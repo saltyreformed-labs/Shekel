@@ -56,9 +56,13 @@ status seam wrote when the transfer settled (:attr:`~TransferLeg.record`).
 **R-BAL87's text says "its dated covering movement"; the record here is
 that movement dated OR kept un-dated across a revert** (ruling **R-BAL61**),
 one word wider than the ruling's, because the load takes a side's record
-whatever its day (:func:`covering_movements_by_leg`) and the popover's
-withdrawal caption names a reverted transfer's kept records
-(``routes/transfers/forms._payment_withdrawal``).  A reverted leg's
+whatever its day (:func:`covering_movements_by_leg`).  Since plan step
+``balance:X-bi-6-4d-2`` no reader of this load uses an un-dated record: it
+gives the popover's day box no day, as no record does, and the withdrawal
+caption (``routes/transfers/forms._payment_withdrawal``), with the lines it
+names, renders only for a settled transfer
+(``transfers/_transfer_full_edit.html``'s ``zero_caption``), whose records
+are dated.  A reverted leg's
 "marking paid records $X" caption reads its TRANSFER's kept figure
 (``transaction_service.leg_retained_amounts_by_key``), never the record,
 which holds no figure; a settled leg's record is dated, so the ruling's
@@ -147,11 +151,13 @@ out of the list :func:`parent_entries` answers, and since leaf
 earlier paychecks"' dated-money arm and the transfer popover's two day boxes,
 which read each side's own day off its movement
 (:func:`transfer_movement_rows`, :func:`covering_movements_by_leg`), and
-since leaf ``X-bi-6-4d-1`` for the transfer service's own reads of what a
-side RECORDS -- the settle's retained correction and carried record, the
-update's echo comparison and the offer's retained correction
-(:func:`transfer_side_leg`, keyed by side) -- for the transfer's hard
-delete, which hands
+since leaf ``X-bi-6-4d-1`` for the transfer service's own reads of a side's
+leg (:func:`transfer_side_leg`, keyed by side) -- the expense leg the settle
+and the update read the transfer's figures through (the retained correction,
+the echo comparison), each off the leg's TRANSFER and never its record since
+plan step ``balance:X-bi-6-4d-2``, and since that step the side's record
+itself for the seam pass, an endpoint move and the statement link -- for the
+transfer's hard delete, which hands
 the removal act every entry its transfer holds
 (:func:`held_transfer_entries`), and for the loan posting probe
 (``loan_posting_service._sync``, ledger row **BAL-579**), which loads the

@@ -168,8 +168,9 @@ def delete_transfer(transfer_id, user_id, soft=False, *, press=None):
         if held:
             # The figure leaves with the records (the build plan's O4): a
             # settled transfer's return to plan released it through the
-            # writer, and a Projected one holding records a revert kept is
-            # not moved by that writer, so the delete releases it here.
+            # writer, and a Projected or Cancelled one holding records a
+            # revert kept is not moved by that writer, so the delete releases
+            # it here.
             status_seam.release_side_figure(xfer)
         db.session.flush()
         log_event(

@@ -57,9 +57,13 @@ writes ``status_id`` at all.
 Architecture:
   - A LOW-LEVEL primitive: it depends on the state machine, the
     settled-status predicate, the session, the models and LEAF services --
-    the settle-day and cash-ledger readers, and the one act that takes a
-    movement off the books (``movement_removal``, which reaches the ledger
-    writer and ``match_withdrawal``) -- never on the higher-level services
+    the settle-day, cash-ledger, pay-period and transfer-leg readers
+    (``settle_day``, ``cash_ledger``, ``pay_period_service``,
+    ``transfer_legs``), the books grade (``planned_rows_books``), the figure
+    and press values (``stated_figure``, ``match_press``), the match
+    withdrawal (``match_withdrawal``) and the one act that takes a movement
+    off the books (``movement_removal``, which reaches the ledger writer and
+    ``match_withdrawal``) -- never on the higher-level services
     that call it (``transaction_service``,
     ``credit_workflow``, ``transfer_service``, the route layer, and the loan /
     paycheck settle paths).  Living below its callers is what keeps it free of
@@ -79,8 +83,13 @@ Architecture:
     sits beside the refusal it defers to
     (:func:`reject_settle_day_without_settled_status`) so the forgiving door
     rule and the fail-loud service rule are read together.
-  - The dependency claim above is unchanged by that: the function is pure, and
-    reads only the settled-status predicate.
+  - The function is not pure: it reads the settled-status predicate, the
+    settle-day echo rule (``settle_day.submitted_settle_day``) and, by one
+    query, the budget's earliest recordable day
+    (:func:`app.services.pay_period_service.earliest_recordable_day`),
+    refusing a forwarded day before it with a ``ValidationError``.
+    ``pay_period_service`` imports no other service, so the read adds no
+    caller of the seam to what the seam imports.
   - No Flask imports.  Mutates the passed row in place and does NOT commit
     -- the caller owns the session boundary; it flushes explicitly only in
     the covering movement's own teardown and re-point

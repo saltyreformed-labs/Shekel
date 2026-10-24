@@ -213,7 +213,10 @@ class TestATransferIsCoveredOnBothLegs:
     The posted ledger books each side's movement as an entry of its own
     against the owner's transfers-in-transit account, and nothing for the
     transfer whole (ruling **R-BAL45**, built at plan step
-    ``balance:X-bi-6-3``); the walk reads each
+    ``balance:X-bi-6-3``; a transfer the ledger booked before that step
+    keeps its legacy whole-transfer entries beside their reversal, netting
+    to zero under ``journal_entries.transfer_id`` until plan step
+    ``balance:X-bi-6-5``, and this class builds none); the walk reads each
     leg's movement and nothing of the leg (ruling **R-BAL80**), and each leg
     is worth its movement (ruling **R-BAL81**), so the fold reads nothing for
     a leg without one -- the control below.  Worked on ``$500.00`` Checking
@@ -574,8 +577,11 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
     this class pinned the movement as INERT to it ("the seam's balance and
     the posted balance read identically with and without the movement");
     that was the interval ruling R-BAL40 accepted, and the pin is inverted
-    with it: re-stating the payment as a close of nothing (a write no door
-    makes) now reads it as nothing moved, and moves the loan's position with
+    with it: re-stating the payment as a close of nothing (a write around
+    the doors: a ``$0.00`` ``figure`` through
+    ``transfer_service.update_transfer`` records the close too, but reverses
+    what the records posted) now reads it as nothing moved, and moves the
+    loan's position with
     it.  The posted ledger does not move: the re-statement reaches no posting
     door, and the loan side's entry against transit (one of ruling R-BAL45's
     two) keeps its postings.

@@ -115,9 +115,11 @@ def _reconcile_postings_after_update(
       dated under a contributing parent, and the seam has already dated (a
       settle), un-dated (a revert) or taken off (a ``$0.00`` close) each
       side's record by the time this runs.  Idempotent reconcile-to-target:
-      a settle posts the per-movement entries, a revert / cancel reverses
-      them to zero, an unchanged effect writes nothing.
-    * **Loan-payment genesis reconcile** last (a no-op for a non-loan transfer):
+      a settle posts the per-movement entries, a revert reverses them to
+      zero (a cancel, reached only from Projected, has none to reverse), an
+      unchanged effect writes nothing.
+    * **Loan-payment genesis reconcile** right after the cash reconcile (a
+      no-op for a non-loan transfer):
       a settle / revert / amount / actual / period edit of a loan payment
       re-reconciles that loan's confirmed-payment splits (coupled on the running
       balance) and its opening / true-up anchor corrections.

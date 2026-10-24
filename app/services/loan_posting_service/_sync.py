@@ -232,8 +232,9 @@ def _reconcile_lineage_transfer_entries(
     """
     posted = _movement_nets_by_date(linked_ledger_id, scenario_id)
     # Zero-filtered SYMMETRICALLY with the posted side (its zero-net dates are
-    # dropped): a settled payment with a zero cash contribution -- the waived-fee
-    # ``actual_amount=0`` case -- posts nothing, so expecting ``{date: 0.00}``
+    # dropped): a settled payment with a zero cash contribution -- a ``$0.00``
+    # close, its transfer's settled figure ``0.00`` and no record on either
+    # side -- posts nothing, so expecting ``{date: 0.00}``
     # would flag it stale and re-sync it (a no-op) on every pass forever.
     #
     # A loop rather than a comprehension because the cash is needed BOTH as the

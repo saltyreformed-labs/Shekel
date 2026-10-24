@@ -25,9 +25,9 @@ preconditions to the module whose single responsibility they already were.
 These helpers plus :class:`TransferRows` are a cohesive,
 transfer-service-private cluster (single responsibility: validate inputs and
 load the rows a mutation operates on).  They write no ``status_id``
-and construct no ``Transaction`` -- so they stay clear of the W9907 status fence
-that keeps the status-mirroring appliers in the parent module -- and they
-compute no balance.
+and construct no ``Transaction`` -- so they stay clear of the W9907 status
+fence, whose one transfer entry is the ``_create`` leaf's constructor write --
+and they compute no balance.
 Flask-isolated like the parent service: plain data in, ORM objects out, no
 ``request`` / ``session`` imports.
 """
@@ -70,9 +70,11 @@ class TransferRows:
     **It holds ONE row since plan step ``balance:X-bi-6-4d-3``**, which
     deleted the twin rows and made the database refuse a new one (rulings
     **R-BAL166**, **R-BAL258**).  The twins had been mirrors and nothing more
-    since ``X-bi-6-4d-2``: a transfer's status and settled figure are its
-    own columns, and each side's day is its payment record's, hung off the
-    transfer by a side link.  The step's leaf 3b deleted the
+    since ``X-bi-6-4d-2``: a transfer's status is its own column, and each
+    side's day is its payment record's, hung off the transfer by a side
+    link; while the twins stood, that record held the side's figure too,
+    which is the transfer's own since ``X-bi-6-4d-2``'s 4d-4 half.  The
+    step's leaf 3b deleted the
     ``shadows`` attribute, the loader that queried the twins
     (``load_transfer_rows``) and the arms of ``_update``, ``_amount`` and
     ``_endpoints`` that wrote the mirrors over them.  What the value still

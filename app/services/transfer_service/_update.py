@@ -1,10 +1,11 @@
 """
 Shekel Budget App -- Transfer Service: the UPDATE verb
 
-The one path that changes an existing transfer and its two sides' payment
-records (on a status move through the one writer,
+The path that EDITS an existing transfer, and its two sides' payment records
+with it (on a status move through the one writer,
 ``_status.apply_status_to_all_three``; an endpoint move carries them,
-:mod:`._endpoints`).  It
+:mod:`._endpoints`); a delete takes the records off, through
+:mod:`._delete`.  It
 also mirrored the transfer's period, category, due date and override flag
 onto two shadow :class:`~app.models.transaction.Transaction` rows, in this
 module and nowhere else, until plan step ``balance:X-bi-6-4d-3`` deleted the

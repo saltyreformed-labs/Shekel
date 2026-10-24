@@ -200,7 +200,6 @@ def sync_transfer_postings(xfer: Transfer) -> list[JournalEntry]:
     ==========================================  ==============================
     projected -> done (mark done)               both movements dated: post
     done -> projected (revert)                  both un-dated: reverse to zero
-    done -> settled (archive)                   no-op (at target)
     projected -> cancelled                      no-op (nothing posted)
     restore of a soft-deleted xfer              no-op (holds no movement)
     settled ``settled_on`` edit (N-13)          reverse at the old day, post at

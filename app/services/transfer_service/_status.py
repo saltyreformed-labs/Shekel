@@ -15,11 +15,13 @@ every earlier split from that module used -- it was at the 1000-line ceiling and
 finding **N-152** recorded that the next change to it would hit the gate again.
 This is that change.  The split is by responsibility rather than by line count:
 these functions are the ONLY place a transfer's status is written, and each
-side's record and settle day move with it here on every status move.  Two
+side's record and settle day move with it here on every status move.  Three
 acts that move no status write a side's record elsewhere: an endpoint move
 relocates it and lowers its day (``_endpoints``, through
-``status_seam.land_moved_side_record``), and a delete takes it off the books
-(``_delete``, through ``movement_removal.remove_movements``).  Plan step
+``status_seam.land_moved_side_record``), a delete takes it off the books
+(``_delete``, through ``movement_removal.remove_movements``), and a reconcile
+marks it cleared by a statement (``_settle.record_leg_clearing``, through
+``status_seam.record_side_clearing``).  Plan step
 X-f2-c3 then made ``transfer_service`` a PACKAGE (**N-152** / **N-156**) and
 this module a leaf of it; the responsibility is unchanged and the file moved from
 ``app/services/_transfer_status.py``.

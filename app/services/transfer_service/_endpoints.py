@@ -32,8 +32,10 @@ mutations applied in place, no ``request`` / ``session`` imports, no flush or
 commit of its own but the record move's (``status_seam.free_moving_side_record``
 flushes a freed record before the transfer's accounts move) -- the caller owns
 the session boundary.  (Reading a side's record is a query, which may
-autoflush pending writes; every refusal in the update runs before this module
-writes.)
+autoflush pending writes.)  Every GATE in the update runs before this module
+writes; the record move's own refusals can fire after its first write, and the
+settle's and the status writer's after the move, so a refused update leaves a
+partial write for the caller's rollback to discard.
 """
 
 from typing import NamedTuple

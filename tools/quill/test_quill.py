@@ -14,10 +14,9 @@ from functools import partial
 import pytest
 import requests
 
-from tools.ci.gitcmd import GitError
+from tools.ci.gitcmd import DEV, GitError, tracking
 from tools.ci.scratch import commit, commit_files, elsewhere, point_dev
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV, tracking
 from tools.quill import _git, _github, _tracker
 from tools.quill import quill
 from tools.quill._fake import CLAIMED, FakeTracker, claim, run, ship, unship

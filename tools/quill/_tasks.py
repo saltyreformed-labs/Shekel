@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from tools.ci.trailers import DEV, MAIN
+from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
 from tools.quill._command import Refused, _label, _one
 from tools.quill._state import drop_takes, dropped

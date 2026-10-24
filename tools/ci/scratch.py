@@ -25,8 +25,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from tools.ci.gitcmd import git
-from tools.ci.trailers import DEV, MAIN, tracking
+from tools.ci.gitcmd import DEV, MAIN, git, tracking
 
 #: Settings no developer's own git configuration may change under a test.
 ISOLATED = ("-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
@@ -114,12 +113,12 @@ def elsewhere(work: Path) -> Path:
 
 def point_dev(root: Path, sha: str) -> None:
     """Point the remote-tracking branch every shipped card is read from
-    (:data:`tools.ci.trailers.DEV`) at ``sha``."""
+    (:data:`tools.ci.gitcmd.DEV`) at ``sha``."""
     run(root, "update-ref", tracking(DEV), sha)
 
 
 def point_main(root: Path, sha: str) -> None:
-    """Point the remote-tracking branch a release merges into (:data:`tools.ci.trailers.MAIN`)
+    """Point the remote-tracking branch a release merges into (:data:`tools.ci.gitcmd.MAIN`)
     at ``sha``."""
     run(root, "update-ref", tracking(MAIN), sha)
 

@@ -125,7 +125,7 @@ def test_a_planted_import_outside_its_half_is_refused(path, source, name):
     (ORCHESTRATOR, "import psycopg"),
     (ORCHESTRATOR, "from psycopg import sql"),
     (ORCHESTRATOR, "from tools.ci import gitcmd"),
-    (ORCHESTRATOR, "from tools.ci.trailers import history"),
+    (ORCHESTRATOR, "from tools.ci.gitcmd import is_ancestor"),
     (ORCHESTRATOR, "from tools.rehearsal import bench"),
     (ORCHESTRATOR_TEST, "import pytest"),
     (SIDE_MODULE, "import os"),

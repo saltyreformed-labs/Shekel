@@ -32,9 +32,9 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 
+from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV, tracking
 from tools.quill import _git, quill
 from tools.quill._github import GitHubError
 from tools.quill._tracker import (

@@ -98,7 +98,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
-from tools.ci.trailers import DEV, MAIN
+from tools.ci.gitcmd import DEV, MAIN
 from tools.quill._git import MARKERS, Claim, task_file
 from tools.quill._tracker import BareCard, Card
 from tools.quill.setup_tracker import FILING, TASK

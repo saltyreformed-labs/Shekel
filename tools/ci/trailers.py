@@ -32,10 +32,13 @@ reader of the old-form ``Ships:``, and L8 deletes it with the plan gate's arms.
 **A shallow clone is refused**: its history stops short, and every card
 shipped before the cut would read as unshipped.
 
-The rules live here, below both of their readers: the tracker tool asks what
-shipped, and CI's ``commit_trailers`` check refuses a commit that breaks them.
-Moved here from what is now ``tools/quill/_git.py`` by step X-cx's L4.  Nothing
-here writes the repository.
+Its one reader left is the release tool's arm for a cut made before the switch
+(``tools/release/_cards.py``, ``_carried.py``): the tracker tool asks the ship
+markers since R-BAL359, and CI's ``commit_trailers`` check was deleted by step
+X-cx's S3b (ruling ``balance:R-BAL389``), which deletes this module with that
+arm.  The two integration branches and the ancestry question it read moved to
+:mod:`tools.ci.gitcmd` then.  Moved here from what is now ``tools/quill/_git.py``
+by step X-cx's L4.  Nothing here writes the repository.
 """
 from __future__ import annotations
 
@@ -44,15 +47,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tools.ci.arcs import ARCS
-from tools.ci.gitcmd import GitError, git, run
+from tools.ci.gitcmd import DEV, GitError, git, is_ancestor
 
 SHIPS, REOPENS = "Ships", "Reopens"
-#: The branch every shipped card's commit is on, as a message names it; :func:`tracking`
-#: is its full name.
-DEV = "origin/dev"
-#: The branch a release merges into, as a message names it; :func:`tracking` is its full
-#: name.
-MAIN = "origin/main"
 #: A trailer's value naming a card: ``plan#`` and the card's number.
 _CARD = re.compile(r"plan#([1-9][0-9]*)")
 #: The old form, ``<arc>:<id>``, which the plan gate reads until the cutover.
@@ -99,16 +96,6 @@ class History:
     old_form_reopens: tuple[OldFormClaim, ...] = ()
 
 
-def tracking(branch: str) -> str:
-    """``branch`` (:data:`DEV` or :data:`MAIN`) by the full name of its remote-tracking
-    reference, which no other reference can stand in for while the branch exists: git
-    resolves the short name to the first reference it could name, so a tag or a local branch
-    of that name comes before the remote-tracking branch (``git help revisions``), and CI's
-    checkout fetches every tag.  A full name that does not exist git still resolves to a tag
-    named like it, so whether the branch exists is asked of the exact reference."""
-    return f"refs/remotes/{branch}"
-
-
 def history(root: Path, *refs: str) -> History:
     """Every ``Ships:`` and ``Reopens:`` trailer naming a card, and every old-form
     ``Ships:`` and ``Reopens:``, on ``refs`` (:data:`DEV` when none is named).
@@ -153,14 +140,6 @@ def _read(key: str, value: str, sha: str, subject: str) -> Trailer | OldFormClai
         return f"{sha[:12]} {key}: {value!r} is not plan#<number>"
     arc, _, ident = value.partition(":")
     return OldFormClaim(sha, arc, ident, key)
-
-
-def is_ancestor(root: Path, older: str, newer: str) -> bool:
-    """Whether ``older`` is in ``newer``'s history (a commit is in its own)."""
-    done = run(root, "merge-base", "--is-ancestor", older, newer)
-    if done.returncode not in (0, 1):
-        raise GitError(f"git merge-base --is-ancestor {older} {newer}: {done.stderr.strip()}")
-    return done.returncode == 0
 
 
 def cancels(root: Path, undo: Trailer, claim: Trailer) -> bool:

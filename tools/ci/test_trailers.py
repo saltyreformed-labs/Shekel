@@ -2,18 +2,19 @@
 
 Moved here with :mod:`tools.ci.trailers` from what is now
 ``tools/quill/test__git.py`` by step X-cx's L4; the tracker tool's own git calls
-are tested there still.
+are tested there still.  The tests of the two integration branches' names and of
+the ancestry question moved with them to ``test_gitcmd.py`` at step X-cx's S3b.
 """
 from __future__ import annotations
 
 import pytest
 
 from tools.ci import scratch
-from tools.ci.gitcmd import GitError, git
+from tools.ci.gitcmd import DEV, GitError, git
 from tools.ci.scratch import commit as _commit
 from tools.ci.scratch import point_dev as _dev
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV, History, cancels, history, is_ancestor, shipped
+from tools.ci.trailers import History, cancels, history, shipped
 
 
 @pytest.fixture(name="repo")
@@ -214,29 +215,21 @@ def test_a_missing_branch_is_an_error_not_an_empty_history(repo):
         history(repo, DEV)
 
 
-def test_is_ancestor_raises_on_a_commit_git_does_not_have(repo):
-    """Exit 128 is an error, never "not an ancestor"."""
-    base = _commit(repo, "base")
-    with pytest.raises(GitError):
-        is_ancestor(repo, "0" * 40, base)
-
-
 # -- an environment bound to another repository reaches nothing but the directory named ----------
 
 @pytest.mark.parametrize("binding", scratch.BINDINGS)
 def test_a_bound_environment_reaches_no_repository_but_the_one_named(binding, tmp_path,
                                                                      monkeypatch):
     """The 2026-10-04 incident's mechanism replayed onto a sentinel: every write the tests'
-    builder makes and every git call this package makes lands in the directory named,
+    builder makes and every git call this module makes lands in the directory named,
     every answer is that directory's, and the sentinel -- its refs, config, HEADs and
     indexes -- is byte-identical afterwards.  The sentinel is proven bound, and its
     indexes not empty (review cp3 M-1's control), before it is handed over
-    (``scratch._prove_bound``).  The tracker tool's own calls are held the same way in
-    ``tools/quill/test__git.py``."""
+    (``scratch._prove_bound``).  :func:`gitcmd.is_ancestor`'s and the tracker tool's own
+    calls are held the same way, in ``test_gitcmd.py`` and ``tools/quill/test__git.py``."""
     sentinel, before = scratch.bound_sentinel(tmp_path, binding, monkeypatch.setenv)
     work, leaf = scratch.leaf_on_dev(tmp_path)
     assert git(work, "rev-parse", "dev").strip() == leaf
     assert [(t.card, t.sha) for t in history(work, "dev").trailers] == [(3, leaf)]
-    assert is_ancestor(work, leaf, leaf)
 
     assert scratch.sentinel_state(sentinel) == before

@@ -82,8 +82,7 @@ from pathlib import Path
 import requests
 
 from tools.ci.arcs import ARCS, REPO
-from tools.ci.gitcmd import GitError
-from tools.ci.trailers import DEV, MAIN, tracking
+from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
 from tools.quill import _git, _tasks
 from tools.quill._command import (
     ON_BOARD,

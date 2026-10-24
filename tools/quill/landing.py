@@ -169,8 +169,7 @@ from pathlib import Path
 import requests
 
 from tools.ci.arcs import REPO
-from tools.ci.gitcmd import FULL_ID, GitError, git
-from tools.ci.trailers import DEV, MAIN, is_ancestor, tracking
+from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, tracking
 from tools.quill import _git
 from tools.quill._command import with_cards, with_closure
 from tools.quill._github import GitHub, GitHubError

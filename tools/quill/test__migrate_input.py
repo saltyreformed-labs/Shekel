@@ -380,3 +380,19 @@ def test_a_paragraph_given_to_the_card_filed_already_is_refused(corpus, monkeypa
     assert ("preambles[0]: balance:A-3 is plan#1 already, whose text the migration does not "
             "rewrite, so a paragraph given to it would land nowhere"
             in grade(data, read_source(corpus), corpus)[1])
+
+
+def test_an_outcome_holding_no_card_for_its_split_steps_leaves_takes_no_milestone(corpus):
+    """recurrence R5's shape: its scope's one open step is split, and every leaf carries an
+    outcome of its own, so it holds no card; nothing is required of it, and a milestone given
+    is refused for that reason, not as a shipped scope."""
+    split = (("O1 the first", ("balance:A-3", "balance:A-2a", "balance:A-2b")),
+             ("O2 the split", ("balance:A-2",)))
+    edited = replace(corpus, outcomes=split)
+    data = complete_input(edited)
+    assert "O2 the split" not in data["milestones"]
+    assert grade(data, read_source(edited), edited)[1] == []
+    data["milestones"]["O2 the split"] = {"title": "Split", "description": "d", "source": "s"}
+    assert grade(data, read_source(edited), edited)[1] == [
+        "milestones: 'O2 the split' holds no card: its open steps are split steps whose leaves "
+        "carry outcomes of their own, so it gets no milestone"]

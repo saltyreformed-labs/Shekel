@@ -279,3 +279,69 @@ def test_a_steps_hash_ignores_the_blank_lines_that_end_its_entry(corpus):
         "A-3's own flush-left spec paragraph.\n", "A-3's own flush-left spec paragraph.\n\n\n")})
     assert source_text(item, read_source(corpus).specs, corpus.documents) == source_text(
         item, read_source(widened).specs, widened.documents)
+
+
+# -- a split step's outcome (the coordinator's code call, 14:4x 10-21; R-BAL274) -------------
+
+def _outcomes(source):
+    """Each step item's outcome, by key."""
+    return {item.key: item.outcome for item in source.items if item.kind == "step"}
+
+
+def test_a_split_steps_outcome_is_carried_to_its_leaves_and_it_keeps_none(corpus):
+    """A-2 split into A-2a and A-2b: an outcome scoping A-2 files both leaves in its
+    milestone and A-2 in none, so the leaves group under it and its progress counts no
+    split step; nothing is reported."""
+    split = (("O1 the first", ("balance:A-3",)), ("O2 the split", ("balance:A-2",)))
+    source = read_source(replace(corpus, outcomes=split))
+    assert (source.refusals, source.reports) == ((), ())
+    assert _outcomes(source) == {
+        "balance:A-2": None, "balance:A-2a": "O2 the split", "balance:A-2b": "O2 the split",
+        "balance:A-3": "O1 the first", "salary:S-1": None}
+
+
+def test_a_leaf_keeps_an_outcome_of_its_own(corpus):
+    """A-2a scoped by its own outcome keeps it; A-2b, scoped by none, takes A-2's."""
+    split = (("O1 the first", ("balance:A-3", "balance:A-2a")), ("O2 the split", ("balance:A-2",)))
+    source = read_source(replace(corpus, outcomes=split))
+    assert (source.refusals, source.reports) == ((), ())
+    assert _outcomes(source) == {
+        "balance:A-2": None, "balance:A-2a": "O1 the first", "balance:A-2b": "O2 the split",
+        "balance:A-3": "O1 the first", "salary:S-1": None}
+
+
+@pytest.mark.parametrize("outcomes, carried, unheld", [
+    ((("O1 the top", ("balance:X",)),), "O1 the top", []),
+    ((("O1 the top", ("balance:X",)), ("O2 the middle", ("balance:X-1",))), "O2 the middle",
+     ["O1 the top"]),
+    ((("O2 the middle", ("balance:X-1",)),), "O2 the middle", []),
+])
+def test_a_leaf_split_twice_takes_the_nearest_split_steps_outcome(outcomes, carried, unheld):
+    """X splits into X-1, which splits into X-1a: neither split step keeps an outcome, and
+    X-1a takes the nearest one above it that holds one (bank_import X-f6b and salary X-av-3's
+    shape, measured at dev e9ab6e0ab).  With both scoped, X's outcome holds no card, which is
+    reported."""
+    steps = (StepRow("balance", "X", "--", "Split (decomposed parent).", "container", "--", "--"),
+             StepRow("balance", "X-1", "--", "Split again (decomposed parent).", "container",
+                     "--", "--"),
+             StepRow("balance", "X-1a", "--", "Do it.", "#1", "--", "NOW"))
+    text = "## 5. The steps\n\n- [ ] **X** x\n  - [ ] **X-1** x\n    - [ ] **X-1a** x\n"
+    source = read_source(registries(steps=steps, findings=(), rulings=(), outcomes=outcomes,
+                                    documents={"balance": text, "salary": "## 4. The steps\n"}))
+    assert [line for line in (*source.refusals, *source.reports) if "outcome" in line] == [
+        f"outcome {name!r} holds no card: its open steps are split steps whose leaves carry "
+        "outcomes of their own, so it gets no milestone" for name in unheld]
+    assert _outcomes(source) == {"balance:X": None, "balance:X-1": None, "balance:X-1a": carried}
+
+
+def test_an_outcome_whose_split_steps_leaves_all_carry_their_own_is_reported(corpus):
+    """recurrence R5's shape (measured at dev e9ab6e0ab): its one leaf carries an outcome of
+    its own, so R5's holds no card and gets no milestone; it is reported, not refused."""
+    split = (("O1 the first", ("balance:A-3", "balance:A-2a", "balance:A-2b")),
+             ("O2 the split", ("balance:A-2",)))
+    source = read_source(replace(corpus, outcomes=split))
+    assert not source.refusals
+    assert source.reports == ("outcome 'O2 the split' holds no card: its open steps are split "
+                              "steps whose leaves carry outcomes of their own, so it gets no "
+                              "milestone",)
+    assert "O2 the split" not in _outcomes(source).values()

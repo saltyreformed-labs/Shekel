@@ -419,13 +419,18 @@ def _target_problem(disposition: str, fields: Mapping[str, str], steps: Mapping,
 def _milestones(given: dict, registries: Registries, source: Source,
                 problems: list[str]) -> dict[str, tuple[str, str]]:
     """Each milestone, a title with no number and a description: one for every OUTCOMES row
-    with an open step in its scope, and none for a row whose whole scope has shipped
-    (``_migrate_source`` reports it), which would hold no card."""
+    some card is filed in (``Item.outcome``), and none for a row that holds no card -- its
+    whole scope shipped, or its open steps all split steps whose leaves carry outcomes of
+    their own (``_migrate_source`` reports either)."""
     outcomes = dict(registries.outcomes)
     held = {item.outcome for item in source.items if item.outcome is not None}
+    moving = {item.key for item in source.items}
     problems += [f"milestones: {name!r} is no outcome in steps.md's OUTCOMES table"
                  for name in sorted(set(given) - set(outcomes))]
-    problems += [f"milestones: {name!r}'s whole scope has shipped, so it gets no milestone"
+    problems += [f"milestones: {name!r} holds no card: its open steps are split steps whose "
+                 "leaves carry outcomes of their own, so it gets no milestone"
+                 if moving & set(outcomes[name]) else
+                 f"milestones: {name!r}'s whole scope has shipped, so it gets no milestone"
                  for name in sorted(set(given) & set(outcomes) - held)]
     milestones = {}
     for name, scope in outcomes.items():

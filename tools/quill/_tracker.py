@@ -574,11 +574,12 @@ class CardReader:
         absent from the answer (a trailer can name a number nobody filed)."""
         return self._lookup(numbers, _queries.BARE_CARD_FIELDS, self._card)
 
-    def _lookup[CardT: BareCard](self, numbers: Iterable[int], card_fields: str,
-                                 card: Callable[[dict], CardT]) -> dict[int, CardT]:
+    def _lookup[T](self, numbers: Iterable[int], card_fields: str,
+                   card: Callable[[dict], T]) -> dict[int, T]:
         """The cards numbered ``numbers`` that exist, each read with ``card_fields`` and
         built by ``card``: the one walk of a read by number, which each reader's
-        :meth:`cards` names its fields and its card type to.  A number past
+        :meth:`cards` names its fields and its card type to (and
+        :meth:`Tracker.milestones_of` its one field).  A number past
         :data:`GRAPHQL_INT_MAX` is never asked, so it is absent like one nobody filed: asked,
         it is an argument GraphQL's ``Int`` cannot hold, which the specification's input
         coercion refuses, and with it the read's every other card (GitHub's own answer is
@@ -602,7 +603,7 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     """A tracker as the App sees it: its cards, each with its board item, and its
     :class:`Board`.
 
-    Pylint: ``too-many-public-methods`` (26/20) -- ``connect``, then **one
+    Pylint: ``too-many-public-methods`` (29/20) -- ``connect``, then **one
     method per read or write quill makes of the tracker** (most one
     request; this module is the one place it speaks to GitHub), the board's
     own writes already apart in :class:`Board`.  The filing mark's read and its
@@ -613,6 +614,9 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     card's Markdown as GitHub does here took it past 20.  The claims' three
     reads and writes and the read of a commit's pull requests left it at X-cx's
     M1: a claim is a branch of the code repository since R-BAL359 (``_git``).
+    ``quill file step --parent``'s read of the milestones a split step and its
+    leaves are in, and its clear of the split step's, came with X-cx's S3a
+    (measured 29 then; 27 before it, where this line said 26).
 
     ``github`` is any object with :class:`_github.GitHub`'s ``rest``,
     ``graphql`` and ``graphql_lookup``.  The tracker's :class:`setup_tracker.Place`
@@ -670,6 +674,14 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         number: each a filing quill began; whether it is still unfinished is
         ``_state.filing_unfinished``'s answer (one dropped while marked is not)."""
         return self._listing(_queries.marked_cards(self.place))
+
+    def milestones_of(self, numbers: Iterable[int]) -> dict[int, int | None]:
+        """The number of the milestone each card numbered ``numbers`` is in, None for none;
+        one that does not exist is absent: ``quill file step --parent``'s read of a split
+        step's milestone and its leaves' (``_filing``), the one field it reads, so no listing
+        a recording replays changes."""
+        return self._lookup(numbers, "milestone { number }",
+                            lambda node: (node["milestone"] or {}).get("number"))
 
     def all_cards(self) -> dict[int, WholeCard]:
         """Every card, open and closed, by number, each WHOLE: its body and every comment.
@@ -823,9 +835,10 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         filing's last write, :meth:`unmark`, removes the mark.  Its number, once GitHub's
         answer shows the type, labels and milestone sent.
 
-        ``milestone``: the number of the milestone the card is filed in, which only X-cx's
-        migration sets (L7 draft 4 s.3: a scope step's create carries its outcome's).
-        None sends no milestone at all, so every other create's request is what it was.
+        ``milestone``: the number of the milestone the card is filed in: X-cx's migration's
+        (L7 draft 4 s.3: a scope step's create carries its outcome's), and a leaf's that
+        ``quill file step --parent`` files in its split step's (``_filing``).  None sends no
+        milestone at all, so every other create's request is what it was.
 
         A create naming a label the tracker lacks makes that label (grey, no description;
         measured 2026-10-04 on the mark itself, before it existed; ``setup_tracker.py
@@ -858,6 +871,19 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         """Make a milestone (X-cx's migration, one per outcome, R-BAL243); its number."""
         return self.github.rest("POST", f"{self.place.path}/milestones",
                                 {"title": title, "description": description})["number"]
+
+    def clear_milestone(self, number: int) -> None:
+        """Take a card out of its milestone, reading it back: a step split into smaller
+        steps keeps none once its leaf carries it (``_filing``).
+
+        Raises:
+            TrackerError: When GitHub's answer still shows the card in a milestone.
+        """
+        issue = self.github.rest("PATCH", f"{self.place.path}/issues/{number}",
+                                 {"milestone": None})
+        if issue.get("milestone") is not None:
+            raise TrackerError(f"plan#{number} is still in milestone "
+                               f"{issue['milestone'].get('number')}: fix it by hand")
 
     def retype(self, number: int, kind: str) -> None:
         """Change a card's kind, reading it back."""

@@ -25,6 +25,9 @@ A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-is
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, ``task-file`` writes its file for the commit that finishes
 the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
+A LEAF (``file step --parent``) is filed in its split step's milestone: the split step's
+own while it holds one, which the filing then clears, else the one its leaves hold
+(``_filing._leaf_milestone``).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 

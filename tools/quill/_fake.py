@@ -173,6 +173,10 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         """The cards that exist among ``numbers``."""
         return {n: self._view(n) for n in numbers if n in self.cards_by_number}
 
+    def milestones_of(self, numbers):
+        """The milestone each card that exists among ``numbers`` is in, None for none."""
+        return {n: self.milestone_of.get(n) for n in numbers if n in self.cards_by_number}
+
     def all_cards(self):
         """Every card, open and closed, with its body, its comments and its milestone."""
         return {n: WholeCard(self._view(n), self.bodies[n], tuple(self.notes.get(n, ())),
@@ -249,6 +253,11 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.writes.append(("create_milestone", number, title))
         self.milestones_by_number[number] = Milestone(number, title, description)
         return number
+
+    def clear_milestone(self, number):
+        """Take a card out of its milestone."""
+        self.writes.append(("clear_milestone", number))
+        self.milestone_of.pop(number, None)
 
     def retype(self, number, kind):
         """Change a card's kind."""

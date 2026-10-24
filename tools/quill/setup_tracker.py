@@ -7,15 +7,16 @@ the developer drags them.  This module is the one home of WHERE that tracker
 lives (:class:`Place`: :data:`PLAN`, and :data:`REHEARSAL`, the throwaway one
 X-cx's migration is rehearsed on) and of its CONFIGURATION: the repository and
 its settings, the labels, the board, and the things only the web can set (the
-organization's issue types, which need a scope the shared token does not carry;
-the board's automations and its view's sort, which the API cannot change; and
-quill's GitHub App).  The cards
+organization's issue types and issue fields, which need a scope the shared token
+does not carry; the board's automations and its view's sort, which the API cannot
+change; and quill's GitHub App).  The cards
 themselves are content, and their home is the tracker; nothing here names one.
 
 Run with no flag it changes nothing: it reads GitHub, prints one line per
 thing it checked, and exits 1 if anything differs.  ``--apply`` makes what is
 missing and corrects what drifted, then reports what it could not fix (an
-issue type, a board automation or a view's sort with the page to fix it on).
+issue type, an issue field, a board automation or a view's sort with the page to
+fix it on).
 It DELETES only what nothing depends on: a label no issue or pull request
 carries, and a custom board field that stores a value per card while the
 board holds no card, archived ones counted.  Every other difference is
@@ -41,9 +42,16 @@ itself, a new leaf where the step it splits sat.  "Auto-add sub-issues to
 project" would put every sub-issue -- a task under its card (``R-BAL386``), a
 leaf under the step it splits -- at the bottom of the ordered list (measured
 2026-10-04, when findings and rulings were their owner's sub-issues: within ten
-seconds; since ``R-BAL395`` each is blocked by its owner instead).  The board
-may keep only an automation that hides a card it already holds
-(:data:`ALLOWED_WORKFLOWS`).
+seconds; since ``R-BAL395`` each is blocked by its owner instead).  **Nor may one hide
+a card**: "Auto-archive items" archives closed cards, and an archived card is in no
+view, so the shipped work kept as closed cards (ruling ``balance:R-BAL352``) would
+vanish from the view that shows it.  So every automation is off, and any archived
+board item is a difference (the coordinator's call, 14:4x 2026-10-21).
+
+**The organization's issue fields are exactly one, Arc** (rulings ``balance:R-BAL348``,
+``R-BAL354``): a single select of the arcs, which a card's arc moves into after the
+cutover, its matching label then kept as display.  GitHub's four default fields and
+any other are differences, deleted on the web (:data:`ARC_FIELD`).
 
 Usage, from the repository root::
 
@@ -121,6 +129,15 @@ TASK = "task"
 #: shares does not carry, so the developer sets them on the web and this module checks them.
 ISSUE_TYPES = (*CARD_TYPES, TASK)
 ISSUE_TYPES_URL = f"https://github.com/organizations/{ORG}/settings/issue-types"
+
+#: The organization's one issue field (rulings ``balance:R-BAL348``, ``R-BAL354``): a single
+#: select whose options are the arcs, :data:`tools.ci.arcs.ARCS`.  An organization's issue
+#: fields, like its issue types, are changed only with the ``admin:org`` scope, so the
+#: developer changes them on the web and this module checks them; any other field is a
+#: difference (GitHub makes four, Priority, Effort, Start date and Target date, when issue
+#: fields are switched on).
+ARC_FIELD = "Arc"
+ISSUE_FIELDS_URL = f"https://github.com/organizations/{ORG}/settings/issue-fields"
 
 #: The repository's settings this module holds.  ``auto_init`` is a creation
 #: argument, not a setting: the README it commits gives the repository a first
@@ -201,16 +218,6 @@ STORED_FIELD_TYPES = frozenset(
 #: lose (see the module docstring); it is tolerated only while unused.
 GITHUB_STATUS_FIELD = "Status"
 
-#: The board's automations that may run: only one that hides a card the board
-#: already holds.  Names as GitHub's documentation lists them (the API lists a
-#: built-in automation only once a board has it).  Every other one writes a
-#: stored field or an issue's state, or ADDS cards ("Auto-add to project",
-#: "Auto-add sub-issues to project"), which only quill may do
-#: (``balance:R-BAL177``); each must be switched off -- on the web, because the
-#: API can only DELETE an automation, and what deleting a built-in one does
-#: is unmeasured.
-ALLOWED_WORKFLOWS = frozenset({"Auto-archive items"})
-
 #: The board's view: the open cards, unsorted, so it shows the drag order.
 VIEW_NAME = "Plan"
 VIEW_FILTER = "is:open"
@@ -237,14 +244,15 @@ query($org: String!) {
 
 _PROJECT = "query($id: ID!) { node(id: $id) { ... on ProjectV2 {" + _PROJECT_FIELDS + "} } }"
 
-_STATUS_VALUES = (
+#: Every board item, archived ones included, with its Status and whether it is archived.
+_BOARD_ITEMS = (
     """
 query($id: ID!, $after: String) {
   node(id: $id) { ... on ProjectV2 {
     items(first: 100, after: $after, archivedStates: [ARCHIVED, NOT_ARCHIVED]) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        id type
+        id type isArchived
         content {
           ... on Issue { number repository { name } }
           ... on PullRequest { number repository { name } }
@@ -263,6 +271,19 @@ query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     labels(first: 100) {
       nodes { name color description issues { totalCount } pullRequests { totalCount } }
+    }
+  }
+}"""
+
+_ISSUE_FIELDS = """
+query($org: String!) {
+  organization(login: $org) {
+    issueFields(first: 100) {
+      totalCount
+      nodes {
+        ... on IssueFieldCommon { name dataType }
+        ... on IssueFieldSingleSelect { options { name } }
+      }
     }
   }
 }"""
@@ -413,6 +434,15 @@ def status_differences(items: list[dict]) -> list[str]:
     ]
 
 
+def archived_differences(items: list[dict]) -> list[str]:
+    """One difference per archived board item, drafts and all (``items``: the items query's
+    nodes): an archived card is in no view (ruling ``balance:R-BAL352`` keeps shipped work
+    as closed cards a view shows)."""
+    return [f"{_item_name(item)} is archived, so no view shows it: restore it from the "
+            "board's archived items"
+            for item in items if item["isArchived"]]
+
+
 def board_differences(project: dict) -> list[str]:
     """Each way a board's configuration differs from this file (its cards aside)."""
     differences = []
@@ -438,10 +468,10 @@ def board_differences(project: dict) -> list[str]:
             "was renamed, so no card's Status can be read -- rename it back"
         )
     differences += [
-        f"the board automation {workflow['name']!r} is on, and only "
-        f"{sorted(ALLOWED_WORKFLOWS)} may be: switch it off at {project['url']}/workflows"
+        f"the board automation {workflow['name']!r} is on, and none may be: switch it off at "
+        f"{project['url']}/workflows"
         for workflow in project["workflows"]["nodes"]
-        if workflow["enabled"] and workflow["name"] not in ALLOWED_WORKFLOWS
+        if workflow["enabled"]
     ]
     views = [view for view in project["views"]["nodes"] if view["name"] == VIEW_NAME]
     if not views:
@@ -468,23 +498,6 @@ def board_differences(project: dict) -> list[str]:
                 f"grouping at {project['url']}"
             )
     return differences
-
-
-def allowed_workflow_states(project: dict) -> list[str]:
-    """Each automation the board may run (:data:`ALLOWED_WORKFLOWS`) and whether it is on.
-
-    Either state matches this file, so neither is a difference; the line says which,
-    because a board copied from this one (X-cx's rehearsal tracker) must match it.  GitHub
-    lists a built-in automation only once a board has it, so one it does not list is said
-    to be unlisted, not off.
-    """
-    listed = {workflow["name"]: workflow["enabled"] for workflow in project["workflows"]["nodes"]}
-    return [
-        f"board automation {name!r} may run: it is {'on' if listed[name] else 'off'}"
-        if name in listed else
-        f"board automation {name!r} may run: GitHub lists no such automation on this board"
-        for name in sorted(ALLOWED_WORKFLOWS)
-    ]
 
 
 def check_repository(github: GitHub, apply: bool, report: Report) -> dict | None:
@@ -557,6 +570,40 @@ def check_issue_types(github: GitHub, report: Report) -> None:
         report.differs(f"{difference}: set it at {ISSUE_TYPES_URL}")
     if not differences:
         report.ok(f"issue types: exactly {', '.join(ISSUE_TYPES)} enabled")
+
+
+def issue_field_differences(fields: dict) -> list[str]:
+    """Each way the organization's issue fields (``issueFields``, read as
+    :data:`_ISSUE_FIELDS`) differ from the one declared: :data:`ARC_FIELD`, a single select
+    whose options are exactly the arcs.  A read GitHub cut short is a difference too: the
+    fields it does not hold are unread."""
+    nodes, differences = fields["nodes"], []
+    if fields["totalCount"] > len(nodes):
+        differences.append(f"the organization has {fields['totalCount']} issue fields and the "
+                           f"read holds {len(nodes)}: the rest are unread")
+    arc = [node for node in nodes if node["name"] == ARC_FIELD]
+    if not arc:
+        differences.append(f"issue field {ARC_FIELD!r} is missing: make it")
+    for node in arc:
+        if node["dataType"] != "SINGLE_SELECT":
+            differences.append(f"issue field {ARC_FIELD!r} is a {node['dataType']}, not a single "
+                               "select: correct it")
+        elif sorted(options := [option["name"] for option in node["options"]]) != sorted(ARCS):
+            differences.append(f"issue field {ARC_FIELD!r} holds the options {options}, not the "
+                               f"arcs {list(ARCS)}: correct it")
+    differences += [f"issue field {node['name']!r} is not declared here: delete it"
+                    for node in nodes if node["name"] != ARC_FIELD]
+    return differences
+
+
+def check_issue_fields(github: GitHub, report: Report) -> None:
+    """Check the organization's issue fields (changed on the web; see :data:`ARC_FIELD`)."""
+    differences = issue_field_differences(
+        github.graphql(_ISSUE_FIELDS, org=ORG)["organization"]["issueFields"])
+    for difference in differences:
+        report.differs(f"{difference} at {ISSUE_FIELDS_URL}")
+    if not differences:
+        report.ok(f"issue fields: exactly {ARC_FIELD!r}, a single select of the {len(ARCS)} arcs")
 
 
 def _project(github: GitHub, project_id: str) -> dict:
@@ -672,12 +719,13 @@ def _apply_to_board(github: GitHub, project: dict, repository: dict, report: Rep
         report.made(f"deleted board field {board_field['name']!r} (the board held no card)")
 
 
-def _cards_holding_status(github: GitHub, project_id: str) -> list[str]:
-    """One difference per card on the board, archived ones included, holding a Status."""
+def _item_differences(github: GitHub, project_id: str) -> list[str]:
+    """One difference per board item, archived ones included, holding a Status, and one per
+    archived item: one read of every item, page by page."""
     differences, after = [], None
     while True:
-        items = github.graphql(_STATUS_VALUES, id=project_id, after=after)["node"]["items"]
-        differences += status_differences(items["nodes"])
+        items = github.graphql(_BOARD_ITEMS, id=project_id, after=after)["node"]["items"]
+        differences += status_differences(items["nodes"]) + archived_differences(items["nodes"])
         if not items["pageInfo"]["hasNextPage"]:
             return differences
         after = items["pageInfo"]["endCursor"]
@@ -705,15 +753,13 @@ def check_board(github: GitHub, repository: dict | None, apply: bool, report: Re
         project = _project(github, project["id"])
         _hide_stored_fields(github, project, report)
         project = _project(github, project["id"])
-    differences = board_differences(project) + _cards_holding_status(github, project["id"])
+    differences = board_differences(project) + _item_differences(github, project["id"])
     for difference in differences:
         report.differs(difference)
-    for state in allowed_workflow_states(project):
-        report.ok(state)
     if not differences:
         report.ok(
             f"board {PROJECT_TITLE!r} ({project['url']}): no stored field but GitHub's unused "
-            f"{GITHUB_STATUS_FIELD}, no automation on that writes or adds cards, an unsorted "
+            f"{GITHUB_STATUS_FIELD}, no automation on, no archived item, an unsorted "
             f"{VIEW_NAME!r} table of open cards, ungrouped, showing no stored field"
         )
 
@@ -779,6 +825,7 @@ def main(argv: list[str] | None = None) -> int:
         if repository is not None:
             check_labels(github, apply, report)
         check_issue_types(github, report)
+        check_issue_fields(github, report)
         check_board(github, repository, apply, report)
         check_app(report)
     except GitHubError as error:

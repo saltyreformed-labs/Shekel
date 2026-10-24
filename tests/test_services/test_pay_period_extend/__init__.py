@@ -8,9 +8,11 @@ periods with each active template's recurring transactions AND transfers;
 (plan step R7d-c-1).  The door used to do both in one call -- a write and then
 a read-dependent write -- so no caller could get between them to open the read
 pass the generation resolves in, and the populate had to open its own.  A test
-here therefore grades ONE of two contracts and says which: the door's own (what
-it appends, what cadence it continues, what it refuses) calls
-``extend_pay_periods`` alone, and any assertion about recurring ROWS runs
+here therefore grades ONE of three contracts and says which: the door's own
+(what it appends, what cadence it continues, what it refuses) calls
+``extend_pay_periods`` alone; the populate half's own
+(``TestPopulateFromActiveTemplates``) calls ``populate_in_a_fresh_pass`` alone;
+and an assertion about the rows an extend leaves runs
 ``_extend_andpopulate_in_a_fresh_pass``, which is what the route runs.
 ``POST /pay-periods/extend`` itself is graded in the
 ``tests/test_routes/test_pay_period_admin/`` package.

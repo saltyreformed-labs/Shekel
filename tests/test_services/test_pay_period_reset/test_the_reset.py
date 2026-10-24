@@ -1,6 +1,6 @@
 """The bounded reset: it wipes every period and rebuilds the schedule with every balance and rule's
-start intact, and it refuses a settled row, changing nothing, or an invalid cadence, rolling the
-wipe back.
+start intact, and it refuses a settled row or an invalid cadence before it deletes anything,
+changing nothing.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def _make_every_n_template(db_session, seed_user, start_period, interval_n=2):
 
 
 class TestResetHappyPath:
-    """Reset wipes everything (incl. the anchor period) and rebuilds."""
+    """Reset wipes every period and rebuilds the schedule."""
 
     def test_wipes_all_and_the_balance_survives(self, app, db, seed_user):
         """Every old period is deleted and the asserted balance is untouched.
@@ -257,9 +257,11 @@ class TestResetHappyPath:
     def test_balance_preserved_and_correct_after_reset(self, app, db, seed_user):
         """Disciplines 2 + 3: anchor balance preserved, balances recompute.
 
-        Anchor $1000 at the new index 0 (the period containing today); a
-        $1200 every-period expense repopulates all six new periods,
-        including the anchor period itself.  A balance read at the CLOSE of a
+        The Checking's $1000 assertion is dated 2024-01-05 (the seed's
+        bootstrap day), before the rebuilt schedule, and the reset keeps it
+        row for row, so the new index 0 (the period containing today) opens
+        at $1000; a $1200 every-period expense repopulates all six new
+        periods, index 0 included.  A balance read at the CLOSE of a
         period counts that period's own net, so the end balance at the close of
         index ``n`` is ``1000 - (n + 1) * 1200``.
         """
@@ -277,7 +279,7 @@ class TestResetHappyPath:
             )
             db.session.commit()
 
-            # End of the anchor period (index 0): 1000 - 1*1200.
+            # End of index 0: 1000 - 1*1200.
             assert seam_cash_balance_at(
                 account, scen, last_covered_day(new_periods[0]),
             ) == Decimal("-200.00")
@@ -518,8 +520,7 @@ class TestResetRefusals:
 
         The gate runs before any delete, under the owner's write lock that
         the one caller took before the door ran, so a refused reset leaves the
-        schedule, the settled row, and the anchor byte-for-byte intact --
-        never a partial wipe.
+        schedule and the settled row intact -- never a partial wipe.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -532,7 +533,6 @@ class TestResetRefusals:
             db.session.commit()
 
             before_ids = {p.id for p in periods}
-            account = seed_user["account"]
 
             with pytest.raises(PayPeriodResetBlocked) as exc_info:
                 pay_period_admin.reset_pay_periods(
@@ -545,7 +545,6 @@ class TestResetRefusals:
             after_ids = {p.id for p in all_periods(user_id)}
             assert after_ids == before_ids  # nothing deleted
             assert db.session.get(Transaction, settled.id) is not None
-            account = db.session.get(Account, account.id)
             assert_pay_period_invariants(db.session, user_id)
 
     def test_soft_deleted_settled_does_not_block(self, app, db, seed_user):
@@ -600,7 +599,6 @@ class TestResetRefusals:
             user_id = seed_user["user"].id
             _seed_old_schedule(db.session, seed_user)
             before_ids = {p.id for p in all_periods(user_id)}
-            account = seed_user["account"]
 
             with pytest.raises(ValidationError):
                 pay_period_admin.reset_pay_periods(
@@ -611,5 +609,4 @@ class TestResetRefusals:
 
             after_ids = {p.id for p in all_periods(user_id)}
             assert after_ids == before_ids
-            account = db.session.get(Account, account.id)
             assert_pay_period_invariants(db.session, user_id)

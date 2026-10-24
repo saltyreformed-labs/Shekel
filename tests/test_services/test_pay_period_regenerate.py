@@ -2,7 +2,9 @@
 
 Regenerate = truncate the not-yet-started, unlocked tail, then generate a
 fresh schedule from a corrected start/cadence.  It composes truncate (so it
-inherits the hard-lock and discard gates) with generate + a cadence upsert.
+inherits the hard-lock and discard gates) with generate, whose writer
+(``record_paydays``) mints a pay era when the batch records a payday on a
+rhythm the covering era does not hold.
 
 **It does NOT repopulate; the ROUTE does, and that is ruling R-R38** (plan
 step R7d-c-1).  The door records the rebuilt tail EMPTY and returns, because
@@ -699,7 +701,9 @@ class TestABatchMayNotSkipAPaycheckOfThePlan:
             _spanning_periods(db.session, seed_user, count=8)
             user_id = seed_user["user"].id
 
-            with pytest.raises(TypeError):
+            with pytest.raises(
+                TypeError, match="unexpected keyword argument 'confirms'",
+            ):
                 # Pylint: ``unexpected-keyword-arg`` -- the call passes a gap
                 # answer the door does not take; its TypeError is this case's
                 # subject.
@@ -717,19 +721,22 @@ class TestABatchMayNotSkipAPaycheckOfThePlan:
     def test_a_re_phase_of_a_few_days_is_NEVER_refused(
         self, app, db, seed_user,
     ):
-        """The window is exactly one paycheck wide.
+        """The window is exactly one paycheck wide, and its floor day is accepted.
 
         The floor is the first projected payday past the last kept one and
-        the ceiling is the SECOND, so correcting a phase by a day or two --
-        the thing this door exists for -- raises nothing.  Without this case
-        the ceiling could be tightened to any tolerance and stay green.
+        the ceiling is the SECOND.  This case opens ON the floor, so it pins
+        that the floor is not tightened past it: a correction later inside the
+        window is accepted, and an earlier one is refused, as every day inside
+        the retained paycheck is
+        (``test_overlapping_new_start_rejected_and_rolls_back``).  The
+        ceiling's own pin is
+        ``test_the_day_before_the_second_planned_payday_is_the_last_allowed``.
         """
         with app.app_context():
             _spanning_periods(db.session, seed_user, count=8)
             user_id = seed_user["user"].id
 
-            # The tail reopens exactly where it stood, which is the ordinary
-            # correction this door exists for.
+            # The tail reopens exactly where it stood: the floor day itself.
             pay_period_admin.regenerate_pay_periods(
                 user_id, new_start_date=date(2026, 6, 26), num_periods=3,
                 rhythm=rhythm_of(14),

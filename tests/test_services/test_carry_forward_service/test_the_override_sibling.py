@@ -136,9 +136,8 @@ class TestCarryForwardOverrideSibling:
             )
             db.session.flush()
 
-            # Pull every non-deleted transaction in the target period
-            # and run them through the balance calculator the same way
-            # the grid route does.
+            # Pull every non-deleted transaction in the target period: the
+            # two rows the balance below must count.
             target_txns = (
                 db.session.query(Transaction)
                 .filter_by(
@@ -175,7 +174,9 @@ class TestCarryForwardOverrideSibling:
         """A subsequent recurrence-engine pass must not add a third row.
 
         The engine treats override siblings as a "this period is
-        already handled" signal (recurrence_engine.py line 114), so
+        already handled" signal
+        (``recurrence_engine._generate.generate_for_template``, whose second
+        step skips a period that already holds an overridden row), so
         re-running generation after carry-forward must leave the count
         at two.
         """

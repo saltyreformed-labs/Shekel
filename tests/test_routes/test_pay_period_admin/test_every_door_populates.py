@@ -123,8 +123,8 @@ class TestEveryDoorThatCreatesAPeriodPopulatesIt:
                 )
                 assert len(transfers) == 1, (
                     f"pay period {period.id} holds {len(transfers)} recurring "
-                    f"transfers, not 1 -- the route ran the transaction engine "
-                    f"and not the transfer one"
+                    f"transfers, not 1 -- the transfer engine did not run over "
+                    f"this period, or placed its transfer in another one"
                 )
 
     def test_the_regenerate_route_populates_the_tail_it_rebuilds(

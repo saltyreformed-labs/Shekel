@@ -76,7 +76,7 @@ def _create_transaction(seed_user, seed_periods, period_index=0,
     return txn
 
 
-# ── Shadow Transaction Carry Forward Tests ─────────────────────────
+# ── Transfer Carry Forward Tests ───────────────────────────────────
 
 
 def _create_savings(seed_user):
@@ -97,7 +97,7 @@ def _create_savings(seed_user):
 
 
 def _create_transfer_in_period(seed_user, seed_periods, period_index=0):
-    """Create a transfer with shadows in the given period."""
+    """Create a Projected $200.00 transfer, Checking to a new Savings, in the given period."""
     savings = _create_savings(seed_user)
     projected = db.session.query(Status).filter_by(name="Projected").one()
     xfer = transfer_service.create_transfer(
@@ -184,8 +184,9 @@ def _plan_of(txn):
     target's estimate is untouched" is a question to the resolver, not to the
     ``estimated_amount`` column -- which reads ``None`` before AND after any
     change to the definition's price.  A row a carry-forward bumped owns its
-    figure from then on and the column is that figure; the cases below read
-    it there directly, because ownership is part of what they assert.
+    figure from then on and the column is that figure; the cases that assert
+    a bump read it there directly, because ownership is part of what they
+    assert.
     """
     return resolve_transaction_amount(txn, amount_basis_for(txn))
 

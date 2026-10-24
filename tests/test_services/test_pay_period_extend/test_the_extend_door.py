@@ -202,7 +202,9 @@ class TestExtendPayPeriods:
         with app.app_context():
             _future_periods(db.session, seed_user, count=2)
 
-            with pytest.raises(TypeError):
+            with pytest.raises(
+                TypeError, match="unexpected keyword argument 'cadence_days'",
+            ):
                 # Pylint: ``unexpected-keyword-arg`` -- the call passes the
                 # parameter plan step C3-b deleted; its TypeError is this case's
                 # subject.

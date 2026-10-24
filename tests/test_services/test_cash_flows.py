@@ -30,7 +30,11 @@ Two questions this file does NOT answer, and their homes:
 The rule under test: only rows the shared ``is_projected`` predicate admits
 contribute; income counts at :func:`~app.services.cash_ledger.contribution_of`
 and expense at the entries-aware reservation, and the split follows the
-transaction TYPE.
+transaction TYPE.  A transfer's planned LEG takes a branch of its own: it is
+gated on its PARENT's status, worth the transfer's resolved amount
+(:func:`~app.services.cash_ledger.planned_leg_contribution`) and filed by its
+SIDE; a movement in flight is an item of its own too
+(``TestTheReductionIsAdditiveOverRows``).
 
 **The basis is a REQUIRED argument since plan step S1-c** (ruling R-DH (d)).
 ``sum_projected`` took one optional ``amount_overrides`` map defaulting to
@@ -377,9 +381,10 @@ class TestTheReductionIsAdditiveOverRows:
         """A transfer's leaving side is worth its amount, not a reservation rule.
 
         The side is the transfer's from-side LEG, loaded as the plan loads it
-        (``planned_transfer_legs``): it carries no template and no entries, so
-        it is worth its amount and lands on the expense leg, and nothing about
-        it is special here.  Groceries: est=500, uncleared_debit=300, credit=0
+        (``planned_transfer_legs``).  The reduction prices a leg in its own
+        branch: gated on the parent transfer's status, worth the transfer's
+        resolved amount (``planned_leg_contribution``), and filed by its side,
+        here the expense leg.  Groceries: est=500, uncleared_debit=300, credit=0
         -> max(500 - 0 - 0, 300) = 500.  Leg: 200.00.
         Reduction: (0.00, 700.00).  (Was: 5000 - 500 - 200 = 4300.)
 

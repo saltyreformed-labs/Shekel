@@ -1,7 +1,7 @@
 """
 Shekel Budget App -- Carry-Forward Preview Modal Route Tests
 
-Phase 5 of ``docs/carry-forward-aftermath-implementation-plan.md``
+Phase 5 of ``docs/historical/carry-forward-aftermath-implementation-plan.md``
 introduces a pre-flight confirmation modal: clicking "Carry Fwd" on
 a past period now opens
 ``GET /pay-periods/<id>/carry-forward-preview`` instead of POSTing

@@ -32,8 +32,8 @@ now goes through a Marshmallow schema and/or a per-FK
 The ad-hoc and update IDOR rejections return 404 (security response
 rule: "404 for both not found and not yours"); the two template
 routes are form posts and redirect (302) instead.  Each proves the
-request wrote nothing: a create made no row, and an update left the
-owner's row as it was.  On the
+request wrote nothing: a create made no row, and the owner's row was not
+re-pointed at the other user's.  On the
 ad-hoc and update doors the service refuses the same references with
 the same 404, so those cases grade the refusal whichever tier gives
 it.

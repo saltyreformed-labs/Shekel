@@ -51,8 +51,10 @@ class TestCarryForwardEnvelopeMixedBatch:
           * Ad-hoc transaction ($30).
           * Transfer ($200 to savings).
 
-        Target canonicals already exist for both templates in period 1
-        (rule-generated rows at default amounts).
+        Only the envelope has a target canonical in period 1 (its
+        rule-generated row at the default amount).  The discrete definition
+        generates its period-0 source alone, so that row lands in period 1
+        with no sibling.
         """
         with app.app_context():
             envelope_template = _create_envelope_template(
@@ -72,7 +74,7 @@ class TestCarryForwardEnvelopeMixedBatch:
                 discrete_template, seed_periods[0],
             )
 
-            # Ad-hoc (no template).
+            # Ad-hoc: a one-off, placed with a rule-less definition.
             adhoc = _create_transaction(
                 seed_user, seed_periods, period_index=0,
                 name="Ad-hoc Expense",
@@ -114,7 +116,9 @@ class TestCarryForwardEnvelopeMixedBatch:
             projected_id = ref_cache.status_id(StatusEnum.PROJECTED)
             assert discrete_source.status_id == projected_id
 
-            # Ad-hoc moved without is_override (no template_id).
+            # Ad-hoc moved without is_override: its definition does not recur,
+            # and the move keys the flag on ``recurs`` (plan step
+            # balance:X-bi-7a), not on the link.
             db.session.refresh(adhoc)
             assert adhoc.pay_period_id == seed_periods[1].id
             assert adhoc.is_override is False
@@ -198,8 +202,9 @@ class TestCarryForwardEnvelopeBalanceInvariant:
     """Cell == period subtotal == balance projection invariant.
 
     The whole point of Option F: every consumer of the post-carry
-    state reads the same number for the envelope.  This test exercises
-    the balance calculator on the post-carry state and asserts the
+    state reads the same number for the envelope.  This test reads the
+    account's balances on the post-carry state
+    (``balance_at.cash_balance_map``, what the app renders) and asserts the
     forward cash flow matches the period subtotal.
     """
 
@@ -239,9 +244,9 @@ class TestCarryForwardEnvelopeBalanceInvariant:
             )
             db.session.commit()
 
-            # Pull every non-deleted transaction across the two
-            # periods and run the balance calculator the same way the
-            # grid route does.
+            # Pull every non-deleted transaction across the two periods.  The
+            # balance below loads the account's own rows, so this query only
+            # feeds the period-1 subtotal.
             txns = (
                 db.session.query(Transaction)
                 .filter(
@@ -254,8 +259,9 @@ class TestCarryForwardEnvelopeBalanceInvariant:
             )
 
             account = seed_user["account"]
-            # Plan step X-g4b: read what the app renders (see the sibling test
-            # above for why ``as_of`` is pinned).
+            # Plan step X-g4b: read what the app renders.  ``as_of`` is pinned
+            # inside period 0 so ruling R-G does not clamp the still-Projected
+            # target out of the window.
             assert txns
             balances = balance_at.cash_balance_map(
                 account,
@@ -341,8 +347,8 @@ class TestCarryForwardEnvelopeIncomeFalse:
             assert source.status_id == ref_cache.status_id(
                 StatusEnum.PROJECTED,
             )
-            # actual_amount must NOT have been set: discrete branch
-            # never calls settle_from_entries.
+            # No settlement recorded: the discrete branch never calls
+            # settle_from_entries.
             assert status_seam.recorded_settlement(source) is None
             assert source.settled_on is None
 

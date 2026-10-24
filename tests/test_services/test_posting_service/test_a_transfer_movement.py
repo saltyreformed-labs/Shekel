@@ -31,10 +31,13 @@ class TestTransactionShadowFamily:
 
     The class's shadow case went at plan step ``balance:X-bi-6-4d-2``
     (ruling **R-BAL388**): a transfer is one row there (ruling
-    **R-BAL258**), so the shadow the row door was handed cannot be stored.
-    That refusal is pinned once, by ``test_the_database_refuses_a_twin``,
-    and the teardown the case read is graded by ``test_a_settled_transfer.py``'s
-    ``TestSyncReversal``.
+    **R-BAL258**), so the shadow the row door was handed, the income twin,
+    cannot be stored.  That refusal is graded by
+    ``test_the_declaration.py``'s
+    ``test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored`` and
+    four loan cases (``test_the_database_refuses_a_twin`` plants the expense
+    twin), and the teardown the case read is graded by
+    ``test_a_settled_transfer.py``'s ``TestSyncReversal``.
     """
 
     def test_a_movement_reconcile_reads_only_its_own_source_kind(
@@ -118,9 +121,12 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
     another period (ruling **R-BAL380**): the period read it kept is graded
     by ``test_the_oracle_and_attribution.py``'s revert-and-move case.  The
     row teardown on a shadow and the movement under a hidden one (ruling
-    **R-BAL388**): the refusal each staged is pinned once, by
-    ``test_the_database_refuses_a_twin``; the money each read is the
-    settle's, graded by ``test_a_settled_transfer.py``'s
+    **R-BAL388**): the refusal each staged is graded per shape, the income
+    twin by ``test_the_declaration.py``'s
+    ``test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored`` and
+    a hidden twin by ``test_c21_state_machine_integration.py``'s
+    ``test_a_hidden_twin_is_refused`` (ruling **R-BAL398**); the money each
+    read is the settle's, graded by ``test_a_settled_transfer.py``'s
     ``TestSyncSettlePostsBalancedEntry``, and the re-sync at target by its
     ``TestSyncIdempotency``.
     """

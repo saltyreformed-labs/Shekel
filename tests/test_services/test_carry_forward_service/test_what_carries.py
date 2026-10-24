@@ -189,7 +189,8 @@ class TestCarryForwardUnpaid:
     # settle, so an unsettled row cannot carry one -- and carry-forward moves
     # UNPAID rows, so no row it touches has a record to preserve.  What the
     # carry must not disturb is the row's OWN amount, and the envelope suites
-    # below grade exactly that: ``TestCarryForwardEnvelopePartialSpend`` and
+    # in ``test_the_envelope_leftover.py`` and ``test_the_envelope_target.py``
+    # grade exactly that: ``TestCarryForwardEnvelopePartialSpend`` and
     # its five siblings assert the source's and the target's
     # ``estimated_amount`` on every branch.
 

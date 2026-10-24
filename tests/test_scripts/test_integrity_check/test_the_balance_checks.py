@@ -169,7 +169,7 @@ class TestBalanceAnomalies:
     # and making it ``- (cadence_days - 1)`` -- the last of which would report
     # every settled row in the owner's final paycheck, on every backup sweep.
 
-    def test_ba06_accepts_the_HORIZON_day_itself(
+    def test_ba06_accepts_the_horizon_day_itself(
         self, db, seed_user, seed_periods,
     ):
         """The last day the schedule covers is COVERED.
@@ -183,7 +183,7 @@ class TestBalanceAnomalies:
 
         assert self._ba06(db.session).passed, self._ba06(db.session).details
 
-    def test_ba06_detects_the_day_AFTER_the_horizon(
+    def test_ba06_detects_the_day_after_the_horizon(
         self, db, seed_user, seed_periods,
     ):
         """One day past the last covered day is outside every paycheck.
@@ -203,7 +203,7 @@ class TestBalanceAnomalies:
         assert ba06.details[0]["settled_on"] == beyond
         assert ba06.details[0]["last_day"] == horizon
 
-    def test_ba06_accepts_the_FIRST_PAYDAY_itself(
+    def test_ba06_accepts_the_first_payday_itself(
         self, db, seed_user, seed_periods,
     ):
         """A period covers its own opening day, so the first payday is inside."""
@@ -212,7 +212,7 @@ class TestBalanceAnomalies:
 
         assert self._ba06(db.session).passed, self._ba06(db.session).details
 
-    def test_ba06_detects_the_day_BEFORE_the_first_payday(
+    def test_ba06_detects_the_day_before_the_first_payday(
         self, db, seed_user, seed_periods,
     ):
         """The OPENING arm, which had no case at all until plan step C4-c.
@@ -235,7 +235,7 @@ class TestBalanceAnomalies:
         assert ba06.details[0]["settled_on"] == before
         assert ba06.details[0]["first_day"] == first
 
-    def test_ba06_ignores_a_row_merely_outside_its_OWN_paycheck(
+    def test_ba06_ignores_a_row_merely_outside_its_own_paycheck(
         self, db, seed_user, seed_periods,
     ):
         """The control, and it is the whole reason this check is narrow.
@@ -259,7 +259,7 @@ class TestBalanceAnomalies:
         ba06 = next(r for r in results if r.check_id == "BA-06")
         assert ba06.passed, ba06.details
 
-    def test_ba06_grades_a_settled_transfer_by_its_LEGS(
+    def test_ba06_grades_a_settled_transfer_by_its_legs(
         self, db, seed_user, seed_periods,
     ):
         """One row per leg, naming the transfer, dated by the leg's MOVEMENT.

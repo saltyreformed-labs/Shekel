@@ -286,7 +286,7 @@ class TestPartialUniqueIndexBehaviour:
     copy of it was deleted under ruling **R-BAL397**.
     """
 
-    def test_insert_allowed_after_soft_delete(self, app, db, transfer_data):
+    def test_a_hidden_twin_is_refused(self, app, db, transfer_data):
         """A soft-deleted twin is refused too, so no predicate has one to exclude.
 
         It soft-deleted the create door's expense shadow, which took it out of

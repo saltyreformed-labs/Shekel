@@ -96,33 +96,25 @@ def _set_status(txn, status_enum):
     status_seam.apply_status_change(txn, ref_cache.status_id(status_enum))
 
 
-def _envelope(db_session, seed_user, period, name, estimated, entries=()):
-    """Build a Projected envelope expense carrying *entries*.
+def _add_outstanding_purchases(db_session, seed_user, txn, entries):
+    """Add *entries* to the envelope *txn*, each a purchase no statement has seen.
 
     Args:
         db_session: The test ``db.session``.
         seed_user: The ``seed_user`` fixture dict.
-        period: The :class:`~app.models.pay_period.PayPeriod` to place it in.
-        name: The template / transaction name.
-        estimated: The envelope's budgeted amount, as a string.
+        txn: The envelope :class:`~app.models.transaction.Transaction`
+            (``create_envelope_txn``'s) the purchases are made against.
         entries: An iterable of ``(amount, is_credit)`` pairs.  Every purchase
             is left with a NULL ``settled_on`` -- not yet seen on a statement,
             and so OUTSTANDING -- which is the shape these reduction tests were
             written on: which BUCKET a purchase falls in is
             ``test_cash_amounts.py``'s subject, not this file's.
-
-    Returns:
-        The flushed :class:`~app.models.transaction.Transaction`.
     """
-    txn = create_envelope_txn(
-        seed_user, db_session, period, name, Decimal(estimated),
-    )
     for amount, is_credit in entries:
         add_entry(
             db_session, seed_user, txn, Decimal(amount), _PURCHASED_ON,
             is_credit=is_credit,
         )
-    return txn
 
 
 class TestOnlyProjectedRowsContribute:
@@ -160,10 +152,10 @@ class TestOnlyProjectedRowsContribute:
         (0.00, 0.00).  (Was: the balance stayed at the 5000.00 anchor.)
         """
         with app.app_context():
-            txn = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("450.00", False)],
+            txn = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
+            _add_outstanding_purchases(db.session, seed_user, txn, [("450.00", False)])
             # Through the real verb, which picks the entries branch itself and
             # records the ``purchases`` basis -- whose figure IS those entries
             # (plan step X-au-c3), so nothing is hand-written here.
@@ -180,10 +172,10 @@ class TestOnlyProjectedRowsContribute:
         Reduction: (0.00, 0.00).  (Was: the balance stayed at 5000.00.)
         """
         with app.app_context():
-            txn = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("200.00", False)],
+            txn = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
+            _add_outstanding_purchases(db.session, seed_user, txn, [("200.00", False)])
             _set_status(txn, StatusEnum.CANCELLED)
             db.session.commit()
 
@@ -199,10 +191,10 @@ class TestOnlyProjectedRowsContribute:
         (Was: the balance stayed at 5000.00.)
         """
         with app.app_context():
-            txn = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("300.00", True)],
+            txn = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
+            _add_outstanding_purchases(db.session, seed_user, txn, [("300.00", True)])
             _set_status(txn, StatusEnum.CREDIT)
             db.session.commit()
 
@@ -326,14 +318,16 @@ class TestTheReductionIsAdditiveOverRows:
         Reduction: (0.00, 480.00).  (Was: 5000 - 480 = 4520.)
         """
         with app.app_context():
-            groceries = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("200.00", False), ("100.00", True)],
+            groceries = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
-            gas = _envelope(
-                db.session, seed_user, seed_periods[1], "Gas", "80.00",
-                [("60.00", False)],
+            _add_outstanding_purchases(
+                db.session, seed_user, groceries, [("200.00", False), ("100.00", True)],
             )
+            gas = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Gas", Decimal("80.00"),
+            )
+            _add_outstanding_purchases(db.session, seed_user, gas, [("60.00", False)])
             db.session.commit()
 
             assert sum_projected(
@@ -354,9 +348,11 @@ class TestTheReductionIsAdditiveOverRows:
         (Was: 5000 + 2000 - 400 - 1200 = 5400.)
         """
         with app.app_context():
-            groceries = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("300.00", False), ("100.00", True)],
+            groceries = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
+            )
+            _add_outstanding_purchases(
+                db.session, seed_user, groceries, [("300.00", False), ("100.00", True)],
             )
             rent = add_txn(
                 db.session, seed_user, seed_periods[1], "Rent", "1200.00",
@@ -373,7 +369,7 @@ class TestTheReductionIsAdditiveOverRows:
                 _unreconciled(groceries, rent, paycheck),
             ) == (Decimal("2000.00"), Decimal("1600.00"))
 
-    def test_a_transfer_shadow_is_priced_like_any_other_row(
+    def test_a_transfers_leaving_leg_is_priced_like_any_other_row(
         self, app, db, seed_user, seed_periods,
     ):
         """A transfer's leaving side is worth its amount, not a reservation rule.
@@ -392,10 +388,10 @@ class TestTheReductionIsAdditiveOverRows:
         figure is unchanged.
         """
         with app.app_context():
-            groceries = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("300.00", False)],
+            groceries = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
+            _add_outstanding_purchases(db.session, seed_user, groceries, [("300.00", False)])
             savings = create_savings_account(
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )

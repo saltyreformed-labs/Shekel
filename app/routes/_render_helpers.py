@@ -50,7 +50,6 @@ from app.services.transaction_service import (
 )
 from app.services.transfer_legs import (
     TransferLeg,
-    covering_movements_by_leg,
     grid_transfer_leg,
     leg_of,
 )
@@ -203,14 +202,17 @@ def transfer_budgets(xfer: Transfer) -> "dict[int, Decimal]":
 
     **It is SEPARATE from :func:`transfer_settlement_amounts` rather than a
     third field on it, and the split is by what each surface renders.**  The
-    quick edit shows a PLAN and nothing else, while that producer takes the
-    legs' records (its caller's ``covering_movements_by_leg`` load) and
-    answers two figures -- so bundling them would make the quick-edit swap
-    pay for a load and two figures it does not display.
+    quick edit shows a PLAN and nothing else, while that producer answers
+    the two settlement figures -- so bundling them would hand the quick-edit
+    swap two figures it does not display.  Until plan step
+    ``balance:X-bi-6-4d-2`` that producer also took the legs' records (its
+    caller's ``covering_movements_by_leg`` load), a load the quick edit would
+    have paid for too; both figures are the transfer's since, and it takes
+    none.
     The popover shows all three and calls both; so does the transfers page's
     CELL since leaf ``X-bi-6-1`` closed finding **N-303** (it showed the plan
     over a figure just corrected, because it was handed neither map).  *A
-    first draft of this paragraph cited finding N-296 for that cost and an
+    first draft of this paragraph cited finding N-296 for that load's cost and an
     adversarial review opened the row: N-296 is a per-DEFINITION eager load in
     BATCH callers, whose remedy is `pricing_load_options` and whose step is
     `X-bm`.  It says nothing about this.  The argument above needs no
@@ -300,7 +302,7 @@ class TransferSettlementAmounts:
 
 
 def transfer_settlement_amounts(
-    xfer: Transfer, user_id: int, records: dict,
+    xfer: Transfer, user_id: int,
 ) -> TransferSettlementAmounts:
     """Return the pair's recorded and retained figures, keyed by transfer id.
 
@@ -317,9 +319,9 @@ def transfer_settlement_amounts(
     by** (leaf ``X-bi-6-1``, ruling **R-BAL87**; rule 14):
     :func:`~app.services.cash_ledger.leg_settled_amounts_by_key` and
     :func:`~app.services.transaction_service.leg_retained_amounts_by_key` over
-    ONE leg built by :func:`~app.services.transfer_legs.leg_of` from the
-    caller's *records*, so what this popover promises, what the cell beside
-    it shows and what a tick books are one walk.  Until that leaf it loaded
+    ONE leg built by :func:`~app.services.transfer_legs.leg_of`, so what
+    this popover promises, what the cell beside it shows and what a tick
+    books are one walk.  Until that leaf it loaded
     the shadow pair and read the expense SHADOW's entries through the row
     producers -- a second walk over the same record that agreed with the
     cell's only while Transfer Invariant 3 held, which an adversarial review
@@ -337,25 +339,25 @@ def transfer_settlement_amounts(
     choice is not made twice.  (A DAY is per side since plan step
     ``balance:X-bi-6-4c-3``; :func:`transfer_side_boxes` draws each.)
 
-    **The legs' records are the CALLER's one load** (ledger row **BAL-530**):
-    the popover reads both day boxes and its withdrawal caption off one
-    :func:`~app.services.transfer_legs.covering_movements_by_leg`, and the
-    leg built here carries the same load, where it loaded the records twice.
-    Neither figure reads a record: both are the transfer's.
+    **It takes no records** (plan step ``balance:X-bi-6-4d-2``): neither
+    producer reads a leg's record -- both figures are the transfer's -- so
+    the leg built here carries none, and neither caller -- the popover nor
+    the transfers page's cell (:func:`render_transfer_cell`) -- loads the
+    records for it.  The popover's own ONE load of them (ledger row
+    **BAL-530**, ``routes/transfers/forms.render_full_edit``) is read by its
+    day boxes and its withdrawal caption alone.
 
     **It answers for a SOFT-DELETED transfer**, where the pair loader it used
     to call refused one: the transfers page's cell reaches here on the stale
-    response after a rival's delete won (``_stale_transfer_response``), and a
-    deleted transfer's leg simply carries no record.  The popover door refuses
-    a deleted transfer itself (``transfers.get_full_edit``).
+    response after a rival's delete won (``_stale_transfer_response``), and
+    nothing here refuses one.  The popover door refuses a deleted transfer
+    itself (``transfers.get_full_edit``).
 
     Args:
         xfer: The transfer the popover is rendering.
         user_id: The owner, a defense-in-depth ownership check the loader used
             to make and this keeps: a transfer that is not *user_id*'s is
             refused as not found.
-        records: ``covering_movements_by_leg([xfer.id])``, loaded once by the
-            caller.
 
     Returns:
         A :class:`TransferSettlementAmounts` whose two maps hold one entry each.
@@ -365,10 +367,7 @@ def transfer_settlement_amounts(
     """
     if xfer.user_id != user_id:
         raise NotFoundError(f"Transfer {xfer.id} not found.")
-    leg = leg_of(
-        xfer, xfer.from_account_id,
-        record=records.get((xfer.id, xfer.from_account_id)),
-    )
+    leg = leg_of(xfer, xfer.from_account_id)
     return TransferSettlementAmounts(
         settled={xfer.id: leg_settled_amounts_by_key([leg])[leg.cell_key]},
         retained={xfer.id: leg_retained_amounts_by_key([leg])[leg.cell_key]},
@@ -704,9 +703,7 @@ def render_transfer_cell(xfer: Transfer, **extra: Any) -> str:
             rule cannot answer.  Unreachable while every transfer owns its
             figure; the leaves after this one are what give it a population.
     """
-    amounts = transfer_settlement_amounts(
-        xfer, current_user.id, covering_movements_by_leg([xfer.id]),
-    )
+    amounts = transfer_settlement_amounts(xfer, current_user.id)
     return render_template(
         "transfers/_transfer_cell.html",
         xfer=xfer,

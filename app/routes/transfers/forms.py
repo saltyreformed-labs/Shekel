@@ -150,16 +150,16 @@ def render_full_edit(xfer, leg_account_id, *, page_refusal):
     periods = period_move_options(
         calendar_for(current_user.id), xfer.pay_period_id,
     )
-    # The legs' records, loaded ONCE for everything below that reads them --
-    # both day boxes and the withdrawal caption, and the leg the figures are
-    # read through, whose figures are the transfer's and read no record
-    # (ledger row **BAL-530**: the figures and the caption each loaded them).
+    # The legs' records, loaded ONCE for both of their readers below -- the
+    # two day boxes and the withdrawal caption (ledger row **BAL-530**: the
+    # figures and the caption each loaded them).  The figures read none
+    # since plan step ``balance:X-bi-6-4d-2``: both are the transfer's.
     records = transfer_legs.covering_movements_by_leg([xfer.id])
     # What the pair RECORDED and what a re-settle would RE-BOOK (plan step
     # X-au-c3), through the one helper, so the popover opened from the
     # transfers page and the one opened from a grid leg's cell cannot show
     # different figures for the same transfer.
-    amounts = transfer_settlement_amounts(xfer, current_user.id, records)
+    amounts = transfer_settlement_amounts(xfer, current_user.id)
     return render_template(
         "transfers/_transfer_full_edit.html",
         card_id=full_edit_dom_id(xfer.id),

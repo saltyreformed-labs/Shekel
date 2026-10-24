@@ -1,17 +1,20 @@
 """Ledger row BAL-530: the transfer popover loads its legs' records ONCE.
 
 Plan step ``balance:X-bi-6-4c-3``.  ``GET /transfers/<id>/full-edit`` reads the
-legs' records -- each side's covering movement -- for three things: the
-figures, both day boxes and the withdrawal caption.  Until that step the
-figures and the caption each called
+legs' records -- each side's covering movement -- for both day boxes and the
+withdrawal caption, and read them for the figures too until plan step
+``balance:X-bi-6-4d-2`` made both figures the transfer's own.  Until
+``X-bi-6-4c-3`` the figures and the caption each called
 ``transfer_legs.covering_movements_by_leg``, so one render ran the join twice;
 the route now loads the records once and hands the same dict to every reader
 (``routes/transfers/forms.get_full_edit``).
 
-The loader is reached through three names -- the package attribute the route
-calls, ``_render_helpers``' own import, and ``_records``' internal calls (the
-grid's leg builders) -- so the spy stands in all three places, and a render
-that reached the join by any of them is counted.
+The loader is reached through two names -- the package attribute the route
+calls and ``_records``' internal calls (the grid's leg builders) -- so the spy
+stands in both places, and a render that reached the join by either is
+counted.  ``_render_helpers``' own import was a third until plan step
+``balance:X-bi-6-4d-2``, when the transfers page's cell render stopped
+loading the records for figures that read none.
 """
 
 from datetime import timedelta
@@ -19,7 +22,6 @@ from decimal import Decimal
 from unittest import mock
 
 from app.extensions import db
-from app.routes import _render_helpers
 from app.services import transfer_legs, transfer_service
 from app.services.transfer_legs import _records
 from app.utils.dates import display_today
@@ -65,8 +67,6 @@ def test_the_popover_loads_the_legs_records_once(
 
         with mock.patch.object(
             transfer_legs, "covering_movements_by_leg", counting,
-        ), mock.patch.object(
-            _render_helpers, "covering_movements_by_leg", counting,
         ), mock.patch.object(
             _records, "covering_movements_by_leg", counting,
         ):

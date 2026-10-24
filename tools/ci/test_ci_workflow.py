@@ -1,18 +1,16 @@
 """Controls for ``ci.yml``'s wiring to the CI modules: every grader is judged, nothing fails green.
 
-``ci.yml`` is wired to ``ci_scope``'s answer: every code-grading JOB is guarded
-by it, the plan gate is not, the guard names the classifier, and the
-``lint-and-test`` aggregate judges every grader through ``ci_verdict``.
-(Re-expressed over jobs when ``bank_import:X-gy`` split the single job, the
-developer confirming the change under rule 5, 2026-09-22.)  Since step X-cx's
-L4 the scope job also hands each event's change set to the ``commit-trailers``
-job, and the merge queue's ``merge_group`` event triggers the workflow.  Split
-out of ``test_ci_scope.py`` by that step, unchanged but for this docstring and
-the imports.  Since L9d the ``landing`` job reads the tracker through a token
-minted for that run alone (ruling balance:R-BAL311).  Since M2 it judges the
-ship markers the merge it checked out writes, for the one pull request the
-scope job names, which it reads through the job's own token (ruling
-balance:R-BAL359); the expected wiring below changed with it, by that plan.
+Every pull request runs every grader: no job carries a condition (ruling
+``balance:R-BAL399`` deleted the scope that let a change set touching only
+planning documents skip lint and the shards, and these controls' guard
+cases with it), and the ``lint-and-test`` aggregate judges every grader
+through ``ci_verdict``.  (Re-expressed over jobs when ``bank_import:X-gy``
+split the single job, the developer confirming the change under rule 5,
+2026-09-22.)  The merge queue's ``merge_group`` event triggers the workflow.
+Since L9d the ``landing`` job reads the tracker through a token minted for
+that run alone (ruling balance:R-BAL311).  Since M2 it judges the ship
+markers the merge it checked out writes, for the one pull request its event
+names, which it reads through the job's own token (ruling balance:R-BAL359).
 """
 from __future__ import annotations
 
@@ -22,10 +20,9 @@ import subprocess
 import sys
 import time
 
-import pytest
 import yaml
 
-from tools.ci import arcs, ci_verdict, scratch
+from tools.ci import arcs, ci_verdict
 from tools.quill import landing
 from tools.quill.setup_tracker import PLAN
 
@@ -33,32 +30,8 @@ from tools.quill.setup_tracker import PLAN
 # ---------------------------------------------------------------- the wiring
 
 
-GUARD = "needs.scope.outputs.scope != 'registry-only'"
-
-#: Jobs that may run code without the guard: the classifier, the card-trailer
-#: check (step X-cx's L4), the landing check (step X-cx's L9d), the plan gate,
-#: the tax-law check (plan step salary:X-at-4), the aggregate that judges them,
-#: and the polyglot linters (every scope).
-UNGUARDED_JOBS = {"scope", "commit-trailers", "landing", "plan-gate", "tax-law",
-                  "lint-and-test", "polyglot-lint"}
-
 #: The tax-law job's one grading step (ruling salary:R-SAL74).
 TAX_LAW_STEP = "Is next year's tax law in? (refuses from December 1)"
-
-#: The steps inside an UNGUARDED job that may run code -- the old single job's
-#: step-level allowlist, carried to the jobs its steps now live in.
-UNGUARDED_CODE_STEPS = {
-    ("scope", "Classify the change set"),
-    ("commit-trailers", "Card trailers (every scope)"),
-    ("landing", "Install dependencies"),
-    ("landing", "Read the tracker's place"),
-    ("landing", "Ship markers against the write rule (every scope)"),
-    ("plan-gate", "Install dependencies"),
-    ("plan-gate", "Plan gate (every scope)"),
-    ("tax-law", "Install dependencies"),
-    ("tax-law", TAX_LAW_STEP),
-    ("lint-and-test", "Verdict"),
-}
 
 #: The step conditions a graded job may carry, each for its own reason.  A step
 #: skipped by its own ``if:`` leaves its job ``success``, so ``ci_verdict`` would
@@ -80,10 +53,12 @@ STEP_CONDITIONS = {
     ("landing", "Mint the tracker read token"): "env.PLAN_READER_KEY_PRESENT == 'true'",
 }
 
-#: The jobs whose every step grades: the seven ``lint-and-test`` needs, and the
+#: The jobs whose every step grades: the five ``lint-and-test`` needs, and the
 #: aggregate itself.
-GRADED_JOBS = ("scope", "commit-trailers", "landing", "plan-gate", "tax-law", "lint",
-               "test", "lint-and-test")
+GRADED_JOBS = ("landing", "tools", "tax-law", "lint", "test", "lint-and-test")
+
+#: The tools job's one grading step.
+TOOLS_STEP = "Lint and test every tools package"
 
 
 def _jobs() -> dict[str, dict]:
@@ -98,51 +73,19 @@ def _steps(job: str) -> dict[str, dict]:
 
 
 class TestTheWorkflowIsWiredToTheAnswer:
-    """Claim 4: read ``ci.yml`` and hold every job to the scope it should have."""
+    """Claim 4: read ``ci.yml`` and hold every job to what it must run."""
 
-    def test_the_classifier_step_exists_and_calls_this_module(self):
-        """The ``scope`` job pipes a rename-visible diff into ``ci_scope.py``."""
-        steps = {s.get("id"): s for s in _jobs()["scope"]["steps"] if s.get("id")}
-        assert "scope" in steps, "no step with id: scope"
-        assert "python -m tools.ci.ci_scope" in steps["scope"]["run"]
-        assert "--no-renames" in steps["scope"]["run"], "a rename must show both paths"
-        assert "pull_request" in steps["scope"]["run"], "a push to main must be full"
-        assert _jobs()["scope"]["outputs"] == {
-            "scope": "${{ steps.scope.outputs.scope }}",
-            "base": "${{ steps.scope.outputs.base }}",
-            "head": "${{ steps.scope.outputs.head }}",
-            "pull": "${{ steps.scope.outputs.pull }}",
-        }
+    def test_no_job_runs_on_a_condition_but_the_aggregate(self):
+        """Every grader runs on every change set (R-BAL399): no job carries an ``if:`` or
+        waits on another job, but the aggregate, which runs ``if: always()`` after them all."""
+        for name, job in _jobs().items():
+            if name == "lint-and-test":
+                continue
+            assert "if" not in job, name
+            assert "needs" not in job, name
 
-    def test_the_classifier_step_is_unconditional(self):
-        """A skipped classifier has no output; the guards must never see that state."""
-        job = _jobs()["scope"]
-        assert "if" not in job and "needs" not in job
-        steps = {s.get("id"): s for s in job["steps"] if s.get("id")}
-        assert "if" not in steps["scope"]
-
-    def test_the_guard_fails_closed_on_a_missing_output(self):
-        """Every scope guard in the file is ``!= 'registry-only'``: no output runs everything."""
-        conditions = [job["if"] for job in _jobs().values() if "if" in job]
-        conditions += [
-            step["if"] for job in _jobs().values() for step in job["steps"] if "if" in step
-        ]
-        scoped = [c for c in conditions if "scope" in c]
-        assert scoped, "no guarded job at all"
-        assert set(scoped) == {GUARD}
-        assert "== 'full'" not in GUARD
-
-    def test_the_plan_gate_runs_in_both_scopes_and_the_code_graders_only_in_full(self):
-        """The plan gate is unguarded and waits on nothing; every code grader is guarded."""
-        jobs = _jobs()
-        gate = jobs["plan-gate"]
-        assert "if" not in gate and "needs" not in gate
-        run = _steps("plan-gate")["Plan gate (every scope)"]["run"]
-        assert "pytest tools/plan_gate" in run
-        assert "pylint tools/plan_gate/" in run
-        for job in ("lint", "test"):
-            assert jobs[job].get("if") == GUARD, f"{job!r} is not guarded by {GUARD}"
-            assert jobs[job].get("needs") == "scope", f"{job!r} does not wait on the classifier"
+    def test_the_code_graders_keep_their_steps(self):
+        """The lint job and the test job each still hold every grading step they run."""
         graders = {
             "lint": [
                 "Lint with pylint",
@@ -161,42 +104,37 @@ class TestTheWorkflowIsWiredToTheAnswer:
         for job, names in graders.items():
             steps = _steps(job)
             for name in names:
-                assert name in steps, f"{name!r} is no longer in the guarded {job!r} job"
+                assert name in steps, f"{name!r} is no longer in the {job!r} job"
 
-    def test_this_package_is_linted_and_tested_in_both_scopes(self):
-        """``tools/ci`` decides what runs, so its own floor and tests run in every scope.
-
-        It is not a registry-only prefix (a change to it runs everything), but
-        a registry pass still runs the classifier it holds, so its tests must
-        not be skipped by the scope they grade.
-        """
-        run = _steps("plan-gate")["Plan gate (every scope)"]["run"]
+    def test_this_package_is_linted_and_tested(self):
+        """``tools/ci`` holds the verdict this workflow's required check runs, so its own
+        floor and tests run in the tools job."""
+        run = _steps("tools")[TOOLS_STEP]["run"]
         assert "pylint tools/ci/ --fail-under=10 --fail-on=E,F" in run
         assert "pytest tools/ci -c /dev/null -q" in run
 
-    def test_the_release_tool_is_linted_and_tested_in_both_scopes(self):
-        """``tools/release`` reads steps.md at a commit until the cutover, so a registry-only
-        change set must not skip its floor or its tests (step X-cx's L9a)."""
-        run = _steps("plan-gate")["Plan gate (every scope)"]["run"]
+    def test_the_release_tool_is_linted_and_tested(self):
+        """``tools/release`` (step X-cx's L9a) holds the same floor in the same step."""
+        run = _steps("tools")[TOOLS_STEP]["run"]
         assert "pylint tools/release/ --fail-under=10 --fail-on=E,F" in run
         assert "pytest tools/release -c /dev/null -q" in run
 
-    def test_the_split_tool_is_linted_and_tested_in_both_scopes(self):
+    def test_the_split_tool_is_linted_and_tested(self):
         """``tools/split`` (step balance:X-er) holds the tools packages' one floor in their
         one step: its pylint 10.00 and its tests run beside quill, ci and release."""
-        run = _steps("plan-gate")["Plan gate (every scope)"]["run"]
+        run = _steps("tools")[TOOLS_STEP]["run"]
         assert "pylint tools/split/ --fail-under=10 --fail-on=E,F" in run
         assert "pytest tools/split -c /dev/null -q" in run
 
-    def test_the_rehearsal_kit_is_linted_and_tested_in_both_scopes(self):
+    def test_the_rehearsal_kit_is_linted_and_tested(self):
         """``tools/rehearsal`` (step X-cx's K1) holds the same floor in the same step, and its
         tests run there with the ``cluster`` ones deselected (the K1 leaf-plan ruling, item 3)."""
-        run = _steps("plan-gate")["Plan gate (every scope)"]["run"]
+        run = _steps("tools")[TOOLS_STEP]["run"]
         assert "pylint tools/rehearsal/ --fail-under=10 --fail-on=E,F" in run
         assert 'pytest tools/rehearsal -c /dev/null -q -m "not cluster"' in run
 
     def test_the_rehearsal_kit_s_cluster_tests_run_on_one_shard_that_holds_their_base(self):
-        """The ``cluster`` tests the plan gate deselects run in the guarded test job, on ONE
+        """The ``cluster`` tests the tools job deselects run in the test job, on ONE
         shard, which must be one the matrix still has: a shard index past its end would skip
         the step on every run, and a skipped step reads green (ruling balance:R-BAL327).  The
         job's checkout fetches depth 2, since the bench case's base state is ``HEAD~1``, which
@@ -209,34 +147,13 @@ class TestTheWorkflowIsWiredToTheAnswer:
         assert _steps("test")["Checkout code"]["with"] == {"fetch-depth": 2,
                                                             "persist-credentials": False}
 
-    def test_no_code_running_job_escapes_the_guard(self):
-        """A job that runs pytest, pylint, a script or ``test.sh`` is guarded or named here."""
-        for name, job in _jobs().items():
-            if name in UNGUARDED_JOBS:
-                continue
-            runs = " ".join(step.get("run", "") for step in job["steps"])
-            if any(tool in runs for tool in ("pytest", "pylint", "python ", "scripts/test.sh")):
-                assert job.get("if") == GUARD, name
-
-    def test_no_code_running_step_in_an_unguarded_job_escapes_the_allowlist(self):
-        """Inside every unguarded job but the polyglot linters, only named steps run code.
-
-        The single job held this per STEP; a grader added to an unguarded job
-        would run on a registry pass and be judged by nobody's guard.
-        """
-        for name in sorted(UNGUARDED_JOBS - {"polyglot-lint"}):
-            for step in _jobs()[name]["steps"]:
-                run = step.get("run", "")
-                if any(tool in run for tool in ("pytest", "pylint", "python ", "scripts/test.sh")):
-                    assert (name, step["name"]) in UNGUARDED_CODE_STEPS, (name, step["name"])
-
     def test_no_step_in_a_graded_job_carries_a_condition_of_its_own(self):
         """Every step of a graded job runs, bar the serial-benchmark leg and the landing mint.
 
         A step skipped by its own ``if:`` leaves its job ``success`` -- the
         skipped-reads-as-passing hole ``lint-and-test`` exists to close, one
-        level down.  The single job held this as ``set(guards) == {GUARD}``
-        over EVERY step condition; this is that claim over the jobs.
+        level down.  The single job held this over EVERY step condition; this
+        is that claim over the jobs.
         """
         for name in GRADED_JOBS:
             for step in _jobs()[name]["steps"]:
@@ -252,13 +169,12 @@ class TestTheWorkflowIsWiredToTheAnswer:
             for step in job["steps"]:
                 assert "continue-on-error" not in step, (name, step["name"])
 
-    def test_the_tax_law_check_runs_in_every_scope_at_the_refuse_stage(self):
+    def test_the_tax_law_check_runs_at_the_refuse_stage(self):
         """From December 1 every pull request waits for next year's tax law (R-SAL74).
 
-        Unguarded and waiting on nothing, like the plan gate, because the
-        ruling refuses EVERY release and a registry-only pull request is one;
-        and at the REFUSE stage, never the notice stage, which would start
-        refusing a month early.  The weekly watch is the NOTICE stage, on a
+        Unconditional and waiting on nothing, because the ruling refuses EVERY
+        release; and at the REFUSE stage, never the notice stage, which would
+        start refusing a month early.  The weekly watch is the NOTICE stage, on a
         schedule.
         """
         job = _jobs()["tax-law"]
@@ -418,32 +334,18 @@ class TestTheWorkflowIsWiredToTheAnswer:
             assert result.returncode != 0, failing
             assert output.read_text() == "", failing
 
-    def test_the_plan_gate_no_longer_hides_inside_the_checker_step(self):
-        """Step 5b used to carry ``pytest tools/plan_gate``; a guarded copy is a second run."""
-        checker_step = _steps("lint")["Test and apply custom pylint checkers"]
-        assert "tools/plan_gate" not in checker_step["run"]
+class TestTheEventIsReadWhereItIsUsed:
+    """The merge queue's trigger, and the one pull request the landing check judges."""
 
-
-class TestTheChangeSetIsHandedOver:
-    """The merge queue's trigger, and the change set's two ends the scope job hands over.
-
-    Step X-cx's L4: the scope job is the one place that reads which payload
-    field holds a pull request's, a merge group's or a push's two ends; the
-    ``commit-trailers`` job reads them from its outputs.  Since M2 it names the
-    pull request the ``landing`` job judges there too: a pull request's number,
-    or a queue group's branch.
-    """
-
-    #: A pull request's number and a queue group's branch for it, set on every run, so an
-    #: event that read the other's field would hand over the wrong pull request.
-    NUMBER = "594"
-    QUEUED = f"refs/heads/gh-readonly-queue/dev/pr-{NUMBER}-{'b' * 40}"
-    NAMES = {"PR_NUMBER": NUMBER, "GROUP_REF": QUEUED}
+    #: The landing check's ``PULL``: a pull request's number on its own event, a queue
+    #: group's branch on its, and nothing on a push, read from the event in the step that
+    #: uses it (the scope job that handed it over went with R-BAL399).
+    PULL = "${{ github.event.pull_request.number || github.event.merge_group.head_ref || '' }}"
 
     def test_the_merge_queue_triggers_the_workflow(self):
         """``merge_group`` beside ``pull_request``, neither filtered; ``push`` still only to
-        ``main``.  A branch filter on ``pull_request`` (``branches: [main]``) would stop both
-        trailer checks on every pull request into ``dev`` (the L9d delta review's LOW-5)."""
+        ``main``.  A branch filter on ``pull_request`` (``branches: [main]``) would stop the
+        landing check on every pull request into ``dev`` (the L9d delta review's LOW-5)."""
         text = (arcs.REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         # PyYAML reads the bare key ``on`` as the boolean True (YAML 1.1), and a bare
         # trigger, one with no filter, as None.
@@ -451,86 +353,16 @@ class TestTheChangeSetIsHandedOver:
         assert triggers == {"push": {"branches": ["main"]}, "pull_request": None,
                             "merge_group": None}
 
-    def test_the_card_trailer_job_checks_the_scope_jobs_range_over_full_history(self):
-        """Unguarded, waiting on the scope job, a full checkout, and exactly this command."""
-        job = _jobs()["commit-trailers"]
-        assert job["needs"] == "scope" and "if" not in job
-        checkout = job["steps"][0]
-        assert checkout["with"] == {"fetch-depth": 0, "persist-credentials": False}
-        step = _steps("commit-trailers")["Card trailers (every scope)"]
-        assert step["env"] == {"BASE_SHA": "${{ needs.scope.outputs.base }}",
-                               "HEAD_SHA": "${{ needs.scope.outputs.head }}"}
-        # EXACTLY this: a ``|| true`` would let a refusal fall on the floor.
-        assert step["run"].strip() == (
-            'python -m tools.ci.commit_trailers "${BASE_SHA}" "${HEAD_SHA}"'
-        )
-
-    @pytest.fixture(name="ran")
-    def _ran(self, tmp_path):
-        """Run the scope step's text, as bash, in a scratch repository; its outputs and log.
-
-        A stand-in ``python`` answers ``registry-only`` for ``-m
-        tools.ci.ci_scope`` and fails on anything else, so the step's own shell
-        is what is graded: which ends it reads for each event, and when it
-        asks the classifier at all.
-        """
-        repo = scratch.repository(tmp_path)
-        base = scratch.commit(repo, "base")
-        head = scratch.commit(repo, "head", parents=[base])
-        stand_in = tmp_path / "python"
-        stand_in.write_text('#!/bin/sh\ntest "$*" = "-m tools.ci.ci_scope" || exit 9\n'
-                            'cat >/dev/null\necho registry-only\n')
-        stand_in.chmod(0o755)
-        run = {s.get("id"): s for s in _jobs()["scope"]["steps"]}["scope"]["run"]
-
-        def _run(event: str, **ends: str) -> tuple[dict[str, str], str]:
-            output = tmp_path / f"output_{event}"
-            output.write_text("")
-            env = {"PATH": f"{tmp_path}:/usr/bin:/bin", "GITHUB_OUTPUT": str(output),
-                   "EVENT_NAME": event, "HOME": str(tmp_path)}
-            env.update({name: ends.get(name, "") for name in (
-                "PR_BASE", "PR_HEAD", "PR_NUMBER", "GROUP_BASE", "GROUP_HEAD", "GROUP_REF",
-                "PUSH_BEFORE", "PUSH_AFTER")})
-            done = subprocess.run(["bash", "--noprofile", "--norc", "-e", "-c", run], cwd=repo,
-                                  env=env, capture_output=True, text=True, check=False)
-            assert done.returncode == 0, done.stderr
-            pairs = [line.split("=", 1) for line in output.read_text().splitlines()]
-            return dict(pairs), done.stdout
-
-        return _run, base, head
-
-    def test_a_pull_request_and_a_merge_group_are_classified_and_handed_over(self, ran):
-        """Each reads its own payload fields, asks the classifier, and hands both ends on, and
-        the pull request it names in a form the landing check reads as that one."""
-        run, base, head = ran
-        assert run("pull_request", PR_BASE=base, PR_HEAD=head, **self.NAMES)[0] == {
-            "base": base, "head": head, "pull": self.NUMBER, "scope": "registry-only"}
-        assert run("merge_group", GROUP_BASE=base, GROUP_HEAD=head, **self.NAMES)[0] == {
-            "base": base, "head": head, "pull": self.QUEUED, "scope": "registry-only"}
-        for event, pull in (("pull_request", self.NUMBER), ("merge_group", self.QUEUED)):
-            assert landing.named([event, head, pull]) == int(self.NUMBER), event
-
-    def test_a_push_is_full_and_still_hands_its_range_over(self, ran):
-        """A release runs everything; its before and after are still the commits to check, and
-        it names no pull request (the landing check says a push was judged in main's queue)."""
-        run, base, head = ran
-        outputs, log = run("push", PUSH_BEFORE=base, PUSH_AFTER=head, **self.NAMES)
-        assert outputs == {"base": base, "head": head, "pull": "", "scope": "full"}
-        assert "has no pull-request change set" in log
-
-    def test_an_unreadable_change_set_is_full_and_its_ends_are_handed_over_as_given(self, ran):
-        """A diff git cannot take answers ``full``; the trailer check then fails on the ends."""
-        run, _base, head = ran
-        outputs, log = run("pull_request", PR_BASE="e" * 40, PR_HEAD=head, **self.NAMES)
-        assert outputs == {"base": "e" * 40, "head": head, "pull": self.NUMBER, "scope": "full"}
-        assert "not trusting an unreadable change set" in log
-
-    def test_any_other_event_hands_over_no_range(self, ran):
-        """No change set: ``full`` here, an empty range the trailer check refuses, and no
-        pull request, which the landing check refuses to judge."""
-        run, _base, _head = ran
-        assert run("workflow_dispatch", **self.NAMES)[0] == {
-            "base": "", "head": "", "pull": "", "scope": "full"}
+    def test_the_landing_check_reads_its_pull_request_from_its_own_event(self):
+        """Each event carries only its own field, so the first non-empty one is the event's;
+        and the two forms it hands over are the ones the landing check reads as that pull
+        request (a queue group's branch ends with the number of the one it merges)."""
+        check = _steps("landing")["Ship markers against the write rule"]
+        assert check["env"]["PULL"] == self.PULL
+        number = "594"
+        queued = f"refs/heads/gh-readonly-queue/dev/pr-{number}-{'b' * 40}"
+        for event, pull in (("pull_request", number), ("merge_group", queued)):
+            assert landing.named([event, "a" * 40, pull]) == int(number), event
 
 
 class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
@@ -546,7 +378,7 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
     """
 
     MINT = "Mint the tracker read token"
-    CHECK = "Ship markers against the write rule (every scope)"
+    CHECK = "Ship markers against the write rule"
     PLACE = "Read the tracker's place"
     #: Every key each step may hold.  A ``shell:`` could run something other than the
     #: check and exit 0, an ``env:`` could hand a step the key or move pip's index, and a
@@ -561,11 +393,11 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
     }
 
     def test_the_job_judges_the_merge_checked_out_over_full_history_in_order(self):
-        """Unguarded, waiting on the scope job, a full checkout, every install before the mint,
-        and the check handed the event, the commit checked out and the pull request the scope
-        job names, with each token under the name the check reads it by."""
+        """Unconditional, waiting on nothing, a full checkout, every install before the mint,
+        and the check handed the event, the commit checked out and the pull request the event
+        names, with each token under the name the check reads it by."""
         job = _jobs()["landing"]
-        assert job["needs"] == "scope" and "if" not in job
+        assert "needs" not in job and "if" not in job
         assert [step["name"] for step in job["steps"]] == [
             "Checkout code", "Set up Python 3.14", "Install dependencies", self.PLACE,
             self.MINT, self.CHECK,
@@ -574,7 +406,7 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         check = _steps("landing")[self.CHECK]
         assert check["env"] == {"EVENT_NAME": "${{ github.event_name }}",
                                 "MERGE_SHA": "${{ github.sha }}",
-                                "PULL": "${{ needs.scope.outputs.pull }}",
+                                "PULL": TestTheEventIsReadWhereItIsUsed.PULL,
                                 landing.TOKEN_VARIABLE: "${{ steps.token.outputs.token }}",
                                 landing.PULL_TOKEN_VARIABLE: "${{ github.token }}"}
         # EXACTLY this, with no condition: the check decides whether a read is
@@ -593,7 +425,7 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         pull request, and nothing else.
         """
         job = _jobs()["landing"]
-        assert set(job) == {"needs", "runs-on", "permissions", "env", "steps"}
+        assert set(job) == {"runs-on", "permissions", "env", "steps"}
         assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
         assert {step["name"]: set(step) for step in job["steps"]} == self.SHAPES
         for step in job["steps"]:
@@ -727,7 +559,7 @@ class TestTheRequiredCheckJudgesEveryGrader:
         jobs = _jobs()
         job = jobs["lint-and-test"]
         assert job.get("if") == "always()"
-        assert set(job["needs"]) == set(ci_verdict.EVERY_SCOPE + ci_verdict.FULL_SCOPE_ONLY)
+        assert set(job["needs"]) == set(ci_verdict.GRADERS)
         assert set(jobs) - {"lint-and-test", "polyglot-lint"} == set(job["needs"])
 
     def test_the_aggregate_hands_the_whole_needs_context_to_the_verdict(self):
@@ -739,17 +571,3 @@ class TestTheRequiredCheckJudgesEveryGrader:
         assert step["run"].strip() == (
             "printf '%s' \"${NEEDS}\" | python -m tools.ci.ci_verdict"
         )
-
-    def test_the_verdicts_classes_are_the_workflows_guards(self):
-        """``EVERY_SCOPE`` jobs are unguarded; ``FULL_SCOPE_ONLY`` jobs carry the guard.
-
-        The verdict lets a ``FULL_SCOPE_ONLY`` job skip on a registry pass; a
-        job that list names but the workflow does not guard -- or the reverse
-        -- would make the verdict and the workflow disagree about what a
-        registry pass may skip.
-        """
-        jobs = _jobs()
-        for name in ci_verdict.EVERY_SCOPE:
-            assert "if" not in jobs[name], name
-        for name in ci_verdict.FULL_SCOPE_ONLY:
-            assert jobs[name].get("if") == GUARD, name

@@ -3,10 +3,10 @@ and each other, and nothing else.
 
 Two claims rest on it.  The tracker tool and the plan gate import this package,
 so an import back would make the layers depend on each other (the design the
-developer approved, ruling balance:R-BAL223); and ``ci.yml`` runs the classifier,
-the verdict and the trailer check with no install, so a third-party import would
-fail only on the runner.  An AST rule, so a test rather than a reviewer's memory
-(review of 1e52a05ae, N3).  Test modules are exempt: they run after the install.
+developer approved, ruling balance:R-BAL223); and ``ci.yml`` runs the verdict with
+no install, so a third-party import would fail only on the runner.  An AST rule, so a
+test rather than a reviewer's memory (review of 1e52a05ae, N3).  Test modules are
+exempt: they run after the install.
 """
 from __future__ import annotations
 
@@ -45,8 +45,8 @@ def _allowed(module: str) -> bool:
 
 def test_every_module_of_the_layer_is_graded():
     """The glob finds the modules CI runs, so an empty list cannot pass by grading nothing."""
-    assert {"arcs.py", "ci_scope.py", "ci_verdict.py", "commit_trailers.py", "gitcmd.py",
-            "trailers.py"} <= {path.name for path in MODULES}
+    assert {"arcs.py", "ci_verdict.py", "gitcmd.py", "trailers.py"} <= {
+        path.name for path in MODULES}
     assert PACKAGE.parent / "__init__.py" in MODULES
 
 

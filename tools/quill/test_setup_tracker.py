@@ -307,12 +307,12 @@ def _visible(*ids):
     return [dict(_FIELDS[ident]) for ident in ids]
 
 
-def _status_item(number, value, kind="ISSUE"):
-    """One board item as the Status query answers it (``value`` None: no Status set;
-    a draft has no content fields)."""
+def _status_item(number, value, kind="ISSUE", archived=False):
+    """One board item as the items query answers it (``value`` None: no Status set;
+    a draft has no content fields; ``archived``: whether it is archived)."""
     content = {"number": number, "repository": {"name": "shekel-plan"}} if number else {}
-    return {"id": f"PVTI_{number or 'draft'}", "type": kind, "content": content,
-            "fieldValueByName": {"name": value} if value else None}
+    return {"id": f"PVTI_{number or 'draft'}", "type": kind, "isArchived": archived,
+            "content": content, "fieldValueByName": {"name": value} if value else None}
 
 
 class _Board(_GitHub):
@@ -414,7 +414,9 @@ def test_apply_on_an_empty_board_deletes_rank_hides_status_and_no_automation():
 def test_an_automation_that_adds_cards_is_a_difference():
     """Only quill puts a card on the board (balance:R-BAL177): GitHub's default
     "Auto-add sub-issues to project" would add every task and every leaf (a finding or a
-    ruling is no sub-issue since R-BAL395); hiding is allowed."""
+    ruling is no sub-issue since R-BAL395).  Nor may one hide a card since R-BAL352 ("The
+    Done view holds all of history"): "Auto-archive items" would take closed cards out of
+    it, so it is a difference too."""
     project = _project(views=(("Plan", "is:open", 0),))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
@@ -427,6 +429,7 @@ def test_an_automation_that_adds_cards_is_a_difference():
     assert [d.split(" is on")[0] for d in differences] == [
         "the board automation 'Auto-add sub-issues to project'",
         "the board automation 'Auto-add to project'",
+        "the board automation 'Auto-archive items'",
     ]
 
 
@@ -728,30 +731,115 @@ def test_main_exits_by_what_it_found(monkeypatch, capsys, differences, refused, 
             report.differs("x")
 
     monkeypatch.setattr(setup_tracker, "check_repository", repository)
-    for name in ("check_issue_types", "check_board", "check_app"):
+    for name in ("check_issue_types", "check_issue_fields", "check_board", "check_app"):
         monkeypatch.setattr(setup_tracker, name, lambda *_: None)
     assert setup_tracker.main([]) == code
     capsys.readouterr()
 
 
-@pytest.mark.parametrize(("workflows", "said"), [
-    ([{"name": "Auto-archive items", "enabled": True}], "it is on"),
-    ([{"name": "Auto-archive items", "enabled": False}], "it is off"),
-    ([], "GitHub lists no such automation on this board"),
+@pytest.mark.parametrize(("workflows", "differences"), [
+    ([{"name": "Auto-archive items", "enabled": True}], 1),
+    ([{"name": "Auto-archive items", "enabled": False}], 0),
+    ([], 0),
 ])
-def test_each_allowed_automation_is_reported_on_off_or_unlisted(workflows, said):
-    """V3-10 (X-cx L7): a board copied from this one must match its allowed automations, so
-    the run says each one's state; either state matches, so neither is a difference."""
+def test_auto_archive_on_is_a_difference_and_off_or_unlisted_is_not(workflows, differences):
+    """R-BAL352 ("The Done view holds all of history"): an archived card is in no view, so
+    "Auto-archive items" may not run (it replaces V3-10's report of it as the one automation
+    allowed); off, or not listed (GitHub lists a built-in automation only once a board has
+    it), it is no difference."""
     project = _project(views=(("Plan", "is:open", 0),))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
     project["workflows"]["nodes"] = workflows
-    assert setup_tracker.allowed_workflow_states(project) == [
-        f"board automation 'Auto-archive items' may run: {said}"]
-    github = _Board(project)
+    report = Report()
+    setup_tracker.check_board(_Board(project), {"node_id": "R"}, apply=False, report=report)
+    assert report.differences == differences
+    assert [line for line in report.lines if "Auto-archive" in line] == [
+        "DIFFERS the board automation 'Auto-archive items' is on, and none may be: switch it "
+        "off at https://github.com/orgs/o/projects/1/workflows"][:differences]
+
+
+def test_every_archived_item_is_a_difference_on_every_page():
+    """An archived card is in no view (R-BAL352), so each one is named, a draft too, on
+    every page of the one read of the board's items that the Status check makes."""
+    github = _Board(_project(cards=3, views=(("Plan", "is:open", 0),)),
+                    status_pages=([_status_item(1, None), _status_item(2, None, archived=True)],
+                                  [_status_item(None, None, "DRAFT_ISSUE", archived=True)]))
     report = Report()
     setup_tracker.check_board(github, {"node_id": "R"}, apply=False, report=report)
-    assert f"ok      board automation 'Auto-archive items' may run: {said}" in report.lines
+    assert [line for line in report.lines if "archived" in line] == [
+        "DIFFERS card shekel-plan#2 is archived, so no view shows it: restore it from the "
+        "board's archived items",
+        "DIFFERS draft issue item PVTI_draft is archived, so no view shows it: restore it from "
+        "the board's archived items"]
+
+
+# -- the organization's issue fields (R-BAL348, R-BAL354) ----------------------------------
+
+def _issue_field(name, data_type="SINGLE_SELECT", options=None):
+    """One issue field as the issue fields query answers it."""
+    field = {"name": name, "dataType": data_type}
+    if data_type == "SINGLE_SELECT":
+        field["options"] = [{"name": option} for option in options or ()]
+    return field
+
+
+def _fields(*nodes, total=None):
+    """The organization's ``issueFields`` connection holding ``nodes``."""
+    return {"totalCount": len(nodes) if total is None else total, "nodes": list(nodes)}
+
+
+def test_exactly_arc_holding_the_arcs_in_any_order_matches():
+    """R-BAL348 'Arc only': the one field, a single select of the six arcs."""
+    assert not setup_tracker.issue_field_differences(_fields(_issue_field("Arc", options=ARCS)))
+    assert not setup_tracker.issue_field_differences(
+        _fields(_issue_field("Arc", options=reversed(ARCS))))
+
+
+def test_githubs_four_default_fields_are_each_reported_for_deletion():
+    """The organization as read 2026-10-24: GitHub's four defaults beside Arc.  R-BAL348
+    deletes them; the token every session shares cannot (no admin:org), so each is a
+    difference to delete on the web."""
+    read = _fields(_issue_field("Priority", options=("Urgent", "High", "Medium", "Low")),
+                   _issue_field("Start date", "DATE"), _issue_field("Target date", "DATE"),
+                   _issue_field("Effort", options=("High", "Medium", "Low")),
+                   _issue_field("Arc", options=ARCS))
+    assert setup_tracker.issue_field_differences(read) == [
+        f"issue field {name!r} is not declared here: delete it"
+        for name in ("Priority", "Start date", "Target date", "Effort")]
+
+
+@pytest.mark.parametrize(("read", "difference"), [
+    (_fields(), "issue field 'Arc' is missing: make it"),
+    (_fields(_issue_field("Arc", "TEXT")), "issue field 'Arc' is a TEXT, not a single select: "
+                                           "correct it"),
+    (_fields(_issue_field("Arc", options=ARCS[:-1])),
+     f"issue field 'Arc' holds the options {list(ARCS[:-1])}, not the arcs {list(ARCS)}: "
+     "correct it"),
+    (_fields(_issue_field("Arc", options=ARCS), total=2),
+     "the organization has 2 issue fields and the read holds 1: the rest are unread"),
+])
+def test_arc_missing_mistyped_or_holding_other_options_or_a_short_read_differs(read, difference):
+    """Each way the one declared field can be wrong, and a read GitHub cut short."""
+    assert setup_tracker.issue_field_differences(read) == [difference]
+
+
+def test_check_issue_fields_names_the_page_to_settle_each_difference_on():
+    """Each difference names the organization's issue fields page (measured 2026-10-24: a
+    route GitHub knows, as its issue types page is); none, and the check says so."""
+    def read(fields):
+        return _GitHub(graphql=lambda query, **_: {"organization": {"issueFields": fields}})
+
+    report = Report()
+    setup_tracker.check_issue_fields(read(_fields(_issue_field("Arc", options=ARCS),
+                                                  _issue_field("Effort", options=("Low",)))),
+                                     report)
+    assert report.lines == [
+        "DIFFERS issue field 'Effort' is not declared here: delete it at "
+        "https://github.com/organizations/saltyreformed-labs/settings/issue-fields"]
+    report = Report()
+    setup_tracker.check_issue_fields(read(_fields(_issue_field("Arc", options=ARCS))), report)
+    assert report.lines == ["ok      issue fields: exactly 'Arc', a single select of the 6 arcs"]
     assert report.differences == 0
 
 

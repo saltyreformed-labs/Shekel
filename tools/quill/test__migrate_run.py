@@ -104,6 +104,21 @@ def test_history_then_open_files_every_card_and_orders_the_board(corpus):
                if not key.startswith(("balance:R-", "salary:R-"))) == 5
 
 
+def test_a_split_steps_leaves_are_filed_in_its_outcomes_milestone_and_it_in_none(corpus):
+    """The outcome scoping A-2 as well as A-3: the run files A-2's leaves in its milestone
+    and A-2 in none (the coordinator's code call, 14:4x 10-21), and the plan read afterwards,
+    which ``migrate verify`` grades by, refuses nothing and has nothing left."""
+    split = replace(corpus, outcomes=(("O1 the first", ("balance:A-2", "balance:A-3")),))
+    tracker = _empty()
+    assert not _run(split, tracker).history()
+    assert not _run(split, tracker).open()
+    assert _settled(split, tracker)
+    numbers = corpus_plan(split, tracker).numbers
+    assert {key: tracker.milestone_of.get(numbers[key]) for key in (
+        "balance:A-2", "balance:A-2a", "balance:A-2b", "balance:A-3", "salary:S-1")} == {
+        "balance:A-2": None, "balance:A-2a": 1, "balance:A-2b": 1, "balance:A-3": 1,
+        "salary:S-1": None}
+
 def test_a_second_run_of_each_phase_writes_nothing(corpus):
     """A finished migration run again: neither phase writes, and the board moves nothing
     (draft 4 s.4: a second run moves nothing)."""

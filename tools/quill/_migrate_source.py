@@ -45,7 +45,7 @@ import hashlib
 import re
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from tools.ci.arc_steps import (
@@ -168,8 +168,9 @@ class Links:
 class Item:
     """One card the migration files (or, :data:`MAPPED`, finds filed): its arc, its alias
     (the old id), its kind, the registry row it is made from, its labels, its
-    :class:`Links` and its outcome -- the OUTCOMES table's name for it, which the input
-    file maps to its milestone's title -- None for none."""
+    :class:`Links` and its outcome -- the OUTCOMES table's name for the milestone its card is
+    filed in, which the input file maps to that milestone's title; a split step's is carried
+    to its leaves (:func:`_carried_outcomes`) -- None for none."""
 
     arc: str
     alias: str
@@ -461,6 +462,7 @@ def _steps(registries: Registries, layouts: Mapping[str, Layout], specs: Mapping
                       None if row.rank is None else (STEPS_TIER, row.rank))
         items.append(Item(row.arc, row.bare_ident, "step", row, step_labels(row), links,
                           outcome.get(row.key)))
+    items = _carried_outcomes(items, containers, outcome, reports)
     refusals += _shown_nowhere(containers, items)
     known = {(row.arc, row.bare_ident) for row in rows}
     refusals += [f"{arc}: line {entry.start + 1} is a checkbox for {entry.step}, which is no "
@@ -533,8 +535,7 @@ def _outcomes(registries: Registries, by_key: Mapping[str, StepRow], refusals: l
     member = {}
     for name, scope in registries.outcomes:
         if all(key in by_key and by_key[key].shipped for key in scope):
-            reports.append(f"outcome {name!r}'s whole scope has shipped, so it gets no "
-                           "milestone")
+            reports.append(f"outcome {no_milestone(name, shipped=True)}")
         for key in scope:
             row = by_key.get(key)
             if row is None:
@@ -545,6 +546,43 @@ def _outcomes(registries: Registries, by_key: Mapping[str, StepRow], refusals: l
             elif not row.shipped:
                 member[key] = name
     return member
+
+
+def _carried_outcomes(items: Sequence[Item], containers: set[str], own: Mapping[str, str],
+                      reports: list[str]) -> list[Item]:
+    """Each step item with the outcome its card is filed in: none for a split step, else
+    its own, else that of the nearest split step above it holding one (the coordinator's
+    code call, 14:4x 10-21, under R-BAL274's one milestone per card).  A split step leaves
+    the board, so its milestone would count it beside its leaves while they grouped under
+    none.  After the cutover ``quill file step --parent`` files a leaf in its split step's
+    milestone only while that step holds one, which no split step this files does
+    (``_filing._leaf_milestone``).  An outcome left holding no card -- its open scope steps
+    all split steps whose leaves are filed in other outcomes' milestones -- is reported
+    (:func:`no_milestone`), and gets no milestone."""
+    parents = {item.key: item.links.parent for item in items}
+
+    def carried(key: str | None) -> str | None:
+        while key is not None and key not in own:
+            key = parents[key]
+        return None if key is None else own[key]
+
+    found = [replace(item, outcome=None if item.key in containers else carried(item.key))
+             for item in items]
+    held = {item.outcome for item in found}
+    reports += [f"outcome {no_milestone(name, shipped=False)}"
+                for name in dict.fromkeys(own.values()) if name not in held]
+    return found
+
+
+def no_milestone(name: str, shipped: bool) -> str:
+    """Why the outcome ``name`` gets no milestone, which would hold no card: its whole scope
+    ``shipped``, or else its open steps are all split steps, whose leaves are filed in
+    other outcomes' milestones (:func:`_carried_outcomes`).  The one spelling of both,
+    which this module's reports and ``_migrate_input``'s refusal of a milestone given for
+    such an outcome each name."""
+    return (f"{name!r}'s whole scope has shipped, so it gets no milestone" if shipped else
+            f"{name!r} holds no card: its open steps are all split steps, whose leaves are "
+            "filed in other outcomes' milestones, so it gets no milestone")
 
 
 def _together_refusals(by_key: Mapping[str, StepRow], reports: list[str]) -> list[str]:

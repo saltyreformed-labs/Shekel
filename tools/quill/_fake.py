@@ -94,8 +94,9 @@ class FakeBoard:
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (27/20) -- it stands in for
-    :class:`_tracker.Tracker`, so it has each of that class's 25 reads and
+    Pylint: ``too-many-public-methods`` (30/20, measured at X-cx's S3a; this
+    line said 27 while 28 stood) -- it stands in for
+    :class:`_tracker.Tracker`, so it has each of that class's 28 reads and
     writes (its own disable says why there are so many), and ``add`` and
     ``add_task``, which put a card or a task in.
     ``too-many-instance-attributes`` (10/7) -- **one per kind
@@ -173,6 +174,10 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         """The cards that exist among ``numbers``."""
         return {n: self._view(n) for n in numbers if n in self.cards_by_number}
 
+    def milestones_of(self, numbers):
+        """The milestone each card that exists among ``numbers`` is in, None for none."""
+        return {n: self.milestone_of.get(n) for n in numbers if n in self.cards_by_number}
+
     def all_cards(self):
         """Every card, open and closed, with its body, its comments and its milestone."""
         return {n: WholeCard(self._view(n), self.bodies[n], tuple(self.notes.get(n, ())),
@@ -249,6 +254,14 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.writes.append(("create_milestone", number, title))
         self.milestones_by_number[number] = Milestone(number, title, description)
         return number
+
+    def set_milestone(self, number, milestone):
+        """Put a card in milestone number ``milestone``, or with None in none."""
+        self.writes.append(("set_milestone", number, milestone))
+        if milestone is None:
+            self.milestone_of.pop(number, None)
+        else:
+            self.milestone_of[number] = milestone
 
     def retype(self, number, kind):
         """Change a card's kind."""

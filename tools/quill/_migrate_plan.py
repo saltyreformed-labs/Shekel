@@ -455,8 +455,9 @@ def _first_card(by_key: Mapping[str, list[int]], keys: set[str]) -> int | None:
 
 def milestone_title(item: Item, milestones: Mapping[str, tuple[str, str]]) -> str | None:
     """The title of the milestone ``item``'s card is filed in, by its outcome's name in
-    ``milestones`` (the input file's), None for an item in no outcome's scope: what the plan
-    grades a card's milestone by and the run files a create in.
+    ``milestones`` (the input file's), None for an item with no outcome (``Item.outcome``:
+    a split step's is carried to its leaves): what the plan grades a card's milestone by
+    and the run files a create in.
 
     Raises:
         KeyError: When ``milestones`` lacks the item's outcome, which
@@ -622,8 +623,9 @@ class _Grading:
         return [*writes, Write(UNMARK, item.key)]
 
     def _milestone(self, item: Item) -> int | None:
-        """The number of the milestone ``item``'s card is filed in, None for none (an item in
-        no outcome's scope, or one whose milestone does not exist yet)."""
+        """The number of the milestone ``item``'s card is filed in, None for none (an item
+        with no outcome, :func:`milestone_title`, or one whose milestone does not exist
+        yet)."""
         title = milestone_title(item, self.milestones)
         found = None if title is None else self.tracked.milestones.get(title)
         return None if found is None else found.number

@@ -5,7 +5,8 @@ command (R-BAL186), and nothing written over one an earlier run filed -- ruling
 and no leaf filed under a step a branch has claimed, or one with a task still open.  A
 task (ruling ``balance:R-BAL386``) is filed under the piece of work it is part of, and
 carries no arc label; a finding and a ruling are blocked by their owner step, never its
-sub-issues (``R-BAL395``).  ``quill.py``'s module docstring is
+sub-issues (``R-BAL395``); a leaf is filed in its split step's milestone while that step
+holds one, which it then gives up (:func:`_leaf_milestone`).  ``quill.py``'s module docstring is
 the command's usage.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
@@ -36,6 +37,7 @@ from tools.quill._state import (
     is_live,
     leaf_placement,
     leaves,
+    leaves_below,
     release_hint,
     withdrawn_filing,
 )
@@ -96,6 +98,48 @@ _NOTHING_READ = _git.Reads(_git.Shipped(frozenset(), frozenset(), ()), {}, {})
 
 
 @dataclass(frozen=True)
+class _LeafMilestone:
+    """The milestone a new leaf is filed in, its split step's, which the filing then clears
+    (``leaf``), and, when the split step holds none, each leaf below it in one, by number,
+    with that milestone's (``below``), named for a person to choose from; None, or empty,
+    for none."""
+
+    leaf: int | None
+    below: tuple[tuple[int, int], ...]
+
+
+#: What a filing that is no leaf reads of milestones: nothing.
+_NO_MILESTONE = _LeafMilestone(None, ())
+
+
+def _leaf_milestone(tracker: Tracker, parent: Card, cards: dict[int, Card],
+                    shipped: frozenset[int]) -> _LeafMilestone:
+    """The milestone a new leaf of ``parent`` is filed in: its split step's (the
+    coordinator's code call, 14:4x 2026-10-21, under ruling ``balance:R-BAL274``'s one
+    milestone per card), ``parent``'s own while it holds one, which the filing then clears:
+    a step split into smaller steps leaves the board, and its milestone would count it
+    beside its leaves.
+
+    Once ``parent`` holds none -- split already, or never in one -- the leaf is filed in
+    none, and each leaf below it in a milestone (nested splits included,
+    :func:`_state.leaves_below`) is named with it, as that leaf's, for a person to set one
+    on the web: the tracker records no outcome for the split step.  None is
+    taken from them: a leaf the migration filed may hold its OWN outcome's, not one carried
+    from ``parent`` (``_migrate_source._carried_outcomes``), and the tracker cannot tell
+    the two apart (X-cx S3a's review, HIGH 1: on the plan at the cutover, 17 of 32 split
+    steps would have filed a new leaf in a sibling's outcome, recurrence R5's in place of
+    R5's own).
+    Where a split step's outcome should live once its first leaf carries it is a question
+    for after the cutover."""
+    below = [card.number for card in leaves_below(parent, cards, shipped)]
+    held = tracker.milestones_of([parent.number, *below])
+    if (own := held.get(parent.number)) is not None:
+        return _LeafMilestone(own, ())
+    return _LeafMilestone(None, tuple((number, held[number]) for number in below
+                                      if held.get(number) is not None))
+
+
+@dataclass(frozen=True)
 class _Filing:
     """What ``file`` writes, and what it read to write it.
 
@@ -106,7 +150,8 @@ class _Filing:
     them, each read by number); ``shipped``: the cards git says shipped; and
     ``claims``: every claim, by card, from the same read of git
     (:func:`_git.read`) -- all three empty with no parent.  ``asked``: for a
-    ruling converted from a question, that question as read.
+    ruling converted from a question, that question as read.  ``milestone``: for a leaf,
+    the milestone it is filed in, which its split step gives up (:func:`_leaf_milestone`).
     """
 
     draft: Draft
@@ -115,6 +160,7 @@ class _Filing:
     shipped: frozenset[int]
     claims: dict[int, _git.Claim]
     asked: _Asked | None
+    milestone: _LeafMilestone
 
 
 def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
@@ -160,7 +206,9 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
     arc = () if args.kind == TASK else (args.arc,)
     labels = tuple(dict.fromkeys((*arc, *(getattr(args, "label", None) or ()))))
     return _Filing(Draft(args.kind, args.title, body, labels, owner), parent, cards,
-                   reads.shipped.cards, reads.claims, asked)
+                   reads.shipped.cards, reads.claims, asked,
+                   _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
+                   if args.kind == "step" and parent is not None else _NO_MILESTONE)
 
 
 def _place_leaf(tracker: Tracker, leaf: Card, filing: _Filing) -> None:
@@ -459,7 +507,7 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
         _refuse_beside_unfinished(filing, card)
         _refuse_over_tasks(filing)
     if card is None:
-        card = _created(args.kind, tracker, filing.draft)
+        card = _created(args.kind, tracker, filing.draft, filing.milestone)
     else:
         print(f"finishing {_label(card)}: its filing has not finished (it is still marked "
               f"{FILING!r}), so this command finishes it rather than filing another (R-BAL186, "
@@ -468,12 +516,22 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
     return 0
 
 
-def _created(kind: str, tracker: Tracker, draft: Draft) -> Card:
-    """A new card filed from ``draft``, marked in the call that creates it (R-BAL202), as
-    read back; a card that cannot be read back yet is a failed call, not a refusal: it
-    was filed."""
-    number = tracker.create(kind, draft.title, draft.body, draft.labels)
+def _created(kind: str, tracker: Tracker, draft: Draft, milestone: _LeafMilestone) -> Card:
+    """A new card filed from ``draft``, marked in the call that creates it (R-BAL202), and a
+    leaf in its split step's milestone, while that step holds one, in that call too
+    (:func:`_leaf_milestone`), as read back; a card that cannot be read back yet is a
+    failed call, not a refusal: it was filed."""
+    number = tracker.create(kind, draft.title, draft.body, draft.labels,
+                            milestone=milestone.leaf)
     print(f"filed plan#{number}")
+    if milestone.leaf is not None:
+        print(f"  in milestone #{milestone.leaf}, its split step's")
+    if milestone.below:
+        held = ", ".join(f"plan#{leaf} is in milestone #{number}"
+                         for leaf, number in milestone.below)
+        print(f"  in no milestone: its split step holds none, so the tracker records no "
+              f"outcome for it; below it, {held}: if this leaf belongs with one of them, set "
+              "it on the web")
     card = tracker.cards([number]).get(number)
     if card is None:
         raise TrackerError(f"plan#{number} was filed but cannot be read back yet: once "
@@ -487,7 +545,9 @@ def _created(kind: str, tracker: Tracker, draft: Draft) -> Card:
 def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
     """Every write of a filing after the create that ``card`` does not show done, each
     printed as it lands, then its mark removed, last (R-BAL202): the link, a ruling's
-    close, a leaf's place, a top-level step's or question's board place."""
+    close, a leaf's place and its split step's milestone cleared (after the leaf's create
+    carried it, so a run cut short between them leaves it held, and the same command run
+    again clears it), a top-level step's or question's board place."""
     kind, parent = filing.draft.kind, filing.parent
     _attach(tracker, card, kind, parent)
     if kind == "ruling" and card.is_open:
@@ -497,6 +557,9 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
         print("  closed already")
     elif kind == "step" and parent is not None:
         _place_leaf(tracker, card, filing)
+        if (split := filing.milestone.leaf) is not None:
+            tracker.set_milestone(parent.number, None)
+            print(f"  plan#{parent.number} left milestone #{split}: a split step keeps none")
     elif kind in ON_BOARD and card.board_item is None:
         tracker.board.add(card)
         print("  board: added at the bottom")

@@ -45,7 +45,6 @@ from app.services.cash_flow_set import (
 )
 from app.services.cash_ledger import settled_cash_facts
 from tests._test_helpers import (
-    assert_a_twin_is_refused,
     capture_sql_statements,
     create_account_of_type,
     create_loan_account,
@@ -300,8 +299,9 @@ class TestOwnRowsClause:
     ``test_transfer_legs/test_the_grids_legs.py``:
     both endpoints members from either balance line, one endpoint in the set,
     both in and the line on neither).  What is left to grade here is the row
-    half, and that no shadow can be a row on either side: the database
-    refuses one (ruling R-BAL258).
+    half.  No shadow can be a row on either side because the database refuses
+    one (ruling R-BAL258); the CHECK's own cases grade that refusal, and this
+    class's copy of it was deleted under ruling **R-BAL397**.
     """
 
     def test_every_members_rows_load_and_an_outsiders_do_not(
@@ -366,47 +366,6 @@ class TestOwnRowsClause:
 
             assert grocery.id in loaded
             assert loaded == expected
-
-    def test_no_shadow_is_a_row_on_either_side(
-        self, app, db, seed_user, seed_periods_today,
-    ):
-        """No twin of a transfer can be a row on either member; the card bill beside them is.
-
-        Both projected and settled.  It read the two shadows the create door
-        wrote for each transfer and found neither loaded until plan step
-        ``balance:X-bi-6-4d-2``: a transfer is one row, and
-        ``ck_transactions_names_no_transfer`` (ruling R-BAL258) refuses a twin
-        on either side, so none can be stored to load (ruling R-BAL167
-        class 2).  The clause it replaced kept the checking shadow here (the
-        near leg) and dropped the card's; the leg the set draws for the same
-        transfer is ``leg_accounts_shown``'s, graded in
-        ``test_transfer_legs/test_the_grids_legs.py``.
-        """
-        with app.app_context():
-            checking = seed_user["account"]
-            card = _card(seed_user)
-            payment = create_transfer(
-                seed_user, db.session, checking, card, seed_periods_today[3],
-                amount=Decimal("165.00"),
-            )
-            paid = create_settled_transfer(
-                seed_user, db.session, checking, card, seed_periods_today[1],
-                amount=Decimal("80.00"),
-            )
-            phone = _expense_row(
-                seed_user, seed_periods_today[3], card, "Phone", "45.00",
-            )
-            db.session.commit()
-
-            loaded = _loaded_ids(
-                resolve_cash_flow_set(seed_user["user"].id),
-                seed_user["scenario"].id,
-            )
-
-            assert phone.id in loaded
-            for transfer in (payment, paid):
-                for is_income in (False, True):
-                    assert_a_twin_is_refused(db.session, transfer, is_income)
 
 
 class TestFarLegsOf:

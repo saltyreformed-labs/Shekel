@@ -30,7 +30,6 @@ from app.services import transfer_service
 from app.models.amount_ownership import AmountOwnership
 from tests._test_helpers import (
     a_twin_of,
-    assert_a_twin_is_refused,
     constraint_name_from,
     one_off_row_of,
     transfer_side_settle_day,
@@ -279,27 +278,13 @@ class TestPartialUniqueIndexBehaviour:
     transaction_type and allowed a re-insert after a soft-delete cleared its
     predicate.  Since plan step ``balance:X-bi-6-4d-2`` no row may name a
     transfer (``ck_transactions_names_no_transfer``, ruling **R-BAL258**),
-    so each shadow-shaped row these cases planted is refused by that CHECK
-    (ruling R-BAL167 class 2), and a row naming no transfer is outside the
-    index as it always was.
+    so a shadow-shaped row is refused by that CHECK whether live or hidden,
+    and a row naming no transfer is outside the index as it always was.
+    The hidden one is graded here (ruling R-BAL167 class 2).  The live one
+    is the CHECK's own case, ``test_a_transfer_is_one_row``'s
+    ``TestTheUpgrade::test_the_database_refuses_a_twin``, and this class's
+    copy of it was deleted under ruling **R-BAL397**.
     """
-
-    def test_third_active_shadow_blocked(self, app, db, transfer_data):
-        """A live expense twin of the transfer is refused.
-
-        It planted a THIRD live shadow beside the create door's two, bypassing
-        the service, and asserted the partial unique index refused it, then
-        read the two back, until plan step ``balance:X-bi-6-4d-2``: a
-        transfer is one row, so there are no two to read, and the planted twin
-        is refused on its own by ``ck_transactions_names_no_transfer`` (ruling
-        R-BAL167 class 2, ruling R-BAL258).
-        """
-        td = transfer_data
-        with app.app_context():
-            xfer = _create_basic_transfer(td)
-            db.session.commit()
-
-            assert_a_twin_is_refused(db.session, xfer, is_income=False)
 
     def test_insert_allowed_after_soft_delete(self, app, db, transfer_data):
         """A soft-deleted twin is refused too, so no predicate has one to exclude.
@@ -313,7 +298,7 @@ class TestPartialUniqueIndexBehaviour:
         ``ck_transactions_names_no_transfer`` (ruling R-BAL258) reads no
         ``is_deleted``: the hidden twin this case staged is refused like a
         live one (ruling R-BAL167 class 2).  The fresh live twin it inserted
-        after is :meth:`test_third_active_shadow_blocked`'s shape.
+        after is the live one the class docstring names.
         """
         td = transfer_data
         with app.app_context():

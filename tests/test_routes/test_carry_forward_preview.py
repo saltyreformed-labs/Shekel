@@ -1,7 +1,7 @@
 """
 Shekel Budget App -- Carry-Forward Preview Modal Route Tests
 
-Phase 5 of ``docs/carry-forward-aftermath-implementation-plan.md``
+Phase 5 of ``docs/historical/carry-forward-aftermath-implementation-plan.md``
 introduces a pre-flight confirmation modal: clicking "Carry Fwd" on
 a past period now opens
 ``GET /pay-periods/<id>/carry-forward-preview`` instead of POSTing
@@ -24,17 +24,21 @@ These tests exercise the route layer:
   * Companion users are blocked by ``@require_owner``.
 
 The service-layer tests in
-``tests/test_services/test_carry_forward_service.py``
-(``TestPreviewCarryForward*``) cover the data correctness; this
-file focuses on HTTP-status, rendering, and security.
+``tests/test_services/test_carry_forward_service/test_the_preview.py``
+and ``test_the_preview_agrees.py`` (``TestPreviewCarryForward*``) cover
+the data correctness; this file focuses on HTTP-status, rendering, and
+security.
 """
 
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
+from app.models.amount_ownership import AmountOwnership
 from app.models.pay_period import PayPeriod
 from app.models.ref import AccountType, Status
 from app.models.scenario import Scenario
@@ -54,7 +58,6 @@ from tests._test_helpers import (
     moved_by_the_owner,
     resolved_amount,
 )
-from app.models.amount_ownership import AmountOwnership
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -358,8 +361,9 @@ class TestCarryForwardPreviewConfirmGating:
             # And the blocked alert appears in the body.
             assert "blocked" in html.lower()
 
+    @pytest.mark.usefixtures("db", "seed_user")
     def test_confirm_disabled_when_period_is_empty(
-        self, app, auth_client, db, seed_user, seed_periods_today,
+        self, app, auth_client, seed_periods_today,
     ):
         """Empty source period: Confirm has nothing to do, disabled.
 
@@ -381,9 +385,11 @@ class TestCarryForwardPreviewConfirmGating:
 class TestCarryForwardPreviewSecurity:
     """404 for unowned/missing periods; companion blocked."""
 
+    @pytest.mark.usefixtures(
+        "db", "seed_user", "seed_periods_today", "seed_second_user",
+    )
     def test_returns_404_for_unowned_period(
-        self, app, auth_client, db, seed_user, seed_periods_today,
-        seed_second_user, seed_second_periods,
+        self, app, auth_client, seed_second_periods,
     ):
         """Cross-user period -> 404 (security response rule).
 
@@ -398,9 +404,8 @@ class TestCarryForwardPreviewSecurity:
             )
             assert resp.status_code == 404
 
-    def test_returns_404_for_missing_period(
-        self, app, auth_client, db, seed_user, seed_periods_today,
-    ):
+    @pytest.mark.usefixtures("db", "seed_user", "seed_periods_today")
+    def test_returns_404_for_missing_period(self, app, auth_client):
         """Unknown period_id -> 404."""
         with app.app_context():
             resp = auth_client.get(
@@ -408,9 +413,8 @@ class TestCarryForwardPreviewSecurity:
             )
             assert resp.status_code == 404
 
-    def test_companion_blocked(
-        self, app, db, seed_user, seed_periods_today, seed_companion,
-    ):
+    @pytest.mark.usefixtures("db", "seed_user", "seed_companion")
+    def test_companion_blocked(self, app, seed_periods_today):
         """Companion gets 404 from @require_owner.
 
         The preview endpoint is not relevant to companions and
@@ -461,7 +465,7 @@ class TestCarryForwardPreviewConfiguration:
             assert b"baseline scenario" in resp.data.lower()
 
     def test_returns_400_when_no_current_period(
-        self, app, db, seed_user, monkeypatch, auth_client, seed_periods_today,
+        self, app, db, seed_user, auth_client, seed_periods_today,
     ):
         """No current period -> 400 (matches POST route's check).
 

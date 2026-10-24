@@ -6,6 +6,8 @@ transfer's sides.
 from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
+
 from app.extensions import db
 from app.enums import StatusEnum
 from app.services.pay_calendar import calendar_for
@@ -14,7 +16,6 @@ from tests._test_helpers import (
     add_txn,
     create_account_of_type,
     create_settled_transfer,
-    settle_day_columns,
 )
 from scripts.integrity_check import check_balance_anomalies
 
@@ -25,7 +26,8 @@ from scripts.integrity_check import check_balance_anomalies
 class TestBalanceAnomalies:
     """Tests for BA-* balance anomaly checks."""
 
-    def test_clean_database_no_anomalies(self, app, db, seed_user, seed_periods):
+    @pytest.mark.usefixtures("seed_user", "seed_periods")
+    def test_clean_database_no_anomalies(self, db):
         """No balance anomalies on a properly seeded database."""
         results = check_balance_anomalies(db.session)
         # 3: BA-02 ("anchor period beyond the user's last period") went with
@@ -42,9 +44,8 @@ class TestBalanceAnomalies:
         ba01 = next(r for r in results if r.check_id == "BA-01")
         assert ba01.passed
 
-    def test_ba01_detects_account_with_no_assertion(
-        self, app, db, seed_user, seed_periods,
-    ):
+    @pytest.mark.usefixtures("seed_periods")
+    def test_ba01_detects_account_with_no_assertion(self, db, seed_user):
         """BA-01 detects an account carrying no balance assertion at all.
 
         **The check was RE-POINTED at plan step X-f1c3c and became
@@ -86,9 +87,8 @@ class TestBalanceAnomalies:
             "page; it must fail the sweep, not warn"
         )
 
-    def test_the_other_balance_checks_stay_warnings(
-        self, app, db, seed_user, seed_periods,
-    ):
+    @pytest.mark.usefixtures("seed_user", "seed_periods")
+    def test_the_other_balance_checks_stay_warnings(self, db):
         """BA-05 and BA-06 are warnings; only BA-01 escalated.
 
         The complement of the assertion above, so "severity is per check"
@@ -117,7 +117,7 @@ class TestBalanceAnomalies:
         )
 
     def test_ba06_detects_a_settle_day_no_paycheck_covers(
-        self, app, db, seed_user, seed_periods,
+        self, db, seed_user, seed_periods,
     ):
         """BA-06 fires on the state C3-b's deleted coverage rule used to refuse.
 
@@ -169,8 +169,8 @@ class TestBalanceAnomalies:
     # and making it ``- (cadence_days - 1)`` -- the last of which would report
     # every settled row in the owner's final paycheck, on every backup sweep.
 
-    def test_ba06_accepts_the_HORIZON_day_itself(
-        self, app, db, seed_user, seed_periods,
+    def test_ba06_accepts_the_horizon_day_itself(
+        self, db, seed_user, seed_periods,
     ):
         """The last day the schedule covers is COVERED.
 
@@ -183,8 +183,8 @@ class TestBalanceAnomalies:
 
         assert self._ba06(db.session).passed, self._ba06(db.session).details
 
-    def test_ba06_detects_the_day_AFTER_the_horizon(
-        self, app, db, seed_user, seed_periods,
+    def test_ba06_detects_the_day_after_the_horizon(
+        self, db, seed_user, seed_periods,
     ):
         """One day past the last covered day is outside every paycheck.
 
@@ -203,8 +203,8 @@ class TestBalanceAnomalies:
         assert ba06.details[0]["settled_on"] == beyond
         assert ba06.details[0]["last_day"] == horizon
 
-    def test_ba06_accepts_the_FIRST_PAYDAY_itself(
-        self, app, db, seed_user, seed_periods,
+    def test_ba06_accepts_the_first_payday_itself(
+        self, db, seed_user, seed_periods,
     ):
         """A period covers its own opening day, so the first payday is inside."""
         first, _horizon = self._schedule_bounds(seed_user["user"].id)
@@ -212,8 +212,8 @@ class TestBalanceAnomalies:
 
         assert self._ba06(db.session).passed, self._ba06(db.session).details
 
-    def test_ba06_detects_the_day_BEFORE_the_first_payday(
-        self, app, db, seed_user, seed_periods,
+    def test_ba06_detects_the_day_before_the_first_payday(
+        self, db, seed_user, seed_periods,
     ):
         """The OPENING arm, which had no case at all until plan step C4-c.
 
@@ -235,8 +235,8 @@ class TestBalanceAnomalies:
         assert ba06.details[0]["settled_on"] == before
         assert ba06.details[0]["first_day"] == first
 
-    def test_ba06_ignores_a_row_merely_outside_its_OWN_paycheck(
-        self, app, db, seed_user, seed_periods,
+    def test_ba06_ignores_a_row_merely_outside_its_own_paycheck(
+        self, db, seed_user, seed_periods,
     ):
         """The control, and it is the whole reason this check is narrow.
 
@@ -259,8 +259,8 @@ class TestBalanceAnomalies:
         ba06 = next(r for r in results if r.check_id == "BA-06")
         assert ba06.passed, ba06.details
 
-    def test_ba06_grades_a_settled_transfer_by_its_LEGS(
-        self, app, db, seed_user, seed_periods,
+    def test_ba06_grades_a_settled_transfer_by_its_legs(
+        self, db, seed_user, seed_periods,
     ):
         """One row per leg, naming the transfer, dated by the leg's MOVEMENT.
 
@@ -268,16 +268,17 @@ class TestBalanceAnomalies:
         DC-11's leg arm had until plan step ``balance:X-bi-6-4d-3`` deleted
         it.  A transfer settled one day past the horizon is
         two legs outside every paycheck -- reported once each under the
-        transfer and that leg's account, and not again as its two shadow
-        rows.  Then the shadows' own day is moved inside the schedule while
-        their movements keep theirs: still reported, because the money is the
-        movement (ruling **R-BAL80**).  A transfer hidden around the service
-        is not reported.  Hidden shadows are no longer read at all (plan step
-        ``balance:X-bi-6-4d-2``: each side's record hangs off the transfer,
-        ruling **R-BAL88**), so hiding them leaves both legs reported -- the
-        twin plant kept, asserting nothing reads it (ruling **R-BAL167**
-        class 3); until that step the join reached a record through a live
-        shadow, and hiding the shadows reported nothing.
+        transfer and that leg's account, on the day that side's movement
+        carries, because the money is the movement (ruling **R-BAL80**).  A
+        transfer hidden around the service is not reported.
+
+        It also moved its two shadow rows' own day inside the schedule, and
+        then hid the two, asserting both legs were still reported each time,
+        until plan step ``balance:X-bi-6-4d-2``: a transfer is one row and no
+        row may name one (``ck_transactions_names_no_transfer``, ruling
+        **R-BAL258**), so each plant updated no row and nothing replaces
+        them -- a transfer carries no settle day of its own to move, and has
+        no twin to hide.
         """
         _first, horizon = self._schedule_bounds(seed_user["user"].id)
         beyond = horizon + timedelta(days=1)
@@ -306,18 +307,8 @@ class TestBalanceAnomalies:
 
         assert reported() == expected
 
-        # The twins hold no day since plan step balance:X-bi-6-4d-2 (the arm
-        # dates the side records), so the plant states the pair the day/basis
-        # CHECK welds; what it asserts is unchanged.
-        db.session.execute(db.text(
-            "UPDATE budget.transactions SET settled_on = :settled_on, "
-            "settled_day_basis_id = :settled_day_basis_id "
-            "WHERE transfer_id = :id"
-        ), {**settle_day_columns(horizon), "id": transfer.id})
-        assert reported() == expected
-
-        # The TRANSFER's own soft delete ends it, even with its shadows live
-        # (a drift no door writes: a soft delete flags all three rows).
+        # The TRANSFER's own soft delete ends it: the leg arm asks the
+        # transfer's ``is_deleted``.
         db.session.execute(db.text(
             "UPDATE budget.transfers SET is_deleted = :gone WHERE id = :id"
         ), {"gone": True, "id": transfer.id})
@@ -325,10 +316,4 @@ class TestBalanceAnomalies:
         db.session.execute(db.text(
             "UPDATE budget.transfers SET is_deleted = :gone WHERE id = :id"
         ), {"gone": False, "id": transfer.id})
-        assert reported() == expected
-
-        db.session.execute(db.text(
-            "UPDATE budget.transactions SET is_deleted = TRUE "
-            "WHERE transfer_id = :id"
-        ), {"id": transfer.id})
         assert reported() == expected

@@ -2,7 +2,9 @@
 
 Regenerate = truncate the not-yet-started, unlocked tail, then generate a
 fresh schedule from a corrected start/cadence.  It composes truncate (so it
-inherits the hard-lock and discard gates) with generate + a cadence upsert.
+inherits the hard-lock and discard gates) with generate, whose writer
+(``record_paydays``) mints a pay era when the batch records a payday on a
+rhythm the covering era does not hold.
 
 **It does NOT repopulate; the ROUTE does, and that is ruling R-R38** (plan
 step R7d-c-1).  The door records the rebuilt tail EMPTY and returns, because
@@ -10,16 +12,17 @@ the read pass the recurrence resolves in may only be opened above the service
 layer and only after the periods exist.  A case here that asserts recurring
 ROWS therefore runs ``_regenerate_and_populate``, which is what the route
 runs; a case about the door's own contract calls the door alone.  ``POST
-/pay-periods/regenerate`` is graded in
-``tests/test_routes/test_pay_period_admin.py``.
+/pay-periods/regenerate`` is graded in the
+``tests/test_routes/test_pay_period_admin/`` package.
 
 ``today`` is pinned with ``freeze_today`` so the past / current / future
 split is deterministic regardless of when the suite runs.  All four
 disciplines apply: structural invariants (Discipline 1), hand-computed
 as-of balances across the retained and rebuilt windows (Discipline 2),
 the production integrity checker (Discipline 3), and adversarial refusal
-tests (Discipline 4).  See
-``docs/plans/implementation_plan_pay_period_crud.md``.
+tests (Discipline 4).  The four disciplines are named in
+``docs/plans/historical/implementation_plan_pay_period_crud.md``, a
+historical record that governs nothing.
 """
 from __future__ import annotations
 
@@ -181,7 +184,7 @@ class TestRegenerateHappyPath:
     def test_rebuilds_tail_keeps_current_and_historical(
         self, app, db, seed_user,
     ):
-        """Indices 0..4 (anchor, past, current) stay; 5.. are rebuilt."""
+        """Indices 0..4 (bootstrap, past, current) stay; 5.. are rebuilt."""
         with app.app_context():
             periods = _spanning_periods(db.session, seed_user, count=8)
             user_id = seed_user["user"].id
@@ -317,7 +320,10 @@ class TestRegenerateHappyPath:
 
 
 class TestRegenerateWhenTheWholeScheduleIsRebuildable:
-    """The boundary cases at both ends of ``_regenerate_keep_through_period``.
+    """The boundary cases at both ends of the keep-through computation.
+
+    ``pay_period_gates.regenerate_keep_through_period`` decides where the
+    rebuildable tail opens.
 
     **Both were unreachable in this suite until plan step C3-a**, and an
     adversarial review is what found that.  Every other test here uses
@@ -326,7 +332,7 @@ class TestRegenerateWhenTheWholeScheduleIsRebuildable:
     locked, and never the rebuildable boundary.  The "keep NONE of them" arm
     therefore had no test at all, on the single most destructive branch in the
     module: it deletes every pay period the owner has, cascading their
-    transactions, their transfers with both shadows, and their journal entries.
+    transactions, their transfers and their journal entries.
 
     ``bare_user`` has no bootstrap period, so a schedule built entirely on one
     side of today reaches each arm.
@@ -337,12 +343,12 @@ class TestRegenerateWhenTheWholeScheduleIsRebuildable:
     ):
         """Every period is unlocked and future, so regenerate replaces them all.
 
-        ``_regenerate_keep_through_period`` answers ``None`` here -- the
-        rebuildable tail starts at the very first period -- and
-        ``_delete_periods_after`` reads that as "delete every one".  The empty
-        state is transient inside the one transaction: the fresh schedule is
-        generated before this call returns, so no committed state is ever
-        period-less.
+        ``pay_period_gates.regenerate_keep_through_period`` answers ``None``
+        here -- the rebuildable tail starts at the very first period -- and
+        ``pay_period_gates.gate_deletable_tail`` reads that as "delete every
+        one".  The empty state is transient inside the one transaction: the
+        fresh schedule is generated before this call returns, so no committed
+        state is ever period-less.
         """
         user_id = bare_user["user"].id
         with app.app_context():
@@ -376,9 +382,10 @@ class TestRegenerateWhenTheWholeScheduleIsRebuildable:
         """No period is rebuildable, so the truncate is a no-op and it appends.
 
         The other arm: the loop finds no not-yet-started unlocked period and
-        falls through to the LAST one, which ``_delete_periods_after`` then
-        selects nothing after.  The docstring has always claimed this
-        "degrades to an append from ``new_start_date``"; nothing asserted it.
+        falls through to the LAST one, which
+        ``pay_period_gates.gate_deletable_tail`` then selects nothing after.
+        The docstring has always claimed this "degrades to an append from
+        ``new_start_date``"; nothing asserted it.
 
         **The append is bounded like every batch** (plan step
         ``pay_calendar:C17-c-2a``, ruling R-PC67): this case used to restart
@@ -471,26 +478,31 @@ class TestRegenerateRefusals:
     ):
         """A new_start below the forward-only floor is rejected, atomically.
 
-        The truncate runs before the writer validates the start, so the
-        route's rollback (simulated here) must restore the deleted tail --
-        nothing partial survives.
+        This said the truncate ran before the writer validated the start and
+        that the route's rollback restored the deleted tail; neither is true.
+        ``record_paydays`` asks the floor
+        (``pay_period_batch.reject_backward_payday``) before it issues a
+        statement, so a refused rebuild deletes nothing and the rollback
+        (simulated here, as the route's) has nothing of the door's to undo.
+        What the case grades holds either way: the period count is unchanged.
 
         **The refused date moved in at plan step C3-b.**  It was five days
         into the retained current period, which the OLD guard refused because
-        it bounded on the retained ``end_date``; the floor is now the retained
-        PAYDAY plus two, so that date is accepted and correctly shortens the
-        retained period (the "correct my cadence going forward" case the
-        implementation plan's section 6 names).  One day in is still below the
-        floor, so it still refuses -- and the atomicity this test is about is
-        unchanged.
+        it bounded on the retained ``end_date``; C3-b's floor was the retained
+        PAYDAY plus two, which accepted that date and shortened the retained
+        period (the "correct my cadence going forward" case the
+        implementation plan's section 6 names).  The floor is now the day the
+        owner's NEXT paycheck opens, so every day inside the retained paycheck
+        is refused, five days in among them; one day in refuses under both
+        floors.
         """
         with app.app_context():
             periods = _spanning_periods(db.session, seed_user, count=8)
             user_id = seed_user["user"].id
             before = _count_periods(db.session, user_id)
-            # One day after the retained current period's PAYDAY: below the
-            # floor of payday + MIN_MATERIALISABLE_CADENCE_DAYS, so it would
-            # leave that period deriving an end equal to its own start.
+            # One day after the retained current period's PAYDAY: inside the
+            # paycheck the owner already has, so below the floor, the day the
+            # next one opens.
             bad_start = periods[3].start_date + timedelta(days=1)
 
             with pytest.raises(ValidationError):
@@ -689,7 +701,12 @@ class TestABatchMayNotSkipAPaycheckOfThePlan:
             _spanning_periods(db.session, seed_user, count=8)
             user_id = seed_user["user"].id
 
-            with pytest.raises(TypeError):
+            with pytest.raises(
+                TypeError, match="unexpected keyword argument 'confirms'",
+            ):
+                # Pylint: ``unexpected-keyword-arg`` -- the call passes a gap
+                # answer the door does not take; its TypeError is this case's
+                # subject.
                 pay_period_admin.regenerate_pay_periods(  # pylint: disable=unexpected-keyword-arg
                     user_id, new_start_date=date(2026, 7, 10), num_periods=3,
                     rhythm=rhythm_of(14), confirms=object(),
@@ -704,19 +721,22 @@ class TestABatchMayNotSkipAPaycheckOfThePlan:
     def test_a_re_phase_of_a_few_days_is_NEVER_refused(
         self, app, db, seed_user,
     ):
-        """The window is exactly one paycheck wide.
+        """The window is exactly one paycheck wide, and its floor day is accepted.
 
         The floor is the first projected payday past the last kept one and
-        the ceiling is the SECOND, so correcting a phase by a day or two --
-        the thing this door exists for -- raises nothing.  Without this case
-        the ceiling could be tightened to any tolerance and stay green.
+        the ceiling is the SECOND.  This case opens ON the floor, so it pins
+        that the floor is not tightened past it: a correction later inside the
+        window is accepted, and an earlier one is refused, as every day inside
+        the retained paycheck is
+        (``test_overlapping_new_start_rejected_and_rolls_back``).  The
+        ceiling's own pin is
+        ``test_the_day_before_the_second_planned_payday_is_the_last_allowed``.
         """
         with app.app_context():
             _spanning_periods(db.session, seed_user, count=8)
             user_id = seed_user["user"].id
 
-            # The tail reopens exactly where it stood, which is the ordinary
-            # correction this door exists for.
+            # The tail reopens exactly where it stood: the floor day itself.
             pay_period_admin.regenerate_pay_periods(
                 user_id, new_start_date=date(2026, 6, 26), num_periods=3,
                 rhythm=rhythm_of(14),

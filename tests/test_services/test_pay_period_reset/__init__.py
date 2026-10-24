@@ -25,17 +25,20 @@ every read either re-sync makes of ``budget.transactions`` or
 ``budget.transfers`` is keyed on a set of ids taken from the POSTED ledger, and
 a freshly generated row is ``Projected`` and posts nothing.  A case here that
 asserts recurring ROWS runs ``_reset_and_populate``; ``POST
-/pay-periods/reset`` is graded in
-``tests/test_routes/test_pay_period_admin.py``.
+/pay-periods/reset`` is graded in the
+``tests/test_routes/test_pay_period_admin/`` package.
 
 All four disciplines apply, and carry extra weight here because the
-failure mode is silent balance corruption: structural invariants after
-every mutation (Discipline 1), hand-computed as-of balances with the
-anchor balance PRESERVED across the wipe-and-rebuild (Discipline 2), the
-production integrity checker (Discipline 3), and the adversarial set --
-settled refusal with the DB unchanged, the deferred-FK commit path, a
-brand-new not-yet-anchored user, recurrence re-pointing, and multi-account
-re-anchoring (Discipline 4).  ``today`` is pinned with ``freeze_today`` so
-the anchor resolution is deterministic.  See
-``docs/plans/implementation_plan_pay_period_crud.md``.
+failure mode is silent balance corruption: the structural invariant
+checker, which most cases run after the reset (Discipline 1), hand-computed
+as-of balances with the anchor balance PRESERVED across the
+wipe-and-rebuild (Discipline 2), the production integrity checker
+(Discipline 3), and the adversarial set -- settled refusal with the DB
+unchanged, a brand-new not-yet-anchored user, a rule's stated start and an
+every-N rule's phase surviving the wipe with nothing re-pointed, and every
+account's asserted balance surviving it with nothing re-anchored
+(Discipline 4).  ``today`` is pinned with ``freeze_today`` so the anchor
+resolution is deterministic.  The four disciplines are named in
+``docs/plans/historical/implementation_plan_pay_period_crud.md``, a
+historical record that governs nothing.
 """

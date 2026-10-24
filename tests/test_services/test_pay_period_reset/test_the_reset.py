@@ -1,6 +1,6 @@
 """The bounded reset: it wipes every period and rebuilds the schedule with every balance and rule's
-start intact, and it refuses a settled row, changing nothing, or an invalid cadence, rolling the
-wipe back.
+start intact, and it refuses a settled row or an invalid cadence before it deletes anything,
+changing nothing.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer import Transfer
 from app.services import (
+    cash_ledger,
     match_withdrawal,
     movement_removal,
     pay_period_admin,
@@ -45,7 +46,6 @@ from tests._test_helpers import (
     seam_cash_balance_at,
 )
 from tests.oracles.recurrence_baseline import EVERY_N_PERIODS
-from app.services import cash_ledger
 
 from ._helpers import _NEW_START, _seed_old_schedule, _reset_and_populate
 
@@ -83,7 +83,7 @@ def _make_every_n_template(db_session, seed_user, start_period, interval_n=2):
     db_session.add(template)
     db_session.flush()
     # The definition first, then the cadence onto it (plan step R-F6).
-    rule = make_cadence_rule(
+    make_cadence_rule(
         template,
         EVERY_N_PERIODS,
         starts_on=start_period.start_date,
@@ -93,7 +93,7 @@ def _make_every_n_template(db_session, seed_user, start_period, interval_n=2):
 
 
 class TestResetHappyPath:
-    """Reset wipes everything (incl. the anchor period) and rebuilds."""
+    """Reset wipes every period and rebuilds the schedule."""
 
     def test_wipes_all_and_the_balance_survives(self, app, db, seed_user):
         """Every old period is deleted and the asserted balance is untouched.
@@ -257,9 +257,11 @@ class TestResetHappyPath:
     def test_balance_preserved_and_correct_after_reset(self, app, db, seed_user):
         """Disciplines 2 + 3: anchor balance preserved, balances recompute.
 
-        Anchor $1000 at the new index 0 (the period containing today); a
-        $1200 every-period expense repopulates all six new periods,
-        including the anchor period itself.  A balance read at the CLOSE of a
+        The Checking's $1000 assertion is dated 2024-01-05 (the seed's
+        bootstrap day), before the rebuilt schedule, and the reset keeps it
+        row for row, so the new index 0 (the period containing today) opens
+        at $1000; a $1200 every-period expense repopulates all six new
+        periods, index 0 included.  A balance read at the CLOSE of a
         period counts that period's own net, so the end balance at the close of
         index ``n`` is ``1000 - (n + 1) * 1200``.
         """
@@ -277,7 +279,7 @@ class TestResetHappyPath:
             )
             db.session.commit()
 
-            # End of the anchor period (index 0): 1000 - 1*1200.
+            # End of index 0: 1000 - 1*1200.
             assert seam_cash_balance_at(
                 account, scen, last_covered_day(new_periods[0]),
             ) == Decimal("-200.00")
@@ -434,11 +436,14 @@ class TestResetHappyPath:
             assert_pay_period_invariants(db.session, user_id)
 
     def test_multiple_accounts_all_reanchored(self, app, db, seed_user):
-        """Every account re-anchors with its own balance preserved.
+        """Every account keeps its own asserted balance through the reset.
 
-        With two accounts, BOTH dangle after the wipe; the deferred FK is
-        what lets reset re-point them both before the single commit
-        validates.  Each keeps its distinct balance.
+        It used to prove that the deferred FK let the reset re-point BOTH
+        accounts' dangling anchors before the single commit validated.
+        Rulings R-EH and R-EO deleted the account's anchor column and the
+        assertion's pay period, so nothing dangles and nothing re-anchors.
+        What stays is what the re-point protected: each of two accounts keeps
+        its own, distinct balance.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -449,7 +454,7 @@ class TestResetHappyPath:
             )
             db.session.commit()
 
-            new_periods = pay_period_admin.reset_pay_periods(
+            pay_period_admin.reset_pay_periods(
                 user_id, new_start_date=_NEW_START, num_periods=4,
                 rhythm=rhythm_of(14),
             )
@@ -513,9 +518,9 @@ class TestResetRefusals:
     ):
         """ANY settled transaction refuses the reset; the DB is unchanged.
 
-        The gate runs before the lock, the FK deferral, and any delete, so
-        a refused reset leaves the schedule, the settled row, and the
-        anchor byte-for-byte intact -- never a partial wipe.
+        The gate runs before any delete, under the owner's write lock that
+        the one caller took before the door ran, so a refused reset leaves the
+        schedule and the settled row intact -- never a partial wipe.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -528,7 +533,6 @@ class TestResetRefusals:
             db.session.commit()
 
             before_ids = {p.id for p in periods}
-            account = seed_user["account"]
 
             with pytest.raises(PayPeriodResetBlocked) as exc_info:
                 pay_period_admin.reset_pay_periods(
@@ -541,7 +545,6 @@ class TestResetRefusals:
             after_ids = {p.id for p in all_periods(user_id)}
             assert after_ids == before_ids  # nothing deleted
             assert db.session.get(Transaction, settled.id) is not None
-            account = db.session.get(Account, account.id)
             assert_pay_period_invariants(db.session, user_id)
 
     def test_soft_deleted_settled_does_not_block(self, app, db, seed_user):
@@ -581,27 +584,29 @@ class TestResetRefusals:
             assert_pay_period_invariants(db.session, user_id)
 
     def test_invalid_cadence_rolls_back_partial_wipe(self, app, db, seed_user):
-        """An invalid cadence raises after the wipe; rollback restores all.
+        """An invalid cadence refuses the reset; the schedule is unchanged.
 
-        The wipe runs before generate validates the cadence, so the
-        route's rollback (simulated here) must restore the deleted
-        schedule and the account's original anchor -- nothing partial
-        survives the failure.
+        This said the wipe ran before the cadence was validated and that the
+        route's rollback restored the deleted schedule; neither is true.
+        ``record_paydays`` asks every precondition, the cadence bound
+        (``pay_schedule_service.reject_out_of_range_cadence``) among them,
+        before it issues a statement, so a refused batch deletes nothing and
+        the rollback (simulated here, as the route's) has nothing of the
+        door's to undo.  What the case grades holds either way: every old
+        period survives.
         """
         with app.app_context():
             user_id = seed_user["user"].id
             _seed_old_schedule(db.session, seed_user)
             before_ids = {p.id for p in all_periods(user_id)}
-            account = seed_user["account"]
 
             with pytest.raises(ValidationError):
                 pay_period_admin.reset_pay_periods(
                     user_id, new_start_date=_NEW_START, num_periods=4,
-                    rhythm=rhythm_of(0),  # generate_pay_periods rejects < 1
+                    rhythm=rhythm_of(0),  # the cadence bound rejects < 1
                 )
             db.session.rollback()
 
             after_ids = {p.id for p in all_periods(user_id)}
             assert after_ids == before_ids
-            account = db.session.get(Account, account.id)
             assert_pay_period_invariants(db.session, user_id)

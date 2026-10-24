@@ -5,9 +5,13 @@ stored.
 
 from decimal import Decimal
 
+import pytest
+
+from app.models.category import Category
 from app.models.ref import TransactionType
 from app.models.savings_goal import SavingsGoal
 from app.models.transaction_template import TransactionTemplate
+from app.services import transfer_service
 from tests._test_helpers import create_account_of_type, create_transfer, make_transfer_template
 from scripts.integrity_check import CheckResult, check_orphaned_records
 
@@ -18,7 +22,8 @@ from scripts.integrity_check import CheckResult, check_orphaned_records
 class TestOrphanDetection:
     """Tests for OR-* orphan detection checks."""
 
-    def test_clean_database_no_orphans(self, app, db, seed_user, seed_periods):
+    @pytest.mark.usefixtures("seed_user", "seed_periods")
+    def test_clean_database_no_orphans(self, db):
         """No orphans detected on a properly seeded database.
 
         Note: OR-03 (unused categories) and OR-04 (empty pay periods) will
@@ -35,7 +40,7 @@ class TestOrphanDetection:
         # All should return CheckResult objects regardless of pass/fail.
         assert all(isinstance(r, CheckResult) for r in results)
 
-    def test_or02_is_retired_because_its_state_is_inexpressible(self, app, db):
+    def test_or02_is_retired_because_its_state_is_inexpressible(self, db):
         """OR-02 is GONE, and the schema is what replaced it (plan step R-F6).
 
         It scanned for recurrence rules no template referenced -- finding
@@ -57,7 +62,8 @@ class TestOrphanDetection:
             "ck_recurrence_rules_one_owner, so a check for it can only pass"
         )
 
-    def test_or03_detects_unused_category(self, app, db, seed_user):
+    @pytest.mark.usefixtures("seed_user")
+    def test_or03_detects_unused_category(self, db):
         """OR-03 detects a category not used by any template or transaction."""
         # The seed_user fixture creates categories that are unused by default.
         results = check_orphaned_records(db.session)
@@ -69,21 +75,24 @@ class TestOrphanDetection:
         assert or03.detail_count == 5
 
     def test_or03_counts_a_transfer_and_a_transfer_definition_as_use(
-        self, app, db, seed_user, seed_periods,
+        self, db, seed_user, seed_periods,
     ):
         """A category a transfer or a recurring transfer names is not unused.
 
         Plan step ``balance:X-bi-6-4c-4`` (ruling **R-BAL160**, the report's
         twin of finding **BAL-545**).  One category is named only by a
         transfer DEFINITION that generated nothing; the other only by a
-        transfer whose shadows were re-categorised around the service -- the
-        state a shadowless transfer presents.  Neither is listed; a category
-        nothing names still is.
-        """
-        # pylint: disable=import-outside-toplevel  -- the module convention.
-        from app.models.category import Category
-        from app.services import transfer_service
+        transfer, moved onto it through the service.  Neither is listed; a
+        category nothing names still is.
 
+        It also re-categorised the transfer's shadow rows to no category
+        around the service, so that only the transfer's own row named the
+        category -- the state a shadowless transfer presents -- until plan
+        step ``balance:X-bi-6-4d-2``: a transfer is one row and no row may
+        name one (``ck_transactions_names_no_transfer``, ruling
+        **R-BAL258**), so that state is every transfer's and the statement
+        updated no row.
+        """
         def fresh(name):
             category = Category(
                 user_id=seed_user["user"].id, group_name="Temp", item_name=name,
@@ -109,10 +118,6 @@ class TestOrphanDetection:
         transfer_service.update_transfer(
             transfer.id, seed_user["user"].id, category_id=by_transfer.id,
         )
-        db.session.execute(db.text(
-            "UPDATE budget.transactions SET category_id = NULL "
-            "WHERE transfer_id = :id"
-        ), {"id": transfer.id})
         db.session.commit()
 
         or03 = next(
@@ -123,7 +128,7 @@ class TestOrphanDetection:
         assert by_definition.id not in listed
         assert by_transfer.id not in listed
 
-    def test_or01_detects_orphaned_template(self, app, db, seed_user):
+    def test_or01_detects_orphaned_template(self, db, seed_user):
         """OR-01: Template with no recurrence rule and no transactions."""
         txn_type = db.session.query(TransactionType).filter_by(name="Expense").one()
         category = list(seed_user["categories"].values())[0]
@@ -149,7 +154,7 @@ class TestOrphanDetection:
         assert or01.detail_count == 1
         assert or01.details[0]["name"] == "Orphaned Template"
 
-    def test_or06_detects_goal_on_inactive_account(self, app, db, seed_user):
+    def test_or06_detects_goal_on_inactive_account(self, db, seed_user):
         """OR-06 flags a savings goal on an inactive account."""
         account = seed_user["account"]
         account.is_active = False

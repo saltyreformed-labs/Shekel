@@ -2,12 +2,17 @@
 
 Rulings **R-BAL125** and **R-BAL157** (developer 2026-09-23, 2026-09-30):
 every door that asks "does this transfer hold a payment or purchase" asks it
-ONCE, of the transfer, through ``transfer_legs.transfer_holds_a_movement`` --
-the pay-period lock, the reset gate, "Remove earlier paychecks" and the three
-archive or delete doors -- so plan step ``X-bi-6-4d``, which moves a
-transfer's movements off its shadow rows, has one place to move.  And the
-lock and the reset read a transfer's settled state off its OWN status, not its
-shadows'.  Ruling **R-BAL126**: the reset refusal counts a transfer ONCE.
+ONCE, of the transfer, through ``transfer_legs``' one join
+(``transfer_holds_a_movement``, or ``held_transfer_entries``, its rows) --
+the pay-period lock, the reset gate, "Remove earlier paychecks", the
+transfer archive and the recurring transfer's delete -- so plan step
+``X-bi-6-4d-2``, which moved a transfer's movements off its shadow rows onto
+the transfer, had one place to move.  The account's delete was a sixth until
+that step deleted its arm: the database refuses a hidden row or transfer
+that holds a payment (rulings **R-CC89**, **R-CC92**), so a transfer the
+account's cleanup removes holds none.  And the lock and the reset read a
+transfer's settled state off its OWN status, not its shadows'.  Ruling
+**R-BAL126**: the reset refusal counts a transfer ONCE.
 
 Each door is graded in the module that holds its own cases:
 ``test_cc5_4a4_history_doors`` (the recurring transfer's delete and archive)

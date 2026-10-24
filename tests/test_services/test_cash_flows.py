@@ -11,7 +11,7 @@ ONE row is worth; this grades which rows are counted at all, and on which leg.
 ``test_balance_calculator_entries.py`` (which then had nothing left to hold and
 deleted) and ``test_balance_resolver.py``.  They always tested THIS rule; they
 reached it through ``balance_at._calculator.calculate_balances``, a PRODUCER
-that deletes at plan step X-c2c4, so every assertion read
+plan step X-g4b deleted (carrying X-c2c4's content), so every assertion read
 ``anchor +/- the reduction`` and the anchor arithmetic was scenery.  **Every
 hand-computed figure is preserved verbatim** -- each test states the reduction
 it now asserts and the balance it used to assert, so the two forms can be
@@ -20,15 +20,21 @@ diffed against each other.
 Two questions this file does NOT answer, and their homes:
 
 * what one row is WORTH -- ``test_cash_amounts.py``;
-* which STARTING balance the reduction is added to, and whether the anchor
-  period and a post-anchor period both apply it -- that is
-  ``balance_at._calculator``'s roll-forward, graded in
-  ``test_balance_calculator.py`` until that module deletes.
+* which STARTING balance the reduction is added to, and how it rolls forward
+  period after period -- the cash fold's (``balance_at._cash_fold``), graded
+  in ``test_cash_fold.py`` (``TestTheOpeningEquityIsTheSeed``,
+  ``TestEveryAssertionIsReplayed``, ``TestTheDriftOracleWalksFiftyTwoPeriods``).
+  It was ``balance_at._calculator``'s roll-forward, graded in
+  ``test_balance_calculator.py``, until plan step X-g4b deleted both.
 
 The rule under test: only rows the shared ``is_projected`` predicate admits
 contribute; income counts at :func:`~app.services.cash_ledger.contribution_of`
 and expense at the entries-aware reservation, and the split follows the
-transaction TYPE.
+transaction TYPE.  A transfer's planned LEG takes a branch of its own: it is
+gated on its PARENT's status, worth the transfer's resolved amount
+(:func:`~app.services.cash_ledger.planned_leg_contribution`) and filed by its
+SIDE; a movement in flight is an item of its own too
+(``TestTheReductionIsAdditiveOverRows``).
 
 **The basis is a REQUIRED argument since plan step S1-c** (ruling R-DH (d)).
 ``sum_projected`` took one optional ``amount_overrides`` map defaulting to
@@ -46,10 +52,11 @@ in a basis one screen away.
 from datetime import date
 from decimal import Decimal
 
+from app import ref_cache
 from app.enums import StatusEnum
-from app.models.transaction import Transaction
-from app.services import transaction_service
+from app.services import status_seam, transaction_service
 from app.services.cash_ledger import in_flight_movements, sum_projected
+from app.services.transfer_legs import planned_transfer_legs
 from tests._test_helpers import (
     add_entry,
     add_txn,
@@ -83,47 +90,37 @@ def _unreconciled(*rows):
 
 
 def _set_status(txn, status_enum):
-    """Move *txn* to *status_enum*, resolving the id through ``ref_cache``.
+    """Move *txn* to *status_enum* through the status seam, as every door does.
 
     Written against the enum rather than a ``Status`` row queried by NAME,
     which is the project's reference-table rule: ids drive logic, name strings
     are display only.  The suites this moved from queried
-    ``Status.filter_by(name=...)`` directly.
+    ``Status.filter_by(name=...)`` directly, and this assigned ``status_id``
+    past the seam; :func:`~app.services.status_seam.apply_status_change`
+    reaches both statuses the cases below need.
     """
-    # pylint: disable=import-outside-toplevel  -- ref_cache needs an app
-    # context, which only exists inside each test.
-    from app import ref_cache
-
-    txn.status_id = ref_cache.status_id(status_enum)
+    status_seam.apply_status_change(txn, ref_cache.status_id(status_enum))
 
 
-def _envelope(db_session, seed_user, period, name, estimated, entries=()):
-    """Build a Projected envelope expense carrying *entries*.
+def _add_outstanding_purchases(db_session, seed_user, txn, entries):
+    """Add *entries* to the envelope *txn*, each a purchase no statement has seen.
 
     Args:
         db_session: The test ``db.session``.
         seed_user: The ``seed_user`` fixture dict.
-        period: The :class:`~app.models.pay_period.PayPeriod` to place it in.
-        name: The template / transaction name.
-        estimated: The envelope's budgeted amount, as a string.
+        txn: The envelope :class:`~app.models.transaction.Transaction`
+            (``create_envelope_txn``'s) the purchases are made against.
         entries: An iterable of ``(amount, is_credit)`` pairs.  Every purchase
             is left with a NULL ``settled_on`` -- not yet seen on a statement,
             and so OUTSTANDING -- which is the shape these reduction tests were
             written on: which BUCKET a purchase falls in is
             ``test_cash_amounts.py``'s subject, not this file's.
-
-    Returns:
-        The flushed :class:`~app.models.transaction.Transaction`.
     """
-    txn = create_envelope_txn(
-        seed_user, db_session, period, name, Decimal(estimated),
-    )
     for amount, is_credit in entries:
         add_entry(
             db_session, seed_user, txn, Decimal(amount), _PURCHASED_ON,
             is_credit=is_credit,
         )
-    return txn
 
 
 class TestOnlyProjectedRowsContribute:
@@ -161,10 +158,10 @@ class TestOnlyProjectedRowsContribute:
         (0.00, 0.00).  (Was: the balance stayed at the 5000.00 anchor.)
         """
         with app.app_context():
-            txn = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("450.00", False)],
+            txn = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
+            _add_outstanding_purchases(db.session, seed_user, txn, [("450.00", False)])
             # Through the real verb, which picks the entries branch itself and
             # records the ``purchases`` basis -- whose figure IS those entries
             # (plan step X-au-c3), so nothing is hand-written here.
@@ -181,10 +178,10 @@ class TestOnlyProjectedRowsContribute:
         Reduction: (0.00, 0.00).  (Was: the balance stayed at 5000.00.)
         """
         with app.app_context():
-            txn = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("200.00", False)],
+            txn = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
+            _add_outstanding_purchases(db.session, seed_user, txn, [("200.00", False)])
             _set_status(txn, StatusEnum.CANCELLED)
             db.session.commit()
 
@@ -200,10 +197,10 @@ class TestOnlyProjectedRowsContribute:
         (Was: the balance stayed at 5000.00.)
         """
         with app.app_context():
-            txn = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("300.00", True)],
+            txn = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
+            _add_outstanding_purchases(db.session, seed_user, txn, [("300.00", True)])
             _set_status(txn, StatusEnum.CREDIT)
             db.session.commit()
 
@@ -327,14 +324,16 @@ class TestTheReductionIsAdditiveOverRows:
         Reduction: (0.00, 480.00).  (Was: 5000 - 480 = 4520.)
         """
         with app.app_context():
-            groceries = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("200.00", False), ("100.00", True)],
+            groceries = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
-            gas = _envelope(
-                db.session, seed_user, seed_periods[1], "Gas", "80.00",
-                [("60.00", False)],
+            _add_outstanding_purchases(
+                db.session, seed_user, groceries, [("200.00", False), ("100.00", True)],
             )
+            gas = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Gas", Decimal("80.00"),
+            )
+            _add_outstanding_purchases(db.session, seed_user, gas, [("60.00", False)])
             db.session.commit()
 
             assert sum_projected(
@@ -355,9 +354,11 @@ class TestTheReductionIsAdditiveOverRows:
         (Was: 5000 + 2000 - 400 - 1200 = 5400.)
         """
         with app.app_context():
-            groceries = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("300.00", False), ("100.00", True)],
+            groceries = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
+            )
+            _add_outstanding_purchases(
+                db.session, seed_user, groceries, [("300.00", False), ("100.00", True)],
             )
             rent = add_txn(
                 db.session, seed_user, seed_periods[1], "Rent", "1200.00",
@@ -374,28 +375,30 @@ class TestTheReductionIsAdditiveOverRows:
                 _unreconciled(groceries, rent, paycheck),
             ) == (Decimal("2000.00"), Decimal("1600.00"))
 
-    def test_a_transfer_shadow_is_priced_like_any_other_row(
+    def test_a_transfers_leaving_leg_is_priced_like_any_other_row(
         self, app, db, seed_user, seed_periods,
     ):
-        """A transfer's expense shadow takes ``effective_amount``, not a rule.
+        """A transfer's leaving side is worth its amount, not a reservation rule.
 
-        The reduction reads no ``transfer_id``: a shadow carries no template
-        and no entries, so it is worth its amount and nothing about it is
-        special here.  Groceries: est=500, uncleared_debit=300, credit=0 ->
-        max(500 - 0 - 0, 300) = 500.  Shadow: 200.00.
+        The side is the transfer's from-side LEG, loaded as the plan loads it
+        (``planned_transfer_legs``).  The reduction prices a leg in its own
+        branch: gated on the parent transfer's status, worth the transfer's
+        resolved amount (``planned_leg_contribution``), and filed by its side,
+        here the expense leg.  Groceries: est=500, uncleared_debit=300, credit=0
+        -> max(500 - 0 - 0, 300) = 500.  Leg: 200.00.
         Reduction: (0.00, 700.00).  (Was: 5000 - 500 - 200 = 4300.)
 
-        The transfer is built through the service rather than by hand, so it
-        carries BOTH shadows (Transfer Invariant 1); the version this test
-        moved from constructed a single expense shadow, a state the invariant
-        forbids.  Only the leaving account's rows are reduced here, so the
+        It priced the transfer's expense SHADOW row until plan step
+        ``balance:X-bi-6-4d-2`` (ruling R-BAL167 class 1): a transfer is one
+        row and writes no shadow, and the plan holds its leaving side as a
+        leg.  Only the leaving account's items are reduced here, so the
         figure is unchanged.
         """
         with app.app_context():
-            groceries = _envelope(
-                db.session, seed_user, seed_periods[1], "Groceries", "500.00",
-                [("300.00", False)],
+            groceries = create_envelope_txn(
+                seed_user, db.session, seed_periods[1], "Groceries", Decimal("500.00"),
             )
+            _add_outstanding_purchases(db.session, seed_user, groceries, [("300.00", False)])
             savings = create_savings_account(
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
@@ -405,16 +408,12 @@ class TestTheReductionIsAdditiveOverRows:
                 period=seed_periods[1], amount=Decimal("200.00"),
             )
             db.session.commit()
-            shadow = (
-                db.session.query(Transaction)
-                .filter(
-                    Transaction.transfer_id == transfer.id,
-                    Transaction.account_id == seed_user["account"].id,
-                )
-                .one()
+            [leg] = planned_transfer_legs(
+                seed_user["account"].id, seed_user["scenario"].id, options=(),
             )
+            assert (leg.transfer.id, leg.is_income) == (transfer.id, False)
 
             assert sum_projected(
-                self._with_in_flight(seed_user, groceries, shadow),
-                _unreconciled(groceries, shadow),
+                self._with_in_flight(seed_user, groceries, leg),
+                _unreconciled(groceries, leg),
             ) == (_ZERO, Decimal("700.00"))

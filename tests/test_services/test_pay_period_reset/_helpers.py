@@ -9,12 +9,12 @@ from datetime import date
 from app.routes._period_population import populate_new_periods
 from app.services import pay_period_admin
 from tests._test_helpers import record_paydays_across_a_hole, rhythm_of
-from tests.oracles.recurrence_baseline import EVERY_PERIOD
 
 
 # Pinned "today".  The rebuilt schedules in this package's parts start
-# 2026-06-05 at a 14-day cadence, so index 0 (06-05..06-18) contains today and
-# becomes the resolved anchor period.
+# 2026-06-05 at a 14-day cadence, so index 0 (06-05..06-18) contains today,
+# the day an account's opening assertion is filed on when its setup names
+# none (``anchor_service.resolve_observation_day``).
 FROZEN_TODAY = date(2026, 6, 15)
 
 

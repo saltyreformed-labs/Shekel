@@ -5,7 +5,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 
 from app import ref_cache
 from app.enums import PostingKindEnum, PostingSourceEnum, StatusEnum
@@ -16,9 +15,6 @@ from app.services import posting_service
 from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.utils.dates import display_today
 from tests._test_helpers import (
-    a_twin_of,
-    assert_a_twin_is_refused,
-    constraint_name_from,
     create_settled_transfer,
     refused_by_database_rule,
 )
@@ -29,76 +25,26 @@ from ._helpers import (
     _transit_ledger_id,
     _covering_movement_of_side,
     _scenario_id,
-    _ledger_total,
 )
 
 
 class TestTransactionShadowFamily:
-    """A transfer's money posts through its own door; no shadow is left for the row door.
+    """A transfer movement's reconcile reads only its own source kind.
 
-    Through plan step ``balance:X-bi-6-4d-2``'s re-parenting a shadow's
-    family was empty -- each side's record hangs off the transfer -- so the
-    row door on a shadow posted nothing (ruling R-BAL167 class 3).  The same
-    step made a transfer one row (ruling **R-BAL258**), so the shadow the
-    door was handed cannot be stored, and its case asserts that refusal
-    (class 2).
+    The class's shadow case went at plan step ``balance:X-bi-6-4d-2``
+    (ruling **R-BAL388**): a transfer is one row there (ruling
+    **R-BAL258**), so the shadow the row door was handed, the income twin,
+    cannot be stored.  That refusal is graded by
+    ``test_the_declaration.py``'s
+    ``test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored`` and
+    four loan cases (``test_the_database_refuses_a_twin`` plants the expense
+    twin), and the teardown the case read is graded by
+    ``test_a_settled_transfer.py``'s ``TestSyncReversal``.
     """
 
-    def test_a_shadow_reconciles_its_movement_against_transit(
-        self, app, db, seed_user, savings,
-    ):
-        """No shadow can be stored for the row door: the transfer's teardown is its own.
-
-        Re-expressed from ``test_transfer_shadow_is_noop`` at plan step
-        ``balance:X-bi-6-3`` (ruling **R-BAL101**): the guard that returned
-        ``[]`` for a shadow went with ruling R-BAL45's interval, and the
-        shadow's family -- its covering movement -- re-posted its side
-        against transit, {Savings +100, transit -100}, from a ledger the
-        teardown had brought to zero.
-
-        **Re-expressed again at plan step ``balance:X-bi-6-4d-2``** (ruling
-        **R-BAL167** class 3, developer 2026-10-09: "Keep (1) and (2) as
-        guards that a copy row posts and reverses nothing"): each side's
-        record hung off the TRANSFER and the shadow held none, so the row
-        door on the income shadow reconciled an empty family and wrote
-        nothing, before the teardown and after it.
-
-        **Class 2 since the same step made a transfer one row** (ruling
-        **R-BAL258**): ``ck_transactions_names_no_transfer`` refuses the
-        income shadow the door was handed, so it is staged as
-        :func:`~tests._test_helpers.assert_a_twin_is_refused` builds it and
-        that refusal asserted.  The guard the 10-09 answer kept is that CHECK
-        now, pinned by ``test_a_transfer_is_one_row/test_the_upgrade.py``'s
-        ``test_the_database_refuses_a_twin``; no row door is reached here.  The
-        money read is the transfer's own teardown: Savings back on its
-        ``$100.00`` opening, transit at ``0.00`` and Checking on its
-        ``$1,000.00`` opening.  Those are also the figures of a settle that
-        posted nothing, so they grade only a teardown that leaves a side
-        posted.
-        """
-        with app.app_context():
-            checking = seed_user["account"]
-            transfer = create_settled_transfer(
-                seed_user, _db.session, checking, savings,
-                seed_user["bootstrap_period"], amount=Decimal("100.00"),
-            )
-            _db.session.commit()
-            # The row the door was handed, the income shadow, cannot be stored.
-            assert_a_twin_is_refused(_db.session, transfer, is_income=True)
-            savings_ledger = _ledger_id(savings)
-            transit_ledger = _transit_ledger_id(seed_user)
-
-            posting_service.reverse_transfer_postings_before_delete(transfer)
-            _db.session.commit()
-
-            assert _ledger_total(savings_ledger) == Decimal("100.00")  # opening
-            assert _ledger_total(transit_ledger) == Decimal("0.00")
-            assert posting_service.account_posting_total(
-                checking.id, _scenario_id(seed_user),
-            ) == Decimal("1000.00")  # opening
-
+    @pytest.mark.usefixtures("db")
     def test_a_movement_reconcile_reads_only_its_own_source_kind(
-        self, app, db, seed_user, savings,
+        self, app, seed_user, savings,
     ):
         """An entry linking the same movement under ANOTHER source is untouched.
 
@@ -173,16 +119,25 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
     Each case wrote a drift around the service and asked the pair's door.
     Since plan step ``balance:X-bi-6-4d-2`` the transfer drifts are refused
     at COMMIT and asked inside the save (ruling **R-BAL167** class 2), and a
-    transfer is one row (ruling **R-BAL258**), so the two shadow cases stage
-    a shadow the database refuses.  The period case, a shadow moved to
-    another period, went with the shadows (ruling **R-BAL380**); the period
-    read it kept is graded by ``test_the_oracle_and_attribution.py``'s
-    revert-and-move case.
+    transfer is one row (ruling **R-BAL258**), so the cases that staged a
+    shadow went with the shadows.  The period case, a shadow moved to
+    another period (ruling **R-BAL380**): the period read it kept is graded
+    by ``test_the_oracle_and_attribution.py``'s revert-and-move case.  The
+    row teardown on a shadow and the movement under a hidden one (ruling
+    **R-BAL388**): the refusal each staged is graded per shape, the income
+    twin by ``test_the_declaration.py``'s
+    ``test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored`` and
+    a hidden twin by ``test_c21_state_machine_integration.py``'s
+    ``test_a_hidden_twin_is_refused`` (ruling **R-BAL398**); the money each
+    read is the settle's, graded by ``test_a_settled_transfer.py``'s
+    ``TestSyncSettlePostsBalancedEntry``, and the re-sync at target by its
+    ``TestSyncIdempotency``.
     """
 
+    @pytest.mark.usefixtures("db")
     def test_a_transfer_deleted_around_the_service_holds_nothing(
-        self, app, db, seed_user, savings,
-    ):  # pylint: disable=unused-argument
+        self, app, seed_user, savings,
+    ):
         """A paid transfer hidden around the service is REFUSED at commit.
 
         ``$100.00`` Checking -> Savings settled; the TRANSFER row is flagged
@@ -228,120 +183,10 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
                 | (TransactionEntry.income_transfer_id == transfer.id),
             ).count() == 2
 
-    def test_a_row_teardown_on_a_shadow_reverses_its_side_under_the_leg(
-        self, app, db, seed_user, savings,
-    ):  # pylint: disable=unused-argument
-        """No shadow can be stored for the row teardown: the transfer's money stays counted once.
-
-        ``$100.00`` Checking -> Savings settled; ``reverse_postings_before_delete``
-        was handed the SAVINGS shadow.  Until plan step ``balance:X-bi-6-4d-2``
-        the shadow held the Savings side's movement, booked under the Savings
-        leg, so the reversal was written under the ``transfer_movement``
-        source: one entry, {Savings -100.00, transit +100.00}, Savings back
-        on its ``$100.00`` opening (the promise ``posting_service`` made at
-        plan step ``balance:X-bi-6-3``, "a transfer shadow reaching here is
-        reversed like any row").
-
-        **Re-expressed at that step** (ruling **R-BAL167** class 3, developer
-        2026-10-09: "Keep (1) and (2) as guards that a copy row posts and
-        reverses nothing"): each side's record hung off the TRANSFER and the
-        shadow held none, so the teardown on the shadow wrote no entry.
-
-        **Class 2 since the same step made a transfer one row** (ruling
-        **R-BAL258**): the Savings shadow the teardown was handed is refused
-        (:func:`~tests._test_helpers.assert_a_twin_is_refused`), the SAME
-        planted shape as the income shadow of
-        ``TestTransactionShadowFamily``'s case.  The guard the 10-09 answer
-        kept is that CHECK now; no row door is reached here.  The money read
-        is the settle's: both sides posted by the transfer's own records --
-        Savings ``200.00`` (``$100.00`` opening + ``100.00``), Checking
-        ``900.00`` -- which the settle's own cases grade too.
-        """
-        with app.app_context():
-            checking = seed_user["account"]
-            scenario_id = _scenario_id(seed_user)
-            transfer = create_settled_transfer(
-                seed_user, _db.session, checking, savings,
-                seed_user["bootstrap_period"], amount=Decimal("100.00"),
-                settled_on=display_today(),
-            )
-            _db.session.commit()
-            # The row the teardown was handed, the Savings shadow, cannot be
-            # stored.
-            assert_a_twin_is_refused(_db.session, transfer, is_income=True)
-
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
-            ) == Decimal("200.00")
-            assert posting_service.account_posting_total(
-                checking.id, scenario_id,
-            ) == Decimal("900.00")
-
-    def test_a_movement_under_a_dead_shadow_posts_nothing(
-        self, app, db, seed_user, savings,
-    ):  # pylint: disable=unused-argument
-        """No hidden shadow can be stored to hold a movement: the transfer's sides stay posted.
-
-        ``$100.00`` Checking -> Savings settled; the CHECKING shadow alone was
-        soft-deleted by SQL, the transfer left live and settled (Transfer
-        Invariant 4 drift).  Until plan step ``balance:X-bi-6-4d-2``: its
-        movement was no leg's record
-        (``movement_parent`` gives its leg none: the join's live-shadow test
-        over one loaded movement), so the pair's door reversed Checking's leg
-        -- Checking back on its ``$1,000.00`` opening -- and kept Savings'
-        (``$100.00`` opening + ``100.00`` = ``200.00``); the row door on the
-        dead shadow then found its family at target.  MUTATION (then): drop
-        ``purchase_posts``' record term and the dead shadow's movement was
-        booked under the LIVE transfer's leg and stayed posted (Checking
-        ``900.00``).
-
-        **Staged inside the save at plan step ``balance:X-bi-6-4d-2``**
-        (ruling **R-BAL167** class 2): a shadow held a movement only when it
-        was planted there -- both side records re-parented under their twins
-        in one statement -- and the deleted-row rule's row arm refused a twin
-        hidden holding one at COMMIT; inside the save the pair door wrote
-        nothing, because a transfer's family is its side records alone
-        (``transfer_legs.transfer_family_movements``).
-
-        **The hidden shadow itself is refused since the same step made a
-        transfer one row** (ruling **R-BAL258**): the Checking shadow is
-        staged as :func:`~tests._test_helpers.a_twin_of` builds it, hidden,
-        and ``ck_transactions_names_no_transfer`` refuses it at the write, so
-        no record can be re-parented under it.  A HIDDEN twin is staged in no
-        other case, so this refusal is the one shape of its own here.  The
-        case then reads the pair's door at target (``[]``) and Savings at
-        ``200.00``, which the pair door's and the settle's own cases grade
-        too.
-        """
-        with app.app_context():
-            checking = seed_user["account"]
-            scenario_id = _scenario_id(seed_user)
-            transfer = create_settled_transfer(
-                seed_user, _db.session, checking, savings,
-                seed_user["bootstrap_period"], amount=Decimal("100.00"),
-                settled_on=display_today(),
-            )
-            _db.session.commit()
-            dead_shadow = a_twin_of(transfer, is_income=False)
-            dead_shadow.is_deleted = True
-            _db.session.add(dead_shadow)
-            # The constraint IS the claim: a bare ``IntegrityError`` would be
-            # satisfied by a foreign key or a NOT NULL just as well.
-            with pytest.raises(IntegrityError) as caught:
-                _db.session.flush()
-            _db.session.rollback()
-            assert constraint_name_from(caught.value) == (
-                "ck_transactions_names_no_transfer"
-            ), f"the hidden shadow was refused by another rule: {caught.value}"
-
-            assert posting_service.sync_transfer_postings(transfer) == []
-            assert posting_service.account_posting_total(
-                savings.id, scenario_id,
-            ) == Decimal("200.00")
-
+    @pytest.mark.usefixtures("db")
     def test_the_oracle_counts_a_dated_leg_whatever_the_transfers_status(
-        self, app, db, seed_user, savings,
-    ):  # pylint: disable=unused-argument
+        self, app, seed_user, savings,
+    ):
         """The oracle states the writer's rule: a dated leg of a contributing transfer.
 
         ``$100.00`` Checking -> Savings settled; the TRANSFER's status alone

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from app import ref_cache
 from app.enums import PostingKindEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
@@ -40,8 +42,9 @@ class TestTransactionShadowFamily:
     ``test_a_settled_transfer.py``'s ``TestSyncReversal``.
     """
 
+    @pytest.mark.usefixtures("db")
     def test_a_movement_reconcile_reads_only_its_own_source_kind(
-        self, app, db, seed_user, savings,
+        self, app, seed_user, savings,
     ):
         """An entry linking the same movement under ANOTHER source is untouched.
 
@@ -131,9 +134,10 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
     ``TestSyncIdempotency``.
     """
 
+    @pytest.mark.usefixtures("db")
     def test_a_transfer_deleted_around_the_service_holds_nothing(
-        self, app, db, seed_user, savings,
-    ):  # pylint: disable=unused-argument
+        self, app, seed_user, savings,
+    ):
         """A paid transfer hidden around the service is REFUSED at commit.
 
         ``$100.00`` Checking -> Savings settled; the TRANSFER row is flagged
@@ -179,9 +183,10 @@ class TestTheWriterBooksATransferMovementUnderItsLeg:
                 | (TransactionEntry.income_transfer_id == transfer.id),
             ).count() == 2
 
+    @pytest.mark.usefixtures("db")
     def test_the_oracle_counts_a_dated_leg_whatever_the_transfers_status(
-        self, app, db, seed_user, savings,
-    ):  # pylint: disable=unused-argument
+        self, app, seed_user, savings,
+    ):
         """The oracle states the writer's rule: a dated leg of a contributing transfer.
 
         ``$100.00`` Checking -> Savings settled; the TRANSFER's status alone

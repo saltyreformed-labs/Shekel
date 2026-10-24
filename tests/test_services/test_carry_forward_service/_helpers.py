@@ -2,9 +2,11 @@
 ``tests/test_services/test_carry_forward_service.py``, moved verbatim by ``tools/split``.
 """
 
+from datetime import date
 from decimal import Decimal
 
 from app.extensions import db
+from app.models.amount_ownership import AmountOwnership
 from app.models.ref import Status, TransactionType
 from app.models.transaction_entry import TransactionEntry
 from app.services import transfer_service
@@ -21,58 +23,55 @@ from tests._test_helpers import (
     cover_bare_settled_row,
 )
 from tests.oracles.recurrence_baseline import ANNUAL
-from app.models.amount_ownership import AmountOwnership
 
 
-def _create_transaction(seed_user, seed_periods, period_index=0,
+def _create_transaction(seed_user, seed_periods, *,
                         status_name="Projected",
-                        is_deleted=False, name="Test Expense",
-                        amount="100.00", settled_amount=None):
-    """Create a ONE-OFF test transaction in the given period.
+                        name="Test Expense", amount="100.00"):
+    """Create a ONE-OFF test transaction in the first seed period.
 
     It took a ``template_id`` until plan step balance:X-cf-3; a row of a
     RECURRING definition is the engine's (:func:`generate_row_of`), and since
     plan step balance:X-bi-7c this builder places a one-off through the
     producer (:func:`one_off_row_of`: a rule-less definition plus its row).
     It can no longer spell a link-less row, and since the family's cutover
-    (plan step balance:X-bi-7d-2) neither can the schema.
+    (plan step balance:X-bi-7d-2) neither can the schema.  A case wanting the
+    row soft-deleted sets ``is_deleted`` on the returned row, as
+    :func:`one_off_row_of` says.
 
     Args:
         seed_user: The seed_user fixture dict.
-        seed_periods: The seed_periods fixture list.
-        period_index: Index into seed_periods for pay_period_id.
+        seed_periods: The seed_periods fixture list; the row goes in its first.
         status_name: Name of the status to look up.
-        is_deleted: Soft-delete flag.
         name: Transaction display name.
         amount: Estimated amount as string.
-        settled_amount: Optional figure a human typed at the settle.
 
     Returns:
         The created Transaction object (flushed, not committed).
     """
+    period = seed_periods[0]
     status = db.session.query(Status).filter_by(name=status_name).one()
     expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
-    _settle_day = default_settle_day(seed_periods[period_index], status.id)
+    _settle_day = default_settle_day(period, status.id)
 
     txn = one_off_row_of(
-        seed_periods[period_index],
+        period,
         name=name,
         amount=Decimal(amount),
-        user_id=seed_periods[period_index].user_id,
+        user_id=period.user_id,
         account_id=seed_user["account"].id,
         scenario_id=seed_user["scenario"].id,
         transaction_type_id=expense_type.id,
         category_id=seed_user["categories"]["Groceries"].id,
     )
     txn.status_id = status.id
-    txn.is_deleted = is_deleted
     # The settle day laid on BARE, as ``add_txn`` lays it (X-f1); the
     # record is the covering movement written after the flush (X-bi-4b-2).
     for _column, _value in settle_day_columns(_settle_day).items():
         setattr(txn, _column, _value)
     db.session.flush()
     if _settle_day is not None:
-        cover_bare_settled_row(db.session, txn, amount, settled_amount)
+        cover_bare_settled_row(db.session, txn, amount)
     return txn
 
 
@@ -194,15 +193,13 @@ def _plan_of(txn):
 def _add_entry(txn, seed_user, amount, *, description="Test purchase",
                is_credit=False):
     """Attach a TransactionEntry to *txn* and flush."""
-    from datetime import date as _date  # local import keeps top clean
-
     entry = TransactionEntry(
         **figure_source_columns(),
         transaction_id=txn.id, account_id=txn.account_id, owner_id=txn.user_id,
         user_id=seed_user["user"].id,
         amount=Decimal(amount),
         description=description,
-        purchased_on=_date(2026, 1, 5),
+        purchased_on=date(2026, 1, 5),
         is_credit=is_credit,
     )
     db.session.add(entry)

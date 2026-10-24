@@ -6,6 +6,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.exceptions import NotFoundError
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.services import carry_forward_service, transaction_service
@@ -47,8 +48,9 @@ def _read_only_session_snapshot():
 class TestPreviewCarryForwardEmptyAndShortCircuits:
     """Boundary cases: empty period, same-period, missing periods."""
 
+    @pytest.mark.usefixtures("db")
     def test_empty_source_returns_empty_plans(
-        self, app, db, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """No projected rows in source -> preview returns empty plans list.
 
@@ -86,7 +88,7 @@ class TestPreviewCarryForwardEmptyAndShortCircuits:
             # Add a row to the period to prove the short-circuit
             # ignores rows when source == target.
             _create_transaction(
-                seed_user, seed_periods, period_index=0,
+                seed_user, seed_periods,
                 name="Should be ignored on same-period preview",
             )
             db.session.commit()
@@ -98,12 +100,11 @@ class TestPreviewCarryForwardEmptyAndShortCircuits:
             assert preview.plans == []
             assert preview.any_blocked is False
 
+    @pytest.mark.usefixtures("db")
     def test_missing_source_period_raises_not_found(
-        self, app, db, seed_user, seed_periods,
+        self, app, seed_user, seed_periods,
     ):
         """Unknown source_period_id raises NotFoundError (route returns 404)."""
-        from app.exceptions import NotFoundError
-
         with app.app_context():
             with pytest.raises(NotFoundError):
                 carry_forward_service.preview_carry_forward(
@@ -111,9 +112,9 @@ class TestPreviewCarryForwardEmptyAndShortCircuits:
                     balance_ctx=BalanceContext.build(seed_user["user"].id),
                 )
 
+    @pytest.mark.usefixtures("db", "seed_second_user")
     def test_unowned_source_period_raises_not_found(
-        self, app, db, seed_user, seed_second_user, seed_periods,
-        seed_second_periods,
+        self, app, seed_user, seed_periods, seed_second_periods,
     ):
         """Cross-user source period raises NotFoundError (404 at route).
 
@@ -122,8 +123,6 @@ class TestPreviewCarryForwardEmptyAndShortCircuits:
         misuse cannot leak data.  Mirrors the security response rule
         in CLAUDE.md.
         """
-        from app.exceptions import NotFoundError
-
         with app.app_context():
             other_period_id = seed_second_periods[0].id
             with pytest.raises(NotFoundError):

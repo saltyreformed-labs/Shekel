@@ -9,7 +9,7 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import SettledDayBasisEnum, StatusEnum, TxnTypeEnum
 from app.extensions import db
-from app.models.ref import Status, TransactionType
+from app.models.ref import TransactionType
 from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.services import carry_forward_service
@@ -244,9 +244,9 @@ class TestCarryForwardUnpaid:
             deleted_txn = _create_transaction(
                 seed_user, seed_periods,
                 status_name="Projected",
-                is_deleted=True,
                 name="Deleted-projected",
             )
+            deleted_txn.is_deleted = True
             db.session.flush()
 
             count = carry_forward_service.carry_forward_unpaid(
@@ -307,7 +307,6 @@ class TestCarryForwardUnpaid:
             db.session.add(alt_scenario)
             db.session.flush()
 
-            status = db.session.query(Status).filter_by(name="Projected").one()
             expense_type = db.session.query(TransactionType).filter_by(
                 name="Expense"
             ).one()
@@ -323,7 +322,6 @@ class TestCarryForwardUnpaid:
                 transaction_type_id=expense_type.id,
                 category_id=seed_user["categories"]["Groceries"].id,
             )
-            baseline_txn.status_id = status.id
 
             # Alternative scenario projected transaction.
             alt_txn = one_off_row_of(
@@ -336,7 +334,6 @@ class TestCarryForwardUnpaid:
                 transaction_type_id=expense_type.id,
                 category_id=seed_user["categories"]["Groceries"].id,
             )
-            alt_txn.status_id = status.id
             db.session.flush()
 
             # Carry forward only the baseline scenario.

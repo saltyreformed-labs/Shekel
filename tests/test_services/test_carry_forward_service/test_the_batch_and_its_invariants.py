@@ -76,7 +76,7 @@ class TestCarryForwardEnvelopeMixedBatch:
 
             # Ad-hoc: a one-off, placed with a rule-less definition.
             adhoc = _create_transaction(
-                seed_user, seed_periods, period_index=0,
+                seed_user, seed_periods,
                 name="Ad-hoc Expense",
                 amount="30.00",
             )

@@ -11,7 +11,7 @@ ONE row is worth; this grades which rows are counted at all, and on which leg.
 ``test_balance_calculator_entries.py`` (which then had nothing left to hold and
 deleted) and ``test_balance_resolver.py``.  They always tested THIS rule; they
 reached it through ``balance_at._calculator.calculate_balances``, a PRODUCER
-that deletes at plan step X-c2c4, so every assertion read
+plan step X-g4b deleted (carrying X-c2c4's content), so every assertion read
 ``anchor +/- the reduction`` and the anchor arithmetic was scenery.  **Every
 hand-computed figure is preserved verbatim** -- each test states the reduction
 it now asserts and the balance it used to assert, so the two forms can be
@@ -20,10 +20,12 @@ diffed against each other.
 Two questions this file does NOT answer, and their homes:
 
 * what one row is WORTH -- ``test_cash_amounts.py``;
-* which STARTING balance the reduction is added to, and whether the anchor
-  period and a post-anchor period both apply it -- that is
-  ``balance_at._calculator``'s roll-forward, graded in
-  ``test_balance_calculator.py`` until that module deletes.
+* which STARTING balance the reduction is added to, and how it rolls forward
+  period after period -- the cash fold's (``balance_at._cash_fold``), graded
+  in ``test_cash_fold.py`` (``TestTheOpeningEquityIsTheSeed``,
+  ``TestEveryAssertionIsReplayed``, ``TestTheDriftOracleWalksFiftyTwoPeriods``).
+  It was ``balance_at._calculator``'s roll-forward, graded in
+  ``test_balance_calculator.py``, until plan step X-g4b deleted both.
 
 The rule under test: only rows the shared ``is_projected`` predicate admits
 contribute; income counts at :func:`~app.services.cash_ledger.contribution_of`

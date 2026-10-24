@@ -425,7 +425,7 @@ def _item_name(item: dict) -> str:
 
 def status_differences(items: list[dict]) -> list[str]:
     """One difference per board item holding a Status value, drafts and all
-    (``items``: the status query's nodes)."""
+    (``items``: :data:`_BOARD_ITEMS`' nodes)."""
     return [
         f"{_item_name(item)} holds {GITHUB_STATUS_FIELD} "
         f"{item['fieldValueByName']['name']!r}: clear it"

@@ -75,9 +75,11 @@ def all_cards(place: Place) -> str:
     """The listing of every card of ``place``, open and closed, each with its body, its
     milestone's number and its first hundred comments (and how many it has).
 
-    Only X-cx's migration reads it, and only it reads a milestone (L7 draft 4 s.12): the
-    milestone is selected HERE, not in :data:`CARD_FIELDS`, which every other query
-    selects and whose text the recordings replay word for word."""
+    Only X-cx's migration reads it, and it is the one listing that reads a milestone (L7
+    draft 4 s.12; ``quill file step --parent`` reads one by number since X-cx's S3a,
+    ``_tracker.Tracker.milestones_of``): the milestone is selected HERE, not in
+    :data:`CARD_FIELDS`, which every other query selects and whose text the recordings
+    replay word for word."""
     return (
         """query($after: String) { repository(owner: "%s", name: "%s") {
   issues(first: 100, after: $after, states: [OPEN, CLOSED]) {

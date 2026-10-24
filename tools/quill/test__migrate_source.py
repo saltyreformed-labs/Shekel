@@ -329,8 +329,8 @@ def test_a_leaf_split_twice_takes_the_nearest_split_steps_outcome(outcomes, carr
     source = read_source(registries(steps=steps, findings=(), rulings=(), outcomes=outcomes,
                                     documents={"balance": text, "salary": "## 4. The steps\n"}))
     assert [line for line in (*source.refusals, *source.reports) if "outcome" in line] == [
-        f"outcome {name!r} holds no card: its open steps are split steps whose leaves carry "
-        "outcomes of their own, so it gets no milestone" for name in unheld]
+        f"outcome {name!r} holds no card: its open steps are all split steps, whose leaves are "
+        "filed in other outcomes' milestones, so it gets no milestone" for name in unheld]
     assert _outcomes(source) == {"balance:X": None, "balance:X-1": None, "balance:X-1a": carried}
 
 
@@ -341,7 +341,7 @@ def test_an_outcome_whose_split_steps_leaves_all_carry_their_own_is_reported(cor
              ("O2 the split", ("balance:A-2",)))
     source = read_source(replace(corpus, outcomes=split))
     assert not source.refusals
-    assert source.reports == ("outcome 'O2 the split' holds no card: its open steps are split "
-                              "steps whose leaves carry outcomes of their own, so it gets no "
-                              "milestone",)
+    assert source.reports == ("outcome 'O2 the split' holds no card: its open steps are all "
+                              "split steps, whose leaves are filed in other outcomes' "
+                              "milestones, so it gets no milestone",)
     assert "O2 the split" not in _outcomes(source).values()

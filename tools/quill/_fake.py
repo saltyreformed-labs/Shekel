@@ -94,8 +94,9 @@ class FakeBoard:
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (27/20) -- it stands in for
-    :class:`_tracker.Tracker`, so it has each of that class's 25 reads and
+    Pylint: ``too-many-public-methods`` (30/20, measured at X-cx's S3a; this
+    line said 27 while 28 stood) -- it stands in for
+    :class:`_tracker.Tracker`, so it has each of that class's 28 reads and
     writes (its own disable says why there are so many), and ``add`` and
     ``add_task``, which put a card or a task in.
     ``too-many-instance-attributes`` (10/7) -- **one per kind
@@ -254,10 +255,13 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.milestones_by_number[number] = Milestone(number, title, description)
         return number
 
-    def clear_milestone(self, number):
-        """Take a card out of its milestone."""
-        self.writes.append(("clear_milestone", number))
-        self.milestone_of.pop(number, None)
+    def set_milestone(self, number, milestone):
+        """Put a card in milestone number ``milestone``, or with None in none."""
+        self.writes.append(("set_milestone", number, milestone))
+        if milestone is None:
+            self.milestone_of.pop(number, None)
+        else:
+            self.milestone_of[number] = milestone
 
     def retype(self, number, kind):
         """Change a card's kind."""

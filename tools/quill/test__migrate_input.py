@@ -394,5 +394,5 @@ def test_an_outcome_holding_no_card_for_its_split_steps_leaves_takes_no_mileston
     assert grade(data, read_source(edited), edited)[1] == []
     data["milestones"]["O2 the split"] = {"title": "Split", "description": "d", "source": "s"}
     assert grade(data, read_source(edited), edited)[1] == [
-        "milestones: 'O2 the split' holds no card: its open steps are split steps whose leaves "
-        "carry outcomes of their own, so it gets no milestone"]
+        "milestones: 'O2 the split' holds no card: its open steps are all split steps, whose "
+        "leaves are filed in other outcomes' milestones, so it gets no milestone"]

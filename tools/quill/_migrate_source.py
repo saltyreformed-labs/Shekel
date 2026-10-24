@@ -535,8 +535,7 @@ def _outcomes(registries: Registries, by_key: Mapping[str, StepRow], refusals: l
     member = {}
     for name, scope in registries.outcomes:
         if all(key in by_key and by_key[key].shipped for key in scope):
-            reports.append(f"outcome {name!r}'s whole scope has shipped, so it gets no "
-                           "milestone")
+            reports.append(f"outcome {no_milestone(name, shipped=True)}")
         for key in scope:
             row = by_key.get(key)
             if row is None:
@@ -555,9 +554,11 @@ def _carried_outcomes(items: Sequence[Item], containers: set[str], own: Mapping[
     its own, else that of the nearest split step above it holding one (the coordinator's
     code call, 14:4x 10-21, under R-BAL274's one milestone per card).  A split step leaves
     the board, so its milestone would count it beside its leaves while they grouped under
-    none; ``quill file step --parent`` files a leaf the same way after the cutover
-    (``_filing``).  An outcome left holding no card -- its open scope steps all split
-    steps whose leaves carry outcomes of their own -- is reported, and gets no milestone."""
+    none.  After the cutover ``quill file step --parent`` files a leaf in its split step's
+    milestone only while that step holds one, which no split step this files does
+    (``_filing._leaf_milestone``).  An outcome left holding no card -- its open scope steps
+    all split steps whose leaves are filed in other outcomes' milestones -- is reported
+    (:func:`no_milestone`), and gets no milestone."""
     parents = {item.key: item.links.parent for item in items}
 
     def carried(key: str | None) -> str | None:
@@ -568,10 +569,20 @@ def _carried_outcomes(items: Sequence[Item], containers: set[str], own: Mapping[
     found = [replace(item, outcome=None if item.key in containers else carried(item.key))
              for item in items]
     held = {item.outcome for item in found}
-    reports += [f"outcome {name!r} holds no card: its open steps are split steps whose leaves "
-                "carry outcomes of their own, so it gets no milestone"
+    reports += [f"outcome {no_milestone(name, shipped=False)}"
                 for name in dict.fromkeys(own.values()) if name not in held]
     return found
+
+
+def no_milestone(name: str, shipped: bool) -> str:
+    """Why the outcome ``name`` gets no milestone, which would hold no card: its whole scope
+    ``shipped``, or else its open steps are all split steps, whose leaves are filed in
+    other outcomes' milestones (:func:`_carried_outcomes`).  The one spelling of both,
+    which this module's reports and ``_migrate_input``'s refusal of a milestone given for
+    such an outcome each name."""
+    return (f"{name!r}'s whole scope has shipped, so it gets no milestone" if shipped else
+            f"{name!r} holds no card: its open steps are all split steps, whose leaves are "
+            "filed in other outcomes' milestones, so it gets no milestone")
 
 
 def _together_refusals(by_key: Mapping[str, StepRow], reports: list[str]) -> list[str]:

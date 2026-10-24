@@ -25,9 +25,10 @@ A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-is
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, ``task-file`` writes its file for the commit that finishes
 the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
-A LEAF (``file step --parent``) is filed in its split step's milestone: the split step's
-own while it holds one, which the filing then clears, else the one its leaves hold
-(``_filing._leaf_milestone``).
+A LEAF (``file step --parent``) is filed in its split step's milestone while the split
+step holds one, which the filing then clears; else in none, the milestones its leaves
+hold named for a person to set one on the web (``_filing._leaf_milestone``).  A leaf
+dropped before its filing finished gives it back (``_unsplit``).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -436,7 +437,8 @@ def _unsplit(tracker: Tracker, undo: Unsplit, cards: dict[int, Card],
     """Take leaves whose filing never finished out of the split they began (R-BAL205,
     :func:`_state.unsplit` decides), each write printed as it lands, or under ``dry_run``
     printed as what would be written and not made: the split step put back on the board,
-    and moved into a leaf's place, when it is left a plain step; then each leaf unlinked.
+    and moved into a leaf's place, when it is left a plain step; its milestone given back
+    (:func:`_give_back_milestone`); then each leaf unlinked.
     ``cards`` holds the split step and every card linked under it
     (:func:`with_closure`); ``quill drop`` and ``quill sync`` both take a split apart
     here."""
@@ -450,11 +452,35 @@ def _unsplit(tracker: Tracker, undo: Unsplit, cards: dict[int, Card],
         shown = dry_run or tracker.board.place(item, after)
         print(f"  board: plan#{split.number} {would}moved into plan#{leaf}'s place"
               + ("" if shown else " (the board has not shown it yet)"))
+    _give_back_milestone(tracker, undo, dry_run)
     for number in undo.unlink:
         if not dry_run:
             tracker.remove_child(split.number, cards[number])
         print(f"  plan#{number} {would}unlinked from plan#{split.number}: its filing never "
               "finished, so it was never part of that split (R-BAL205)")
+
+
+def _give_back_milestone(tracker: Tracker, undo: Unsplit, dry_run: bool) -> None:
+    """Undo the milestone move of each leaf ``undo`` takes out of its split (X-cx S3a's
+    review, MEDIUM 2): a leaf's create carried its split step's milestone, and its filing
+    then cleared the split step's (``_filing._leaf_milestone``), so the split step, while
+    it holds none, gets the leaf's back, and the leaf, never part of the split, leaves it;
+    each write printed as it lands, or under ``dry_run`` printed as what would be written
+    and not made.  Run again after a failure, it finds the split step holding one
+    and takes the leaf's off.  A split step left with other leaves gets it back too, as it
+    held it before this filing, and the next leaf filed under it moves it again."""
+    held, would = tracker.milestones_of([undo.step, *undo.unlink]), "would be " if dry_run else ""
+    for number in undo.unlink:
+        if (moved := held.get(number)) is None:
+            continue
+        if held.get(undo.step) is None:
+            if not dry_run:
+                tracker.set_milestone(undo.step, moved)
+            print(f"  plan#{undo.step} {would}put back in milestone #{moved}, from "
+                  f"plan#{number}")
+        if not dry_run:
+            tracker.set_milestone(number, None)
+        print(f"  plan#{number} {would}taken out of milestone #{moved}")
 
 
 def _leave_split(tracker: Tracker, leaf: Card, cards: dict[int, Card],

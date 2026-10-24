@@ -615,7 +615,8 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     reads and writes and the read of a commit's pull requests left it at X-cx's
     M1: a claim is a branch of the code repository since R-BAL359 (``_git``).
     ``quill file step --parent``'s read of the milestones a split step and its
-    leaves are in, and its clear of the split step's, came with X-cx's S3a
+    leaves are in, and its move of a card's milestone (the split step's to its
+    leaf, and back when the leaf is dropped unfinished), came with X-cx's S3a
     (measured 29 then; 27 before it, where this line said 26).
 
     ``github`` is any object with :class:`_github.GitHub`'s ``rest``,
@@ -836,9 +837,10 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         answer shows the type, labels and milestone sent.
 
         ``milestone``: the number of the milestone the card is filed in: X-cx's migration's
-        (L7 draft 4 s.3: a scope step's create carries its outcome's), and a leaf's that
-        ``quill file step --parent`` files in its split step's (``_filing``).  None sends no
-        milestone at all, so every other create's request is what it was.
+        (L7 draft 4 s.3: a step's create carries its outcome's, a split step's carried to its
+        leaves instead, ``_migrate_source._carried_outcomes``), and a leaf's that ``quill file
+        step --parent`` files in its split step's while that step holds one (``_filing``).
+        None sends no milestone at all, so every other create's request is what it was.
 
         A create naming a label the tracker lacks makes that label (grey, no description;
         measured 2026-10-04 on the mark itself, before it existed; ``setup_tracker.py
@@ -872,18 +874,21 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         return self.github.rest("POST", f"{self.place.path}/milestones",
                                 {"title": title, "description": description})["number"]
 
-    def clear_milestone(self, number: int) -> None:
-        """Take a card out of its milestone, reading it back: a step split into smaller
-        steps keeps none once its leaf carries it (``_filing``).
+    def set_milestone(self, number: int, milestone: int | None) -> None:
+        """Put a card in the milestone numbered ``milestone``, or with None take it out of its
+        one, reading it back: a step split into smaller steps keeps none once its leaf carries
+        it (``_filing``), and gets it back from a leaf dropped before its filing finished
+        (``quill._unsplit``).
 
         Raises:
-            TrackerError: When GitHub's answer still shows the card in a milestone.
+            TrackerError: When GitHub's answer shows the card in any other milestone, or none.
         """
         issue = self.github.rest("PATCH", f"{self.place.path}/issues/{number}",
-                                 {"milestone": None})
-        if issue.get("milestone") is not None:
-            raise TrackerError(f"plan#{number} is still in milestone "
-                               f"{issue['milestone'].get('number')}: fix it by hand")
+                                 {"milestone": milestone})
+        held = (issue.get("milestone") or {}).get("number")
+        if held != milestone:
+            raise TrackerError(f"plan#{number} is in milestone {held}, not {milestone}: fix it "
+                               "by hand")
 
     def retype(self, number: int, kind: str) -> None:
         """Change a card's kind, reading it back."""

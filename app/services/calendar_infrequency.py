@@ -9,7 +9,7 @@ three pattern names living in ``calendar_service``.
 rather than about calendars**, and because ``calendar_service`` sits at 857 of pylint's
 1,000-line ceiling (measured 2026-09-01; it read 891 undated, and the module has moved
 twice since): the derivation needs its reasoning written down, and a cap is a forcing
-function rather than a ceiling to raise (``docs/plans/conventions.md`` rule 4).  Two
+function rather than a ceiling to raise (the planning conventions' rule 4).  Two
 facts moved here with it -- what
 "infrequent" MEANS, and when the owner's pay cadence has to be resolved to
 answer -- and neither has a second home.

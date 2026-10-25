@@ -1,6 +1,6 @@
 """The processes the proof runs: the suite through ``./scripts/test.sh`` (never bare
-pytest: the wrapper gives each run a database cluster of its own), pylint, the plan gate,
-and ``git grep`` for the old module's name.  Each returns what it observed; judging it is
+pytest: the wrapper gives each run a database cluster of its own), pylint, and ``git grep``
+for the old module's name.  Each returns what it observed; judging it is
 :mod:`tools.split._dynamic`'s.
 """
 from __future__ import annotations
@@ -58,13 +58,6 @@ def pylint_messages(root: Path, paths: list[str]) -> list[dict]:
         raise RunError(f"pylint did not lint {paths} (exit {proc.returncode}): "
                        f"{proc.stderr.strip()[-500:]}")
     return json.loads(proc.stdout or "[]")
-
-
-def plan_gate(root: Path) -> tuple[int, str]:
-    """The plan gate's exit status and summary line, run as pre-commit and CI run it."""
-    proc = subprocess.run(["pytest", "tools/plan_gate", "-c", "/dev/null", "-q"], cwd=root,
-                          capture_output=True, text=True, check=False)
-    return proc.returncode, (proc.stdout.strip().splitlines() or [""])[-1]
 
 
 def mentions(plan: Plan) -> re.Pattern[str]:

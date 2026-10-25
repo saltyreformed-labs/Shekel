@@ -1,7 +1,7 @@
 """Tests for the b2e9a47c3f18 "drop the closed pattern set's table" migration.
 
-Plan step **R9** of ``docs/plans/implementation_plan_recurrence_redesign.md``
-section 4 -- the last artefact of the closed pattern set.  The revision drops
+Plan step **R9** (shipped at ``800671a7``)
+-- the last artefact of the closed pattern set.  The revision drops
 ``ref.recurrence_patterns``; the same commit deletes ``RecurrencePatternEnum``,
 ``ref_cache.recurrence_pattern_id`` and the ``app/ref_seeds.py`` entry.
 

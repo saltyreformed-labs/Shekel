@@ -4,7 +4,7 @@ The from-scratch design of what a bank line ENDS ON, written after the developer
 that the model below is the one to build rather than the one shipped. It is a Loop A argument: the
 audit of what exists, the design, what the design DELETES, the screen and the words the owner reads,
 the limits the design does not reach, and the forks still owed a ruling. It mints no steps and
-states no order -- `docs/plans/steps.md` owns both.
+states no order -- the tracker owns both.
 
 It is the second Loop A over this feature. The first (`docs/design/bank_import_audit.md`, locked at
 round 4 on 2026-08-29) redesigned the SCREENS and deliberately left the layers underneath alone, on
@@ -309,8 +309,8 @@ and your bank*, itemised as
 
 ## 7. Loop B
 
-The decomposition and its order are `docs/plans/steps.md`'s alone; what belongs here is what each
-piece IS, so that this document and the registry cannot describe different work.
+The decomposition and its order are the tracker's alone; what belongs here is what each piece IS, so
+that this document and the cards cannot describe different work.
 
 - **The store.** `budget.line_dispositions`, its migration and its backfill from the two existing
   act tables, with the readers repointed. It is the whole of section 2.1 and it moves no money: a
@@ -325,8 +325,8 @@ piece IS, so that this document and the registry cannot describe different work.
 - **The skip rule** (ruling **R-JZ**): the SKIP disposition a merchant rule may state, its
   *Skipped by your rule* surface, and its exclusion from `filed_total`.
 
-**The container is `bank_import:X-gl`** and its leaves are the pieces above; `docs/plans/steps.md`
-ranks them and this document does not.
+**The container is `bank_import:X-gl`** and its leaves are the pieces above; the board ranks them
+and this document does not.
 
 **Sequencing, ruled 2026-09-04 (**bank_import:R-JY**)**: ship `bank_import:X-gj-4b` first on the
 store as it stands, then the release ruling **bank_import:R-JK** requires, then `X-gl` ranked beside

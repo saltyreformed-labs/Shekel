@@ -433,7 +433,7 @@ def reject_books_open_on_or_after_matched_lines(
     match at all.  What makes it reachable is arithmetic rather than data --
     a group of lines posted 04-10 and 04-20 on an account with no other
     activity settles its member on 04-20 and leaves 04-10..04-19 open -- and
-    ``conventions.md`` rule 8 is explicit that a finding costing ``$0.00`` on
+    the planning conventions' rule 8 was explicit that a finding costing ``$0.00`` on
     today's data is a defect waiting for the data to change.
 
     **The message names UNMATCHING and not re-dating**, which is why this is a

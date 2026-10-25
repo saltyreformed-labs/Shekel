@@ -3,15 +3,14 @@
 **STATUS: DESIGN, RULED 2026-09-18 (`credit_card:R-CC14`..`R-CC19`, and the three amendments of the
 same day, `R-CC20`..`R-CC22`, recorded in 3.5 and 3.10) after two neutral adversarial reviews, which
 broke a good deal of the first draft; section 8 records what each refuted.** Nothing here has been
-built. The leaves of section 5 are minted into `docs/plans/steps.md` by the coordinator's re-mint of
-the arc, which retires the 2026-07-19 leaves `CC0a`..`CC5b`; every ruling's text lands in
-`docs/plans/rulings.md`, keyed `(credit_card, id)`, with the re-mint (`R-CC16`..`R-CC22` are minted
-and not yet on dev at `cd242edc`), and this document records how each came to be and quotes the
-option the developer picked. Its companions are `from_scratch_architecture.md` (the movement model
-and the level relation this design rides) and `pay_calendar_from_scratch.md`; the arc's plan of
-record is `docs/plans/implementation_plan_credit_card.md`, and when a leaf may start is `steps.md`'s
-answer, never restated here. The session record, with the cold-start note each session left the
-next, is `~/projects/shekel-handoffs/HANDOFF-credit-card-from-scratch-2026-09-18.md` (outside the
+built. The leaves of section 5 were minted as steps by the coordinator's re-mint of the arc, which
+retired the 2026-07-19 leaves `CC0a`..`CC5b`; its open leaves and its rulings are cards in the
+tracker, titled by their ids, and this document records how each came to be and quotes the option
+the developer picked. Its companions are `from_scratch_architecture.md` (the movement model and the
+level relation this design rides) and `pay_calendar_from_scratch.md`; the arc's own document is
+`docs/plans/implementation_plan_credit_card.md`, and when a leaf may start is the board's answer,
+never restated here. The session record, with the cold-start note each session left the next, is
+`~/projects/shekel-handoffs/HANDOFF-credit-card-from-scratch-2026-09-18.md` (outside the
 repository); the per-leaf trace that preceded it is `HANDOFF-credit-card-trace-2026-09-18.md` beside
 it.
 
@@ -62,9 +61,8 @@ shape (`R-BAL20`, `app/services/one_off.py`), the books boundary (`d3b6f1c8a274`
 rulings `R-GJ`, `R-GK`, `R-HP`..`R-HV`, and every open step in `steps.md` (2.1). `R-CC14` and
 `R-CC15` are on dev since PR #399. The population was measured READ-ONLY on production 2026-09-18
 (section 7; a dated measurement, re-run before it is relied on). Every code claim cites its
-file:line on dev `1431c44a`, verified there (`cd242edc` moved none of the cited files); steps.md
-RANKS are quoted nowhere here, because they are recut with every tick and `steps.md` is their only
-home.
+file:line on dev `1431c44a`, verified there (`cd242edc` moved none of the cited files); step RANKS
+are quoted nowhere here, because they are recut with every tick and the board is their only home.
 
 ## 1. What a credit card is, in the app's own words
 
@@ -122,7 +120,7 @@ plan item's (3.2), a plan item placed on the account expected to pay it (3.3), t
 (3.4), the card payment rule (3.5), the finance-charge and rewards derivations (3.6, 3.7), the
 card's screens (3.9), the card on the bank feed (3.11).
 
-### 2.1 Where `steps.md` is taking the code, and how the card rides each direction
+### 2.1 Where the open steps are taking the code, and how the card rides each direction
 
 Each row is a direction the card must ride rather than duplicate or contradict:
 
@@ -175,7 +173,7 @@ with a non-zero correction), six sites spelling "records are the fact" as `is PL
 rows) that would each need a second member, and the flip learning a twin at every PLAIN arm.
 **Rejected also**: a `CardKind` enum (one boolean has no second value); INTEREST-kinding the card
 (that accrual is a modelled return on an asset with an APY row, and `R-FO` would book a card true-up
-as interest income). This SUPERSEDES steps.md `CC0a`'s "REVOLVING projection kind" and the
+as interest income). This SUPERSEDES the step `CC0a`'s "REVOLVING projection kind" and the
 Architecture's precedence sentence.
 
 The one seam surface that changes: `balance_at/_liability.py:95-101` holds every non-loan liability
@@ -511,7 +509,7 @@ carried past a due date "accrues 3.6's interest" and `R-CC3`'s "plus a projected
 both read as POST-`R16-d`, and the re-mint records `R-CC3` as amended by `R-CC18` with that clause
 deferred by `R-CC19`. Confirming the real charge is the ordinary settle: the feed's line matches the
 row, or the owner ticks it. No `system_origin_id` column (R-IY: the row's definition already says
-what it is), no sync that creates and deletes a conditional row, no fourth pricing FK (steps.md
+what it is), no sync that creates and deletes a conditional row, no fourth pricing FK (the step
 `CC4d` is re-opened: the row carries `template_id` and satisfies `ck_transactions_one_pricing_link`
 at `<= 1` today and at `= 1` after `X-bi-7d`).
 
@@ -717,7 +715,7 @@ card-side aggregate row and its 2x2 sync matrix, `_revolving.py` and the REVOLVI
 them built.
 
 **Rulings and steps this re-opens, named**: R-CC1 and R-CC9 (re-opened by R-CC15 on 2026-09-18);
-R-CC5 and R-CC6 (3.10); R-CC7 (the rename becomes a delete, 3.2); steps.md `CC0a`'s REVOLVING kind
+R-CC5 and R-CC6 (3.10); R-CC7 (the rename becomes a delete, 3.2); the step `CC0a`'s REVOLVING kind
 (3.1), `CC1a`/`CC1b` (dissolved by R-CC14), `CC2b`'s wait (it becomes CC-3i behind
 `recurrence:R16-d`, 3.6), `CC3a`-`CC3c`'s shapes (3.2), `CC4c`/`CC4d`'s sync-maintained row and
 typed FK (3.6), `CC5a`'s `system_origin_id` (3.7); `X-bi-6`'s NO ACTION restore clause (3.2). R-CC2,
@@ -728,8 +726,8 @@ AMENDED by R-CC18 (3.5) with its finance-charge clause deferred by R-CC19 (3.6).
 
 Every step additive-first, each commit green and revertable; money movers own their PR. Waits on the
 balance chain are REAL ones only (the trace's standard, `HANDOFF-credit-card-trace-2026-09-18.md`).
-Ranks are `steps.md`'s and are quoted nowhere here; the `waits on` column is the dependency graph
-the plan gate reads.
+Ranks are the board's and are quoted nowhere here; the `waits on` column is the dependency graph the
+cards' blocked-by links hold.
 
 | leaf | what | waits on |
 |---|---|---|
@@ -748,9 +746,9 @@ the plan gate reads.
 | CC-11 | the card cockpit and the grid affordances through the design loop (3.9) | CC-6 |
 | BI | the card on the feed (3.11), bank_import's steps: `X-f6b` carries it and CONFIRMS that SimpleFIN serves a card's lines and balance (an external property nothing on the tree asserts); card lines disposed under `X-gl`'s verbs; the two `statement_match` readers of 3.2; the Capital One CSV adapter only as a manual fallback | CC-5, `X-f6b`, `X-gl` |
 
-When each leaf may start is `steps.md`'s answer; ids are the coordinator's.
+When each leaf may start is the board's answer.
 
-**What the re-mint retires and re-homes** (the 2026-07-19 leaves as `steps.md` holds them at
+**What the re-mint retires and re-homes** (the 2026-07-19 leaves as `steps.md` held them at
 `cd242edc`):
 
 | old leaf | becomes |
@@ -774,7 +772,7 @@ CC-6), **N-264** (`CC4c` -> CC-8), **N-351** credit_card (`CC3b`/`CC3c` -> CC-7)
 waits on CC-5 (the entry shape) instead of `CC3c`; `balance:X-au-l`'s wait on `CC4d` DROPS, because
 the finance charge carries `template_id` from birth and `amount_source_id` needs no card link to
 go -- RULED DROPPED by the developer 2026-09-18 (AskUserQuestion in the coordinator session).
-Registry edits the re-mint owes beyond the card rows: `recurrence:R16-d`'s sentence gains the
+Registry edits the re-mint owed beyond the card rows: `recurrence:R16-d`'s sentence gains the
 `DAILY_ACTUAL_365` member (rule 14: one convention table); `X-bi-4`'s README entry spells BOTH
 halves of the fork (the key relaxed AND the fold's movement predicate `TransactionEntry.account_id`,
 which `_events.py:750` reads as the parent's today) and its `steps.md` sentence if that changes;

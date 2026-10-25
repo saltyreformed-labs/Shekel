@@ -44,8 +44,8 @@ re-export block would surface only as an ``AttributeError`` in whatever test
 happened to call it, and two of these accessors have no caller at all to raise
 one.
 
-**The cap is a forcing function, not a ceiling to raise** (``conventions.md``
-rule 4's own argument, applied to code): the real pressure is that these
+**The cap is a forcing function, not a ceiling to raise** (the planning
+conventions' rule 4's own argument, applied to code): the real pressure is that these
 accessors are twenty-six near-identical two-line bodies -- two of them
 (``acct_type_icon``, ``acct_type_max_term``) measurably DEAD, 0 references
 anywhere -- and collapsing what survives into one generic lookup is finding

@@ -6,7 +6,7 @@ step ``bank_import:X-gi-2`` the ONLY one: it replaced the review queue, the
 register and the hand-build workbench, and that step deleted all three.  Plan
 step ``bank_import:X-gj-1b``; the direction was locked at Loop A round 4 on
 2026-08-29 and is ``docs/design/bank_import_audit.md``.  Its rulings are
-**bank_import:R-HP** through **R-HX** in ``docs/plans/rulings.md``, plus
+**bank_import:R-HP** through **R-HX** (ruling cards in the tracker), plus
 **bank_import:R-IA** (the accept door exempts no shape) and
 **bank_import:R-IB** (a standing rule is offered once per merchant, on the
 receipt).  **Both ids were minted in the ``balance`` arc the same day**, so

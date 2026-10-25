@@ -1,6 +1,6 @@
 """Balance-at-T seam -- what a balance ASSERTION does to a running total.
 
-Plan step **X-f3c-1** (``docs/audits/balance_architecture/README.md`` section 5).
+Plan step **X-f3c-1** (shipped at ``2dad8512``).
 The replay this module owns lived inside
 :func:`app.services.cash_ledger.walk_cash_ledger` until then, and moving it here
 is not a tidy-up: it is what makes the CUTOVER expressible.

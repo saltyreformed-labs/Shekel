@@ -1,7 +1,7 @@
 """The paycheck engine's owner-level input: a salary profile and its calendar.
 
-Plan step **R-F16** (``docs/plans/implementation_plan_recurrence_redesign.md``,
-"Carried steps").  Its own module rather than a type inside
+Plan step **R-F16** (shipped at ``4258ce28``).
+Its own module rather than a type inside
 :mod:`app.services.paycheck_calculator`, which sits at the 1000-line ceiling
 this step's own additions pushed it past -- and because nine modules outside
 that one CONSTRUCT this value while only it computes a paycheck, so the input

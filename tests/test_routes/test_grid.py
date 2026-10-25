@@ -9509,7 +9509,7 @@ class TestTheMobileSummaryRefusesAnotherOwnersPaycheck:
     Flow and Projected Balance is the leak, and 204 is exactly the status this
     endpoint's swap-nothing no-op already uses for a transient miss.
 
-    The two cases are separate tests rather than one (``conventions.md``: merge
+    The two cases are separate tests rather than one (the planning conventions: merge
     what shares KEYS, split what shares only a READER).  "That id does not
     exist" and "that id is someone else's" are two states this route must
     answer IDENTICALLY, and a single test asserting both cannot show that they

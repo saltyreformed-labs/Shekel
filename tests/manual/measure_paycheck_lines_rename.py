@@ -1,7 +1,7 @@
 """Price every saved paycheck through the app's one producer and dump the whole breakdown.
 
-Plan step **salary:R18-a** (``docs/plans/implementation_plan_salary.md``
-section 4; ruling **R-SAL38**): the RENAME of ``salary.paycheck_deductions``
+Plan step **salary:R18-a** (shipped at ``ef0dc831``;
+ruling **R-SAL38**): the RENAME of ``salary.paycheck_deductions``
 to ``salary.paycheck_lines`` claims to move no figure.  This harness is how
 that claim is graded rather than quoted: run it on the tree BEFORE the rename
 against a database at the prior migration head, upgrade the database, run it

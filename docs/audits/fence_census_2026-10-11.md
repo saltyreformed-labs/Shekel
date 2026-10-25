@@ -1,6 +1,6 @@
 # O7's fence census (balance:R-BAL263) and the record of the fences ruled KEEP (R-BAL268)
 
-A LIVE record. `docs/plans/steps.md` names it as outcome O7's record. No step deletes a fence on its
+A LIVE record, outcome O7's (a milestone in the tracker). No step deletes a fence on its
 KEEP list unless its row names the step that may (`balance:R-BAL268`): a step that would delete one
 asks the developer first.
 
@@ -40,7 +40,7 @@ for a fence, the kind is this record's reading.
 | T-32 | `.github/workflows/ci.yml:590` (audit-trigger benchmarks) | nothing; it measures trigger overhead | not a fence |
 | T-36 | `tests/test_arch/test_an_inline_style_is_refused_by_a_gate.py:96` | the inline-style lint rule going missing or silent | a test of a linter rule |
 | T-50 | `tests/test_arch/test_the_shards_partition_the_suite.py:115` | a shard split that drops or doubles a test | CI infrastructure |
-| T-54 | `tools/ci/ci_scope.py:151` (`EXEMPT_READERS`) | a code change classed as registry-only; it fails closed | CI economics, built to outlive the plan gate |
+| T-54 | `tools/ci/ci_scope.py:151` (`EXEMPT_READERS`) | a code change classed as registry-only; it fails closed | CI economics, built to outlive the plan gate; deleted by the tracker switch (`balance:X-cx`, L8; `balance:R-BAL399`), every pull request running every grader |
 | T-55 | `tools/ci/ci_verdict.py` | a green verdict over a skipped or failed grader | a correctness gate on CI itself |
 | T-57 | `tools/ci/test_bottom_layer.py` | a non-stdlib or upward import in `tools/ci` (`balance:R-BAL223`) | layering of the tooling |
 | T-58 | `tools/ci/test_ci_workflow.py` | CI wiring that reads a red grader as green | a test of CI's wiring |
@@ -59,7 +59,7 @@ for a fence, the kind is this record's reading.
 | T-18 | `scripts/hooks/post-edit-deps.sh` | a `requirements*.txt` edit nobody approved (it asks) | a developer-approval rule |
 | T-21 | `scripts/hooks/session-start.sh` | nothing; it prints the session's context | process |
 | T-22 | `scripts/hooks/guard-pr-actions.sh` | a pull request opened or merged outside the coordinator (it asks) | an advisory process control |
-| T-56 | `tools/ci/commit_trailers.py`, `tools/ci/trailers.py` | a malformed `Ships:` trailer, a revert git would answer wrongly | git is the truth of what shipped (`balance:R-BAL170`) |
+| T-56 | `tools/ci/commit_trailers.py`, `tools/ci/trailers.py` | a malformed `Ships:` trailer, a revert git would answer wrongly | git is the truth of what shipped (`balance:R-BAL170`); deleted by the tracker switch (`balance:X-cx`, L8; `balance:R-BAL389`), the done file `plan/ships/N` replacing the trailer (`balance:R-BAL359`) |
 | T-97 | `tests/test_models/test_books_boundary_arms.py:387`, `:499` | a revision that rewrites frozen function bodies | an applied migration is immutable history |
 | T-213 | `tests/test_models/test_posting_ref_seed_parity.py:388` | an enum member no migration seeds | migrations are frozen history; `X-dl` may retire its migration leg |
 | T-215 | five revision tests asserting `Review:`, e.g. `tests/test_models/test_pay_entries_migration.py:616` | a destructive migration with no recorded review | a developer-approval rule |
@@ -195,8 +195,8 @@ keys `salary.paycheck_lines`, the table DC-09 reads, or DC-09 stays.
   takes a route-only `BalanceContext` factory.
 - T-51's owner and cap arms, by `X-cx`'s `tools/quill/check.py` and the tracker Action: the rule set
   moves home.
-- T-53, the shipped-against-git arm, by `tools/ci/trailers.py` and `plan sync` (`balance:R-BAL184`),
-  a stored card state kept by a reconciler.
+- T-53, the shipped-against-git arm, by the ship marker `plan/ships/N` (`balance:R-BAL359`) and
+  `quill sync` (`balance:R-BAL184`), a stored card state kept by a reconciler.
 - T-06, W9908's list, possibly by W9910 package privacy, as `G1`'s trace decides.
 - T-01, T-02, T-03, T-13 and T-74, static checkers, by run-time refusals (`FloatOperation`, `Money`,
   a raising `DisplayLabel.__eq__`), so their coverage becomes the code that runs.

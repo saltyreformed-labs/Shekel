@@ -33,7 +33,7 @@ loaded; a change to a rule here updates that mirror in the same commit.
   WHERE/JOIN/ORDER BY columns.
   **EXEMPT: single-column `PRIMARY KEY (id)` / `UNIQUE (name)` on a `ref` lookup
   table**, which take PostgreSQL's generated names (developer ruling 2026-08-14,
-  ledger row `recurrence:F-3`; 24 of 24 live `ref` tables already do). Those two
+  finding `recurrence:F-3`; 24 of 24 live `ref` tables already do). Those two
   names are never referenced by anything. Every other constraint is named.
 
 ## Migrations
@@ -51,6 +51,8 @@ loaded; a change to a rule here updates that mirror in the same commit.
   `server_default` only if a static default fits every existing row.
 - Review auto-generated migrations: intended changes only, no phantom diffs, named
   constraints, correct downgrade.
+- **A migration's commit carries its own change and nothing else.** An unrelated fix riding in
+  a schema migration is unreviewable there: it is a standalone commit of its own.
 
 ## Audit triggers
 

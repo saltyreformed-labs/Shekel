@@ -10,7 +10,7 @@ states that five separate runtime fences had to police.  This package holds the
 derivation, and since that step dropped both columns none of those states has a
 subject -- nor does any of the five fences, all of which went with it.
 
-The plan of record is ``docs/plans/implementation_plan_pay_calendar.md``.
+The arc's document is ``docs/plans/implementation_plan_pay_calendar.md``.
 **What it says about this package, quoted rather than paraphrased:** nothing.
 The plan names no module and no package anywhere -- it specifies BEHAVIOUR per
 step, and where that behaviour lives was decided with the developer when C1 was

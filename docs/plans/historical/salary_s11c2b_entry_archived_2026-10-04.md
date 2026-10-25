@@ -1,5 +1,5 @@
 > **ARCHIVED. Historical record only -- this document governs nothing and
-> may be out of date.** The live plan is `docs/plans/steps.md`; the code as
+> may be out of date.** The live plan is the tracker, `saltyreformed-labs/shekel-plan`; the code as
 > committed is the source of truth for what the app does.
 
 # The shipped salary step `S11-c-2b`'s plan entry, condensed to a pointer under R-SAL103 on 2026-10-04

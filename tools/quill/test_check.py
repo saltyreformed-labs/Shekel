@@ -12,11 +12,9 @@ from tools.quill.check import (
     TITLE_CAP,
     Draft,
     Owner,
-    card_title,
     in_ruling_shape,
     ruling_body,
     ruling_question,
-    title_alias,
     violations,
 )
 
@@ -258,21 +256,6 @@ def test_in_ruling_shape_needs_both_marks():
     assert in_ruling_shape(ruling_body("Where?", "Here."))
     for body in ("Question: Where?", "Where?\n\nAnswer: Here.", None):
         assert not in_ruling_shape(body), body
-
-
-@pytest.mark.parametrize("alias", ["X-bi-6-4d", "N-391 question", "R-BAL80", "A"])
-def test_a_migrated_title_gives_back_the_alias_it_was_written_with(alias):
-    """X-cx's migration finds an item's card by the alias its title carries (L7 draft 4
-    s.4); one with a space in it (``N-391 question``) included."""
-    assert title_alias(card_title(alias, "A short name")) == alias
-
-
-@pytest.mark.parametrize("title", ["X-cx move the plan", "[X-cx]move", "[] name", "[a]b] name",
-                                   " [A] name", "[A]"])
-def test_a_title_carrying_no_alias_mark_gives_none(title):
-    """No mark first, no space after it, an empty one, a ``]`` inside it, a space before it,
-    nothing after it: none is :func:`card_title`'s shape."""
-    assert title_alias(title) is None
 
 
 def _task(**changes):

@@ -909,8 +909,8 @@ class TestTheDoorsKeepTheAdHocShape:
 def _code_lines_matching(pattern, path):
     """Return *path*'s CODE lines matching *pattern* -- strings and comments blanked.
 
-    The plan gate's ``code`` census filter, restated over one file: a
-    docstring naming the old spelling is prose, not a use of it.
+    A ``code`` census filter over one file: a docstring naming the old
+    spelling is prose, not a use of it.
     """
     source = path.read_text()
     by_line = {}
@@ -929,8 +929,7 @@ def test_the_census_reads_three_accessor_bodies():
 
     Twelve code lines spelled ``recurrence_rule is (not) None`` on the base
     tree; the three left are the accessor bodies, one per definition kind
-    (R-BAL97).  The plan gate re-runs the same census from the step's
-    sentence; this pins the ANSWER so a fourth spelling fails here first.
+    (R-BAL97).  This pins the ANSWER, so a fourth spelling fails here.
     """
     pattern = re.compile(r"recurrence_rule is (not )?None")
     hits = {

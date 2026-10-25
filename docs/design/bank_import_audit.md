@@ -15,13 +15,12 @@ standing merchant rules) and on the five screens rendered live through the devel
 
 **Do not scrap the feature. Scrap the five screens.** The layers underneath the screens -- the
 import record, the matchers, the standing-rule store, the auto-apply door, the receipt and the
-undo -- are measured good and are what the balance cutover (the cutover steps `steps.md` ranks
-behind this rebuild) consumes. The layers on top of them were rebuilt over five days as disclosure
-documents rather than as a work queue, and the queue itself holds sixteen lines that no screen can
-resolve because their remedy lives in other arcs. The developer's expectation -- import, most lines
-match themselves, a few exceptions by hand, done -- is exactly the design every peer product
-converges on, and it is reachable here: the engine for it shipped last week and has never run on a
-real import.
+undo -- are measured good and are what the balance cutover (the cutover steps ranked behind this
+rebuild) consumes. The layers on top of them were rebuilt over five days as disclosure documents
+rather than as a work queue, and the queue itself holds sixteen lines that no screen can resolve
+because their remedy lives in other arcs. The developer's expectation -- import, most lines match
+themselves, a few exceptions by hand, done -- is exactly the design every peer product converges on,
+and it is reachable here: the engine for it shipped last week and has never run on a real import.
 
 ## Method and scope
 
@@ -409,10 +408,10 @@ census `X-gi` already owes.
 
 ## Rulings needed before Loop A
 
-**RULED 2026-08-29: yes to all seven** (developer, in-session). They are recorded as
-`bank_import:R-HP` to `R-HV` in `docs/plans/rulings.md`, one per item below in the same order; the
-build steps they mint are `bank_import:X-gj` and its leaves in `steps.md`. The list is kept here as
-the argument each ruling points back to.
+**RULED 2026-08-29: yes to all seven** (developer, in-session). They are recorded as the ruling
+cards `bank_import:R-HP` to `R-HV`, one per item below in the same order; the build steps they mint
+are `bank_import:X-gj` and its leaves. The list is kept here as the argument each ruling points back
+to.
 
 1. **The screen's vocabulary is the four verbs** (match / add / transfer / skip); the evidence and
    mechanism partitions stay in the service. Amends R-HB's visible grouping only.
@@ -562,9 +561,11 @@ The hero drops to two columns. Both themes through the tokens; the mockup was sh
 
 ## Loop B plan
 
-The build is `bank_import:X-gj`, decomposed in `steps.md`, which is where its leaves, their ORDER
-and what blocks what are stated. What belongs here is only what each leaf IS, so that the locked
-direction and the registry cannot describe different work:
+The build was `bank_import:X-gj`, now shipped (its as-built records are
+`docs/plans/historical/bank_import_x_gj_as_built_2026-09-04.md` and
+`docs/plans/historical/bank_import_x_gj_1_as_built_2026-09-02.md`); the plan stated its leaves,
+their ORDER and what blocked what. What belongs here is only what each leaf IS, so that the locked
+direction and the plan could not describe different work:
 
 - **The page** (`X-gj-1`) is itself decomposed three ways, on the two boundaries the package already
   draws: `X-gj-1a` is the view model in the service; `X-gj-1b` is the page and the three tabs whose

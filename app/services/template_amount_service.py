@@ -347,7 +347,7 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     no caller can move one without the other.  **The scalar stopped PRICING a
     transaction row at plan step balance:X-au-e** -- generation writes no figure
     and the series answers on each row's own due date -- but it did not go with
-    that step and no step in ``docs/plans/steps.md`` removes it: a generated
+    that step, and it stays until plan step balance:X-bp deletes it: a generated
     TRANSFER still stores it (until X-au-f), ``salary_profile_service`` opens an
     archived profile's series AT it, the conflict chooser gates on it, and the
     cutover migration's downgrade restores from it.

@@ -1,7 +1,7 @@
 """Report what an owner's payroll is modelled to put into each account.
 
-Plan step **salary:R14-b** (``docs/plans/implementation_plan_salary.md``
-section 4), findings **D45** and **N-532**.  The step re-points the modelled
+Plan step **salary:R14-b** (shipped at ``e0f0c05f``),
+findings **D45** and **N-532**.  The step re-points the modelled
 contribution feed off its own arithmetic and onto the paycheck engine's
 per-period breakdown (ruling **R-SAL2**), which **MOVES MONEY**: this is the
 harness that says how much, on real data, through the app's own doors.

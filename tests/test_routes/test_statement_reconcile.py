@@ -928,8 +928,8 @@ class TestTheMatchPanePricesWhatIsTicked:
         """Stage finding **salary:N-391**'s own case.
 
         N-239 until `balance:X-aw` retired that row on 2026-08-30 and split
-        its bank half off as N-391; `grep -c '| N-239 ' docs/plans/ledger.md`
-        returns 0.
+        its bank half off as N-391; the planning ledger held no N-239 row
+        after it.
         """
         statement = an_import(seed_user)
         line = a_bank_line(

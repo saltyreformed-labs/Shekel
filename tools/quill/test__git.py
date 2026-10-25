@@ -1,8 +1,8 @@
 """The tracker tool's own git calls, read from throwaway repositories under pytest's tmp_path.
 
-What a card's trailers mean (``Ships:``, ``Reopens:``) moved with :mod:`tools.ci.trailers` to
-``tools/ci/test_trailers.py`` (step X-cx's L4); quill reads none since the ship marker (X-cx's
-M1, ruling ``balance:R-BAL359``).  The marker and the claim are read and written here against a
+Quill reads no trailer (``Ships:``, ``Reopens:``) since the ship marker (X-cx's M1, ruling
+``balance:R-BAL359``), and step X-cx's S3b deleted the trailer reader (ruling
+``balance:R-BAL389``).  The marker and the claim are read and written here against a
 real bare ``origin`` (:func:`_origin`), so the pushes, the lease and the fetch run as git runs
 them.
 """
@@ -566,6 +566,27 @@ def test_a_branch_starts_at_the_commit_it_grew_from(repo, monkeypatch):
     assert _git.started(repo, "fresh") == "2026-10-02T09:00:00-04:00"
 
 
+@pytest.mark.parametrize("kind", ["tag", "branch"])
+def test_a_reference_named_like_dev_does_not_move_where_a_branch_started(repo, monkeypatch,
+                                                                         kind):
+    """Git resolves the short name ``origin/dev`` to a tag or a local branch of that name
+    before the remote-tracking branch, and CI's checkout fetches every tag: one at the
+    branch's own tip would leave it no commit of its own, so its window would start at its
+    tip and hide every spec edit since the work began.  ``dev`` is read by its full name
+    (:func:`tools.ci.gitcmd.tracking`), as every other reader of it asks.  The control: the
+    short name IS shadowed."""
+    dated = {}
+    for name, when, parents in (("fork", "2026-09-30T12:00:00-04:00", ()),
+                                ("tip", "2026-10-03T09:00:00-04:00", ("fork",))):
+        monkeypatch.setenv("GIT_AUTHOR_DATE", when)
+        dated[name] = _commit(repo, name, parents=[dated[p] for p in parents])
+    _dev(repo, dated["fork"])
+    _run(repo, "update-ref", "refs/heads/feature", dated["tip"])
+    _run(repo, kind, _git.DEV, dated["tip"])
+    assert _run(repo, "rev-parse", _git.DEV) == dated["tip"], "control: the short name is shadowed"
+    assert _git.started(repo, "feature") == "2026-09-30T12:00:00-04:00"
+
+
 def test_a_branch_holding_a_merge_starts_at_the_earliest_line_it_grew_from(repo, monkeypatch):
     """Review cp4 L-5: a merge listing a peer line FIRST put that line's base first, so the
     branch's own commit b1 fell outside the window; every line it grew from counts."""
@@ -635,8 +656,8 @@ def test_a_bound_environment_reaches_no_repository_but_the_one_named(binding, tm
     directory named, every answer is that directory's, and the sentinel -- its refs, config,
     HEADs and indexes -- is byte-identical afterwards.  The sentinel is proven bound, and its
     indexes not empty (review cp3 M-1's control), before it is handed over
-    (``scratch._prove_bound``).  The trailer rules' own calls, ``is_ancestor`` among them,
-    are held the same way in ``tools/ci/test_trailers.py``."""
+    (``scratch._prove_bound``).  ``tools.ci.gitcmd``'s own calls, ``is_ancestor`` among them,
+    are held the same way in ``tools/ci/test_gitcmd.py``."""
     sentinel, before = scratch.bound_sentinel(tmp_path, binding, monkeypatch.setenv)
     work = scratch.repository(tmp_path, "work")
     _origin(work)

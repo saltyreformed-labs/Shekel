@@ -25,7 +25,10 @@ them now if this session has not. Then hold the work to this brief:
    boundary, run `/handoff`.
 5. **Adversarial review before commit.** A neutral fresh subagent reviews the design and the diff;
    it grades the fix's own claims about itself hardest. Findings are fixed or reported, never waved
-   through.
+   through. A card's spec is its body in the tracker, and an edit to it counts the moment it is
+   saved (R-BAL174), so the review also reads every edit since the work started:
+   `python -m tools.quill.quill spec-history plan#N --since card/N` is handed to the reviewer, and a
+   spec change the code does not answer is a finding.
 6. **Coordinate.** When peer sessions are active: PRs and merges go through the coordinator
    session; pushing a branch to back up work is fine. Suite runs need no slot -- each gets its own
    cluster -- but the wrapper names any peer run it can see, and a gating run of yours slows theirs.

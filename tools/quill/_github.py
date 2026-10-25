@@ -105,9 +105,8 @@ class CredentialsError(ValueError):
     holds no client ID, or ``app.pem`` no RSA private key quill can sign a token with.
     Raised where each file is read or parsed (:func:`app_credentials`, :func:`app_jwt`).
     ``quill`` and ``release plan`` report it as a tracker they cannot reach (exit 2) and
-    ``setup_tracker`` as a difference (exit 1); ``migrate`` does not catch it, and its
-    docstring names an App key file that cannot be parsed as a traceback (exit 1).  A
-    file that is MISSING stays the :class:`FileNotFoundError` reading it raises."""
+    ``setup_tracker`` as a difference (exit 1).  A file that is MISSING stays the
+    :class:`FileNotFoundError` reading it raises."""
 
 
 def _graphql_errors_say_rate_limit(response) -> bool:
@@ -249,11 +248,6 @@ class GitHub:
         """One REST call; the decoded JSON body, or None for an empty one."""
         response = self._send(method, API + path, body)
         return response.json() if response.content else None
-
-    def rest_text(self, method: str, path: str, body: dict | None = None) -> str:
-        """One REST call whose answer is text, not JSON (``/markdown`` answers HTML); the
-        text."""
-        return self._send(method, API + path, body).text
 
     def graphql(self, query: str, **variables) -> dict:
         """One GraphQL call; its ``data``.  GraphQL reports errors in a 200."""

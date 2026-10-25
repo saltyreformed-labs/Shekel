@@ -800,7 +800,7 @@ def reconcile_page(
     # The hazard that carried -- ``X-gj-4b`` lighting the verb while the tab
     # could show nothing, so a skipped line left EVERY surface with no way back
     # -- is now unrepresentable rather than held off by a blocker in
-    # ``docs/plans/steps.md``: the tab reads the store
+    # the plan: the tab reads the store
     # (:func:`~._skipping.skipped_acts`), so whatever a door records, the tab
     # renders.  Named by adversarial design review 2026-09-03 and closed here.
     transfers = tuple(parked_card(review, one) for one in review.parked)

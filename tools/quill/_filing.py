@@ -124,8 +124,8 @@ def _leaf_milestone(tracker: Tracker, parent: Card, cards: dict[int, Card],
     none, and each leaf below it in a milestone (nested splits included,
     :func:`_state.leaves_below`) is named with it, as that leaf's, for a person to set one
     on the web: the tracker records no outcome for the split step.  None is
-    taken from them: a leaf the migration filed may hold its OWN outcome's, not one carried
-    from ``parent`` (``_migrate_source._carried_outcomes``), and the tracker cannot tell
+    taken from them: a leaf X-cx's migration filed may hold its OWN outcome's, not one it
+    carried down from the nearest split step above holding one, and the tracker cannot tell
     the two apart (X-cx S3a's review, HIGH 1: on the plan at the cutover, 17 of 32 split
     steps would have filed a new leaf in a sibling's outcome, recurrence R5's in place of
     R5's own).

@@ -40,7 +40,7 @@ for a fence, the kind is this record's reading.
 | T-32 | `.github/workflows/ci.yml:590` (audit-trigger benchmarks) | nothing; it measures trigger overhead | not a fence |
 | T-36 | `tests/test_arch/test_an_inline_style_is_refused_by_a_gate.py:96` | the inline-style lint rule going missing or silent | a test of a linter rule |
 | T-50 | `tests/test_arch/test_the_shards_partition_the_suite.py:115` | a shard split that drops or doubles a test | CI infrastructure |
-| T-54 | `tools/ci/ci_scope.py:151` (`EXEMPT_READERS`) | a code change classed as registry-only; it fails closed | CI economics, built to outlive the plan gate |
+| T-54 | `tools/ci/ci_scope.py:151` (`EXEMPT_READERS`) | a code change classed as registry-only; it fails closed | CI economics, built to outlive the plan gate; deleted by the tracker switch (`balance:X-cx`, L8; `balance:R-BAL399`), every pull request running every grader |
 | T-55 | `tools/ci/ci_verdict.py` | a green verdict over a skipped or failed grader | a correctness gate on CI itself |
 | T-57 | `tools/ci/test_bottom_layer.py` | a non-stdlib or upward import in `tools/ci` (`balance:R-BAL223`) | layering of the tooling |
 | T-58 | `tools/ci/test_ci_workflow.py` | CI wiring that reads a red grader as green | a test of CI's wiring |
@@ -195,8 +195,8 @@ keys `salary.paycheck_lines`, the table DC-09 reads, or DC-09 stays.
   takes a route-only `BalanceContext` factory.
 - T-51's owner and cap arms, by `X-cx`'s `tools/quill/check.py` and the tracker Action: the rule set
   moves home.
-- T-53, the shipped-against-git arm, by `tools/ci/trailers.py` and `plan sync` (`balance:R-BAL184`),
-  a stored card state kept by a reconciler.
+- T-53, the shipped-against-git arm, by the ship marker `plan/ships/N` (`balance:R-BAL359`) and
+  `quill sync` (`balance:R-BAL184`), a stored card state kept by a reconciler.
 - T-06, W9908's list, possibly by W9910 package privacy, as `G1`'s trace decides.
 - T-01, T-02, T-03, T-13 and T-74, static checkers, by run-time refusals (`FloatOperation`, `Money`,
   a raising `DisplayLabel.__eq__`), so their coverage becomes the code that runs.

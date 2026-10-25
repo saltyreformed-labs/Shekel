@@ -275,13 +275,13 @@ class TestTransactionsMarkDoneActualAmount:
         figure with the same 422 and no transition.  The leg is the
         checking side's, the transfer's own ``from_account_id``: it was
         read off whichever of the transfer's two shadow rows came first
-        until plan step balance:X-bi-6-4d-3 made a transfer one row.  The
+        until plan step balance:X-bi-6-4d-2 made a transfer one row.  The
         422 re-renders that leg's own cell, which is what grades the
         ``leg_account_id`` the request carries.  The savings books open
         before the period, so a valid figure WOULD settle here and the
         refusal is the figure's alone: on books opened today, every settle
         was refused by the books first and the no-transition read could
-        not fail (found by an adversarial review of 4d-3).
+        not fail (found by an adversarial review of 4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)

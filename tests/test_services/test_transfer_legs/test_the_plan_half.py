@@ -3,7 +3,7 @@ and the contribution feeds read the transfer, and a transfer settled with no rec
 neither half of the cash fold.
 
 The part's docstring named the two status drifts it pinned, drift A counted once and drift B by
-neither, until plan step ``balance:X-bi-6-4d-3`` deleted drift A's four cases (ruling
+neither, until plan step ``balance:X-bi-6-4d-2`` deleted drift A's four cases (ruling
 **R-BAL313**); :class:`TestAStatusDriftIsCountedOnce` says what is left.
 """
 
@@ -100,7 +100,7 @@ class TestTransferLegs:
             db.session.commit()
             # Through the transfer service's delete, the door that hides a
             # transfer; it hid the parent and both shadows together until
-            # plan step balance:X-bi-6-4d-3 made a transfer one row (ruling
+            # plan step balance:X-bi-6-4d-2 made a transfer one row (ruling
             # R-BAL258).
             delete_transfer(deleted.id, seed_user["user"].id, soft=True)
             db.session.commit()
@@ -123,7 +123,7 @@ class TestTheCashFoldReadsTheParent:
         The leg half derives the leg from the transfer.  The case also read
         that no ROW of the plan named a transfer (a shadow beside its leg
         would have counted the transfer twice) until plan step
-        ``balance:X-bi-6-4d-3``'s vacuous-residue checkpoint: a transfer is
+        ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint: a transfer is
         one row since that step (ruling **R-BAL258**), and the database
         refuses a row naming one (``ck_transactions_names_no_transfer``,
         pinned by ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``'s
@@ -185,7 +185,7 @@ class TestTheCashFoldReadsTheParent:
         the day before reads the pre-transfer balance and the 3rd reads the
         transfer (checking $250.00 lower, savings $250.00 higher).  The
         savings side's two reads joined at plan step
-        ``balance:X-bi-6-4d-3``: until then the case read checking alone, so
+        ``balance:X-bi-6-4d-2``: until then the case read checking alone, so
         a fold that landed only the to-side's leg on its period's day instead
         of its due date failed none of the tests that passed at that step
         (measured over the whole suite).  Renamed from
@@ -193,7 +193,7 @@ class TestTheCashFoldReadsTheParent:
         it was a firing control that moved the checking-side shadow's due
         date to the 8th around the service, the day the fold dated until
         plan step ``balance:X-bi-6a``.  A transfer came with two shadow rows
-        until plan step ``balance:X-bi-6-4d-3`` made it one row (ruling
+        until plan step ``balance:X-bi-6-4d-2`` made it one row (ruling
         **R-BAL258**), so there is no shadow to move, and the case keeps its
         transfer's day alone.
         """
@@ -400,7 +400,7 @@ class TestAStatusDriftIsCountedOnce:
     (``-$500.00`` on a ``$250.00`` transfer, ledger row **BAL-500**) until
     plan step ``balance:X-bi-4a`` let a side's DATED movement, not a status,
     decide which relation its leg is in (ruling **R-BAL79**).  Its four
-    cases were deleted at plan step ``balance:X-bi-6-4d-3`` (ruling
+    cases were deleted at plan step ``balance:X-bi-6-4d-2`` (ruling
     **R-BAL313**): a transfer came with two shadow rows until that step made
     it one row (ruling **R-BAL258**), so no shadow's status can drift.  Drift
     B, the parent settled alone, is the one case left, and it is no drift
@@ -426,12 +426,12 @@ class TestAStatusDriftIsCountedOnce:
         account reads on the transfer's day what it read before the transfer
         existed: checking does not fall $250.00 and savings does not rise
         $250.00.  The plan read, by the fold's own loader on both accounts,
-        joined at plan step ``balance:X-bi-6-4d-3``'s vacuous-residue
+        joined at plan step ``balance:X-bi-6-4d-2``'s vacuous-residue
         checkpoint: until then the case read it only through the balances,
         which the valuation's own re-check of the status holds, so a loader
         that admitted the closed transfer's leg on either side failed none of
         this case's reads (measured on each side).  The savings
-        read joined at plan step ``balance:X-bi-6-4d-3``: until then the case
+        read joined at plan step ``balance:X-bi-6-4d-2``: until then the case
         read checking alone, and a cash fold that valued only the to-side's
         leg of such a transfer, at the transfer's amount, changed no balance
         any passing test read (measured over the whole suite at that step).

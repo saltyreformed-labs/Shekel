@@ -8,7 +8,7 @@ release that stops their upkeep) and 2026-10-09 (ruling R-BAL258: the database
 refuses a new twin; ruling R-BAL260: the downgrade restores each twin from a
 kept copy)
 
-Plan step **balance:X-bi-6-4d-3** of ``docs/audits/balance_architecture/README.md``
+Plan step **balance:X-bi-6-4d-2** of ``docs/audits/balance_architecture/README.md``
 (design ``X-bi-6-4d`` D6).  **Every transfer had two hidden twin
 ``budget.transactions`` rows**, one on each account, which the transfer service
 created with it and kept equal to it.  Since ``e616adf7fe22`` (the step before,
@@ -401,7 +401,7 @@ CREATE TABLE system.transfer_twin_purge (
 _COMMENT_COPY_SQL = """
 COMMENT ON TABLE system.transfer_twin_purge IS
 'Every transfer twin row (budget.transactions with transfer_id set) as revision
-82f7b7ed4332 (plan step balance:X-bi-6-4d-3, ruling R-BAL260) deleted it: the
+82f7b7ed4332 (plan step balance:X-bi-6-4d-2, ruling R-BAL260) deleted it: the
 whole row as jsonb, its transfer''s version counter and whether the twin''s side
 held a payment record at that moment.  Read by that revision''s downgrade,
 which restores each twin from it, and inherited by plan step balance:X-bi-6-5,
@@ -810,7 +810,7 @@ def refuse_twins_that_cannot_go(bind) -> None:
         )
     if problems:
         raise RuntimeError(
-            "X-bi-6-4d-3 refuses: " + "; ".join(problems) + ".  Nothing was "
+            "X-bi-6-4d-2 refuses: " + "; ".join(problems) + ".  Nothing was "
             "written; each is the developer's to rule (rulings R-BAL166, "
             "R-BAL260)."
         )
@@ -826,7 +826,7 @@ def upgrade():
     deleted = bind.execute(sa.text(_DELETE_TWINS_SQL)).rowcount
     if deleted != kept:
         raise RuntimeError(
-            f"X-bi-6-4d-3 kept {kept} twin(s) and deleted {deleted}; the "
+            f"X-bi-6-4d-2 kept {kept} twin(s) and deleted {deleted}; the "
             "transaction rolls back."
         )
     op.create_check_constraint(
@@ -834,7 +834,7 @@ def upgrade():
         "transfer_id IS NULL", schema="budget",
     )
     print(
-        f"X-bi-6-4d-3: {deleted} transfer twin row(s) kept in "
+        f"X-bi-6-4d-2: {deleted} transfer twin row(s) kept in "
         "system.transfer_twin_purge and deleted; 0 refused.  A transaction "
         "naming a transfer is now refused (ck_transactions_names_no_transfer)."
     )
@@ -856,7 +856,7 @@ def downgrade():
     built = bind.execute(sa.text(_BUILD_NEW_SQL)).rowcount
     op.execute("DROP TABLE system.transfer_twin_purge")
     print(
-        f"X-bi-6-4d-3 downgrade: {restored} kept twin(s) restored: {rebuilt} "
+        f"X-bi-6-4d-2 downgrade: {restored} kept twin(s) restored: {rebuilt} "
         f"in line with a transfer written since; {changed} of an unwritten "
         "transfer differ from their kept row, saying what the transfer and "
         f"its side's record say now ({unfit} of them because a kept value no "

@@ -656,11 +656,11 @@ class TestTemplateUpdate:
         """Apply 'use' realigns the overridden transfer to the new amount.
 
         It also read both shadow transactions' amounts until plan step
-        ``balance:X-bi-6-4d-3``, which births none: each side's figure is
+        ``balance:X-bi-6-4d-2``, which births none: each side's figure is
         derived from the transfer read here, a projection
         ``test_transfer_legs/test_what_a_side_shows.py::TestBothSidesShowTheTransfer`` grades
         field by field (ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-3).
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
             from app.services import transfer_recurrence, transfer_service
@@ -801,7 +801,7 @@ class TestUnarchiveUsesService:
         (the definition's price), Projected, in its own pay period.
 
         **Was ``test_unarchive_restores_via_service_with_invariant_correction``
-        until plan step ``balance:X-bi-6-4d-3``.**  Its proof was a twin whose
+        until plan step ``balance:X-bi-6-4d-2``.**  Its proof was a twin whose
         period it drifted and the service re-synced; that step births no twin
         (the database refuses one), and the re-sync is an arm leaf 3b
         deletes.  What the door does after 3b that the route could not do
@@ -809,7 +809,7 @@ class TestUnarchiveUsesService:
         graded at the service, in ``test_transfer_service/test_the_restore_door.py``'s
         ``TestRestoreTransfer``, not through this route.  Re-expressed by the
         coordinator's ruling (option A, R-BAL207, ruling R-BAL167 class 1,
-        plan step balance:X-bi-6-4d-3).
+        plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)

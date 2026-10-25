@@ -807,7 +807,7 @@ def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
     # the rows still exist to link against, re-syncs a loan the payment left
     # (its split links no row, ruling **R-BAL102**) and emits
     # ``EVT_TRANSFER_HARD_DELETED`` per deletion; its orphan self-check went
-    # with the twins at plan step ``balance:X-bi-6-4d-3``.  See audit B6-03 / LOW-02.
+    # with the twins at plan step ``balance:X-bi-6-4d-2``.  See audit B6-03 / LOW-02.
     for xfer in work.retire:
         transfer_service.delete_transfer(xfer.id, template.user_id, soft=False)
 

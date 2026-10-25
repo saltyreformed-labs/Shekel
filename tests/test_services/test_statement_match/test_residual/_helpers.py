@@ -67,7 +67,7 @@ def _minted(seed_user):
     both through one predicate would pass a rename it should have caught.
 
     **No transfer term.**  A transfer came with two shadow rows until plan
-    step ``balance:X-bi-6-4d-3``, and the ``create_transfer`` fixture left a
+    step ``balance:X-bi-6-4d-2``, and the ``create_transfer`` fixture left a
     shadow's category NULL, so this helper excluded shadows by
     ``transfer_id IS NULL`` (without that term it reported one as a row this
     door minted, in a first version of the group cases).  A transfer is one
@@ -197,7 +197,7 @@ def _a_transfer(seed_user, *, amount="100.00"):
     Built through ``transfer_service.create_transfer``, the sole creation
     chokepoint, so the transfer and its invariants are the real ones.  A
     case ticks it as its leg on checking, the EXPENSE side.  It returned
-    that side's shadow row until plan step ``balance:X-bi-6-4d-3`` (ruling
+    that side's shadow row until plan step ``balance:X-bi-6-4d-2`` (ruling
     **R-BAL167** class 4): no shadow can be stored since that step's first
     checkpoint (ruling **R-BAL258**), and its one caller read the shadow's
     transfer.

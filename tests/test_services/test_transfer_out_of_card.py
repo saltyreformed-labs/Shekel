@@ -56,7 +56,7 @@ def _reread(xfer_id):
     same name does.  The commit writes whatever a REFUSED door staged, so a
     refusal case reads what the session would have written.  The cases read
     the transfer's two legs, by side, until plan step
-    ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-3; the legs were two shadow
+    ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-3; the legs were two shadow
     rows until that step (ruling R-BAL167 class 4), and each is derived from
     the transfer now: a side's account is its endpoint column
     (``test_transfer_legs/test_what_a_side_shows.py``'s ``TestLegOf``) and its label is composed
@@ -82,7 +82,7 @@ class TestTheCreateDoor:
         transfer exists afterwards.
 
         It also counted the card's ``Transaction`` rows (none) until plan
-        step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2b.  No transfer door
+        step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2b.  No transfer door
         writes a ``Transaction`` row since that step's create door, so the
         count read none whether the guard fired or not (a vacuous read, the
         mutant M-NOCARDGUARD of the review of its checkpoint 2e-1), and a
@@ -183,7 +183,7 @@ class TestTheEndpointMoveDoor:
         checkpoint :func:`_reread` names, where it also read the legs'
         accounts and the expense leg's label; the legs were the two shadow
         rows, whose names the move re-wrote, until plan step
-        ``balance:X-bi-6-4d-3``.
+        ``balance:X-bi-6-4d-2``.
         """
         with app.app_context():
             td = seed_full_user_data
@@ -216,7 +216,7 @@ class TestTheEndpointMoveDoor:
         The legacy state is PLANTED, because no door produces it: a transfer
         whose source is already a card must move its DESTINATION without
         being re-graded for a shape the edit does not touch.  It is planted on
-        the transfer alone since plan step ``balance:X-bi-6-4d-3``, where it was
+        the transfer alone since plan step ``balance:X-bi-6-4d-2``, where it was
         planted on the transfer AND its expense shadow: a leg is derived from
         its transfer, so there is no second row to plant it on (ruling
         R-BAL167 class 1).  The move is read off the row re-read from the

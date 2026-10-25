@@ -168,7 +168,7 @@ def _settle_payment(seed_user, loan, period, cash, actual=None, settled_on=None)
 
     Creates and settles the transfer through ``transfer_service`` (so the
     Step-2 cash entry auto-posts) and returns it.  It returned the loan-side
-    income shadow beside it until plan step ``balance:X-bi-6-4d-3`` made a
+    income shadow beside it until plan step ``balance:X-bi-6-4d-2`` made a
     transfer one row (ruling R-BAL167 class 4): the transfer and the loan
     name the side the split books under now.
 
@@ -222,7 +222,7 @@ def _loan_side_movement(xfer, loan):
     (:func:`~tests._test_helpers.transfer_side_record`).  It hung off the
     income shadow (``shadow.covering_movements``) until plan step
     ``balance:X-bi-6-4d-2`` moved it onto the transfer, and the shadow named
-    the transfer and side until plan step ``balance:X-bi-6-4d-3`` (ruling
+    the transfer and side until plan step ``balance:X-bi-6-4d-2`` (ruling
     R-BAL167 class 4).
     """
     movement = transfer_side_record(_db.session, xfer.id, loan.id)
@@ -1074,7 +1074,7 @@ class TestSyncLoanPaymentPostings:
             # day is the loan side's RECORD's since plan step
             # balance:X-bi-6-4d-2; it read the income shadow's own day until
             # then (ruling R-BAL167 class 1).  The period is the transfer's
-            # since plan step balance:X-bi-6-4d-3; it read the shadow's
+            # since plan step balance:X-bi-6-4d-2; it read the shadow's
             # mirrored copy until then (ruling R-BAL167 class 1).
             assert entry.transfer_id is None
             assert entry.transaction_id is None
@@ -1367,7 +1367,7 @@ class TestSyncLoanPaymentPostings:
         property is structural now, and this pins it as such.
 
         It drove the poster on the payment's loan-side income shadow until
-        plan step ``balance:X-bi-6-4d-3`` made a transfer one row: no
+        plan step ``balance:X-bi-6-4d-2`` made a transfer one row: no
         transaction row can name the payment now (ruling **R-BAL258**).
         Re-expressed under ruling **R-BAL167** class 1 (the cp2a review's
         L-2, its RV-B3), an ordinary row standing where the shadow stood: an
@@ -1553,7 +1553,7 @@ class TestTheSplitIsADateKeyedCorrection:
         principal (-500) = -100500.00 and the interest ledger 500.00.
 
         **Paid is pressed on a day the test states, and the loan side is read
-        off the transfer, since plan step ``balance:X-bi-6-4d-3``** (ruling
+        off the transfer, since plan step ``balance:X-bi-6-4d-2``** (ruling
         **R-BAL167** class 1): it asked the income shadow for its covering
         movements and its settle day, and both answers had been empty since
         plan step ``balance:X-bi-6-4d-2`` moved the record onto the transfer
@@ -1639,7 +1639,7 @@ class TestTheSplitIsADateKeyedCorrection:
             db.session.commit()
             # One key: each payment's period off its transfer and its day off
             # its loan side's record.  Both were read off the income shadows
-            # until plan step balance:X-bi-6-4d-3, whose day stopped being
+            # until plan step balance:X-bi-6-4d-2, whose day stopped being
             # kept at plan step balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
             assert (
                 first_xfer.pay_period_id,

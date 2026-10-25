@@ -735,7 +735,7 @@ class TestDaysUntilDue:
         and the cutover (plan step balance:X-bi-7d-2) dated every legacy one
         the same way, so a row NO definition prices is what still reaches
         the ``None`` arm.  It was a transfer's shadow until plan step
-        ``balance:X-bi-6-4d-3`` refused the shadow, and the card cutover
+        ``balance:X-bi-6-4d-2`` refused the shadow, and the card cutover
         (``credit_card:CC-7``, rulings **R-CC17** / **R-CC20**) deletes the
         payback, so this case goes with the arm.  The payback is Projected,
         so the settled arm, which also answers ``None``, cannot answer for

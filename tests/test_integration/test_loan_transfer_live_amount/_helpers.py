@@ -32,7 +32,7 @@ def _derived_cash(seed_user, legs):
     read-time override to supersede.  So the map this file grades is the
     amount model's own, and the assertions below keep their original figures.
     It was ``cash_ledger.amounts_by_id`` over the shadow rows, keyed by
-    transaction id, until plan step balance:X-bi-6-4d-3 stopped the shadows
+    transaction id, until plan step balance:X-bi-6-4d-2 stopped the shadows
     being born; it is ``cash_ledger.leg_amounts_by_key`` over the legs now,
     keyed by ``leg.cell_key`` -- what the grid publishes for a leg since plan
     step ``balance:X-bi-6-1`` (ruling **R-BAL167** class 4).
@@ -170,7 +170,7 @@ def _mark_done_from_leg(auth_client, transfer_id, account_id):
     that leaf deleted the shadow branch.  The leg is *transfer_id*'s on
     *account_id*; the response is the leg's cell.  It took the loan-side
     shadow row and read only its ``transfer_id`` and ``account_id`` until plan
-    step balance:X-bi-6-4d-3 stopped the shadow being born, so it takes those
+    step balance:X-bi-6-4d-2 stopped the shadow being born, so it takes those
     two now (ruling **R-BAL167** class 4).
     """
     return auth_client.post(
@@ -202,7 +202,7 @@ def _loan_payment_legs(loan_id, scenario_id):
     From-side first, transfers in id order.  It was
     ``_loan_transfer_shadows`` and returned every shadow row in the scenario
     -- both sides, and IGNORING ``loan_id`` -- until plan step
-    balance:X-bi-6-4d-3 stopped the shadows being born (ruling **R-BAL167**
+    balance:X-bi-6-4d-2 stopped the shadows being born (ruling **R-BAL167**
     class 4).  The legs are read off each transfer with
     :func:`~app.services.transfer_legs.leg_of`, so both sides stay covered
     and the parameter now selects what it names.
@@ -227,7 +227,7 @@ def _first_payment(loan_id, scenario_id, due_date=None):
     """Return the transfer into *loan_id* due on *due_date*, or the first one.
 
     Where these cases found the loan-side SHADOW row due that day (or the
-    first by id), until plan step balance:X-bi-6-4d-3 stopped the shadows
+    first by id), until plan step balance:X-bi-6-4d-2 stopped the shadows
     being born (ruling **R-BAL167** class 4): the shadow copied its due date
     and pay period off this transfer, and its leg on the loan is
     ``transfer_legs.leg_of(xfer, loan_id)``.  With *due_date* it insists on

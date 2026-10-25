@@ -1,6 +1,6 @@
 """Migration ``82f7b7ed4332``: a transfer is one row.
 
-Plan step ``balance:X-bi-6-4d-3``, rulings **R-BAL166** (the twin rows are
+Plan step ``balance:X-bi-6-4d-2``, rulings **R-BAL166** (the twin rows are
 deleted in the release that stops their upkeep), **R-BAL258** (the database
 refuses a new one, "Database refuses") and **R-BAL260** (the downgrade restores
 each twin from a kept copy, "Keep a copy").  The revision keeps a copy of every

@@ -226,7 +226,7 @@ class TestVisibilityFiltering:
         it; the cutover minted every such row a definition (the placed case
         below) and dropped the cell.  The link-less row left is a CC payback
         (the transfer shadow was the other until plan step
-        ``balance:X-bi-6-4d-3``), and the card cutover (``credit_card:CC-7``,
+        ``balance:X-bi-6-4d-2``), and the card cutover (``credit_card:CC-7``,
         rulings **R-CC17** / **R-CC20**) deletes it, so this case goes with
         the arm.
 

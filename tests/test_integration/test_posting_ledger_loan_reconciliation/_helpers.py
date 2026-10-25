@@ -490,7 +490,7 @@ def _assert_completeness(
     # A split's ``source`` is the payment's loan-side TransferLeg since plan step
     # balance:X-bi-6-4d-2, not its income shadow; the shared reader keys the
     # corrections off the transfer and the loan side's record, and is passed
-    # the transfer and the loan since plan step balance:X-bi-6-4d-3, where no
+    # the transfer and the loan since plan step balance:X-bi-6-4d-2, where no
     # shadow exists to name the side (ruling R-BAL167 class 4).
     for split in splits:
         non_principal = split.interest + split.escrow + split.excess

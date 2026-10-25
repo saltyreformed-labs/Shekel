@@ -117,7 +117,7 @@ class TestBothSidesShowTheTransfer:
     ):
         """ONE fact, one test: each side shows the stored row's value, field by field.
 
-        A transfer is one stored row since plan step ``balance:X-bi-6-4d-3``,
+        A transfer is one stored row since plan step ``balance:X-bi-6-4d-2``,
         and its two sides are read off it every time, so "both sides show the
         transfer's amount" can break only in the code that READS a side,
         never in an edit (ruling **R-BAL290** part 1, the developer,
@@ -141,7 +141,7 @@ class TestBothSidesShowTheTransfer:
         :class:`TestALegsDisplayProjections` can see: the label case's
         transfers have no id, and the saved transfer there has a definition
         (the mutant TMPL-ONEOFF-ID of the review of plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-2a, which passes both).
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-2a, which passes both).
 
         Three transfers are written through the doors: Savings to Reserve
         at $1,062.48, Projected, in the sixth period, due nine days in,
@@ -153,7 +153,7 @@ class TestBothSidesShowTheTransfer:
         date, no category and no notes.  The third is the row whose optional
         columns are empty, so a side that answers something for an empty
         one -- a default category, day or note -- disagrees with it.  It
-        joined the table at plan step ``balance:X-bi-6-4d-3``'s checkpoint
+        joined the table at plan step ``balance:X-bi-6-4d-2``'s checkpoint
         2e-2b-1b-2: until then both rows carried a category, and a side that
         answered one for a transfer filed under none failed only
         ``test_transfer_service/test_the_edit_door.py``'s
@@ -349,7 +349,7 @@ class TestALegsDisplayProjections:
         (only where the transfer is saved and the side holds no record, or
         only where the side holds one), on the expense side alone and on the
         income side alone (measured at the fix of the delta review of plan
-        step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-2c, and again by
+        step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-2c, and again by
         that fix's own review).  Two neighbouring states are asked their
         label by no case named here: a REVERTED transfer, Projected over
         each side's kept un-dated record (ruling R-BAL61), and a saved
@@ -365,7 +365,7 @@ class TestALegsDisplayProjections:
 
         ``test_transfer_service/test_the_create_door.py``'s ``test_with_custom_name`` and
         ``test_with_template_id`` asked a created transfer's two sides these
-        questions until plan step ``balance:X-bi-6-4d-3``'s checkpoint
+        questions until plan step ``balance:X-bi-6-4d-2``'s checkpoint
         2e-2b-1b-2, which moved them here (ruling R-BAL290 part 1); the
         second asked them of an ENGINE-generated transfer of a definition
         whose rule recurs every period.  Its
@@ -444,7 +444,7 @@ class TestALegsDisplayProjections:
         generated transfer is born in and keeps until it is settled or
         cancelled, and the state ``test_transfer_service/test_the_create_door.py``'s
         ``test_with_template_id`` asked each side in until plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-2.  Then settled, each
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-2.  Then settled, each
         side carrying its RECORD (its payment).  Every leg the grid draws in
         production is persisted, and the grid's row match reads a side's
         ``template_id`` (``grid_view_service._match_row_in_period``).  A

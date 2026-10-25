@@ -115,7 +115,7 @@ def _create_transfer_to_loan(seed_user, loan_account, period, amount,
 
     Uses the transfer service, the one door that writes a transfer, so the
     transfer is the one production writes: one row since plan step
-    balance:X-bi-6-4d-3 (ruling **R-BAL258**), where the door also wrote the
+    balance:X-bi-6-4d-2 (ruling **R-BAL258**), where the door also wrote the
     two shadows whose amounts and statuses it kept equal.  **A SETTLED one is
     created Projected, then settled** through the settle verb
     (``update_transfer`` with *status_enum*), because the create makes no

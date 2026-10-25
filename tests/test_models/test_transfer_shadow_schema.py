@@ -3,7 +3,7 @@ Shekel Budget App -- Transfer Shadow Transaction Schema Tests
 
 Tests for the schema additions in Task 2 of the Transfer Architecture Rework:
   - Transaction.transfer_id (nullable FK to Transfer with ON DELETE CASCADE);
-    since plan step balance:X-bi-6-4d-3 a row naming a transfer is refused
+    since plan step balance:X-bi-6-4d-2 a row naming a transfer is refused
     (ck_transactions_names_no_transfer, ruling R-BAL258)
   - Transfer.category_id (nullable FK to Category)
   - TransferTemplate.category_id (nullable FK to Category)
@@ -53,7 +53,7 @@ class TestTransactionTransferId:
     def _make_shadow(self, seed_full_user_data, transfer, txn_type_name):
         """Helper: stage (unflushed) a twin row naming *transfer*.
 
-        Since plan step ``balance:X-bi-6-4d-3`` the database refuses such a
+        Since plan step ``balance:X-bi-6-4d-2`` the database refuses such a
         row (``ck_transactions_names_no_transfer``, ruling **R-BAL258**), so
         the callers below assert the refusal at the flush (ruling **R-BAL167**
         class 2: a test that plants a state the database refuses).
@@ -84,7 +84,7 @@ class TestTransactionTransferId:
         """The column is still mapped, and a row naming a transfer is refused.
 
         It saved and resolved the relationship until plan step
-        ``balance:X-bi-6-4d-3`` (ruling **R-BAL258**); the column goes at
+        ``balance:X-bi-6-4d-2`` (ruling **R-BAL258**); the column goes at
         ``X-bi-6-5``.
         """
         with app.app_context():
@@ -123,7 +123,7 @@ class TestTransactionTransferId:
         """A transfer has no twin for its delete to cascade: the plant is refused.
 
         ``ON DELETE CASCADE`` took a deleted transfer's two twins with it
-        until plan step ``balance:X-bi-6-4d-3`` made a twin unstorable
+        until plan step ``balance:X-bi-6-4d-2`` made a twin unstorable
         (ruling **R-BAL258**; re-expressed under ruling **R-BAL167** class 2).
         """
         with app.app_context():
@@ -142,7 +142,7 @@ class TestTransactionTransferId:
         """The backref is empty, and a twin staged into it is refused.
 
         It returned both linked twins until plan step
-        ``balance:X-bi-6-4d-3`` (ruling **R-BAL258**; re-expressed under
+        ``balance:X-bi-6-4d-2`` (ruling **R-BAL258**; re-expressed under
         ruling **R-BAL167** class 2).
         """
         with app.app_context():

@@ -40,7 +40,7 @@ class TestMovingATransferBetweenAccounts:
     re-creating every one of them, and a NON-repeating transfer refused the same
     edit outright because nothing could carry it.  The arm moves the transfer
     and reconciles the ledger on both sides of the move.  Until plan step
-    ``balance:X-bi-6-4d-3`` its two legs were two shadow rows, which the arm
+    ``balance:X-bi-6-4d-2`` its two legs were two shadow rows, which the arm
     re-pointed and re-named (that upkeep is deleted at the step's leaf 3b);
     each is derived from the transfer's endpoints now.  So a case that grades
     where the move LEFT the transfer reads the endpoint columns of the row
@@ -142,7 +142,7 @@ class TestMovingATransferBetweenAccounts:
 
         What the move wrote, re-read from the database (ruling R-BAL290
         part 1).  It also read both legs' accounts and labels until plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-3: the legs were two
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-3: the legs were two
         shadow rows whose accounts and names the arm re-wrote until that
         step, and the expense leg's label had to follow a destination it does
         not sit on.  Each leg is derived from the transfer now, so a side's
@@ -191,7 +191,7 @@ class TestMovingATransferBetweenAccounts:
     ):
         """The control: an ordinary edit moves neither endpoint.
 
-        **It carried a NAME half until plan step ``balance:X-bi-6-4d-3``,
+        **It carried a NAME half until plan step ``balance:X-bi-6-4d-2``,
         dropped there as a DOMINATED read, with the rename that set nothing.**
         It renamed the destination account and then asserted the edit left
         the two shadow rows' STORED names alone (the arm re-wrote them only on
@@ -300,7 +300,7 @@ class TestMovingATransferBetweenAccounts:
         it -- which is the point: the row exists on data written before the
         guard, and an edit must not be refused for a shape it does not change.
         It is planted on the transfer alone since plan step
-        ``balance:X-bi-6-4d-3``, where it was planted on the transfer AND its
+        ``balance:X-bi-6-4d-2``, where it was planted on the transfer AND its
         expense shadow: a leg is derived from its transfer, so there is no
         second row to plant it on (ruling R-BAL167 class 1).  Each move is
         read off the row re-read from the database since that step's
@@ -416,7 +416,7 @@ class TestMovingATransferBetweenAccounts:
 
         It reads what the refused update would have WRITTEN: the transfer's
         row re-read after a commit, which writes whatever the update staged
-        (ruling R-BAL290 part 1, since plan step ``balance:X-bi-6-4d-3``'s
+        (ruling R-BAL290 part 1, since plan step ``balance:X-bi-6-4d-2``'s
         checkpoint 2e-2b-1b-3).  A move assigns the endpoint RELATIONSHIPS
         (``_apply_endpoint_move``), whose columns sync only at a flush, and
         the update does not flush before the amount's refusal raises; with
@@ -456,7 +456,7 @@ class TestMovingATransferBetweenAccounts:
         leaves the transfer exactly as it was, beside an amount the same
         request states.  Read off the row re-read after a commit, which writes
         whatever the refused update staged (ruling R-BAL290 part 1), since
-        plan step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-3, where it
+        plan step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-3, where it
         read the session's three columns and both legs' accounts and labels.
         Renamed from
         ``test_a_refused_move_leaves_the_transfer_and_its_legs_untouched``,

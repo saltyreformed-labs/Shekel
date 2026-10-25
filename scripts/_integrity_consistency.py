@@ -31,7 +31,7 @@ def check_data_consistency(session):
         falls back to ``estimated_amount``), so the check flagged
         routine legal data on every prod run.  DC-12 ("live transfers
         whose live shadow rows number other than two", Transfer
-        Invariant 1) was removed at plan step ``balance:X-bi-6-4d-3``,
+        Invariant 1) was removed at plan step ``balance:X-bi-6-4d-2``,
         which deleted the twin rows it counted and made the database
         refuse a new one (rulings **R-BAL166**, **R-BAL258**): a transfer
         has no twins to count.  The remaining IDs keep their historical
@@ -277,7 +277,7 @@ def check_data_consistency(session):
     # disagreed, and a settled row with no movement is the ``$0.00`` record
     # since, ruling **R-BAL82**.)
     # **A settled TRANSFER's money is not graded here since plan step
-    # ``balance:X-bi-6-4d-3``**, which deleted the LEG arm (one row per
+    # ``balance:X-bi-6-4d-2``**, which deleted the LEG arm (one row per
     # un-dated side record under a settled, live transfer, from leaf
     # ``X-bi-6-4a``, ruling **R-BAL106**).  The database refuses that state at
     # COMMIT since ``X-bi-6-4d-2``: the deferred side-band rule
@@ -300,7 +300,7 @@ def check_data_consistency(session):
     # idle: a transfer CREATED settled built its twins in
     # its settled status with no day (the create door stated none, and the arm
     # dates the side records instead), which this arm read as CRITICAL money
-    # the fold cannot see.  The twins themselves went at ``X-bi-6-4d-3``
+    # the fold cannot see.  The twins themselves went at ``X-bi-6-4d-2``
     # (ruling **R-BAL166**), with DC-12, and the database refuses a new one
     # (ruling **R-BAL258**), so the arm's ``t.transfer_id IS NULL`` excludes
     # nothing until ``X-bi-6-5`` drops the column with it.

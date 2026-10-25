@@ -224,7 +224,7 @@ def _apply_endpoint_move(
     of them (the side key), so the transfer and its records move in one act.
     The twin rows followed by their own TYPE (an expense twin the source, an
     income twin the destination), re-named from both accounts, until plan
-    step ``balance:X-bi-6-4d-3`` deleted them; its leaf 3b deleted that loop.
+    step ``balance:X-bi-6-4d-2`` deleted them; its leaf 3b deleted that loop.
     Each leg is derived from the transfer's endpoints now
     (:mod:`app.services.transfer_legs`), so it moves with them.
 

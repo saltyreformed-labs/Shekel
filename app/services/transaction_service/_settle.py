@@ -428,7 +428,7 @@ def settle_transaction(
     broken in one call, and silently, because ``sync_transaction_postings``
     returned ``[]`` for a twin then, so the ledger stayed flat while the grid
     showed one leg settled.  No such row exists now: plan step
-    ``balance:X-bi-6-4d-3`` deleted the twins (ruling **R-BAL166**) and
+    ``balance:X-bi-6-4d-2`` deleted the twins (ruling **R-BAL166**) and
     ``ck_transactions_names_no_transfer`` refuses a new one, so the refusal
     (:func:`reject_unsettleable`) answers a row that cannot be stored; it
     goes with the ``transfer_id`` column at plan step ``balance:X-bi-6-5``.

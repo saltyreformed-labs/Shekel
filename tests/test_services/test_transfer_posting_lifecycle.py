@@ -640,7 +640,7 @@ class TestZeroCorrectionWithdrawsTheLegs:
 
         That last is graded by two reads before any count of the side links,
         and none is taken: the two counts this case took were reached by no
-        app mutant (measured at plan step ``balance:X-bi-6-4d-3``'s
+        app mutant (measured at plan step ``balance:X-bi-6-4d-2``'s
         vacuous-residue checkpoint, where they went).  The COMMIT is the
         first: the status-band rule refuses a settled transfer whose sides
         hold one dated record, so a correction that withdraws either side's

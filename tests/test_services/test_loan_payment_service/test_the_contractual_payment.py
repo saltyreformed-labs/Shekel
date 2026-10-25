@@ -317,7 +317,7 @@ class TestALoansPriceDoesNotReadItsOwnPayments:
         the rows leaves nothing for a coupled producer to read at all.
 
         **The feed is ONE relation, ``budget.transfers``, since plan step
-        balance:X-bi-6-4d-3**, so the transfers into the loan are what is
+        balance:X-bi-6-4d-2**, so the transfers into the loan are what is
         deleted.  It was two from plan step balance:X-bi-6a: the shadow rows
         in ``budget.transactions`` (the settled half) and the parent rows
         (the projected half, as derived legs), and deleting the shadows alone

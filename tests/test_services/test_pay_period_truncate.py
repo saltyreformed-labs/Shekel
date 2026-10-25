@@ -243,7 +243,7 @@ class TestTruncateHappyPath:
     def test_cascade_removes_the_doomed_periods_transfer(self, app, db, seed_user):
         """A transfer in a deleted period goes with it.
 
-        Until plan step ``balance:X-bi-6-4d-3`` the case also read that
+        Until plan step ``balance:X-bi-6-4d-2`` the case also read that
         neither of the transfer's two shadow rows survived in the deleted
         period.  A transfer is one row since (``ck_transactions_names_no_transfer``),
         so that count found no row to count.  Renamed from

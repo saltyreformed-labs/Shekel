@@ -848,7 +848,7 @@ class TestTheWalkSeesOnlyItsOwnRows:
         SQL with the payments left on, the Checking leg -- its transfer and
         its side's record -- is valued inside the save, and the commit is
         then refused.  It also hid the transfer's two twin rows by SQL; from
-        plan step ``balance:X-bi-6-4d-3``'s create door on there are none, so
+        plan step ``balance:X-bi-6-4d-2``'s create door on there are none, so
         that statement touched no row (measured at that step's
         vacuous-residue checkpoint), and it is dropped.
         DROPPED: ``settled_cash_facts(...) == []``.  Inside the save the walk
@@ -883,7 +883,7 @@ class TestTheWalkSeesOnlyItsOwnRows:
 
         # Hidden the way the soft delete left it until the step, less the
         # twins it also flagged (none exist since plan step
-        # ``balance:X-bi-6-4d-3``): the transfer flagged, the payments in
+        # ``balance:X-bi-6-4d-2``): the transfer flagged, the payments in
         # place.  STAGED.
         db.session.execute(
             text("UPDATE budget.transfers SET is_deleted = TRUE WHERE id = :t"),

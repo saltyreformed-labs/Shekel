@@ -64,7 +64,7 @@ _M = load_migration_module(
     "c4a4e7d1b9f2_a_row_s_delete_never_takes_its_movements.py",
 )
 
-#: Plan step ``balance:X-bi-6-4d-3``'s revision, which deletes every transfer
+#: Plan step ``balance:X-bi-6-4d-2``'s revision, which deletes every transfer
 #: shadow and refuses a new one; its downgrade builds a transfer's two, which
 #: the hidden-leg case below needs.
 _TWINS_DELETED = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
@@ -393,7 +393,7 @@ class TestTheMigration:
 
         **The shadows are built and the payments put back under them first**,
         the shape this revision ran against.  No transfer has a shadow since
-        plan step ``balance:X-bi-6-4d-3`` (``82f7b7ed4332`` deletes them and
+        plan step ``balance:X-bi-6-4d-2`` (``82f7b7ed4332`` deletes them and
         refuses a new one), so the case runs that revision's downgrade, which
         builds both, each settled like its transfer, after head's own
         (``b7d2e4f19a63``), which puts the transfer's figure back on each

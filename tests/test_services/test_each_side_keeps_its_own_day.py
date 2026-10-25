@@ -320,7 +320,7 @@ class TestASettleOverADriftedSide:
         the state, and inside the save the side borrows the Checking side's
         day instead (measured).  The plant also wrote the Savings shadow's
         status and day, which no reader read (class 3), until plan step
-        ``balance:X-bi-6-4d-3`` made a transfer one row (ruling
+        ``balance:X-bi-6-4d-2`` made a transfer one row (ruling
         **R-BAL258**); the record is the whole plant now.
         """
         with app.app_context():

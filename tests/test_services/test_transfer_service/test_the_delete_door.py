@@ -30,7 +30,7 @@ class TestDeleteTransfer:
     delete HIDES it, a hard delete removes it for good).  Each case checks
     what that delete must leave behind (ruling R-BAL290 part 2, the
     developer, 2026-10-14).  The group has been laid out this way since plan
-    step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2a, which merged two groups
+    step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2a, which merged two groups
     into it: ``TestSoftDeleteHandling`` (the already-hidden cases) and
     ``TestADeleteReturnsAPaidTransferToAPlan`` (the paid cases).
 
@@ -116,7 +116,7 @@ class TestDeleteTransfer:
         identity, so the returned object's flag is the stored one.  It
         also asked each endpoint's plan loader for a leg of the transfer,
         before the delete and after it, until plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2a.  That a hidden transfer
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2a.  That a hidden transfer
         leaves both accounts' plans is the LOADER's fact, whichever delete
         hid it, and it is asked of this case's own stored state (saved,
         ad-hoc, Projected, hidden, no side holding a record) on BOTH sides by
@@ -150,7 +150,7 @@ class TestDeleteTransfer:
         """Hard delete removes the transfer row.
 
         It also collected the transfer's two shadow rows and asserted each
-        was gone, until plan step ``balance:X-bi-6-4d-3``; from that step's
+        was gone, until plan step ``balance:X-bi-6-4d-2``; from that step's
         create door on the transfer holds none, so the collection was empty
         and the loop over it ran over none (a vacuous read, measured at its
         checkpoint 2e-2a-2), and it is dropped.  Renamed from
@@ -271,7 +271,7 @@ class TestDeleteTransfer:
         one copy of a pair: the delete group's ``test_soft_delete_idempotent``
         made the same two deletes, asked only the flag on the transfer the
         second one returned, and was deleted at plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2a (ruling R-BAL290 part 2,
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2a (ruling R-BAL290 part 2,
         "the stronger check survives"), where this case moved into the delete
         group from ``TestSoftDeleteHandling``.  What the second delete left
         is read off the row re-read from the database since then (ruling
@@ -283,7 +283,7 @@ class TestDeleteTransfer:
         after the second.
 
         It read the shadow rows' flags afterwards ("still soft-deleted")
-        until plan step ``balance:X-bi-6-4d-3``; from that step's create door
+        until plan step ``balance:X-bi-6-4d-2``; from that step's create door
         on no row can name the transfer (``ck_transactions_names_no_transfer``,
         ruling R-BAL258), so ``all()`` ran over none after the second delete
         (a vacuous read; a probe counted such rows 0 before the first delete
@@ -321,12 +321,12 @@ class TestDeleteTransfer:
         The hard-delete path must work regardless of the is_deleted flag.
         The one copy of a pair: the delete group's
         ``test_hard_on_already_soft_deleted`` was this case line for line and
-        was deleted at plan step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2a
+        was deleted at plan step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2a
         (ruling R-BAL290 part 2), where this case moved into the delete group
         from ``TestSoftDeleteHandling``.
 
         It also counted the shadow rows naming the transfer afterwards (0)
-        until plan step ``balance:X-bi-6-4d-3``; from that step's create door
+        until plan step ``balance:X-bi-6-4d-2``; from that step's create door
         on no row can name one (``ck_transactions_names_no_transfer``, ruling
         R-BAL258), so the count it took after the last delete read none (a
         vacuous read; a probe counted such rows 0 before the first delete and
@@ -354,7 +354,7 @@ class TestDeleteTransfer:
         On either delete: the service refuses someone else's transfer itself,
         whether or not any caller reaches the door with one today (the
         defense in depth the door's ``user_id`` is for).  The case ran the
-        hard delete alone until plan step ``balance:X-bi-6-4d-3``'s
+        hard delete alone until plan step ``balance:X-bi-6-4d-2``'s
         vacuous-residue checkpoint, where a delete door letting a non-owner's
         soft delete of a live transfer through, as if its owner had asked,
         failed no test in the suite (measured there).  The
@@ -392,7 +392,7 @@ class TestDeleteTransfer:
         so a repeated hide and a hard delete of a hidden transfer work), so
         its ownership check must hold for a hidden row, on either delete, as
         it does for a live one (:meth:`test_wrong_user_rejected`, on either
-        delete since plan step ``balance:X-bi-6-4d-3``'s vacuous-residue
+        delete since plan step ``balance:X-bi-6-4d-2``'s vacuous-residue
         checkpoint, where it gained the soft delete).  The refused
         delete is read off the row re-read after a COMMIT, which writes
         whatever it staged: the transfer is still there and still hidden.

@@ -110,7 +110,7 @@ because only the shadow was read.  Plan step ``X-bi-4a`` let a side's DATED
 movement, not a status, decide which half counts its leg (ruling
 **R-BAL79**), and both drifts were pinned in
 ``tests/test_services/test_transfer_legs/test_the_plan_half.py``.  **Drift A
-is structural now**: plan step ``balance:X-bi-6-4d-3`` made a transfer one
+is structural now**: plan step ``balance:X-bi-6-4d-2`` made a transfer one
 row (ruling **R-BAL258**), so no shadow's status can part from its
 transfer's.  What pins that is the database's refusal of a shadow row
 (``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``'s

@@ -282,7 +282,7 @@ def gate_removable_head(
     **What GOES with the paycheck**: an unpaid row its template made that the
     owner never changed (:func:`_regenerable`, the discard gate's own rule,
     and holding no payment or purchase), and a transfer the same way, one row
-    since plan step ``balance:X-bi-6-4d-3`` deleted its twins.  They are what
+    since plan step ``balance:X-bi-6-4d-2`` deleted its twins.  They are what
     populating the paycheck wrote when it was added, so removing it takes
     back exactly that.
 
@@ -810,7 +810,7 @@ def _live_rows_of(model, definition, period_ids, *scope):
     period set, the live filter and the eager load of the definition are
     stated here, and each arm adds only what is its own (the transaction
     arm's ``transfer_id IS NULL``, which excludes nothing since plan step
-    ``balance:X-bi-6-4d-3`` deleted the transfer twins and goes with the
+    ``balance:X-bi-6-4d-2`` deleted the transfer twins and goes with the
     column at ``X-bi-6-5``).  ``selectinload`` fetches every row's
     definition in one query rather than one per row, since this runs over
     every period a truncate would drop.
@@ -848,7 +848,7 @@ def count_discardable_items(period_ids):
     payment or purchase, are already hard-locked upstream, so they never
     reach here).  Transfers are counted once on their own table by the same
     three questions (the transaction scan's ``transfer_id IS NULL`` kept
-    their twin rows out until plan step ``balance:X-bi-6-4d-3`` deleted
+    their twin rows out until plan step ``balance:X-bi-6-4d-2`` deleted
     them).  That way a recurring transfer (regenerable) does not falsely
     trip the gate while a one-time or ad-hoc transfer does.  The
     not-Projected test routes through ``balance_predicates.is_projected``

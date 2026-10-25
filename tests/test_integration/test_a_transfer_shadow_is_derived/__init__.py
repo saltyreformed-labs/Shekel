@@ -6,7 +6,7 @@ Plan step **X-au-g-2c-2**, rulings **R-FI**, **R-IN** and **R-IO**.
 shadow held a COPY of its parent's figure, and two hand-written repairs kept the
 copy true -- ``transfer_service._update``'s propagation and ``_restore``'s drift
 corrector, which logged a warning and rewrote the copies that got away.  From
-X-au-g-2c-2 until plan step balance:X-bi-6-4d-3 deleted the shadows, a shadow
+X-au-g-2c-2 until plan step balance:X-bi-6-4d-2 deleted the shadows, a shadow
 DECLARED ``PARENT_TRANSFER`` and stored no figure at all, so the two could not
 disagree: ``ck_transactions_amount_ownership`` refused a shadow that held both,
 and the value was READ rather than copied.
@@ -26,7 +26,7 @@ On production this moved ``$0.00``: measured 2026-09-01 at stamp
 ``budget.loan_payment_settings`` held zero rows, so the loan arm is graded here
 on a seeded mortgage.
 
-**There are no shadows to ask since plan step balance:X-bi-6-4d-3.**  A
+**There are no shadows to ask since plan step balance:X-bi-6-4d-2.**  A
 transfer is one row, its two legs are read off it (**R-BAL13**: each worth
 ``resolve_transfer_amount`` on the parent), and
 ``ck_transactions_names_no_transfer`` refuses a row naming a transfer (ruling

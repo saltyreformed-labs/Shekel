@@ -79,7 +79,7 @@ def _transfer_to_loan(
 
     Through :func:`~app.services.transfer_service.create_transfer` rather than
     by inserting rows, so the transfer this file reads is the one production
-    writes: one row since plan step balance:X-bi-6-4d-3 (ruling **R-BAL258**),
+    writes: one row since plan step balance:X-bi-6-4d-2 (ruling **R-BAL258**),
     where it came with the pair of shadows this file read until then.
 
     **A SETTLED one is created Projected, then settled** through the settle
@@ -414,7 +414,7 @@ class TestPaymentInstallments:
         producer.  Reporting it would tell the replay an installment was paid
         that the posted ledger has no entry for.
 
-        **Re-expressed at plan step balance:X-bi-6-4d-3** (ruling **R-BAL167**
+        **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
         class 2): a transfer is one row since that step (ruling **R-BAL258**),
         so the row the bypass wrote the day onto -- the loan-side twin --
         cannot be stored: ``ck_transactions_names_no_transfer`` refuses it at
@@ -477,7 +477,7 @@ class TestPaymentInstallments:
         the later settled row in front.  Only the tie-break puts them in the
         order the feed's chronology means.
 
-        **Read in TRANSFER ids since plan step balance:X-bi-6-4d-3** (ruling
+        **Read in TRANSFER ids since plan step balance:X-bi-6-4d-2** (ruling
         **R-BAL167** class 1): it compared the loan-side shadows' ids, which
         followed their parents' (the service wrote a parent before its
         shadows), until that step made a transfer one row.

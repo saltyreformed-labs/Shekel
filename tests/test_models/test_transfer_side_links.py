@@ -458,7 +458,7 @@ class TestTheDeletedRowTransferArm:
         Each side's record arrives ALONE, because the arm reads whichever of
         the two link columns the record sets and each must refuse on its
         own.  The case brought the from-side's record alone until plan step
-        ``balance:X-bi-6-4d-3``'s vacuous-residue checkpoint, where an arm
+        ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint, where an arm
         reading the from-side link only failed no test in the suite
         (measured there).
         """
@@ -482,7 +482,7 @@ class TestTheDeletedRowTransferArm:
         onto a hidden one sharing the record's account.  Each side's link is
         moved ALONE, because the arm reads either link and its early return
         compares each, so each must refuse on its own.  The case moved the
-        from-side link alone until plan step ``balance:X-bi-6-4d-3``'s
+        from-side link alone until plan step ``balance:X-bi-6-4d-2``'s
         vacuous-residue checkpoint, where an arm reading the from-side link
         only, or an early return comparing it only, failed no test in the
         suite (measured there).
@@ -506,7 +506,7 @@ class TestTheDeletedRowTransferArm:
     ):
         """CONTROL: the same UPDATE onto a live transfer sharing the record's account.
 
-        Per side since plan step ``balance:X-bi-6-4d-3``'s vacuous-residue
+        Per side since plan step ``balance:X-bi-6-4d-2``'s vacuous-residue
         checkpoint, beside the refusal it controls; until then it moved the
         from-side link alone.
 
@@ -538,7 +538,7 @@ class TestTheDeletedRowTransferArm:
 
         Each side ALONE holds the record, because the arm asks two link
         columns and each must refuse on its own.  The case held the
-        from-side's record alone until plan step ``balance:X-bi-6-4d-3``'s
+        from-side's record alone until plan step ``balance:X-bi-6-4d-2``'s
         vacuous-residue checkpoint, where an arm asking the from-side link
         only failed no test in the suite (measured there); each side's record
         is planted with the bare ORM, as every record in this module is.

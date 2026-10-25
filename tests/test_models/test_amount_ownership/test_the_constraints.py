@@ -251,7 +251,7 @@ class TestOnePricingLink:
         discriminator ruling R-FI refused, arriving as data instead of as code.
 
         **Refused by ``ck_transactions_names_no_transfer`` since plan step
-        ``balance:X-bi-6-4d-3``** (ruling **R-BAL258**; re-expressed under
+        ``balance:X-bi-6-4d-2``** (ruling **R-BAL258**; re-expressed under
         ruling **R-BAL167** class 2): a row may name no transfer at all, so
         the row this plants is refused before the pricing-link count is
         reached (PostgreSQL checks a table's CHECKs in name order).  The

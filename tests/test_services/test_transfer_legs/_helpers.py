@@ -44,7 +44,7 @@ def _cancelled_transfer(seed_user, from_account, to_account, period):
     """Create a CANCELLED transfer through the creation door.
 
     It wrote the parent and both shadows until plan step
-    ``balance:X-bi-6-4d-3`` made a transfer one row (ruling **R-BAL258**).
+    ``balance:X-bi-6-4d-2`` made a transfer one row (ruling **R-BAL258**).
     """
     return create_transfer_from_spec(TransferSpec(
         user_id=seed_user["user"].id,

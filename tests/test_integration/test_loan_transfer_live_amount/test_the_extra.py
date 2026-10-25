@@ -68,7 +68,7 @@ def test_derived_override_includes_standing_extra(
         cash   = 1,199.10 + 300.00 + 100.00  = 1,599.10
     The extra is a LIVE parameter added on top; it is NOT baked into the stale
     stored $1.00, which stays untouched.  It prices the payments' legs, where
-    it priced the shadow rows until plan step balance:X-bi-6-4d-3 (ruling
+    it priced the shadow rows until plan step balance:X-bi-6-4d-2 (ruling
     R-BAL167 class 1).
     """
     with app.app_context():
@@ -99,7 +99,7 @@ def test_manual_payment_with_extra_gets_base_plus_extra(
     Manual base (stored default) $1,499.10 + extra $100.00 = $1,599.10.  The
     base is operator-owned (not re-derived); only the extra is added live.
     It prices the payments' legs, where it priced the shadow rows until plan
-    step balance:X-bi-6-4d-3 (ruling R-BAL167 class 1).
+    step balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
     """
     with app.app_context():
         loan, _escrow, scenario_id, template, _rule, _periods = (
@@ -167,7 +167,7 @@ def test_manual_payment_without_extra_gets_no_override(
 
     It prices the payments' legs, and the probe keys the escrow by each leg's
     installment date, where both read the shadow rows until plan step
-    balance:X-bi-6-4d-3 (ruling R-BAL167 class 1; ``loan_payment_due_date``
+    balance:X-bi-6-4d-2 (ruling R-BAL167 class 1; ``loan_payment_due_date``
     takes a leg).
     """
     with app.app_context():
@@ -241,7 +241,7 @@ def test_a_derive_payment_on_the_same_fixture_does_follow_the_escrow(
 
     P&I 1,199.10 + the raised escrow 400.00 = 1,599.10.
 
-    **It graded NOTHING from plan step balance:X-bi-6-4d-3's first checkpoint
+    **It graded NOTHING from plan step balance:X-bi-6-4d-2's first checkpoint
     until it was re-expressed** (CLAUDE.md rule 4; ruling R-BAL167 class 1).
     Its row set was every shadow in the scenario, none is born since that
     step, so both ``all()`` reads ran over an empty map and passed --

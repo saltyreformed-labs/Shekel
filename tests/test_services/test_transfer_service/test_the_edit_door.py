@@ -41,7 +41,7 @@ class TestUpdateTransfer:
 
         What the edit wrote, re-read from the database (ruling R-BAL290
         part 1).  It also priced both legs until plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-1; what a side shows of
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-1; what a side shows of
         the row's amount is ``test_transfer_legs/test_what_a_side_shows.py``'s
         ``TestBothSidesShowTheTransfer`` now.  The one copy of a pair: the
         invariant group's ``test_amounts_always_match_after_update`` made the
@@ -97,7 +97,7 @@ class TestUpdateTransfer:
 
         What the edit wrote, re-read from the database (ruling R-BAL290
         part 1).  It also read both legs' periods until plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-1; what a side shows of
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-1; what a side shows of
         the row's period is ``test_transfer_legs/test_what_a_side_shows.py``'s
         ``TestBothSidesShowTheTransfer`` now.  The one copy of a pair: the
         invariant group's ``test_periods_always_match_after_update`` made the
@@ -120,7 +120,7 @@ class TestUpdateTransfer:
         """A category edit writes the new category on the transfer's row.
 
         It read the two shadow rows' categories until plan step
-        ``balance:X-bi-6-4d-3``, whose create door stopped writing them
+        ``balance:X-bi-6-4d-2``, whose create door stopped writing them
         (ruling R-BAL167 class 1).  **Its edit moved nothing**: the transfer
         is created under Rent and the edit named Rent, a no-op in the shadow
         version too; re-pointed onto the transfer and its legs, it PASSED with
@@ -154,7 +154,7 @@ class TestUpdateTransfer:
         """A notes edit writes the transfer's notes and leaves its amount as it was.
 
         It compared the two shadow rows' amounts before and after the edit
-        until plan step ``balance:X-bi-6-4d-3``, and from that step's create
+        until plan step ``balance:X-bi-6-4d-2``, and from that step's create
         door on both reads ran over none (a vacuous read, measured at its
         checkpoint 2e-2a-2).  It then priced both legs before and after the
         edit until that step's checkpoint 2e-2b-1b-1, which reads the row's
@@ -191,7 +191,7 @@ class TestUpdateTransfer:
         BEHAVIOUR change and belongs in the commit message.
 
         "Before any write" is read off each SIDE's payment record since plan
-        step ``balance:X-bi-6-4d-3``, where it asked each of the two shadow
+        step ``balance:X-bi-6-4d-2``, where it asked each of the two shadow
         rows, which that step's create door no longer writes (ruling R-BAL167
         class 1).
         """
@@ -214,7 +214,7 @@ class TestUpdateTransfer:
 
         What the edit wrote, re-read from the database (ruling R-BAL290
         part 1).  It also read both legs' flags until plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-1; what a side shows of
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-1; what a side shows of
         the row's flag is ``test_transfer_legs/test_what_a_side_shows.py``'s
         ``TestBothSidesShowTheTransfer`` now.  Renamed from
         ``test_an_override_edit_reaches_the_transfer_and_both_legs``, and
@@ -258,7 +258,7 @@ class TestUpdateTransfer:
         prevent confusing error messages during debugging.
 
         An EDIT refusal, moved here from ``TestSoftDeleteHandling`` at plan
-        step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2a, which merged that
+        step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2a, which merged that
         group's delete cases into :class:`TestDeleteTransfer` (ruling
         R-BAL290 part 2).
         """
@@ -312,7 +312,7 @@ class TestUpdateTransfer:
 
         What the edit wrote, re-read from the database (ruling R-BAL290
         part 1).  It also read both legs' categories, as PROJECTION reads,
-        until plan step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-2: both
+        until plan step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-2: both
         rows of ``test_transfer_legs/test_what_a_side_shows.py``'s ``TestBothSidesShowTheTransfer``
         carried a category until then, so a side that answered some category
         for a transfer filed under NONE failed only those reads (measured at
@@ -550,7 +550,7 @@ class TestUpdateTransfer:
         record read by its own SQL
         (:func:`tests._test_helpers.transfer_side_record`).  Moved here from
         the invariant group as ``test_multiple_updates_maintain_invariants``
-        at plan step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-1 (ruling
+        at plan step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-1 (ruling
         R-BAL290 part 1), where it read both legs' periods and, after the
         settle, their prices, and not the records' amounts.  A side's period
         is ``test_transfer_legs/test_what_a_side_shows.py``'s ``TestBothSidesShowTheTransfer``; a

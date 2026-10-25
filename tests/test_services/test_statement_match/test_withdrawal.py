@@ -847,12 +847,12 @@ class TestARowThatIsHalfOfSomethingElseRefusesTheDelete:
     action card renders the delete control exactly when it is ``None`` -- the
     same layering ``entry_service.removal_refusal`` has one table over.  It
     graded a second shape, a transfer's shadow row, until plan step
-    ``balance:X-bi-6-4d-3`` (ruling **R-BAL300**), where no shadow can be
+    ``balance:X-bi-6-4d-2`` (ruling **R-BAL300**), where no shadow can be
     stored.
     """
 
     # ``test_a_transfer_shadow_is_refused_and_says_where_to_go`` stood here
-    # until plan step balance:X-bi-6-4d-3 (ruling **R-BAL300**, developer
+    # until plan step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer
     # 2026-10-15: "Delete all 27").  It asked ``deletion_refusal`` and the
     # delete verb about a transfer's SHADOW row and asserted the sentence
     # pointing at the transfer's own delete.  No shadow can exist now (the

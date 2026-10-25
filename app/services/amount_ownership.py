@@ -109,7 +109,7 @@ def declare_derived(row, relation: AmountSourceEnum) -> None:
     The act a per-kind cutover performs when a row stops being priced by a
     stored copy: the row names the RELATION that prices it -- its recurring
     definition (a transfer shadow named its parent transfer until plan step
-    ``balance:X-bi-6-4d-3`` deleted the shadows) -- and holds no figure at
+    ``balance:X-bi-6-4d-2`` deleted the shadows) -- and holds no figure at
     all, so a stale derived amount becomes unrepresentable rather than merely
     unlikely (ruling **R-FI**, plan step X-au-c1).
 
@@ -118,7 +118,7 @@ def declare_derived(row, relation: AmountSourceEnum) -> None:
     payment, is a property of the DEFINITION read live at price time, so a mode
     flip changes what the row is worth without rewriting the row.  That is why
     a transfer SHADOW took ``PARENT_TRANSFER`` whether or not the transfer was
-    a loan payment, until plan step ``balance:X-bi-6-4d-3`` deleted the
+    a loan payment, until plan step ``balance:X-bi-6-4d-2`` deleted the
     shadows, and why the loan-settings routes need no writer of their own.
 
     **The enum-to-id translation is :func:`derived_ownership`'s**, above, and
@@ -130,7 +130,7 @@ def declare_derived(row, relation: AmountSourceEnum) -> None:
     Idempotent, and a caller leans on it: :func:`app.services.one_off.restate_price`
     declares a row that may never have left this state.  The transfer door
     leaned on it too, re-declaring both twin legs on every definition-driven
-    amount write, until plan step ``balance:X-bi-6-4d-3`` deleted the twins.
+    amount write, until plan step ``balance:X-bi-6-4d-2`` deleted the twins.
 
     Args:
         row: The :class:`~app.models.transaction.Transaction` or

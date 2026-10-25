@@ -507,7 +507,7 @@ class TestAccessDeniedLogging:
 
 
 # ``TestATransferShadowRowAtTheTransactionDoor`` stood here until plan step
-# balance:X-bi-6-4d-3 (ruling **R-BAL300**, developer 2026-10-15: "Delete all
+# balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer 2026-10-15: "Delete all
 # 27").  Its two cases pinned WHERE plan step X-bi-6-1's shadow fence
 # (``is_transfer_shadow``) sits in ``get_accessible_transaction``: after both
 # access branches, so the owner's own shadow logged ``resource_not_found`` at
@@ -536,7 +536,7 @@ class TestAProbeOfAnotherOwnersDeletedRowIsADenial:
     (``is_not_found_to_transaction_doors``) AFTER both access branches, and its
     comment says why: every such probe is an access denial first (``access_denied_cross_user``
     at WARNING, the F-144 contract) and "not found" second, so the predicate never runs
-    and logs nothing.  Measured at plan step ``balance:X-bi-6-4d-3`` (ruling **R-BAL300**):
+    and logs nothing.  Measured at plan step ``balance:X-bi-6-4d-2`` (ruling **R-BAL300**):
     evaluating the predicate ahead of the access branches, every return unchanged, logged
     the row as ``resource_not_found`` before the denial and failed no test that captures a
     log, for either requester (for the companion, at the deletion's parent too).  These

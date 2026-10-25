@@ -15,7 +15,7 @@ movements, or to one side's, leaves such a record behind and the delete fails
 at the flush.  The suite graded none of that before this leaf.
 
 A second case hid both shadows over the two kept records first, until plan
-step ``balance:X-bi-6-4d-3``'s vacuous-residue checkpoint deleted it (ruling
+step ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint deleted it (ruling
 **R-BAL325**, the developer, 2026-10-19).  From that step's create door on a
 transfer has no shadow to hide, so its two hides touched no row, and each half
 of what was left is graded elsewhere: the database's refusal of a transfer

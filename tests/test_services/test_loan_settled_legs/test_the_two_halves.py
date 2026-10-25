@@ -115,7 +115,7 @@ class TestTheSettledHalfComplementsThePlanHalf:
         (ruling **R-BAL61**), so records EXIST and none is DATED; the plan
         emits a leg for a side with no dated movement (ruling **R-BAL79**),
         and the settled half, the plan half's complement, does not hold it.
-        It is a NEW member at plan step ``balance:X-bi-6-4d-3``: no member
+        It is a NEW member at plan step ``balance:X-bi-6-4d-2``: no member
         stood in that state before.
 
         **Since plan step ``balance:X-bi-6-4d-2``** each side's record hangs
@@ -130,7 +130,7 @@ class TestTheSettledHalfComplementsThePlanHalf:
         dated, settled as it was -- its walk's refusal is
         :class:`TestASettledPaymentWithAnUndatedRecordFailsLoud`'s).
 
-        **Four members left at plan step ``balance:X-bi-6-4d-3``**, where a
+        **Four members left at plan step ``balance:X-bi-6-4d-2``**, where a
         transfer became one row (ruling **R-BAL258**).  Three planted the
         loan-side twin first: Paid with nothing moved, Paid with a dated
         movement under it, and that one with its twin hidden.  The twin is
@@ -298,7 +298,7 @@ class TestTheSettledHalfComplementsThePlanHalf:
         and the status guard here holds the Paid that keeps the second true.
         It stays as the claim's other half.
 
-        Added at plan step ``balance:X-bi-6-4d-3``, because no PASSING test
+        Added at plan step ``balance:X-bi-6-4d-2``, because no PASSING test
         failed with the settled half's filter dropped (measured 2026-10-15:
         the full suite's failing set was unchanged, and a test already
         failing could reveal nothing).
@@ -405,7 +405,7 @@ class TestTheContributionFeedCountsADriftOnce:
 
         The feed read it as ONE planned $250.00: the parent decides, and no
         money moved.  **The twin is REFUSED at the write since plan step
-        ``balance:X-bi-6-4d-3``** (ruling **R-BAL167** class 2, ruling
+        ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 2, ruling
         **R-BAL258**): ``ck_transactions_names_no_transfer`` refuses the
         income twin with or without the Paid status and the 03-05 day the
         drift wrote onto it (measured both ways), so it is staged as
@@ -488,7 +488,7 @@ class TestTheLineageProbeNamesADeadShadowsMovement:
         **The state is REFUSED since plan step ``balance:X-bi-6-4d-2``**
         (ruling **R-BAL167** class 2): the loan side's payment is its record
         on the TRANSFER (ruling **R-BAL88**), read here off the side link
-        (class 1).  Until plan step ``balance:X-bi-6-4d-3`` a movement sat
+        (class 1).  Until plan step ``balance:X-bi-6-4d-2`` a movement sat
         under a twin only where it was planted -- both records re-parented
         under their twins in one statement -- and a twin hidden holding one
         was refused by the deleted-row rule's row arm.  **Since that step the

@@ -1102,7 +1102,7 @@ class TestShadowContributionBoundary:
     charges a different dollar than the growth engine actually applies.  The
     realized figure is each side's payment RECORD, hanging off the transfer,
     since plan step ``balance:X-bi-6-4d-2``, and a transfer is ONE row since
-    plan step ``balance:X-bi-6-4d-3`` (ruling R-BAL258): it had two shadow
+    plan step ``balance:X-bi-6-4d-2`` (ruling R-BAL258): it had two shadow
     rows, which carried the realized figure until the first step and nothing
     after it.  :meth:`_contribution` settles through the transfer's door and
     writes no shadow (ruling R-BAL167 class 4).
@@ -1124,7 +1124,7 @@ class TestShadowContributionBoundary:
         investment account, which is the leg the loader prices.  The helper
         was ``_contribution_shadow`` and returned ``(account,
         income_shadow)``, the shadow row the loader once selected, until plan
-        step ``balance:X-bi-6-4d-3`` made a transfer one row (ruling
+        step ``balance:X-bi-6-4d-2`` made a transfer one row (ruling
         R-BAL258).  No case read that row, so it returns the account alone
         (ruling R-BAL167 class 4, every assertion unchanged).
 

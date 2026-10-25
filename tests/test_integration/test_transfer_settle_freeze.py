@@ -100,7 +100,7 @@ def _derived_loan_transfer(seed_user, seed_periods):
     transfer whose stored amount is stale.
 
     It returned the transfer AND its expense shadow until plan step
-    ``balance:X-bi-6-4d-3``, where a transfer became one row and the shadow
+    ``balance:X-bi-6-4d-2``, where a transfer became one row and the shadow
     stopped being born (ruling **R-BAL167** class 4).  Four callers read the
     shadow and every other discarded it: three read only its ``account_id``,
     the transfer's from-account, where the expense twin sat; one read the
@@ -169,7 +169,7 @@ def _sides(xfer_id):
     record hangs off the TRANSFER and nothing keeps a twin's status, day or
     figure, so each side is read as the transfer and its record, never as its
     twin row (the deleted ``_shadows``, which went with its last caller at plan
-    step ``balance:X-bi-6-4d-3``, where no twin is born).
+    step ``balance:X-bi-6-4d-2``, where no twin is born).
     """
     xfer = db.session.get(Transfer, xfer_id)
     return (xfer.from_account_id, xfer.to_account_id)
@@ -203,7 +203,7 @@ class TestTheSettleFreezeIsTheSERVICEs:
         read off its twin row (ruling R-BAL167 class 1, plan step
         balance:X-bi-6-4d-2).  The PLAN column asserted empty below is the
         transfer's, where it was each twin's AND the transfer's until plan
-        step balance:X-bi-6-4d-3 stopped the twins being born (ruling
+        step balance:X-bi-6-4d-2 stopped the twins being born (ruling
         R-BAL167 class 1).
         """
         with app.app_context():
@@ -232,7 +232,7 @@ class TestTheSettleFreezeIsTheSERVICEs:
             # sat on each shadow, where the deleted ``_manual_shadow_amount``
             # read it as its base; it moved to the PARENT at X-au-g-2c-2 and
             # is GONE at X-au-f, and the shadows themselves are gone since
-            # plan step balance:X-bi-6-4d-3.  So the ONE row left stores no
+            # plan step balance:X-bi-6-4d-2.  So the ONE row left stores no
             # figure for a settle to derive from -- the same claim with
             # nothing left to violate it.
             assert db.session.get(Transfer, xfer.id).amount is None
@@ -342,7 +342,7 @@ class TestTheSettleFreezeIsTheSERVICEs:
         and its side's record, not its twin row (ruling R-BAL167 class 1, plan
         step balance:X-bi-6-4d-2).  The stored `$1,325.00` is read off the
         transfer, which owns it, where each twin's copy was read until plan
-        step balance:X-bi-6-4d-3 stopped the twins being born (ruling R-BAL167
+        step balance:X-bi-6-4d-2 stopped the twins being born (ruling R-BAL167
         class 1).
         """
         with app.app_context():
@@ -501,7 +501,7 @@ class TestEveryDoorReachesTheSameFigure:
         side is read as the transfer and its side's record, not its twin row
         (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The leg
         pressed is the transfer's from-side, where it was the expense twin's
-        account until plan step balance:X-bi-6-4d-3 stopped the twin being
+        account until plan step balance:X-bi-6-4d-2 stopped the twin being
         born -- the same account (ruling R-BAL167 class 1).
         """
         with app.app_context():
@@ -616,7 +616,7 @@ class TestEveryDoorReachesTheSameFigure:
         Each side is read as the transfer and its side's record, not its twin
         row (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The leg
         asked from is the transfer's from-side, where it was the expense
-        twin's account until plan step balance:X-bi-6-4d-3 stopped the twin
+        twin's account until plan step balance:X-bi-6-4d-2 stopped the twin
         being born -- the same account (ruling R-BAL167 class 1).
         """
         with app.app_context():
@@ -656,7 +656,7 @@ class TestEveryDoorReachesTheSameFigure:
         as the transfer and its side's record, not its twin row (ruling
         R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The landing day is
         read off the TRANSFER's own period and due date, where it was read off
-        the expense twin's until plan step balance:X-bi-6-4d-3 stopped the twin
+        the expense twin's until plan step balance:X-bi-6-4d-2 stopped the twin
         being born; the twin copied both from the transfer, so the day is the
         same (ruling R-BAL167 class 1).
         """
@@ -1060,7 +1060,7 @@ class TestOneBrokenPairCannotStopTheDeployResync:
     could not reach the screen that would name the row.  Before the predicate it
     would have posted a figure and carried on.
 
-    **That drift has no row to live on since plan step balance:X-bi-6-4d-3**: a
+    **That drift has no row to live on since plan step balance:X-bi-6-4d-2**: a
     transfer is one row and ``ck_transactions_names_no_transfer`` refuses a
     twin (ruling **R-BAL258**).  The batch's blast radius is still the subject,
     so the case below breaks a transfer the way one still CAN be broken -- its
@@ -1090,7 +1090,7 @@ class TestOneBrokenPairCannotStopTheDeployResync:
     ):
         """The resync refuses one transfer, re-posts the other, and returns.
 
-        **Re-expressed at plan step balance:X-bi-6-4d-3** (ruling **R-BAL167**
+        **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
         class 1, the substitution stated; it was
         ``test_it_skips_the_broken_pair_and_still_posts_the_healthy_one``, and
         at cp2c of that step briefly

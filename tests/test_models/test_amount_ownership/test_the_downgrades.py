@@ -27,7 +27,7 @@ _SHADOW_CUTOVER = load_migration_module(
     "c9a4e7b21d58_a_transfer_shadow_is_derived.py",
 )
 
-#: Plan step ``balance:X-bi-6-4d-3``'s revision, which deletes every transfer
+#: Plan step ``balance:X-bi-6-4d-2``'s revision, which deletes every transfer
 #: shadow and refuses a new one.  Its downgrade builds two for every transfer,
 #: each declared derived from its parent with no figure of its own
 #: (``_BUILT_SQL``): the shadows ``c9a4e7b21d58`` declared, which every case
@@ -104,12 +104,12 @@ class TestTheDowngradeRefusesToInventAFigure:
         then the one this case is about: every transaction owns its figure
         and one transfer does not.
 
-        **No transfer has a shadow since plan step balance:X-bi-6-4d-3**
+        **No transfer has a shadow since plan step balance:X-bi-6-4d-2**
         (``82f7b7ed4332``), and the engine's transfer is derived already, so
-        the re-price alone leaves it the ONE row with no figure.  Until 4d-3
+        the re-price alone leaves it the ONE row with no figure.  Until 4d-2
         each of its two shadows was given a figure of its own first, since
         they declared their parent and the guard reads transactions first;
-        4d-3's leaf rebuilt them by that revision's downgrade only to hide them
+        4d-2's leaf rebuilt them by that revision's downgrade only to hide them
         the same way, and its review measured the case grading its name
         identically without them, so they went.
         """
@@ -139,7 +139,7 @@ class TestTheShadowCutoverDowngradeRefusesToInventAFigure:
     that derives a parent transfer's figure (plan step X-au-f,
     ``b7e4c1f38a20``) comes after this revision in the chain.
 
-    **No transfer has a shadow since plan step balance:X-bi-6-4d-3**
+    **No transfer has a shadow since plan step balance:X-bi-6-4d-2**
     (``82f7b7ed4332`` deletes them and refuses a new one), so every case here
     first runs that revision's downgrade, which builds the engine transfer's
     two, each DECLARED derived from its parent: the population this guard

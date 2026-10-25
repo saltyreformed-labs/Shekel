@@ -122,6 +122,6 @@ class TestRunAllChecks:
         # 31 at balance:X-bi-6-3 (DC-12, Transfer Invariant 1, the alarm the
         # posting writer stopped raising), and to 34 at balance:X-bi-6-4c-4
         # (FK-14..16, FK-05..07's transfer twins, ruling R-BAL160).  It fell
-        # to 33 at balance:X-bi-6-4d-3, which deleted DC-12 with the twin
+        # to 33 at balance:X-bi-6-4d-2, which deleted DC-12 with the twin
         # rows it counted (rulings R-BAL166, R-BAL258).
         assert len(results) == 33

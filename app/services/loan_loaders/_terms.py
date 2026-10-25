@@ -663,7 +663,7 @@ def loan_payment_due_date(
     (``16f83aa0`` recorded that neither producer's signature would accept a
     transfer; this signature does), so the derivation was one function over
     two row shapes rather than a second spelling per shape, until plan step
-    ``balance:X-bi-6-4d-3`` deleted the shadows.  Every caller hands it a
+    ``balance:X-bi-6-4d-2`` deleted the shadows.  Every caller hands it a
     leg now; the annotation still admits a ``Transaction`` and the parameter
     keeps the shadow era's name.
 

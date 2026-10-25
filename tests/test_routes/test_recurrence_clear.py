@@ -503,7 +503,7 @@ class TestClearingATransferTemplatesRecurrence:
 
         Same contract as the transaction half, through the transfer service.
         It read each survivor's two shadow transactions, and counted the eight
-        left, until plan step ``balance:X-bi-6-4d-3``: a transfer stores no
+        left, until plan step ``balance:X-bi-6-4d-2``: a transfer stores no
         leg row since migration 82f7 (ruling **R-BAL167** class 1).
         """
         savings = _savings_account(seed_user)

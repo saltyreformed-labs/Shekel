@@ -45,7 +45,7 @@ class TestTransferRegeneration:
         everything it touched.  It now asserts what a maintain pass promises,
         which is strictly more: the same rows, carrying the new figure, and
         nothing created or destroyed.  It read each row's two shadow
-        transactions too until plan step ``balance:X-bi-6-4d-3``: a transfer
+        transactions too until plan step ``balance:X-bi-6-4d-2``: a transfer
         stores no leg row since migration 82f7 (ruling **R-BAL167** class 1).
 
         Keeping the id is the point rather than a detail: the delete it replaces
@@ -267,7 +267,7 @@ class TestRegenerateDeletionRoutedThroughService:
     audit event is emitted per deleted transfer.  This asserts forensic
     completeness, not arithmetic correctness.  The orphan-verification
     self-check and the shadow pair it counted went at plan step
-    ``balance:X-bi-6-4d-3``: a transfer stores no leg row since migration
+    ``balance:X-bi-6-4d-2``: a transfer stores no leg row since migration
     82f7 (ruling **R-BAL167**).
     """
 
@@ -401,7 +401,7 @@ class TestRegenerateDeletionRoutedThroughService:
         The service path ran an orphan-verification self-check
         (``query(Transaction).filter_by(transfer_id=...).count()``) and
         surfaced it as the event's ``orphan_count`` until plan step
-        ``balance:X-bi-6-4d-3``, which deleted the twins it counted and made
+        ``balance:X-bi-6-4d-2``, which deleted the twins it counted and made
         the database refuse a row naming a transfer (ruling **R-BAL258**,
         graded by ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``), so no
         count of such rows can fail here.  What the event still says -- one
@@ -432,7 +432,7 @@ class TestRegenerateDeletionRoutedThroughService:
             assert {r.transfer_id for r in hard_delete_records} == retired_ids
 
     # ``test_regen_delete_leaves_no_orphan_shadows`` (C34-3) was deleted at plan
-    # step ``balance:X-bi-6-4d-3`` (ruling **R-BAL320**): without its twin reads
+    # step ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**): without its twin reads
     # it asserted nothing but its helper's ``created == []``.
     # ``test_regen_delete_emits_one_hard_delete_event_per_deletion`` runs the
     # same ``_retire_every_row`` and reads one event per deletion and every

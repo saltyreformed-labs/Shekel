@@ -4,7 +4,7 @@ Shekel Budget App -- Transfer Service: the CREATE verb
 The one path that brings a transfer into existence, and the
 :class:`TransferSpec` value that describes one such request.
 
-**A transfer is ONE row since plan step ``balance:X-bi-6-4d-3``** (ruling
+**A transfer is ONE row since plan step ``balance:X-bi-6-4d-2``** (ruling
 **R-BAL166**).  This door also built two twin
 :class:`~app.models.transaction.Transaction` rows per transfer, one on each
 account, until then; since ``X-bi-6-4d-2`` nothing read a twin's status or

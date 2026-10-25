@@ -125,7 +125,7 @@ def _undated_transfer_out(db_session, seed_user, period, to_account_name, amount
     off the transfer's endpoints.
 
     It returned the transfer's expense shadow row, guarded undated, until plan
-    step balance:X-bi-6-4d-3 made a transfer one row (ruling R-BAL258); the
+    step balance:X-bi-6-4d-2 made a transfer one row (ruling R-BAL258); the
     guard reads the transfer's own due date now, the column the leg projects,
     and no caller read the return (ruling R-BAL167 class 4).
     """
@@ -1140,7 +1140,7 @@ class TestTheBillsAreThePaychecksAcrossTheSet:
         tests plant theirs: created from a helper Savings account INTO
         checking (allowed), then its source re-pointed onto the card by
         assignment, past the door.  The re-point moved the transfer's expense
-        shadow row too until plan step balance:X-bi-6-4d-3 made a transfer
+        shadow row too until plan step balance:X-bi-6-4d-2 made a transfer
         one row (ruling R-BAL258); the transfer is the whole plant now
         (ruling R-BAL167 class 1).  The savings account is not a member of
         the set.  The plant carries its own tell, the transfer's endpoints,
@@ -1256,7 +1256,7 @@ class TestTheBillsAreLegsReadOffTheParent:
             )
 
             # "No shadow" is the database's since plan step
-            # balance:X-bi-6-4d-3: a row naming a transfer is refused at the
+            # balance:X-bi-6-4d-2: a row naming a transfer is refused at the
             # write (ruling R-BAL258), so a per-row ``transfer_id is None``
             # check here passed with ``own_rows_clause``'s ``IS NULL`` term
             # deleted (measured 10-15) and is gone.

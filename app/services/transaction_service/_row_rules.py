@@ -202,7 +202,7 @@ def deletion_refusal(
     half of something else.**
 
     * **A row naming a transfer**, which no stored row is.  Until plan step
-      ``balance:X-bi-6-4d-3`` every transfer had two such twin rows, and a
+      ``balance:X-bi-6-4d-2`` every transfer had two such twin rows, and a
       delete of one alone would have orphaned the other, so this arm sent it
       to ``transfer_service.delete_transfer``.  That step deleted the twins
       (ruling **R-BAL166**), and the database refuses a row naming a transfer
@@ -318,7 +318,7 @@ def reject_unsettleable(txn: Transaction) -> None:
 
     **A row naming a transfer** was one of a transfer's twin rows, which
     settled through ``transfer_service.update_transfer`` with their transfer.
-    No stored row is one since plan step ``balance:X-bi-6-4d-3`` deleted the
+    No stored row is one since plan step ``balance:X-bi-6-4d-2`` deleted the
     twins (ruling **R-BAL166**), and the database refuses a new one
     (``ck_transactions_names_no_transfer``), so this arm answers a row that
     cannot be stored (one reaches it only unflushed); it goes with the

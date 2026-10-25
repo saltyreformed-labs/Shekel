@@ -21,7 +21,7 @@ changed and what it declared:
 * a carry-forward transfer plan is labelled by its FROM side, in transfer-id
   order (finding **BAL-546**, declared).
 
-Plan step ``balance:X-bi-6-4d-3`` deleted three cases that planted a
+Plan step ``balance:X-bi-6-4d-2`` deleted three cases that planted a
 transfer's shadow (ruling **R-BAL313**) -- the records predicate's own case
 (a movement under a hidden shadow), a broken pair offered and settled, and a
 loader case under a Cancelled shadow -- and re-expressed two panel cases
@@ -179,7 +179,7 @@ class TestALegIsKeyedApartFromARow:
             )
             # The day the panel prints beside the leg's tick: the day the
             # transfer lands, its period's first.  Moved here at plan step
-            # balance:X-bi-6-4d-3 from the deleted
+            # balance:X-bi-6-4d-2 from the deleted
             # test_a_transfer_whose_twin_was_deleted_is_offered_and_settles
             # (ruling R-BAL313): measured 2026-10-18 without this read, a day
             # added to the expense side's caption failed no test.
@@ -297,7 +297,7 @@ class TestTheOfferableLegLoader:
         since plan step ``balance:X-bi-6-4d-2``'s 4d-4b-2 leaf the band
         trigger's figure arm refuses a settled transfer storing no figure.
         Until plan
-        step ``balance:X-bi-6-4d-3`` its shadows stayed Projected under it,
+        step ``balance:X-bi-6-4d-2`` its shadows stayed Projected under it,
         and this case read one as the drift's control (ruling **R-BAL167**
         class 1); the shadow scope leaf ``X-bi-6-4c-2`` replaced offered that
         Projected shadow, and a tick then no-opped the settle and linked a
@@ -440,7 +440,7 @@ class TestTheBlockReadsTheLeg:
         transfer was created; it is the leg's label now, composed from the
         endpoints' current names -- the change leaf X-bi-6-1 made on the grid.
         The shadow's stale copy was this case's control until plan step
-        ``balance:X-bi-6-4d-3`` deleted the shadows (ruling **R-BAL167**
+        ``balance:X-bi-6-4d-2`` deleted the shadows (ruling **R-BAL167**
         class 1).
         """
         with app.app_context():
@@ -473,7 +473,7 @@ class TestTheBlockReadsTheLeg:
         is (ruling **R-FC**): the tally counts it a deposit, the section
         does not.  Its caption day, printed beside the tick, is the day the
         transfer lands, its period's first.  Added at plan step
-        ``balance:X-bi-6-4d-3``: measured 2026-10-18, offering the income
+        ``balance:X-bi-6-4d-2``: measured 2026-10-18, offering the income
         side as a Deposit failed no test, nor did a day added to its caption.
         """
         with app.app_context():
@@ -502,7 +502,7 @@ class TestTheBlockReadsTheLeg:
         cash detail page (which builds the panel inline), and the panel's own
         fragment.  With the transfer offerable there IS something to tick, so
         the true-up opens its modal (``prompt_fragment`` gates on ticks).
-        Until plan step ``balance:X-bi-6-4d-3`` the transfer's savings shadow
+        Until plan step ``balance:X-bi-6-4d-2`` the transfer's savings shadow
         was hidden here and each door was read for no "damaged" warning
         (ruling **R-BAL235**); no shadow can be stored now, and no template
         prints that word.
@@ -540,7 +540,7 @@ class TestTheBlockReadsTheLeg:
     ):
         """With a bill to tick too, the post-true-up modal still offers the transfer's tick.
 
-        Until plan step ``balance:X-bi-6-4d-3`` the transfer's savings shadow
+        Until plan step ``balance:X-bi-6-4d-2`` the transfer's savings shadow
         was hidden here and the modal was read for no "damaged" warning
         (ruling **R-BAL235**); no shadow can be stored now, and no template
         prints that word.

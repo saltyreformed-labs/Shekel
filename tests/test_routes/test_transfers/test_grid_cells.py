@@ -274,9 +274,9 @@ class TestLegContextResponse:
 
     Each case's leg is the transfer's FROM-side, read off the transfer.  A
     file-local ``_get_expense_shadow`` found it as the expense twin's account
-    until plan step ``balance:X-bi-6-4d-3``, which births no twin; the twin
+    until plan step ``balance:X-bi-6-4d-2``, which births no twin; the twin
     sat on the from-side (ruling R-BAL167 class 4, plan step
-    balance:X-bi-6-4d-3).
+    balance:X-bi-6-4d-2).
 
     Fixes H1, L2, L3 from transfer_rework_verification.md.
     """
@@ -293,10 +293,10 @@ class TestLegContextResponse:
 
         The amount is read off the transfer, re-read from the database.  The
         expense twin's amount was read too until plan step
-        ``balance:X-bi-6-4d-3``, which births none: each side's figure is the
+        ``balance:X-bi-6-4d-2``, which births none: each side's figure is the
         transfer's, projected (graded field by field by
         ``test_transfer_legs/test_what_a_side_shows.py::TestBothSidesShowTheTransfer``; ruling
-        R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)

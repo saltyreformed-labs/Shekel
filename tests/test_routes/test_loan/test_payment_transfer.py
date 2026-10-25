@@ -195,7 +195,7 @@ class TestTransferPrompt:
         and passed; since ruling R-BAL356 each non-ref table's ids start in a
         range of their own, and the two differ.
 
-        **Re-expressed onto the TRANSFER at plan step balance:X-bi-6-4d-3**
+        **Re-expressed onto the TRANSFER at plan step balance:X-bi-6-4d-2**
         (ruling **R-BAL167** class 1).  It counted the live income SHADOW
         rows on the loan account -- a ``budget.transactions`` row of income
         type carrying a ``transfer_id`` -- and a transfer is one row since

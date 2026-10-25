@@ -49,14 +49,14 @@ def test_settling_derived_loan_payment_captures_live_amount(
     N-259's shape).  The column was empty on a derived row, so that hazard had
     no state to occur in, and what a PROJECTED shadow was worth was asked of
     the amount model rather than of the column; no shadow is born since plan
-    step balance:X-bi-6-4d-3, and the paragraph below says what is asked now.
+    step balance:X-bi-6-4d-2, and the paragraph below says what is asked now.
 
     After the settle, the transfer's status is the one status and each side's
     record holds the captured figure, where both were read off the twin rows
     (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
 
     **The payment is the first TRANSFER into the loan since plan step
-    balance:X-bi-6-4d-3** (ruling R-BAL167 class 1), where it was the first
+    balance:X-bi-6-4d-2** (ruling R-BAL167 class 1), where it was the first
     loan-side shadow; it is priced through its leg on the loan.  The two "the
     PLAN column is empty" reads were the shadow's ``estimated_amount`` and the
     transfer's ``amount`` before the settle, and the shadow's after it: the
@@ -215,7 +215,7 @@ def test_nothing_after_the_settle_moves_what_a_loan_payment_paid(
     ``test_settling_an_ALREADY_settled_transfer_writes_nothing``.
 
     The payments are the TRANSFERS due 2026-02-01 and 2026-03-01, each read
-    through its leg on the loan (plan step balance:X-bi-6-4d-3, ruling
+    through its leg on the loan (plan step balance:X-bi-6-4d-2, ruling
     R-BAL167 class 1).
     """
     with app.app_context():
@@ -287,7 +287,7 @@ def test_settling_with_extra_lands_the_extra_in_principal(
     the loan-side twin row (ruling R-BAL167 class 1, plan step
     balance:X-bi-6-4d-2).  The payment is the first TRANSFER into the loan,
     settled through its leg there, where it was the first loan-side shadow
-    until plan step balance:X-bi-6-4d-3 (ruling R-BAL167 class 1).
+    until plan step balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
     """
     with app.app_context():
         loan, _escrow, scenario_id, template, _rule, _periods = (
@@ -341,7 +341,7 @@ def test_settling_manual_payment_with_extra_captures_base_plus_extra(
     balance:X-bi-6-4d-2).  The payment is the first TRANSFER into the loan,
     where it was the first loan-side shadow, and "neither row has a plan
     column to write" is asked of the one row left, until plan step
-    balance:X-bi-6-4d-3 (ruling R-BAL167 class 1): the shadow's
+    balance:X-bi-6-4d-2 (ruling R-BAL167 class 1): the shadow's
     ``estimated_amount`` half went with the shadow.
     """
     with app.app_context():
@@ -399,7 +399,7 @@ def test_each_payments_cash_is_its_own_installments_pi(
 ):
     """A payment's P&I is its INSTALLMENT's, not the read date's (ruling R-IJ).
 
-    **Renamed at plan step balance:X-bi-6-4d-3's checkpoint 2d-a** (it was
+    **Renamed at plan step balance:X-bi-6-4d-2's checkpoint 2d-a** (it was
     ``test_each_shadows_cash_is_its_own_installments_pi``; the shadows it
     priced are not born since that step, and each payment's two legs answer
     its one figure).
@@ -427,7 +427,7 @@ def test_each_payments_cash_is_its_own_installments_pi(
     boundary itself is asserted rather than the figures alone.
 
     It prices the payments' legs, keyed by each leg's installment date, where
-    it priced the shadow rows until plan step balance:X-bi-6-4d-3 (ruling
+    it priced the shadow rows until plan step balance:X-bi-6-4d-2 (ruling
     R-BAL167 class 1).
     """
     with app.app_context():

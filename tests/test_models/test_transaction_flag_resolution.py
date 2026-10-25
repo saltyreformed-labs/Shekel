@@ -6,7 +6,7 @@ Unit tests for ``Transaction.tracks_purchases`` and
 are its DEFINITION's (the definition is the single source of truth for
 every row it generates or places), and a row that names no definition
 answers ``False`` (ruling **R-BAL73**).  That row is a CC payback: the
-transfer shadow was the other until plan step ``balance:X-bi-6-4d-3``, where
+transfer shadow was the other until plan step ``balance:X-bi-6-4d-2``, where
 the database began refusing a row that names a transfer, and the card
 cutover (``credit_card:CC-7``, rulings **R-CC17** / **R-CC20**) deletes the
 payback, so these two cases go with the ``template_id is None`` arms they

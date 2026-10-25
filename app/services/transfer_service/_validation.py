@@ -67,7 +67,7 @@ class TransferRows:
     by typo.  The same reasoning
     :class:`app.services.reconcile_service._rows.Statement` is built on.
 
-    **It holds ONE row since plan step ``balance:X-bi-6-4d-3``**, which
+    **It holds ONE row since plan step ``balance:X-bi-6-4d-2``**, which
     deleted the twin rows and made the database refuse a new one (rulings
     **R-BAL166**, **R-BAL258**).  The twins had been mirrors and nothing more
     since ``X-bi-6-4d-2``: a transfer's status is its own column, and each
@@ -306,7 +306,7 @@ def assert_restorable(xfer, user_id):
     status drift** (ruling **R-DO**: a twin whose status could not legally reach
     the parent's) went at plan step ``balance:X-bi-6-4d-2``, when a twin's
     status stopped being kept or read; the **twin count** (exactly two) and the
-    **type pairing** (one expense, one income) went at ``balance:X-bi-6-4d-3``,
+    **type pairing** (one expense, one income) went at ``balance:X-bi-6-4d-2``,
     which deleted the twins and made the database refuse a new one (ruling
     **R-BAL258**).
 

@@ -27,7 +27,7 @@ Three locks land here:
   trip, and the second upgrade prints the same count.  The transfer pair is
   settled through the door and then put back into the shape this revision
   reads (``TestTheRoundTrip._stage``): ``82f7b7ed4332``'s downgrade builds its
-  twins, since plan step ``balance:X-bi-6-4d-3`` stores none, and its records
+  twins, since plan step ``balance:X-bi-6-4d-2`` stores none, and its records
   are re-parented under them by SQL, since plan step ``balance:X-bi-6-4d-2``
   files a side's record under the TRANSFER.
 
@@ -50,7 +50,7 @@ on an old-dump restore, and a template build replays the chain over an empty
 database.  The STATES they refused have homes -- a dateless settled row and an
 undated movement are ``integrity_check`` DC-11's two arms
 (``test_integrity_check/test_the_consistency_checks.py``); a shadow, broken or
-whole, is a row the database refuses since plan step ``balance:X-bi-6-4d-3``
+whole, is a row the database refuses since plan step ``balance:X-bi-6-4d-2``
 (``test_a_transfer_is_one_row/test_the_upgrade.py::TestTheUpgrade::
 test_the_database_refuses_a_twin``); a settled row recording nothing is the
 ``$0.00`` record (``test_settlement_record.py``); a movement disagreeing with
@@ -91,7 +91,7 @@ from tests._test_helpers import (
 
 _M = load_migration_module("45f10b870c8b_the_record_is_its_movements.py")
 
-#: Plan step ``balance:X-bi-6-4d-3``'s revision, which deletes every transfer
+#: Plan step ``balance:X-bi-6-4d-2``'s revision, which deletes every transfer
 #: twin and refuses a new one; its downgrade builds a transfer's two, which the
 #: round trip's transfer pair needs.
 _TWINS_DELETED = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
@@ -255,7 +255,7 @@ class TestTheRoundTrip:
         **The transfer pair is put back into the pre-step shape** since plan
         step ``balance:X-bi-6-4d-2``, which files each side's record under the
         TRANSFER (``expense_transfer_id`` / ``income_transfer_id``), and plan
-        step ``balance:X-bi-6-4d-3`` (``82f7b7ed4332``), which deletes every
+        step ``balance:X-bi-6-4d-2`` (``82f7b7ed4332``), which deletes every
         twin and refuses a new one -- so no door writes the shape this
         revision reads any more (each twin settled, holding its covering
         movement).  The pair is settled through the door, then

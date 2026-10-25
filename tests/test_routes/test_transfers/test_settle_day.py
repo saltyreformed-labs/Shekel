@@ -125,8 +125,8 @@ class TestTransferSettleDayEditDoor:
         Each read off the side's payment RECORD, which hangs off the transfer
         since plan step ``balance:X-bi-6-4d-2`` -- where a ``_shadow_days``
         beside it read the twins, which kept no day since that step and are
-        born no more since ``balance:X-bi-6-4d-3`` (ruling R-BAL167 class 4,
-        plan step balance:X-bi-6-4d-3).  ``None`` for a side holding no dated
+        born no more since ``balance:X-bi-6-4d-2`` (ruling R-BAL167 class 4,
+        plan step balance:X-bi-6-4d-2).  ``None`` for a side holding no dated
         record.
         """
         xfer = db.session.get(Transfer, xfer_id)
@@ -248,7 +248,7 @@ class TestTransferSettleDayEditDoor:
         transfer since plan step ``balance:X-bi-6-4d-2``, not off its twin
         (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The leg is
         the from-side, where the first twin this took its account from sat
-        until plan step ``balance:X-bi-6-4d-3``, which births none (ruling
+        until plan step ``balance:X-bi-6-4d-2``, which births none (ruling
         R-BAL167 class 1).
         """
         with app.app_context():
@@ -441,9 +441,9 @@ class TestTransferSettleDayEditDoor:
         state.  Asserted from BOTH openers -- the transfers page and a grid
         leg's cell -- because the grid opener is the one N-181's rows are
         reached through.  The leg is Savings', the side whose twin this took
-        its account from until plan step ``balance:X-bi-6-4d-3``, which
+        its account from until plan step ``balance:X-bi-6-4d-2``, which
         births none (ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-3).
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -522,7 +522,7 @@ class TestTransferSettleDayEditDoor:
         fails on it too; what only this case grades is a guard keyed on a
         side's record or day, which a ``$0.00`` close lacks.
 
-        **Its plant moved at plan step ``balance:X-bi-6-4d-3``** (ruling
+        **Its plant moved at plan step ``balance:X-bi-6-4d-2``** (ruling
         R-BAL167 class 1, onto ruling **R-BAL141**'s shape; the coordinator's
         ruling of 2026-10-15 under R-BAL207).  It cleared the day off a
         settled transfer's twins and their records behind the seam (the
@@ -598,7 +598,7 @@ class TestTransferSettleDayEditDoor:
         pair's days are read off both sides' payment records, not the twins
         (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The leg is
         the from-side, named off the transfer where it was read off that
-        side's twin until plan step ``balance:X-bi-6-4d-3``, which births
+        side's twin until plan step ``balance:X-bi-6-4d-2``, which births
         none (ruling R-BAL167 class 1).
         """
         with app.app_context():
@@ -644,7 +644,7 @@ class TestTransferSettleDayEditDoor:
         off their payment records, not the twins (ruling R-BAL167 class 1,
         plan step balance:X-bi-6-4d-2).  The leg is the from-side, named off
         the transfer where it was read off that side's twin until plan step
-        ``balance:X-bi-6-4d-3``, which births none (ruling R-BAL167 class 1).
+        ``balance:X-bi-6-4d-2``, which births none (ruling R-BAL167 class 1).
         """
         with app.app_context():
             settled_day = display_today() - timedelta(days=6)

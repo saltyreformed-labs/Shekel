@@ -328,8 +328,8 @@ class TestTheRenderedSelect:
         and this pins that the grid-origin ask offers the same periods the
         transfers page's does.  The leg is the from-side, named off the
         transfer where it was read off the first twin until plan step
-        ``balance:X-bi-6-4d-3``, which births none (ruling R-BAL167 class 1,
-        plan step balance:X-bi-6-4d-3).
+        ``balance:X-bi-6-4d-2``, which births none (ruling R-BAL167 class 1,
+        plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)

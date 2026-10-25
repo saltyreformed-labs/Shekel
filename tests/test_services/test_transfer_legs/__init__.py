@@ -8,7 +8,7 @@ worth its parent*).  Now the readers derive one
 row in ``budget.transfers`` and no reader folding a projection reads a
 projected shadow at all.
 
-**The firing controls these cases held until plan step balance:X-bi-6-4d-3.**
+**The firing controls these cases held until plan step balance:X-bi-6-4d-2.**
 Wherever Transfer Invariants 1-3 held, the fold's answer was the same whether it
 read the shadow or the parent -- 0 of 350 shadow rows drifted on the
 2026-09-15 production snapshot -- so a before/after diff of every figure the

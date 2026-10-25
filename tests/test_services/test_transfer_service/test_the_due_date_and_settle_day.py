@@ -25,7 +25,7 @@ class TestDueDateAndSettleDayShadows:
     own SQL (:func:`tests._test_helpers.transfer_side_record`).  What a side
     shows of the row's due date is ``test_transfer_legs/test_what_a_side_shows.py``'s
     ``TestBothSidesShowTheTransfer``, both sides.  Until plan step
-    ``balance:X-bi-6-4d-3`` each due-date case also read the transfer's two
+    ``balance:X-bi-6-4d-2`` each due-date case also read the transfer's two
     shadow rows, which that step's create door no longer writes (ruling
     R-BAL290 part 1).  The name is kept as history.
     """
@@ -36,7 +36,7 @@ class TestDueDateAndSettleDayShadows:
         """create_transfer with a due date writes it on the transfer's row.
 
         Read off the row re-read from the database since plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2b, where it read the
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2b, where it read the
         object the door returned and both shadow rows' due dates (ruling
         R-BAL290 part 1).  Renamed from ``test_shadow_due_date_propagation``.
         """
@@ -64,7 +64,7 @@ class TestDueDateAndSettleDayShadows:
         """create_transfer with no due date leaves the transfer's due date empty.
 
         Read off the row re-read from the database since plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2b, where it read the
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2b, where it read the
         object the door returned and both shadow rows' due dates (ruling
         R-BAL290 part 1); a create that dated an undated transfer fails it
         (measured there).  Renamed from
@@ -95,7 +95,7 @@ class TestDueDateAndSettleDayShadows:
 
         The transfer is created with none, so the edit moves it.  Read off
         the row re-read from the database since plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2b, where it read the
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2b, where it read the
         object in the session and both shadow rows' due dates (ruling
         R-BAL290 part 1).  Renamed from ``test_shadow_due_date_update``.
         """
@@ -166,7 +166,7 @@ class TestDueDateAndSettleDayShadows:
         write goes through the status seam now, which refuses it.
 
         It also asked the transfer's shadow rows for a day after the refusal
-        until plan step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2b.  From
+        until plan step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2b.  From
         that step's create door no row can name a transfer
         (``ck_transactions_names_no_transfer``), so the loop ran over none
         (a vacuous read, structurally empty), and it is dropped, not moved

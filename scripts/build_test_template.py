@@ -229,7 +229,7 @@ def _start_each_table_in_an_id_range_of_its_own() -> None:
     accident, and no case can tell.  The fixture has the coincidence by
     construction; production has it only where two counters happen to agree,
     so there the wrong id names a wrong row.  Review 1 of plan step
-    ``balance:X-bi-6-4d-3`` (its MEDIUM-4) measured six account-id writes that
+    ``balance:X-bi-6-4d-2`` (its MEDIUM-4) measured six account-id writes that
     no case in the suite caught: four for exactly this reason, and two log
     fields that no case asserts, which the ranges do not change.
 

@@ -551,7 +551,7 @@ class TestTheFeedPricesADerivedRow:
     passing because the ROUTE prices the projected half through the amount
     model and not through that accessor.
 
-    **Re-expressed onto the TRANSFER at plan step balance:X-bi-6-4d-3**
+    **Re-expressed onto the TRANSFER at plan step balance:X-bi-6-4d-2**
     (ruling **R-BAL167** class 1).  The figure-less row was the loan-side
     income shadow declared derived (``PARENT_TRANSFER``), and the accessor
     the ROW accessor :func:`~app.services.row_valuation.settled_contribution`.
@@ -581,7 +581,7 @@ class TestTheFeedPricesADerivedRow:
         $1,500.00 the definition states.
 
         It declared the LOAN-side income shadow derived and asserted the feed
-        carried its parent's $1,500.00 until plan step balance:X-bi-6-4d-3
+        carried its parent's $1,500.00 until plan step balance:X-bi-6-4d-2
         (see the class).  The transfer has no ``LoanPaymentSettings``, so it
         is priced from its definition's $1,500.00, not from the loan's own
         installment.
@@ -619,7 +619,7 @@ class TestTheFeedPricesADerivedRow:
         It asked the ROW accessor
         :func:`~app.services.row_valuation.settled_contribution` of the
         loan-side income shadow declared derived until plan step
-        balance:X-bi-6-4d-3 (see the class); that accessor's refusal of a
+        balance:X-bi-6-4d-2 (see the class); that accessor's refusal of a
         derived Projected row is graded on an ordinary row by
         ``test_amount_ownership/test_the_cheap_accessor.py``'s
         ``test_a_derived_transaction_refuses``.

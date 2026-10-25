@@ -339,7 +339,7 @@ class TestDayAssignment:
         legs read off its parent, no shadow, since plan step
         ``balance:X-bi-6-1b``; the case called its undated entry the
         transfer's expense shadow, and read that shadow's due date, until plan
-        step ``balance:X-bi-6-4d-3``'s vacuous-residue checkpoint.)  The case
+        step ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint.)  The case
         reads checking's calendar, so it grades the from-side leg only.
         """
         with app.app_context():
@@ -1803,7 +1803,7 @@ class TestATransferIsALegOfItsParent:
         checking -> savings transfer; savings holds no row of its own.
         Checking's load answers the Rent row alone and one EXPENSE leg on
         checking; savings' answers no row and one INCOME leg on savings.
-        Until plan step ``balance:X-bi-6-4d-3`` the case also read that no row
+        Until plan step ``balance:X-bi-6-4d-2`` the case also read that no row
         checking's load answered named a transfer (a shadow); no row can since
         (``ck_transactions_names_no_transfer``).  Renamed from
         ``test_the_loader_answers_own_rows_and_both_sides_legs_and_no_shadow``.

@@ -43,7 +43,7 @@ class TestCreateTransfer:
         """create_transfer writes ONE row, the transfer, carrying the spec's fields.
 
         It counted two shadow rows and asserted these fields on each until
-        plan step ``balance:X-bi-6-4d-3``, whose create door stopped writing
+        plan step ``balance:X-bi-6-4d-2``, whose create door stopped writing
         them: a transfer is one row and its two legs are derived from it
         (ruling R-BAL167 class 1; one leg per side is
         ``test_transfer_legs/test_the_plan_half.py``'s
@@ -83,7 +83,7 @@ class TestCreateTransfer:
         """The transfer files under the user-selected category.
 
         It asserted the two shadow rows' categories, and nothing on the
-        transfer, until plan step ``balance:X-bi-6-4d-3``; the transfer holds
+        transfer, until plan step ``balance:X-bi-6-4d-2``; the transfer holds
         the category now (ruling R-BAL167 class 1).  It also read both legs'
         categories until that step's checkpoint 2e-2b-1b-2, which reads the
         row re-read from the database instead (ruling R-BAL290 part 1); what
@@ -117,7 +117,7 @@ class TestCreateTransfer:
         link in its spec the way the application does: a GENERATED transfer
         of the fixture's definition, whose rule recurs every period.  It
         also asked each side for a definition until plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-2, which reads the row
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-2, which reads the row
         re-read from the database instead (ruling R-BAL290 part 1): that a
         side names no TRANSACTION definition whatever its transfer's shape
         (the grid's row-key contract) is ``test_transfer_legs/test_what_a_side_shows.py``'s
@@ -146,7 +146,7 @@ class TestCreateTransfer:
         """A custom name names the transfer.
 
         It asked the two shadow rows' names until plan step
-        ``balance:X-bi-6-4d-3``, and from that step's create door on the loop
+        ``balance:X-bi-6-4d-2``, and from that step's create door on the loop
         over them ran over none (a vacuous read, measured at its checkpoint
         2e-2a-1).  It then asked each side's label, exactly, until that
         step's checkpoint 2e-2b-1b-2, which reads the row re-read from the
@@ -184,7 +184,7 @@ class TestCreateTransfer:
         """Without a name, transfer gets 'from_account to to_account'.
 
         Read off the row re-read from the database since plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-2, where it read the
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-2, where it read the
         object the door returned (ruling R-BAL290 part 1), and asked that
         each account's name was IN it: a default naming the two accounts
         the other way round passed (measured there), so it asks the whole

@@ -178,9 +178,9 @@ class TestTransferInstance:
         used to DROP the empty submit so the None never arrived -- the
         nullable-field clear defect.  The transfer must come back NULL,
         re-read from the database.  Both shadows had to as well until plan
-        step ``balance:X-bi-6-4d-3``, which births none: each side's
+        step ``balance:X-bi-6-4d-2``, which births none: each side's
         category is derived from the transfer's (ruling R-BAL167 class 1,
-        plan step balance:X-bi-6-4d-3).
+        plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -202,8 +202,8 @@ class TestTransferInstance:
         """PATCH /transfers/instance/<id> with due_date updates the transfer.
 
         Re-read from the database.  It read both shadows' due dates too until
-        plan step ``balance:X-bi-6-4d-3``, which births none (ruling R-BAL167
-        class 1, plan step balance:X-bi-6-4d-3).
+        plan step ``balance:X-bi-6-4d-2``, which births none (ruling R-BAL167
+        class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -234,8 +234,8 @@ class TestTransferInstance:
         pin's job -- the real form ships the pin and a stale submit gets
         a 409 before any field is applied.  The transfer is re-read from the
         database; the shadows' due dates were read too until plan step
-        ``balance:X-bi-6-4d-3``, which births none (ruling R-BAL167 class
-        1, plan step balance:X-bi-6-4d-3).
+        ``balance:X-bi-6-4d-2``, which births none (ruling R-BAL167 class
+        1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -445,11 +445,11 @@ class TestTransferInstance:
         could not tell a working door from a silently ignored one.
 
         The leg is the from-side, where the expense twin this read sat until
-        plan step ``balance:X-bi-6-4d-3``, which births none; the twins'
+        plan step ``balance:X-bi-6-4d-2``, which births none; the twins'
         figures it read then are each side's projection of the transfer
         read here, graded field by field by
         ``test_transfer_legs/test_what_a_side_shows.py::TestBothSidesShowTheTransfer`` (ruling
-        R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -488,9 +488,9 @@ class TestTransferInstance:
         the refusal renders INTO the leg's cell (so the person who clicked
         sees it), and the parent amount is unchanged (#26), re-read from the
         database.  The leg is the from-side, where the twin this read sat
-        until plan step ``balance:X-bi-6-4d-3``, which births none; the twins'
+        until plan step ``balance:X-bi-6-4d-2``, which births none; the twins'
         figures it also read are each side's projection of that amount
-        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -552,7 +552,7 @@ class TestTransferInstance:
 
             # Parent and both sides untouched -- still Projected, no record.
             # (It also counted two shadows until plan step
-            # balance:X-bi-6-4d-3, which births none.)
+            # balance:X-bi-6-4d-2, which births none.)
             db.session.refresh(xfer)
             assert xfer.status.name == "Projected"
             assert all(
@@ -602,7 +602,7 @@ class TestTransferInstance:
         the twins' statuses, which no door writes since plan step
         ``balance:X-bi-6-4d-2`` (ruling R-BAL167 class 1, plan step
         balance:X-bi-6-4d-2).  The leg is the from-side, where the twin this
-        read its account off sat until plan step ``balance:X-bi-6-4d-3``,
+        read its account off sat until plan step ``balance:X-bi-6-4d-2``,
         which births none (ruling R-BAL167 class 1).
         """
         with app.app_context():
@@ -709,10 +709,10 @@ class TestTransferInstance:
         the transfer is what makes both legs worth nothing.
 
         Named ``..._through_its_shadows`` until plan step
-        ``balance:X-bi-6-4d-3``, which births no shadow; its guard that
+        ``balance:X-bi-6-4d-2``, which births no shadow; its guard that
         exactly two shadows existed went too.  The loop below runs over the
         transfer's two endpoints, a fixed pair, so it cannot run over
-        nothing (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        nothing (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -765,8 +765,8 @@ class TestTransferPeriodMove:
     filtered period selector, the override flag on a template move, the
     gridRefresh trigger, and route-boundary ownership of the submitted
     period id.  A file-local ``_shadows`` read the two shadow transactions'
-    periods until plan step ``balance:X-bi-6-4d-3``, which births none
-    (ruling R-BAL167 class 4, plan step balance:X-bi-6-4d-3).
+    periods until plan step ``balance:X-bi-6-4d-2``, which births none
+    (ruling R-BAL167 class 4, plan step balance:X-bi-6-4d-2).
     """
 
     def test_full_edit_renders_filtered_period_selector(
@@ -812,11 +812,11 @@ class TestTransferPeriodMove:
         The response asks for a full grid refresh so the relocated legs
         appear under the new period.  Named
         ``test_move_relocates_transfer_and_both_shadows`` until plan step
-        ``balance:X-bi-6-4d-3``, which births no shadow: it read both
+        ``balance:X-bi-6-4d-2``, which births no shadow: it read both
         shadows' periods (Transfer Invariant 3), which are each side's
         projection of the transfer's period read here
         (``test_transfer_legs/test_what_a_side_shows.py``'s ``TestBothSidesShowTheTransfer``;
-        ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -865,9 +865,9 @@ class TestTransferPeriodMove:
         """Submitting another user's period id returns 404 and moves nothing.
 
         Its read of the shadows' periods was VACUOUS from plan step
-        ``balance:X-bi-6-4d-3``, which births none: an ``all()`` over an
+        ``balance:X-bi-6-4d-2``, which births none: an ``all()`` over an
         empty list.  Dropped; the transfer's own period is the read (ruling
-        R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)

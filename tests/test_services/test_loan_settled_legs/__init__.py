@@ -23,12 +23,12 @@ none of them:
   ``balance:X-bi-6-4d-2`` a side's money is its record on the TRANSFER and no
   reader reads a twin, and the drift whose money moved -- a DATED side record
   under a Projected transfer -- is refused by the database (ruling
-  **R-BAL167** class 2).  Since plan step ``balance:X-bi-6-4d-3`` the twin row
+  **R-BAL167** class 2).  Since plan step ``balance:X-bi-6-4d-2`` the twin row
   itself is refused at the write (ruling **R-BAL258**), so the drift whose
   money did NOT move has no row to be written on.
 * The posting sync's lineage probe named the transfer of a movement that hung
   off a DEAD shadow, so that movement's postings reversed; since plan step
-  ``balance:X-bi-6-4d-3`` no twin can be stored to hang one off, which the
+  ``balance:X-bi-6-4d-2`` no twin can be stored to hang one off, which the
   case asserts.
 
 Every figure is made up (ruling R-BAL132).  The loan is ``$100,000.00`` at 6%

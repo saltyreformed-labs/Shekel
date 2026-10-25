@@ -33,7 +33,7 @@ class Transfer(
     the stored value is atomically incremented; concurrent
     mutations race for the bump and the loser raises
     :class:`sqlalchemy.orm.exc.StaleDataError`.  Until plan step
-    ``balance:X-bi-6-4d-3`` deleted the transfer's two shadow
+    ``balance:X-bi-6-4d-2`` deleted the transfer's two shadow
     transactions, the transfer service propagated parent-transfer
     mutations to both, so the parent's version pin protected the
     three-row write set even though the shadow rows carried their
@@ -62,7 +62,7 @@ class Transfer(
         # parent's figure onto both shadows, and a drift corrector repaired the
         # copies that got away.  Plan step X-au-g-2c-2 deleted both by making a shadow READ
         # its parent (``1f2b98a40``, ruling **R-IN**, which took in X-au-f's
-        # shadow half), and plan step ``balance:X-bi-6-4d-3`` deleted the
+        # shadow half), and plan step ``balance:X-bi-6-4d-2`` deleted the
         # shadows.
         #
         # ``ck_transfers_positive_amount`` (``amount > 0``) is UNCHANGED and
@@ -228,7 +228,7 @@ class Transfer(
         # double-click, browser back-and-resubmit -- creates two parent
         # transfers in the same period.  Each duplicate transfer is a
         # second debit and a second credit (with two more shadow
-        # transactions, until plan step ``balance:X-bi-6-4d-3`` deleted
+        # transactions, until plan step ``balance:X-bi-6-4d-2`` deleted
         # the shadows), so a single accidental double-click silently
         # doubles the user's projected debit and credit; balance
         # projections drift by ``2 * amount`` until the user notices and
@@ -275,7 +275,7 @@ class Transfer(
     # ``pay_periods`` and ``transfers`` simultaneously would
     # previously have raised a RESTRICT error even though every
     # row was destined for deletion.  Until plan step
-    # ``balance:X-bi-6-4d-3`` deleted the shadows, CASCADE also kept
+    # ``balance:X-bi-6-4d-2`` deleted the shadows, CASCADE also kept
     # a transfer with its two shadow transactions: the three and
     # their pay period disappeared together rather than leaving the
     # parent transfer orphaned after the shadows cascaded away
@@ -410,7 +410,7 @@ class Transfer(
     # ``Transaction.due_date`` (ad-hoc transfers may omit it; a generated
     # transfer's is ``recurrence.compute_due_date``'s answer).  Each side's leg reads
     # it here (``TransferLeg.due_date``, :mod:`app.services.transfer_legs`).
-    # Until plan step ``balance:X-bi-6-4d-3`` deleted the shadows, the
+    # Until plan step ``balance:X-bi-6-4d-2`` deleted the shadows, the
     # transfer service mirrored it to both shadow transactions, and the
     # consumers of a due date read the shadow ``Transaction.due_date``.
     #
@@ -442,7 +442,7 @@ class Transfer(
     # occurrence (NULL).
     #
     # **It was never mirrored onto the two shadow transactions** plan step
-    # ``balance:X-bi-6-4d-3`` deleted: a shadow was not the rule's own row
+    # ``balance:X-bi-6-4d-2`` deleted: a shadow was not the rule's own row
     # (``transfer_service`` created it from the parent, never the recurrence
     # engine from an occurrence), and no generate pass asked a shadow whether
     # an occurrence had been written.

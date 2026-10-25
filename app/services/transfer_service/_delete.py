@@ -4,7 +4,7 @@ Shekel Budget App -- Transfer Service: the DELETE verb
 Removing a transfer, soft or hard.  It removed both shadow
 :class:`~app.models.transaction.Transaction` rows with it -- Transfer Invariant
 2, that a shadow is never orphaned, applied in the one direction that could
-orphan one -- until plan step ``balance:X-bi-6-4d-3`` deleted the shadows; its
+orphan one -- until plan step ``balance:X-bi-6-4d-2`` deleted the shadows; its
 leaf 3b deleted the delete's last query and flags over them.
 
 The ORDER inside is the whole of the module: the posted cash effect is
@@ -183,7 +183,7 @@ def delete_transfer(transfer_id, user_id, soft=False, *, press=None):
     else:
         # Hard delete.  It counted the twins the ``transactions.transfer_id``
         # CASCADE should have taken, and logged any left behind, until plan
-        # step ``balance:X-bi-6-4d-3`` deleted the twins and made the database
+        # step ``balance:X-bi-6-4d-2`` deleted the twins and made the database
         # refuse a new one (ruling **R-BAL258**): there is nothing left to
         # orphan.
         db.session.delete(xfer)

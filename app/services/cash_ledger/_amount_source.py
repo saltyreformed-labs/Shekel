@@ -54,7 +54,7 @@ discriminator by tracing -- because two of them are SUBSETS of two others:
   5. **TRANSFER** -- a transfer shadow, priced by its parent transfer, which
      is itself priced by rule 1, rule 3 or rule 4
      (:func:`resolve_transfer_amount`).  No row is one since plan step
-     ``balance:X-bi-6-4d-3`` deleted the shadows (ruling **R-BAL166**): the
+     ``balance:X-bi-6-4d-2`` deleted the shadows (ruling **R-BAL166**): the
      rule refuses a row that still declares it (:func:`_transfer_answer`),
      and that arm goes at plan step ``balance:X-bi-6-5``.
 
@@ -91,7 +91,7 @@ measurement -- before it, a Projected template-linked row priced from the SERIES
 and agreed with its column only because X-au-b measured ``$0.00`` drift.  **The
 per-kind cutovers are what stamp a relation as each bucket stops being priced**:
 X-au-g-2c-2 declared every transfer SHADOW (350 rows on production, 2026-09-01;
-plan step ``balance:X-bi-6-4d-3`` deleted the shadows), **X-au-d** every
+plan step ``balance:X-bi-6-4d-2`` deleted the shadows), **X-au-d** every
 non-override SALARY row (59 rows, 2026-09-02), **X-au-e** the non-override
 TEMPLATE rows and **X-au-f** a generated transfer's own amount.  *The sentence
 this replaces still said every production row was OWN; it went stale at the
@@ -194,7 +194,7 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
     (:func:`leg_amounts_by_key`), the cash fold and the loan payment feed read
     projected transfers as legs of the PARENT and take
     :func:`~app.utils.amount_relationships.transfer_pricing_load_options`
-    instead, and plan step ``balance:X-bi-6-4d-3`` deleted the shadows (ruling
+    instead, and plan step ``balance:X-bi-6-4d-2`` deleted the shadows (ruling
     **R-BAL166**).  It lives one tier
     DOWN because ``loan_loaders`` needs it and this package imports
     ``loan_loaders``; that module states the argument.
@@ -381,7 +381,7 @@ def resolve_transfer_amount(xfer, basis: AmountBasis) -> Decimal:
     was correct while the parent still stored a figure and unpriceable the
     moment the cutover emptied that column (``X-au-f-3``, absorbed into
     ``X-au-f-2``).  The occurrence is ONE economic
-    event, held as three rows until plan step ``balance:X-bi-6-4d-3`` deleted
+    event, held as three rows until plan step ``balance:X-bi-6-4d-2`` deleted
     its two shadows (ruling **R-BAL166**) and as one since; the two legs are
     its PROJECTION, so the value's home is the parent and each leg reads it
     through this function (the grid's :func:`leg_amounts_by_key` and the cash
@@ -772,7 +772,7 @@ def _transfer_answer(txn, basis: AmountBasis) -> Decimal:
     the answer for every declared shadow, a loan payment's two legs included
     (ruling **R-BAL10**), so it was R-JM's one chain -- *a leg reads its
     parent, and the parent decides owner or contract*.  Plan step
-    ``balance:X-bi-6-4d-3`` deleted the shadows (ruling **R-BAL166**) and
+    ``balance:X-bi-6-4d-2`` deleted the shadows (ruling **R-BAL166**) and
     ``ck_transactions_names_no_transfer`` refuses a row naming a transfer,
     while a definition's row declaring ``PARENT_TRANSFER`` still passes every
     CHECK and is stored with no transfer to load: the refusal below answers

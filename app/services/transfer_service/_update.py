@@ -8,7 +8,7 @@ with it (on a status move through the one writer,
 :mod:`._delete`.  It
 also mirrored the transfer's period, category, due date and override flag
 onto two shadow :class:`~app.models.transaction.Transaction` rows, in this
-module and nowhere else, until plan step ``balance:X-bi-6-4d-3`` deleted the
+module and nowhere else, until plan step ``balance:X-bi-6-4d-2`` deleted the
 rows; that step's leaf 3b deleted the mirrors.  A shadow's status and day
 were no longer kept from ``X-bi-6-4d-2``: nothing read them.
 
@@ -225,7 +225,7 @@ def _apply_remaining_fields(
     """Apply every field a SETTLE does not own.
 
     It also MIRRORED each field onto the twin rows, here and nowhere else,
-    until plan step ``balance:X-bi-6-4d-3`` deleted them (its leaf 3b deleted
+    until plan step ``balance:X-bi-6-4d-2`` deleted them (its leaf 3b deleted
     the mirrors): a transfer is one row, each side's leg reads the transfer's
     period, category and due date (``transfer_legs``), and each side's
     record is the status seam's Transfer arm's (plan step
@@ -720,7 +720,7 @@ def update_transfer(transfer_id, user_id, *, press=None, **kwargs):
     an endpoint move (:func:`_apply_endpoint_move`).  Each side's leg reads the
     transfer's period, category and due date (``transfer_legs``), so no copy
     of them is kept to hold equal: the twin rows that carried one went at
-    plan step ``balance:X-bi-6-4d-3``, and their mirrors at its leaf 3b.  A
+    plan step ``balance:X-bi-6-4d-2``, and their mirrors at its leaf 3b.  A
     planned leg reads its PRICE off the transfer too, and a settled
     transfer's figure is the TRANSFER's own since plan step
     ``balance:X-bi-6-4d-2``'s 4d-4 half (rulings **R-BAL365**,

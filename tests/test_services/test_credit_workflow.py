@@ -1021,7 +1021,7 @@ class TestNegativePaths:
             assert txn.status.name == "Cancelled"
 
     # ``test_mark_credit_rejects_shadow_transaction`` stood here until plan
-    # step balance:X-bi-6-4d-3 (ruling **R-BAL300**, developer 2026-10-15:
+    # step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer 2026-10-15:
     # "Delete all 27").  It handed ``mark_as_credit`` a transfer's expense
     # SHADOW row and asserted the service's own refusal (M-03, the
     # ``transfer_id`` guard in ``credit_workflow``).  No shadow can exist now

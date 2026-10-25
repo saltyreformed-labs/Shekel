@@ -585,7 +585,7 @@ def settled_items(periods: "list[int] | Query") -> "tuple[Query, Query]":
 
     **The parent decides, and since plan step ``balance:X-bi-6-4d-2`` it is
     the only status read here**: a settle STORED its twins Projected under a
-    Paid transfer until ``balance:X-bi-6-4d-3`` deleted the twins, but the
+    Paid transfer until ``balance:X-bi-6-4d-2`` deleted the twins, but the
     row query excluded every twin (``transfer_id IS NULL``) and the transfer
     query asks the transfer, so the drift ruling **R-JM** settled here (a
     parent over a shadow whose status differed) was stored and never read.
@@ -624,7 +624,7 @@ def _items(
     **An item is what the owner sees in a pay period**: a plan row, or a
     TRANSFER once for its two legs, which the transfer query asks.  The row
     query's ``transfer_id IS NULL`` (the discard gate's idiom) kept a
-    transfer's shadow rows out until plan step ``balance:X-bi-6-4d-3``
+    transfer's shadow rows out until plan step ``balance:X-bi-6-4d-2``
     deleted them; it excludes nothing since, and goes with the column at
     plan step ``balance:X-bi-6-5``.
     Each query yields one ``(pay_period_id,)`` per item, so a caller reads
@@ -633,7 +633,7 @@ def _items(
     with ``with_entities``, keeping the scope.
 
     **One premise the DOORS held and no key did until plan step
-    ``balance:X-bi-6-4d-3``** (the reason :func:`settled_items` gives for
+    ``balance:X-bi-6-4d-2``** (the reason :func:`settled_items` gives for
     status drift, for the period a shadow mirrored).  A shadow's
     ``pay_period_id`` was its transfer's (``transfer_service`` moved both
     together, a restore re-aligned them, carry-forward's bulk moves excluded

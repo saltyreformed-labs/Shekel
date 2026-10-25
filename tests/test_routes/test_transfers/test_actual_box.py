@@ -60,7 +60,7 @@ class TestThePatchGradesEachBoxOnItsOwn:
 
         Each off the side's payment RECORD, which hangs off the transfer since
         plan step ``balance:X-bi-6-4d-2``; it read the twins until then, which
-        held no day from that step until plan step balance:X-bi-6-4d-3 deleted
+        held no day from that step until plan step balance:X-bi-6-4d-2 deleted
         them (ruling R-BAL167 class 4, plan step balance:X-bi-6-4d-2).
         """
         db.session.expire_all()
@@ -193,9 +193,9 @@ class TestTransferActualBox:
 
         A side's record hangs off the TRANSFER since plan step
         ``balance:X-bi-6-4d-2``, where a ``_legs`` helper's twins held it
-        until then; that helper went at ``balance:X-bi-6-4d-3``, which
+        until then; that helper went at ``balance:X-bi-6-4d-2``, which
         births no twin (ruling R-BAL167 class 4, plan step
-        balance:X-bi-6-4d-3).  Read by independent SQL
+        balance:X-bi-6-4d-2).  Read by independent SQL
         (``transfer_side_record``); ``None`` for a side holding none.
         """
         xfer = db.session.get(Transfer, xfer_id)
@@ -216,7 +216,7 @@ class TestTransferActualBox:
         unreachable.  Being disabled WAS the defect, so the test asserts the
         box is present AND live, on both doors onto this popover.  The leg
         door's leg is the from-side, named off the transfer where it was read
-        off the expense twin until plan step ``balance:X-bi-6-4d-3``, which
+        off the expense twin until plan step ``balance:X-bi-6-4d-2``, which
         births none (ruling R-BAL167 class 1).
         """
         with app.app_context():
@@ -459,7 +459,7 @@ class TestTransferActualBox:
         "Written anyway" is read off each side's payment record, which hangs
         off the transfer since plan step ``balance:X-bi-6-4d-2``, not off
         the twins, which held none from that step until plan step
-        balance:X-bi-6-4d-3 deleted them (ruling R-BAL167 class 1, plan step
+        balance:X-bi-6-4d-2 deleted them (ruling R-BAL167 class 1, plan step
         balance:X-bi-6-4d-2).
         """
         with app.app_context():
@@ -594,7 +594,7 @@ class TestTransferActualBox:
         ``$0.00`` close is built through the app -- a typed ``$0.00``
         correction, which takes both sides' records off -- where it was
         staged behind the seam's back on the twins, which held no record
-        from that step until plan step balance:X-bi-6-4d-3 deleted them
+        from that step until plan step balance:X-bi-6-4d-2 deleted them
         (ruling R-BAL167, plan step balance:X-bi-6-4d-2; the
         refused second save follows R-BAL230, a rule-5 re-expression the
         developer approved 2026-10-09).  Each save is graded on the side

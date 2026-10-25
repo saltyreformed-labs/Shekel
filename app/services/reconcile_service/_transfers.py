@@ -22,7 +22,7 @@ panel was unchanged on production when plan step X-f2-c3 shipped.
 **It offers the LEG, off ``budget.transfers``, since leaf
 ``balance:X-bi-6-4c-2``** (the one-place rule leaves ``X-bi-6-4a`` / ``6-4b``
 followed: a reader reached a shadow only through a leg-shaped call in
-``transfer_legs`` or ``transfer_service``, until ``X-bi-6-4d-3`` deleted the
+``transfer_legs`` or ``transfer_service``, until ``X-bi-6-4d-2`` deleted the
 shadows): a
 :class:`~app.services.transfer_legs.TransferLeg` from
 ``transfer_legs.offerable_transfer_legs``, keyed by
@@ -35,7 +35,7 @@ shadow's id in one map with the transaction arm's rows, which only the
 table's partition on ``transfer_id`` kept from colliding.  So this arm reached
 no shadow itself; the two doors did, through the interval, until plan step
 ``balance:X-bi-6-4d-2`` re-bodied them onto the transfer and its sides' records
-and ``X-bi-6-4d-3`` deleted the shadows.  **What can move on screen**, all of it
+and ``X-bi-6-4d-2`` deleted the shadows.  **What can move on screen**, all of it
 declared: a transfer's block is headed by its leg's label, composed from the
 endpoints' CURRENT names, where it printed the shadow's stored copy (leaf
 ``X-bi-6-1``'s same change on the grid) -- 0 of 354 shadows disagreed on the
@@ -45,12 +45,12 @@ shadow pair is broken was warned about rather than offered (ruling
 **R-BAL148**) until plan step ``balance:X-bi-6-4d-2`` priced a leg off its
 transfer alone and ruling **R-BAL235** offered it like any other; and a
 shadow drifted from its parent was offered by the parent's state
-(``transfer_legs.offerable_transfer_legs``) until ``X-bi-6-4d-3`` deleted the
+(``transfer_legs.offerable_transfer_legs``) until ``X-bi-6-4d-2`` deleted the
 shadows.
 
 **Its settle is ``transfer_service.settle_transfer``, and that is the whole
 reason it is a separate arm** (ruling **R-FA**).  A transfer is ONE row since
-plan step ``balance:X-bi-6-4d-3`` (ruling **R-BAL166**; it was a parent and two
+plan step ``balance:X-bi-6-4d-2`` (ruling **R-BAL166**; it was a parent and two
 shadows until then), its status is the transfer's, and every write of it goes
 through ``transfer_service`` (``CLAUDE.md``, Architecture).  Ticking one here
 therefore settles the leg on the OTHER account too, which is a fact about the
@@ -107,7 +107,7 @@ def _settle_one(
 
     This arm's settle, named by :data:`ARM`.
     **Both legs move in this one call**: a transfer is one row whose status
-    is the transfer's (plan step ``balance:X-bi-6-4d-3``, ruling
+    is the transfer's (plan step ``balance:X-bi-6-4d-2``, ruling
     **R-BAL166**), so the structure holds that rather than this function
     remembering it, and it is why a tick here settles the matching leg on the
     other account (the section note says so on the panel).

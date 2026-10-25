@@ -31,7 +31,7 @@ def _both_legs(xfer):
     surface prices with :func:`~app.services.cash_ledger.leg_amounts_by_key`,
     which is how a leg is read since plan step ``balance:X-bi-6-1`` (ruling
     **R-BAL87**).  These cases priced the two shadow ROWS with
-    ``amounts_by_id`` until plan step ``balance:X-bi-6-4d-3`` stopped the
+    ``amounts_by_id`` until plan step ``balance:X-bi-6-4d-2`` stopped the
     shadows being born (ruling **R-BAL167** class 1).
     """
     return [leg_of(xfer, xfer.from_account_id), leg_of(xfer, xfer.to_account_id)]
@@ -49,7 +49,7 @@ class TestALoanPaymentsLegsReadTheLoan:
         worth ``$1.00`` is one the loan did not price.  It asked both legs
         because the cutover declared both shadow rows, and a version declaring
         only the checking side would have left the loan-side income leg
-        answering the parent.  Since plan step balance:X-bi-6-4d-3 both legs
+        answering the parent.  Since plan step balance:X-bi-6-4d-2 both legs
         resolve through ONE ``resolve_transfer_amount`` call on one transfer,
         so the two cannot differ: ``len(priced) == 2`` checks that the two
         legs' keys are distinct, not that two answers agree.
@@ -61,7 +61,7 @@ class TestALoanPaymentsLegsReadTheLoan:
         discrimination is the same -- ``$1.00`` against the contract's
         ``$1,499.10`` -- and one stored copy shorter.
 
-        **The legs are the transfer's since plan step balance:X-bi-6-4d-3**
+        **The legs are the transfer's since plan step balance:X-bi-6-4d-2**
         (ruling **R-BAL167** class 1): both are priced through
         ``leg_amounts_by_key``, where the two shadow rows were priced through
         ``amounts_by_id``, and the per-leg "stores nothing" check went with the
@@ -156,7 +156,7 @@ class TestAnOwnerTypedFigureShowsBeforeItSettles:
         ``amounts_by_id`` over the shadow rows (ruling **R-Q**), and since
         plan step ``balance:X-bi-6-1`` it is ``leg_amounts_by_key`` over the
         legs (``routes/grid/_items.py``); this case asked the first until plan
-        step balance:X-bi-6-4d-3 stopped the shadows being born (ruling
+        step balance:X-bi-6-4d-2 stopped the shadows being born (ruling
         R-BAL167 class 1).
         """
         with app.app_context():
@@ -218,7 +218,7 @@ class TestAModeFlipRewritesNoRow:
         the loan's ``$1,499.10`` -- so the route reprices without a writer, which
         is the scope argument (**R-IN**) itself.
 
-        **Asked of the TRANSFER since plan step balance:X-bi-6-4d-3** (ruling
+        **Asked of the TRANSFER since plan step balance:X-bi-6-4d-2** (ruling
         **R-BAL167** class 1): no shadow row is born, both legs are read off
         the transfer (**R-BAL13**), so what they are worth is
         :func:`~tests._test_helpers.transfer_amount` and the row the flip must

@@ -58,11 +58,11 @@ class TestOneTimeTransfer:
         AND a single Transfer.
 
         Named ``..._and_two_shadows`` until plan step
-        ``balance:X-bi-6-4d-3``, which births no shadow: its count of two
+        ``balance:X-bi-6-4d-2``, which births no shadow: its count of two
         and their expense / income types went, the sides being the
         transfer's projection by endpoint (``test_transfer_legs/test_what_a_side_shows.py``'s
         ``TestBothSidesShowTheTransfer``; ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-3).
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -112,11 +112,11 @@ class TestOneTimeTransfer:
         """A non-repeating transfer runs from the form's from-account to its to-account.
 
         Re-read from the database.  Named ``test_non_repeating_shadow_accounts``
-        until plan step ``balance:X-bi-6-4d-3``, which births no shadow: it
+        until plan step ``balance:X-bi-6-4d-2``, which births no shadow: it
         read the expense twin's account (the from-account) and the income
         twin's (the to-account), which are the transfer's two endpoint
         columns read here (ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-3).
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -158,9 +158,9 @@ class TestOneTimeTransfer:
         increase by the transfer amount.  Each balance reads the transfer's
         LEG on its account (Transfer Invariant 5).  The case also asserted a
         shadow existed on each account until plan step
-        ``balance:X-bi-6-4d-3``, which births none; the transfer the create
+        ``balance:X-bi-6-4d-2``, which births none; the transfer the create
         placed is asserted instead (ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-3).  The two balances are unchanged.
+        balance:X-bi-6-4d-2).  The two balances are unchanged.
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -364,14 +364,14 @@ class TestOneTimeTransfer:
         (``transfer_service._endpoints``), so the edit applies here too and one
         edit stops meaning two different things.
 
-        It asserted all three rows until plan step ``balance:X-bi-6-4d-3``,
+        It asserted all three rows until plan step ``balance:X-bi-6-4d-2``,
         which births no shadow: each side is the transfer's projection by
         endpoint now (``test_transfer_legs/test_what_a_side_shows.py``'s
         ``TestBothSidesShowTheTransfer``), and a side's display NAME is
         composed from the endpoints at read time (its label is pinned by
         ``TestALegsDisplayProjections`` there), so the transfer's two
         endpoint columns, re-read, are what this asserts (ruling R-BAL167
-        class 1, plan step balance:X-bi-6-4d-3).
+        class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -430,9 +430,9 @@ class TestOneTimeTransfer:
         read there, not off the twins (ruling R-BAL167 class 1, plan step
         balance:X-bi-6-4d-2).  It also counted
         the twins on the old destination until plan step
-        ``balance:X-bi-6-4d-3``, which births none; the transfer's own
+        ``balance:X-bi-6-4d-2``, which births none; the transfer's own
         destination column, re-read, says where the side is (ruling R-BAL167
-        class 1, plan step balance:X-bi-6-4d-3).
+        class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -569,7 +569,7 @@ class TestOneTimeTransfer:
         transfer since plan step ``balance:X-bi-6-4d-2`` and is read there
         rather than off the twins (ruling R-BAL167 class 1, plan step
         balance:X-bi-6-4d-2); their count of two went at
-        ``balance:X-bi-6-4d-3``, which births none (ruling R-BAL167 class 1).
+        ``balance:X-bi-6-4d-2``, which births none (ruling R-BAL167 class 1).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -672,9 +672,9 @@ class TestOneTimeTransfer:
         would pass this test against the broken code.
 
         It also counted the transfer's two shadows before and after, and read
-        their amounts, until plan step ``balance:X-bi-6-4d-3``, which births
+        their amounts, until plan step ``balance:X-bi-6-4d-2``, which births
         none; the surviving transfer's id, name and price are read instead
-        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)

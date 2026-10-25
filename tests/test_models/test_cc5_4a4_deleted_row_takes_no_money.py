@@ -122,7 +122,7 @@ def _hiding_a_paid_transfer(seed_user):
     Hidden the way ``transfer_service.delete_transfer(..., soft=True)`` left it
     until plan step ``balance:X-bi-6-4d-2`` -- the transfer flagged, the
     payments in place.  It flagged both twins too until plan step
-    ``balance:X-bi-6-4d-3``, where no twin is born: that statement reached 0
+    ``balance:X-bi-6-4d-2``, where no twin is born: that statement reached 0
     rows (measured) and is gone.  The hiding rule is checked at COMMIT, so
     the state exists only inside this save (the delete door takes the payments
     off in the same save since ``X-bi-6-4d-2``, ruling **credit_card:R-CC75**); the
@@ -275,7 +275,7 @@ class TestARowCannotBeHiddenHoldingMoney:
         """The PAYMENT half: a Paid $40.00 row's covering record, not a purchase.
 
         The account door's archive arm for a hidden row holding a payment or
-        purchase went at plan step ``balance:X-bi-6-4d-3`` on this refusal, and
+        purchase went at plan step ``balance:X-bi-6-4d-2`` on this refusal, and
         the case above holds a purchase only.
         """
         with app.app_context():
@@ -375,7 +375,7 @@ class TestARowCannotBeHiddenHoldingMoney:
             assert _held_by_transfer(transfer_id) == 2
 
     # ``test_stripping_a_hidden_leg_of_its_transfer_is_refused`` stood here
-    # until plan step balance:X-bi-6-4d-3 (ruling **R-BAL300**, developer
+    # until plan step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer
     # 2026-10-15: "Delete all 27").  It re-parented both of a paid transfer's
     # side records, each under its own side's TWIN, hid the expense twin, and
     # asserted the row arm's refusal at commit: the arm excepts no twin since

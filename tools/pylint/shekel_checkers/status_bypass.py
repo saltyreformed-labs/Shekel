@@ -33,7 +33,7 @@ from ._common import _called_name_in, _is_string_const, _module_in_allowlist
 # decided on, which is the failure mode a fence exists to prevent. ``_create``
 # holds the one write that needs it (``Transfer(status_id=...)`` in
 # ``create_transfer``; the shadow constructor went with the shadows at plan
-# step X-bi-6-4d-3);
+# step X-bi-6-4d-2);
 # every other leaf reaches the column through the seam. Plan step X-aj2 makes
 # the write door structural and deletes the entry.
 #
@@ -202,7 +202,7 @@ class ShekelTransactionStatusBypassChecker(BaseChecker):
     (``app.services.status_seam``) and ``transfer_service`` may write it -- the
     latter for its ONE constructor write only (``Transfer(status_id=...)`` in
     ``_create``; the shadow constructor went with the shadows at plan step
-    ``balance:X-bi-6-4d-3``), since plan step X-aj1 deleted the
+    ``balance:X-bi-6-4d-2``), since plan step X-aj1 deleted the
     module's own copy of the seam and it now assigns no ``status_id`` attribute
     at all (see the note on :data:`_STATUS_SEAM_MODULES`).  The
     status analog of the balance-seam fence.

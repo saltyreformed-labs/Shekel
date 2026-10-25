@@ -27,7 +27,7 @@ developer 2026-10-08 (rule 5, ruling **balance:R-BAL234**): no arm, basis or
 day a case checks changed.  Until that step the service wrote these states.
 
 **And no transfer has a twin at head** since plan step
-``balance:X-bi-6-4d-3``, whose revision (:data:`_TWINS_DELETED`) deletes
+``balance:X-bi-6-4d-2``, whose revision (:data:`_TWINS_DELETED`) deletes
 them and refuses a new one.  So each case runs that revision's downgrade
 ONCE, after head's own (:data:`_SIDE_RECORD_FIGURE`), once its transfers
 exist and before any plant (:func:`_twins_built`):
@@ -73,7 +73,7 @@ _MIGRATION = load_migration_module(
     "d3b8f5a1c7e2_a_transfer_side_knows_its_own_day.py",
 )
 
-#: Plan step ``balance:X-bi-6-4d-3``'s revision, which deletes every twin and
+#: Plan step ``balance:X-bi-6-4d-2``'s revision, which deletes every twin and
 #: whose downgrade builds them back (the module docstring).
 _TWINS_DELETED = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
 

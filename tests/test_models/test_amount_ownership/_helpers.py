@@ -281,7 +281,7 @@ def _make_transfer(data, **overrides):
       no-op and one stating an OWN figure, a status, a date or
       ``is_override`` is a pre-cutover shape laid onto the engine's transfer
       for a frozen migration's probe.  It has no shadow legs: none is stored
-      since plan step balance:X-bi-6-4d-3, so a probe that reads them first
+      since plan step balance:X-bi-6-4d-2, so a probe that reads them first
       runs ``82f7b7ed4332``'s downgrade, which builds them (:func:`_legs_of`).
       ``pay_period_id`` picks the paycheck and is not restated afterwards.
     * **An AD-HOC transfer** (``transfer_template_id=None``) is constructed
@@ -341,7 +341,7 @@ def _transfer_of_definition(data, template_id, overrides):
 def _legs_of(xfer):
     """Return ``(expense leg, income leg)``: the two shadow rows of *xfer*.
 
-    No transfer has one since plan step balance:X-bi-6-4d-3, so a caller
+    No transfer has one since plan step balance:X-bi-6-4d-2, so a caller
     first runs ``82f7b7ed4332``'s downgrade, which builds two for every
     transfer; on a transfer holding none this raises ``KeyError``.
     """

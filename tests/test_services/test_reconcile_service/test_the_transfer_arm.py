@@ -48,7 +48,7 @@ class TestTheTransferArm:
     that a tick settles the transfer and dates both sides' records by the
     statement -- which is the whole reason the panel prints a note saying a
     second account moves.  A transfer was three rows (a parent and two
-    shadows) until plan step ``balance:X-bi-6-4d-3``, and a tick moved all
+    shadows) until plan step ``balance:X-bi-6-4d-2``, and a tick moved all
     three until plan step ``balance:X-bi-6-4d-2``.
     """
 
@@ -80,7 +80,7 @@ class TestTheTransferArm:
         """Return a committed transfer from the seed account to a new savings account.
 
         It returned the transfer's expense shadow on the seed account beside
-        it until plan step ``balance:X-bi-6-4d-3``: a transfer is one row
+        it until plan step ``balance:X-bi-6-4d-2``: a transfer is one row
         since then (ruling R-BAL167 class 4).
         """
         transfer = create_transfer(
@@ -117,7 +117,7 @@ class TestTheTransferArm:
         side's payment record -- so a refusal is graded on both, and on both
         sides, re-read after the caller's ``expire_all``.  It read the seed
         account's expense shadow's ``settled_on`` until plan step
-        ``balance:X-bi-6-4d-3`` (ruling R-BAL167 class 1).
+        ``balance:X-bi-6-4d-2`` (ruling R-BAL167 class 1).
         """
         for account_id in (transfer.from_account_id, transfer.to_account_id):
             assert transfer_side_record(db.session, transfer.id, account_id) is None, (
@@ -235,7 +235,7 @@ class TestTheTransferArm:
             assert "both sides" in block.section.note
             assert block.settle_closes_an_envelope is False
             # The figure the EXPENSE side's tick offers, the transfer's own
-            # $75.00.  Moved here at plan step balance:X-bi-6-4d-3 from the
+            # $75.00.  Moved here at plan step balance:X-bi-6-4d-2 from the
             # deleted test_a_transfer_shadow_belongs_to_the_OTHER_arm (ruling
             # R-BAL313): measured 2026-10-17 without this read, an extra $1.00
             # on the expense side's offer failed no PASSING test.

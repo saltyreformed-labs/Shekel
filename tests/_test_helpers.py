@@ -1982,7 +1982,7 @@ def loan_correction_entries(db_session, transfer_id, loan_account_id):
     so the shadow it was passed named only which transfer and which side; it
     read the shadow's own period, scenario and day until then (the loan walk
     has read the record's day since ``X-bi-6-4b``).  **It is keyed by the
-    transfer and the loan account since plan step ``balance:X-bi-6-4d-3``**
+    transfer and the loan account since plan step ``balance:X-bi-6-4d-2``**
     (ruling **R-BAL167** class 4): a transfer is one row there and no
     shadow exists to name the side.  A side with no dated record
     has no key and is REFUSED rather than answered ``[]`` (the leaf-2
@@ -3638,7 +3638,7 @@ def create_transfer(
 ):
     """Create a PROJECTED transfer via the real service; it is one row.
 
-    It came with two shadow rows until plan step ``balance:X-bi-6-4d-3`` made a
+    It came with two shadow rows until plan step ``balance:X-bi-6-4d-2`` made a
     transfer one row (ruling **R-BAL258**).
 
     The create half of :func:`create_settled_transfer`, which now builds on this
@@ -3717,7 +3717,7 @@ def create_settled_transfer(
     production produces them.  The transfer is created Projected, then
     transitioned to Paid via ``update_transfer`` (the same ``mark_done``
     chokepoint the route uses).  It built "a settled transfer with two real
-    shadows" until plan step ``balance:X-bi-6-4d-3`` made a transfer one row
+    shadows" until plan step ``balance:X-bi-6-4d-2`` made a transfer one row
     (ruling **R-BAL258**).
 
     **It PRESSES Paid, and a Paid press states no day** (ruling **R-BAL163**,
@@ -4867,7 +4867,7 @@ def assert_a_twin_is_refused(db_session, xfer, is_income):
 
     A ruling **R-BAL167** class 2 re-expression of a test whose subject was a
     transfer's shadow row: a transfer is one row since plan step
-    ``balance:X-bi-6-4d-3``, and ``ck_transactions_names_no_transfer`` (ruling
+    ``balance:X-bi-6-4d-2``, and ``ck_transactions_names_no_transfer`` (ruling
     **R-BAL258**) refuses any ``budget.transactions`` row naming one, so the
     row such a test drove a door on, priced or read can no longer be stored.
     The refusal is spelled other ways too (the transfer schema's
@@ -4899,7 +4899,7 @@ def a_twin_of(xfer, is_income):
     """Return, unsaved, the twin row one side of *xfer* used to have.
 
     The ONE construction of a twin for a test that plants one (plan step
-    ``balance:X-bi-6-4d-3``): :func:`assert_a_twin_is_refused` adds it as it
+    ``balance:X-bi-6-4d-2``): :func:`assert_a_twin_is_refused` adds it as it
     is, and a test whose planted shape is a twin with something MORE on it --
     a figure written past the amount seam -- takes it from here and adds that,
     so the two cannot come to disagree about what the rest of the row is.
@@ -5500,7 +5500,7 @@ def one_off_row_of(  # pylint: disable=too-many-arguments
     ``legacy_link_less_row_of`` until 7d-2 retired them with the arm.  The
     one link-less row shape left is a CC payback, which has a builder of
     its own (:func:`payback_row_of`): a transfer's shadows were the other
-    until plan step ``balance:X-bi-6-4d-3`` deleted them.
+    until plan step ``balance:X-bi-6-4d-2`` deleted them.
 
     Two consequences follow from getting the producer's row, each the point
     rather than a cost, exactly as for :func:`generate_row_of`:
@@ -5520,7 +5520,7 @@ def one_off_row_of(  # pylint: disable=too-many-arguments
       "anytime this period" shelf wants a row no definition prices -- a CC
       payback (:func:`payback_row_of`; the producer dates none), the one
       undated row shape left since the cutover and plan step
-      ``balance:X-bi-6-4d-3``, which deleted the transfer shadows (a
+      ``balance:X-bi-6-4d-2``, which deleted the transfer shadows (a
       transfer with no ``due_date`` is not a row).  On the 2026-09-18
       production restore the paybacks were undated (31 of 31) and no
       shadow was.
@@ -5600,7 +5600,7 @@ def generate_transfer_of(template, period):
     OWNERSHIP and due date the definition derives) into a
     ``transfer_service.TransferSpec`` and so gets the transfer from the one
     door that writes ``budget.transfers`` (with its two shadow legs, until
-    plan step ``balance:X-bi-6-4d-3`` deleted the shadows).  This
+    plan step ``balance:X-bi-6-4d-2`` deleted the shadows).  This
     helper CALLS the generate pass, with a window of exactly one paycheck,
     and hands back what the engine wrote; every promise
     :func:`generate_row_of` makes and every refusal the shared private body
@@ -5831,7 +5831,7 @@ def a_deleted_occurrence(db_session, owner, period, **definition):
     ``is_deleted`` at ``:446-447``), so the row stays in the table, deleted and
     carrying its name: the row a transaction door names only to a requester
     who may reach it (ruling **R-CC104**).  Added at plan step
-    ``balance:X-bi-6-4d-3`` for the stranger's and the companion's probes of
+    ``balance:X-bi-6-4d-2`` for the stranger's and the companion's probes of
     such a row, and the two route cases that built it by hand.
 
     Args:
@@ -6749,7 +6749,7 @@ def assert_pay_period_invariants(db_session, user_id):
 
     # 2. Every transfer is in one of the user's own (surviving) periods.  It
     #    also counted two shadows per transfer, each in the transfer's period,
-    #    until plan step balance:X-bi-6-4d-3 (ruling R-BAL167 class 4): a
+    #    until plan step balance:X-bi-6-4d-2 (ruling R-BAL167 class 4): a
     #    transfer is one row there and ck_transactions_names_no_transfer
     #    refuses a row naming one, so its legs are drawn off the transfer
     #    itself and have no period of their own to disagree with.

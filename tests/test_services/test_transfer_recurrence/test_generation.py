@@ -238,7 +238,7 @@ class TestTransferGenerationSharesTheOccurrencePairs:
         the pass REFUSED (plan ledger row D19).  Plan step **R17** re-keyed the
         index onto ``(template, scenario, occurs_on)``, so three occurrences
         are three keys and all three transfers are written.  Each kept a
-        shadow pair, read here, until plan step ``balance:X-bi-6-4d-3``: a
+        shadow pair, read here, until plan step ``balance:X-bi-6-4d-2``: a
         transfer stores no leg row since migration 82f7 (ruling **R-BAL167**
         class 1).
         """
@@ -380,7 +380,7 @@ class TestShadowTransactionCreation:
     """A generated transfer's category, and the rows a maintain pass keeps.
 
     The class name is history: it graded each transfer's two shadow (twin)
-    transactions until plan step ``balance:X-bi-6-4d-3``, and a transfer
+    transactions until plan step ``balance:X-bi-6-4d-2``, and a transfer
     stores no leg row since migration 82f7 (ruling **R-BAL167**).
     """
 
@@ -415,7 +415,7 @@ class TestShadowTransactionCreation:
         return template, savings
 
     # ``test_generated_transfers_have_shadows`` was deleted at plan step
-    # ``balance:X-bi-6-4d-3`` (ruling **R-BAL320**): without its twin read it
+    # ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**): without its twin read it
     # counted ``created`` against ``seed_periods``, which
     # ``TestTransferGeneration::test_every_period_generates_for_all`` counts on
     # the same act, failing first when generation skips a period (measured).
@@ -426,7 +426,7 @@ class TestShadowTransactionCreation:
         """Template category_id flows to every generated transfer.
 
         It read the expense shadow's category beside the transfer's until plan
-        step ``balance:X-bi-6-4d-3``: a transfer stores no leg row since
+        step ``balance:X-bi-6-4d-2``: a transfer stores no leg row since
         migration 82f7, so the transfer's own column is the read (ruling
         **R-BAL167** class 1).
         """
@@ -459,7 +459,7 @@ class TestShadowTransactionCreation:
 
         It read each transfer's two shadow rows too, and was named
         ``test_maintaining_keeps_the_shadows_it_already_has``, until plan step
-        ``balance:X-bi-6-4d-3``: a transfer stores no leg row since migration
+        ``balance:X-bi-6-4d-2``: a transfer stores no leg row since migration
         82f7 (ruling **R-BAL167** class 1).  What it reads that
         ``test_regeneration.py``'s ``test_regenerate_maintains_its_rows_in_place``
         does not: each row re-read after a COMMIT and an ``expire_all``, so the
@@ -496,7 +496,7 @@ class TestShadowTransactionCreation:
                 assert transfer_amount(xfer) == Decimal("300.00")
 
     # ``test_no_orphaned_shadows_after_regeneration`` was deleted at plan step
-    # ``balance:X-bi-6-4d-3`` (ruling **R-BAL320**): its one read was a loop over
+    # ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**): its one read was a loop over
     # the transactions naming a transfer, which the database refuses to store
     # (``ck_transactions_names_no_transfer``), so it looped over none
     # (measured 0 after its regeneration).
@@ -514,7 +514,7 @@ class TestATransferRecordsItsOccurrence:
     the same ``PlannedOccurrence`` through the same shared helpers.  A case here
     asserted that a transfer's two SHADOW transactions kept ``occurs_on`` NULL,
     so mirroring could not put a second writer on the column, until plan step
-    ``balance:X-bi-6-4d-3``: a transfer stores no leg row since migration 82f7,
+    ``balance:X-bi-6-4d-2``: a transfer stores no leg row since migration 82f7,
     so the transfer is the column's one home (ruling **R-BAL320**, below).
     """
 
@@ -564,7 +564,7 @@ class TestATransferRecordsItsOccurrence:
             )
 
     # ``test_the_shadows_carry_no_occurrence`` was deleted at plan step
-    # ``balance:X-bi-6-4d-3`` (ruling **R-BAL320**): the twins it read are rows
+    # ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**): the twins it read are rows
     # the database refuses to store (``ck_transactions_names_no_transfer``,
     # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``'s
     # ``test_the_database_refuses_a_twin``), so it read none (measured 0), and
@@ -592,7 +592,7 @@ class TestATransferRecordsItsOccurrence:
         "deleted_count": 1, "created_count": 1``.
 
         It counted the retained transfer's two shadow rows too (Transfer
-        Invariant 1) until plan step ``balance:X-bi-6-4d-3``: a transfer
+        Invariant 1) until plan step ``balance:X-bi-6-4d-2``: a transfer
         stores no leg row since migration 82f7, so the parent's own re-read is
         the control (ruling **R-BAL167** class 1).
         """

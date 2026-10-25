@@ -94,7 +94,7 @@ transaction_table_args = (
     # ``uq_transactions_credit_payback_unique``.  Audit reference:
     # F-046 / commit C-21 of the 2026-04-15 security remediation
     # plan.  **It guards no row now**: plan step
-    # ``balance:X-bi-6-4d-3`` deleted the shadows, and
+    # ``balance:X-bi-6-4d-2`` deleted the shadows, and
     # ``ck_transactions_names_no_transfer`` below refuses every row
     # that carries ``transfer_id``, so no storable row meets this
     # predicate.  Plan step ``balance:X-bi-6-5`` drops it with the
@@ -244,7 +244,7 @@ transaction_table_args = (
     # 2026-09-18) a rule-less definition, so the zero-link half is no longer
     # a shape the application writes, and the constraint says so; a CC
     # payback names its source, and a transfer shadow named its transfer
-    # until plan step ``balance:X-bi-6-4d-3`` deleted the shadows
+    # until plan step ``balance:X-bi-6-4d-2`` deleted the shadows
     # (``ck_transactions_names_no_transfer`` below refuses one since).
     # ``= 1`` is also why both ``SET NULL`` link keys became ``RESTRICT``: a
     # key that nulled a link would manufacture the row this refuses.
@@ -259,7 +259,7 @@ transaction_table_args = (
         "+ (credit_payback_for_id IS NOT NULL)::int = 1",
         name="ck_transactions_one_pricing_link",
     ),
-    # A TRANSACTION NEVER NAMES A TRANSFER (plan step ``balance:X-bi-6-4d-3``,
+    # A TRANSACTION NEVER NAMES A TRANSFER (plan step ``balance:X-bi-6-4d-2``,
     # ruling **R-BAL258**, "Database refuses").  Every transfer had two hidden
     # twin rows here, one per account, which that step deleted (ruling
     # **R-BAL166**): a transfer is one row, and each side's payment hangs off

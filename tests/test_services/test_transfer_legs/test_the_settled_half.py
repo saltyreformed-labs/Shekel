@@ -102,7 +102,7 @@ class TestTheWritersParentIsTheLeg:
     (``transfer_family_movements``).  The answer reads the movement's side
     links in Python (``transfer_legs._side_of``), the twin of the join's SQL
     expressions, so these cases pin the twin to the join.  Until plan step
-    ``balance:X-bi-6-4d-3`` they also pinned it over a hidden shadow and a
+    ``balance:X-bi-6-4d-2`` they also pinned it over a hidden shadow and a
     stray entry under a live one, and pinned the one dated-leg clause its
     three readers share (the plan half, the loan settled half and the deploy
     resync); those cases went there with the shadows (ruling **R-BAL313**).
@@ -152,7 +152,7 @@ class TestTheWritersParentIsTheLeg:
         movement is its leg's record, on Checking; and each family is walked
         in movement order.  Renamed from
         ``test_the_python_twin_agrees_with_the_join_live_and_dead_shadows_alike``:
-        until plan step ``balance:X-bi-6-4d-3`` the second transfer's
+        until plan step ``balance:X-bi-6-4d-2`` the second transfer's
         Checking shadow was soft-deleted by SQL first, and the case read
         that the side under the hidden twin still kept its record, which
         neither implementation reads off a twin (ruling **R-BAL167** class

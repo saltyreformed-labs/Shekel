@@ -14,7 +14,7 @@ read off ``budget.transfers`` since plan step balance:X-bi-6-4b**; the settled
 half was the loan-side income SHADOW row until then.  The module and its
 names kept the shadow era's spelling -- ``_shadows``, ``ShadowSets``,
 ``income_shadows``, ``settled_income_shadows`` -- until plan step
-balance:X-bi-6-4d-3 renamed them for what they return.
+balance:X-bi-6-4d-2 renamed them for what they return.
 
 **Its two jobs are both rule-14 answers, and plan step balance:X-bl-2a is where
 they became one each.**  Settled-ness had two derivations -- this module's

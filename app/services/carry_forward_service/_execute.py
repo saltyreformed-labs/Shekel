@@ -317,7 +317,7 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
         # The service moves the transfer to the target period, and both of
         # its legs read the transfer's period (``transfer_legs``), so no
         # second row holds a period that could disagree with it.  It moved
-        # the two twin rows with it until plan step ``balance:X-bi-6-4d-3``
+        # the two twin rows with it until plan step ``balance:X-bi-6-4d-2``
         # deleted them.
         moved = {"pay_period_id": target_period_id}
         if transfer.recurs:

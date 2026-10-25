@@ -64,7 +64,7 @@ class TestASettledPaymentWithAnUndatedRecordFailsLoud:
         movement's belongs passed the leaf's first version of this case.  The
         test database now numbers each table from a range of its own (ruling
         ``balance:R-BAL356``), so the two ids differ without the decoys.  The
-        twin's id joined the check until plan step ``balance:X-bi-6-4d-3``
+        twin's id joined the check until plan step ``balance:X-bi-6-4d-2``
         made a transfer one row
         (ruling **R-BAL258**; ruling **R-BAL167** class 4, through the
         helper :func:`_stage_an_undated_loan_side`).

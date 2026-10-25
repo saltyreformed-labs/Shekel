@@ -118,7 +118,7 @@ class TestTransactionNameRows:
         """A transfer produces its own grid row with its leg's name in the header.
 
         It planted the transfer's expense TWIN beside it until plan step
-        ``balance:X-bi-6-4d-3`` made a twin unstorable (ruling **R-BAL258**);
+        ``balance:X-bi-6-4d-2`` made a twin unstorable (ruling **R-BAL258**);
         the grid has drawn a transfer's row from the transfer itself since leaf
         ``balance:X-bi-6-1``, so the transfer alone is the subject now
         (re-expressed under ruling **R-BAL167** class 1).

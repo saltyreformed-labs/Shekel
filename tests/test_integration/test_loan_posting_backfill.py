@@ -502,7 +502,7 @@ class TestBackfillLeavesNonLoansAlone:
         shadow and no per-loan ledger account is minted.
 
         **The owner's entries are counted since plan step
-        ``balance:X-bi-6-4d-3``** (ruling **R-BAL167** class 1): a transfer is
+        ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 1): a transfer is
         one row there, so there is no shadow id to filter by, and no split has
         linked a shadow's row since ruling **R-BAL102**.  The owner has no loan,
         so any ``loan_payment`` entry is the backfill misfiring.
@@ -610,7 +610,7 @@ class TestDeployHookCommitsBackfill:
             # the split links no row; it was read by ``transaction_id`` here
             # until plan step ``balance:X-bi-6-3``).  The scenario and period
             # are the transfer's; they were read off its income shadow until
-            # plan step ``balance:X-bi-6-4d-3`` (ruling R-BAL167 class 1).
+            # plan step ``balance:X-bi-6-4d-2`` (ruling R-BAL167 class 1).
             with db.engine.connect() as conn:
                 committed = conn.execute(
                     text(

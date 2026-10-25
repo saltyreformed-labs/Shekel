@@ -87,7 +87,7 @@ class TestTheFigureCorrectionDoorOnAPair:
         ``balance:X-bi-6-4d-2``, where the shadows held them until then
         (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The status
         is read off the row re-read from the database since plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-2, where it read the
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-2, where it read the
         object in the session (ruling R-BAL290 part 1).  Named
         ``test_a_correction_records_on_both_legs_and_on_neither_parent``
         until plan step ``balance:X-bi-6-4d-2``'s 4d-4 half, when each side's
@@ -141,7 +141,7 @@ class TestTheFigureCorrectionDoorOnAPair:
         Shown to FIRE: the accompanying ``amount`` is asserted UNWRITTEN, so a
         gate moved below the field loop fails this test rather than passing it.
         Both writes are read off the row re-read from the database since plan
-        step ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-1b-2, where they read
+        step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-1b-2, where they read
         the object in the session (ruling R-BAL290 part 1).
 
         It also asked each of the transfer's shadow rows for a recorded

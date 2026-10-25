@@ -161,7 +161,7 @@ class TestTheCashFigureBesideTheBookedOne:
         offer type: a bill can hold no entries, and a transfer's leg
         structurally holds no purchase (production: 342 shadows, 0 entries,
         measured while a transfer still kept its shadow rows; a transfer is
-        one row since plan step ``balance:X-bi-6-4d-3``).
+        one row since plan step ``balance:X-bi-6-4d-2``).
         """
         with app.app_context():
             bill = self._bill(seed_user, seed_periods[0], amount="180.00")

@@ -298,7 +298,7 @@ class TestTheSplitUnlinkExecutes:
     here, since the DDL half cannot run under the ORM.
 
     **The plant links an ordinary row of the owner's since plan step
-    ``balance:X-bi-6-4d-3``** (ruling **R-BAL167** class 1): a transfer is one
+    ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 1): a transfer is one
     row there, so the income shadow the old shape linked cannot be stored, and
     the statement and the grade read only whether a link is SET, never what
     it names.

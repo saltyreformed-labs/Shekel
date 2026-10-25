@@ -422,7 +422,7 @@ class TestTheTransferArmThroughItsROUTE:
         Dated into the past through the period it sits in, so the shared
         attribution bound admits it against a statement asserted today.  It
         returned the transfer's shadow on the reconciled account beside it
-        until plan step ``balance:X-bi-6-4d-3``: a transfer is one row since
+        until plan step ``balance:X-bi-6-4d-2``: a transfer is one row since
         then (ruling R-BAL167 class 4).
         """
         savings = account_service.create_account(

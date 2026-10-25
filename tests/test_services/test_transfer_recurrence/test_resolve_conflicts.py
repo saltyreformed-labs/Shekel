@@ -345,7 +345,7 @@ class TestResolveConflictsServiceRouting:
 
     Closes L1 from transfer_rework_verification.md.  The routing's proof was
     the two shadow transactions following their parent until plan step
-    ``balance:X-bi-6-4d-3``; a transfer stores no leg row since migration
+    ``balance:X-bi-6-4d-2``; a transfer stores no leg row since migration
     82f7, and a direct write of the same columns leaves every value the cases
     re-read equal, so each case reads the service's own audit events
     (``EVT_TRANSFER_UPDATED``, ``EVT_TRANSFER_RESTORED``) beside its row
@@ -386,7 +386,7 @@ class TestResolveConflictsServiceRouting:
         Graded by the one ``EVT_TRANSFER_UPDATED`` the service emits for this
         transfer, read first: a direct write of ``is_override`` and the
         ownership emits none.  It graded both shadow rows following the parent
-        until plan step ``balance:X-bi-6-4d-3`` (ruling **R-BAL167** class 1).
+        until plan step ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 1).
         """
         with app.app_context():
             template = self._make_template_with_rule(
@@ -434,7 +434,7 @@ class TestResolveConflictsServiceRouting:
         first and in order: ``EVT_TRANSFER_RESTORED``, then
         ``EVT_TRANSFER_UPDATED``.  A direct write of ``is_deleted`` emits
         neither.  It graded both shadow rows following the parent until plan
-        step ``balance:X-bi-6-4d-3`` (ruling **R-BAL167** class 1).
+        step ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 1).
         """
         with app.app_context():
             template = self._make_template_with_rule(
@@ -521,7 +521,7 @@ class TestResolveConflictsServiceRouting:
             assert xfer.is_override is True
 
     # ``test_all_five_invariants_hold_after_resolution`` was deleted at plan step
-    # ``balance:X-bi-6-4d-3`` (ruling **R-BAL320**): its one assertion read the
+    # ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**): its one assertion read the
     # transfer's twin rows, which the database refuses to store
     # (``ck_transactions_names_no_transfer``), so it read none (measured 0);
     # its act is ``test_update_action_routes_amount_through_service``'s.
@@ -536,7 +536,7 @@ class TestResolveConflictsServiceRouting:
         Graded by the service's audit events, read first: one
         ``EVT_TRANSFER_UPDATED`` per transfer and one ``EVT_TRANSFER_RESTORED``
         for the soft-deleted one.  It graded each transfer's shadow rows until
-        plan step ``balance:X-bi-6-4d-3`` (ruling **R-BAL167** class 1).
+        plan step ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 1).
         """
         with app.app_context():
             template = self._make_template_with_rule(

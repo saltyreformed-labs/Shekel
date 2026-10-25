@@ -649,7 +649,7 @@ class TestGenerateTransferOf:
     shape, it is priced by its definition, the occurrence claim refuses a
     second ask, and another owner's paycheck is refused before the transfer
     is written.  It graded the transfer's two shadow legs too until plan step
-    ``balance:X-bi-6-4d-3``: a transfer stores no leg row since migration 82f7
+    ``balance:X-bi-6-4d-2``: a transfer stores no leg row since migration 82f7
     (ruling **R-BAL167** class 1).
     """
 
@@ -664,7 +664,7 @@ class TestGenerateTransferOf:
         an OWN figure beside the link.
 
         Named ``test_the_transfer_is_the_engines_with_both_legs`` until plan
-        step ``balance:X-bi-6-4d-3``, where its reads of the two shadow legs
+        step ``balance:X-bi-6-4d-2``, where its reads of the two shadow legs
         went (ruling **R-BAL167** class 1): a transfer stores no leg row since
         migration 82f7.  Each side's endpoint and due date are read off the
         transfer, graded once by ``tests.test_services.test_transfer_legs`` ::
@@ -753,7 +753,7 @@ class TestGenerateTransferOf:
         The transfer would have been written, and it is not: the refusal is
         the schedule's, one tier above the composite keys that would refuse
         the INSERT.  It counted the owner's transactions naming a transfer too
-        until plan step ``balance:X-bi-6-4d-3``: the database refuses such a
+        until plan step ``balance:X-bi-6-4d-2``: the database refuses such a
         row (``ck_transactions_names_no_transfer``), so that count was over
         rows nothing can write (measured 0; ruling **R-BAL167**).
         """

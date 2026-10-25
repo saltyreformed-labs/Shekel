@@ -48,8 +48,8 @@ class TestAdHoc:
         """POST /transfers/ad-hoc with due_date sets it on the transfer.
 
         Re-read from the database.  It read both shadows' due dates too until
-        plan step ``balance:X-bi-6-4d-3``, which births none (ruling R-BAL167
-        class 1, plan step balance:X-bi-6-4d-3).
+        plan step ``balance:X-bi-6-4d-2``, which births none (ruling R-BAL167
+        class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -145,9 +145,9 @@ class TestAdHoc:
         first.  After two identical submissions the period must
         contain exactly one active ad-hoc transfer.  It also counted two
         active shadow transactions, not four, until plan step
-        ``balance:X-bi-6-4d-3``, which births none: a second transfer, the
+        ``balance:X-bi-6-4d-2``, which births none: a second transfer, the
         only thing that made four, fails the one-transfer count first
-        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -251,8 +251,8 @@ class TestAdHoc:
         ``balance:X-bi-6-4d-2``, and the transfer's status is the one
         status (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         Named ``..._on_both_shadows`` until plan step
-        ``balance:X-bi-6-4d-3``, which births no shadow; its count of two
-        went too (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        ``balance:X-bi-6-4d-2``, which births no shadow; its count of two
+        went too (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)

@@ -336,7 +336,7 @@ def _transfer_family_accounts(xfer: Transfer, movements) -> tuple:
     """Return every real account a transfer family's legs can touch.
 
     The transfer twin of :func:`_family_accounts`: both endpoints (the legacy
-    entry's legs; the shadows' too, until ``X-bi-6-4d-3`` deleted them) and
+    entry's legs; the shadows' too, until ``X-bi-6-4d-2`` deleted them) and
     each movement's own account (its leg lands there, ruling **R-BAL75**; one
     with the endpoint until the settle door takes a tender of its own).
     Deduplicated, first-seen order, so the self-heal visits an account once.
@@ -414,7 +414,7 @@ def sync_transaction_postings(txn: Transaction) -> list[JournalEntry]:
     made worthless.  The ``settled`` flag this took through ``X-bi-3e`` chose
     the row's OWN target, and a row has none.
 
-    **No transfer shadow reaches here since plan step ``balance:X-bi-6-4d-3``
+    **No transfer shadow reaches here since plan step ``balance:X-bi-6-4d-2``
     deleted them** (ruling **R-BAL166**; ``ck_transactions_names_no_transfer``
     refuses a row naming a transfer).  A transfer side's payment record hangs
     off the TRANSFER by its side link since plan step ``balance:X-bi-6-4d-2``
@@ -511,7 +511,7 @@ def _emit_transaction_deltas(txn: Transaction) -> "list[JournalEntry]":
 
     Args:
         txn: The transaction, never a transfer shadow since plan step
-            ``balance:X-bi-6-4d-3`` deleted them (the sync skipped a shadow's
+            ``balance:X-bi-6-4d-2`` deleted them (the sync skipped a shadow's
             TRANSACTION source from its first version to ``X-bi-6-3``, its
             target empty after: 0 such entries on the 2026-09-22 17:06
             production dump).  The kind a reversal would stamp is the ROW's
@@ -584,7 +584,7 @@ def reverse_postings_before_delete(txn: Transaction) -> None:
     so every ledger account still nets correctly.  The transaction analog of
     :func:`reverse_transfer_postings_before_delete`, which
     ``transfer_service.delete_transfer`` runs first for the same reason.  No
-    transfer shadow reaches here since plan step ``balance:X-bi-6-4d-3``
+    transfer shadow reaches here since plan step ``balance:X-bi-6-4d-2``
     deleted them (ruling **R-BAL166**): a transfer side's payment record
     hangs off the transfer since plan step ``balance:X-bi-6-4d-2``, and
     :func:`reverse_transfer_postings_before_delete` reverses the pair's.
@@ -844,7 +844,7 @@ def resync_all_cash_postings() -> tuple[int, int]:
             # lazy-loads in its place and no autoflush moves into the loop.
             # The whole walk is enumerable here because no row can name a
             # transfer (``ck_transactions_names_no_transfer``, since plan step
-            # ``balance:X-bi-6-4d-3``), so the transfer arm that made
+            # ``balance:X-bi-6-4d-2``), so the transfer arm that made
             # ``reconcile_service._rows``' twin undecidable does not apply.
         )
         .filter(

@@ -82,7 +82,7 @@ def holds_a_movement():
     ``balance:X-bi-6-4a-3``, ruling **R-BAL125**): a transfer is asked
     ``transfer_legs.transfer_holds_a_movement``, because a side's record
     hangs off its transfer, never a row, since plan step
-    ``balance:X-bi-6-4d-2``.  Until plan step ``balance:X-bi-6-4d-3`` deleted
+    ``balance:X-bi-6-4d-2``.  Until plan step ``balance:X-bi-6-4d-2`` deleted
     the shadows (ruling **R-BAL166**), a door whose row scope could reach one
     excluded them.
 
@@ -558,7 +558,7 @@ def account_holds_other_rows_movements(account_id: int) -> bool:
     movement under a row the cleanup DOES remove was asked by the door's own
     arm from plan step ``credit_card:CC-5-4a-4`` (until then a ghost's
     movement cascaded with it, ``fk_transaction_entries_owner_transaction``)
-    until plan step ``balance:X-bi-6-4d-3`` deleted that arm: a live row
+    until plan step ``balance:X-bi-6-4d-2`` deleted that arm: a live row
     holding one is history, and the database refuses a hidden one.
 
     Args:

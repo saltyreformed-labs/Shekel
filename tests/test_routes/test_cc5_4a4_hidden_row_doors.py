@@ -69,7 +69,7 @@ Review 6 found a row its recurring item's ARCHIVE hid told "was deleted"
 Rulings **R-CC107** ("Say archived") and **R-CC108** (the desktop cell's word
 "Archived") are :class:`TestAnArchivedItemsRowSaysArchived`.  L2's case, the
 deleted leg in :class:`TestNothingLeaksThroughTheName`, was deleted at plan
-step ``balance:X-bi-6-4d-3`` (ruling **R-BAL300**), where no shadow can be
+step ``balance:X-bi-6-4d-2`` (ruling **R-BAL300**), where no shadow can be
 stored; the note where it stood says why nothing grades its order now.
 
 Review 7 found the archive's read flushing a caller's staged state from the
@@ -936,7 +936,7 @@ class TestNothingLeaksThroughTheName:
     hidden deleted row, and calling a live transfer shadow "deleted".  Each
     case below is the one row a reordering would name, at every surface.
     The third's cases, and review 6's L2 beside them, were deleted at plan
-    step ``balance:X-bi-6-4d-3`` (ruling **R-BAL300**): no shadow can be
+    step ``balance:X-bi-6-4d-2`` (ruling **R-BAL300**): no shadow can be
     stored, so no request reaches that reordering.
     """
 
@@ -980,7 +980,7 @@ class TestNothingLeaksThroughTheName:
 
     # ``test_a_live_transfer_leg_is_never_called_deleted`` and
     # ``test_a_deleted_transfer_leg_is_not_named`` stood here, five surfaces
-    # each, until plan step balance:X-bi-6-4d-3 (ruling **R-BAL300**,
+    # each, until plan step balance:X-bi-6-4d-2 (ruling **R-BAL300**,
     # developer 2026-10-15: "Delete all 27").  They pressed each surface on a
     # transfer SHADOW row's crafted id -- live, and after its transfer's soft
     # delete (review 6's L2) -- and asserted the nameless answer: the shadow

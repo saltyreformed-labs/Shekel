@@ -56,7 +56,7 @@ def _payback(seed_user, period):
 
     The payback names no definition -- its one pricing link is the row it
     repays, here an envelope -- the one link-less shape left since plan step
-    ``balance:X-bi-6-4d-3`` refused the transfer shadow (the family's cutover,
+    ``balance:X-bi-6-4d-2`` refused the transfer shadow (the family's cutover,
     plan step balance:X-bi-7d-2, minted every bare row a definition).  The
     envelope is the engine's row of a RECURRING definition, so it recurs: a
     link-less arm that answered through the payback's link to its envelope

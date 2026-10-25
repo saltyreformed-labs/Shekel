@@ -99,10 +99,10 @@ class TestTheGridDrawsALegOffItsParent:
         The window is the set's OWN rows plus legs
         (``cash_flow_set.own_rows_clause`` + ``grid_transfer_legs``).  Named
         ``test_the_cell_is_the_leg_and_no_shadow_row_is_drawn`` until plan
-        step ``balance:X-bi-6-4d-3``, which births no shadow: it also
+        step ``balance:X-bi-6-4d-2``, which births no shadow: it also
         asserted the expense shadow's ``txn-cell-<shadow id>`` absent, and
         with no such row there is no id to look for (ruling R-BAL167 class
-        1, plan step balance:X-bi-6-4d-3).
+        1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings(seed_user)
@@ -135,10 +135,10 @@ class TestTheGridDrawsALegOffItsParent:
         render.  What makes the negative assertion mean something is the
         grid BEFORE the rename, which drew the old name.  It also read the
         shadow's stored name, still the old one, until plan step
-        ``balance:X-bi-6-4d-3``, which births no shadow; the label
+        ``balance:X-bi-6-4d-2``, which births no shadow; the label
         assertions are kept, the case being one of three database-backed pins
         that an in-session rename re-labels the derived leg (ruling R-BAL167
-        class 1, plan step balance:X-bi-6-4d-3).
+        class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings(seed_user)

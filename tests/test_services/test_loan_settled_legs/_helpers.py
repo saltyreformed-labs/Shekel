@@ -60,7 +60,7 @@ def _stage_an_undated_loan_side(transfer, account):
 
     Returns:
         The loan side's record.  It returned the income twin beside it until
-        plan step ``balance:X-bi-6-4d-3`` made a transfer one row (ruling
+        plan step ``balance:X-bi-6-4d-2`` made a transfer one row (ruling
         **R-BAL258**; the helper rewritten under ruling **R-BAL167** class 4).
     """
     record = transfer_side_record(db.session, transfer.id, account.id)

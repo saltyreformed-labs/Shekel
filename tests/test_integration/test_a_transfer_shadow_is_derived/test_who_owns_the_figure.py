@@ -36,7 +36,7 @@ def _generated_transfer(seed_user, seed_periods, series="500.00"):
     """A TEMPLATE-LINKED transfer, priced by its definition.
 
     It was ``_generated_pair`` and returned the transfer AND its two shadow
-    legs until plan step balance:X-bi-6-4d-3, where a transfer became one row
+    legs until plan step balance:X-bi-6-4d-2, where a transfer became one row
     (ruling **R-BAL167** class 4).
 
     **The sibling of :func:`_plain_transfer`, and the difference is load-bearing
@@ -92,7 +92,7 @@ def _generated_transfer(seed_user, seed_periods, series="500.00"):
 class TestWhoOwnsTheFigureAfterAnEdit:
     """Ruling R-IO at the one door that states a transfer's amount.
 
-    **Asked of the TRANSFER since plan step balance:X-bi-6-4d-3** (ruling
+    **Asked of the TRANSFER since plan step balance:X-bi-6-4d-2** (ruling
     **R-BAL167** class 1).  Each case asked its two shadow legs whether they
     owned the figure, what they stored and what they were worth; a transfer is
     one row since then and both its legs are read off it (**R-BAL13**), so the
@@ -159,9 +159,9 @@ class TestWhoOwnsTheFigureAfterAnEdit:
         not READ the stored flag to decide a price, which is finding N-262's
         rule; ``is_override`` here is the kwarg this call carried.  The same
         call took the figure back for both shadow legs until plan step
-        balance:X-bi-6-4d-3.
+        balance:X-bi-6-4d-2.
 
-        **Renamed at plan step balance:X-bi-6-4d-3's checkpoint 2d-a** (it was
+        **Renamed at plan step balance:X-bi-6-4d-2's checkpoint 2d-a** (it was
         ``test_an_owner_stated_amount_makes_both_legs_own_it``, a claim about
         the legs it no longer asserts).  **Its ownership read went at
         checkpoint 2c-a** (ruling **R-BAL167** class 1, the cp2c review's L-4
@@ -528,7 +528,7 @@ class TestWhoOwnsTheFigureAfterAnEdit:
         The leg asked from is the transfer's from-side, where it was the
         expense twin's account, and "still the contract's" is asked of the
         transfer, where it was asked of each twin, until plan step
-        balance:X-bi-6-4d-3 stopped the twins being born (ruling R-BAL167
+        balance:X-bi-6-4d-2 stopped the twins being born (ruling R-BAL167
         class 1; the account is the same one).
         """
         with app.app_context():
@@ -573,7 +573,7 @@ class TestWhoOwnsTheFigureAfterAnEdit:
     ):
         """An ad-hoc retype lands on the transfer as typed and raises no flag.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_an_AD_HOC_retype_now_TAKES_both_legs``; ruling **R-BAL167**
         class 1).  What it was written to state -- an ad-hoc retype TAKES both
         legs, where it once left them derived, the arm that changed at plan

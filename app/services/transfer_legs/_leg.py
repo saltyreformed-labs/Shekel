@@ -37,7 +37,7 @@ from app.utils.dates import days_paid_before_due
 #: composed rather than a literal of its own -- the coupling
 #: ``transfer_service._create.shadow_names`` reported and left for this leaf
 #: (that writer went with the twin rows' mirrors at plan step
-#: ``balance:X-bi-6-4d-3``'s leaf 3b).
+#: ``balance:X-bi-6-4d-2``'s leaf 3b).
 TRANSFER_TO_PREFIX = "Transfer to "
 TRANSFER_FROM_PREFIX = "Transfer from "
 
@@ -50,7 +50,7 @@ def leg_label(from_account: Account, to_account: Account) -> tuple[str, str]:
     the to-side shows.  :attr:`TransferLeg.name` reads it off the parent's
     endpoints at render time, and nothing stores it:
     ``transfer_service._create.shadow_names`` wrote the same pair onto the two
-    shadow rows until plan step ``balance:X-bi-6-4d-3`` deleted them, and its
+    shadow rows until plan step ``balance:X-bi-6-4d-2`` deleted them, and its
     leaf 3b deleted that writer.
 
     Args:
@@ -98,7 +98,7 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
             ``from_account_id`` or ``to_account_id``.
         is_income: ``True`` on the to-side (money arrives), ``False`` on the
             from-side (money leaves).  The split the two shadows' transaction
-            TYPES carried until plan step ``balance:X-bi-6-4d-3`` deleted
+            TYPES carried until plan step ``balance:X-bi-6-4d-2`` deleted
             them, stated here from the columns that decide it.
         record: The leg's COVERING MOVEMENT
             (:class:`~app.models.transaction_entry.TransactionEntry`,

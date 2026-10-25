@@ -49,7 +49,7 @@ no definition, no transfer, no credit source -- is unstorable under
 ``ck_transactions_one_pricing_link`` at ``= 1``, so nothing exists for a link
 to arrive on; the control against over-refusal of the due-date CHECK is an
 undated CC payback (a transfer's undated shadow until plan step
-``balance:X-bi-6-4d-3`` refused the shadow), and the bare row's refusal is
+``balance:X-bi-6-4d-2`` refused the shadow), and the bare row's refusal is
 asserted by the one-link CHECK's own name.
 
 The last class drives the migration's own ``downgrade()`` and ``upgrade()``
@@ -279,7 +279,7 @@ class TestATransactionOfADefinitionIsDated:
         ``credit_workflow.create_cc_payback_transaction`` (both doors that
         mint a payback reach it), writes none.  The one undated shape the
         schema still admits since the cutover; a transfer's shadow was the
-        other until plan step ``balance:X-bi-6-4d-3`` refused the shadow, and
+        other until plan step ``balance:X-bi-6-4d-2`` refused the shadow, and
         the card cutover (``credit_card:CC-7``, rulings **R-CC17** /
         **R-CC20**) deletes the payback, so this case goes with it.  The
         envelope is built bare like the file's other rows; the payback comes

@@ -16,7 +16,7 @@ asks :func:`_derived_cash`, which is what a SCREEN reads for a transfer's legs
 ``balance:X-bi-6-1``).
 
 **The rows priced are the payment's LEGS since plan step
-balance:X-bi-6-4d-3** (ruling **R-BAL167**; each case's class is in the
+balance:X-bi-6-4d-2** (ruling **R-BAL167**; each case's class is in the
 commit that made it).  A transfer is one row since that step and no shadow is
 born, so a case that priced the loan's shadow rows with
 ``cash_ledger.amounts_by_id`` prices the legs read off each transfer

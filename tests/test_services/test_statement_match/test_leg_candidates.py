@@ -17,7 +17,7 @@ and the re-price a stale form meets.  The before/after
 grade over the 2026-09-30 00:11 production dump lives with the leaf's
 handoff, not here.
 
-Plan step ``balance:X-bi-6-4d-3`` deleted three of the four cases that read
+Plan step ``balance:X-bi-6-4d-2`` deleted three of the four cases that read
 or hid a transfer's shadow (ruling **R-BAL313**) -- no shadow ever a
 candidate, and a damaged pair (rulings **R-BAL158**, **R-BAL235**) offered at
 its price and once after a revert; the fourth, a renamed account's label,
@@ -202,7 +202,7 @@ class TestAStillPlannedTransferIsOfferedAsItsLeg:
             assert leg.period.period_id == transfer.pay_period_id
             # One side of a transfer is never corrected alone (invariant 3).
             assert leg.figure_is_correctable is False
-        # Moved here at plan step balance:X-bi-6-4d-3 from the deleted
+        # Moved here at plan step balance:X-bi-6-4d-2 from the deleted
         # test_a_broken_shadow_pair_is_offered_at_its_price_and_counted_nowhere
         # (ruling R-BAL313): measured 2026-10-18 without these reads, a leg
         # offered AND listed among the unpriceable failed no test.
@@ -286,7 +286,7 @@ class TestAStillPlannedTransferIsOfferedAsItsLeg:
         leaf ``X-bi-6-1``'s change on the grid).  0 of 256 live shadows
         differed on the 2026-09-30 00:11 production dump, so no screen moved
         on today's data.  The shadow's stale copy was this case's contrast
-        until plan step ``balance:X-bi-6-4d-3`` deleted the shadows.
+        until plan step ``balance:X-bi-6-4d-2`` deleted the shadows.
         """
         savings = _savings(seed_user)
         transfer = _a_transfer(seed_user, savings)
@@ -379,7 +379,7 @@ class TestAPaidSideIsItsLegsRecord:
 
         assert (only.kind, only.row_id) == (RowKind.LEG, transfer.id)
         assert only.cash_amount == -_AMOUNT
-        # Moved here at plan step balance:X-bi-6-4d-3 from the deleted
+        # Moved here at plan step balance:X-bi-6-4d-2 from the deleted
         # test_a_damaged_reverted_transfer_is_offered_once
         # (ruling R-BAL313): measured 2026-10-18 without these reads, a leg
         # offered AND listed among the unpriceable failed no test.
@@ -599,7 +599,7 @@ class TestTheParentDecidesADriftedSide:
         at the settle price and its movement hidden; the leg arm emits a side
         only while its dated movement does not exist, so the dated movement
         is the subject, at its recorded figure.  The case also set each
-        shadow back to Projected, until plan step ``balance:X-bi-6-4d-3``'s
+        shadow back to Projected, until plan step ``balance:X-bi-6-4d-2``'s
         vacuous-residue checkpoint: a transfer is one row since that step
         (ruling **R-BAL258**), so that loop walked no row (measured).
         """
@@ -627,7 +627,7 @@ class TestTheParentDecidesADriftedSide:
         offer loader admits no transfer that is not Projected
         (``transfer_legs.offerable_transfer_legs``), and a leg worth
         nothing is dropped (``_leg_valuation.leg_candidate``), which a
-        ``$0.00`` close's leg is.  Until plan step ``balance:X-bi-6-4d-3``'s
+        ``$0.00`` close's leg is.  Until plan step ``balance:X-bi-6-4d-2``'s
         vacuous-residue checkpoint the case wrote the status Done around the
         service, and it read checking's offer set alone.  Renamed from
         ``test_a_settled_transfer_over_projected_shadows_offers_nothing``.

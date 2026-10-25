@@ -5,7 +5,7 @@ Comprehensive tests for create_transfer, update_transfer, and
 delete_transfer: what each door writes on the transfer's row, validation
 rules, edge cases, and cross-user isolation.
 
-A transfer is one stored row since plan step ``balance:X-bi-6-4d-3``, and its
+A transfer is one stored row since plan step ``balance:X-bi-6-4d-2``, and its
 two sides are read off it every time, so a door's test checks what the door
 WROTE, re-read from the database, and the side's own payment record, the one
 thing still stored per side (ruling R-BAL290 part 1, the developer,

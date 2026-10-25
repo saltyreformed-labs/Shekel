@@ -529,7 +529,7 @@ class TestNonLoanTransferIgnored:
         the transfer's income shadow.
 
         **Read at the savings side's key and over the owner's entries since
-        plan step ``balance:X-bi-6-4d-3``** (ruling **R-BAL167** class 1):
+        plan step ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 1):
         it named the side by the income shadow, which no longer exists, and
         counted the entries linking that shadow's row id, which no split has
         carried since ruling **R-BAL102**.

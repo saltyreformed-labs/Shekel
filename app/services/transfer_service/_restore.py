@@ -4,7 +4,7 @@ Shekel Budget App -- Transfer Service: the RESTORE verb
 The inverse of a soft delete.  It was also the one place the transfer
 invariants were REPAIRED rather than merely maintained -- a shadow that had
 drifted from its parent while hidden was re-synced on the way back -- until
-plan step ``balance:X-bi-6-4d-3`` deleted the shadows and its leaf 3b deleted
+plan step ``balance:X-bi-6-4d-2`` deleted the shadows and its leaf 3b deleted
 the repairs: a transfer is one row, so nothing beside it can drift.
 
 It refuses before it moves (:func:`assert_restorable`, ruling **R-DR**), so a
@@ -41,7 +41,7 @@ def restore_transfer(transfer_id, user_id):
     This is the inverse of ``delete_transfer(soft=True)``: it sets
     ``is_deleted=False`` on the transfer.  It un-deleted both shadows too and
     re-synced their period, category, due date and override flag from the
-    parent until plan step ``balance:X-bi-6-4d-3`` deleted the shadows (its
+    parent until plan step ``balance:X-bi-6-4d-2`` deleted the shadows (its
     leaf 3b deleted the loop).
 
     **It repairs no STATUS and no day, since plan step
@@ -90,7 +90,7 @@ def restore_transfer(transfer_id, user_id):
 
     # ── Refuse before anything moves (X-aj1) ────────────────────────
     # Archived endpoints (F-164); the twin count and type pairing went with
-    # the twins at plan step ``balance:X-bi-6-4d-3``.  Run BEFORE
+    # the twins at plan step ``balance:X-bi-6-4d-2``.  Run BEFORE
     # the un-delete, which is a change from the code this replaced:
     # that version flipped ``is_deleted`` first and then hand-restored it on
     # each failing branch, so the rollback was written out three times and the

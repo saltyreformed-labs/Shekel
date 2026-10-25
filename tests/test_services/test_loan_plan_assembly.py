@@ -182,7 +182,7 @@ def _project_loan_payment(seed_user, db, loan, period, amount, due_date):
     PLANNED tier reads a projected payment off its PARENT now (ruling R-BAL13),
     so a date the parent never carried is a date the plan never sees.  It
     returned the income shadow the door mirrored the date onto until plan step
-    balance:X-bi-6-4d-3 made a transfer one row; it returns the transfer
+    balance:X-bi-6-4d-2 made a transfer one row; it returns the transfer
     (ruling R-BAL167 class 4).
     """
     transfer = transfer_service.create_transfer(
@@ -220,7 +220,7 @@ def test_a_projected_loan_payment_is_priced_and_its_derived_twin_refused(
     adversarial review censused the accessor and found TWO callers of an
     unsettled row, not one.
 
-    Until plan step ``balance:X-bi-6-4d-3`` a paired refusal made this a
+    Until plan step ``balance:X-bi-6-4d-2`` a paired refusal made this a
     measurement rather than a happy path: the SAME derived declaration, on the
     payment's income shadow, still broke the accessor the tier used to call.
     That step made a transfer one row (ruling **R-BAL258**), so there is no
@@ -334,7 +334,7 @@ def test_a_planned_record_keys_its_rate_and_escrow_on_the_due_date(
     )
     # The versions really are inside the window: after the pay-period start,
     # before the installment they govern (read off the transfer; off its
-    # income shadow until plan step balance:X-bi-6-4d-3, ruling R-BAL167
+    # income shadow until plan step balance:X-bi-6-4d-2, ruling R-BAL167
     # class 1).
     assert (
         transfer.pay_period.start_date
@@ -556,7 +556,7 @@ def test_an_early_settled_payment_is_not_re_synthesized_as_estimated(
     # A payment for the 2026-06-01 installment, SETTLED early on 2026-05-20.
     # The installment is stated on the TRANSFER, where a payment's installment
     # is read since plan step balance:X-bi-6-4b; it was written on the income
-    # shadow alone until plan step balance:X-bi-6-4d-3 made a transfer one row
+    # shadow alone until plan step balance:X-bi-6-4d-2 made a transfer one row
     # (ruling R-BAL167 class 1), a copy no reader asked after X-bi-6-4b.
     create_settled_transfer(
         seed_user, db.session, seed_user["account"], account,

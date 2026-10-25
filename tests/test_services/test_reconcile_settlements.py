@@ -13,7 +13,7 @@ graded here:
   (not this one), a payment un-dated (not dated) and on THIS account (not a
   third), no purchase held (**R-CC113**), Projected, and the bill's own
   landing day (**R-CC118**).  The scope's clause leaving out a transfer's
-  shadow has had no case since plan step ``balance:X-bi-6-4d-3`` (ruling
+  shadow has had no case since plan step ``balance:X-bi-6-4d-2`` (ruling
   **R-BAL313**): it planted a payment under a shadow, which cannot be stored
   since that step's first checkpoint (ruling **R-BAL258**);
 * the offer: priced, boxed (**R-CC110**) and posted (**R-CC116**) exactly as

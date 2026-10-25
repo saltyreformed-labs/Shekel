@@ -94,8 +94,8 @@ def _create_transfer(seed_user, period, savings):
     """Create a Checking -> Savings transfer via the service.
 
     Named ``_create_transfer_with_shadows`` until plan step
-    ``balance:X-bi-6-4d-3``, which births no shadow (ruling R-BAL167 class 4,
-    plan step balance:X-bi-6-4d-3).
+    ``balance:X-bi-6-4d-2``, which births no shadow (ruling R-BAL167 class 4,
+    plan step balance:X-bi-6-4d-2).
 
     Returns:
         The Transfer (committed).
@@ -391,8 +391,8 @@ class TestUpdateTransferFromALegFkOwnership:
 
     Each case's leg is the transfer's from-side, read off the transfer.  It
     was the account of the first live twin the case found until plan step
-    ``balance:X-bi-6-4d-3``, which births none; that twin sat on the
-    from-side (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+    ``balance:X-bi-6-4d-2``, which births none; that twin sat on the
+    from-side (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
     """
 
     def test_cross_user_pay_period_from_a_leg_returns_404(

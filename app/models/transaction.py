@@ -295,7 +295,7 @@ class Transaction(
     # means "ask ``cash_ledger.resolve_transaction_amount``".  No production row
     # was NULL at that step.  The cutovers emptied it: plan step X-au-g-2c-2
     # for every transfer shadow (migration ``c9a4e7b21d58``), whose rows plan
-    # step ``balance:X-bi-6-4d-3`` later deleted; X-au-d for every paycheck its
+    # step ``balance:X-bi-6-4d-2`` later deleted; X-au-d for every paycheck its
     # owner had not overridden, settled ones included (``d7b2e6c1a483``);
     # X-au-e for every other row of a definition its owner had not overridden
     # (``c8f3a5d2e714``); and ``balance:X-bi-7d-2`` for every bare one-off it
@@ -368,7 +368,7 @@ class Transaction(
     # and ``companion_visible``); :attr:`tracks_purchases` and
     # :attr:`visible_to_companion` read them there.  A CC payback names no
     # definition and answers ``False`` (ruling **R-BAL73**); a transfer shadow
-    # did too until plan step ``balance:X-bi-6-4d-3`` deleted the shadows
+    # did too until plan step ``balance:X-bi-6-4d-2`` deleted the shadows
     # (ruling **R-BAL166**).
     # is_override and is_deleted are provided by SoftDeleteOverridableMixin.
     transfer_id = db.Column(
@@ -405,7 +405,7 @@ class Transaction(
     # states a day (ruling **R-BAL22**; the cutover at ``X-bi-7d-2`` dated
     # every bare row so).  No other rule reads a transaction's own date: a
     # credit payback is priced through its parent (as a transfer shadow was
-    # until plan step ``balance:X-bi-6-4d-3`` deleted the shadows), so on one
+    # until plan step ``balance:X-bi-6-4d-2`` deleted the shadows), so on one
     # the field is the owner's optional note of when the bill falls and NULL
     # means they gave none.
     due_date = db.Column(db.Date, nullable=True)
@@ -698,7 +698,7 @@ class Transaction(
         counted unrecoverable.  What the link alone still tells apart is a
         CC payback, which reads ``credit_payback_for_id`` directly (a
         transfer shadow, read off ``transfer_id``, was the other until plan
-        step ``balance:X-bi-6-4d-3`` deleted the shadows).
+        step ``balance:X-bi-6-4d-2`` deleted the shadows).
 
         Reads the template relationship only when ``template_id`` is set, so a
         link-less row costs no load; the rule rides on the template's own
@@ -721,7 +721,7 @@ class Transaction(
         recurrence rule PLACES its rows -- a grid one-off's one, a bank-born
         envelope's one per paycheck (**R-BAL24**) -- where a definition with
         a rule GENERATES them, and a link-less row (a CC payback, the only
-        shape without a definition since plan step ``balance:X-bi-6-4d-3``
+        shape without a definition since plan step ``balance:X-bi-6-4d-2``
         deleted the transfer shadows; the two were the only such shapes
         from the family's cutover at leaf 7d-2) names no definition at all.  Five
         doors fork on exactly this: the popover
@@ -750,7 +750,7 @@ class Transaction(
         stored.  The answer is the DEFINITION's ``is_envelope`` -- the
         definition owns the setting for every row it generates or places --
         and a row that names no definition (a CC payback) answers ``False``
-        (ruling **R-BAL73**): since plan step ``balance:X-bi-6-4d-3``
+        (ruling **R-BAL73**): since plan step ``balance:X-bi-6-4d-2``
         deleted the transfer shadows it is the only link-less shape (the
         two were, from plan step ``balance:X-bi-7d-2``), no cell of the
         row's own exists to ask, and ``False`` is what every
@@ -776,7 +776,7 @@ class Transaction(
         :attr:`tracks_purchases`'s mirror in every respect since plan step
         ``balance:X-bi-1b`` (ruling **R-BAL19**): the answer is the
         DEFINITION's ``companion_visible``, and a row that names no
-        definition (a CC payback, since plan step ``balance:X-bi-6-4d-3``
+        definition (a CC payback, since plan step ``balance:X-bi-6-4d-2``
         deleted the transfer shadows) answers ``False``
         (ruling **R-BAL73**, for the reason its twin states).  Reads the
         template relationship only when ``template_id`` is set.
@@ -841,7 +841,7 @@ class Transaction(
         refused, trading a soft metric for a 500 on the grid.  The resolution
         named then was plan step X-f1c's edit door, which let those 8 legacy
         days be corrected; the 8 rows themselves went at plan step
-        ``balance:X-bi-6-4d-3``, which deleted every shadow (ruling
+        ``balance:X-bi-6-4d-2``, which deleted every shadow (ruling
         **R-BAL166**).
         """
         return days_paid_before_due(self.due_date, self.settled_on)

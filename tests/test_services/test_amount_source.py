@@ -38,7 +38,7 @@ The LOAN_PAYMENT rule is graded ONLY here: ``budget.loan_payment_settings`` is
 empty on production, so the oracle prices ``$0.00`` through it and a seeded loan
 is the only place it runs.
 
-**No transfer shadow is born since plan step balance:X-bi-6-4d-3**, and
+**No transfer shadow is born since plan step balance:X-bi-6-4d-2**, and
 ``ck_transactions_names_no_transfer`` refuses one (ruling **R-BAL258**).  So
 a case that priced a shadow asks the TRANSFER, or prices its legs through
 ``leg_amounts_by_key`` -- each leg worth ``resolve_transfer_amount`` on its
@@ -194,7 +194,7 @@ def _declare_transfer_derived(xfer):
     either a figure it owns or the relation that prices it, never both
     (``ck_transfers_amount_ownership``).  It had a transaction twin,
     ``_declare_derived``, which declared shadow rows and went with its last
-    caller at plan step balance:X-bi-6-4d-3, where no shadow is born (ruling
+    caller at plan step balance:X-bi-6-4d-2, where no shadow is born (ruling
     **R-BAL167** class 4), with ``_state_own_amount``, its other direction.
 
     Only ``template`` can price a transfer -- a transfer has no parent transfer
@@ -301,7 +301,7 @@ def _legs_of(xfer):
 
     ``transfer_legs.leg_of`` on each endpoint.  It replaces ``_shadow_of``,
     which returned one of the two shadow ROWS and went with its last caller at
-    plan step balance:X-bi-6-4d-3, where no shadow is born (ruling
+    plan step balance:X-bi-6-4d-2, where no shadow is born (ruling
     **R-BAL167** class 4): a leg is read off its transfer, and
     ``leg_amounts_by_key`` prices it.
     """
@@ -323,7 +323,7 @@ def _twin_holding_its_parent(xfer):
     collection and warn at the next autoflush.  For the rule-5 cases, which
     grade an arm that ships until plan step balance:X-bi-6-5 on a twin the
     database refuses (an adversarial review of plan step
-    balance:X-bi-6-4d-3's checkpoint 2d-a found the parentless twin let
+    balance:X-bi-6-4d-2's checkpoint 2d-a found the parentless twin let
     the refinement ruling **R-BAL10** deleted pass them).
 
     Args:
@@ -345,7 +345,7 @@ def _refused_by(row):
     it owns -- so the case asserts which CHECK refuses its own shape.  The
     session is rolled back after the refusal, so the caller commits first.
     The two orphan cases planted the twin with its parent link gone through
-    it until their re-expression at plan step balance:X-bi-6-4d-3's
+    it until their re-expression at plan step balance:X-bi-6-4d-2's
     checkpoint 2d-a, which asks the resolver of that twin unsaved instead.
 
     Args:
@@ -467,7 +467,7 @@ def _loan_payment(
 
     ``owns=True`` takes the transfer for the OWNER at ``stored`` through the
     transfer door (:func:`transfer_repriced_by_the_owner`).  It also took each
-    shadow's figure back to ``$1,200.00`` until plan step balance:X-bi-6-4d-3,
+    shadow's figure back to ``$1,200.00`` until plan step balance:X-bi-6-4d-2,
     where no shadow is born and the database refuses one (ruling
     **R-BAL258**), so that figure went with its row: the one case that named
     it names the transfer's own ``$1,250.00`` as the rival base instead
@@ -495,7 +495,7 @@ def _loan_payment(
 def _declare_loan_payment_derived(xfer):
     """Declare a loan payment's transfer derived.
 
-    **It declares the TRANSFER alone since plan step balance:X-bi-6-4d-3**,
+    **It declares the TRANSFER alone since plan step balance:X-bi-6-4d-2**,
     where no shadow is born (ruling **R-BAL167** class 4); it looped the
     transfer's shadows first, and the paragraphs below are the history of
     that loop's scope.
@@ -685,7 +685,7 @@ class TestWhichRulePricesARow:
         would break, and it is a derive-mode payment -- the shape that DID take
         it.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_loan_payment_SHADOW_is_priced_by_its_parent_like_any_other``;
         ruling **R-BAL167** class 4, with a refusal added).  It planted
         nothing: it classified the expense shadow the ENGINE made, and no
@@ -732,7 +732,7 @@ class TestWhichRulePricesARow:
     ):
         """A twin with no loan settings behind it takes the transfer rule, and cannot be stored.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_generic_transfer_shadow_is_priced_by_its_parent``; ruling
         **R-BAL167** class 4, with a refusal added).  It planted nothing: it
         classified the expense shadow the ENGINE made, and no shadow is born
@@ -778,9 +778,9 @@ class TestWhichRulePricesARow:
         """A twin that owns a figure is refused: no shadow takes its figure back now.
 
         It was the case above on the shadow side, a shape production held,
-        until plan step balance:X-bi-6-4d-3 deleted every twin.
+        until plan step balance:X-bi-6-4d-2 deleted every twin.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_shadow_that_took_its_figure_back_owns_it_again``; ruling
         **R-BAL167** class 2).  The planted shape is a twin that OWNS
         ``$77.77`` -- a figure and no source -- which passes
@@ -1107,7 +1107,7 @@ class TestWhatEachRuleAnswers:
         and its parent's were both populated and only the review's three-figure
         fixture told a column-reading resolver from a rule-resolving one.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_transfer_shadow_answers_its_parents_RULE_not_either_column``;
         ruling **R-BAL167** class 1).  No shadow is born, so the expense side
         is its LEG, priced by ``leg_amounts_by_key``; the shadow's empty column
@@ -1135,7 +1135,7 @@ class TestWhatEachRuleAnswers:
         The declaration empties both columns instead, so such a resolver now
         answers ``None`` twice -- the same discrimination, made structural.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_both_shadows_of_one_transfer_answer_the_same_figure``; ruling
         **R-BAL167** class 1).  The two legs are read off one transfer and
         priced by ``leg_amounts_by_key``, one ``resolve_transfer_amount`` on
@@ -1162,7 +1162,7 @@ class TestWhatEachRuleAnswers:
         graded here and nowhere else -- and it is the arm that decides whether
         the transfer rule is total for a transfer nobody generated.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_shadow_of_an_adhoc_transfer_answers_the_parents_own_figure``;
         ruling **R-BAL167** class 1): the expense side is its leg, priced by
         ``leg_amounts_by_key``, where the expense shadow was declared derived
@@ -1351,7 +1351,7 @@ class TestEveryRefusalFires:
         memory (``shadow.transfer = None``), never flushed, rather than by
         storing a state the key forbids.
 
-        **Re-expressed at plan step balance:X-bi-6-4d-3** (ruling **R-BAL167**
+        **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
         class 4; its subject and its assertion unchanged).  No shadow is born,
         so the orphan is the expense twin built UNSAVED
         (:func:`~tests._test_helpers.a_twin_of`): it carries its transfer's
@@ -1472,7 +1472,7 @@ class TestTheLoanPaymentRule:
         The definition says ``$1,300.00`` -- a figure the loan's own answer is
         not.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_derive_mode_shadow_answers_the_loans_own_figure``; ruling
         **R-BAL167** class 1): asked of the TRANSFER, whose rule the shadow
         answered.  The sentence above named three figures -- the definition's,
@@ -1494,7 +1494,7 @@ class TestTheLoanPaymentRule:
         candidate implementation -- and the loan's own P&I of ``$1,199.10`` must
         not appear either.
 
-        Asked of the TRANSFER since plan step balance:X-bi-6-4d-3, whose rule
+        Asked of the TRANSFER since plan step balance:X-bi-6-4d-2, whose rule
         the shadow answered (ruling **R-BAL167** class 1).  The sentence above
         also named the parent's ``$1,250.00`` and the shadow's ``$1,200.00``,
         and this fixture stores neither: the payment is not taken for an
@@ -1529,7 +1529,7 @@ class TestTheLoanPaymentRule:
         is derived.  The discrimination is the same and one producer shorter.
 
         **The rival base is the TRANSFER's stored ``$1,250.00`` since plan
-        step balance:X-bi-6-4d-3** -- ruling **R-BAL272**, the developer's
+        step balance:X-bi-6-4d-2** -- ruling **R-BAL272**, the developer's
         answer, picked verbatim: "Use $1,250.00 (Recommended)": "The stored
         figure the test names becomes the transfer's own $1,250.00 (a wrong
         answer would be $1,250.00 + $150.00 = $1,400.00). The test then makes
@@ -1576,7 +1576,7 @@ class TestTheLoanPaymentRule:
         )
         basis = _basis_for(seed_user)
         # Asked of the TRANSFER, whose rule the shadow answered, since plan
-        # step balance:X-bi-6-4d-3 (ruling R-BAL167 class 1).
+        # step balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
         with pytest.raises(AmountUnresolvable, match="would not resolve"):
             resolve_transfer_amount(xfer, basis)
 
@@ -1724,7 +1724,7 @@ class TestAShadowWithNoParentRefuses:
         could not hold an orphan shadow, which made this a defensive refusal
         rather than a reachable state.
 
-        **Re-expressed at plan step balance:X-bi-6-4d-3** (ruling **R-BAL167**
+        **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
         class 4: the fixture rebuilt, its two assertions unchanged).  No
         shadow is born, so the row is the expense twin built UNSAVED and
         holding its parent in memory (:func:`_twin_holding_its_parent`): it is
@@ -1773,7 +1773,7 @@ class TestTheBatchTier:
         the discriminator ruling R-FI refuted.
 
         **The loan payment is asked as its TRANSFER since plan step
-        balance:X-bi-6-4d-3** (ruling **R-BAL167** class 1), and one clause
+        balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1), and one clause
         is gone with no row to ask: ``salary_net_for(shadow, ...) is None``
         asked the salary derivation about the loan payment's shadow, and the
         payment is a transfer now, which that derivation (it takes INCOME
@@ -1829,7 +1829,7 @@ class TestTheBatchTier:
         # $1,250.00 -- the parent's stored column with the extra dropped -- and
         # it is named so the assertion cannot pass on a dropped term.  Asked
         # of the TRANSFER, whose rule the shadow answered, since plan step
-        # balance:X-bi-6-4d-3 (ruling R-BAL167 class 1).
+        # balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
         assert resolve_transfer_amount(xfer, stale) == Decimal("1450.00")
         other = add_txn(
             db.session, seed_user, seed_periods[0], "Fuel", "60.00",
@@ -1857,7 +1857,7 @@ class TestTheBatchTier:
         that answers rule 2 for every salary-linked row whatever its ownership.
 
         **The map is the GRID's merged budgets map since plan step
-        balance:X-bi-6-4d-3** (ruling **R-BAL167** class 1).  The loan
+        balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1).  The loan
         payment's two shadow rows sat in ``amounts_by_id`` beside the
         paychecks; no shadow is born, and a screen holds a transfer's LEGS in
         the same map by ``leg.cell_key`` (``leg_amounts_by_key``, since plan
@@ -1866,7 +1866,7 @@ class TestTheBatchTier:
         only spelling: the dashboard pulse builds the same rows-plus-legs map
         inline (``dashboard_service/_pulse.py``), a second home for one
         derived map (CLAUDE.md rule 14), reported at plan step
-        balance:X-bi-6-4d-3 rather than moved in this tests-only step.
+        balance:X-bi-6-4d-2 rather than moved in this tests-only step.
         """
         template, _profile = _salary_template(seed_user)
         paycheck = _template_row(
@@ -1964,7 +1964,7 @@ class TestTheRulesDoNotReadTheColumnTheyReplace:
     ):
         """Only the definition moves a generated transfer's leg.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_shadows_answer_ignores_both_its_own_column_and_its_parents``;
         ruling **R-BAL167** class 1).  The expense side is its LEG, priced by
         ``leg_amounts_by_key``; the parent's rival ``$2,424.24`` and the
@@ -2177,7 +2177,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
         Both shadows were ``_touch``-ed first, so the relationship loads were
         not what the count measured.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_the_loan_resolve_runs_ONCE_however_many_shadows_ask``; ruling
         **R-BAL167** class 1).  The two asks are the payment's two LEGS, each
         priced by ``leg_amounts_by_key``, where they were its two shadow rows
@@ -2240,7 +2240,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
         """
         # The payment is the transfer, and the leg is its checking side, where
         # it was the checking-side shadow's transfer and account until plan
-        # step balance:X-bi-6-4d-3 (ruling R-BAL167 class 4).
+        # step balance:X-bi-6-4d-2 (ruling R-BAL167 class 4).
         xfer = _loan_payment(seed_user, derive=True)
         db.session.commit()
         basis = _basis_for(seed_user)
@@ -2564,7 +2564,7 @@ class TestPricingReadsNoSTATUS:
         status.
 
         **Asked of the TRANSFER and its checking-side LEG since plan step
-        balance:X-bi-6-4d-3** (ruling **R-BAL167** class 1): the status is the
+        balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1): the status is the
         transfer's, its price is ``resolve_transfer_amount``'s and the leg's
         contribution is ``leg_contribution_of``'s, where all three were the
         checking-side shadow's.  No door moves a transfer to Credit -- the

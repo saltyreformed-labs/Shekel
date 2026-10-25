@@ -3,7 +3,7 @@ verbatim by ``tools/split``, and which part imports each: ``make_template_with_r
 (``test_generation``, ``test_regeneration``, ``test_resolve_conflicts``) and ``_LogCapture``
 (``test_maintain``, ``test_regeneration``, ``test_resolve_conflicts``); ``test_negative_paths``
 imports neither.  ``_assert_shadows_valid`` read a transfer's two twin rows and went at plan step
-``balance:X-bi-6-4d-3`` (ruling **R-BAL167** class 4): a transfer stores no leg row since
+``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 4): a transfer stores no leg row since
 migration 82f7.
 """
 

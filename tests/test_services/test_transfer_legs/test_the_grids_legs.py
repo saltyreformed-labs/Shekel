@@ -344,7 +344,7 @@ class TestTheLegMapProducers:
         """Ruling R-BAL82's state on a leg: settled, no covering movement, ``$0``, on both sides.
 
         The transfer is closed at ``$0.00`` through its door
-        (:func:`_closed_at_zero`).  Until plan step ``balance:X-bi-6-4d-3``'s
+        (:func:`_closed_at_zero`).  Until plan step ``balance:X-bi-6-4d-2``'s
         vacuous-residue checkpoint the case hand-built the EXPENSE side's
         leg, record ``None``, over a transfer settled at $250.00 with a
         record on each side; it read no income side, and the cp2e-2b-2b

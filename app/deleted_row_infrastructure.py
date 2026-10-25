@@ -52,7 +52,7 @@ so either can move without the other.
   landed with the transfer delete that takes a side's records off first**
   (design D7, finding BAL-532), at the leaf's second checkpoint, so under
   :data:`TRANSFER_ARM` the row arm excepts nothing either, and since plan
-  step ``balance:X-bi-6-4d-3`` no row is a transfer's leg at all
+  step ``balance:X-bi-6-4d-2`` no row is a transfer's leg at all
   (``ck_transactions_names_no_transfer``, ruling **R-BAL258**).  The
   row-only text a revision without :data:`TRANSFER_ARM` installs keeps the
   clause, and with it

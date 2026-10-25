@@ -44,7 +44,7 @@ being true**: the fence's allowlist read ``app.services.transfer_service`` and
 become exempt without anybody deciding it should be.  The entry now names
 :mod:`app.services.transfer_service._create` -- the one leaf holding the
 CONSTRUCTOR that holds it open (``create_transfer``'s; the shadow constructor
-went with the shadows at plan step X-bi-6-4d-3), which plan step X-aj2
+went with the shadows at plan step X-bi-6-4d-2), which plan step X-aj2
 replaces.
 
 Flask-isolated like the parent service: plain data and ORM rows in, mutations

@@ -1502,7 +1502,7 @@ class TestTheReportReadsTheCashFlowSet:
         on the card, checking's on checking, and the helper holds none.
         Neither reader here reads postings; the order is kept so the planted
         state is whole.  The re-point moved the transfer's expense
-        shadow row too until plan step balance:X-bi-6-4d-3 made a transfer
+        shadow row too until plan step balance:X-bi-6-4d-2 made a transfer
         one row (ruling R-BAL258); the transfer is the whole plant now
         (ruling R-BAL167 class 1).  The savings account is not a member of
         the set.  The plant carries its own tell, the transfer's endpoints,
@@ -1618,7 +1618,7 @@ class TestATransferIsALegOfItsParent:
                 seed_periods[0].start_date, last_covered_day(seed_periods[0]),
             )
             # "No shadow" is the database's since plan step
-            # balance:X-bi-6-4d-3: a row naming a transfer is refused at the
+            # balance:X-bi-6-4d-2: a row naming a transfer is refused at the
             # write (ruling R-BAL258), so a per-row ``transfer_id is None``
             # check here passed with ``own_rows_clause``'s ``IS NULL`` term
             # deleted (measured 10-15) and is gone.
@@ -2292,7 +2292,7 @@ class TestTheActualHalfAsksTheAmountModel:
     stays" clause) and this class is the arm's first coverage.
 
     **Its fixture is an engine-generated row since plan step
-    balance:X-bi-6-4d-3**, which made a transfer one row (ruling R-BAL258).
+    balance:X-bi-6-4d-2**, which made a transfer one row (ruling R-BAL258).
     It was a projected transfer's expense shadow until then: the twin was the
     class's FIXTURE for an unsettled derived row, replaced by another member
     of that population (an engine-generated row), assertions unchanged (the
@@ -2315,7 +2315,7 @@ class TestTheActualHalfAsksTheAmountModel:
         price and so the one ``default_amount`` holds.  A fall-through that
         answered the definition's newest price rather than its price on the
         row's own due date would read ``$200.00``.  Both prices were
-        ``$321.00`` when plan step ``balance:X-bi-6-4d-3`` first built this
+        ``$321.00`` when plan step ``balance:X-bi-6-4d-2`` first built this
         helper, and a fall-through reading ``default_amount`` passed both
         cases (measured by that step's delta review).
 
@@ -2463,7 +2463,7 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
         the transfer's status is the one status; ruling R-BAL167 class 1).
         Its precondition read that twin -- ``estimated_amount is None``, the
         shadow storing no plan of its own -- and went with it at plan step
-        ``balance:X-bi-6-4d-3`` (ruling R-BAL258, class 1 with nothing
+        ``balance:X-bi-6-4d-2`` (ruling R-BAL258, class 1 with nothing
         re-expressed): no such row can be stored now
         (``test_a_transfer_is_one_row/test_the_upgrade.py::TestTheUpgrade::
         test_the_database_refuses_a_twin``),

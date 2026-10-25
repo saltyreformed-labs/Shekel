@@ -23,7 +23,7 @@ def _plain_transfer(seed_user, seed_periods, amount="250.00"):
     """A checking-to-savings transfer -- no loan, no definition behind it.
 
     It was ``_plain_pair`` and returned the transfer AND its two shadow legs
-    until plan step balance:X-bi-6-4d-3, where a transfer became one row
+    until plan step balance:X-bi-6-4d-2, where a transfer became one row
     (ruling **R-BAL167** class 4).
     """
     savings = account_service.create_account(

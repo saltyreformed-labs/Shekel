@@ -50,7 +50,7 @@ class TestDataConsistency:
         raise (a settled row the fold cannot see).  DC-12 arrived at
         ``balance:X-bi-6-3`` with the one the posting writer stopped raising
         (Transfer Invariant 1, a pair missing a shadow) and went at
-        ``balance:X-bi-6-4d-3`` with the twin rows it counted (rulings
+        ``balance:X-bi-6-4d-2`` with the twin rows it counted (rulings
         **R-BAL166**, **R-BAL258**).
         """
         results = check_data_consistency(db.session)

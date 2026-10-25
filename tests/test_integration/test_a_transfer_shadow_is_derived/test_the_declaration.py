@@ -31,7 +31,7 @@ from ._helpers import _CONTRACT, _plain_transfer
 class TestAShadowIsBornDerived:
     """The declaration is made by the constructor, not by a later writer.
 
-    Since plan step balance:X-bi-6-4d-3 the constructor makes ONE row, so what
+    Since plan step balance:X-bi-6-4d-2 the constructor makes ONE row, so what
     the first case asked of the two legs it built is asked of the transfer
     (ruling **R-BAL167** class 1, with a refusal of either twin added), and
     the second, which planted a figure on a leg, asserts that row unstorable
@@ -43,7 +43,7 @@ class TestAShadowIsBornDerived:
     ):
         """``create_transfer`` births one owning row, and no leg row beside it.
 
-        **Renamed and re-expressed at plan step balance:X-bi-6-4d-3** (it was
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_both_legs_declare_their_parent_and_store_nothing``; ruling
         **R-BAL167** class 1, with a refusal ADDED: it planted nothing, it read
         the two legs ``create_transfer`` made, so the twin refused below is a
@@ -89,7 +89,7 @@ class TestAShadowIsBornDerived:
         drifted one this case is about. Reaching the private column is the only
         way left to construct the drift, and the database still refuses it.
 
-        **Re-expressed at plan step balance:X-bi-6-4d-3** (ruling **R-BAL167**
+        **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
         class 2): no leg row is born to write the figure onto, so the planted
         row is the twin :func:`~tests._test_helpers.a_twin_of` builds -- the
         shape ``_build_shadow`` built -- with the rival figure written past
@@ -123,7 +123,7 @@ class TestAShadowIsBornDerived:
 class TestTheAmountModelsOwnEagerLoad:
     """``transfer_pricing_load_options`` keeps a priced leg set off an N+1.
 
-    **Re-expressed onto TRANSFER legs at plan step balance:X-bi-6-4d-3**
+    **Re-expressed onto TRANSFER legs at plan step balance:X-bi-6-4d-2**
     (ruling **R-BAL167** class 1).  The pair loaded SHADOW rows with
     ``pricing_load_options`` and priced them with ``amounts_by_id``; no shadow
     is born since that step, and a leg is read off its transfer (**R-BAL13**),

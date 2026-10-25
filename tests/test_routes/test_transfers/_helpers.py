@@ -147,9 +147,9 @@ def _received_transfer_of(template, period, seed_user, figure):
     close stores is laid beside it, ``0.00`` and typed (ruling **R-BAL365**):
     since that step's 4d-4b-2 leaf the band trigger's figure arm refuses a
     settled transfer storing no figure.  It gave both twins the status too
-    until plan step ``balance:X-bi-6-4d-3``, which births none: that loop
+    until plan step ``balance:X-bi-6-4d-2``, which births none: that loop
     ran over nothing (ruling R-BAL167 class 4, plan step
-    balance:X-bi-6-4d-3).
+    balance:X-bi-6-4d-2).
     """
     xfer = transfer_repriced_by_the_owner(
         generate_transfer_of(template, period), figure,

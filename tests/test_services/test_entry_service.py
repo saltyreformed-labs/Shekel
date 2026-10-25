@@ -165,7 +165,7 @@ class TestCreateEntry:
                 )
 
     # ``test_create_entry_rejects_a_transfer_shadow`` stood here until plan
-    # step balance:X-bi-6-4d-3 (ruling **R-BAL300**, developer 2026-10-15:
+    # step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer 2026-10-15:
     # "Delete all 27").  It added a purchase to a transfer's expense SHADOW
     # row, which names no definition, so ``tracks_purchases`` answered
     # ``False`` (ruling R-BAL73) and the envelope guard refused it.  No shadow

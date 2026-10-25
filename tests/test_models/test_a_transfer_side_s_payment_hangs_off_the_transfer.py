@@ -11,7 +11,7 @@ transfer and its side's record say (the cp2b-1 review's L-4).
 
 Driven against the test database, which is built at head, through the shipped
 ``upgrade`` / ``downgrade``.  **At head no transfer has a twin**: plan step
-``balance:X-bi-6-4d-3``'s revision, the one above (:data:`_STEP_ABOVE`),
+``balance:X-bi-6-4d-2``'s revision, the one above (:data:`_STEP_ABOVE`),
 deletes them and refuses a new one.  So every case that reads or plants a
 twin, or downgrades this revision, first runs the step above's downgrade
 (:func:`_twins_built`), as the release's own way down does: it builds two
@@ -65,7 +65,7 @@ _MIGRATION = load_migration_module(
     "e616adf7fe22_a_transfer_side_s_payment_hangs_off_the_transfer.py",
 )
 
-#: Plan step ``balance:X-bi-6-4d-3``'s revision, the one above, whose downgrade
+#: Plan step ``balance:X-bi-6-4d-2``'s revision, the one above, whose downgrade
 #: builds the twins this revision's downgrade re-attaches records under.
 _STEP_ABOVE = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
 

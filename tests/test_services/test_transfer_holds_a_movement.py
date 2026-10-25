@@ -124,7 +124,7 @@ class TestTheOneClause:
     It asked about any entry under any shadow, live or dead, until plan step
     ``balance:X-bi-6-4d-2`` moved each side's record onto the transfer
     (ruling **R-BAL88**); a transfer has no twin since plan step
-    ``balance:X-bi-6-4d-3`` made it one row (ruling **R-BAL258**).
+    ``balance:X-bi-6-4d-2`` made it one row (ruling **R-BAL258**).
     """
 
     def test_a_transfer_holding_nothing_is_not_held(
@@ -174,7 +174,7 @@ class TestTheOneClause:
         records and the clause still holds it.  The case also hid both twins
         around the service, before the refused hide and again over the live
         transfer's two kept records, until plan step
-        ``balance:X-bi-6-4d-3``'s vacuous-residue checkpoint: a transfer is
+        ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint: a transfer is
         one row since that step (ruling **R-BAL258**), so each of those
         updates touched no row and the plant's read of the twins walked an
         empty list (both measured).  Renamed from
@@ -212,7 +212,7 @@ class TestThePeriodLock:
         """No row of the period is settled; the $500.00 transfer is.
 
         A transfer's status lives in its one row since plan step
-        ``balance:X-bi-6-4d-3`` (ruling **R-BAL258**).  Until plan step
+        ``balance:X-bi-6-4d-2`` (ruling **R-BAL258**).  Until plan step
         ``balance:X-bi-6-4d-2`` its two shadow rows carried the same status
         on this door-written state, so the case could not tell which of the
         three the lock read, and :class:`TestTheParentDecidesADrift` planted
@@ -260,7 +260,7 @@ class TestTheParentDecidesADrift:
     because on every door-written state the transfer and its legs shared
     one status, so a lock still reading the LEGS' status passed every test
     above.  Drift A, a leg set Paid under a Projected transfer, was deleted
-    at plan step ``balance:X-bi-6-4d-3`` (ruling **R-BAL313**): a transfer
+    at plan step ``balance:X-bi-6-4d-2`` (ruling **R-BAL313**): a transfer
     came with two shadow rows until that step made it one row (ruling
     **R-BAL258**).  Its three reads of the reverted transfer it planted over
     -- the HOLDS_MOVEMENT lock, no settled item, one holding row -- are
@@ -283,7 +283,7 @@ class TestTheParentDecidesADrift:
         A ``$0.00`` close stores no record on either side (rulings
         **R-BAL82**, **R-BAL141**), so the lock and the settled count read
         the transfer's own status alone.  Until plan step
-        ``balance:X-bi-6-4d-3``'s vacuous-residue checkpoint the case wrote
+        ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint the case wrote
         the status Done around the service: drift B, over two Projected
         shadows until that step made a transfer one row (a lock reading the
         legs' status found no settled item there), and its plant read those

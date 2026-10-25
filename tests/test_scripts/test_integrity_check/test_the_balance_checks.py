@@ -265,7 +265,7 @@ class TestBalanceAnomalies:
         """One row per leg, naming the transfer, dated by the leg's MOVEMENT.
 
         Plan step ``balance:X-bi-6-4c-4`` (ruling **R-BAL160**): the shape
-        DC-11's leg arm had until plan step ``balance:X-bi-6-4d-3`` deleted
+        DC-11's leg arm had until plan step ``balance:X-bi-6-4d-2`` deleted
         it.  A transfer settled one day past the horizon is
         two legs outside every paycheck -- reported once each under the
         transfer and that leg's account, on the day that side's movement

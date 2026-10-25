@@ -419,7 +419,7 @@ def planned_cash_rows(
     the valuation walked it to the parent (amount rule 5).  The row half of
     the plan then EXCLUDED shadows -- the one place this loader narrows on
     ``transfer_id`` -- and it excludes nothing since plan step
-    ``balance:X-bi-6-4d-3`` deleted them (ruling **R-BAL166**); the narrowing
+    ``balance:X-bi-6-4d-2`` deleted them (ruling **R-BAL166**); the narrowing
     goes with the column at plan step ``balance:X-bi-6-5``.  The leg half is
     :func:`app.services.transfer_legs.planned_transfer_legs` over
     ``budget.transfers``: one :class:`~app.services.transfer_legs.TransferLeg`

@@ -414,7 +414,7 @@ def track_payment(account_id, template_id):
     ``LoanPricing.live_cash`` superseding each shadow's stored figure on every
     read; from plan step X-au-g-2c-2 a transfer shadow stored no figure (it
     declared ``PARENT_TRANSFER`` from birth), and plan step
-    ``balance:X-bi-6-4d-3`` deleted the shadows.  A generated payment its
+    ``balance:X-bi-6-4d-2`` deleted the shadows.  A generated payment its
     owner has not overridden stores no figure either: it declares its
     definition (``TEMPLATE``, since plan step X-au-f), and which rule prices
     it is read live off the definition (ruling **R-FK**,

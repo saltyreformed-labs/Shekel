@@ -220,7 +220,7 @@ class TestResetHappyPath:
         an adversarial review of this step: copied from the positive sibling,
         where the fixture made it load-bearing while a transfer still wrote two
         shadow rows (the sibling's term went at plan step
-        ``balance:X-bi-6-4d-3``), and inert here in a way that narrowed what
+        ``balance:X-bi-6-4d-2``), and inert here in a way that narrowed what
         the negative case could see.*
         """
         with app.app_context():
@@ -299,7 +299,7 @@ class TestResetHappyPath:
         transfer path exercises ``assert_pay_period_invariants``' transfer
         invariant: every transfer sits in one of the owner's own periods.  The
         helper also counted two shadows per transfer until plan step
-        ``balance:X-bi-6-4d-3``, and the expense count carried a
+        ``balance:X-bi-6-4d-2``, and the expense count carried a
         ``transfer_id=None`` term that kept those shadows out of it; no row
         names a transfer since (``ck_transactions_names_no_transfer``), so the
         term changed no count and is gone.

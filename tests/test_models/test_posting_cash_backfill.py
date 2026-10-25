@@ -116,7 +116,7 @@ _MIGRATIONS_DIR = (
 _MIGRATION_FILENAME = "7d63529e4300_backfill_historical_cash_postings.py"
 _MIGRATION = load_migration_module(_MIGRATION_FILENAME)
 
-#: Plan step ``balance:X-bi-6-4d-3``'s revision, which deletes every transfer
+#: Plan step ``balance:X-bi-6-4d-2``'s revision, which deletes every transfer
 #: shadow and refuses a new one; its downgrade builds a transfer's two, which
 #: the shadow exclusion case needs.
 _TWINS_DELETED = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
@@ -242,7 +242,7 @@ class TestBackfillExclusions:
         SQL, so a regression in the term fails here as that crash, not as a
         read naming the exclusion.
 
-        No transfer has a shadow since plan step ``balance:X-bi-6-4d-3``
+        No transfer has a shadow since plan step ``balance:X-bi-6-4d-2``
         (``82f7b7ed4332`` deletes them and refuses a new one), so the case
         first runs that revision's downgrade, which builds the transfer's two,
         each settled and live as the transfer is.  That is asserted: a

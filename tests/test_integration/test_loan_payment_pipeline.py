@@ -6,7 +6,7 @@ dashboard route -> transfer generation -> payment history query ->
 amortization engine projection -> balance calculator.
 
 It also verified the transfer invariants over each transfer's two shadow
-rows until plan step ``balance:X-bi-6-4d-3`` made a transfer one row
+rows until plan step ``balance:X-bi-6-4d-2`` made a transfer one row
 (ruling **R-BAL258**): what they kept equal has one home now, and the
 generated transfers are read directly.
 """
@@ -55,7 +55,7 @@ class TestLoanPaymentPipeline:
            the checking account.
 
         **Steps 4 and 7 read the TRANSFERS since plan step
-        balance:X-bi-6-4d-3** (ruling **R-BAL167** class 1).  Step 4
+        balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1).  Step 4
         checked each transfer's two shadow rows against the invariants it
         numbered 1, 3, 4 and 5 -- one income and one expense, equal amounts,
         statuses and periods -- and step 7 took its pay period off the
@@ -157,7 +157,7 @@ class TestLoanPaymentPipeline:
             # pinned inside period 0 so ruling R-G does not clamp the
             # still-Projected payment out of the window.  The period is the
             # first transfer's; it was the checking shadow's until plan step
-            # balance:X-bi-6-4d-3 (ruling R-BAL167 class 1), which carried its
+            # balance:X-bi-6-4d-2 (ruling R-BAL167 class 1), which carried its
             # transfer's period.
             checking_balances = balance_at.cash_balance_map(
                 checking,

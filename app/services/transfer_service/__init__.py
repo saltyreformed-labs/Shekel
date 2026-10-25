@@ -44,7 +44,7 @@ Two things follow from the package that a flat module could not have:
   package prefix, so leaving it would have silently widened the fence over
   eight modules.  It now names :mod:`._create` alone -- the only leaf holding
   the CONSTRUCTOR write (``create_transfer``'s; the second, the shadow
-  constructor, went with the shadows at plan step X-bi-6-4d-3) that holds it
+  constructor, went with the shadows at plan step X-bi-6-4d-2) that holds it
   open, which plan step X-aj2 replaces.
 
 **A transfer's SETTLE is a rule of this package, not of the doors that ask for

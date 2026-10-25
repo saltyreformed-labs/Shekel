@@ -17,7 +17,7 @@ needed a two-module allowlist at all.  **Merging the seams does not by itself
 shrink that allowlist**, and saying so here matters because the obvious
 inference is wrong: ``transfer_service`` still writes a status through a
 CONSTRUCTOR (``create_transfer``'s; the shadow constructor went with the
-shadows at plan step X-bi-6-4d-3), which W9907's
+shadows at plan step X-bi-6-4d-2), which W9907's
 born-Projected rule refuses, so its entry survives until plan step X-aj2 replaces
 the write door.  What the merge did remove is the duplicate ATTRIBUTE writes --
 and three defects the duplicate had and this one did not:

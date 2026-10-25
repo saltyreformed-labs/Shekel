@@ -583,7 +583,7 @@ class TestATransferAnswersForItsOwnCategoryAndAccounts:
         The category goes on through the transfer service and no row carries
         it, so the transfer is the only thing that can answer.  Soft-deleting
         the transfer keeps the answer, as a soft-deleted ROW's category always
-        has.  Until plan step balance:X-bi-6-4d-3 made a transfer one row, the
+        has.  Until plan step balance:X-bi-6-4d-2 made a transfer one row, the
         service mirrored the category to both shadows and the case
         re-categorised them around it, to plant the state a shadowless
         transfer presents.
@@ -657,13 +657,13 @@ class TestATransferAnswersForItsOwnCategoryAndAccounts:
         before the predicate is asked, so a door that left the transfer
         Projected, or live, cannot pass here.  It ran over a Projected
         transfer only, hidden by hand, until an adversarial review of plan
-        step balance:X-bi-6-4d-3 found an arm narrowed to Projected passing
+        step balance:X-bi-6-4d-2 found an arm narrowed to Projected passing
         the whole suite; a Paid transfer holding its payment records cannot be
         hidden by hand (``ck_hidden_transfer_holds_nothing``).  Its [DONE]
         transfer holds them, so the delete takes them off and sets it back to
         Projected (ruling R-BAL246): the hidden Paid state is the case below.
         Until
-        4d-3 made a transfer one row, the case hid its shadows around the
+        4d-2 made a transfer one row, the case hid its shadows around the
         service to plant the state a shadowless transfer presents.
         """
         with app.app_context():

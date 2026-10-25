@@ -41,7 +41,7 @@ def test_derived_transfer_amount_tracks_escrow_without_regeneration(
     live override reflects the new escrow.
 
     Both reads price the payments' LEGS, where they priced the shadow rows
-    until plan step balance:X-bi-6-4d-3 (ruling R-BAL167 class 1); the
+    until plan step balance:X-bi-6-4d-2 (ruling R-BAL167 class 1); the
     second read is now guarded non-empty too.
     """
     with app.app_context():
@@ -110,7 +110,7 @@ def test_non_derived_transfer_has_no_live_override(
     all".  Naming the figure is the stronger claim, and it is the one that
     would catch a shadow that had stopped being priced.  It prices the
     payments' legs, where it priced the shadow rows until plan step
-    balance:X-bi-6-4d-3 (ruling R-BAL167 class 1).
+    balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
     """
     with app.app_context():
         loan, _escrow, scenario_id, template, _rule, _periods = (
@@ -146,7 +146,7 @@ def test_derived_transfer_due_date_matches_loan_due_date(
     03-01, 04-01, 05-01.
 
     **The "both shadows mirror the parent" block went at plan step
-    balance:X-bi-6-4d-3** (ruling R-BAL167 class 1, with no subject left):
+    balance:X-bi-6-4d-2** (ruling R-BAL167 class 1, with no subject left):
     it asserted each shadow row's copied ``due_date`` (Transfer Invariant
     3), and no shadow is born.  A leg's due date IS its parent's
     (``TransferLeg.due_date`` reads the transfer), so there is no copy left
@@ -191,7 +191,7 @@ def test_derived_override_is_per_leg_date_aware(
     the bug this per-installment resolution fixes, and the cash side of the
     cash==split invariant for future-dated escrow.
 
-    **Renamed at plan step balance:X-bi-6-4d-3's checkpoint 2d-a** (it was
+    **Renamed at plan step balance:X-bi-6-4d-2's checkpoint 2d-a** (it was
     ``test_derived_override_is_per_shadow_date_aware``; the shadows it
     partitioned are not born since that step).
 
@@ -204,7 +204,7 @@ def test_derived_override_is_per_leg_date_aware(
 
     It partitions the payments' LEGS by their due date (the parent's), where
     it partitioned the shadow rows by theirs until plan step
-    balance:X-bi-6-4d-3 (ruling R-BAL167 class 1).
+    balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
     """
     with app.app_context():
         loan, escrow, scenario_id, template, _rule, _periods = (
@@ -272,7 +272,7 @@ def test_live_cash_and_split_agree_on_a_mid_window_escrow_change(
     where it was read off the loan-side twin row (ruling R-BAL167 class 1,
     plan step balance:X-bi-6-4d-2).  The payment is the TRANSFER due
     2026-03-01, priced and settled through its leg on the loan, where it was
-    the loan-side shadow due that day until plan step balance:X-bi-6-4d-3
+    the loan-side shadow due that day until plan step balance:X-bi-6-4d-2
     (ruling R-BAL167 class 1); the shadow copied the window's two dates off
     the transfer.
     """
@@ -359,7 +359,7 @@ def test_an_off_day_payment_is_priced_on_its_intervals_installment(
     where it was read off the loan-side twin row (ruling R-BAL167 class 1,
     plan step balance:X-bi-6-4d-2).  The payment is the TRANSFER due
     2026-03-10, priced and settled through its leg on the loan, where it was
-    the loan-side shadow due that day until plan step balance:X-bi-6-4d-3
+    the loan-side shadow due that day until plan step balance:X-bi-6-4d-2
     (ruling R-BAL167 class 1).
     """
     with app.app_context():
@@ -431,7 +431,7 @@ def test_an_early_extra_is_charged_nothing_in_the_posted_ledger(
     where it was read off the loan-side twin row (ruling R-BAL167 class 1,
     plan step balance:X-bi-6-4d-2).  The payment is the TRANSFER due
     2026-02-10, settled through its leg on the loan, where it was the
-    loan-side shadow due that day until plan step balance:X-bi-6-4d-3
+    loan-side shadow due that day until plan step balance:X-bi-6-4d-2
     (ruling R-BAL167 class 1).
     """
     with app.app_context():

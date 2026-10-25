@@ -342,7 +342,7 @@ class TestARowTheBooksHavePassedStaysDeleted:
         """The transfer twin: the later of its two books binds, and the notice names it.
 
         The transfer's own flag is what stays deleted.  It also read both of
-        the transfer's shadow rows deleted until plan step balance:X-bi-6-4d-3
+        the transfer's shadow rows deleted until plan step balance:X-bi-6-4d-2
         made a transfer one row.
         """
         with app.app_context():

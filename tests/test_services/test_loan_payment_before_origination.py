@@ -238,7 +238,7 @@ class TestTheEditPathIsGuardedToo:
         raised.  Rolling back before asserting would erase that evidence and
         leave the test proving only that the caller's rollback works.  The case
         read the transfer's two shadow rows beside it until plan step
-        ``balance:X-bi-6-4d-3`` deleted them.  Renamed from
+        ``balance:X-bi-6-4d-2`` deleted them.  Renamed from
         ``test_the_refused_edit_leaves_all_three_rows_untouched``.
 
         NEGATIVE CONTROL: move the ``_reject_installment_move_before_loan`` call

@@ -109,7 +109,7 @@ def _archive(template, ctx):
        write of a transfer goes through (``CLAUDE.md``, Architecture).  Its
        two shadow transactions went with it (a three-level cascade: template
        archival -> transfer soft-delete -> shadow soft-delete) until plan
-       step ``balance:X-bi-6-4d-3`` deleted the shadows.  **A transfer
+       step ``balance:X-bi-6-4d-2`` deleted the shadows.  **A transfer
        either of whose legs holds a payment is kept** (plan step
        ``credit_card:CC-5-4a-4``, rulings **R-CC63**, **R-CC65**): a
        Projected leg holds one only as a reverted settle's kept payment, which
@@ -319,7 +319,7 @@ def hard_delete_transfer_template(template_id):
     Every transfer deletion is routed through
     ``transfer_service.delete_transfer()``, which every write of a transfer
     goes through (``CLAUDE.md``, Architecture).  Until plan step
-    ``balance:X-bi-6-4d-3`` deleted the transfer's two shadow transactions,
+    ``balance:X-bi-6-4d-2`` deleted the transfer's two shadow transactions,
     this docstring listed five transfer invariants the deletion kept; all but
     the one above were about the shadows.
 
@@ -418,7 +418,7 @@ def _destroy(template, template_id):
     Permanently deletes the linked transfers through the transfer service,
     which every write of a transfer goes through (``CLAUDE.md``,
     Architecture); the delete CASCADE-deleted their shadow transactions too
-    until plan step ``balance:X-bi-6-4d-3`` deleted the shadows.  None of them
+    until plan step ``balance:X-bi-6-4d-2`` deleted the shadows.  None of them
     holds a payment: the caller archived on that (plan step
     ``credit_card:CC-5-4a-4``), so the service's removal act takes nothing.
     ``transfer_service.delete_transfer`` flushes but does not commit, so all

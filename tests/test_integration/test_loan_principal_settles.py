@@ -219,7 +219,7 @@ def _create_piti_transfer(  # pylint: disable=too-many-arguments,too-many-positi
 
     Routed through :func:`transfer_service.create_transfer` so the transfer
     is written the same way the production transfer route writes it: one
-    row since plan step ``balance:X-bi-6-4d-3`` (ruling **R-BAL258**), where
+    row since plan step ``balance:X-bi-6-4d-2`` (ruling **R-BAL258**), where
     the door also wrote the two shadows Transfer Invariant 1 named.  Status
     is Projected; the caller settles via the live ``mark_done`` route when
     it wants the resolver to count the payment as confirmed.
@@ -517,7 +517,7 @@ class TestLoanPrincipalSettles:
 
         The pre-condition reads the transfer and its loan side's record,
         where it read the loan-side income shadow's status until plan step
-        ``balance:X-bi-6-4d-3`` made a transfer one row (ruling **R-BAL167**
+        ``balance:X-bi-6-4d-2`` made a transfer one row (ruling **R-BAL167**
         class 1): Projected, and no payment recorded on the loan.
         """
         _ = auth_client  # Fixture kept for context-setup symmetry.

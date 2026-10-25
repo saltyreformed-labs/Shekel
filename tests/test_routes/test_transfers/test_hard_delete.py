@@ -29,11 +29,11 @@ class TestTransferTemplateHardDelete:
     These tests verify transfer invariant compliance: all deletions must
     flow through the transfer service.  They also counted shadow
     transactions before and after, so none was orphaned, until plan step
-    ``balance:X-bi-6-4d-3``, which births none: the database refuses a
+    ``balance:X-bi-6-4d-2``, which births none: the database refuses a
     transaction naming a transfer (``ck_transactions_names_no_transfer``),
     so an orphan count is over rows nothing can write, 0 before any act,
     and those counts are dropped (ruling R-BAL167 class 1, plan step
-    balance:X-bi-6-4d-3).
+    balance:X-bi-6-4d-2).
     """
 
     def test_hard_delete_transfer_template_no_history(
@@ -84,10 +84,10 @@ class TestTransferTemplateHardDelete:
         """C-5A.5-18: Template with Paid transfer is blocked and archived instead.
 
         "The Paid transfer is untouched" read its two shadows, still there and
-        not hidden, until plan step ``balance:X-bi-6-4d-3``, which births
+        not hidden, until plan step ``balance:X-bi-6-4d-2``, which births
         none; it reads the transfer, not hidden, and both sides' payment
         records, still held, which is what the settle left (ruling R-BAL167
-        class 1, plan step balance:X-bi-6-4d-3).
+        class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -139,10 +139,10 @@ class TestTransferTemplateHardDelete:
         transfer's own delete left is the ledger after: the permanent delete
         removes a plan, which posted nothing.  Its count of the transfer's
         shadows after the delete (0) was VACUOUS from plan step
-        ``balance:X-bi-6-4d-3``, which births none and whose CHECK refuses
+        ``balance:X-bi-6-4d-2``, which births none and whose CHECK refuses
         one: a count over rows nothing can write, 0 before the delete too,
         so it is dropped (ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-3).
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -216,9 +216,9 @@ class TestTransferTemplateHardDelete:
         physically destroying the transfer.
         Verifies the predicate fix end-to-end at the route layer.  It also
         counted the transfer's two surviving shadows until plan step
-        ``balance:X-bi-6-4d-3``, which births none; the surviving transfer,
+        ``balance:X-bi-6-4d-2``, which births none; the surviving transfer,
         its status and figure are what it reads (ruling R-BAL167 class 1,
-        plan step balance:X-bi-6-4d-3).
+        plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -293,9 +293,9 @@ class TestTransferTemplateHardDelete:
         the twins' planted statuses, which nothing writes or reads since
         (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  It also
         counted and read both transfers' shadows until plan step
-        ``balance:X-bi-6-4d-3``, which births none: the deleted transfer's
+        ``balance:X-bi-6-4d-2``, which births none: the deleted transfer's
         orphan count was over rows nothing can write (ruling R-BAL167 class
-        1, plan step balance:X-bi-6-4d-3).
+        1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -358,12 +358,12 @@ class TestTransferTemplateHardDelete:
         """C-5A.5-19: Hard-deleting a template removes ALL of its transfers.
 
         Named ``test_hard_delete_preserves_shadow_invariant`` until plan step
-        ``balance:X-bi-6-4d-3``, which births no shadow: it counted six
+        ``balance:X-bi-6-4d-2``, which births no shadow: it counted six
         shadows (two per transfer) before the delete and none after, so no
         shadow was orphaned.  A transaction naming a transfer is refused by
         the database now, so neither count can read anything but 0; the
         three transfers, present before and gone after, are what this reads
-        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-3).
+        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -473,10 +473,10 @@ class TestTransferTemplateHardDelete:
 
         Its reads of the transfer's shadows -- all hidden before the
         hard-delete, none left after -- were VACUOUS from plan step
-        ``balance:X-bi-6-4d-3``, which births none and whose CHECK refuses
+        ``balance:X-bi-6-4d-2``, which births none and whose CHECK refuses
         one: an ``all()`` over an empty list and a count 0 before the act,
         so they are dropped (ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-3).
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)

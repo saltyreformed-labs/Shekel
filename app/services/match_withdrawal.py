@@ -817,7 +817,7 @@ def _parent_ids(entries, leaving_ids: "set[int]") -> "dict[str, list[int]]":
     read the shadow row's id off a transfer's payment until that step -- an
     id ``X-bi-6-4d`` leaves unset, and one ``sorted`` could not have ordered
     beside the others.  The rows a transfer delete handed over as leaving
-    were its shadows until plan step ``balance:X-bi-6-4d-3`` deleted them;
+    were its shadows until plan step ``balance:X-bi-6-4d-2`` deleted them;
     it hands over none.
 
     Args:

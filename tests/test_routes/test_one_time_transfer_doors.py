@@ -44,12 +44,12 @@ a cleared cadence (several transfers of one definition, each answering the
 occurrence the cadence named -- what the sibling refusal is graded on).
 
 A file-local ``_shadows`` read the transfer's two twin rows until plan step
-``balance:X-bi-6-4d-3``, which births none and whose CHECK refuses one.  Six
+``balance:X-bi-6-4d-2``, which births none and whose CHECK refuses one.  Six
 passing cases read the twins' mirrored columns through it (``is_override``,
 ``due_date``, ``pay_period_id``, ``amount_source_id``) in an ``all()`` or a
 loop over an empty list -- VACUOUS -- beside the transfer's own column, which
 each still reads; those reads are dropped.  The seventh counted two twins and
-failed (ruling R-BAL167 classes 1 and 4, plan step balance:X-bi-6-4d-3).
+failed (ruling R-BAL167 classes 1 and 4, plan step balance:X-bi-6-4d-2).
 """
 import io
 import pathlib
@@ -537,9 +537,9 @@ class TestTheRestate:
         What each leg books is its side's payment RECORD since plan step
         ``balance:X-bi-6-4d-2``; the shadows held it until then (ruling
         R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  Its count of two
-        shadows went at ``balance:X-bi-6-4d-3``, which births none; the two
+        shadows went at ``balance:X-bi-6-4d-2``, which births none; the two
         side records read below are one per endpoint (ruling R-BAL167 class
-        1, plan step balance:X-bi-6-4d-3).
+        1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _savings(seed_user)
@@ -658,7 +658,7 @@ class TestTheDueDateGate:
         """A moved date is the transfer's due date and its occurrence.
 
         Named ``test_moving_the_date_lands_on_all_three_rows`` until plan
-        step ``balance:X-bi-6-4d-3``, which births no twin: its read of the
+        step ``balance:X-bi-6-4d-2``, which births no twin: its read of the
         two twins' dates ran over an empty list (see the module docstring).
         """
         with app.app_context():

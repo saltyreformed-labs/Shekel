@@ -71,7 +71,7 @@ class TestLatePaidPaymentDating:
         # On the TRANSFER, where a payment's installment is read since plan step
         # balance:X-bi-6-4b.  It wrote the shadow's copy alone until then
         # (rule-5 re-expression, developer approval 2026-09-24), and the
-        # shadow's copy beside it until plan step balance:X-bi-6-4d-3 made a
+        # shadow's copy beside it until plan step balance:X-bi-6-4d-2 made a
         # transfer one row (ruling R-BAL167 class 1).
         payment.due_date = date(2026, 2, 1)
         db.session.flush()
@@ -223,7 +223,7 @@ class TestLatePaidPaymentDating:
             late = _settle(seed_user, loan, late_period)
             # The installment it paid, on the TRANSFER, where a payment's
             # installment is read since plan step balance:X-bi-6-4b.  It was
-            # written on the shadow alone until plan step balance:X-bi-6-4d-3
+            # written on the shadow alone until plan step balance:X-bi-6-4d-2
             # made a transfer one row (ruling R-BAL167 class 1), a copy no
             # reader asked after X-bi-6-4b.
             late.due_date = date(2026, 5, 5)

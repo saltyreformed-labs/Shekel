@@ -623,7 +623,7 @@ def _history_refusal(account, definitions) -> "str | None":
       deleted, with them, until plan step ``credit_card:CC-5-4a-4``, whose
       arm here archived on a payment or purchase under a HIDDEN row or
       transfer the cleanup would remove.  That arm went at plan step
-      ``balance:X-bi-6-4d-3``, because the database refuses a hidden row or
+      ``balance:X-bi-6-4d-2``, because the database refuses a hidden row or
       transfer holding one (rulings **R-CC89**, **R-CC92**;
       :mod:`app.deleted_row_infrastructure`): a row the cleanup removes holds
       no movement.*

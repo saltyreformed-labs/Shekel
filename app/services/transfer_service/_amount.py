@@ -4,7 +4,7 @@ Shekel Budget App -- Transfer Service: WHO OWNS a transfer's stated figure.
 One act: a caller states a transfer's amount OWNERSHIP, and this applies it to
 the transfer.  Ruling **R-FI**'s two states.  It applied the same answer to
 each of the transfer's two twin rows as well until plan step
-``balance:X-bi-6-4d-3`` deleted them; that step's leaf 3b deleted the loop.
+``balance:X-bi-6-4d-2`` deleted them; that step's leaf 3b deleted the loop.
 
 **The caller states ONE value since plan step X-au-f, and ruling R-BAL11 is
 why.**  It took three parameters -- a figure, whether a human authored it, and
@@ -52,7 +52,7 @@ def apply_amount_ownership(rows: TransferRows, ownership) -> None:
     side's record holds none).
 
     **A twin row's ownership FOLLOWED the parent's** until plan step
-    ``balance:X-bi-6-4d-3`` deleted the twins (its leaf 3b deleted the loop
+    ``balance:X-bi-6-4d-2`` deleted the twins (its leaf 3b deleted the loop
     that wrote it): a twin COPIED an owned figure, and declared
     :attr:`~app.enums.AmountSourceEnum.PARENT_TRANSFER` under a derived one.
 

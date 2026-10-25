@@ -46,7 +46,7 @@ class TestTransferServiceLogging:
         """create_transfer emits ``transfer_created``, naming the transfer.
 
         The event no longer carries the two shadow-id fields it carried until
-        plan step ``balance:X-bi-6-4d-3``.
+        plan step ``balance:X-bi-6-4d-2``.
         """
         td = _transfer_setup
         with app.app_context(), _LogCapture(
@@ -63,7 +63,7 @@ class TestTransferServiceLogging:
         assert record.user_id == td["user"].id
         assert record.transfer_id == xfer.id
         assert record.amount == "100.00"
-        # A transfer is one row since plan step ``balance:X-bi-6-4d-3``
+        # A transfer is one row since plan step ``balance:X-bi-6-4d-2``
         # (ruling R-BAL166), so a forensic query pivots on ``transfer_id``
         # alone (read above): each side's payment records name it through
         # their side link.  The two reads below pin only that the shadow-id
@@ -109,7 +109,7 @@ class TestTransferServiceLogging:
         assert record.user_id == td["user"].id
         assert record.transfer_id == xfer.id
         # The event no longer carries the count of shadows the delete hid,
-        # which it carried until plan step ``balance:X-bi-6-4d-3``: there is
+        # which it carried until plan step ``balance:X-bi-6-4d-2``: there is
         # none to hide.  The read pins that field's absence only.
         assert not hasattr(record, "shadow_count")
 
@@ -143,7 +143,7 @@ class TestTransferServiceLogging:
         assert record.transfer_id == xfer.id
         # The event no longer carries the count of shadows the restore
         # brought back, which it carried until plan step
-        # ``balance:X-bi-6-4d-3``: there is none.  The read pins that field's
+        # ``balance:X-bi-6-4d-2``: there is none.  The read pins that field's
         # absence only.
         assert not hasattr(record, "shadow_count")
 

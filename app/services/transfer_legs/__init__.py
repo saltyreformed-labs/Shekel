@@ -18,7 +18,7 @@ to-account -- and priced each through amount rule 5 (*a shadow is worth its
 parent*).  From this step no reader FOLDING a projection read one; the
 shadows stayed, maintained by the transfer service for the settle doors and
 the screens that rendered them, until plan step ``balance:X-bi-6-4d-2``
-stopped keeping them in step, and plan step ``balance:X-bi-6-4d-3`` deleted
+stopped keeping them in step, and plan step ``balance:X-bi-6-4d-2`` deleted
 them, making a transfer one row (ruling **R-BAL258**).  The settled half
 is each side's covering MOVEMENT since plan step ``balance:X-bi-4a`` (filed
 under the side's shadow until plan step ``balance:X-bi-6-4d-2``, under the
@@ -90,7 +90,7 @@ deleted the term (:func:`_records._side_records` says why no liveness test is
 left) and refused at commit the hide of a shadow holding a movement (the
 deleted-row rule's row arm, ruling **R-BAL167**'s class 2), so from then its
 case pinned the storable neighbour, a movement under a LIVE shadow, until plan
-step ``balance:X-bi-6-4d-3`` made a transfer one row (ruling **R-BAL258**) and
+step ``balance:X-bi-6-4d-2`` made a transfer one row (ruling **R-BAL258**) and
 that case went with the shadows (ruling **R-BAL313**).  **The double drift is
 structural now**: no shadow can be stored to hide
 (``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``'s
@@ -104,7 +104,7 @@ CURRENT names: "Transfer to <to-account>" on the from-side, "Transfer from
 <from-account>" on the to-side.  It is the one composition the grid's row
 label reads, and the shadow rows' name writer
 (``transfer_service._create.shadow_names``) read it too until plan step
-``balance:X-bi-6-4d-3`` deleted the shadows and its leaf 3b that writer, so a
+``balance:X-bi-6-4d-2`` deleted the shadows and its leaf 3b that writer, so a
 renamed account re-labels every leg it touches where a shadow's stored
 ``name`` went stale -- one of the two visible changes 6-1 makes.  The other:
 a leg's ``notes`` are its PARENT's (a shadow was written with none and no
@@ -170,7 +170,7 @@ and names the transfer now, as its owner finds it in the app.
 plan step ``balance:X-bi-6-4d-2``**, with the join: the integrity sweep's one
 raw-SQL leg join (``scripts/_integrity_core.TRANSFER_LEG_RECORDS_JOIN``,
 which BA-06's leg arm reads, and DC-11's did until plan step
-``balance:X-bi-6-4d-3``) spells :func:`_records._movement_link`
+``balance:X-bi-6-4d-2``) spells :func:`_records._movement_link`
 again over the side links, since raw SQL cannot call it; statement match's
 ``_acts.named_rows`` names a payment's parent by :func:`cell_key` over
 :func:`movement_parent` (a transfer side's record its LEG) where it read the

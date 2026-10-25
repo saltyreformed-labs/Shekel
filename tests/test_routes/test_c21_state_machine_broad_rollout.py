@@ -297,7 +297,7 @@ class TestTransferShadowMarkDoneStateMachine:
     transfer's grid leg while the transfer is in a non-mutable state.
 
     The class name is history: each case reached its leg through a shadow
-    (twin) row until plan step ``balance:X-bi-6-4d-3``, and a transfer
+    (twin) row until plan step ``balance:X-bi-6-4d-2``, and a transfer
     stores no leg row since migration 82f7 (ruling **R-BAL167** class 1)."""
 
     def _create_transfer(
@@ -307,7 +307,7 @@ class TestTransferShadowMarkDoneStateMachine:
         the service requires, and a Projected transfer.  Returns the
         transfer so tests can drive status changes through it.  Named
         ``_create_transfer_with_shadows`` until plan step
-        ``balance:X-bi-6-4d-3``.
+        ``balance:X-bi-6-4d-2``.
         """
         from app.models.category import Category
         from app.models.ref import AccountType
@@ -383,7 +383,7 @@ class TestTransferShadowMarkDoneStateMachine:
         shadow's status until plan step ``balance:X-bi-6-4d-2`` stopped keeping
         one (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The leg
         is the transfer's from-side; it was the first shadow row the session
-        returned until plan step ``balance:X-bi-6-4d-3``, which deleted the
+        returned until plan step ``balance:X-bi-6-4d-2``, which deleted the
         twins (ruling R-BAL167 class 1).
         """
         with app.app_context():
@@ -422,7 +422,7 @@ class TestTransferShadowMarkDoneStateMachine:
         """Cancel on a Paid transfer from its grid LEG returns 400 (Done ->
         Cancelled is illegal under the state machine).  Re-expressed on the
         transfer door at plan step balance:X-bi-6-1 (ruling R-BAL87); its leg
-        is the from-side since plan step balance:X-bi-6-4d-3 deleted the shadow
+        is the from-side since plan step balance:X-bi-6-4d-2 deleted the shadow
         row it was reached through (ruling R-BAL167 class 1)."""
         with app.app_context():
             xfer = self._create_transfer(
@@ -463,7 +463,7 @@ class TestTransferShadowMarkDoneStateMachine:
         ValidationError, so without the except-branch rollback that dirty
         mutation sits on the session and any later commit in the same request
         would flush the half-applied change.  It read the shadow's amount
-        beside the transfer's until plan step ``balance:X-bi-6-4d-3``: a
+        beside the transfer's until plan step ``balance:X-bi-6-4d-2``: a
         transfer stores no leg row since migration 82f7 (ruling **R-BAL167**
         class 1).  Drive the path directly (a
         route-level test cannot observe this -- per-request teardown

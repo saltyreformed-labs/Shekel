@@ -159,7 +159,7 @@ class TestTransferMaintain:
         every generated row is an orphan.  One holding nothing of the owner's
         is removed -- through ``transfer_service.delete_transfer``, so the
         ledger is reconciled first.  It read each row's two shadow rows gone
-        too until plan step ``balance:X-bi-6-4d-3``: a transfer stores no leg
+        too until plan step ``balance:X-bi-6-4d-2``: a transfer stores no leg
         row since migration 82f7 (ruling **R-BAL167** class 1).
         """
         with app.app_context():
@@ -384,7 +384,7 @@ class TestTransferMaintain:
         the new endpoints; the pass now moves the transfer, keeping each row's
         id.  It read each row's two shadow rows too -- the income leg on the new
         account and both legs' display names -- until plan step
-        ``balance:X-bi-6-4d-3``: a transfer stores no leg row since migration
+        ``balance:X-bi-6-4d-2``: a transfer stores no leg row since migration
         82f7, so each side's account is its parent's endpoint, graded once by
         ``tests.test_services.test_transfer_legs`` ::
         ``test_both_sides_show_the_row_in_every_field_the_table_names``, and

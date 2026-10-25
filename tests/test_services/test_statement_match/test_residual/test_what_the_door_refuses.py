@@ -368,7 +368,7 @@ class TestOneRowIsDeterminateHoweverManyLinesExplainIt:
         the transfer already accounts for.  A first version of this step
         asked this only of a LONE row, so ticking one extra turned the
         refusal into a residual.  The transfer was reached through its
-        checking shadow until plan step ``balance:X-bi-6-4d-3``, and the case
+        checking shadow until plan step ``balance:X-bi-6-4d-2``, and the case
         was named for that shadow.
         """
         statement = an_import(seed_user)

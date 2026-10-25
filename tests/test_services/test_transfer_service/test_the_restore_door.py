@@ -28,7 +28,7 @@ class TestRestoreTransfer:
     found for someone else's transfer or none (ruling R-BAL290 part 3, the
     developer, 2026-10-14, "Delete the seven").  Each case that reads the
     transfer reads the row re-read from the database since plan step
-    ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2b, where they read the
+    ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2b, where they read the
     object in the session and the transfer's two shadow rows (ruling
     R-BAL290 part 1).  The nonexistent-transfer case and the both-archived
     refusal read no row; the wrong-owner case reads it after the refusal
@@ -111,7 +111,7 @@ class TestRestoreTransfer:
         read: that a live transfer is in both plans and a hidden one in
         neither is the plan loader's fact, and a loader that kept hidden
         transfers and dropped live ones fails this case first at it
-        (measured at plan step ``balance:X-bi-6-4d-3``'s checkpoint
+        (measured at plan step ``balance:X-bi-6-4d-2``'s checkpoint
         2e-2b-2b).  Until that checkpoint it read the object in the session
         and asked the transfer's two shadow rows for their delete flags
         (ruling R-BAL290 part 1).  The name is kept: ruling R-BAL273 names
@@ -165,7 +165,7 @@ class TestRestoreTransfer:
         would discard such a staged un-hide).  The owner's own restore then
         lands on the same id, so the refusal is the ownership check's and not
         a wrong id's.  It read the raise alone until plan step
-        ``balance:X-bi-6-4d-3``'s vacuous-residue checkpoint.
+        ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint.
         """
         with app.app_context():
             td = transfer_data
@@ -194,7 +194,7 @@ class TestRestoreTransfer:
         deleted and active transfers.
 
         The row it leaves is read re-read from the database since plan step
-        ``balance:X-bi-6-4d-3``'s checkpoint 2e-2b-2b, where it read the
+        ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2b, where it read the
         object the door returned (ruling R-BAL290 part 1); the door returns
         the session's own row.
         """
@@ -229,7 +229,7 @@ class TestRestoreTransfer:
         (``assert_restorable``, plan step X-aj1), so the row is read
         re-read after a COMMIT, which writes whatever the refused restore
         staged: a restore that un-hid the row before refusing fails it
-        (measured at plan step ``balance:X-bi-6-4d-3``'s checkpoint
+        (measured at plan step ``balance:X-bi-6-4d-2``'s checkpoint
         2e-2b-2b).  Until that checkpoint it rolled the session back before
         re-reading, which discards such a staged un-hide, and asked the
         transfer's two shadow rows for their delete flags (ruling R-BAL290
@@ -330,7 +330,7 @@ class TestRestoreTransfer:
         their refusals is the archive's: the restore lands, returns the
         row, and leaves it unhidden with its amount, status and pay period
         unchanged (ruling R-BAL273's condition).  Read off the row re-read
-        from the database since plan step ``balance:X-bi-6-4d-3``'s
+        from the database since plan step ``balance:X-bi-6-4d-2``'s
         checkpoint 2e-2b-2b, where it read the object the door returned and
         the transfer's two shadow rows (ruling R-BAL290 part 1).  The name
         is kept: ruling R-BAL273 names it.

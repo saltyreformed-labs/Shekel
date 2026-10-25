@@ -5,7 +5,7 @@ Tests for the guards on every transaction mutation route: a soft-deleted
 row cannot be settled, a loan account admits no transaction, a transfer's
 due date moves through its leg's door, and regular transactions are
 unaffected.  The cases that pressed each door on a transfer SHADOW row were
-deleted at plan step balance:X-bi-6-4d-3 (ruling R-BAL300), where no
+deleted at plan step balance:X-bi-6-4d-2 (ruling R-BAL300), where no
 shadow can be stored; the note where they stood says what grades the rest.
 """
 
@@ -53,7 +53,7 @@ def _create_test_transfer(seed_user, seed_periods_today):
     """Create a $300.00 checking -> savings transfer via the service, committed; returns it.
 
     It returned ``(transfer, expense_shadow, income_shadow)`` until plan step
-    ``balance:X-bi-6-4d-3`` made a transfer one row (ruling **R-BAL167**
+    ``balance:X-bi-6-4d-2`` made a transfer one row (ruling **R-BAL167**
     class 4): no shadow is born, and a caller names a side by the
     transfer's own endpoint (``from_account_id`` is where the expense shadow
     sat).
@@ -98,7 +98,7 @@ def _create_regular_txn(seed_user, seed_periods_today):
 
 
 # ``TestATransactionDoorRefusesAShadowRow`` stood here until plan step
-# balance:X-bi-6-4d-3 (ruling **R-BAL300**, developer 2026-10-15: "Delete all
+# balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer 2026-10-15: "Delete all
 # 27").  It pressed every transaction door -- the cell, both editors, the
 # PATCHes, delete, Mark Paid, Mark Credit and its undo, Cancel -- on a
 # transfer's SHADOW row and asserted a 404 that moved nothing: plan step
@@ -285,7 +285,7 @@ class TestDueDatePatch:
         **Re-expressed at plan step balance:X-bi-6-1 (ruling R-BAL87)**: it
         PATCHed the SHADOW row through the transaction door; the grid's door
         is the transfer PATCH carrying ``leg_account_id`` now.  **And at plan
-        step balance:X-bi-6-4d-3** (ruling **R-BAL167** class 1; it was
+        step balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1; it was
         ``test_patch_due_date_from_a_leg_propagates``): it read the date off
         both shadows, which a transfer no longer has, so it reads the
         transfer's own column, re-read from the database.  The leg pressed is

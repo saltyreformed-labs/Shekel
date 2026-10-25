@@ -19,7 +19,7 @@ no check and one name: the runner lost its leading underscore, because every
 family module now calls it.  What the same step then changed in the checks
 (FK-10, the transfer twins FK-14..16, OR-03 and BA-06) is stated at each;
 its change to DC-11's join went with DC-11's leg arm at plan step
-``balance:X-bi-6-4d-3``.
+``balance:X-bi-6-4d-2``.
 """
 
 from dataclasses import dataclass, field
@@ -88,7 +88,7 @@ class CheckSpec:
 #: ``balance:X-bi-6-4c-4``**, when BA-06 began asking a transfer's legs too,
 #: so plan step ``balance:X-bi-6-4d-2`` re-pointed it off the shadow rows and
 #: onto the side links here, in one place.  BA-06 is its one reader since plan
-#: step ``balance:X-bi-6-4d-3`` deleted DC-11's leg arm, whose state the
+#: step ``balance:X-bi-6-4d-2`` deleted DC-11's leg arm, whose state the
 #: database refuses at commit (``app.side_band_infrastructure``).  **It asks
 #: no covering test and no live-row test,
 #: as the app's join asks none** (``_records._side_records``): a side link is

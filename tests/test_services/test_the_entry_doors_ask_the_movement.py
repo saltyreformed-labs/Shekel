@@ -18,7 +18,7 @@ still holds, so 6-4d finds nothing to move in them:
 * **that refusal names the movement's parent** through ``movement_parent``,
   so a transfer's payment is named by its LEG's label -- the grid's, from the
   endpoints' current names -- not by a name stored when it was written (the
-  shadow row's until plan step ``balance:X-bi-6-4d-3`` deleted it; ruling
+  shadow row's until plan step ``balance:X-bi-6-4d-2`` deleted it; ruling
   **R-BAL160**).
 """
 
@@ -190,7 +190,7 @@ class TestATransfersPaymentIsNamedByItsLeg:
         the labels ``transfer_legs.leg_label`` composes.  Each payment is its
         side's record on the TRANSFER since plan step ``balance:X-bi-6-4d-2``
         (ruling **R-BAL88**), where it hung off the shadow until then (ruling
-        **R-BAL167** class 4).  Until plan step ``balance:X-bi-6-4d-3``'s
+        **R-BAL167** class 4).  Until plan step ``balance:X-bi-6-4d-2``'s
         vacuous-residue checkpoint the stale name was planted on the shadow,
         which that step deleted, so the plant wrote no row and the case read
         one side's label no rename had moved.  Renamed from

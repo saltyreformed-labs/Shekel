@@ -580,7 +580,7 @@ class TestTheEventFilesATransfersPaymentUnderItsTransfer:
 
         Returns:
             The transfer.  It returned the expense shadow's id beside it,
-            for a failure message, until plan step ``balance:X-bi-6-4d-3``
+            for a failure message, until plan step ``balance:X-bi-6-4d-2``
             made a transfer one row (ruling **R-BAL258**).
         """
         savings = create_account_of_type(
@@ -635,7 +635,7 @@ class TestTheEventFilesATransfersPaymentUnderItsTransfer:
         Renamed from
         ``test_a_hard_delete_names_the_transfer_beside_its_leaving_shadows``:
         the delete handed its two shadows over as leaving rows, and the event
-        named their ids, until plan step ``balance:X-bi-6-4d-3`` made a
+        named their ids, until plan step ``balance:X-bi-6-4d-2`` made a
         transfer one row (ruling **R-BAL258**).
         """
         with app.app_context():
@@ -699,7 +699,7 @@ class TestTheRemovedMovementLeavesItsParentsLoadedList:
         Checking shadow's ``entries`` until then (ruling **R-BAL167** class
         1).  Renamed from
         ``test_a_transfers_payment_leaves_its_shadows_entries`` at plan step
-        ``balance:X-bi-6-4d-3``'s vacuous-residue checkpoint.
+        ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint.
         """
         with app.app_context():
             savings = create_account_of_type(

@@ -11,12 +11,12 @@ server's listing, and writes nothing.
 carries, each step's money flag and deploy-together group, the migrations it adds, edits
 or deletes; what refuses it; what the developer's approval question must name; and, on a
 refusal or two added migrations, the newest earlier cut to offer him.  ``production``
-lists what each pull request in ``<base>..<cut>`` changes of what production runs
-(:mod:`tools.release._changes`), for the approval question to name where no rehearsal kit
-covered it (R-BAL281's interim).  ``census`` lists every worktree, every branch ``main``
-already holds or a kit names, and every dev database, marking what this release made: its
-``release/<date>`` branch and what each rehearsal kit's manifest names
-(:mod:`tools.release._census`).
+lists what the release ``<base>..<cut>`` changes of what production runs, by each pull
+request's own change and apart what none of them changed (:mod:`tools.release._changes`),
+for the approval question to name where no rehearsal kit covered it (R-BAL281's interim).
+``census`` lists every worktree, every branch ``main`` already holds or a kit names, and
+every dev database, marking what this release made: its ``release/<date>`` branch and what
+each rehearsal kit's manifest names (:mod:`tools.release._census`).
 
 Usage, from the repository root, after ``git fetch origin``::
 
@@ -71,7 +71,7 @@ from tools.release._census import (
     census,
     docker_listing,
 )
-from tools.release._changes import Change, changes
+from tools.release._changes import Changes, changes
 from tools.release._model import ReleaseError
 from tools.release._plan import CLEAN, NEEDS_APPROVAL, REFUSED, Inputs, Plan, Verdict, plan
 
@@ -165,17 +165,25 @@ def plan_lines(judged: Plan) -> list[str]:
     return lines
 
 
-def production_lines(base: str, cut: str, found: tuple[Change, ...]) -> list[str]:
+def production_lines(base: str, cut: str, found: Changes) -> list[str]:
     """``production``'s report over ``<base>..<cut>``, ending with its verdict: each pull
-    request whose own change changes what production runs, newest first, with each path."""
+    request whose own change changes a file the release changes of what production runs,
+    newest first, with each such path; then each path the release changes that no pull
+    request's own change does."""
     lines = [f"release production: base {base}, cut {cut}"]
-    changing = [change for change in found if change.paths]
-    for change in changing:
-        lines.append(f"{change.sha} {change.subject!r} changes {len(change.paths)} of "
+    changing = [pull for pull in found.pulls if pull.paths]
+    for pull in changing:
+        lines.append(f"{pull.sha} {pull.subject!r} changes {len(pull.paths)} of "
                      "production's files:")
-        lines += [f"  {path}" for path in change.paths]
-    lines.append(f"verdict: {len(changing)} of {len(found)} pull requests change what "
-                 "production runs (exit 0)")
+        lines += [f"  {path}" for path in pull.paths]
+    if found.unowned:
+        lines.append(f"changed by no pull request's own change ({len(found.unowned)}): a "
+                     "merge's resolution, or an ignore-file edit meeting a file the other "
+                     "branch brought:")
+        lines += [f"  {path}" for path in found.unowned]
+    lines.append(f"verdict: {len(found.net)} of production's files change; {len(changing)} "
+                 f"of {len(found.pulls)} pull requests change them, {len(found.unowned)} "
+                 "by none (exit 0)")
     return lines
 
 

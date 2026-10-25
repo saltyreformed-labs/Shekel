@@ -205,10 +205,11 @@ grade to the lane.
 
 ## 5. Ask Josh to approve
 
-First list each pull request's change to what production runs. The release tool reads what
-production runs as CI's write rule does (`tools/quill/_production.py`: the files the image holds,
-by Docker's own reading of `.dockerignore`, and the files outside it that build or run production),
-each pull request against its merge's first parent:
+First list what the release changes of what production runs: the cut's tree against the base's,
+which is what step 6 releases, read as CI's write rule reads it (`tools/quill/_production.py`: the
+files the image holds, by Docker's own reading of `.dockerignore`, and the files outside it that
+build or run production), with each pull request's own part of it and, apart, each file no pull
+request's own change made:
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -225,9 +226,14 @@ Header "Release ok". The question lists, in plain words with each id after its w
 - each card the release carries, and which moves money;
 - each migration it adds, edits or deletes, and what it changes;
 - every `APPROVAL MUST NAME` line of `plan.txt`;
-- every OTHER change to what production runs, named UNREHEARSED (R-BAL281's interim): each pull
-  request `production.txt` lists, with the files it changes, whose change no kit rehearsed. This
-  skill keeps no list of production's files: its last one missed `docker-compose.yml`;
+- every OTHER change to what production runs, named UNREHEARSED (R-BAL281's interim, read as
+  every file production runs: the image's and those outside it that build or run it). Name each
+  pull request `production.txt` lists whose change no kit rehearsed, in plain words with how many
+  files it changes (the file, kept in the record, holds each path). Name each file under its
+  `changed by no pull request's own change` heading too, saying in plain words what
+  `git diff "$BASE" "$CUT" -- <file>` shows the release does to it: a merge's resolution kept or
+  dropped a side there, and a hotfix a resync dropped leaves production. This skill keeps no list
+  of production's files: its last one missed `docker-compose.yml`;
 - each kit's verdict, or that nothing needed rehearsal.
 
 Options: "Approve this release" or "Not now". "Not now" merges nothing (step 0's early end).
@@ -356,7 +362,8 @@ Production's checkout first: the dry run reads it, and nothing waits on `dev`.
 git -C ~/projects/Shekel fetch origin && git -C ~/projects/Shekel merge --ff-only origin/main; echo "exit=$?"
 ```
 
-`~/projects/Shekel` must be clean on `main` before its fast-forward. A `deploy/` change is live from
+`~/projects/Shekel` must be clean on `main` before its fast-forward. A change to `deploy/`, or to
+`scripts/_container_lib.sh`, which the deploy script sources from beside it (R-BAL254), is live from
 this moment: `shekel-deploy` runs that checkout's copy (trap u).
 
 Then `dev`. No one can push to `dev` (ruleset `dev-queue`, whose bypass list is empty, R-BAL322),

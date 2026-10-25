@@ -96,7 +96,8 @@ def test_plan_exits_2_on_a_cut_git_does_not_have(repo, capsys):
 def test_production_lists_each_pull_request_changing_what_production_runs_and_exits_0(
         repo, capsys):
     """Newest first, each pull request whose own change changes what production runs, with
-    each path; one changing none is counted, not listed."""
+    each path; one changing none is counted, not listed, and no block of changes no pull
+    request made is printed when there are none."""
     base = repo.commit("base", {".dockerignore": "docs\n", "app.py": "0", "docs/a.md": "0",
                                 "docker-compose.yml": "0"})
     first = pull_request(repo, base, files={"app.py": "1", "docker-compose.yml": "1"})
@@ -108,7 +109,28 @@ def test_production_lists_each_pull_request_changing_what_production_runs_and_ex
         f"{first} 'Merge pull request' changes 2 of production's files:",
         "  app.py",
         "  docker-compose.yml",
-        "verdict: 1 of 2 pull requests change what production runs (exit 0)"]
+        "verdict: 2 of production's files change; 1 of 2 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
+def test_production_names_apart_a_change_no_pull_request_made(repo, capsys):
+    """A resync of a hotfix to ``app.py`` whose resolution kept ``dev``'s side: the release
+    takes the hotfix out of production, and the report names it under its own heading."""
+    start = repo.commit("base", {"app.py": "0", "gunicorn.conf.py": "0"})
+    main = pull_request(repo, start, files={"app.py": "1"})
+    work = pull_request(repo, start, files={"gunicorn.conf.py": "1"})
+    resync = repo.commit("Merge main into dev", parents=(work, main))
+    assert release.main(["production", "--base", main, "--cut", resync],
+                        root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {main}, cut {resync}",
+        f"{work} 'Merge pull request' changes 1 of production's files:",
+        "  gunicorn.conf.py",
+        "changed by no pull request's own change (1): a merge's resolution, or an ignore-file "
+        "edit meeting a file the other branch brought:",
+        "  app.py",
+        "verdict: 2 of production's files change; 1 of 2 pull requests change them, 1 by "
+        "none (exit 0)"]
 
 
 def test_production_exits_2_and_lists_nothing_on_an_ignore_file_docker_refuses(repo, capsys):

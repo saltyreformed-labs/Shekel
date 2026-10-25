@@ -91,6 +91,37 @@ def test_plan_exits_2_on_a_cut_git_does_not_have(repo, capsys):
     assert "nothing was judged" in capsys.readouterr().err
 
 
+# -- production ------------------------------------------------------------------------------
+
+def test_production_lists_each_pull_request_changing_what_production_runs_and_exits_0(
+        repo, capsys):
+    """Newest first, each pull request whose own change changes what production runs, with
+    each path; one changing none is counted, not listed."""
+    base = repo.commit("base", {".dockerignore": "docs\n", "app.py": "0", "docs/a.md": "0",
+                                "docker-compose.yml": "0"})
+    first = pull_request(repo, base, files={"app.py": "1", "docker-compose.yml": "1"})
+    second = pull_request(repo, first, files={"docs/a.md": "1"})
+    assert release.main(["production", "--base", base, "--cut", second],
+                        root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {second}",
+        f"{first} 'Merge pull request' changes 2 of production's files:",
+        "  app.py",
+        "  docker-compose.yml",
+        "verdict: 1 of 2 pull requests change what production runs (exit 0)"]
+
+
+def test_production_exits_2_and_lists_nothing_on_an_ignore_file_docker_refuses(repo, capsys):
+    """An ignore file Docker refuses is an error, never a release changing nothing."""
+    base = repo.commit("base", {"app.py": "0"})
+    cut = pull_request(repo, base, files={".dockerignore": "!\n"})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("release production: nothing was judged: a line \"!\" "
+                                   "names no pattern")
+
+
 # -- census ---------------------------------------------------------------------------------
 
 REFUSED_ONE = "verdict: cleanup NOT proven, 1 of 1 kits refused (exit 4)"

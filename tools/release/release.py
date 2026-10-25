@@ -10,15 +10,19 @@ server's listing, and writes nothing.
 ``plan`` judges the release ``<base>..<cut>`` (:mod:`tools.release._plan`): the steps it
 carries, each step's money flag and deploy-together group, the migrations it adds, edits
 or deletes; what refuses it; what the developer's approval question must name; and, on a
-refusal or two added migrations, the newest earlier cut to offer him.  ``census`` lists
-every worktree, every branch ``main`` already holds or a kit names, and every dev
-database, marking what this release made: its ``release/<date>`` branch and what each
-rehearsal kit's manifest names (:mod:`tools.release._census`).
+refusal or two added migrations, the newest earlier cut to offer him.  ``production``
+lists what each pull request in ``<base>..<cut>`` changes of what production runs
+(:mod:`tools.release._changes`), for the approval question to name where no rehearsal kit
+covered it (R-BAL281's interim).  ``census`` lists every worktree, every branch ``main``
+already holds or a kit names, and every dev database, marking what this release made: its
+``release/<date>`` branch and what each rehearsal kit's manifest names
+(:mod:`tools.release._census`).
 
 Usage, from the repository root, after ``git fetch origin``::
 
     python -m tools.release.release plan --cut SHA [--base origin/main]
         [--unrehearsed KEY|REVISION ...]
+    python -m tools.release.release production --cut SHA [--base origin/main]
     python -m tools.release.release census [--main origin/main] [--release-branch release/DATE]
         [--kit DIR ...]
 
@@ -30,7 +34,9 @@ line per thing the kit made, written before it made it.
 
 Exit status, ``plan``: 0 clean; 1 refused, each reason printed with the cut to offer;
 3 the approval question must name what is printed; 2 nothing was judged (the command
-line, git, the tracker, or an unrehearsed name that names nothing).  ``census``: 0
+line, git, the tracker, or an unrehearsed name that names nothing).  ``production``: 0
+listed; 2 nothing was judged (the command line, git, or an ignore file holding a pattern
+Docker refuses).  ``census``: 0
 listed, every kit's manifest accepted; 4 listed, but a kit was refused (each reason
 printed), so the cleanup is NOT proven and nothing that kit names is marked, whoever
 else names it; 2 git, the compose file or the docker listing failed.
@@ -49,7 +55,13 @@ import yaml
 
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import GitError
-from tools.quill.door import CredentialsError, GitHubError, Tracker, TrackerError
+from tools.quill.door import (
+    CredentialsError,
+    GitHubError,
+    IgnoreFileError,
+    Tracker,
+    TrackerError,
+)
 from tools.quill.quill import CONNECT
 from tools.release._census import (
     RELEASE_PREFIX,
@@ -59,6 +71,7 @@ from tools.release._census import (
     census,
     docker_listing,
 )
+from tools.release._changes import Change, changes
 from tools.release._model import ReleaseError
 from tools.release._plan import CLEAN, NEEDS_APPROVAL, REFUSED, Inputs, Plan, Verdict, plan
 
@@ -74,7 +87,7 @@ def _release_branch(name: str) -> str:
 
 
 def parser() -> argparse.ArgumentParser:
-    """The command line: ``plan`` and ``census``."""
+    """The command line: ``plan``, ``production`` and ``census``."""
     top = argparse.ArgumentParser(prog="release", description=__doc__.splitlines()[0])
     commands = top.add_subparsers(dest="command", required=True)
     judged = commands.add_parser("plan", help="judge the release <base>..<cut>")
@@ -82,6 +95,10 @@ def parser() -> argparse.ArgumentParser:
     judged.add_argument("--base", default="origin/main", help="what production runs")
     judged.add_argument("--unrehearsed", action="append", default=[], metavar="KEY|REVISION",
                         help="a money mover or added migration with no rehearsal kit")
+    shipped = commands.add_parser("production", help="list what each pull request in "
+                                  "<base>..<cut> changes of what production runs")
+    shipped.add_argument("--cut", required=True, help="the commit the release is cut at")
+    shipped.add_argument("--base", default="origin/main", help="what production runs")
     listed = commands.add_parser("census", help="list what may be cleaned up")
     listed.add_argument("--main", default="origin/main", help="the branch released into")
     listed.add_argument("--release-branch", type=_release_branch,
@@ -148,6 +165,20 @@ def plan_lines(judged: Plan) -> list[str]:
     return lines
 
 
+def production_lines(base: str, cut: str, found: tuple[Change, ...]) -> list[str]:
+    """``production``'s report over ``<base>..<cut>``, ending with its verdict: each pull
+    request whose own change changes what production runs, newest first, with each path."""
+    lines = [f"release production: base {base}, cut {cut}"]
+    changing = [change for change in found if change.paths]
+    for change in changing:
+        lines.append(f"{change.sha} {change.subject!r} changes {len(change.paths)} of "
+                     "production's files:")
+        lines += [f"  {path}" for path in change.paths]
+    lines.append(f"verdict: {len(changing)} of {len(found)} pull requests change what "
+                 "production runs (exit 0)")
+    return lines
+
+
 def census_lines(found: Census) -> list[str]:
     """``census``'s report, ending with its verdict: each thing listed, MADE or other,
     with what locates it; then each kit, accepted with what it names that is GONE, or
@@ -191,12 +222,16 @@ def main(argv: list[str] | None = None, root: Path = REPO,
                           Inputs(args.unrehearsed, connect))
             print("\n".join(plan_lines(judged)))
             return judged.verdict.status
+        if args.command == "production":
+            print("\n".join(production_lines(args.base, args.cut,
+                                              changes(root, args.base, args.cut))))
+            return 0
         found = census(root, args.main, Made(args.release_branch, tuple(args.kit)), listing)
         print("\n".join(census_lines(found)))
         return 0 if found.proven else UNPROVEN
-    except (ReleaseError, GitError, OSError, UnicodeDecodeError, yaml.YAMLError,
-            subprocess.CalledProcessError, GitHubError, TrackerError, CredentialsError,
-            requests.RequestException) as error:
+    except (ReleaseError, GitError, IgnoreFileError, OSError, UnicodeDecodeError,
+            yaml.YAMLError, subprocess.CalledProcessError, GitHubError, TrackerError,
+            CredentialsError, requests.RequestException) as error:
         print(f"release {args.command}: nothing was judged: {error}", file=sys.stderr)
         return CANNOT
 

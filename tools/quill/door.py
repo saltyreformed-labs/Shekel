@@ -37,6 +37,11 @@ Each name, and who reads it:
   whole release judged on nothing: M3's review, its 1), the cards a tree's markers name,
   the entries under :data:`MARKERS` that differ between two trees, and the commits of a
   range that changed each marker, by quill's one reading of each.
+- ``changed`` and ``IgnoreFileError``: ``tools/release._changes``, for what each pull request
+  a release carries changes of what production runs, by CI's write rule's one reading of it
+  (``_production``; rulings ``balance:R-BAL362`` and ``R-BAL400``), and the error saying an
+  ignore file holds a pattern Docker refuses, which ``tools/release.release`` reports as a
+  listing made of nothing.
 - ``GitHubError``, ``TrackerError`` and ``CredentialsError``: ``tools/release.release``,
   which reports a failed read of the tracker, or App credentials it cannot use, as a
   release judged on nothing.
@@ -60,6 +65,7 @@ from tools.quill._git import (
     merged_tree,
 )
 from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._production import IgnoreFileError, changed
 from tools.quill._state import (
     OWNED,
     SHIPPABLE,
@@ -78,6 +84,7 @@ __all__ = [
     "CredentialsError",
     "FakeTracker",
     "GitHubError",
+    "IgnoreFileError",
     "MarkerConflict",
     "OWNED",
     "OutsideLink",
@@ -85,6 +92,7 @@ __all__ = [
     "TrackerError",
     "above",
     "card_of",
+    "changed",
     "changes",
     "dropped",
     "dropped_above",

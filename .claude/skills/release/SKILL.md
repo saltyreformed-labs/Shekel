@@ -205,17 +205,29 @@ grade to the lane.
 
 ## 5. Ask Josh to approve
 
+First list each pull request's change to what production runs. The release tool reads what
+production runs as CI's write rule does (`tools/quill/_production.py`: the files the image holds,
+by Docker's own reading of `.dockerignore`, and the files outside it that build or run production),
+each pull request against its merge's first parent:
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}" "${BASE:?}" "${CUT:?}"
+.venv/bin/python -m tools.release.release production --base "$BASE" --cut "$CUT" \
+    > "$R/production.txt" 2>&1; echo "exit=$?"
+```
+
+Exit 0 ends with its `verdict:` line. Exit 2 listed nothing (the file says why), and an exit with
+no `verdict:` line is a crash: either is a STOP.
+
 Header "Release ok". The question lists, in plain words with each id after its words:
 
 - each card the release carries, and which moves money;
 - each migration it adds, edits or deletes, and what it changes;
 - every `APPROVAL MUST NAME` line of `plan.txt`;
-- every OTHER change to what the image ships, named UNREHEARSED (R-BAL281's interim). Find them:
-  `git log --first-parent --format='%h %s' "$BASE".."$CUT"` gives one merge per pull request;
-  name each whose own diff (`git diff --stat <merge>^1 <merge> -- <paths>`) touches the paths
-  `.dockerignore`'s header lists as living in the image, or `Dockerfile`, and that no kit
-  rehearsed. Name `deploy/` and `.github/workflows/` changes too: the first change production's
-  deploy path, the second the image build that runs on `main`;
+- every OTHER change to what production runs, named UNREHEARSED (R-BAL281's interim): each pull
+  request `production.txt` lists, with the files it changes, whose change no kit rehearsed. This
+  skill keeps no list of production's files: its last one missed `docker-compose.yml`;
 - each kit's verdict, or that nothing needed rehearsal.
 
 Options: "Approve this release" or "Not now". "Not now" merges nothing (step 0's early end).
@@ -448,10 +460,10 @@ With kits, the guard names `"${KITS:?}"` too, and each directory gets a `--kit` 
 sha, the resync PR and its merge sha (`RS`, `RM`), the image digest old -> new, the dry run's
 stamp, the dump's path, and each verdict with its exit (plan, each kit, the checks, each queue run,
 the build, the dry run, the deploy, verify, main's CI, the census); a run that ended early says
-where and why, and names what it left open. Beside it: `plan.txt`, `dump.txt`, `dump_err.txt` and
-`rehearsal.txt` (when rehearsed), `checks_<PR>.txt`, `checks_<RS>.txt`, each `queue_<run>.txt`,
-`build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`, `deploy.txt`,
-`verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.
+where and why, and names what it left open. Beside it: `plan.txt`, `production.txt`, `dump.txt`,
+`dump_err.txt` and `rehearsal.txt` (when rehearsed), `checks_<PR>.txt`, `checks_<RS>.txt`, each
+`queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`,
+`deploy.txt`, `verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.
 
 The last act of every run, however it ended, moves `current.sh` into the record, so no later block
 reads this run's values: each sources a file that is gone and stops (`exit 1`). A resumed run

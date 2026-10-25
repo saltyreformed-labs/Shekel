@@ -1,5 +1,5 @@
 > **ARCHIVED. Historical record only -- this document governs nothing and
-> may be out of date.** The live plan is `docs/plans/steps.md`; the design of record for the card is
+> may be out of date.** The live plan is the tracker, `saltyreformed-labs/shekel-plan`; the design of record for the credit card is
 > `docs/design/credit_card_from_scratch.md` (ruled 2026-09-18, `credit_card:R-CC14`..`R-CC22`), and the
 > code as committed is the source of truth for what the app does.
 

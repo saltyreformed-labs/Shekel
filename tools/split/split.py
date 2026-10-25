@@ -166,14 +166,11 @@ def prove(ctx: Context, idmap: Path) -> list[str]:
     importers = ctx.read(_META)["importers"]
     importer_kinds = dynamic.new_kinds(ctx.read(_BEFORE_IMPORTERS), run.pylint_messages(
         ctx.root, importers)) if importers else {}
-    gate, gate_line = run.plan_gate(ctx.root)
-    if gate:
-        failures.append(f"plan gate: {gate_line}")
     hits = dynamic.classify(ctx.root, run.census(ctx.root, layout.plan), origins)
     print("\n".join(_report_moves(ctx, layout, idmap, seen)
                     + _report_lint(ctx, after_pylint, importer_kinds)
                     + _report_duplicates(seen)
-                    + _report_pointers(gate_line, hits)))
+                    + _report_pointers(hits)))
     return failures
 
 
@@ -232,13 +229,12 @@ def _report_duplicates(seen: dict) -> list[str]:
             f"pair; listed in {path.name})"]
 
 
-def _report_pointers(gate_line: str, hits: list[dynamic.Hit]) -> list[str]:
-    """The proof block's tail: the plan gate and every line still naming the old module, the
-    package's own composed provenance counted apart."""
+def _report_pointers(hits: list[dynamic.Hit]) -> list[str]:
+    """The proof block's tail: every line still naming the old module, the package's own
+    composed provenance counted apart."""
     live = [h for h in hits if not h.archived and not h.composed]
     archived = sum(1 for h in hits if h.archived)
     return [
-        f"- plan gate: {gate_line}",
         f"- census of the old module's name: {len(live)} live, {archived} archived, "
         f"{len(hits) - len(live) - archived} the package's own provenance (not counted)",
         *(f"    live {h.path}:{h.line}: {h.text[:120]}" for h in live),

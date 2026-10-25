@@ -6,46 +6,43 @@ from __future__ import annotations
 import pytest
 
 from tools.ci.scratch import run
+from tools.quill.door import FakeTracker
 from tools.release import release
-from tools.release._carried import STEPS_PATH
 from tools.release._census import COMPOSE, MANIFEST
-from tools.release.conftest import steps
+from tools.release.conftest import MONEY, migration, pull_request, ship
 
-MONEY = "Move the money. **MOVES MONEY**."
 COMPOSED = ("services:\n  db:\n    container_name: dev-db\n    environment:\n"
             "      POSTGRES_USER: someone\n      POSTGRES_DB: budget\n")
 
 
 def _two_movers(repo):
-    """dev took A-1 (moves money) then B-1 (moves money): the base, the first merge, the
-    second."""
-    base = repo.plan((("balance:A-1", MONEY, "#1", "--"), ("balance:B-1", MONEY, "#2", "--")),
-                     parents=())
-    first = repo.merge(base, repo.commit("ship A-1", {STEPS_PATH: steps(
-        ("balance:A-1", "Moved.", "SHIPPED", "`0123abcd`"),
-        ("balance:B-1", MONEY, "#1", "--"))}, ships=("balance:A-1",), parents=(base,)))
-    second = repo.merge(first, repo.commit("ship B-1", {STEPS_PATH: steps(
-        ("balance:A-1", "Moved.", "SHIPPED", "`0123abcd`"),
-        ("balance:B-1", "Moved.", "SHIPPED", "`4567abcd`"))}, ships=("balance:B-1",),
-        parents=(first,)))
-    return base, first, second
+    """dev took #40 (moves money) then #41 (moves money): the base, the first merge, the
+    second, and the tracker holding both cards."""
+    base = repo.commit("base")
+    first = pull_request(repo, base, ship(40))
+    second = pull_request(repo, first, ship(41))
+    tracker = FakeTracker()
+    tracker.add(40, labels=MONEY)
+    tracker.add(41, labels=MONEY)
+    return base, first, second, tracker
 
 
 def test_plan_prints_what_refuses_the_release_and_the_cut_to_offer_and_exits_1(repo, capsys):
     """The report names each carried step, the rule, the cut offered, and the verdict."""
-    base, first, second = _two_movers(repo)
-    assert release.main(["plan", "--base", base, "--cut", second], root=repo.root) == 1
+    base, first, second, tracker = _two_movers(repo)
+    assert release.main(["plan", "--base", base, "--cut", second], root=repo.root,
+                        connect=lambda: tracker) == 1
     out = capsys.readouterr().out.splitlines()
     assert out[0] == f"release plan: base {base}"
     assert out[1] == f"cut {second} 'Merge pull request'"
     assert out[2] == "steps carried (2):"
-    assert out[3].startswith("  balance:A-1  moves money: yes  (claimed at ")
-    assert out[4].startswith("  balance:B-1  moves money: yes  (claimed at ")
+    assert out[3].startswith("  plan#40  moves money: yes  (claimed at ")
+    assert out[4].startswith("  plan#41  moves money: yes  (claimed at ")
     assert out[5:] == [
         "migrations (0):",
-        "REFUSED -- it carries 2 steps that move money (balance:A-1, balance:B-1); a release "
+        "REFUSED -- it carries 2 steps that move money (plan#40, plan#41); a release "
         "carries one at most",
-        f"newest earlier cut that passes: {first} 'Merge pull request' (carries balance:A-1 "
+        f"newest earlier cut that passes: {first} 'Merge pull request' (carries plan#40 "
         "[moves money]; exit 0)",
         "verdict: refused (exit 1)",
     ]
@@ -53,53 +50,98 @@ def test_plan_prints_what_refuses_the_release_and_the_cut_to_offer_and_exits_1(r
 
 def test_plan_exits_0_on_a_clean_release(repo, capsys):
     """One mover alone: clean, no offer printed."""
-    base, first, _ = _two_movers(repo)
-    assert release.main(["plan", "--base", base, "--cut", first], root=repo.root) == 0
+    base, first, _, tracker = _two_movers(repo)
+    assert release.main(["plan", "--base", base, "--cut", first], root=repo.root,
+                        connect=lambda: tracker) == 0
     assert capsys.readouterr().out.splitlines()[-1] == "verdict: clean (exit 0)"
+
+
+def test_plan_prints_what_the_approval_question_must_name_and_exits_3(repo, capsys):
+    """Two added migrations in one pull request: the approval question must name them, no
+    earlier cut adds at most one, and the verdict says so."""
+    base = repo.commit("base")
+    cut = pull_request(repo, base, files={
+        "migrations/versions/a1_first.py": migration("a1", None),
+        "migrations/versions/b2_second.py": migration("b2", "a1")})
+    assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
+                        connect=FakeTracker) == 3
+    assert capsys.readouterr().out.splitlines()[-3:] == [
+        "APPROVAL MUST NAME -- it adds 2 migrations: a1 (migrations/versions/a1_first.py), "
+        "b2 (migrations/versions/b2_second.py)",
+        "newest cut adding at most one migration: none (no earlier cut on dev's first-parent "
+        "line qualifies)",
+        "verdict: approval must name the above (exit 3)"]
 
 
 def test_plan_exits_2_and_judges_nothing_on_a_name_that_names_nothing(repo, capsys):
     """A mistyped unrehearsed name is a stop, never a release read as rehearsed."""
-    base, first, _ = _two_movers(repo)
+    base, first, _, tracker = _two_movers(repo)
     assert release.main(["plan", "--base", base, "--cut", first, "--unrehearsed", "typo"],
-                        root=repo.root) == 2
+                        root=repo.root, connect=lambda: tracker) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.startswith("release plan: nothing was judged: unrehearsed typo")
 
 
-def test_plan_prints_each_declaration_with_its_source_and_exits_3(repo, capsys):
-    """A born-ticked step declared by the skill: its flag shows where it was read, and the
-    approval question must name it."""
-    base = repo.plan((), parents=())
-    cut = repo.plan((("balance:B-1", "Did it.", "SHIPPED", "`0123abcd`"),), parents=(base,),
-                    ships=("balance:B-1",))
-    assert release.main(["plan", "--base", base, "--cut", cut, "--declare",
-                         "balance:B-1=none@a924135ed"], root=repo.root) == 3
-    out = capsys.readouterr().out.splitlines()
-    assert out[3].startswith("  balance:B-1  moves money: no (declared from a924135ed)  ")
-    assert out[-2:] == [
-        "APPROVAL MUST NAME -- balance:B-1: no version of steps.md from base to the cut "
-        "holds it open; the skill declared it moving no money, from a924135ed",
-        "verdict: approval must name the above (exit 3)"]
-
-
-@pytest.mark.parametrize("text", ["balance:B-1=none", "balance:B-1=maybe@x", "=none@x",
-                                  "balance:B-1", "balance:B-1=none@ "])
-def test_plan_refuses_a_declaration_without_a_value_or_a_source(repo, text):
-    """A declaration names its value AND where it was read, or it is no declaration."""
-    base, first, _ = _two_movers(repo)
-    with pytest.raises(SystemExit) as exited:
-        release.main(["plan", "--base", base, "--cut", first, "--declare", text],
-                     root=repo.root)
-    assert exited.value.code == 2
-
-
 def test_plan_exits_2_on_a_cut_git_does_not_have(repo, capsys):
     """An unknown commit is an error, never an empty release."""
-    base, _, _ = _two_movers(repo)
-    assert release.main(["plan", "--base", base, "--cut", "0" * 40], root=repo.root) == 2
+    base, _, _, tracker = _two_movers(repo)
+    assert release.main(["plan", "--base", base, "--cut", "0" * 40], root=repo.root,
+                        connect=lambda: tracker) == 2
     assert "nothing was judged" in capsys.readouterr().err
+
+
+# -- production ------------------------------------------------------------------------------
+
+def test_production_lists_each_pull_request_changing_what_production_runs_and_exits_0(
+        repo, capsys):
+    """Newest first, each pull request whose own change changes what production runs, with
+    each path; one changing none is counted, not listed, and no block of changes no pull
+    request made is printed when there are none."""
+    base = repo.commit("base", {".dockerignore": "docs\n", "app.py": "0", "docs/a.md": "0",
+                                "docker-compose.yml": "0"})
+    first = pull_request(repo, base, files={"app.py": "1", "docker-compose.yml": "1"})
+    second = pull_request(repo, first, files={"docs/a.md": "1"})
+    assert release.main(["production", "--base", base, "--cut", second],
+                        root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {second}",
+        f"{first} 'Merge pull request' changes 2 of production's files:",
+        "  app.py",
+        "  docker-compose.yml",
+        "verdict: 2 of production's files change; 1 of 2 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
+def test_production_names_apart_a_change_no_pull_request_made(repo, capsys):
+    """A resync of a hotfix to ``app.py`` whose resolution kept ``dev``'s side: the release
+    takes the hotfix out of production, and the report names it under its own heading."""
+    start = repo.commit("base", {"app.py": "0", "gunicorn.conf.py": "0"})
+    main = pull_request(repo, start, files={"app.py": "1"})
+    work = pull_request(repo, start, files={"gunicorn.conf.py": "1"})
+    resync = repo.commit("Merge main into dev", parents=(work, main))
+    assert release.main(["production", "--base", main, "--cut", resync],
+                        root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {main}, cut {resync}",
+        f"{work} 'Merge pull request' changes 1 of production's files:",
+        "  gunicorn.conf.py",
+        "changed by no pull request's own change (1): a merge's resolution, or an ignore-file "
+        "edit meeting a file the other branch brought:",
+        "  app.py",
+        "verdict: 2 of production's files change; 1 of 2 pull requests change them, 1 by "
+        "none (exit 0)"]
+
+
+def test_production_exits_2_and_lists_nothing_on_an_ignore_file_docker_refuses(repo, capsys):
+    """An ignore file Docker refuses is an error, never a release changing nothing."""
+    base = repo.commit("base", {"app.py": "0"})
+    cut = pull_request(repo, base, files={".dockerignore": "!\n"})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("release production: nothing was judged: a line \"!\" "
+                                   "names no pattern")
 
 
 # -- census ---------------------------------------------------------------------------------

@@ -1,28 +1,24 @@
 # Shekel Budget App -- Continuous Integration
 #
-# Eight jobs grade a pull request, and a ninth -- lint-and-test -- answers
-# for the seven it needs (polyglot-lint is a required check of its own):
+# Six jobs grade a pull request, and a seventh -- lint-and-test -- answers
+# for the five it needs (polyglot-lint is a required check of its own).
+# Every pull request runs every one of them: ruling balance:R-BAL399 deleted
+# the scope that let a change set touching only planning documents skip lint
+# and the shards.
 #
-#   scope          classifies the change set: ``registry-only`` or ``full``
-#                  (tools/ci/ci_scope.py; step 2b below), hands its two
-#                  ends to commit-trailers, and names its pull request to
-#                  landing.
-#   commit-trailers  refuses a commit that breaks the card-trailer rules
-#                  (tools/ci/commit_trailers.py), in EVERY scope (step 4d).
 #   landing        refuses a merge writing a ship marker the one write rule
-#                  forbids (tools/quill/landing.py), in EVERY scope (step 4e).
-#   plan-gate      the plan gate, quill and tools/ci, in EVERY scope
-#                  (step 4b).
+#                  forbids, or changing what production runs and writing
+#                  none (tools/quill/landing.py; step 4e).
+#   tools          every tools package's pylint floor and tests (step 4b).
 #   tax-law        refuses from December 1 until next year's tax law is in
-#                  the app, in EVERY scope (step 4c).
-#   lint           every pylint floor and the checker tests (steps 5-5c),
-#                  skipped when the scope is ``registry-only``.
+#                  the app (step 4c).
+#   lint           every pylint floor and the checker tests (steps 5-5c).
 #   test           the suite in six shards, each on its own runner through
 #                  ``scripts/test.sh`` (steps 5d-7b), and the rehearsal kit's
-#                  cluster tests on one of them (step 7c), skipped likewise.
-#   polyglot-lint  the non-Python linters, in every scope (its own check).
+#                  cluster tests on one of them (step 7c).
+#   polyglot-lint  the non-Python linters (its own check).
 #   lint-and-test  the check the ``dev`` and ``main`` rulesets require.  It
-#                  NEEDS the first seven and runs ``if: always()``, because a
+#                  NEEDS the first five and runs ``if: always()``, because a
 #                  SKIPPED required check counts as passing and a job that
 #                  merely depended on a failed shard would be skipped --
 #                  green.  tools/ci/ci_verdict.py judges every result.
@@ -40,8 +36,8 @@
 # runners; six shards at ``-n logical`` ran 6.4-9.7 min each.
 #
 # THE STEP NUMBERS are kept from the single-job era, on the same steps, because
-# .pre-commit-config.yaml, pytest.ini and tools/ci/ci_scope.py cite
-# them.  Python matches the production Dockerfile (3.14) in every job.
+# .pre-commit-config.yaml and pytest.ini cite them.  Python matches the
+# production Dockerfile (3.14) in every job.
 
 name: CI
 
@@ -57,8 +53,7 @@ name: CI
 # ``merge_group`` is what GitHub's merge queue runs the required checks on:
 # since 2026-10-19 dev and main each take a change only through a queue
 # (rulesets ``dev-queue`` and ``main-queue``, ruling R-BAL322), and each
-# queued group is a change set of its own, classified and checked like a
-# pull request.
+# queued group is a change set of its own, checked like a pull request.
 on:
   push:
     branches: [main]
@@ -99,141 +94,7 @@ env:
 
 # ── Jobs ──────────────────────────────────────────────────────────
 jobs:
-  scope:
-    runs-on: ubuntu-24.04
-    outputs:
-      scope: ${{ steps.scope.outputs.scope }}
-      base: ${{ steps.scope.outputs.base }}
-      head: ${{ steps.scope.outputs.head }}
-      pull: ${{ steps.scope.outputs.pull }}
-    steps:
-      # The three-dot diff below reads history, so this checkout is full.
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      # tools/ci is standard-library only, so no install precedes it.
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-
-      # ── 2b. Classify the change set ──────────────────────────────
-      # A registry pass -- the docs/plans commit that ticks a step, files
-      # its findings and records its rulings -- is a pull request whose
-      # only grader is the plan gate, and the registry lane is serialized
-      # (one such PR at a time, each computed on the tree the last one
-      # left), so the suite's runners and minutes spent on it sit on the
-      # queue's critical path and grade nothing.  ``tools/ci/ci_scope.py``
-      # answers ``registry-only`` when EVERY changed path is under
-      # docs/plans, an arc document's directory (derived from
-      # ``tools/ci/arcs.py``, not spelled here) or the plan gate's package,
-      # and ``full`` for anything else, including an empty change set and
-      # tools/ci itself: it fails CLOSED.
-      # What makes the skip sound is the census that module keeps -- no
-      # module in a skipped suite reads under those prefixes -- not that
-      # every file there is graded; the polyglot-lint job still lints the
-      # Markdown.  Every code-grading JOB (lint, test) is guarded
-      # ``!= 'registry-only'``, so a missing output runs everything rather
-      # than nothing; the plan gate (step 4b) is unguarded.  Approved by the
-      # developer 2026-09-11 as its own PR; ``tools/ci/test_ci_workflow.py``
-      # holds this wiring (split out of ``test_ci_scope.py`` at step X-cx's
-      # L4), and that PR's body cites the runs that proved each scope.
-      #
-      # A pull_request event and a merge-queue group have a change set: a
-      # push to main is a release and runs everything.  The step hands every
-      # event's two ends -- a push's included, its before and after -- to the
-      # commit-trailers job, and the pull request it judges -- a pull
-      # request's number, or a queue group's branch, which ends with the
-      # number of the one it merges -- to the landing job, so which payload
-      # field holds them is read here and nowhere else.  The three-dot diff
-      # is the branch's own changes since it forked from its base, so a ``git
-      # merge origin/dev`` on the branch does not drag dev's files into the
-      # set; --no-renames shows a rename as its old AND new path, so a file
-      # renamed out of docs/plans is seen leaving.  Both SHAs are in the
-      # fetch-depth-0 history; a diff that fails for any reason is reported
-      # and answered ``full`` rather than trusted.
-      - name: Classify the change set
-        id: scope
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          GROUP_BASE: ${{ github.event.merge_group.base_sha }}
-          GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
-          GROUP_REF: ${{ github.event.merge_group.head_ref }}
-          PUSH_BEFORE: ${{ github.event.before }}
-          PUSH_AFTER: ${{ github.event.after }}
-        run: |
-          set -euo pipefail
-          case "${EVENT_NAME}" in
-              pull_request) BASE_SHA="${PR_BASE}" HEAD_SHA="${PR_HEAD}" PULL="${PR_NUMBER}" ;;
-              merge_group) BASE_SHA="${GROUP_BASE}" HEAD_SHA="${GROUP_HEAD}" PULL="${GROUP_REF}" ;;
-              push) BASE_SHA="${PUSH_BEFORE}" HEAD_SHA="${PUSH_AFTER}" PULL="" ;;
-              *) BASE_SHA="" HEAD_SHA="" PULL="" ;;
-          esac
-          {
-              echo "base=${BASE_SHA}"
-              echo "head=${HEAD_SHA}"
-              echo "pull=${PULL}"
-          } >> "${GITHUB_OUTPUT}"
-          if [ "${EVENT_NAME}" != "pull_request" ] && [ "${EVENT_NAME}" != "merge_group" ]; then
-              echo "scope=full" >> "${GITHUB_OUTPUT}"
-              echo "scope: full (a ${EVENT_NAME} event has no pull-request change set)"
-              exit 0
-          fi
-          if ! changed="$(git diff --name-only --no-renames "${BASE_SHA}...${HEAD_SHA}")"; then
-              echo "scope=full" >> "${GITHUB_OUTPUT}"
-              echo "scope: full (git diff ${BASE_SHA}...${HEAD_SHA} failed; not trusting an unreadable change set)"
-              exit 0
-          fi
-          printf 'changed files:\n%s\n' "${changed}"
-          scope="$(printf '%s\n' "${changed}" | python -m tools.ci.ci_scope)"
-          echo "scope=${scope}" >> "${GITHUB_OUTPUT}"
-          echo "scope: ${scope}"
-
-  commit-trailers:
-    needs: scope
-    runs-on: ubuntu-24.04
-    steps:
-      # The undone commit a revert names can be anywhere in history, and the
-      # stray rule reads origin/dev and origin/main, so this checkout is full;
-      # the trailers are only READ.
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      # tools/ci is standard-library only, so no install precedes it.
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-
-      # ── 4d. The card-trailer rules, in EVERY scope ───────────────
-      # Every commit of the change set (``base..head``, handed over by the
-      # scope job) names a card as ``Ships: plan#N`` / ``Reopens: plan#N``
-      # (or, until X-cx's cutover, ``<arc>:<id>``); a revert carries the
-      # ``Reopens:`` or ``Ships:`` that keeps git's answer to "did plan#N
-      # ship?" true to the code it removes or brings back (step X-cx's L4,
-      # card plan#4); and a ``Reopens:`` on a commit neither dev nor main holds
-      # yet undoes a ``Ships:`` in its own history (step X-cx's L9d, R-BAL309).
-      # Git only, no tracker access.  A missing or partial range is a usage
-      # error, never an empty change set: it fails, so the verdict is red.
-      # Unguarded, like the plan gate: a registry-only pull request carries
-      # commits too.  The rules: tools/ci/commit_trailers.py.
-      - name: Card trailers (every scope)
-        env:
-          BASE_SHA: ${{ needs.scope.outputs.base }}
-          HEAD_SHA: ${{ needs.scope.outputs.head }}
-        run: python -m tools.ci.commit_trailers "${BASE_SHA}" "${HEAD_SHA}"
-
   landing:
-    needs: scope
     runs-on: ubuntu-24.04
     # The job's own token reads the pull request it judges (its base, head
     # branch and head commit), so this job alone adds ``pull-requests: read``
@@ -295,7 +156,7 @@ jobs:
           print(f"name={PLAN.name}")
           EOF
 
-      # ── 4e. The one write rule over ship markers, in EVERY scope ─
+      # ── 4e. The one write rule over ship markers ─────────────────
       # Ruling balance:R-BAL289 (CI reads the tracker with a read-only token)
       # as balance:R-BAL311 makes it: the read-only App "Shekel plan reader"
       # (Issues read-only, installed on the tracker only), its private key in
@@ -327,42 +188,39 @@ jobs:
       # this run checked out (``github.sha``: a pull request's trial merge,
       # or the commit a queue group's target becomes) is judged as the change
       # it makes to its first parent, the target's tip, for the ONE pull
-      # request the scope job names.  The job's own token reads that pull
-      # request's base, head branch and head commit, and a merge whose second
-      # parent is not that head is not judged (exit 2).  A push to main was
+      # request the event names: a pull request's number, or a queue group's
+      # branch, which ends with the number of the one it merges (each event
+      # carries only its own field, and a push neither, so ``PULL`` is empty
+      # on a push).  The job's own token reads that pull request's base, head
+      # branch and head commit, and a merge whose second parent is not that
+      # head is not judged (exit 2).  A push to main was
       # judged in main's queue, its only way in (R-BAL322), so the check says
       # so and exits 0.  The tracker is read only when a card the change
       # records must be.  No condition: with the mint skipped the token is
       # empty, and the check decides.
       # The rules: tools/quill/landing.py.
-      - name: Ship markers against the write rule (every scope)
+      - name: Ship markers against the write rule
         env:
           EVENT_NAME: ${{ github.event_name }}
           MERGE_SHA: ${{ github.sha }}
-          PULL: ${{ needs.scope.outputs.pull }}
+          PULL: ${{ github.event.pull_request.number || github.event.merge_group.head_ref || '' }}
           PLAN_READ_TOKEN: ${{ steps.token.outputs.token }}
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m tools.quill.landing "${EVENT_NAME}" "${MERGE_SHA}" "${PULL}"
 
-  plan-gate:
+  tools:
     runs-on: ubuntu-24.04
     steps:
       # ── 1. Check out the repository ──────────────────────────────
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The plan gate's git arms (tools/plan_gate/_shipped.py) READ this
-          # history: they resolve every SHIPPED step's commit and refuse an
-          # open leaf that a commit on this tree says it shipped.  The default
-          # depth-1 checkout makes both arms blind, and rule 7's hash arm used
-          # to grade a hash's FORM only for exactly that reason -- "a gate that
-          # passes on nothing".  ``test_shipped_against_git`` asserts the
-          # history IS gradeable, so removing this line fails the suite loudly
-          # instead of silently switching two arms off.
-          fetch-depth: 0
-          # The arms only READ local history, so the GITHUB_TOKEN still need
-          # not persist in .git/config.  Avoids the credential-persistence
-          # vector (zizmor artipacked).
+          # The default depth-1 checkout: no tools test reads this checkout's
+          # history (the plan gate's git arms did, until step X-cx's S3b deleted
+          # the gate; the rehearsal bench's HEAD~1 case runs in the test job).
+          # Nothing here pushes, so the GITHUB_TOKEN need not persist in
+          # .git/config.  Avoids the credential-persistence vector (zizmor
+          # artipacked).
           persist-credentials: false
 
       - name: Set up Python 3.14
@@ -383,50 +241,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      # ── 4b. The plan gate, in EVERY scope ────────────────────────
-      # The one grader a registry-only pull request has, so it is a job of
-      # its own with no guard, running beside lint and the shards rather than
-      # ahead of them.  The package's 10.00/10 pylint floor was enforced by
-      # pre-commit alone until 2026-09-11 (its hook comment says so); a
-      # registry-only run that edits the gate would otherwise merge unlinted,
-      # so the floor is held here too, in both scopes.  ``yaml`` (PyYAML,
+      # ── 4b. Every tools package, at one floor, in one step ───────
+      # Each package's 10.00/10 pylint floor and its tests: quill
+      # (tools/quill/: the private tracker's setup and the ``quill`` command;
+      # ruling balance:R-BAL170), ``tools/ci`` (this workflow's verdict, the
+      # archive banner and the arc list the tools read; step X-cx's L4),
+      # ``tools/release`` (what a release carries; step X-cx's L9a),
+      # ``tools/split`` (the proved test-file split; step balance:X-er, ruling
+      # R-BAL301) and ``tools/rehearsal`` (the release rehearsal kit; step
+      # X-cx's K1, rulings R-BAL314 and R-BAL315).  A job of its own, beside
+      # lint and the shards rather than ahead of them.  ``yaml`` (PyYAML,
       # pinned in requirements-dev.txt) is what ``tools/ci/test_ci_workflow.py``
       # reads THIS file with, which is why the step follows the install.
       #
-      # Quill (tools/quill/: the private tracker's setup, and from
-      # step X-cx's leaf L2 the ``quill`` command; ruling balance:R-BAL170) is
-      # graded in the same step, at the same floor, in every scope.  Its tests
-      # never call GitHub and take under a second, and a test of the tool that
-      # will READ the registries (the migration, L7) must not be skipped by a
-      # registry-only change set, which the lint job would do.
-      #
-      # ``tools/ci`` (this workflow's classifier and verdict, and the arc
-      # list the gate and the tool read; step X-cx's L4) is graded here too.
-      # A change to it is never registry-only, but every registry pass RUNS
-      # its classifier, so its tests are not left to the scope they grade.
-      #
-      # ``tools/release`` (what a release carries; step X-cx's L9a) reads
-      # steps.md as each commit holds it until the cutover, so, like quill's,
-      # its tests run in every scope rather than being skipped by a
-      # registry-only change set.
-      #
-      # ``tools/split`` (the proved test-file split; step balance:X-er, ruling
-      # R-BAL301) reads no registry.  It is graded here beside the other tools
-      # packages, at the same floor, so every tools package holds one floor in
-      # one step; a change to it is still ``full`` (it is no registry-only
-      # prefix), which ``tools/ci/test_ci_scope.py`` holds.
-      #
-      # ``tools/rehearsal`` (the release rehearsal kit; step X-cx's K1, rulings
-      # R-BAL314 and R-BAL315) reads no registry either, and holds the same
-      # floor here.  Its tests that start a real private cluster carry the
-      # ``cluster`` marker and are deselected: a registry-only change set
-      # cannot change the kit, so a cluster here would grade nothing new (the
-      # coordinator's K1 leaf-plan ruling, item 3).  They run in the test job,
-      # step 7c.
-      - name: Plan gate (every scope)
+      # The rehearsal kit's tests that start a real private cluster carry the
+      # ``cluster`` marker and are deselected here, so they run once, in the
+      # test job, step 7c (the coordinator's K1 leaf-plan ruling, item 3).
+      - name: Lint and test every tools package
         run: |
-          pylint tools/plan_gate/ --fail-under=10 --fail-on=E,F --output-format=colorized
-          pytest tools/plan_gate -c /dev/null -q
           pylint tools/quill/ --fail-under=10 --fail-on=E,F --output-format=colorized
           pytest tools/quill -c /dev/null -q
           pylint tools/ci/ --fail-under=10 --fail-on=E,F --output-format=colorized
@@ -470,14 +302,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ── 4c. Next year's tax law, in EVERY scope ──────────────────
+      # ── 4c. Next year's tax law ──────────────────────────────────
       # From December 1 this job fails every pull request -- a release to
-      # main, a dev PR, a registry-only tick or a Dependabot bump alike --
-      # until next year's tax law is in app/tax_law/ (plan step
-      # salary:X-at-4; rulings salary:R-SAL74, R-SAL86: the year, listing
-      # every state an earlier year lists).  Unguarded, like the plan gate,
-      # because the ruling refuses EVERY release and a registry-only PR is
-      # one.  It reads the REAL clock, in the display timezone, so the TZ skew
+      # main, a dev PR or a Dependabot bump alike -- until next year's tax
+      # law is in app/tax_law/ (plan step salary:X-at-4; rulings
+      # salary:R-SAL74, R-SAL86: the year, listing every state an earlier
+      # year lists).  It waits on nothing, because the ruling refuses EVERY
+      # release.  It reads the REAL clock, in the display timezone, so the TZ skew
       # above cannot move it and the calendar sweep's faked date never
       # reaches it.  It is judged when the PR is pushed, and again on the
       # merge-queue group that lands it: dev and main each take a change only
@@ -495,8 +326,6 @@ jobs:
         run: python scripts/check_tax_law.py refuse
 
   lint:
-    needs: scope
-    if: needs.scope.outputs.scope != 'registry-only'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
@@ -621,8 +450,6 @@ jobs:
         run: pylint app/ scripts/ --disable=all --enable=duplicate-code --disable=unknown-option-value,bad-option-value --output-format=colorized
 
   test:
-    needs: scope
-    if: needs.scope.outputs.scope != 'registry-only'
     runs-on: ubuntu-24.04
     strategy:
       # One red shard must not cancel the others: a failing merge gate should
@@ -755,9 +582,8 @@ jobs:
       # from the image step 7 built or verified, and dump and restore with the
       # IMAGE's own ``pg_dump`` and ``pg_restore``, run inside the cluster's
       # container, so the runner needs no PostgreSQL tools (ruling
-      # balance:R-BAL327).  The plan gate's step deselects them, since a
-      # registry-only change set cannot change the kit; here they run in the
-      # full scope.  ``CI`` sanctions the runner's own daemon, as in step 7.
+      # balance:R-BAL327).  The tools job's step deselects them, so they run
+      # here alone.  ``CI`` sanctions the runner's own daemon, as in step 7.
       #
       # Shard 3 because it had the lowest mean wall time of the six over the
       # six newest green runs (449-693 s, against 704-742 s for shard 0, which
@@ -768,7 +594,7 @@ jobs:
         run: pytest tools/rehearsal -c /dev/null -q -m cluster
 
   lint-and-test:
-    needs: [scope, commit-trailers, landing, plan-gate, tax-law, lint, test]
+    needs: [landing, tools, tax-law, lint, test]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -782,11 +608,10 @@ jobs:
         with:
           python-version: "3.14"
 
-      # The verdict, fail-closed: every grader succeeded, or -- only when the
-      # scope is exactly ``registry-only`` -- lint and the shards were
-      # skipped.  A failed, cancelled or wrongly skipped job, a job the
-      # verdict does not know, or one missing from ``needs`` is red.  The
-      # rules and why each exists: tools/ci/ci_verdict.py.
+      # The verdict, fail-closed: every grader succeeded.  A failed,
+      # cancelled or skipped job, a job the verdict does not know, or one
+      # missing from ``needs`` is red.  The rules and why each exists:
+      # tools/ci/ci_verdict.py.
       - name: Verdict
         env:
           NEEDS: ${{ toJSON(needs) }}

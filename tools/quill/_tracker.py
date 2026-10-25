@@ -31,8 +31,7 @@ claim is the code repository's branch ``card/N``, read and written by ``_git``.
 
 **Every read and write names its tracker's :class:`setup_tracker.Place`**, the one
 the :class:`Board` was resolved for: :data:`setup_tracker.PLAN` for every quill
-command, and the rehearsal tracker for X-cx's migration (L7).  A write cannot
-reach another tracker's cards or board:
+command.  A write cannot reach another tracker's cards or board:
 
 - the App's token is minted NARROWED to the place's one repository
   (:meth:`Tracker.connect`).  That narrows repository access only: the board is an
@@ -40,12 +39,6 @@ reach another tracker's cards or board:
 - so the board is resolved by its title in the place's organization and refused
   unless it is linked to the place's repository (:func:`board_of`), and every board
   write is sent through :meth:`Board._write`, which names that board and no other.
-
-**The numbering** (:func:`numbering`): GitHub numbers issues and pull requests in one
-sequence and answers a DELETED issue's number ``410 Gone`` (#11-#25 and #28-#30 on
-the real tracker), so a listing of the cards that exist shows gaps.  Each gap is
-read by number, which is how X-cx's migration (L7, Code B) is to find a card whose
-create answer was lost rather than file it twice.
 
 **A link to an issue outside the tracker is carried, never followed**
 (ruling ``balance:R-BAL188``).  GitHub lets a parent, sub-issue or blocked-by
@@ -66,7 +59,6 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from enum import Enum
 from functools import partial
 from typing import overload
 from urllib.parse import quote
@@ -74,7 +66,6 @@ from urllib.parse import quote
 from tools.quill import _queries
 from tools.quill._github import (
     GitHub,
-    GitHubError,
     app_credentials,
     app_installation,
     app_jwt,
@@ -203,50 +194,6 @@ class Card(BareCard):
 
 
 @dataclass(frozen=True)
-class WholeCard:
-    """A card with its text: its :class:`Card`, its body, every comment on it, oldest
-    first, and the number of its milestone, None for none (X-cx's migration reads every
-    card this way, L7)."""
-
-    card: Card
-    body: str
-    comments: tuple[Comment, ...]
-    milestone: int | None
-
-
-@dataclass(frozen=True)
-class Milestone:
-    """One of a tracker's milestones: its number, title and description (X-cx's migration
-    gives each outcome one, ruling ``balance:R-BAL243``)."""
-
-    number: int
-    title: str
-    description: str
-
-
-class NumberState(Enum):
-    """What GitHub answers a REST read of an issue number with (:meth:`Tracker.number_state`)."""
-
-    ISSUE = "an issue"
-    PULL_REQUEST = "a pull request"
-    DELETED = "a deleted issue (410)"
-    NOT_FOUND = "nothing this token can read (404)"
-
-
-@dataclass(frozen=True)
-class Numbering:
-    """The numbers a tracker's listing of cards lacks, read one by one (:func:`numbering`):
-    the deleted ones, the pull requests, and ``stopped_at``, the first number above the
-    highest listed that answers 404, where the read stopped.  It is the number the next
-    create takes only when nothing the token cannot read holds it: GitHub answers 404 for
-    that too, whatever it is."""
-
-    deleted: tuple[int, ...]
-    pull_requests: tuple[int, ...]
-    stopped_at: int
-
-
-@dataclass(frozen=True)
 class Edit:
     """One saved version of a card's body, in full."""
 
@@ -294,8 +241,8 @@ def _counted(connection: dict | None, what: str, number: int) -> list:
 
 def listing(github: GitHub, query: str) -> list[dict]:
     """Every issue node a listing ``query`` holds (:func:`_queries.open_cards`,
-    :func:`_queries.marked_cards`, :func:`_queries.all_cards`,
-    :func:`_queries.export_cards`), read page by page (:func:`_github.paged`)."""
+    :func:`_queries.marked_cards`, :func:`_queries.export_cards`), read page by page
+    (:func:`_github.paged`)."""
     return paged(partial(github.graphql, query),
                  lambda answer: answer["repository"]["issues"])[0]
 
@@ -401,48 +348,6 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
         if item["project"]["id"] == board_id
     ]
     return Card(**facts, board_item=items[0] if items else None)
-
-
-def numbering(listed: Iterable[int], state_of: Callable[[int], NumberState]) -> Numbering:
-    """Read by number every number from #1 that a listing of every card lacks, up to the
-    first one above the highest listed that answers 404.
-
-    A deleted issue (410) and a pull request are stepped over.  What it REFUSES, naming the
-    number: an issue the listing lacked (GitHub's listing lags a create: read again later);
-    a 404 BELOW the highest listed, which GitHub's one sequence leaves only where something
-    this token cannot read holds the number; and, raised by ``state_of``, an issue moved to
-    another repository (301).
-
-    Args:
-        listed: The numbers of every card the listing holds, open and closed.
-        state_of: How GitHub answers a REST read of one number
-            (:meth:`Tracker.number_state`).
-
-    Returns:
-        The deleted numbers and pull requests among the gaps, and the number the read
-        stopped at (:class:`Numbering`).
-
-    Raises:
-        TrackerError: For each refusal above.
-    """
-    listed = set(listed)
-    highest = max(listed, default=0)
-    deleted, pull_requests, number = [], [], 0
-    while True:
-        number += 1
-        if number in listed:
-            continue
-        state = state_of(number)
-        if state is NumberState.ISSUE:
-            raise TrackerError(f"#{number} is an issue the listing of every card lacks "
-                               "(GitHub's listing lags a create): read it again")
-        if state is NumberState.NOT_FOUND:
-            if number < highest:
-                raise TrackerError(f"#{number} answers 404 below #{highest}, which the "
-                                   "listing holds: GitHub gave it out, to something this "
-                                   "token cannot read")
-            return Numbering(tuple(deleted), tuple(pull_requests), number)
-        (deleted if state is NumberState.DELETED else pull_requests).append(number)
 
 
 def board_of(github: GitHub, place: Place) -> str:
@@ -603,21 +508,21 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     """A tracker as the App sees it: its cards, each with its board item, and its
     :class:`Board`.
 
-    Pylint: ``too-many-public-methods`` (29/20) -- ``connect``, then **one
-    method per read or write quill makes of the tracker** (most one
-    request; this module is the one place it speaks to GitHub), the board's
-    own writes already apart in :class:`Board`.  The filing mark's read and its
-    removal (R-BAL202), a leaf's unlink (R-BAL205), ``show``'s read of a card's
-    comments, X-cx's migration's (L7) whole-card read, its question of what a
-    number is, its read and make of milestones and its close of a ruling with
-    its mark's removal in one write, and its grade's (R-BAL355) render of a
-    card's Markdown as GitHub does here took it past 20.  The claims' three
-    reads and writes and the read of a commit's pull requests left it at X-cx's
-    M1: a claim is a branch of the code repository since R-BAL359 (``_git``).
-    ``quill file step --parent``'s read of the milestones a split step and its
-    leaves are in, and its move of a card's milestone (the split step's to its
-    leaf, and back when the leaf is dropped unfinished), came with X-cx's S3a
-    (measured 29 then; 27 before it, where this line said 26).
+    Pylint: ``too-many-public-methods`` (23/20, measured at X-cx's S3b) --
+    ``connect``, then **one method per read or write quill makes of the tracker**
+    (most one request; this module is the one place it speaks to GitHub), the
+    board's own writes already apart in :class:`Board`: among them the filing
+    mark's read and its removal (R-BAL202), a leaf's unlink (R-BAL205), ``show``'s
+    read of a card's comments, and ``quill file step --parent``'s read of the
+    milestones a split step and its leaves are in and its move of a card's
+    milestone (the split step's to its leaf, and back when the leaf is dropped
+    unfinished; X-cx's S3a).  The claims' three reads and writes and the read of a
+    commit's pull requests left at X-cx's M1: a claim is a branch of the code
+    repository since R-BAL359 (``_git``).  X-cx's migration's six (its whole-card
+    read, its question of what a number is, its read and make of milestones, its
+    close of a ruling with its mark's removal in one write, and its grade's
+    (R-BAL355) render of a card's Markdown) left with the migration at X-cx's S3b
+    (29 before it).
 
     ``github`` is any object with :class:`_github.GitHub`'s ``rest``,
     ``graphql`` and ``graphql_lookup``.  The tracker's :class:`setup_tracker.Place`
@@ -684,79 +589,9 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         return self._lookup(numbers, "milestone { number }",
                             lambda node: (node["milestone"] or {}).get("number"))
 
-    def all_cards(self) -> dict[int, WholeCard]:
-        """Every card, open and closed, by number, each WHOLE: its body and every comment.
-
-        The listing carries a card's first hundred comments; a card with more has them
-        all read by :meth:`comments`, so no card's comments are cut short.
-        """
-        cards = {}
-        for node in listing(self.github, _queries.all_cards(self.place)):
-            number, held = node["number"], node["comments"]
-            comments = ([_comment(each) for each in held["nodes"]]
-                        if held["totalCount"] <= len(held["nodes"]) else self.comments(number))
-            cards[number] = WholeCard(self._card(node), node["body"] or "", tuple(comments),
-                                      (node["milestone"] or {}).get("number"))
-        return cards
-
-    def milestones(self) -> dict[str, Milestone]:
-        """Every milestone, open and closed, by title, read page by page.
-
-        X-cx's migration finds each outcome's milestone by its title (L7 draft 4 s.11
-        V3-5), so a lost create's answer is found rather than made twice.
-
-        Raises:
-            TrackerError: When two milestones share a title, which would make the one
-                found by it a guess.
-        """
-        found, page = {}, 1
-        while True:
-            more = "" if page == 1 else f"&page={page}"
-            listed = self.github.rest(
-                "GET", f"{self.place.path}/milestones?state=all&per_page=100{more}") or []
-            for node in listed:
-                if node["title"] in found:
-                    raise TrackerError(f"two milestones of {self.place.full_name} are titled "
-                                       f"{node['title']!r}: #{found[node['title']].number} and "
-                                       f"#{node['number']}")
-                found[node["title"]] = Milestone(node["number"], node["title"],
-                                                 node["description"] or "")
-            if len(listed) < 100:
-                return found
-            page += 1
-
-    def number_state(self, number: int) -> NumberState:
-        """What GitHub answers a REST read of issue ``number`` with (:func:`numbering`).
-
-        Raises:
-            TrackerError: For an issue moved to another repository (GitHub's 301, which
-                :class:`_github.GitHub` never follows).
-            GitHubError: For any other refusal.
-        """
-        try:
-            issue = self.github.rest("GET", f"{self.place.path}/issues/{number}")
-        except GitHubError as error:
-            if error.status == 410:
-                return NumberState.DELETED
-            if error.status == 404:
-                return NumberState.NOT_FOUND
-            if error.status == 301:
-                raise TrackerError(f"#{number} of {self.place.full_name} was moved to another "
-                                   "repository (301)") from error
-            raise
-        return NumberState.PULL_REQUEST if "pull_request" in issue else NumberState.ISSUE
-
     def body(self, number: int) -> str:
         """A card's body as it stands."""
         return self.github.rest("GET", f"{self.place.path}/issues/{number}")["body"] or ""
-
-    def render(self, text: str) -> str:
-        """``text`` as GitHub renders a card's Markdown in this tracker, as HTML: its
-        Markdown API in ``gfm`` mode with the tracker as context, which links ``#N`` to card
-        N where card N exists, and stores nothing (X-cx's migration grades the cards'
-        numbers by it, ``_migrate_numbers.grade_rendered``)."""
-        return self.github.rest_text("POST", "/markdown", {
-            "text": text, "mode": "gfm", "context": self.place.full_name})
 
     def blocking(self, number: int) -> tuple[Child, ...]:
         """The cards of this tracker that card ``number`` blocks, each with its type and state
@@ -836,11 +671,10 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         filing's last write, :meth:`unmark`, removes the mark.  Its number, once GitHub's
         answer shows the type, labels and milestone sent.
 
-        ``milestone``: the number of the milestone the card is filed in: X-cx's migration's
-        (L7 draft 4 s.3: a step's create carries its outcome's, a split step's carried to its
-        leaves instead, ``_migrate_source._carried_outcomes``), and a leaf's that ``quill file
-        step --parent`` files in its split step's while that step holds one (``_filing``).
-        None sends no milestone at all, so every other create's request is what it was.
+        ``milestone``: the number of the milestone the card is filed in: a leaf's that
+        ``quill file step --parent`` files in its split step's while that step holds one
+        (``_filing``).  None sends no milestone at all, so every other create's request is
+        what it was.
 
         A create naming a label the tracker lacks makes that label (grey, no description;
         measured 2026-10-04 on the mark itself, before it existed; ``setup_tracker.py
@@ -868,11 +702,6 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
             raise TrackerError(f"plan#{issue['number']} was filed in milestone {held}, not "
                                f"{milestone}: fix it by hand")
         return issue["number"]
-
-    def create_milestone(self, title: str, description: str) -> int:
-        """Make a milestone (X-cx's migration, one per outcome, R-BAL243); its number."""
-        return self.github.rest("POST", f"{self.place.path}/milestones",
-                                {"title": title, "description": description})["number"]
 
     def set_milestone(self, number: int, milestone: int | None) -> None:
         """Put a card in the milestone numbered ``milestone``, or with None take it out of its
@@ -924,26 +753,6 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     def unmark(self, number: int) -> None:
         """Remove a card's :data:`setup_tracker.FILING` mark: its filing's last write."""
         self.github.rest("DELETE", f"{self.place.path}/issues/{number}/labels/{FILING}")
-
-    def close_unmarked(self, number: int, labels: Iterable[str]) -> None:
-        """Close a card as completed AND remove its :data:`setup_tracker.FILING` mark, in ONE
-        write: a migrated ruling's last (L7 draft 4 s.11 V3-8, one write where
-        :meth:`close` and :meth:`unmark` are two).  ``labels`` are the card's as read; the
-        write sets them without the mark, so it is sent only during the cutover's freeze,
-        when nothing else labels a card.  GitHub's answer is read back.
-
-        Raises:
-            TrackerError: When the answer shows the card open, closed for another reason,
-                or labelled otherwise.
-        """
-        kept = sorted(set(labels) - {FILING})
-        issue = self.github.rest("PATCH", f"{self.place.path}/issues/{number}", {
-            "state": "closed", "state_reason": "completed", "labels": kept})
-        got = (issue["state"], issue.get("state_reason"),
-               sorted(label["name"] for label in issue["labels"]))
-        if got != ("closed", "completed", kept):
-            raise TrackerError(f"plan#{number} reads {got} after its close and unmark, not "
-                               f"{('closed', 'completed', kept)}: fix it by hand")
 
     def add_child(self, parent: int, child: Card) -> None:
         """Make ``child`` a sub-issue of ``parent``."""

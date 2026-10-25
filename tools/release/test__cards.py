@@ -11,8 +11,7 @@ from tools.ci.scratch import run
 from tools.quill.door import FakeTracker, GitHubError
 from tools.quill.quill import CONNECT
 from tools.release import _cards, release
-from tools.release._carried import Declaration
-from tools.release._model import STEPS_PATH, ReleaseError
+from tools.release._model import ReleaseError
 from tools.release._plan import CLEAN, REFUSED, Inputs, plan
 from tools.release.conftest import (
     MONEY,
@@ -40,11 +39,6 @@ class Reached:
         return self.tracker
 
 
-def _never() -> FakeTracker:
-    """A connection a test says is never made."""
-    raise AssertionError("the tracker was reached")
-
-
 # -- the era and the money flag -------------------------------------------------------------
 
 def test_a_cut_after_the_cutover_is_judged_by_its_cards_labels(repo):
@@ -59,13 +53,6 @@ def test_a_cut_after_the_cutover_is_judged_by_its_cards_labels(repo):
     assert [(s.key, s.money, s.undone) for s in verdict.carried.steps] == [
         ("plan#40", True, False), ("plan#41", False, False)]
     assert verdict.status == CLEAN
-
-
-def test_a_cut_before_the_cutover_never_reaches_the_tracker(repo):
-    """The 4d release is before the cutover: its reader is the registries', offline."""
-    base = repo.plan((), parents=())
-    cut = repo.commit("work", {"app.py": "1"}, parents=(base,))
-    assert plan(repo.root, base, cut, Inputs(connect=_never)).verdict.status == CLEAN
 
 
 def test_a_cut_after_the_cutover_with_no_tracker_given_judges_nothing(repo):
@@ -288,62 +275,21 @@ def test_a_marker_conflicting_in_the_merge_of_base_and_cut_judges_nothing(repo, 
 
 # -- what the card reader cannot read --------------------------------------------------------
 
-def test_an_old_form_claim_after_the_cutover_names_the_cut_to_release_first(repo):
-    """R-BAL287: a step ticked before the cutover and not released by its freeze has no
-    card; only a cut holding steps.md can judge it, and the refusal names the NEWEST such
-    cut holding the claim (two hold steps.md after it here)."""
-    base = repo.plan((("balance:A-1", "Do it.", "#1", "--"),), parents=())
-    tick = repo.plan((("balance:A-1", "Did it.", "SHIPPED", "`0123abcd`"),), parents=(base,),
-                     ships=("balance:A-1",))
-    later = repo.plan((("balance:A-1", "Did it.", "SHIPPED", "`0123abcd`"),
-                       ("balance:A-2", "Do more.", "#1", "--")), parents=(tick,))
-    cutover = repo.commit("cutover", {STEPS_PATH: None}, parents=(later,))
-    cut = pull_request(repo, cutover, ship(40))
-    tracker = FakeTracker()
-    tracker.add(40)
-    assert judge(repo, base, cut, tracker).verdict.refusals == (
-        f"{tick[:12]} claims `balance:A-1` in the old form, which only a cut holding steps.md "
-        "can judge (R-BAL287: the cutover's freeze ends with a release of every one): "
-        f"release {later[:12]} first, with the release tool as that cut holds it",)
-
-
 def test_an_old_form_claim_merged_after_the_cutover_is_prose(repo):
-    """A claim on a branch merged after the cutover: the cut before the cutover holds
-    steps.md but not the claim, so no release could judge it, and a marker is the record:
-    it is prose (X-cx's marker_leaf_plan 2(c)), never a refusal wedging every release."""
-    base = repo.plan((("balance:A-1", "Do it.", "#1", "--"),), parents=())
-    before = repo.plan((("balance:A-1", "Do it.", "#1", "--"),
-                        ("balance:A-2", "Do more.", "#2", "--")), parents=(base,))
-    cutover = repo.commit("cutover", {STEPS_PATH: None}, parents=(before,))
+    """A claim in the old form on a branch merged after the cutover: a marker is the record
+    and no trailer is read, so it is prose (X-cx's marker_leaf_plan 2(c)), never a refusal
+    wedging every release."""
+    base, cutover = after_cutover(repo)
     late = repo.commit("late", {"app.py": "1"}, ships=("balance:A-1",), parents=(base,))
-    # The merge keeps the cutover's deletion, as git's does (the branch never touched it).
     cut = repo.commit("Merge pull request", {"app.py": "1"}, parents=(cutover, late))
     verdict = judge(repo, base, cut, FakeTracker()).verdict
     assert (verdict.carried.steps, verdict.refusals, verdict.status) == ((), (), CLEAN)
 
 
-def test_an_old_form_reopens_before_the_cutover_is_refused_as_judged_by_no_reader(repo):
-    """An undo of a step with no card, merged before the cutover and missed by its freeze:
-    no reader judges what it takes out of production, the release tool as a cut holding
-    steps.md holds it included (it reads no ``Reopens:``), so no cut is named to release
-    first (M3's review, its 2)."""
-    base = repo.plan((("balance:A-1", "Did it.", "SHIPPED", "`0123abcd`"),), parents=())
-    revert = repo.commit("revert", {"app.py": "0"}, trailers=("Reopens: balance:A-1",),
-                         parents=(base,))
-    cutover = repo.commit("cutover", {STEPS_PATH: None}, parents=(revert,))
-    cut = pull_request(repo, cutover, ship(40))
-    tracker = FakeTracker()
-    tracker.add(40)
-    assert judge(repo, base, cut, tracker).verdict.refusals == (
-        f"{revert[:12]} carries `Reopens: balance:A-1` in the old form: it undoes a step "
-        "that has no card, so no reader judges what it takes out of production (R-BAL287, "
-        "R-BAL288)",)
-
-
 def test_an_old_form_reopens_merged_after_the_cutover_is_prose(repo):
-    """An undo of a step with no card, merged after the cutover: no cut holding steps.md
-    holds it, so no release could judge it, and a marker is the record: prose.  The
-    release carries the marker the same commit writes, judged as any is."""
+    """An undo of a step with no card, merged after the cutover: a marker is the record and
+    no trailer is read, so it is prose.  The release carries the marker the same commit
+    writes, judged as any is."""
     base, cutover = after_cutover(repo)
     revert = repo.commit("revert", {"app.py": "1", **ship(41)},
                          trailers=("Reopens: balance:A-1",), parents=(cutover,))
@@ -453,17 +399,6 @@ def test_a_marker_naming_a_card_the_tracker_does_not_hold_is_refused(repo):
     assert verdict.refusals == (
         f"plan#999 (its marker changed at {typo[:12]}) is a card the tracker does not hold, "
         "so whether it moves money cannot be read (R-BAL289)",)
-
-
-def test_a_declaration_on_a_cut_after_the_cutover_judges_nothing(repo):
-    """Every card's flag is its label, so a declaration fills nothing (R-BAL287)."""
-    base, cutover = after_cutover(repo)
-    cut = pull_request(repo, cutover, ship(40))
-    tracker = FakeTracker()
-    tracker.add(40)
-    with pytest.raises(ReleaseError, match="declare plan#40: names no step"):
-        plan(repo.root, base, cut,
-             Inputs((), [Declaration("plan#40", False, "x")], lambda: tracker))
 
 
 # -- the command line ------------------------------------------------------------------------

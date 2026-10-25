@@ -2,12 +2,17 @@
 
 Every call runs ``git -C <root>`` through :func:`run`, with the variables that
 bind git to some OTHER repository removed, so ``root`` alone decides which
-repository is read or written.  The card-trailer rules (:mod:`tools.ci.trailers`),
-the tracker tool's own git calls (``tools/quill/_git.py``) and the tests'
-throwaway repositories (:mod:`tools.ci.scratch`) all start git here, but for one
+repository is read or written.  The tracker tool's own git calls
+(``tools/quill/_git.py``) and the tests' throwaway repositories
+(:mod:`tools.ci.scratch`) all start git here, but for one
 call: ``scratch._prove_bound``'s control, which must reach the binding this module
 removes, to prove a test's sentinel is bound.  Moved here from what is now
 ``tools/quill/_git.py`` by step X-cx's L4.
+
+The two integration branches are named here too (:data:`DEV`, :data:`MAIN`, each
+by its full name through :func:`tracking`), with the one question of ancestry
+(:func:`is_ancestor`): moved from ``tools/ci/trailers.py`` by step X-cx's S3b,
+which deleted that module (ruling ``balance:R-BAL389``).
 """
 from __future__ import annotations
 
@@ -23,6 +28,12 @@ _PLAIN = ("-c", "log.showSignature=false")
 
 #: A full commit id, SHA-1 or SHA-256.
 FULL_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+#: The branch every shipped card's commit is on, as a message names it; :func:`tracking`
+#: is its full name.
+DEV = "origin/dev"
+#: The branch a release merges into, as a message names it; :func:`tracking` is its full
+#: name.
+MAIN = "origin/main"
 
 
 class GitError(RuntimeError):
@@ -76,3 +87,21 @@ def git(root: Path, *args: str, stdin: str | None = None) -> str:
     if done.returncode:
         raise GitError(f"git {' '.join(args)}: {done.stderr.strip()}")
     return done.stdout
+
+
+def tracking(branch: str) -> str:
+    """``branch`` (:data:`DEV` or :data:`MAIN`) by the full name of its remote-tracking
+    reference, which no other reference can stand in for while the branch exists: git
+    resolves the short name to the first reference it could name, so a tag or a local branch
+    of that name comes before the remote-tracking branch (``git help revisions``), and CI's
+    checkout fetches every tag.  A full name that does not exist git still resolves to a tag
+    named like it, so whether the branch exists is asked of the exact reference."""
+    return f"refs/remotes/{branch}"
+
+
+def is_ancestor(root: Path, older: str, newer: str) -> bool:
+    """Whether ``older`` is in ``newer``'s history (a commit is in its own)."""
+    done = run(root, "merge-base", "--is-ancestor", older, newer)
+    if done.returncode not in (0, 1):
+        raise GitError(f"git merge-base --is-ancestor {older} {newer}: {done.stderr.strip()}")
+    return done.returncode == 0

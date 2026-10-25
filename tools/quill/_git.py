@@ -53,8 +53,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from tools.ci.gitcmd import FULL_ID, GitError, git, run
-from tools.ci.trailers import DEV, MAIN, is_ancestor, tracking
+from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, run, tracking
 
 #: The directory holding every card's ship marker, one file per card (R-BAL359).
 MARKERS = "plan/ships"
@@ -249,7 +248,7 @@ def on_origin(root: Path) -> dict[int, str]:
 
 
 def fetch(root: Path, cards: Iterable[int] = ()) -> None:
-    """Bring :data:`tools.ci.trailers.DEV`, :data:`tools.ci.trailers.MAIN` and the branch
+    """Bring :data:`tools.ci.gitcmd.DEV`, :data:`tools.ci.gitcmd.MAIN` and the branch
     ``card/N`` of each of ``cards`` up to date in ONE fetch, each by its name into its own
     tracking ref, so "shipped" and "claimed" are today's answers: the refs a claim's push
     writes too (git's update of a pushed branch's tracking ref), and no other."""
@@ -765,7 +764,9 @@ def author_date(root: Path, ref: str) -> str:
 
 def started(root: Path, ref: str) -> str:
     """When the work on branch ``ref`` started: the earliest author date among its own
-    commits (those not on :data:`tools.ci.trailers.DEV`) and the commits they grew from.
+    commits (those not on :data:`tools.ci.gitcmd.DEV`, read by its full name, so no tag or
+    local branch named like it stands in: :func:`tools.ci.gitcmd.tracking`) and the commits
+    they grew from.
 
     The commits they grew from are the boundary of that set -- every commit not
     of the branch that one of its own commits sits on, under any line a merge
@@ -777,7 +778,7 @@ def started(root: Path, ref: str) -> str:
     starts at its tip.  So is a branch already MERGED into dev, whose start git
     no longer records; its window then starts at its last commit.
     """
-    dates = git(root, "log", "--boundary", "--format=%aI", ref, "--not", DEV).split()
+    dates = git(root, "log", "--boundary", "--format=%aI", ref, "--not", tracking(DEV)).split()
     if not dates:
         return author_date(root, ref)
     return min(dates, key=datetime.fromisoformat)

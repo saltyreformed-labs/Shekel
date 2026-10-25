@@ -23,7 +23,10 @@ not.
 
 ## 2. Commit and push
 
-Commit what is clean. Then read whether a pull request from the branch is open; a push would join
+Commit what is clean. A task this session finished (a piece inside its card's one pull request,
+R-BAL386) has its file `plan/tasks/T` in the commit that finished it:
+`python -m tools.quill.quill task-file plan#T` writes it on `card/<its card>`, and the file goes in
+with the piece. Then read whether a pull request from the branch is open; a push would join
 it, so an open one means do NOT push, and s.0 says so:
 
 ```bash
@@ -51,11 +54,13 @@ session's name. A superseded s.0 is never deleted (the folder is not in git); it
 history. s.0 holds:
 
 1. The worktree, the branch, HEAD's sha and origin's state (equal, or why not), each read from
-   git (`git rev-parse`), never typed from memory.
+   git (`git rev-parse`), never typed from memory. A lane working card N names it as `plan#N`, and
+   its branch is `card/N`, the one `quill claim` made.
 2. The tree: clean, or each dirty path and why it stays.
 3. Every worktree, branch and database clone this session made, a review subagent's worktree and
    its `worktree-agent-*` branch included: removed, or listed with its state and who removes it.
-4. What is done, each commit by its sha, and what is not.
+4. What is done, each commit by its sha, and what is not; each task this session finished, as
+   `plan#T`.
 5. The next session's FIRST act: when `pwd` is not item 1's worktree, `EnterWorktree` into it once
    (Josh cannot relaunch a terminal from the web); then `pwd` and `git rev-parse --show-toplevel`
    print item 1's worktree, `git rev-parse --abbrev-ref HEAD` and `git rev-parse HEAD` print its
@@ -64,8 +69,8 @@ history. s.0 holds:
 6. What the next session must not do (push while a pull request is open, say), and the traps
    learned or review findings that recurred.
 
-The checker grades items 1, 2, 3 and 5 against git, and every commit item 4 cites; items 4 and 6
-are the lane's judgment. Nothing in s.0 asks Josh for anything: a question he must answer is asked
+The checker grades items 1, 2, 3 and 5 against git, and every commit and task file item 4 cites;
+items 4 and 6 are otherwise the lane's judgment. Nothing in s.0 asks Josh for anything: a question he must answer is asked
 before the stop, by AskUserQuestion (CLAUDE.md, Multi-session operation).
 
 ## 4. Refresh the memory hook

@@ -211,7 +211,7 @@ def create_template():
     # writes no figure, so a template whose series never opened generates rows
     # ``_stated_amount`` REFUSES.  *An earlier version of this comment said
     # X-au-e "removes the redundancy by removing the column"; it does not, and
-    # no step in ``docs/plans/steps.md`` removes ``default_amount`` -- see
+    # ``default_amount`` stays until plan step ``balance:X-bp`` deletes it -- see
     # ``template_amount_service.set_amount`` for what still reads it.*  A
     # template created today generates rows into historical pay periods too,
     # and those resolve by the series holding flat before its earliest version

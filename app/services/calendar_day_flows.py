@@ -10,7 +10,7 @@ the two value records they produce.
 pylint's 1,000, and ruling **bank_import:R-II** -- a merchant refund files as a
 NEGATIVE purchase -- needed the sign rules here rewritten and their reasoning
 written down.  A cap is a forcing function rather than a ceiling to raise
-(``docs/plans/conventions.md`` rule 4), which is the argument
+(the planning conventions' rule 4), which is the argument
 :mod:`.calendar_infrequency` makes in as many words for the split that took the
 recurrence question out of the same file.
 

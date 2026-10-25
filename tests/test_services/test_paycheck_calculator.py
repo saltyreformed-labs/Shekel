@@ -4064,9 +4064,9 @@ class TestTheGrossContractIsDocumented:
     in and read as though it still applied.
 
     The fourth arm that lived here -- the ids these docstrings cite have a
-    row in the registry they name -- is ``tools/plan_gate/test_citations.py``
-    since 2026-09-11: it reads ``docs/plans``, and the plan gate is the suite
-    that runs on a pull request touching only that (``ci_scope.py``).
+    row in the registry they name -- left this suite on 2026-09-11 and went
+    with the planning registries at the tracker switch: each id now titles a
+    card in the tracker, which no test reads.
     """
 
     def test_module_docstring_names_the_rate_contract(self):

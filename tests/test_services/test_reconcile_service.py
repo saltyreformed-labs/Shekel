@@ -2607,7 +2607,7 @@ class TestTheSectionsAndTheOrder:
     referenced ``OfferKind``, ``section_label``, ``kind``, ``_block_order`` or
     ``rank`` -- the entire content of the ruling, and the whole reason the
     assembler took ownership of the block order, was ungraded.  That is the
-    balance README's own live lesson (a producer's new fields are the fields
+    balance arc's live lesson of the time (a producer's new fields are the fields
     nobody was asserting) repeating one leaf later.
 
     The rules: the blocks arrive ordered by kind then by each block's OLDEST

@@ -265,8 +265,8 @@ def taxes_tab():
     # C2-f3e until 2026-08-20**, correctly when written and not afterwards:
     # C11 was a LEAF of C2-f3 and was promoted out of it on 2026-08-19, so
     # C2-f3e shipped without closing either row.  A step id written into a
-    # comment has no reconciler: the plan gate grades the registries and
-    # nothing grades this line, so it was corrected by hand at the tick.  Deriving here is the
+    # comment has no reconciler: nothing grades this line, so it was
+    # corrected by hand at the tick.  Deriving here is the
     # direction that fix goes -- the route is the door -- so the duplicate is a
     # transient of the sequence rather than a second producer being added.
     available_years = _get_available_years(

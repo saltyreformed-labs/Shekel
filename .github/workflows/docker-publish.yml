@@ -127,7 +127,7 @@ jobs:
       # value, or a comparison that errors (``set -e`` does not fire inside an
       # ``if``) -- falls to a refusal.  ``shell: bash`` makes GitHub run it
       # as ``bash --noprofile --norc -eo pipefail``, the invocation
-      # tools/ci/test_ci_scope.py RUNS this text under, with planted
+      # tools/ci/test_ci_workflow.py RUNS this text under, with planted
       # values.
       - name: Is it still before the tax-law refusal?
         shell: bash

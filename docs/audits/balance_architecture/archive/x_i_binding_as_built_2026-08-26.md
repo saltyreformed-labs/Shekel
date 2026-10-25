@@ -1,6 +1,6 @@
 > **ARCHIVED. Historical record only -- this document governs nothing and
 > may never be read as a live plan or as a statement of the current state.**
-> The live plan is `../README.md`; the code as committed is the source of
+> The live plan is the tracker, `saltyreformed-labs/shekel-plan`; the code as committed is the source of
 > truth for what the app does.
 
 # The one-read-pass BOUNDARY and BINDING, as built

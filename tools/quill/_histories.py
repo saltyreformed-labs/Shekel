@@ -100,9 +100,13 @@ def never():
 
 def start(parent):
     """A repository under ``parent`` whose ``origin/dev`` and ``origin/main`` hold one base
-    commit (its ``app.py``), the start of every history; the repository and the base."""
+    commit (its ``app.py``, and a ``.dockerignore`` of ``*``), the start of every history; the
+    repository and the base.  An image built from it holds nothing, so production changes
+    with no file these histories write and the landing check's rule 9 passes every change
+    (``test_landing_image.py`` grades that rule): each test here grades rules 1-8 alone."""
     root = repository(parent)
-    base = commit_files(root, commit(root, "root"), "base", {"app.py": "base\n"})
+    base = commit_files(root, commit(root, "root"), "base",
+                        {"app.py": "base\n", ".dockerignore": "*\n"})
     point_dev(root, base)
     point_main(root, base)
     return root, base

@@ -250,8 +250,8 @@ def generate():
     #
     # The step was originally specified as a CHECK for that state
     # (**R-PC55**); a check is a reconciler for a duplication, and rule 14 says
-    # delete a home instead.  **R-PC55's supersession rides with R-PC63** in
-    # ``docs/plans/rulings.md``.
+    # delete a home instead.  **R-PC55's supersession rides with R-PC63**, on
+    # its ruling card.
     #
     # **The submitted fields are IGNORED rather than refused, and that is this
     # arc's own precedent rather than a shortcut.**  Plan step C3-b deleted

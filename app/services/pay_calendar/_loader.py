@@ -340,9 +340,10 @@ def cadence_for(user_id: int) -> PayCadence:
     answer -- ``routes/salary/profiles._paychecks_per_year`` renders a pointer
     where this raises, because a form must not 500 on the state it repairs.
 
-    **Resolve it once per PRODUCER and thread it.**  Section 4a of
-    ``docs/plans/implementation_plan_recurrence_redesign.md`` says "once per
-    request", and the honest statement is narrower, because two surfaces
+    **Resolve it once per PRODUCER and thread it.**  The recurrence plan said
+    "once per request" (archived in
+    ``docs/plans/historical/recurrence_findings_as_built_2026-08-15.md``), and
+    the honest statement is narrower, because two surfaces
     genuinely read it twice: the budget dashboard's tracks section runs both
     narrow savings producers and each resolves its own, and ``/retirement``
     calls ``load_gap_inputs`` from the gap producer and again from the lever

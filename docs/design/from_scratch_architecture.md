@@ -2,7 +2,7 @@
 
 **STATUS: REVISED 2026-09-01 after three adversarial reviews, which broke a great deal of it.
 Section 9 records what they refuted.** Section 3.2 is RULED.
-**Section 6's order was ruled and is now WITHDRAWN by its own author** -- the plan gate refuses it
+**Section 6's order was ruled and is now WITHDRAWN by its own author** -- the plan gate refused it
 and a cheaper order buys the same correctness (Section 6). Nothing here has been built. This
 document answers the developer's question of 2026-09-01,
 *"how would you design this from scratch?"*, and it exists because `balance:X-f3c-4`'s specification
@@ -603,7 +603,7 @@ calendar, and it is corroboration that the direction is the project's own.)*
 **Section 6's original order was ruled by the developer on 2026-09-01 and is withdrawn by its own
 author the same day.** Two findings make that unavoidable rather than advisable:
 
-1. **The plan gate REFUSES it.** Inverting `#5`/`#6` was demonstrated against a mirror of
+1. **The plan gate REFUSED it.** Inverting `#5`/`#6` was demonstrated against a mirror of
    `tools/plan_gate` and fails **three arms** -- `X-f3c-5` would be ranked ahead of the unshipped
    step it is `blocked by`, `X-f3c-2b-3`'s `starts` would precede its blocker, and the order table
    would no longer be sorted into execution order.
@@ -778,9 +778,9 @@ family's registry commit), audited the same day on tree `81b92227`** (`71e09443`
 `companion_visible`, with `dev` `98cc0ab4` merged) and on the production restore `shekel_xbi1b`. Two
 adversarial passes over the draft refuted four of its figures and one of its central claims; what
 stands below is the corrected text, and 10.9 records what fell. This section is the argument the
-family's specifications point at; the specifications themselves are the balance README's section 5
-entries and `docs/plans/steps.md`. **Every fork in 10.6 was RULED by the developer on 2026-09-12, in
-this session, and 10.10 states the ruled design in one place.**
+family's specifications point at; the specifications themselves are the family's cards in the
+tracker. **Every fork in 10.6 was RULED by the developer on 2026-09-12, in this session, and 10.10
+states the ruled design in one place.**
 
 Three words are used precisely throughout: a row is **undated** when its `due_date` is NULL; it
 **answers no occurrence** when its `occurs_on` is NULL (a different column and a different fact);

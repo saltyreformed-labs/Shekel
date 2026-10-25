@@ -38,9 +38,9 @@ not refused when only its labels change.
 
 Real production figures are ALLOWED in the private tracker (``R-BAL172``), so
 nothing here looks for them.  Nothing here reads GitHub: a caller describes
-the card as a :class:`Draft`.  Until step X-cx's cutover (L8) deletes the plan
-gate's registry arms, ``tools/plan_gate/_rulings.RULINGS_ROW_CAP`` spells
-R-BAL136's 2,000 again, for a ``rulings.md`` row.
+the card as a :class:`Draft`.  :data:`RULING_CAP` is R-BAL136's 2,000's one
+spelling since step X-cx's S3b deleted the plan gate, whose ``RULINGS_ROW_CAP``
+spelled it again for a ``rulings.md`` row.
 """
 from __future__ import annotations
 
@@ -107,26 +107,10 @@ class Draft:
 
 
 def alias_mark(alias: str) -> str:
-    """How a card's title carries the old id it is known by: ``[alias]``, first.  ``quill
-    show OLD-ID`` finds a card by it; X-cx's migration titles every card with it (draft 4
-    s.3, :func:`card_title`)."""
+    """How a card's title carries the old id it is known by: ``[alias]``, first, then its
+    short name (R-BAL237), as X-cx's migration titled every card it filed.  ``quill show
+    OLD-ID`` finds a card by it."""
     return f"[{alias}]"
-
-
-def card_title(alias: str, name: str) -> str:
-    """A migrated card's title: its :func:`alias_mark`, then its short name (R-BAL237)."""
-    return f"{alias_mark(alias)} {name.strip()}"
-
-
-def title_alias(title: str) -> str | None:
-    """The old id a title carries as :func:`card_title` writes it -- its
-    :func:`alias_mark`, first, then a space -- or None for a title that carries none.
-    X-cx's migration finds each item's card by it (L7 draft 4 s.4).  An alias holds no
-    ``]``: the first one closes the mark."""
-    alias, closed, _ = title.removeprefix("[").partition("] ")
-    if not title.startswith("[") or not closed or not alias or "]" in alias:
-        return None
-    return alias
 
 
 def ruling_body(question: str, answer: str) -> str:

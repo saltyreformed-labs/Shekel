@@ -92,12 +92,15 @@ Migrations and schema:
   constraints mirroring Marshmallow ranges; explicit `ondelete`; named
   constraints. NOT NULL on a populated table uses the three-step add/backfill/
   alter. Every migration has a working downgrade or a `NotImplementedError` that
-  explains the manual revert.
+  explains the manual revert. A migration's commit carries its own change only: an
+  unrelated fix riding in it is unreviewable there and is its own commit.
 
 Tests:
 - Assert behavior and computed values, not just status codes or truthiness. A
   financial assertion should show the arithmetic that produced the expected value.
   A test that does not verify behavior is worse than no test.
+- A pay-calendar fixture that tests a derived period end is OFF cadence: on cadence
+  `lead(start) - 1` and `start + cadence - 1` are the same day, so the test is vacuous.
 - Tests that must share one session (one reads state another left in the worker)
   share an `@pytest.mark.xdist_group`: CI shards the suite across runners and only a
   group is kept whole (`tests/_shard.py`).

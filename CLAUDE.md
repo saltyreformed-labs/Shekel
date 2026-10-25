@@ -9,13 +9,11 @@ Bootstrap 5
 **YOU ARE THE ONLY SAFEGUARD.** This project has no QA team and no human code reviewer. CI
 (`.github/workflows/ci.yml`: pylint + the full pytest suite) runs on every pull request and on
 pushes to `main`, and the merge queue on `dev` and on `main` lands nothing until that
-`lint-and-test` check is green on the exact merge commit it lands. (A pull request touching ONLY the
-planning documents and the plan gate runs the plan gate in place of the suite --
-`tools/ci/ci_scope.py` decides, and fails closed.) CI is therefore an enforced pre-merge gate -- but
-it is only as good as the tests, and no human will catch a bad assertion or a missing case for you.
-The developer is a solo operator. If you miss a bug, skip an edge case, or take a shortcut, that
-defect ships to production. In a budgeting app, that means real money is mismanaged. Treat every
-line of code as if someone's rent payment depends on it being correct.
+`lint-and-test` check is green on the exact merge commit it lands. CI is therefore an enforced
+pre-merge gate -- but it is only as good as the tests, and no human will catch a bad assertion or a
+missing case for you. The developer is a solo operator. If you miss a bug, skip an edge case, or
+take a shortcut, that defect ships to production. In a budgeting app, that means real money is
+mismanaged. Treat every line of code as if someone's rent payment depends on it being correct.
 
 ## Rules
 
@@ -97,7 +95,9 @@ the developer should never have to re-request them.
   the workaround silently.
 - **The goal state of every arc is that its fences are structurally unnecessary.** A checker, an
   allowlist, or an invariant a reconciler enforces is scaffolding around a defect. The work is to
-  make the defect unrepresentable, then delete the fence.
+  make the defect unrepresentable, then delete the fence. The fences ruled KEEP are
+  `docs/audits/fence_census_2026-10-11.md`, and a step that would delete one asks the developer
+  first (R-BAL268).
 - **On a design fork, map the FULL option space, then give a firm recommendation.** Lead with the
   most-correct from-scratch design; sequencing manages risk, the design does not compromise for it.
   A financial fork gets a worked numeric example per option BEFORE the question is asked.
@@ -118,8 +118,8 @@ Several Claude sessions regularly work this repo at once, each in its own worktr
 - **PRs and merges are coordinated.** When multiple sessions are active, the coordinator session
   opens, orders and merges every PR. **Any session may `git push` its own branch to back up work**
   (developer ruling 2026-09-02); a pushed branch is not a handoff and not a request to merge.
-- **Planning-document ids are reserved through the coordinator.** Never grep sibling worktrees for a
-  free ledger or ruling id; a snapshot cannot see a worktree created after you looked.
+- **GitHub numbers the cards, so there is no id to reserve.** A step, finding, ruling or question is
+  filed as a card (`quill file`, Common Commands) and its number, `plan#N`, is GitHub's.
 - **Suite runs no longer need coordinating, and there is no slot to take.** `./scripts/test.sh`
   gives every run a postgres cluster of its own, so no run can restart, corrupt or collide with
   another -- in one worktree or many. What concurrent runs still share is this host's cores, which
@@ -144,9 +144,10 @@ root; never silence it with a bare disable.
 - **Per-edit hooks (`scripts/hooks/`)** lint each `app/`/`scripts/` Python edit and hard-block on
   errors and the custom checkers `shekel-decimal-from-float` / `shekel-refname-compare`; templates
   and `requirements.txt` have their own guards.
-- **SessionStart hook** (`scripts/hooks/session-start.sh`) prints the session's checkout, branch and
-  the plan of record's next step into context at session start, plus a pointer to the Multi-session
-  doctrine.
+- **SessionStart hook** (`scripts/hooks/session-start.sh`) prints the session's checkout and branch
+  into context at session start, a warning when the shared main checkout is pinned to a release
+  branch, a pointer to the Multi-session doctrine, and one to `python -m tools.quill.quill next` for
+  the next step (it reads no network, so a start never waits on the tracker).
 - **PR-guard hook** (`scripts/hooks/guard-pr-actions.sh`) turns `gh pr create` / `gh pr merge` into
   a permission prompt outside the coordinator session (which exports `SHEKEL_PR_COORDINATOR=1`);
   `git push` is never gated. Advisory by design: an ask decision, never a deny.
@@ -154,22 +155,24 @@ root; never silence it with a bare disable.
   and hard-blocks once `scripts/hooks/ENFORCE_PYLINT_FLOOR` exists (the 10.00/10 lock-in).
 - **Custom checkers:** `tools/pylint/shekel_checkers/` (+ tests), loaded via `.pylintrc`. Add one
   when a rule is an AST pattern rather than hoping a reviewer remembers it.
-- **CI + pre-commit** run `pylint app/` (checkers as hard `--fail-on`) and the full suite per PR (a
-  registry-only PR runs the plan gate in place of the suite; `tools/ci/ci_scope.py` holds the
-  boundary and its census of test modules that read there); `useless-suppression` is on, so a
+- **CI + pre-commit** run `pylint app/` (checkers as hard `--fail-on`) and the full suite on every
+  PR, and CI's `tools` job runs every tools package's own tests; `useless-suppression` is on, so a
   disable that suppresses nothing is itself a finding.
-- **Plan gate (`tools/plan_gate/`)** grades the PLANNING documents against
-  `docs/plans/conventions.md` -- every finding names a live owner, an identity class shares one tick
-  state, an unruled fork refuses a tick on either remedy, the index and the specifications agree
-  both ways, and the dependency graph is referential and acyclic. It also grades the ORDER: ranks
-  are dense, a rank never precedes an unshipped blocker's, the derived `starts` column is
-  recomputed, every step's description is one complete sentence, and every archived document
-  declares itself one on its first line. **Since 2026-09-11 it reads GIT and the CODE too**: a
-  SHIPPED row's commit must resolve and be an ancestor of HEAD, no commit's `Ships: <arc>:<id>`
-  trailer may name an open leaf (a trailer only, never prose: R-BAL134), and every `(census N ...)`
-  marker is RE-RUN against the tree (`_shipped.py`, `_census.py`; CI checks out at `fetch-depth: 0`
-  so neither arm is silently blind). **Editing a planning document is what runs it** (pre-commit,
-  scoped to those files; CI runs `pytest tools/plan_gate`).
+- **The landing check** (`tools/quill/landing.py`, CI's `landing` job) holds the ONE write rule for
+  the plan's records in git, judged on the merge that lands: a card's done file `plan/ships/N` is
+  added or changed only from its own branch `card/N`, and a task's file `plan/tasks/T` only from its
+  card's branch (R-BAL386), but for a line carried from the other integration branch (a release or a
+  resync) and, while it lives, the records-only door into `main` for a card never claimed
+  (R-BAL363); a change that writes no line of a done file may not change what `dev` and `main`
+  together say of that card (R-BAL385, R-BAL390); a pull request from `card/N` is refused while a
+  task under N that was not dropped lacks its file; and a change to what production runs must add,
+  delete or change a card's done file, from any branch, a release or a resync passing only with the
+  done files it carries (R-BAL362): the files the image holds, as Docker reads its ignore file
+  (`.dockerignore`, R-BAL364's one list of them), and the files outside the image that build or run
+  production, which `tools/quill/_production.py` lists, their one list (R-BAL400, R-BAL401). Its
+  module docstring states every rule.
+- **Archived documents** (`tools/ci/archive.py`): every document under an `archive/` or
+  `historical/` directory opens with the `> **ARCHIVED.` banner, and CI refuses one that does not.
 - **Judgment the linters cannot mechanize** (float-on-money boundaries, IDOR, transfer invariants,
   DRY/SOLID, test quality) is the `code-reviewer` subagent and the `/standards` command.
 
@@ -197,6 +200,17 @@ pylint app/ --fail-on=E,F,shekel-decimal-from-float,shekel-refname-compare,sheke
 # Database migrations
 flask db migrate -m "description"
 flask db upgrade
+
+# The plan: cards in the private tracker saltyreformed-labs/shekel-plan, read and written only
+# through quill (plan#N or N names a card; each command's --help gives its every flag)
+python -m tools.quill.quill next [--arc ARC]          # the next step to build
+python -m tools.quill.quill claim plan#N              # claim card N: branch card/N, checked out
+python -m tools.quill.quill show plan#N               # a card, its comments and its git history
+python -m tools.quill.quill file step|finding|ruling|question --arc ARC --title NAME ...
+python -m tools.quill.quill file task --parent plan#N ...    # a task: a piece inside N's one PR
+python -m tools.quill.quill task-file plan#T          # write task T's file on its card's branch
+python -m tools.quill.quill sync                      # write every card's state from git
+python -m tools.quill.quill release plan#N            # free a claim, keeping its work
 ```
 
 ## Architecture
@@ -278,16 +292,17 @@ A task is NOT complete until ALL of these are true:
 
 **Invariant 3 is rule 14's known instance**: one value kept in two homes by a maintenance contract,
 and invariant 5's record half is why the mirror still exists at all. Which clauses are already
-structural and which steps delete the rest is the balance arc's plan of record --
-`docs/audits/balance_architecture/README.md` (the X-bi-6 specifications). Until that work ships, the
-invariants are enforced exactly as written above, and the step that deletes a home owes this section
-its rewrite.
+structural and which steps delete the rest is the balance arc's plan of record -- the X-bi-6 cards
+in the tracker (their argument: `docs/audits/balance_architecture/README.md`). Until that work
+ships, the invariants are enforced exactly as written above, and the step that deletes a home owes
+this section its rewrite.
 
 ## Standards
 
 Full standards: `docs/coding-standards.md` and `docs/testing-standards.md`. They are not
-force-loaded; the path-scoped rules in `.claude/rules/` (`coding`, `database`, `testing`, `deploy`)
-load the essentials automatically when you touch matching files and point you to the full doc.
+force-loaded; the path-scoped rules in `.claude/rules/` (`coding`, `database`, `testing`, `deploy`,
+`recurrence-form`) load the essentials automatically when you touch matching files and point you to
+the full doc.
 
 **The tier rule: a fact lives in ONE tier.** This file states a rule in one line and points;
 `.claude/rules/*` carry the path-scoped must-knows; `docs/*-standards.md` hold the rationale and
@@ -319,21 +334,26 @@ hardening, and prod-override-sync conventions auto-load via `.claude/rules/deplo
 
 ## Development Status
 
-**All live work is six ARCS, and `docs/plans/steps.md` is the single source of truth for what to do
-next.** Start there and nowhere else: it holds every step in every arc IN EXECUTION ORDER, one
-sentence each. **The next step is the first row of its order table.** A row whose `starts` column
-reads `NOW` can be picked up today whatever its rank, which is how two steps run in parallel.
+**All live work is cards in the private tracker `saltyreformed-labs/shekel-plan`, and the tracker is
+the single source of truth for what to do next** (R-BAL170). Every step, finding, ruling and
+question is one card, `plan#N`, and every read and write goes through quill (Common Commands). The
+board holds the steps and questions in the order the developer drags them (R-BAL177);
+**the next step is `python -m tools.quill.quill next`'s answer.** A card's spec is its body, and a
+review reads its edits since the work started (`/charter`, R-BAL174). A step split into leaves holds
+them as sub-issues, and a piece of work inside a card's one pull request is a task under it (Git
+Workflow). Whether a card SHIPPED is git's answer, never the card's state: its done file
+`plan/ships/N` in the merge of `dev` and `main` (R-BAL359), from which `quill sync` writes each
+card's state.
 
-Five more registries sit beside it, all in `docs/plans/`: `ledger.md` is every open finding in every
-arc and every row names a live owner; `rulings.md` is every developer ruling, keyed `(arc, id)` with
-the arc a COLUMN; `conventions.md` is the 16 rules all of it is held to; `verification.md` is what
-"done" means for a step in any arc; `lessons.md` is what this project has already paid to learn.
-Each arc's argument and step specifications stay in its own document:
-`docs/audits/balance_architecture/README.md` (balance), and `implementation_plan_*.md` for
-recurrence, pay_calendar, credit_card, bank_import and salary. `steps.md` names which document and
-section holds a given step's detail. **Every arc's rulings are in `rulings.md`, keyed `(arc, id)`,
-since `balance:X-ao-2a`; no arc document states one, and each carries a `The rulings` pointer
-instead.**
+Every card but a task carries its arc (a task's is its card's). Each arc's argument, the reasoning
+behind its steps, stays in its own document: `docs/audits/balance_architecture/README.md` (balance),
+and `implementation_plan_*.md` in `docs/plans/` for recurrence, pay_calendar, credit_card,
+bank_import and salary. A ruling made before the tracker is a closed card titled by its old id, and
+every step, finding and question open when the tracker took over is a card titled by its id, so
+`python -m tools.quill.quill show balance:R-BAL38` finds one. A shipped step's or a closed finding's
+id names no card: its record is the commit that shipped or closed it, and the archives. Beside the
+arc documents, `docs/plans/verification.md` is what "done" means for a step in any arc, and
+`docs/plans/lessons.md` is what this project has already paid to learn.
 
 **Anything under an `archive/` or `historical/` directory is a HISTORICAL RECORD and governs
 nothing** -- every such file says so on its first line. Cite one for how a decision came to be,
@@ -362,3 +382,24 @@ PR `dev` -> `main`, wait for the green check, then queue it. Do NOT
 After a PR merges into `main`, resync `dev` so it holds every commit `main` does: a PR `main` ->
 `dev`, queued through `dev`'s queue (`git push origin dev` is rejected). When several sessions are
 active, PR and merge timing is the coordinator session's call -- see Multi-session operation.
+
+**Work for card N is on its branch `card/N`**, which `quill claim N` makes from `dev` with the
+card's done file `plan/ships/N` as its first commit: one branch records one card, merging it ships
+the card, and a revert of that merge removes the file and reopens the card.
+**A `credit_card` card that moves money owns its pull request**: nothing else rides in it. A
+`recurrence` or `pay_calendar` step is a leaf boundary: one card and its one pull request, its own
+tests green, independently revertible by reverting its merge; a `recurrence` step states its
+behaviour change by measurement, not a hedge.
+
+**A piece of work inside a card's one pull request is a TASK** (R-BAL386), a sub-issue of the card:
+filed under it when the piece is planned (`quill file task`), its file `plan/tasks/T` written in the
+commit that finishes it (`quill task-file plan#T`). The task closes once the pushed `card/N` holds
+the file and reopens if a revert removes it; the card's pull request is refused while a task under
+it that was not dropped lacks its file. A piece that lands by a pull request of its own is a leaf
+step instead, with its own claim.
+
+**The resync rule for the files the tracker switch deleted** (the planning registries in
+`docs/plans/` and the tools that read or migrated them): `main` keeps them until the first release
+after the switch carries their delete, so a resync that meets a hotfix's change to one takes `dev`'s
+delete. A hotfix card's record reaches the tracker as its done file, from its own `card/N` (or
+through the records-only door while that lives, R-BAL363), never as a registry edit.

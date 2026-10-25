@@ -12,9 +12,9 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit as _commit
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV, tracking
 from tools.quill import _git
 from tools.quill._fake import FailOnce, FakeTracker, claim, leaf_filing, run, ship
 from tools.quill._tracker import Child

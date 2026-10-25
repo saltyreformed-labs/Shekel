@@ -92,7 +92,7 @@ TRUNCATED_RECORD = [(1, date(2026, 1, 2)), (2, date(2026, 3, 13))]
 #: 2030-11-28 is the fourth Thursday of November 2030 -- Thanksgiving -- and
 #: this era's grid passes through it: 2030-01-10 + 23 fortnights.  Under
 #: ``prior`` payroll pays it 2030-11-27, which is the specification's own
-#: worked example (steps.md, C17-b-2).
+#: worked example (C17-b-2's specification, shipped at ``06fc0d33``).
 THANKSGIVING_ERA = era_of(date(2030, 1, 10), 14, PRIOR)
 
 
@@ -258,8 +258,9 @@ class TestTheNextPaydayAfterTheRecord:
     def test_the_specifications_worked_example(self):
         """A last recorded 2030-11-27 projects 12-12, where the recorded anchor gave 12-11.
 
-        The step's own worked example (steps.md #10): the record is the
-        nominal 11-28 Thanksgiving paid a day early under ``prior``; anchored
+        The step's own worked example (C17-b-2's specification, shipped at
+        ``06fc0d33``): the record is the nominal 11-28 Thanksgiving paid a day
+        early under ``prior``; anchored
         on the record the next payday came a day early too, and every
         boundary after it.
         """

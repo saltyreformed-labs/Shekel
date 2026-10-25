@@ -1,4 +1,4 @@
-"""The SessionStart hook reports STANDING CONSTRAINTS, and both arms fire.
+"""The SessionStart hook reports a RELEASE PIN on the shared main checkout.
 
 **Why the hook grew this at all** (developer ruling 2026-09-05).  A constraint
 that lives only in coordinator messages is invisible to any session that clears
@@ -9,18 +9,13 @@ tree offers is about the CHECKOUT and none is about the session reading them.  A
 second session could not learn why its browser pass was impossible, the same
 pin being the cause, and is worktree-isolated so it could not have looked.
 
-**Two arms, because neither covers the other.**  The DERIVED arm reads the pin
-off ``git worktree list`` and cannot go stale.  The STATED arm reads
-``docs/plans/STANDING.md`` for what the tree does not imply.  Each is mutated in
-its own direction below, and the two silences are what stop the arms firing on
-every session forever -- a warning that always prints is not a warning.
-
-**Two earlier spellings of the STATED filter were wrong in OPPOSITE
-directions**, which is why the "prints no guidance" and "prints the whole
-constraint" cases both exist: filtering "not a comment" printed the file's whole
-guidance block, and filtering to bullet lines only printed each constraint
-TRUNCATED at its first wrap -- a half-sentence being worse than nothing, because
-it reads as complete.
+The arm reads the pin off ``git worktree list``, so it cannot go stale, and it
+is mutated in both directions below: the silence is what stops it firing on
+every session forever -- a warning that always prints is not a warning.  The
+hook's STATED arm, which printed the coordinator's notice board of standing
+constraints, went with that board and its tests at the tracker switch (ruling
+``balance:R-BAL347``, the developer's confirmation).  The next step is the
+tracker's answer, which the hook only points at.
 """
 from __future__ import annotations
 
@@ -105,45 +100,10 @@ class TestTheDerivedArmReadsThePinOffTheTree:
         assert "release/2026-09-05" in out, "and the shared pin is reported beside it"
 
 
-class TestTheStatedArmReadsTheConstraintsFile:
-    """What the tree does not imply, and the two ways a filter gets it wrong."""
+class TestTheNextStepIsThePointer:
+    """The plan of record is the tracker, and the hook never reads it."""
 
-    @staticmethod
-    def _write(linked: pathlib.Path, body: str) -> None:
-        plans = linked / "docs" / "plans"
-        plans.mkdir(parents=True, exist_ok=True)
-        (plans / "STANDING.md").write_text(body)
-
-    def test_a_constraint_is_printed_WHOLE_and_not_cut_at_its_first_wrap(
-            self, checkouts):
-        """A half-sentence is worse than nothing: it reads as complete."""
+    def test_it_points_at_quill_next(self, checkouts):
+        """A start reads no network, so the hook names the command and stops."""
         _, linked = checkouts
-        self._write(linked, "# Standing constraints\n\nGuidance paragraph.\n\n"
-                            "- 2026-09-05: the first line of the constraint,\n"
-                            "  its second line,\n"
-                            "  and its third.\n")
-        out = _run(linked)
-        assert "the first line of the constraint," in out
-        assert "its second line," in out
-        assert "and its third." in out
-
-    def test_the_files_own_GUIDANCE_is_not_printed(self, checkouts):
-        """The first spelling of this filter printed the whole file."""
-        _, linked = checkouts
-        self._write(linked, "# Standing constraints\n\n"
-                            "Guidance nobody needs at session start.\n\n"
-                            "- 2026-09-05: the constraint.\n")
-        out = _run(linked)
-        assert "the constraint." in out
-        assert "Guidance nobody needs" not in out
-
-    def test_a_file_with_no_bullets_is_SILENT(self, checkouts):
-        """EMPTY IS THE NORMAL STATE, so an empty file prints no heading."""
-        _, linked = checkouts
-        self._write(linked, "# Standing constraints\n\nGuidance only.\n")
-        assert "STANDING CONSTRAINTS" not in _run(linked)
-
-    def test_an_absent_file_is_SILENT(self, checkouts):
-        """The hook must never block or complain -- it is a status hook."""
-        _, linked = checkouts
-        assert "STANDING CONSTRAINTS" not in _run(linked)
+        assert "- next step: the tracker's, by python -m tools.quill.quill next" in _run(linked)

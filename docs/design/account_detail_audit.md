@@ -426,8 +426,8 @@ mockup RETAINED per the developer's 2026-07-12 instruction (delete after the dev
 ## Surface 7: Balance history (2026-08-10, plan step X-f2-b)
 
 New surface on the cash detail page, so it re-enters the protocol here: this audit section, then
-Loop A, then Loop B. Plan of record `docs/audits/balance_architecture/README.md` step **X-f2-b**
-(ruling **R-EV**); it closes findings **N-205**, **N-204** and **N-206** in `docs/plans/ledger.md`.
+Loop A, then Loop B. Plan step **X-f2-b** (shipped at `a41b5ebf`, ruling **R-EV**); it closes
+findings **N-205**, **N-204** and **N-206**.
 
 ### The surface's job
 

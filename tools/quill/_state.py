@@ -98,7 +98,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
-from tools.ci.trailers import DEV, MAIN
+from tools.ci.gitcmd import DEV, MAIN
 from tools.quill._git import MARKERS, Claim, task_file
 from tools.quill._tracker import BareCard, Card
 from tools.quill.setup_tracker import FILING, TASK
@@ -296,8 +296,8 @@ def dropped_above(card: Card, cards: Mapping[int, Card], shipped: Iterable[int])
 def is_live(number: int, cards: Mapping[int, Card], shipped: Iterable[int]) -> bool:
     """Whether a card is still work to do: not resolved, and no step above it dropped.
 
-    The owner a finding needs (``conventions.md`` rule 1; the one step it is blocked
-    by, R-BAL395), and the step a new leaf may split.
+    The owner a finding needs (the one step it is blocked by, R-BAL395, which
+    :mod:`check` holds every filing to), and the step a new leaf may split.
     """
     return (not resolved(number, cards, shipped)
             and dropped_above(cards[number], cards, shipped) is None)

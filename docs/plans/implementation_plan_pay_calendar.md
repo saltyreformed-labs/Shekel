@@ -50,8 +50,9 @@ which equals the definition only when the next batch happens to start at `start 
 
 **Two derived values stored beside the fact they derive from, with nothing reconciling them.** Every
 symptom here is one disagreement: `end_date` BELOW the next `start_date` is a GAP, a day funded by
-no paycheck (row P2); at or ABOVE it is an OVERLAP, a day funded by two; and `period_index` order
-disagreeing with `start_date` order is the balance resolver walking money out of calendar order.
+no paycheck (row P2, which is the recurrence arc's F-10: one defect under two ids); at or ABOVE it
+is an OVERLAP, a day funded by two; and `period_index` order disagreeing with `start_date` order is
+the balance resolver walking money out of calendar order.
 
 Because the schema cannot make them agree, the application grew
 **five separate runtime fences that all police the same functional dependency**:

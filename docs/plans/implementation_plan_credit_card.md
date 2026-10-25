@@ -1,10 +1,10 @@
 # Credit card arc: the argument
 
 **Status: RE-MINTED FROM SCRATCH 2026-09-18 (`credit_card:R-CC14`..`R-CC22`). The design of record
-is `docs/design/credit_card_from_scratch.md`; the arc's twelve leaves are its section 5, and its
-section 5 also holds the map from the seventeen 2026-07-19 leaves to these.** The 2026-07-19 plan
-(its architecture, its phases 0-6 and its consumer inventory) is archived whole to
-`historical/credit_card_plan_2026-07-19.md`.
+is `docs/design/credit_card_from_scratch.md`; the arc's leaves are its section 5 (all but `CC-12`,
+outcome O7's), and its section 5 also holds the map from the seventeen 2026-07-19 leaves to these.**
+The 2026-07-19 plan (its architecture, its phases 0-6 and its consumer inventory) is archived whole
+to `historical/credit_card_plan_2026-07-19.md`.
 
 **The 2026-07-19 "Ratified sequencing" was DISCHARGED and is ARCHIVED** to
 `historical/credit_card_sequencing_2026-07-19.md`. It stayed here, live-looking, until 2026-08-11,

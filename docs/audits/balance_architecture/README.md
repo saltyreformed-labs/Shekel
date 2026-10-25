@@ -37,7 +37,8 @@ closed at X-g2b. Both records are in the archive.
    them**, which is root cause 1's other face -- plus the residue **X-e** owns.
 3. **The pay calendar is a PARTIAL function -- the same shape, on the other axis.**
    `pay_period_service.get_all_periods` returns the materialized rows and stops, so past the last
-   one every consumer improvises. Plan step **X-l**.
+   one every consumer improvises. Plan step **X-l**, which SHIPPED at `4f134bf4` as
+   `pay_calendar:C2`.
 4. **The assertion RESETS the ledger instead of reconciling with it**, plugging the difference to
    Equity so real activity is invisible on the income statement. **Re-measured 2026-08-13 at
    `$15,413.71` gross, and the GROSS is the instrument's own path length**: the plug telescopes by
@@ -48,8 +49,8 @@ closed at X-g2b. Both records are in the archive.
    downstream of this.** `paid_at` was `db.func.now()` at the click; X-f1b replaced it with
    `transactions.settled_on` but the backfill was that derivation verbatim, so no stored date
    improved. **Measured against the developer's own bank export 2026-08-13: of 110 movements matched
-   to bank lines on exact amount, only 33 (30%) carry the day the bank posted them.** Step **X-f6a**
-   replaces the guess with the bank's own record.
+   to bank lines on exact amount, only 33 (30%) carry the day the bank posted them.** Step **X-f6a**,
+   the importer's core, SHIPPED at `9439a5ad`; the rest of the replacement is the bank_import arc's.
 6. **A surface still picks which producer answers for its account.** `/dashboard`'s hero, its pulse
    and the analytics calendar read the kind-blind cash view while `/grid` and `/savings` read the
    modelled one, so the same account renders two balances for the same period. Plan step **X-j**.
@@ -73,7 +74,7 @@ against.
 
 **The loan baseline is still a LIVE regression gate for CASH commits.** Mortgage (account 3)
 **$177,277.97**, Van Loan (account 8) **$15,663.59**. Re-derive both from the seam before and after
-every commit in this phase: a cash change that moves a loan figure is wrong.
+every cash commit: a cash change that moves a loan figure is wrong.
 
 **Verified for cash, independently of the producers under test:** the fold reproduces the app's own
 persisted double-entry ledger to the cent on both accounts carrying postings (Checking `$2,824.26`
@@ -139,16 +140,20 @@ what the records say, and an unexplained difference becomes a recorded, categori
 **Fact 2 is why the reset cannot simply be deleted, and ruling R-FL carries the measurement that
 says so.** The steps that remain are cards in the tracker, and their order is the board's.
 
-### 3.4 The amount model (ruling R-FI)
+### 3.4 The amount model (ruling R-FI), as it was argued
 
-**What the amount model is about, in one sentence: the app stores five amounts it also computes,
-and each one grew its own private repair mechanism.** Salary income is repaired at READ time by
-`income_service.live_projected_net`, which writes nothing back (**N-224**); a loan-payment shadow by
+*The argument as the amount model's steps carried it, 2026-08-11 to 2026-09-02. The four repair
+mechanisms it names are gone: `row_valuation.py`, `transfer_service/_create.py` and
+`recurrence_engine/_amounts.py` each say where.*
+
+**What the amount model was about, in one sentence: the app stored five amounts it also computed,
+and each one grew its own private repair mechanism.** Salary income was repaired at READ time by
+`income_service.live_projected_net`, which wrote nothing back (**N-224**); a loan-payment shadow by
 `cash_ledger.LoanPricing.live_cash`, which also read the wall clock until `X-au-g-2b` (**N-40**); a
 transfer shadow by a two-line copy in `transfer_service.update_transfer` beside a drift corrector
-that logs `"Correcting shadow %d estimated_amount drift"`; an ordinary template row by
-`regenerate_for_template`, which DELETES and recreates every non-override row from a date the form
-supplies and never stores. `credit_card:CC4b` planned a fifth (re-minted 2026-09-18 as `CC-6`, which prices through the resolver). **R-FI deletes the class**: a derived
+that logged `"Correcting shadow %d estimated_amount drift"`; an ordinary template row by
+`regenerate_for_template`, which DELETED and recreated every non-override row from a date the form
+supplied and never stored. `credit_card:CC4b` planned a fifth (re-minted 2026-09-18 as `CC-6`, which prices through the resolver). **R-FI deletes the class**: a derived
 amount is not stored, one total resolver answers, and the CHECK makes a stale derived figure
 unrepresentable rather than merely unlikely.
 

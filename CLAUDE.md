@@ -166,11 +166,11 @@ root; never silence it with a bare disable.
   (R-BAL363); a change that writes no line of a done file may not change what `dev` and `main`
   together say of that card (R-BAL385, R-BAL390); a pull request from `card/N` is refused while a
   task under N that was not dropped lacks its file; and a change to what production runs must add,
-  delete or change a done file, from any branch, a release or a resync passing only with the done
-  files it carries (R-BAL362): the files the image holds, read from `.dockerignore`, which lists
-  exactly what production runs (R-BAL364), and the `Dockerfile`, `docker-compose.yml`, `deploy/`
-  (its `README.md` files excepted) and the workflow that builds and signs the image (R-BAL400,
-  R-BAL401). Its module docstring states every rule.
+  delete or change a card's done file, from any branch, a release or a resync passing only with the
+  done files it carries (R-BAL362): the files the image holds, read from `.dockerignore` (which
+  R-BAL364 trimmed to the files production runs), and the `Dockerfile`, `docker-compose.yml`,
+  `deploy/` (its `README.md` files excepted) and the workflow that builds and signs the image
+  (R-BAL400, R-BAL401). Its module docstring states every rule.
 - **Archived documents** (`tools/ci/archive.py`): every document under an `archive/` or
   `historical/` directory opens with the `> **ARCHIVED.` banner, and CI refuses one that does not.
 - **Judgment the linters cannot mechanize** (float-on-money boundaries, IDOR, transfer invariants,

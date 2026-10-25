@@ -196,4 +196,5 @@ requires a new batch to start after the latest existing `end_date`, so `latest_e
 accepted and leaves a gap -- and registration bootstraps a 14-day period 0 that any later real
 schedule starts after. `place()` answers "no period" and the composition REPORTS the unplaced
 occurrence; generation LOGS it and skips it (ruled 2026-08-08, built at R4b-2, row D7 closed).
-Closing the WRITER that permits a gapped batch is finding F-10.
+Closing the WRITER that permits a gapped batch is finding F-10, which is the pay calendar arc's P2:
+one defect under two ids.

@@ -12,9 +12,9 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit as _commit
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV, tracking
 from tools.quill import _git
 from tools.quill._fake import FailOnce, FakeTracker, claim, leaf_filing, run, ship
 from tools.quill._tracker import Child
@@ -175,13 +175,14 @@ def test_the_refusal_offers_no_drop_of_a_shipped_leaf(code, tmp_path, capsys):
 
 def test_a_finding_is_filed_under_a_claimed_step(code):
     """Only a step splits: a finding owned by a claimed step decides nothing about its
-    split (R-BAL177), so it is filed."""
+    split (R-BAL177; blocked by it, no sub-issue of it, R-BAL395), so it is filed."""
     tracker = FakeTracker()
     tracker.add(1)
     _claimed_by_a_race(code, 1)
     assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Off by one",
                "--owner", "plan#1", "--text", "The total is one cent short.") == 0
-    assert tracker.cards_by_number[2].parent == 1 and tracker.cards_by_number[2].kind == "finding"
+    finding = tracker.cards_by_number[2]
+    assert (finding.kind, finding.parent, finding.blocked_by) == ("finding", None, (1,))
 
 
 def test_sync_reports_a_claim_on_a_split_step_until_it_is_released(code, tmp_path, capsys):

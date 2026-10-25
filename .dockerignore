@@ -36,6 +36,13 @@
 # Everything else listed below is dev-time tooling, host-side ops
 # scripts, build context noise, or documentation -- none of which is
 # referenced from inside the container.
+#
+# This file is also the one list of what production runs (ruling
+# R-BAL364): CI's write rule refuses a change to any file the image
+# holds unless the change records a plan card (ruling R-BAL362,
+# tools/quill/landing.py, which reads this file with Docker's own
+# rules), so a file production never runs is excluded here, never
+# left in.
 
 # ── Version control ────────────────────────────────────────────────
 .git
@@ -81,10 +88,27 @@ pytest.ini
 conftest.py
 
 # ── Dev-only toolchain configs ─────────────────────────────────────
+# Read by the linters, pre-commit and CI on the host; nothing in the
+# container runs a linter.
 requirements-dev.txt
 .pylintrc
 .markdownlint.json
 .rumdl.toml
+.djlint_rules.yaml
+.djlintrc
+.gitleaks.toml
+.hadolint.yaml
+.pre-commit-config.yaml
+.shellcheckrc
+.yamllint
+_typos.toml
+biome.jsonc
+
+# ── The repository's own tools ─────────────────────────────────────
+# tools/ (quill, the CI checks, the release tool, the rehearsal kit)
+# runs on the host and in CI; app/, migrations/ and scripts/ import
+# none of it (ruling R-BAL364).
+tools/
 
 # ── Logs & ephemeral state ─────────────────────────────────────────
 # logs/ is a host-side directory used by deploy/backup scripts.  The
@@ -103,9 +127,10 @@ state/
 # docs/ holds runbooks, audit reports, plans, and design docs -- all
 # operator-facing content.  The host-side checkout retains all of it
 # for the operator; the runtime container does not need any of it.
-# Top-level *.md files are the same story.
+# Top-level *.md files and the LICENSE are the same story.
 docs/
 *.md
+LICENSE
 
 # ── Ship markers ───────────────────────────────────────────────────
 # plan/ships/<N> records that card N of the plan tracker shipped
@@ -160,7 +185,7 @@ amortization-fix.patch
 .worktrees/
 
 # ── Dev-only scripts ───────────────────────────────────────────────
-# scripts/ is mostly runtime-essential; entrypoint.sh runs five of
+# scripts/ is mostly runtime-essential; entrypoint.sh runs four of
 # the .py / .sql files at container start and the runbook documents
 # many ``docker exec ... python scripts/...`` invocations.  Only the
 # strictly host-only or build-time scripts are excluded here.
@@ -183,6 +208,20 @@ amortization-fix.patch
 #                 host before ``docker compose up`` -- never executed
 #                 inside the container.  Audit finding F-154 / Commit
 #                 C-37.
+# scripts/reconcile_prod_to_canonical.sh, _backup_lib.sh,
+# scripts/_container_lib.sh
+#                 Host-side too: the one-shot production reconcile,
+#                 and the helpers the backup family and
+#                 deploy/shekel-deploy.sh source on the host.
+# scripts/test.sh, build_test_db_image.py, build_test_template.py,
+# scripts/private_cluster.py, prune_test_db_images.py,
+# scripts/migration_chain.py
+#                 The test suite's wrapper, its database image and
+#                 per-run clusters, and the migration-id parser they
+#                 and tools/release read: developer and CI only.
+# scripts/check_tax_law.py
+#                 The tax-law alarm's command line, run by CI's and
+#                 the image publish's tax-law jobs on the runner.
 scripts/audit/
 scripts/hooks/
 scripts/vendor_google_fonts.py
@@ -194,3 +233,13 @@ scripts/verify_backup.sh
 scripts/deploy.sh
 scripts/retire_stale_containers.sh
 scripts/generate_pg_cert.sh
+scripts/reconcile_prod_to_canonical.sh
+scripts/_backup_lib.sh
+scripts/_container_lib.sh
+scripts/test.sh
+scripts/build_test_db_image.py
+scripts/build_test_template.py
+scripts/private_cluster.py
+scripts/prune_test_db_images.py
+scripts/migration_chain.py
+scripts/check_tax_law.py

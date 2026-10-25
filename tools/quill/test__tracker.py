@@ -6,7 +6,9 @@ R-BAL202's filing mark, every create carrying it) by a session that ran every
 cards #11-#25 (``_recorded.Recorder``, which writes to scratch cards only and
 redacts every other card's text); ``recorded/label_missing.json`` was kept the
 same evening, before the mark's label existed; ``recorded/comments.json`` was kept
-2026-10-06 20:23 EDT, after the App's rename, on scratch cards #28-#30.
+2026-10-06 20:23 EDT, after the App's rename, on scratch cards #28-#30;
+``recorded/blocking.json`` and ``recorded/show.json`` were kept 2026-10-24 on the
+throwaway ``plan-views-demo`` (R-BAL395), on scratch cards #220-#222 and #223-#228.
 These tests replay them (``_recorded.Replay``), which answers only a request
 it recorded, in the order recorded.  Nothing here calls GitHub.  A query whose
 text changes no longer matches its recording: re-record it, never edit an
@@ -30,12 +32,14 @@ from tools.quill._recorded import (
     REDACTED,
     SCRATCH,
     Replay,
+    Scratch,
     recording,
 )
 from tools.quill._state import filing_unfinished
 from tools.quill._tracker import (
     BOARD_WAIT_SECONDS,
     Board,
+    Child,
     Comment,
     OutsideLink,
     Tracker,
@@ -608,9 +612,9 @@ def test_an_unlink_of_a_card_not_linked_is_refused_and_a_closed_parent_is_not_wh
 
 #: The App's login as the comments recording holds it: kept after the App's rename (R-BAL227).
 QUILL = "shekel-quill"
-#: The scratch cards the comments recording filed: step S, the finding C linked under it, and
-#: the step B blocking it.
-S, C, B = 28, 29, 30
+#: The scratch cards the comments recording filed: step S, the finding C linked under it (and
+#: the step #30 blocking S, which the show recording's test replaced, R-BAL395).
+S, C = 28, 29
 
 
 def _comments_recording():
@@ -694,67 +698,99 @@ def test_edits_are_read_page_by_page_and_the_text_is_the_last_pages():
         node["id"] for node in sorted(nodes, key=lambda node: node["editedAt"])]
 
 
-def test_show_over_the_recording_prints_its_links_titles_and_its_comments(code, capsys):
-    """The ``quill show plan#28`` the recording session ran, replayed: every read show makes
-    of the tracker, in its order, answered as GitHub answered it, and nothing written --
-    #28 by number; its child #29 and its blocker #30 in ONE read by number, for their
-    titles; the board; its text; its comments.  Whether it shipped, its claim and its
-    marker's history are git's (``code``: no marker, no ``card/28``), not the tracker's."""
-    tracker, replay = _comments_recording()
-    assert quill.main(["show", f"plan#{S}"], connect=lambda: tracker, root=code) == 0
+#: The scratch cards the show recording filed on the throwaway plan-views-demo, 2026-10-24
+#: (R-BAL395): step SS with the task ST under it, the finding SF and the ruling SR it owns
+#: (each blocked by it), the step SB blocking it and the step SW waiting on it.
+SS, ST, SF, SR, SB, SW = 223, 224, 225, 226, 227, 228
+
+
+def _show_line(name, kind):
+    """A scratch card's title in the show recording."""
+    return f"{SCRATCH} show {name} ({kind}), R-BAL395"
+
+
+def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_comments(
+        code, capsys):
+    """The ``quill show`` of a step and of the finding it owns, recorded 2026-10-24 12:04 EDT
+    on the throwaway plan-views-demo (``recorded/show.json``, R-BAL395), replayed: every read
+    show makes of the tracker, in its order, answered as GitHub answered it, and nothing
+    written.  The step: by number; its blocking read, which lists the finding, the ruling and
+    the step waiting on it; its task, its blocker and the two cards it owns in ONE read by
+    number, for their titles -- never the waiting step, which is no card it owns; the board;
+    its text; its comments.  The finding: by number; its owner, its one blocker, in one read;
+    the board; its text; its comments.  Whether either shipped, its claim and its marker's
+    history are git's (``code``: no marker, no ``card/N``), not the tracker's."""
+    replay = Replay("show")
+    scratch = Scratch.from_json(recording("show")["scratch"])
+    github = GitHub("token", replay)
+    tracker = Tracker(github, Board(github, scratch.place, scratch.board), APP)
+    assert quill.main(["show", f"plan#{SS}"], connect=lambda: tracker, root=code) == 0
     assert capsys.readouterr().out == (
-        f"plan#{S} [step, balance] {SCRATCH} step S, its comments read by the recorder "
-        "(delete me)\n"
+        f"plan#{SS} [step, no arc] {_show_line('S', 'step')}\n"
         "  state: open\n"
         "  shipped (git): no\n"
         "  board: not on it\n"
         "  claim: none\n"
         "  parent: none\n"
-        f"  child: plan#{C} (finding, open) {SCRATCH} finding C under step S, by the "
-        "recorder (delete me)\n"
-        f"  blocked by: plan#{B} {SCRATCH} step B blocking step S, by the recorder "
-        "(delete me)\n"
+        f"  child: plan#{ST} (task, open; done (git): no) {_show_line('T', 'task')}\n"
+        f"  blocked by: plan#{SB} {_show_line('B', 'step')}\n"
+        f"  owns: plan#{SF} (finding, open) {_show_line('F', 'finding')}\n"
+        f"  owns: plan#{SR} (ruling, closed) {_show_line('R', 'ruling')}\n"
         "\n"
-        "The recorder files this step to record a card's comments and quill show.\n"
+        "THROWAWAY recording of quill show, card S; deleted after.\n"
         "\n"
-        f"== comment, 2026-10-07T00:23:24Z by {QUILL}\n"
-        "A first comment the recorder posts.\n"
-        f"== comment, 2026-10-07T00:23:24Z by {QUILL}\n"
-        "A second comment, on two lines:\n"
-        "the recorder posts it too.\n"
+        "== comment, 2026-10-24T16:04:50Z by SaltyReformed\n"
+        "A comment the recorder posts on step S.\n"
         "\n"
-        f"no commit on origin/dev or origin/main adds, changes or deletes plan/ships/{S}\n")
-    repo = f"/repos/{TRACKER}"
+        f"no commit on origin/dev or origin/main adds, changes or deletes plan/ships/{SS}\n")
+    assert quill.main(["show", f"plan#{SF}"], connect=lambda: tracker, root=code) == 0
+    assert capsys.readouterr().out == (
+        f"plan#{SF} [finding, no arc] {_show_line('F', 'finding')}\n"
+        "  state: open\n"
+        "  shipped (git): no\n"
+        "  board: not on it\n"
+        "  claim: none\n"
+        "  parent: none\n"
+        f"  owner (blocked by): plan#{SS} {_show_line('S', 'step')}\n"
+        "\n"
+        "THROWAWAY recording of quill show, card F; deleted after.\n"
+        "\n"
+        "no comments\n"
+        "\n"
+        f"no commit on origin/dev or origin/main adds, changes or deletes plan/ships/{SF}\n")
+    assert replay.unused() == 0
+    repo = f"/repos/{scratch.place.full_name}"
     assert [(method, url.removeprefix("https://api.github.com"))
             for method, url, _ in replay.sent] == [
+        ("POST", "/graphql"), ("POST", "/graphql"), ("POST", "/graphql"), ("POST", "/graphql"),
+        ("GET", f"{repo}/issues/{SS}"), ("POST", "/graphql"),
         ("POST", "/graphql"), ("POST", "/graphql"), ("POST", "/graphql"),
-        ("GET", f"{repo}/issues/{S}"), ("POST", "/graphql")]
+        ("GET", f"{repo}/issues/{SF}"), ("POST", "/graphql")]
     queries = [str((body or {}).get("query", "")) for _, _, body in replay.sent]
     assert not any("mutation" in query for query in queries)
-    assert f"c{S}: issue" in queries[0] and f"c{C}: issue" not in queries[0]
-    assert f"c{C}: issue" in queries[1] and f"c{B}: issue" in queries[1]
-    assert "ProjectV2" in queries[2] and "comments(first" in queries[4]
+    assert f"c{SS}: issue" in queries[0] and "blocking(first" in queries[1]
+    assert [number for number in (ST, SF, SR, SB, SW) if f"c{number}: issue" in queries[2]] == [
+        ST, SF, SR, SB]
+    assert "ProjectV2" in queries[3] and "comments(first" in queries[5]
+    assert f"c{SF}: issue" in queries[6] and f"c{SS}: issue" in queries[7]
+    assert "ProjectV2" in queries[8] and "comments(first" in queries[10]
 
 
-class _Markdown:
-    """GitHub's Markdown API: every text asked, answered as HTML."""
-
-    def __init__(self):
-        """Nothing asked yet."""
-        self.sent = []
-
-    def rest_text(self, method, path, body=None):
-        """Remember the request; answer it."""
-        self.sent.append((method, path, body))
-        return '<p dir="auto">rendered</p>'
-
-
-def test_a_render_asks_githubs_markdown_api_in_gfm_mode_in_the_trackers_context():
-    """R-BAL355's grade: the text goes to ``POST /markdown`` as a card's comment renders
-    (``gfm``), the tracker as context so ``#N`` links its card N, and GitHub's HTML comes
-    back as it is."""
-    github = _Markdown()
-    tracker = Tracker(github, Board(github, PLAN, "B"), APP)
-    assert tracker.render("see #2") == '<p dir="auto">rendered</p>'
-    assert github.sent == [("POST", "/markdown", {"text": "see #2", "mode": "gfm",
-                                                  "context": TRACKER})]
+def test_a_steps_blocking_read_lists_the_findings_and_rulings_it_owns():
+    """R-BAL395, recorded on the throwaway plan-views-demo (``recorded/blocking.json``): an
+    open finding and a ruling closed after its link, each blocked by a step.  Each is read
+    with that step as its one blocker and no parent, and the step with no sub-issue; the
+    step's own read lists both, each with its type and state, the newest link first, the
+    closed one too."""
+    replay = Replay("blocking")
+    place = Scratch.from_json(recording("blocking")["scratch"]).place
+    github = GitHub("token", replay)
+    tracker = Tracker(github, Board(github, place, "none"), APP)
+    cards = tracker.cards([220, 221, 222])
+    step, finding, ruling = cards[220], cards[221], cards[222]
+    assert (step.kind, step.children, step.blocked_by) == ("step", (), ())
+    assert [(card.kind, card.is_open, card.parent, card.blocked_by)
+            for card in (finding, ruling)] == [("finding", True, None, (220,)),
+                                               ("ruling", False, None, (220,))]
+    assert tracker.blocking(220) == (Child(222, "ruling", False), Child(221, "finding", True))
+    assert replay.unused() == 0

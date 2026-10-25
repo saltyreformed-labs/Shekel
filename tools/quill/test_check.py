@@ -12,11 +12,9 @@ from tools.quill.check import (
     TITLE_CAP,
     Draft,
     Owner,
-    card_title,
     in_ruling_shape,
     ruling_body,
     ruling_question,
-    title_alias,
     violations,
 )
 
@@ -81,21 +79,22 @@ def test_a_title_written_is_a_short_name_of_at_most_100_characters():
 
 
 @pytest.mark.parametrize(("owner", "said"), [
-    (None, "its parent is none"),
-    (Owner("finding", True), "its parent is finding"),
-    (Owner("step", False), "its parent is a step that is done"),
+    (None, "its owner is none"),
+    (Owner("finding", True), "its owner is finding"),
+    (Owner("step", False), "its owner is a step that is done"),
 ])
 def test_a_finding_set_under_an_owner_needs_a_live_step(owner, said):
-    """R-BAL177: the owner is the parent; a finding names a LIVE owner."""
+    """R-BAL395: the owner is the step it is blocked by, never its parent; a finding names a
+    LIVE owner."""
     (problem,) = violations(_finding(owner=owner), {OWNER})
-    assert problem.endswith(said) and "LIVE step" in problem
+    assert problem.endswith(said) and "blocked by a LIVE step, its owner (R-BAL395)" in problem
 
 
 def test_a_ruling_set_under_an_owner_needs_a_step_done_or_not():
     """A ruling outlives the step that asked it, so its owner may be done."""
     assert not violations(_ruling(owner=Owner("step", False)), {OWNER})
     (problem,) = violations(_ruling(owner=None), {OWNER})
-    assert problem.endswith("its parent is none")
+    assert problem == "a ruling is blocked by a step, its owner (R-BAL395); its owner is none"
 
 
 def test_the_owner_is_graded_only_when_the_change_sets_it():
@@ -248,7 +247,7 @@ def test_a_card_under_a_parent_with_no_type_is_refused_never_read_as_having_none
         "a step's parent is the step it splits; its parent is a card with no type"]
     for draft in (_finding(owner=untyped), _ruling(owner=untyped)):
         (problem,) = violations(draft, {OWNER})
-        assert problem.endswith("its parent is a card with no type")
+        assert problem.endswith("its owner is a card with no type")
     assert not violations(Draft("step", "top", "", ("balance",)))
 
 
@@ -259,16 +258,49 @@ def test_in_ruling_shape_needs_both_marks():
         assert not in_ruling_shape(body), body
 
 
-@pytest.mark.parametrize("alias", ["X-bi-6-4d", "N-391 question", "R-BAL80", "A"])
-def test_a_migrated_title_gives_back_the_alias_it_was_written_with(alias):
-    """X-cx's migration finds an item's card by the alias its title carries (L7 draft 4
-    s.4); one with a space in it (``N-391 question``) included."""
-    assert title_alias(card_title(alias, "A short name")) == alias
+def _task(**changes):
+    """A task that passes every rule (R-BAL386), with ``changes`` applied."""
+    fields = {"kind": "task", "title": "4d-4a: the links' migration", "body": "The migration.",
+              "labels": (), "owner": Owner("step", True)}
+    return Draft(**{**fields, **changes})
 
 
-@pytest.mark.parametrize("title", ["X-cx move the plan", "[X-cx]move", "[] name", "[a]b] name",
-                                   " [A] name", "[A]"])
-def test_a_title_carrying_no_alias_mark_gives_none(title):
-    """No mark first, no space after it, an empty one, a ``]`` inside it, a space before it,
-    nothing after it: none is :func:`card_title`'s shape."""
-    assert title_alias(title) is None
+@pytest.mark.parametrize("owner", [Owner("step", True), Owner("finding", True)])
+def test_a_task_under_a_live_piece_of_work_carrying_no_arc_passes(owner):
+    """R-BAL386: a task is a piece of one step or finding, still work, and carries no arc
+    label, its arc being its card's (rule 14); the filing mark and a release label are no
+    arc."""
+    assert not violations(_task(owner=owner))
+    assert not violations(_task(owner=owner, labels=("filing", "moves-money")))
+
+
+def test_a_task_carrying_an_arc_label_is_refused_whatever_the_change():
+    """An arc on a task is a second home for its card's arc."""
+    (problem,) = violations(_task(labels=("balance",)), LABELS_ONLY)
+    assert problem == "a task carries no arc label: its arc is its card's; it has ['balance']"
+
+
+@pytest.mark.parametrize(("owner", "said"), [
+    (None, "none"),
+    (Owner(None, True), "a card with no type"),
+    (Owner("step", False), "a step that is done"),
+    (Owner("finding", False), "a finding that is done"),
+    (Owner("ruling", False), "ruling"),
+    (Owner("question", True), "question"),
+    (Owner("task", True), "task"),
+])
+def test_a_task_set_under_a_parent_needs_a_live_step_or_finding(owner, said):
+    """A task under no card, a card of no type, work that is done, or a card that is no work
+    is refused: no change ships its card, so it is never done."""
+    assert violations(_task(owner=owner)) == [
+        "a task is a sub-issue of a LIVE step or finding, the piece of work it is part of "
+        f"(R-BAL386); its parent is {said}"]
+    assert not violations(_task(owner=owner), {TITLE, BODY})
+
+
+def test_a_tasks_title_is_held_as_any_cards_is():
+    """R-BAL178 and R-BAL180 hold a task's title too, when the change writes it."""
+    assert violations(_task(title=" "), {TITLE}) == ["its title is a short name, and it has none"]
+    assert violations(_task(title="t" * (TITLE_CAP + 1)), {TITLE}) == [
+        f"its title is a short name of at most {TITLE_CAP} characters; it is {TITLE_CAP + 1}"]
+    assert not violations(_task(title="t" * (TITLE_CAP + 1)), LABELS_ONLY)

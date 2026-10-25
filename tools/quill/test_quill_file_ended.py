@@ -1,7 +1,7 @@
 """Filings that ended, X-cx L2's leaf C (applications of ruling ``balance:R-BAL207``, recorded
 beside R-BAL202..R-BAL206): ``quill file`` run again writes nothing over a filing an earlier
-run made -- a card still marked is found in any state, and a ruling among its owner's
-sub-issues -- and never files over one a decision ended; and a leaf closed while still
+run made -- a card still marked is found in any state, and a ruling among the cards its
+owner blocks (R-BAL395) -- and never files over one a decision ended; and a leaf closed while still
 marked is no leaf of its split step, unless git says it shipped (``_state.leaves``) -- and,
 leaf C2, ``sync`` unlinks it, putting a split step it leaves bare back on the board
 (R-BAL205, ``_state.unsplit``).  Over
@@ -30,8 +30,9 @@ def _closed_by_hand(tracker, number, reason="COMPLETED"):
 
 
 def _rulings(tracker):
-    """Every ruling card: (number, parent, open, marked)."""
-    return [(card.number, card.parent, card.is_open, FILING in card.labels)
+    """Every ruling card: (number, parent, the cards it is blocked by -- its owner,
+    R-BAL395 -- open, marked)."""
+    return [(card.number, card.parent, card.blocked_by, card.is_open, FILING in card.labels)
             for card in tracker.cards_by_number.values() if card.kind == "ruling"]
 
 
@@ -40,7 +41,7 @@ def _rulings(tracker):
 def test_a_finished_rulings_command_run_again_writes_nothing(code, tmp_path, capsys):
     """Review rbal202b M1 probe 3: a finished ruling is closed and unmarked, so neither the
     open listing nor the marked one holds it, and the plain repeat filed a second ruling;
-    it is found among its owner's sub-issues."""
+    it is found among the cards its owner blocks (R-BAL395)."""
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 0
@@ -49,7 +50,7 @@ def test_a_finished_rulings_command_run_again_writes_nothing(code, tmp_path, cap
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 0
     assert tracker.writes == writes
     assert capsys.readouterr().out.startswith("plan#2 [ruling, balance] Home is filed already")
-    assert _rulings(tracker) == [(2, 1, False, False)]
+    assert _rulings(tracker) == [(2, None, (1,), False, False)]
 
 
 def test_a_ruling_whose_unmark_landed_but_lost_its_answer_is_not_filed_again(code, tmp_path):
@@ -59,10 +60,10 @@ def test_a_ruling_whose_unmark_landed_but_lost_its_answer_is_not_filed_again(cod
     tracker.add(1)
     AnswerLostOnce(tracker, "unmark")
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 2
-    assert _rulings(tracker) == [(2, 1, False, False)]
+    assert _rulings(tracker) == [(2, None, (1,), False, False)]
     writes = list(tracker.writes)
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 0
-    assert tracker.writes == writes and _rulings(tracker) == [(2, 1, False, False)]
+    assert tracker.writes == writes and _rulings(tracker) == [(2, None, (1,), False, False)]
 
 
 def test_a_ruling_whose_mark_was_removed_mid_filing_is_not_filed_again(code, tmp_path, capsys):
@@ -84,7 +85,7 @@ def test_a_ruling_whose_mark_was_removed_mid_filing_is_not_filed_again(code, tmp
     assert "Label does not exist" in capsys.readouterr().err
     writes = list(tracker.writes)
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 0
-    assert tracker.writes == writes and _rulings(tracker) == [(2, 1, False, False)]
+    assert tracker.writes == writes and _rulings(tracker) == [(2, None, (1,), False, False)]
 
 
 def test_a_withdrawn_ruling_is_never_filed_over_until_a_person_restores_it(code, tmp_path,
@@ -105,16 +106,16 @@ def test_a_withdrawn_ruling_is_never_filed_over_until_a_person_restores_it(code,
     assert tracker.writes == writes
     _closed_by_hand(tracker, 2, "COMPLETED")
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 0
-    assert tracker.writes == writes and _rulings(tracker) == [(2, 1, False, False)]
+    assert tracker.writes == writes and _rulings(tracker) == [(2, None, (1,), False, False)]
 
 
 def test_a_ruling_withdrawn_before_its_link_landed_is_found_by_its_mark(code, tmp_path, capsys):
-    """A ruling whose link failed is under no owner; withdrawn on the web, it is still
+    """A ruling whose link failed is blocked by no owner; withdrawn on the web, it is still
     marked, so the marked listing holds it and the re-run refuses; restored, the same
     command finishes it -- linked, closed already, unmarked -- with no second ruling."""
     tracker = FakeTracker()
     tracker.add(1)
-    FailOnce(tracker, "add_child")
+    FailOnce(tracker, "block")
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 2
     _closed_by_hand(tracker, 2, "NOT_PLANNED")
     writes = list(tracker.writes)
@@ -125,8 +126,8 @@ def test_a_ruling_withdrawn_before_its_link_landed_is_found_by_its_mark(code, tm
     assert tracker.writes == writes
     _closed_by_hand(tracker, 2, "COMPLETED")
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 0
-    assert tracker.writes[len(writes):] == [("add_child", 1, 2), ("unmark", 2)]
-    assert _rulings(tracker) == [(2, 1, False, False)]
+    assert tracker.writes[len(writes):] == [("block", 2, 1), ("unmark", 2)]
+    assert _rulings(tracker) == [(2, None, (1,), False, False)]
 
 
 def test_a_withdrawn_extra_never_hides_the_ruling_that_stands(code, tmp_path, capsys):
@@ -135,9 +136,9 @@ def test_a_withdrawn_extra_never_hides_the_ruling_that_stands(code, tmp_path, ca
     for a closed one is a close as not planned, which `quill drop` cannot make."""
     body = ruling_body("Where?", "Here.")
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "ruling", False), Child(3, "ruling", False)))
+    tracker.add(1)
     for number in (2, 3):
-        tracker.add(number, "ruling", body=body, title="Home", parent=1, is_open=False,
+        tracker.add(number, "ruling", body=body, title="Home", blocked_by=(1,), is_open=False,
                     state_reason="COMPLETED", closed_by_tool=True)
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 1
     assert ("2 cards have this kind, title and text (plan#2, plan#3): withdraw the extras -- "
@@ -151,15 +152,15 @@ def test_a_withdrawn_extra_never_hides_the_ruling_that_stands(code, tmp_path, ca
 
 def test_a_ruling_a_person_moved_under_another_owner_is_not_found(code, tmp_path):
     """The one place the ruling search does not reach (``_same_filing``): a closed ruling a
-    person re-homed is under no owner this command names, so the command files one under
+    person re-homed is blocked by no owner this command names, so the command files one for
     the owner it names."""
     tracker = FakeTracker()
     tracker.add(1)
-    tracker.add(5, children=(Child(2, "ruling", False),))
-    tracker.add(2, "ruling", body=ruling_body("Where?", "Here."), title="Home", parent=5,
+    tracker.add(5)
+    tracker.add(2, "ruling", body=ruling_body("Where?", "Here."), title="Home", blocked_by=(5,),
                 is_open=False, state_reason="COMPLETED", closed_by_tool=True)
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 0
-    assert _rulings(tracker) == [(2, 5, False, False), (6, 1, False, False)]
+    assert _rulings(tracker) == [(2, None, (5,), False, False), (6, None, (1,), False, False)]
 
 
 def test_a_card_dropped_while_its_command_ran_is_never_filed_over(code, tmp_path, capsys,
@@ -409,8 +410,8 @@ def test_a_withdrawn_ruling_is_refused_as_withdrawn_whatever_its_labels(code, tm
 
 def test_a_finding_closed_after_its_filing_finished_is_filed_anew(code):
     """The boundary ``_same_filing`` states (review LOW 4, P6): only a card still marked,
-    or a ruling under its owner, is looked for among closed cards; a finding dropped after
-    its filing finished is not, and the same command files another."""
+    or a ruling blocked by its owner (R-BAL395), is looked for among closed cards; a
+    finding dropped after its filing finished is not, and the same command files another."""
     args = ("file", "finding", "--arc", "balance", "--title", "Twice", "--owner", "plan#1",
             "--text", "The report counts a refund twice.")
     tracker = FakeTracker()

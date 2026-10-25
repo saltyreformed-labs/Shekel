@@ -3,9 +3,8 @@ listing of cards, a card's histories, and the board's order and links.
 
 What pins each text: the recordings (``_recorded.Replay``) replay most of them word for
 word, so a change to one no longer matches its recording: re-record it, never edit an
-answer by hand.  Two no recording holds: :func:`all_cards` (its milestone is graded by
-``test__tracker_place.py``) and :data:`BARE_CARD_FIELDS` (graded against the recorded
-lookup, less its board items, by ``test__tracker_card_reader.py``).
+answer by hand.  One no recording holds: :data:`BARE_CARD_FIELDS` (graded against the
+recorded lookup, less its board items, by ``test__tracker_card_reader.py``).
 
 Split out of :mod:`_tracker`, which sends them and reads their answers, at X-cx L9d's
 card-only reader, whose change would otherwise take that module past the 1,000 lines
@@ -71,23 +70,6 @@ def marked_cards(place: Place) -> str:
 COMMENT_FIELDS = "author { login } createdAt body"
 
 
-def all_cards(place: Place) -> str:
-    """The listing of every card of ``place``, open and closed, each with its body, its
-    milestone's number and its first hundred comments (and how many it has).
-
-    Only X-cx's migration reads it, and only it reads a milestone (L7 draft 4 s.12): the
-    milestone is selected HERE, not in :data:`CARD_FIELDS`, which every other query
-    selects and whose text the recordings replay word for word."""
-    return (
-        """query($after: String) { repository(owner: "%s", name: "%s") {
-  issues(first: 100, after: $after, states: [OPEN, CLOSED]) {
-    pageInfo { hasNextPage endCursor } nodes { %s body
-      milestone { number }
-      comments(first: 100) { totalCount nodes { %s } } } } } }"""
-        % (place.owner, place.name, CARD_FIELDS, COMMENT_FIELDS)
-    )
-
-
 #: The board's cards in their drag order, a page at a time (:meth:`_tracker.Board.order`).
 BOARD_ORDER = """query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {
   items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {
@@ -111,6 +93,20 @@ def edits(place: Place) -> str:
       pageInfo { hasNextPage endCursor }
       nodes { %s } } } } }"""
         % (place.owner, place.name, EDIT_FIELDS)
+    )
+
+
+def blocking(place: Place) -> str:
+    """The read of the cards one card blocks, each with its state and type (ruling
+    ``balance:R-BAL395``: a step's are the findings and rulings it owns, beside any card
+    waiting on it).  Its own read, never a field of every card's: only ``quill show`` and a
+    ruling's filing run again ask it."""
+    return (
+        """query($number: Int!) { repository(owner: "%s", name: "%s") {
+  issue(number: $number) { number
+    blocking(first: 100) { totalCount nodes {
+      number state issueType { name } repository { nameWithOwner } } } } } }"""
+        % (place.owner, place.name)
     )
 
 

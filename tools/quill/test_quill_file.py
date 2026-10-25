@@ -29,15 +29,18 @@ def test_a_finding_that_fails_the_check_writes_nothing(code, capsys):
 
 
 def test_a_finding_is_filed_under_its_owner_and_kept_off_the_board(code):
-    """R-BAL177: findings are listed on their owner's card, not in the order; R-BAL202: it
-    is created marked, and the mark comes off last."""
+    """R-BAL177: findings are listed on their owner's card, not in the order; R-BAL395: as
+    blocked by it, never its sub-issue; R-BAL202: it is created marked, and the mark comes
+    off last."""
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Twice",
                 "--owner", "plan#1", "--text", "The report counts a refund twice.") == 0
     assert tracker.writes == [("create", 2, "finding", "Twice", ("balance", FILING)),
-                              ("add_child", 1, 2), ("unmark", 2)]
-    assert tracker.cards_by_number[2].labels == ("balance",)
+                              ("block", 2, 1), ("unmark", 2)]
+    finding = tracker.cards_by_number[2]
+    assert (finding.labels, finding.parent, finding.blocked_by) == (("balance",), None, (1,))
+    assert tracker.cards_by_number[1].children == ()
     assert tracker.board.items == [1]
 
 
@@ -105,8 +108,9 @@ def test_a_ruling_is_filed_closed_under_its_owner(code, tmp_path):
 
 
 def test_an_answered_question_becomes_its_ruling(code, tmp_path, capsys):
-    """One card, so the question's text is never copied (rule 14); run again over the
-    finished ruling, the conversion creates nothing: its question is no open question."""
+    """One card, so the question's text is never copied (rule 14), blocked by its owner and
+    no sub-issue of it (R-BAL395); run again over the finished ruling, the conversion
+    creates nothing: its question is no open question."""
     answer = tmp_path / "a"
     answer.write_text("Yes.")
     tracker = FakeTracker()
@@ -116,7 +120,10 @@ def test_an_answered_question_becomes_its_ruling(code, tmp_path, capsys):
             "--from-question", "plan#2", "--answer-file", str(answer))
     assert run(tracker, code, *args) == 0
     card = tracker.cards_by_number[2]
-    assert (card.kind, card.parent, card.is_open) == ("ruling", 1, False)
+    assert (card.kind, card.parent, card.blocked_by, card.is_open) == ("ruling", None, (1,),
+                                                                       False)
+    assert ("block", 2, 1) in tracker.writes
+    assert tracker.cards_by_number[1].children == ()
     assert tracker.bodies[2] == ruling_body("Ship it tonight?", "Yes.")
     assert tracker.board.items == [1]
     assert not [w for w in tracker.writes if w[0] == "create"]
@@ -182,7 +189,7 @@ def test_splitting_a_blocked_step_offers_no_leaf_until_its_wait_ends(code, tmp_p
 
 
 
-@pytest.mark.parametrize("failing", ["retype", "add_child", "close"])
+@pytest.mark.parametrize("failing", ["retype", "block", "close"])
 def test_a_conversion_cut_short_is_finished_by_the_same_command(code, tmp_path, capsys,
                                                                 failing):
     """R-BAL186 (review M1): each write is printed as it lands, and the retry finishes the
@@ -199,14 +206,16 @@ def test_a_conversion_cut_short_is_finished_by_the_same_command(code, tmp_path, 
     assert "plan#2's body: the question, then the answer" in capsys.readouterr().out
     assert run(tracker, code, *args) == 0
     card = tracker.cards_by_number[2]
-    assert (card.kind, card.parent, card.is_open) == ("ruling", 1, False)
+    assert (card.kind, card.parent, card.blocked_by, card.is_open) == ("ruling", None, (1,),
+                                                                       False)
+    assert tracker.writes.count(("block", 2, 1)) == 1, "the owner link was written once"
     assert tracker.bodies[2] == ruling_body("Ship it tonight?", "Yes.")
     assert len(tracker.versions[2]) == 2, "the body was written once"
     assert tracker.board.items == [1]
 
 
 
-@pytest.mark.parametrize("failing", ["add_child", "close"])
+@pytest.mark.parametrize("failing", ["block", "close"])
 def test_a_ruling_filing_cut_short_is_finished_not_filed_twice(code, tmp_path, failing):
     """R-BAL186 (review M1): the retry filed a second ruling."""
     question, answer = tmp_path / "q", tmp_path / "a"
@@ -220,7 +229,9 @@ def test_a_ruling_filing_cut_short_is_finished_not_filed_twice(code, tmp_path, f
     assert run(tracker, code, *args) == 2
     assert run(tracker, code, *args) == 0
     rulings = [card for card in tracker.cards_by_number.values() if card.kind == "ruling"]
-    assert [(card.number, card.parent, card.is_open) for card in rulings] == [(2, 1, False)]
+    assert [(card.number, card.parent, card.blocked_by, card.is_open)
+            for card in rulings] == [(2, None, (1,), False)]
+    assert tracker.writes.count(("block", 2, 1)) == 1
 
 
 
@@ -247,10 +258,17 @@ def test_a_matching_card_under_another_owner_or_with_other_labels_is_refused_unw
     tracker = FakeTracker()
     tracker.add(1)
     tracker.add(3)
+    twice = ("file", "finding", "--arc", "balance", "--title", "Twice", "--owner", "plan#1",
+             "--text", "The report counts a refund twice.")
+    tracker.add(2, "finding", body="The report counts a refund twice.", title="Twice",
+                blocked_by=(3,))
+    assert run(tracker, code, *twice) == 1
+    assert ("is blocked by plan#3, not only by plan#1, the owner this filing names (R-BAL395)"
+            in capsys.readouterr().err)
     tracker.add(2, "finding", body="The report counts a refund twice.", title="Twice", parent=3)
-    assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Twice",
-               "--owner", "plan#1", "--text", "The report counts a refund twice.") == 1
-    assert "a sub-issue of plan#3, not plan#1" in capsys.readouterr().err
+    assert run(tracker, code, *twice) == 1
+    assert ("is a sub-issue of plan#3, but a finding or ruling is blocked by its owner, plan#1, "
+            "and is no card's sub-issue (R-BAL395)" in capsys.readouterr().err)
     spec = tmp_path / "spec.md"
     spec.write_text("New work.")
     tracker.add(4, body="New work.", title="New", labels=("salary",))
@@ -348,17 +366,23 @@ def test_two_open_cards_with_the_same_kind_title_and_text_are_refused(code, caps
 def test_a_question_already_under_another_step_is_refused_before_any_write(code, tmp_path,
                                                                              capsys):
     """Review M1: the conversion never read the question's parent, so its first writes
-    landed before the sub-issue call could fail."""
+    landed before the sub-issue call could fail.  R-BAL395: a ruling is no card's sub-issue,
+    and is blocked by its owner alone, so either link elsewhere refuses it."""
     answer = tmp_path / "a"
     answer.write_text("Yes.")
     tracker = FakeTracker()
     tracker.add(1)
     tracker.add(3)
+    args = ("file", "ruling", "--arc", "balance", "--title", "Ship", "--owner", "plan#1",
+            "--from-question", "plan#2", "--answer-file", str(answer))
     tracker.add(2, "question", body="Ship it?", title="Ship", parent=3)
-    assert run(tracker, code, "file", "ruling", "--arc", "balance", "--title", "Ship",
-               "--owner", "plan#1", "--from-question", "plan#2",
-               "--answer-file", str(answer)) == 1
-    assert "a sub-issue of plan#3, not plan#1" in capsys.readouterr().err
+    assert run(tracker, code, *args) == 1
+    assert ("is a sub-issue of plan#3, but a finding or ruling is blocked by its owner, plan#1, "
+            "and is no card's sub-issue (R-BAL395)" in capsys.readouterr().err)
+    tracker.add(2, "question", body="Ship it?", title="Ship", blocked_by=(3,))
+    assert run(tracker, code, *args) == 1
+    assert ("is blocked by plan#3, not only by plan#1, the owner this filing names (R-BAL395)"
+            in capsys.readouterr().err)
     assert not tracker.writes
 
 
@@ -380,7 +404,8 @@ def test_a_question_quoting_a_rulings_shape_keeps_every_word_as_its_ruling(code,
                "--owner", "plan#1", "--from-question", "plan#2",
                "--answer-file", str(answer)) == 0
     assert tracker.bodies[2] == ruling_body(asked, "100.")
-    assert tracker.cards([1])[1].children == (Child(2, "ruling", False),)
+    assert tracker.blocking(1) == (Child(2, "ruling", False),)
+    assert tracker.cards([1])[1].children == ()
 
 
 
@@ -388,8 +413,8 @@ def test_an_open_ruling_given_another_answer_is_refused_unwritten(code, tmp_path
     """Review cp3 L-h: a ruling whose close failed, taken as --from-question with a NEW
     answer, had the developer's recorded answer replaced."""
     tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "ruling", True),))
-    tracker.add(2, "ruling", body=ruling_body("Where?", "Here."), title="Home", parent=1)
+    tracker.add(1)
+    tracker.add(2, "ruling", body=ruling_body("Where?", "Here."), title="Home", blocked_by=(1,))
     answer = tmp_path / "a"
     answer.write_text("There.")
     args = ("file", "ruling", "--arc", "balance", "--title", "Home", "--owner", "plan#1",
@@ -631,8 +656,11 @@ def test_a_conversion_a_person_touched_up_is_still_refused(code, tmp_path, capsy
     assert "text is an earlier conversion's" in capsys.readouterr().err
 
 
-def test_a_question_blocked_from_outside_the_tracker_still_becomes_its_ruling(code, tmp_path):
-    """Review cp4b P13: only an outside PARENT re-homes a card; an outside blocker does not."""
+def test_a_question_blocked_from_outside_the_tracker_is_refused_unwritten(code, tmp_path,
+                                                                           capsys):
+    """R-BAL395 turns review cp4b P13 over: a ruling's blocker is its owner, so a question
+    blocked by an issue outside the tracker would become a ruling with a second owner; it is
+    refused before any write, as an outside parent is."""
     answer = tmp_path / "a"
     answer.write_text("Yes.")
     tracker = FakeTracker()
@@ -641,8 +669,11 @@ def test_a_question_blocked_from_outside_the_tracker_still_becomes_its_ruling(co
                 outside=(OutsideLink("blocker", "saltyreformed-labs/Shekel#6"),))
     assert run(tracker, code, "file", "ruling", "--arc", "balance", "--title", "Ship",
                "--owner", "plan#1", "--from-question", "plan#2",
-               "--answer-file", str(answer)) == 0
-    assert tracker.cards_by_number[2].kind == "ruling"
+               "--answer-file", str(answer)) == 1
+    assert ("is blocked by saltyreformed-labs/Shekel#6, outside the tracker, not only by plan#1"
+            in capsys.readouterr().err)
+    assert tracker.cards_by_number[2].kind == "question"
+    assert not tracker.writes
 
 
 def test_a_leaf_whose_move_failed_is_moved_into_its_place_by_the_same_command(code, tmp_path,

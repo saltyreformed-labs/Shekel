@@ -8,7 +8,7 @@ from dataclasses import replace
 
 import pytest
 
-from tools.quill.door import FakeTracker
+from tools.quill.door import FakeTracker, OutsideLink
 from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, FILING
 from tools.release import release
 from tools.release._plan import CLEAN, REFUSED
@@ -185,7 +185,7 @@ def test_an_undo_of_a_marker_production_never_held_names_no_card(repo):
     ship in the same window, the net change names it on neither side, and the release is
     held to no group for it.  (The half this replaces deleted markers never written, which
     changes nothing and could not fail: M3's review, its 6.)  #51 and #52 released; #53 a
-    leaf and #56 a finding under #51, both dropped, each shipped and undone in the window."""
+    leaf and #56 a finding #51 owns, both dropped, each shipped and undone in the window."""
     _, cutover = after_cutover(repo)
     base = pull_request(repo, cutover, ship(51), ship(52))
     cut = pull_request(repo, pull_request(repo, base, ship(53), ship(56)), undo(53), undo(56))
@@ -193,7 +193,7 @@ def test_an_undo_of_a_marker_production_never_held_names_no_card(repo):
     tracker = FakeTracker()
     deploy_group(tracker, leaves=(51, 52, 53))
     tracker.add(56, kind="finding")
-    tracker.add_child(51, tracker.cards_by_number[56])
+    tracker.block(56, tracker.cards_by_number[51])
     tracker.close(53, "not_planned")
     tracker.close(56, "not_planned")
     verdict = judge(repo, base, cut, tracker).verdict
@@ -349,12 +349,12 @@ def test_a_finding_under_a_group_touches_it_and_is_held_to_its_leaves(repo):
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.add(55, kind="finding")
-    tracker.add_child(51, tracker.cards_by_number[55])
+    tracker.block(55, tracker.cards_by_number[51])
     verdict = judge(repo, base, cut, tracker).verdict
     assert verdict.carried.steps[0].groups == ("plan#50",)
     assert verdict.refusals == (
         "it leaves production holding plan#51 of the deploy-together group plan#50 without "
-        "plan#52 (it names plan#55 under plan#51, under the group but no leaf of it); the "
+        "plan#52 (it names plan#55 owned by plan#51, under the group but no leaf of it); the "
         "group ships whole",)
 
 
@@ -369,9 +369,10 @@ def test_a_deploy_together_step_with_no_leaf_is_no_group(repo):
     assert (verdict.carried.steps[0].groups, verdict.carried.groups) == ((), ())
 
 
-def test_a_finding_shipped_into_a_group_production_holds_none_of_is_clean(repo):
-    """#55, a finding under #51, ships before any leaf of group #50: production holds the
-    group wholly out, and a finding is no member of it."""
+def test_a_finding_linked_under_a_group_leaf_but_owned_by_none_touches_no_group(repo):
+    """R-BAL395: a finding's owner is the one step it is blocked by, never a parent.  #55
+    linked under #51 by hand and blocked by nothing has no owner (quill's sync reports it),
+    so it is under no group, and the release shipping it touches none."""
     base, cutover = after_cutover(repo)
     cut = pull_request(repo, cutover, ship(55))
     tracker = FakeTracker()
@@ -380,9 +381,68 @@ def test_a_finding_shipped_into_a_group_production_holds_none_of_is_clean(repo):
     tracker.add_child(51, tracker.cards_by_number[55])
     verdict = judge(repo, base, cut, tracker).verdict
     assert verdict.status == CLEAN
+    assert (verdict.carried.steps[0].groups, verdict.carried.groups) == ((), ())
+
+
+@pytest.mark.parametrize("second", ["a-step-it-waits-on", "an-outside-issue"])
+def test_a_finding_blocked_by_more_than_its_owner_refuses_the_release(repo, second):
+    """R-BAL395: a finding's owner is the ONE card it is blocked by.  #55, owned by #51, a
+    leaf of group #50 production holds without #52, is blocked by a second card too -- #70,
+    a step it waits on (``quill block``, or the web's "Mark as blocked by"), or an issue
+    outside the tracker -- so it names no one owner and which groups it is under cannot be
+    read: the release shipping it is refused, never judged clean beside the group (R395's
+    review, F3).  Blocked by #51 alone, the same release is held to the group."""
+    _, cutover = after_cutover(repo)
+    base = pull_request(repo, cutover, ship(51))
+    cut = pull_request(repo, base, ship(55))
+    tracker = FakeTracker()
+    deploy_group(tracker)
+    tracker.add(70)
+    waits = second == "a-step-it-waits-on"
+    tracker.add(55, kind="finding", blocked_by=(51, 70) if waits else (51,),
+                outside=() if waits else (OutsideLink("blocker", "o/code#9"),))
+    (refusal,) = judge(repo, base, cut, tracker).verdict.refusals
+    assert refusal.startswith("plan#55 (its marker changed at ")
+    assert refusal.endswith(
+        f") is a finding blocked by plan#51, {'plan#70' if waits else 'o/code#9'}, so it "
+        "names no one owner (the one step it is blocked by, R-BAL395) and which groups it is "
+        "under cannot be read: leave it blocked by its owner alone")
+    tracker.cards_by_number[55] = replace(tracker.cards_by_number[55], blocked_by=(51,),
+                                          outside=())
+    assert judge(repo, base, cut, tracker).verdict.refusals == (
+        "it leaves production holding plan#51 of the deploy-together group plan#50 without "
+        "plan#52 (it names plan#55 owned by plan#51, under the group but no leaf of it); the "
+        "group ships whole",)
+
+
+def test_a_finding_owned_by_a_step_below_a_leaf_names_its_owner_then_each_step(repo):
+    """#55, a finding owned by #511, a leaf #51 was split into, ships before any leaf of the
+    group #50: the report names its way up, its owner first and then each step it is under
+    (R-BAL395: a finding is blocked by its owner, and under no card; R395's review, F4)."""
+    base, cutover = after_cutover(repo)
+    cut = pull_request(repo, cutover, ship(55))
+    tracker = FakeTracker()
+    deploy_group(tracker)
+    replan(tracker, 51, (511, 512))
+    tracker.add(55, kind="finding", blocked_by=(511,))
+    (group,) = judge(repo, base, cut, tracker).verdict.carried.groups
+    assert group.through == ("plan#55 owned by plan#511 under plan#51",)
+
+
+def test_a_finding_shipped_into_a_group_production_holds_none_of_is_clean(repo):
+    """#55, a finding #51 owns, ships before any leaf of group #50: production holds the
+    group wholly out, and a finding is no member of it."""
+    base, cutover = after_cutover(repo)
+    cut = pull_request(repo, cutover, ship(55))
+    tracker = FakeTracker()
+    deploy_group(tracker)
+    tracker.add(55, kind="finding")
+    tracker.block(55, tracker.cards_by_number[51])
+    verdict = judge(repo, base, cut, tracker).verdict
+    assert verdict.status == CLEAN
     (group,) = verdict.carried.groups
     assert (group.carried, group.missing, group.through) == (
-        (), ("plan#51", "plan#52"), ("plan#55 under plan#51",))
+        (), ("plan#51", "plan#52"), ("plan#55 owned by plan#51",))
 
 
 # -- a step that will never ship, while production holds it ----------------------------------
@@ -480,7 +540,7 @@ def test_a_step_that_will_never_ship_outside_a_group_is_no_member_of_it(repo):
 
 
 def test_a_finding_under_a_group_undone_and_dropped_is_no_member(repo):
-    """#55, a finding under #51, shipped with the group and is reverted and dropped: it
+    """#55, a finding #51 owns, shipped with the group and is reverted and dropped: it
     touches the group and is never a member (a fix the group cannot ship without is a
     leaf), so production keeping #51 and #52 is whole."""
     _, cutover = after_cutover(repo)
@@ -489,12 +549,12 @@ def test_a_finding_under_a_group_undone_and_dropped_is_no_member(repo):
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.add(55, kind="finding")
-    tracker.add_child(51, tracker.cards_by_number[55])
+    tracker.block(55, tracker.cards_by_number[51])
     tracker.close(55, "not_planned")
     verdict = judge(repo, base, cut, tracker).verdict
     assert verdict.status == CLEAN
     assert verdict.carried.steps[0].groups == ("plan#50",)
-    assert verdict.carried.groups[0].through == ("plan#55 under plan#51",)
+    assert verdict.carried.groups[0].through == ("plan#55 owned by plan#51",)
 
 
 def test_production_after_a_release_is_the_merge_not_the_cut(repo):
@@ -510,10 +570,10 @@ def test_production_after_a_release_is_the_merge_not_the_cut(repo):
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.add(55, kind="finding")
-    tracker.add_child(51, tracker.cards_by_number[55])
+    tracker.block(55, tracker.cards_by_number[51])
     assert judge(repo, base, cut, tracker).verdict.refusals == (
         "it leaves production holding plan#51 of the deploy-together group plan#50 without "
-        "plan#52 (it names plan#55 under plan#51, under the group but no leaf of it); the "
+        "plan#52 (it names plan#55 owned by plan#51, under the group but no leaf of it); the "
         "group ships whole",)
 
 
@@ -529,7 +589,7 @@ def test_production_after_a_release_holds_a_member_a_hotfix_shipped(repo):
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.add(55, kind="finding")
-    tracker.add_child(51, tracker.cards_by_number[55])
+    tracker.block(55, tracker.cards_by_number[51])
     verdict = judge(repo, base, cut, tracker).verdict
     assert [(group.key, group.released, group.missing) for group in verdict.carried.groups] == [
         ("plan#50", ("plan#51", "plan#52"), ())]
@@ -645,7 +705,7 @@ def test_a_step_that_will_never_ship_deep_below_the_group_is_a_member(repo, dept
 
 def test_a_dead_member_production_keeps_is_named_beside_a_missing_one(repo):
     """The full-leaf review's H4: #51 shipped, split on the web into #511, and #511
-    dropped; #52 never shipped.  A fix to #55, a finding under #51, keeps #51 without #52,
+    dropped; #52 never shipped.  A fix to #55, a finding #51 owns, keeps #51 without #52,
     and the refusal names #51's way out too."""
     _, cutover = after_cutover(repo)
     base = pull_request(repo, cutover, ship(51))
@@ -654,12 +714,12 @@ def test_a_dead_member_production_keeps_is_named_beside_a_missing_one(repo):
     replan(tracker, 51, (511,))
     tracker.close(511, "not_planned")
     tracker.add(55, kind="finding")
-    tracker.add_child(51, tracker.cards_by_number[55])
+    tracker.block(55, tracker.cards_by_number[51])
     cut = pull_request(repo, base, ship(55))
     verdict = judge(repo, base, cut, tracker).verdict
     assert verdict.refusals == (
         "it leaves production holding plan#51 of the deploy-together group plan#50 without "
-        "plan#52 (it names plan#55 under plan#51, under the group but no leaf of it); a step "
+        "plan#52 (it names plan#55 owned by plan#51, under the group but no leaf of it); a step "
         "the plan will never ship (plan#51) is a member while production holds it, at the "
         "base or the cut: a release that leaves production holding none of the group is "
         "whole (reverting the merge that landed each of plan#51); the group ships whole",)
@@ -703,7 +763,7 @@ def test_an_offered_cut_is_held_to_the_leaves_the_cut_reads(repo):
                                            labels=("balance", FILING))
     _person_closed(tracker, 521, "COMPLETED")
     tracker.add(55, kind="finding")
-    tracker.add_child(52, tracker.cards_by_number[55])
+    tracker.block(55, tracker.cards_by_number[52])
     tracker.add(40, labels=MONEY)
     tracker.add(41, labels=MONEY)
     judged = judge(repo, base, cut, tracker)
@@ -780,11 +840,11 @@ def test_plan_prints_each_card_named_under_a_group_that_is_no_leaf_of_it(repo, c
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.add(55, kind="finding")
-    tracker.add_child(51, tracker.cards_by_number[55])
+    tracker.block(55, tracker.cards_by_number[51])
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
                         connect=lambda: tracker) == CLEAN
     assert ("group plan#50: carried none; released none; missing plan#51, plan#52; named "
-            "under it plan#55 under plan#51") in capsys.readouterr().out.splitlines()
+            "under it plan#55 owned by plan#51") in capsys.readouterr().out.splitlines()
 
 
 def test_plan_prints_each_member_the_plan_will_never_ship(repo, capsys):

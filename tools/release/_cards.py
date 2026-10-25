@@ -1,5 +1,5 @@
-"""Which cards a release carries after the cutover, whether each moves money, and which
-deploy-together groups each is under: the release tool's card reader (step X-cx's
+"""Which cards a release carries, whether each moves money, and which deploy-together
+groups each is under: the release tool's card reader (step X-cx's
 L9a-1b, T-a a1; rulings ``balance:R-BAL287`` - ``R-BAL289``), read from the ship markers
 since step X-cx's M3 (ruling ``R-BAL359``).
 
@@ -23,8 +23,7 @@ card's commits are those of ``<base>..<cut>`` that changed its marker, by quill'
 **A card moves money when it carries the moves-money label**: its OWN label, as the
 tracker holds it when the release is judged, split or not (the coordinator, under
 R-BAL207, 2026-10-14).  A label is no sentence a tick rewrites, so a card keeps its flag
-after it ships (the registries' ``recurrence:R20`` shape, which the pre-cutover reader
-reads around, has no counterpart here).  A step split into leaves since its marker
+after it ships.  A step split into leaves since its marker
 landed is judged as the work it was, by its own label: a split writes the step only its
 sub-issue link, so its labels stay (``tools/quill/test_quill_file.py``), and each leaf is
 judged by its own when the window names it.  No card inherits a leaf's label: a label a
@@ -56,9 +55,14 @@ throughout), and a finding is never one: a fix the group cannot ship without is 
 quill's leaf rule reads, so a group's leaves are always among its steps.  Which groups a
 release TOUCHES reads the same links UP (:func:`tools.quill.door.above`, quill's one
 walk up the steps a card splits): each group a card it names is under, the card itself
-or a step above it.  **Under every read this reader judges, the two walks give a group
-the same steps, and no step hangs below it unread**: the read takes every card below
-each group, of any kind, and judges nothing when a step hangs under a card that is no
+or a step above it -- for a finding, its owner, the one step it is blocked by and never a
+parent (ruling ``R-BAL395``, :func:`tools.quill.door.owner`), or a step above that, so a
+finding is under the groups its owner is under, and one blocked by no card is under none
+(:func:`_line_up`; one blocked by cards that name no one owner refuses the release, below).
+**Under every read this reader judges, the two walks give a group the same steps, and no
+step hangs below it unread**: the read takes every card below each group, of any kind (a
+finding or a ruling below the step that owns it, by that step's blocking read), and
+judges nothing when a step hangs under a card that is no
 step (:func:`_none_hung`: only a person's link or retype puts one there, since quill
 links a step only under the step it splits), and then compares the two walks for each
 group and judges nothing when they part (:func:`_one_walk`: only a link or a card's
@@ -119,29 +123,27 @@ refused every later release.  The way out can meet the money rule's cap (a group
 two money movers comes out in no one release): that is the developer's question, asked
 at X-cx's piece L9d.
 
-**What it cannot read refuses the release**, and nothing is declared after the cutover
-(R-BAL287, R-BAL289):
+**No trailer is read**: every one is prose -- an old-form ``<arc>:<id>`` one, a
+``plan#N`` one, a value of neither form -- since a marker is the record.  Refusing one
+would wedge every release over it, since no check refuses a trailer's shape before it
+lands (``R-BAL184``; X-cx's ``m2_plan.md`` s.3).  The cutover's freeze ends with a
+release, so production holds every commit made before it, each old-form trailer's
+included (R-BAL287), and no release after it carries a commit made before it (step
+X-cx's S3b deleted the reader that judged them, ruling ``R-BAL389``).
 
-- an old-form ``Ships: <arc>:<id>`` that a cut holding ``steps.md`` on ``dev``'s line in
-  the window holds: the cutover's freeze ends with a release, so production held every
-  one merged before the cutover (R-BAL287), and this one the freeze missed.  Only such a
-  cut can judge it, so the refusal names the newest one, to release first with the
-  release tool as that cut holds it;
-- an old-form ``Reopens: <arc>:<id>`` such a cut holds: it undoes a step that has no
-  card, and no reader judges what it takes out of production, the release tool as that
-  cut holds it included (``tools/release/_carried.py`` reads no ``Reopens:``), so the
-  refusal names no cut to release first (M3's review, its 2).  None exists on ``dev`` or
-  ``main`` (measured 2026-10-23).  Every other trailer is prose -- an old-form one merged
-  after the cutover, a ``plan#N`` one, a value of neither form -- since a marker is the
-  record and nothing after the cutover reads a trailer: refusing one would wedge every
-  release over it, once no check refuses a trailer's shape before it lands
-  (``R-BAL184``; X-cx's ``m2_plan.md`` s.3);
+**What it cannot read refuses the release**, and nothing is declared (R-BAL287,
+R-BAL289):
+
 - a marker naming a card the tracker does not hold: CI's landing check refuses one before
   it lands (R-BAL289; ``tools/quill/landing.py``, its rule 7), so what reaches here is a
   card deleted after its marker landed;
 - a marker naming a card of a kind no commit ships (a ruling, a question, a card of no
   type; quill's ``SHIPPABLE``): read as work it would pass as moving no money.  The landing
   check refuses one when it lands, so what reaches here was retyped since;
+- a marker naming a finding blocked by cards that name no one owner (two cards or more, or
+  an issue outside the tracker beside one or alone; :func:`tools.quill.door.owner`,
+  R-BAL395): which groups it is under cannot be read, so the release is refused, and
+  quill's ``sync`` reports the finding (R395's review, its F3);
 - an entry under ``plan/ships/`` that is no card's marker (a name that is no card number,
   a file in a directory below it, an entry that is no file), which the landing check
   refuses before it lands (its rule 1);
@@ -169,10 +171,11 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-from tools.ci import trailers
 from tools.quill.door import (
     MARKERS,
+    OWNED,
     SHIPPABLE,
+    Card,
     MarkerConflict,
     Tracker,
     above,
@@ -184,35 +187,34 @@ from tools.quill.door import (
     marker_changes,
     markers_in,
     merged_tree,
+    owner,
     with_closure,
 )
 from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, MOVES_MONEY_LABEL
-from tools.release._model import (
-    Carried,
-    Group,
-    ReleaseError,
-    Step,
-    first_parent_line,
-    steps_blob,
-)
+from tools.release._model import Carried, Group, ReleaseError, Step, first_parent_line
 
 
 @dataclass(frozen=True)
 class Cards:
     """What the release's cut knows of the cards its window names, read from the tracker
     once: whether each one that is work moves money; each one's line up (itself, the step
-    it splits, that step's, ...); each deploy-together group the read holds that has a
+    it splits or, for a finding, its owner, that step's, ...); each deploy-together group
+    the read holds that has a
     step below it, with every such step (those that can be its members, :func:`_member`),
     in card order; each such group's leaves by quill's rule, in any state; which of those
-    steps and named cards will never ship (dropped, or under a step that was); and what each
-    named card that is no work is."""
+    steps and named cards will never ship (dropped, or under a step that was); each named
+    card's kind, as the tracker holds it (one that is not there has none: a named card
+    that is no work is a kind no commit ships, and a finding's line up starts at its owner,
+    R-BAL395); and what blocks each named finding that names no one owner
+    (:func:`_unowned`)."""
 
     money: Mapping[int, bool]
     lines: Mapping[int, tuple[int, ...]]
     groups: Mapping[int, tuple[int, ...]]
     leaves: Mapping[int, frozenset[int]]
     dropped: frozenset[int]
-    no_work: Mapping[int, str]
+    kinds: Mapping[int, str | None]
+    unowned: Mapping[int, str]
 
 
 @dataclass(frozen=True)
@@ -312,8 +314,7 @@ def read(root: Path, base: str, cut: str, tracker: Tracker) -> Cards:
     closure = with_closure(tracker, dict(held))
     shipped = set(window.after)
     work = {number for number, card in held.items() if card.kind in SHIPPABLE}
-    up = {number: tuple(step.number for step in above(card, closure))
-          for number, card in closure.items()}
+    up = {number: _line_up(card, closure) for number, card in closure.items()}
 
     def never_ships(number: int) -> bool:
         return (dropped(number, closure, shipped)
@@ -329,9 +330,7 @@ def read(root: Path, base: str, cut: str, tracker: Tracker) -> Cards:
     groups = {group: below(group) for group, card in closure.items()
               if DEPLOY_TOGETHER_LABEL in card.labels}
     kinds = {number: card.kind for number, card in closure.items()}
-    _none_hung(tracker, groups, {number: tuple((child.number, child.kind)
-                                               for child in card.children)
-                                 for number, card in closure.items()}, kinds)
+    _none_hung(tracker, groups, _below_each(tracker, closure, groups), kinds)
     _one_walk(groups, up, kinds)
     groups = {group: steps for group, steps in groups.items() if steps}
     return Cards(
@@ -344,7 +343,54 @@ def read(root: Path, base: str, cut: str, tracker: Tracker) -> Cards:
         frozenset(number for number in {*work, *(step for steps in groups.values()
                                                  for step in steps)}
                   if never_ships(number)),
-        {number: _what(card.kind) for number, card in held.items() if number not in work})
+        {number: card.kind for number, card in held.items()},
+        _unowned(held))
+
+
+def _line_up(card: Card, cards: Mapping[int, Card]) -> tuple[int, ...]:
+    """The steps above ``card``, nearest first, by quill's one walk up
+    (:func:`tools.quill.door.above`): for a finding or a ruling, from its owner, the one
+    step it is blocked by, never from a parent (ruling ``R-BAL395``,
+    :func:`tools.quill.door.owner`), so one with no owner is under no step.  ``cards``
+    holds every card the walk reads (quill's closure holds each blocker and parent)."""
+    if card.kind not in OWNED:
+        return tuple(step.number for step in above(card, cards))
+    held_by = owner(card)
+    return () if held_by is None else (
+        held_by, *(step.number for step in above(cards[held_by], cards)))
+
+
+def _unowned(held: Mapping[int, Card]) -> dict[int, str]:
+    """What blocks each finding of ``held`` whose blockers name no one owner (two cards or
+    more, or an issue outside the tracker; :func:`tools.quill.door.owner`, R-BAL395), for a
+    refusal: which groups it is under cannot be read.  One blocked by nothing is under no
+    group, and is not here."""
+    found = {}
+    for number, card in held.items():
+        blockers = ([f"plan#{blocker}" for blocker in card.blocked_by]
+                    + [link.issue for link in card.outside if link.what == "blocker"])
+        if card.kind in OWNED and card.kind in SHIPPABLE and blockers and owner(card) is None:
+            found[number] = ", ".join(blockers)
+    return found
+
+
+def _below_each(
+        tracker: Tracker, closure: Mapping[int, Card], groups: Mapping[int, Collection[int]],
+) -> dict[int, tuple[tuple[int, str | None], ...]]:
+    """What stands below each card of ``closure``, as ``(number, kind)``, for
+    :func:`_none_hung`: its sub-issues and, for each group's own card and each step below a
+    group that is a step, each finding and ruling it blocks, its owner's link (R-BAL395: a
+    finding or a ruling is no sub-issue of the step that owns it, so a step hung under one
+    is below the group all the same; R395's review, its F1), by that step's blocking read
+    (``Tracker.blocking``), once each."""
+    below = {number: tuple((child.number, child.kind) for child in card.children)
+             for number, card in closure.items()}
+    for step in {card for group, steps in groups.items() for card in (group, *steps)}:
+        if closure[step].kind == "step":
+            below[step] += tuple((blocked.number, blocked.kind)
+                                 for blocked in tracker.blocking(step)
+                                 if blocked.kind in OWNED)
+    return below
 
 
 def _one_walk(groups: Mapping[int, Collection[int]], lines: Mapping[int, tuple[int, ...]],
@@ -392,9 +438,10 @@ def _none_hung(tracker: Tracker, groups: Mapping[int, Collection[int]],
     (quill's closure holds a step's step sub-issues, never a finding's), so a member
     production holds could be dropped unseen.  Every card below each group in ``groups``
     (every group the read holds, touched by the release or not), of any kind and in any
-    state, is read for it: ``listed`` holds each card the read holds's sub-issues, as
-    ``(number, kind)``, and ``kinds`` each one's kind; the rest are read from ``tracker``
-    here, in rounds, each card once.
+    state, is read for it: ``listed`` holds what stands below each card the read holds, as
+    ``(number, kind)`` (its sub-issues and, for a step below a group, the findings and
+    rulings it owns: :func:`_below_each`), and ``kinds`` each one's kind; the rest are read
+    from ``tracker`` here, in rounds, each card once, by their sub-issues.
 
     Raises:
         ReleaseError: naming each card a step hangs under, the steps and the groups above
@@ -439,59 +486,31 @@ def _keys(numbers: Collection[int]) -> str:
     return ", ".join(f"plan#{number}" for number in numbers)
 
 
-def _judgeable(root: Path, base: str, cut: str, claim: str) -> str | None:
-    """The newest cut on ``dev``'s first-parent line in ``<base>..<cut>`` whose tree holds
-    ``steps.md`` and whose history holds the commit ``claim``, so that releasing it
-    carries the claim; None when none does (the claim was merged after the cutover)."""
-    return next((sha for sha, _ in first_parent_line(root, base, cut)
-                 if steps_blob(root, sha) is not None
-                 and trailers.is_ancestor(root, claim, sha)), None)
-
-
-@cache
-def _old_form(root: Path, base: str, cut: str) -> tuple[str, ...]:
-    """Each old-form trailer in ``<base>..<cut>`` that a cut before the cutover holds: a
-    ``Ships:``, naming the newest such cut to release first, and a ``Reopens:``, which no
-    reader judges; read once per range, as :func:`_window` is.  Every other trailer is
-    prose (the module's docstring)."""
-    found = trailers.history(root, f"{base}..{cut}")
-    lines = []
-    for claim in found.old_form:
-        judgeable = _judgeable(root, base, cut, claim.sha)
-        if judgeable is not None:
-            lines.append(f"{claim.sha[:12]} claims `{claim.key}` in the old form, which only a "
-                         "cut holding steps.md can judge (R-BAL287: the cutover's freeze ends "
-                         f"with a release of every one): release {judgeable[:12]} first, with "
-                         "the release tool as that cut holds it")
-    lines += [f"{undo.sha[:12]} carries `Reopens: {undo.key}` in the old form: it undoes a "
-              "step that has no card, so no reader judges what it takes out of production "
-              "(R-BAL287, R-BAL288)" for undo in found.old_form_reopens
-              if _judgeable(root, base, cut, undo.sha) is not None]
-    return tuple(lines)
-
-
 def _at(shas: Collection[str]) -> str:
     """Where a card's marker changed in the window, for a refusal; empty when no commit of
     it changed the marker."""
     return f" (its marker changed at {', '.join(sha[:12] for sha in shas)})" if shas else ""
 
 
-def _unreadable(root: Path, base: str, cut: str, window: _Window, known: Cards) -> list[str]:
-    """Each thing this reader cannot read in ``window``, the window of ``<base>..<cut>``:
-    an old-form trailer a cut before the cutover holds; a card the tracker does not hold,
-    or holds as no work; and an entry under the markers' directory that is no card's
-    marker."""
-    lines = list(_old_form(root, base, cut))
+def _unreadable(window: _Window, known: Cards) -> list[str]:
+    """Each thing this reader cannot read in ``window``, a release's window: a card the
+    tracker does not hold, or holds as no work; a finding blocked by cards that name no
+    one owner; and an entry under the markers' directory that is no card's marker."""
+    lines: list[str] = []
     for number, shas in sorted(window.named.items()):
+        if number in known.unowned:
+            lines.append(f"plan#{number}{_at(shas)} is a finding blocked by "
+                         f"{known.unowned[number]}, so it names no one owner (the one step it "
+                         "is blocked by, R-BAL395) and which groups it is under cannot be "
+                         "read: leave it blocked by its owner alone")
         if number in known.money:
             continue
-        what = known.no_work.get(number)
-        if what is None:
+        if number not in known.kinds:
             lines.append(f"plan#{number}{_at(shas)} is a card the tracker does not hold, so "
                          "whether it moves money cannot be read (R-BAL289)")
         else:
-            lines.append(f"plan#{number}{_at(shas)} is {what}, which no commit ships, so it "
-                         "names no work whose flag can be read")
+            lines.append(f"plan#{number}{_at(shas)} is {_what(known.kinds[number])}, which no "
+                         "commit ships, so it names no work whose flag can be read")
     return lines + [f"{path} is no card's marker (a marker is the file {MARKERS}/<card "
                     "number>), so what this release changes there cannot be read"
                     for path in window.strays]
@@ -524,8 +543,8 @@ def _group(group: int, known: Cards, touching: Mapping[int, tuple[int, ...]],
     (at its base) and ``after`` it (at the judged cut) -- carried in by it, released
     before it, taken out by it (undone), or held on neither side (missing) -- and apart,
     each member that will never ship; and each card the window names that touches the
-    group and is no member of it, with the cards between (steps, or a finding it hangs
-    under; the group's own card names itself).  ``touching`` maps each card the window
+    group and is no member of it, with the cards between (:func:`_route`; the group's own
+    card names itself).  ``touching`` maps each card the window
     names to the groups it touches (:func:`_counts`)."""
     members = tuple(step for step in known.groups[group]
                     if _member(step, group, known, before, after))
@@ -537,12 +556,23 @@ def _group(group: int, known: Cards, touching: Mapping[int, tuple[int, ...]],
                  released=keys(lambda member: member not in touching and member in after),
                  missing=keys(lambda member: member not in before and member not in after),
                  undone=keys(lambda member: member in before and member not in after),
-                 through=tuple(" under ".join(f"plan#{step}"
-                                              for step in walk[:walk.index(group) or 1])
+                 through=tuple(_route(walk[:walk.index(group) or 1], known.kinds)
                                for number, walk in sorted(known.lines.items())
                                if group in touching.get(number, ())
                                and number not in members),
                  dead=keys(lambda member: member in known.dropped))
+
+
+def _route(walk: tuple[int, ...], kinds: Mapping[int, str | None]) -> str:
+    """A named card's way up to a group, for the report: ``walk``, the card and each card
+    above it short of the group, each joined to the next by its link -- a finding (by its
+    kind in ``kinds``) to its owner, the step it is blocked by (R-BAL395), and each other
+    card to the step it is under."""
+    first, *rest = walk
+    text = f"plan#{first}"
+    for index, step in enumerate(rest):
+        text += f" {'owned by' if not index and kinds[first] in OWNED else 'under'} plan#{step}"
+    return text
 
 
 def carried(root: Path, base: str, cut: str, known: Cards) -> Carried:
@@ -575,4 +605,4 @@ def carried(root: Path, base: str, cut: str, known: Cards) -> Carried:
         for number, shas in sorted(window.named.items()) if number in known.money)
     groups = tuple(_group(group, known, touching, before, standing)
                    for group in sorted({group for each in touching.values() for group in each}))
-    return Carried(steps, groups, tuple(_unreadable(root, base, cut, window, known)))
+    return Carried(steps, groups, tuple(_unreadable(window, known)))

@@ -3,7 +3,8 @@ drop, sync, spec-history and spec-revert -- over :class:`_fake.FakeTracker` and 
 throwaway git repository with a real bare ``origin`` (the ``code`` fixture,
 ``conftest.py``), where every ship marker and claim (ruling ``balance:R-BAL359``) is
 written and read as git writes and reads it.  ``file`` has its own module,
-``test_quill_file.py``.  Nothing here calls GitHub.
+``test_quill_file.py``, and so do ``show``'s own cases, ``test_quill_show.py``.  Nothing
+here calls GitHub.
 """
 from __future__ import annotations
 
@@ -13,16 +14,14 @@ from functools import partial
 import pytest
 import requests
 
-from tools.ci.gitcmd import GitError
+from tools.ci.gitcmd import DEV, GitError, tracking
 from tools.ci.scratch import commit, commit_files, elsewhere, point_dev
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV, tracking
 from tools.quill import _git, _github, _tracker
 from tools.quill import quill
 from tools.quill._fake import CLAIMED, FakeTracker, claim, run, ship, unship
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Child, Comment, Edit, OutsideLink
-from tools.quill.setup_tracker import FILING
+from tools.quill._tracker import Child, Edit, OutsideLink
 
 
 # -- next ----------------------------------------------------------------------------------
@@ -408,125 +407,7 @@ def test_spec_revert_restores_a_version_and_refuses_a_change_since_its_read(code
     assert tracker.bodies[1] == "changed meanwhile"
 
 
-
-# -- show, and the exit statuses -----------------------------------------------------------
-
-def test_show_resolves_an_old_id_by_its_title_alias(code, capsys):
-    """``R-BAL80`` finds the card titled ``[R-BAL80] ...``; two arcs' same id need the arc."""
-    tracker = FakeTracker()
-    tracker.add(1, "ruling", title="[R-GU] one", labels=("balance",), is_open=False)
-    tracker.add(2, "ruling", title="[R-GU] two", labels=("bank_import",), is_open=False)
-    tracker.add(3, "ruling", title="[R-GUX] other", labels=("balance",), is_open=False)
-    assert run(tracker, code, "show", "R-GU") == 1
-    assert "names 2 cards" in capsys.readouterr().err
-    assert run(tracker, code, "show", "bank_import:R-GU") == 0
-    assert capsys.readouterr().out.startswith("plan#2 [ruling, bank_import] [R-GU] two")
-
-
-def test_show_prints_the_claim_and_the_markers_history(code, capsys):
-    """R-BAL359: the claim's branch, when it was claimed and last committed; whether git says
-    the card shipped; each commit on dev or main that added or deleted its marker, newest
-    first, or that none did."""
-    tracker = FakeTracker()
-    tracker.add(1)
-    tracker.add(2)
-    claim(code, 1)
-    assert run(tracker, code, "show", "plan#1") == 0
-    out = capsys.readouterr().out
-    assert "\n  claim: card/1 (claimed 2026-10-04T12:00:00Z; last commit " in out
-    assert out.endswith("\nno commit on origin/dev or origin/main adds, changes or deletes "
-                        "plan/ships/1\n")
-    shipped = ship(code, 2)
-    assert run(tracker, code, "show", "plan#2") == 0
-    out = capsys.readouterr().out
-    assert "\n  shipped (git): yes\n" in out and "\n  claim: none\n" in out
-    assert out.endswith(f"\n\nadded plan/ships/2: {shipped[:12]} ship\n")
-    reverted = unship(code, 2)
-    assert run(tracker, code, "show", "plan#2") == 0
-    out = capsys.readouterr().out
-    assert "\n  shipped (git): no\n" in out
-    assert out.endswith(f"\n\ndeleted plan/ships/2: {reverted[:12]} Revert ship\n"
-                        f"added plan/ships/2: {shipped[:12]} ship\n")
-
-
-def test_show_names_each_links_title_and_prints_the_comments_after_the_text(code, capsys,
-                                                                            monkeypatch):
-    """Card plan#27, leaf B: a child's and a blocker's title follow their numbers, read by
-    number once -- a step child the leaf rule read already is not read again -- and the
-    card's comments follow its text, oldest first, each under its time and author (``?``
-    when the account is gone), its trailing space trimmed and its leading space kept (an
-    indented first line, a code block, keeps its indent); a card with none says so, its
-    parent's aside."""
-    tracker = FakeTracker()
-    tracker.add(1, body="The spec.", blocked_by=(4,),
-                children=(Child(2, "step", True), Child(3, "finding", True)))
-    tracker.add(2, title="Leaf two", parent=1)
-    tracker.add(3, "finding", title="A finding", parent=1)
-    tracker.add(4, title="The blocker")
-    tracker.notes[1] = [Comment("SaltyReformed", "2026-10-05T00:00:00Z",
-                                "    indented first line\nFirst, by hand.\n\n"),
-                        Comment(None, "2026-10-06T00:00:00Z", "Second.")]
-    reads, read = [], tracker.cards
-    monkeypatch.setattr(tracker, "cards", lambda numbers: reads.append(set(numbers)) or read(
-        numbers))
-    assert run(tracker, code, "show", "plan#1") == 0
-    out = capsys.readouterr().out
-    assert ("\n  child: plan#2 (step, open) Leaf two\n  child: plan#3 (finding, open) A finding"
-            "\n  blocked by: plan#4 The blocker\n\nThe spec.\n\n"
-            "== comment, 2026-10-05T00:00:00Z by SaltyReformed\n    indented first line\n"
-            "First, by hand.\n"
-            "== comment, 2026-10-06T00:00:00Z by ?\nSecond.\n\nno commit on ") in out
-    assert reads == [{1}, {2}, {3, 4}]
-    reads.clear()
-    assert run(tracker, code, "show", "plan#2") == 0
-    out = capsys.readouterr().out
-    assert "\n\nno comments\n\nno commit on " in out and "by hand" not in out
-    assert reads == [{2}]
-
-
-def test_a_comment_quill_posts_is_shown_after_the_text(code, tmp_path, capsys):
-    """``quill comment`` then ``quill show``: the comment the tool wrote is read back under
-    the App's login."""
-    tracker = FakeTracker()
-    tracker.add(1, body="The spec.")
-    note = tmp_path / "note"
-    note.write_text("Noted.\n")
-    assert run(tracker, code, "comment", "plan#1", "--body-file", str(note)) == 0
-    assert run(tracker, code, "show", "plan#1") == 0
-    assert (f"\nThe spec.\n\n== comment, 2026-10-06T00:00:00Z by {FakeTracker.app_login}\n"
-            "Noted.\n\n") in capsys.readouterr().out
-
-
-def test_show_fails_on_a_grandchild_the_leaf_rule_reads_and_no_read_holds(code, capsys):
-    """Review M-1: a step closed while still being filed has its own linked steps read for
-    the leaf rule (:func:`_state.leaves`); one of those no read by its number holds fails
-    show, exit 2, naming it -- the refusal only the leaf rule's read makes, since the
-    titles are read for the card's own links alone."""
-    tracker = FakeTracker()
-    tracker.add(1, children=(Child(2, "step", False),))
-    tracker.add(2, parent=1, is_open=False, state_reason="NOT_PLANNED", on_board=False,
-                labels=("balance", FILING), children=(Child(3, "step", True),))
-    assert run(tracker, code, "show", "plan#1") == 2
-    assert ("failed: plan#3 is linked below plan#1 or blocks it, but a read by its number "
-            "does not hold it: run show again") in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("links", [{"children": (Child(2, "step", True),)},
-                                   {"children": (Child(2, "finding", True),)},
-                                   {"blocked_by": (2,)}])
-def test_show_fails_on_a_link_no_read_by_number_holds(code, capsys, links):
-    """A child or a blocker the card names that a read by its number does not hold (a read
-    lagging the link, or a card deleted since) fails show, exit 2, naming it.  The titles'
-    read refuses the finding child and the blocker; the step child is refused first by the
-    leaf rule's read, and with that refusal gone the titles' read refuses it in the same
-    words.  The leaf rule's read alone is graded by the grandchild case above."""
-    tracker = FakeTracker()
-    tracker.add(1, **links)
-    assert run(tracker, code, "show", "plan#1") == 2
-    assert ("failed: plan#2 is linked below plan#1 or blocks it, but a read by its number "
-            "does not hold it: run show again") in capsys.readouterr().err
-
-
+# -- the exit statuses ---------------------------------------------------------------------
 
 def test_a_github_failure_exits_2(code, capsys, monkeypatch):
     """Refused is 1; a failed call is 2, with its message."""
@@ -925,7 +806,8 @@ def test_a_closed_card_is_not_dropped_again(code, capsys):
 
 
 def test_dropping_a_step_that_owns_findings_drops_the_step(code):
-    """Review cp4b P15: a step owning findings (and no step) is no split step (R-BAL177)."""
+    """Review cp4b P15: a step with findings under it and no step (its sub-issues, as quill
+    filed a finding before R-BAL395 and a person may still link one) is no split step."""
     tracker = FakeTracker()
     tracker.add(1, children=(Child(2, "finding", True),))
     tracker.add(2, "finding", parent=1)

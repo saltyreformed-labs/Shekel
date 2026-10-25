@@ -1,8 +1,8 @@
 """The tracker tool's own git calls, read from throwaway repositories under pytest's tmp_path.
 
-What a card's trailers mean (``Ships:``, ``Reopens:``) moved with :mod:`tools.ci.trailers` to
-``tools/ci/test_trailers.py`` (step X-cx's L4); quill reads none since the ship marker (X-cx's
-M1, ruling ``balance:R-BAL359``).  The marker and the claim are read and written here against a
+Quill reads no trailer (``Ships:``, ``Reopens:``) since the ship marker (X-cx's M1, ruling
+``balance:R-BAL359``), and step X-cx's S3b deleted the trailer reader (ruling
+``balance:R-BAL389``).  The marker and the claim are read and written here against a
 real bare ``origin`` (:func:`_origin`), so the pushes, the lease and the fetch run as git runs
 them.
 """
@@ -227,6 +227,52 @@ def test_a_conflict_on_a_marker_refuses_to_answer_and_one_elsewhere_does_not(rep
         _git.shipped(repo)
 
 
+def test_a_merge_names_each_marker_that_conflicts_and_only_merged_tree_refuses_it(repo):
+    """``merge`` answers every merge, naming each marker that conflicts and no other path:
+    dev changes card 7's line and main deletes it (each also changing the README), and the
+    tree holds dev's line where the two conflict, which is no settled record, so
+    ``merged_tree`` refuses it."""
+    base = _files(repo, _origin(repo), "seven", _marker(7))
+    dev = _files(repo, base, "dev", {"README": "dev\n", **_marker(7, "2026-10-20T09:30:00Z")})
+    main = _files(repo, base, "main", {"README": "main\n", _git.marker(7): None})
+    merged = _git.merge(repo, (dev, main))
+    assert (merged.tips, merged.conflicts) == ((dev, main), (_git.marker(7),))
+    assert _run(repo, "rev-parse", f"{merged.tree}:{_git.marker(7)}") == _run(
+        repo, "rev-parse", f"{dev}:{_git.marker(7)}")
+    with pytest.raises(_git.MarkerConflict, match="conflict on plan/ships/7") as raised:
+        _git.merged_tree(repo, (dev, main))
+    assert raised.value.paths == (_git.marker(7),)
+
+
+def test_a_file_meeting_a_directory_at_a_marker_is_named_by_its_path(repo):
+    """L1's review, its L1: dev changes card 7's line and main makes ``plan/ships/7`` a
+    directory.  git lists that conflict under the name of the file it moved aside,
+    ``<path>~<tip>``, the tip as given; the merge names it by its path, however each tip is
+    spelled and whichever side holds the file."""
+    base = _files(repo, _origin(repo), "seven", _marker(7))
+    dev = _files(repo, base, "dev", _marker(7, "2026-10-20T09:30:00Z"))
+    main = _files(repo, _files(repo, base, "main", {_git.marker(7): None}), "a directory",
+                  {"plan/ships/7/x": "x\n"})
+    _push(repo, dev, "dev")
+    _push(repo, main, "main")
+    _git.fetch(repo)
+    for tips in ((dev, main), (main, dev), _git.TIPS, tuple(reversed(_git.TIPS))):
+        assert _git.merge(repo, tips).conflicts == (_git.marker(7),), tips
+
+
+def test_blob_at_reads_a_file_and_nothing_else(repo):
+    """The blob of the file at a path; None where nothing is, where a directory is, and
+    where a submodule's commit (a gitlink) is."""
+    base = _files(repo, _origin(repo), "files", {**_marker(5), "plan/ships/6/inner": "x\n"})
+    _run(repo, "update-index", "--add", "--cacheinfo", f"160000,{base},{_git.marker(7)}")
+    _run(repo, "commit", "--quiet", "-m", "a gitlink")
+    tip = _run(repo, "rev-parse", "HEAD")
+    assert _git.blob_at(repo, tip, _git.marker(5)) == _run(repo, "rev-parse",
+                                                           f"{tip}:{_git.marker(5)}")
+    for path in (_git.marker(6), _git.marker(7), _git.marker(8)):
+        assert _git.blob_at(repo, tip, path) is None
+
+
 def test_landings_names_the_commit_on_the_branch_line_that_took_each_line_in(repo):
     """CI's write rule asks through which commit of its OWN line a branch took each marker's
     line in.  Card 212's claim and work land on dev by one merge, which a release brings to
@@ -251,6 +297,27 @@ def test_landings_names_the_commit_on_the_branch_line_that_took_each_line_in(rep
     assert _git.landings(repo, released) == {(path, first): (_git.Took(released, None),)}
     assert _git.landings(repo, work) == {(path, first): (_git.Took(claimed, None),)}
     assert not _git.landings(repo, base)
+
+
+def test_the_walk_names_each_blob_before_and_passes_over_merges_when_asked(repo):
+    """Each change the walk lists names the blob its entry held before it (``was``): none
+    for an add, the line for a delete.  Asked for commits of one parent alone, it passes over
+    a merge, even one whose resolution alone deleted a marker, and lists a plain delete
+    (CI's landing check, R-BAL391)."""
+    base = _origin(repo)
+    claimed = _files(repo, base, "claim plan#5 and plan#6", {**_marker(5), **_marker(6)})
+    five, six = (_git.marker(number) for number in (5, 6))
+    lines = {path: _run(repo, "rev-parse", f"{claimed}:{path}") for path in (five, six)}
+    dropped = _merge(repo, _files(repo, claimed, "drop 5", {five: None}), claimed, base,
+                     message="a merge dropping plan#5")
+    plain = _files(repo, dropped, "Revert plan#6", {six: None})
+    found = {flag: [(change.sha, change.entry.status, change.entry.path, change.was)
+                    for change in _git.marker_changes(repo, (plain, f"^{base}"), no_merges=flag)]
+             for flag in (False, True)}
+    added = [(claimed, "A", five, None), (claimed, "A", six, None)]
+    assert found[False] == [(plain, "D", six, lines[six]), (dropped, "D", five, lines[five]),
+                            *added]
+    assert found[True] == [(plain, "D", six, lines[six]), *added]
 
 
 def test_changes_names_every_entry_at_any_path_with_its_blob_and_no_rename(repo):
@@ -284,6 +351,21 @@ def test_markers_in_reads_one_trees_markers_and_names_each_other_entry(repo):
     tree = _run(repo, "rev-parse", f"{one}^{{tree}}")
     assert _git.markers_in(repo, tree) == _git.markers_in(repo, one)
     assert _git.markers_in(repo, base) == (frozenset(), ())
+
+
+def test_lines_in_reads_each_markers_line_beside_the_entries_markers_in_names(repo):
+    """The one reading of a tree's markers, with each card's line (its blob): two claims'
+    lines differ, and every other entry under the markers' directory is named as
+    :func:`_git.markers_in` names it."""
+    base = _origin(repo)
+    one = _files(repo, base, "one", {**_marker(5), **_marker(12, "2026-10-21T08:00:00Z"),
+                                     "plan/ships/notes": "x\n", "app.py": "a\n"})
+    lines, strays = _git.lines_in(repo, one)
+    assert lines == {number: _run(repo, "rev-parse", f"{one}:{_git.marker(number)}")
+                     for number in (5, 12)}
+    assert lines[5] != lines[12]
+    assert strays == ("plan/ships/notes",) == _git.markers_in(repo, one)[1]
+    assert _git.lines_in(repo, base) == ({}, ())
 
 
 @pytest.mark.parametrize(("path", "card"), [
@@ -484,6 +566,27 @@ def test_a_branch_starts_at_the_commit_it_grew_from(repo, monkeypatch):
     assert _git.started(repo, "fresh") == "2026-10-02T09:00:00-04:00"
 
 
+@pytest.mark.parametrize("kind", ["tag", "branch"])
+def test_a_reference_named_like_dev_does_not_move_where_a_branch_started(repo, monkeypatch,
+                                                                         kind):
+    """Git resolves the short name ``origin/dev`` to a tag or a local branch of that name
+    before the remote-tracking branch, and CI's checkout fetches every tag: one at the
+    branch's own tip would leave it no commit of its own, so its window would start at its
+    tip and hide every spec edit since the work began.  ``dev`` is read by its full name
+    (:func:`tools.ci.gitcmd.tracking`), as every other reader of it asks.  The control: the
+    short name IS shadowed."""
+    dated = {}
+    for name, when, parents in (("fork", "2026-09-30T12:00:00-04:00", ()),
+                                ("tip", "2026-10-03T09:00:00-04:00", ("fork",))):
+        monkeypatch.setenv("GIT_AUTHOR_DATE", when)
+        dated[name] = _commit(repo, name, parents=[dated[p] for p in parents])
+    _dev(repo, dated["fork"])
+    _run(repo, "update-ref", "refs/heads/feature", dated["tip"])
+    _run(repo, kind, _git.DEV, dated["tip"])
+    assert _run(repo, "rev-parse", _git.DEV) == dated["tip"], "control: the short name is shadowed"
+    assert _git.started(repo, "feature") == "2026-09-30T12:00:00-04:00"
+
+
 def test_a_branch_holding_a_merge_starts_at_the_earliest_line_it_grew_from(repo, monkeypatch):
     """Review cp4 L-5: a merge listing a peer line FIRST put that line's base first, so the
     branch's own commit b1 fell outside the window; every line it grew from counts."""
@@ -553,8 +656,8 @@ def test_a_bound_environment_reaches_no_repository_but_the_one_named(binding, tm
     directory named, every answer is that directory's, and the sentinel -- its refs, config,
     HEADs and indexes -- is byte-identical afterwards.  The sentinel is proven bound, and its
     indexes not empty (review cp3 M-1's control), before it is handed over
-    (``scratch._prove_bound``).  The trailer rules' own calls, ``is_ancestor`` among them,
-    are held the same way in ``tools/ci/test_trailers.py``."""
+    (``scratch._prove_bound``).  ``tools.ci.gitcmd``'s own calls, ``is_ancestor`` among them,
+    are held the same way in ``tools/ci/test_gitcmd.py``."""
     sentinel, before = scratch.bound_sentinel(tmp_path, binding, monkeypatch.setenv)
     work = scratch.repository(tmp_path, "work")
     _origin(work)

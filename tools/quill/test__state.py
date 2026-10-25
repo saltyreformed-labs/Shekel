@@ -72,8 +72,9 @@ def _linked(split):
 
 def _claim(number, committed="2026-10-04T11:00:00+00:00", claimed="2026-10-04T11:00:00Z"):
     """The branch ``card/<number>``, claimed and last committed an hour before NOW: its tip's
-    committer date as git prints it (ISO, with its offset), its marker's instant in UTC."""
-    return Claim(number, f"sha{number}", committed, claimed)
+    committer date as git prints it (ISO, with its offset), its marker's instant in UTC; no
+    task file at its tip."""
+    return Claim(number, f"sha{number}", committed, claimed, frozenset())
 
 
 def test_shipped_in_git_is_resolved_whatever_the_card_shows():
@@ -221,12 +222,13 @@ def test_sync_closes_a_container_whose_leaves_are_done_and_reopens_one_that_gain
 
 
 def test_sync_reports_an_open_finding_whose_owner_is_done():
-    """Every open finding names a live owner; its owner shipping orphans it."""
-    cards = _cards(_card(1, children=(Child(3, "finding", True),)), _card(3, "finding", parent=1),
-                   _card(4, "finding"))
+    """Every open finding names a live owner, the one step it is blocked by (R-BAL395); its
+    owner shipping orphans it."""
+    cards = _cards(_card(1), _card(3, "finding", blocked_by=(1,)), _card(4, "finding"))
     plan = sync_plan(cards, shipped={1}, claims={})
-    assert [report.split("'s owner")[0] for report in plan.reports[-2:]] == [
-        "finding plan#3", "finding plan#4"
+    assert [report.split(":")[0] for report in plan.reports[-2:]] == [
+        "finding plan#3's owner plan#1 is no longer live (done, or under a dropped step)",
+        "finding plan#4's owner is missing",
     ]
 
 
@@ -305,8 +307,7 @@ def test_sync_reports_steps_left_open_under_a_dropped_one_and_the_findings_they_
     """R-BAL185: the leaves are never offered, so a person closes or re-homes them; a finding
     owned by one has lost its live owner."""
     cards = _cards(_closed(1, by_tool=False, children=(Child(2, "step", True),)),
-                   _card(2, parent=1, children=(Child(3, "finding", True),)),
-                   _card(3, "finding", parent=2))
+                   _card(2, parent=1), _card(3, "finding", blocked_by=(2,)))
     plan = sync_plan(cards, shipped=set(), claims={})
     assert not (plan.close or plan.reopen)
     assert len(plan.reports) == 2
@@ -319,8 +320,7 @@ def test_sync_reports_steps_left_open_under_a_dropped_one_and_the_findings_they_
 def test_a_finding_off_the_board_is_never_named_as_a_step_the_order_cannot_place():
     """Review cp3 M-5: with ``kind == "step"`` deleted from ``workable``, every open finding
     (findings never sit on the board, R-BAL177) was listed NOT ON THE BOARD."""
-    cards = _cards(_card(1, children=(Child(2, "finding", True),)),
-                   _card(2, "finding", parent=1, board_item=None))
+    cards = _cards(_card(1), _card(2, "finding", blocked_by=(1,), board_item=None))
     answer = next_step([1], cards, shipped=set(), claims={})
     assert answer.card.number == 1 and not answer.unplaced
 
@@ -345,7 +345,7 @@ def test_a_container_a_person_reopened_is_reported_only_while_its_leaves_are_all
 def test_a_shipped_finding_is_not_reported_as_orphaned_by_its_owner():
     """Review cp3 M-5: with ``not in shipped`` deleted, a finding git says shipped was also
     reported for an owner that is done -- which a shipped finding no longer needs."""
-    cards = _cards(_card(1, children=(Child(3, "finding", True),)), _card(3, "finding", parent=1))
+    cards = _cards(_card(1), _card(3, "finding", blocked_by=(1,)))
     plan = sync_plan(cards, shipped={1, 3}, claims={})
     assert plan.close == [1, 3] and not plan.reports
 
@@ -427,8 +427,8 @@ def test_a_leaf_git_says_shipped_was_not_dropped_whoever_closed_it():
 
 def test_a_finding_whose_owner_is_outside_the_tracker_is_reported_once():
     """Review cp4 L-9: it got the outside link's report AND "owner is missing"; it has an
-    owner, outside the tracker."""
-    finding = _card(3, "finding", outside=(OutsideLink("parent", "o/code#9"),))
+    owner, outside the tracker: since R-BAL395 the issue it is blocked by."""
+    finding = _card(3, "finding", outside=(OutsideLink("blocker", "o/code#9"),))
     reports = sync_plan(_cards(finding), set(), {}).reports
     assert len(reports) == 1 and "outside the tracker" in reports[0]
 
@@ -494,11 +494,35 @@ def test_a_marker_naming_a_dropped_card_that_is_not_work_leaves_it_dropped():
     assert dropped_above(cards[2], cards, {1}).number == 1
 
 
-def test_a_finding_with_no_parent_but_an_outside_blocker_has_lost_its_owner():
-    """Review cp4b S9: only an outside PARENT is an owner outside the tracker."""
-    finding = _card(3, "finding", outside=(OutsideLink("blocker", "o/code#9"),))
-    reports = sync_plan(_cards(finding), set(), {}).reports
-    assert any("owner is missing" in line for line in reports)
+def test_a_finding_with_no_blocker_but_a_parent_has_lost_its_owner():
+    """R-BAL395 (review cp4b S9's rule, turned over): only the issue a finding is blocked by
+    is its owner, so a finding that is a sub-issue -- of a live step, or of an issue outside
+    the tracker -- and blocked by nothing has none."""
+    for finding in (_card(3, "finding", parent=1),
+                    _card(3, "finding", outside=(OutsideLink("parent", "o/code#9"),))):
+        reports = sync_plan(_cards(_card(1), finding), set(), {}).reports
+        assert any(line.startswith("finding plan#3's owner is missing") for line in reports)
+
+
+def test_a_finding_blocked_by_two_cards_or_by_no_step_has_no_owner():
+    """R-BAL395: a finding's owner is the ONE step it is blocked by, so two blockers name no
+    one owner, and a blocker that is no step is none; each is reported, and closed by no
+    write."""
+    cards = _cards(_card(1), _card(2), _card(5, "question"),
+                   _card(3, "finding", blocked_by=(1, 2)), _card(4, "finding", blocked_by=(5,)),
+                   _card(6, "finding", blocked_by=(1,),
+                         outside=(OutsideLink("blocker", "o/code#9"),)))
+    plan = sync_plan(cards, set(), {})
+    lost = [line for line in plan.reports if "'s owner" in line]
+    assert lost == [
+        "finding plan#3's owner is not one step: it is blocked by plan#1, plan#2: give it one "
+        "open step as its owner, the one card it is blocked by (R-BAL395)",
+        "finding plan#4's owner plan#5 is a question, no step: give it one open step as its "
+        "owner, the one card it is blocked by (R-BAL395)",
+        "finding plan#6's owner is not one step: it is blocked by plan#1, o/code#9: give it "
+        "one open step as its owner, the one card it is blocked by (R-BAL395)",
+    ]
+    assert not (plan.close or plan.reopen or plan.drop)
 
 
 def test_a_leaf_is_placed_after_its_other_leaves_never_after_itself():

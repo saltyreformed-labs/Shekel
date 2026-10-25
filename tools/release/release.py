@@ -4,9 +4,8 @@ Not ``quill release``, which deletes a card's claim: this is a release of code t
 production (card ``plan#9``).  Everything with a person or a judgment in it -- the
 developer's two questions, the CI reads, the rehearsal, the deploy and its checks -- is
 the skill's prose (``.claude/skills/release/SKILL.md``, X-cx's piece L9a-2); this
-command reads git; the plan's registries as each commit holds them, or, for a cut after
-the cutover, the tracker's cards through quill's App; and the dev database server's
-listing; and writes nothing.
+command reads git, the tracker's cards through quill's App and the dev database
+server's listing, and writes nothing.
 
 ``plan`` judges the release ``<base>..<cut>`` (:mod:`tools.release._plan`): the steps it
 carries, each step's money flag and deploy-together group, the migrations it adds, edits
@@ -19,27 +18,22 @@ rehearsal kit's manifest names (:mod:`tools.release._census`).
 Usage, from the repository root, after ``git fetch origin``::
 
     python -m tools.release.release plan --cut SHA [--base origin/main]
-        [--unrehearsed KEY|REVISION ...] [--declare KEY=money|none@SOURCE ...]
+        [--unrehearsed KEY|REVISION ...]
     python -m tools.release.release census [--main origin/main] [--release-branch release/DATE]
         [--kit DIR ...]
 
-``--unrehearsed`` names a money-moving step (``<arc>:<id>``, or ``plan#N`` after the
-cutover) or an added migration's revision for which the skill found no rehearsal kit;
-the release is refused for it.  ``--declare`` gives the flag of a carried step no
-version of ``steps.md`` holds open (one written already ticked), with the commit or
-handoff it was read from; the approval question must name each declaration, and a
-declaration for any other step stops the command, as does every declaration on a cut
-after the cutover, where each card's flag is its label (R-BAL287).  ``--kit`` names a
-rehearsal kit's directory, which holds the kit's ``release-manifest.txt``: one line per
-thing the kit made, written before it made it.
+``--unrehearsed`` names a money-moving card (``plan#N``) or an added migration's
+revision for which the skill found no rehearsal kit; the release is refused for it.
+Each card's money flag is its label, and nothing is declared (R-BAL287).  ``--kit``
+names a rehearsal kit's directory, which holds the kit's ``release-manifest.txt``: one
+line per thing the kit made, written before it made it.
 
 Exit status, ``plan``: 0 clean; 1 refused, each reason printed with the cut to offer;
 3 the approval question must name what is printed; 2 nothing was judged (the command
-line, git, the tracker, an unrehearsed name that names nothing, or a declaration that
-fills no unreadable flag).  ``census``: 0 listed, every kit's manifest accepted; 4
-listed, but a kit was refused (each reason printed), so the cleanup is NOT proven and
-nothing that kit names is marked, whoever else names it; 2 git, the compose file or the
-docker listing failed.
+line, git, the tracker, or an unrehearsed name that names nothing).  ``census``: 0
+listed, every kit's manifest accepted; 4 listed, but a kit was refused (each reason
+printed), so the cleanup is NOT proven and nothing that kit names is marked, whoever
+else names it; 2 git, the compose file or the docker listing failed.
 A judged run's last line on stdout is its ``verdict:``; exit 2 and a crash print none.
 """
 from __future__ import annotations
@@ -57,7 +51,6 @@ from tools.ci.arcs import REPO
 from tools.ci.gitcmd import GitError
 from tools.quill.door import CredentialsError, GitHubError, Tracker, TrackerError
 from tools.quill.quill import CONNECT
-from tools.release._carried import Declaration
 from tools.release._census import (
     RELEASE_PREFIX,
     UNPROVEN,
@@ -70,8 +63,6 @@ from tools.release._model import ReleaseError
 from tools.release._plan import CLEAN, NEEDS_APPROVAL, REFUSED, Inputs, Plan, Verdict, plan
 
 CANNOT = 2
-#: A declared flag's two values.
-DECLARED = {"money": True, "none": False}
 
 
 def _release_branch(name: str) -> str:
@@ -80,17 +71,6 @@ def _release_branch(name: str) -> str:
         raise argparse.ArgumentTypeError(
             f"{name!r} is no release branch: its name starts with {RELEASE_PREFIX!r}")
     return name
-
-
-def _declaration(text: str) -> Declaration:
-    """``KEY=money|none@SOURCE`` read as a :class:`Declaration`; the source is required."""
-    key, _, rest = text.partition("=")
-    value, _, source = rest.partition("@")
-    if not key or value not in DECLARED or not source.strip():
-        raise argparse.ArgumentTypeError(
-            f"{text!r} is no declaration: write KEY=money@SOURCE or KEY=none@SOURCE, the "
-            "source being the commit or handoff the flag was read from")
-    return Declaration(key, DECLARED[value], source)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -102,9 +82,6 @@ def parser() -> argparse.ArgumentParser:
     judged.add_argument("--base", default="origin/main", help="what production runs")
     judged.add_argument("--unrehearsed", action="append", default=[], metavar="KEY|REVISION",
                         help="a money mover or added migration with no rehearsal kit")
-    judged.add_argument("--declare", action="append", default=[], type=_declaration,
-                        metavar="KEY=money|none@SOURCE",
-                        help="the flag of a carried step no version holds open")
     listed = commands.add_parser("census", help="list what may be cleaned up")
     listed.add_argument("--main", default="origin/main", help="the branch released into")
     listed.add_argument("--release-branch", type=_release_branch,
@@ -120,8 +97,7 @@ def _verdict_lines(verdict: Verdict) -> list[str]:
     lines = [f"cut {verdict.cut} {verdict.subject!r}",
              f"steps carried ({len(verdict.carried.steps)}):"]
     for step in verdict.carried.steps:
-        money = {True: "yes", False: "no", None: "UNREADABLE"}[step.money] + (
-            f" (declared from {step.declared})" if step.declared else "")
+        money = "yes" if step.money else "no"
         groups = f"  deploy-together: {', '.join(step.groups)}" if step.groups else ""
         undone = "  UNDONE: its marker deleted" if step.undone else ""
         claims = ", ".join(sha[:12] for sha in step.claims)
@@ -204,15 +180,15 @@ def main(argv: list[str] | None = None, root: Path = REPO,
          listing: Callable[[list[str]], list[str]] = docker_listing,
          connect: Callable[[], Tracker] | None = None) -> int:
     """Run one command on the repository at ``root``, listing the dev databases with
-    ``listing`` and reaching the tracker with ``connect`` (none given: a cut after the
-    cutover judges nothing; only the command line, run as ``python -m``, gives quill's
+    ``listing`` and reaching the tracker with ``connect`` (none given: ``plan`` judges
+    nothing; only the command line, run as ``python -m``, gives quill's
     :data:`~tools.quill.quill.CONNECT`, so no other caller, a test above all, reaches the
     live tracker unless it says so); its exit status."""
     args = parser().parse_args(argv)
     try:
         if args.command == "plan":
             judged = plan(root, args.base, args.cut,
-                          Inputs(args.unrehearsed, args.declare, connect))
+                          Inputs(args.unrehearsed, connect))
             print("\n".join(plan_lines(judged)))
             return judged.verdict.status
         found = census(root, args.main, Made(args.release_branch, tuple(args.kit)), listing)

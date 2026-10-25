@@ -14,6 +14,18 @@ one through which it undid it (:func:`landings`).  Every reader here takes the m
 ``dev`` and ``main`` hold as they
 are.  This module writes a marker only in :func:`claim`'s commit.
 
+**A task is done when its file ``plan/tasks/T`` is in that tree too** (ruling
+``balance:R-BAL386``; :func:`task_file`): a piece of one step or finding, a commit inside its
+card's one pull request, whose file that commit writes.  Before the card lands it is done in
+the tip of the card's live claim when the claim's own commits wrote that file
+(:attr:`Claim.tasks`, :func:`own_tasks`: ``quill claim`` cuts a claim from ``dev`` unless told
+otherwise, so its tip holds every task file ``dev`` does, and none of those is its own),
+where only the tracker says which card a task is under, so ``quill sync`` keeps a claim's
+task file only for a task under that claim's card.  A task file is read as a marker is
+(:func:`lines_in`), and a revert of the commit that wrote it deletes it, so the task is no
+longer done.  Which change may write one is the markers' write rule, judged in the same walk
+(``tools/quill/landing.py``).
+
 **A claim is the branch ``card/N`` on ``origin``** (:func:`card_branch`) whose tip neither
 ``dev`` nor ``main`` holds (:func:`claims`).  ``quill claim`` makes it (:func:`claim`): a
 commit adding the card's marker, pushed CREATE-ONLY with a lease on the branch's absence, so
@@ -41,11 +53,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from tools.ci.gitcmd import FULL_ID, GitError, git, run
-from tools.ci.trailers import DEV, MAIN, is_ancestor, tracking
+from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, run, tracking
 
 #: The directory holding every card's ship marker, one file per card (R-BAL359).
 MARKERS = "plan/ships"
+#: The directory holding every task's done file, one file per task (R-BAL386).
+TASKS = "plan/tasks"
 #: A claim's branch is this and the card's number (:func:`card_branch`).
 CARD_BRANCH = "card/"
 #: Where a released claim's work is kept (:func:`release`).
@@ -61,12 +74,14 @@ class Claim:
     """A card a session is building: ``sha``, the tip of the branch ``card/<card>`` on
     ``origin``; ``committed``, when that tip was committed (ISO 8601, with its offset); and
     ``claimed``, the instant the card's marker at that tip says it was claimed, None when the
-    tip holds no marker for it."""
+    tip holds no marker for it; and ``tasks``, each task whose done file the claim's own
+    commits wrote (:func:`own_tasks`), whatever card the tracker says it is under."""
 
     card: int
     sha: str
     committed: str
     claimed: str | None
+    tasks: frozenset[int]
 
     @property
     def branch(self) -> str:
@@ -77,10 +92,12 @@ class Claim:
 @dataclass(frozen=True)
 class Shipped:
     """What git says shipped (:func:`shipped`): ``cards``, the card numbers whose markers the
-    merge of ``dev`` and ``main`` holds; ``history``, one line for each entry under
-    :data:`MARKERS` that is no card's marker, which no tracker write can change (R-BAL184)."""
+    merge of ``dev`` and ``main`` holds; ``tasks``, the task numbers whose done files it holds;
+    ``history``, one line for each entry under :data:`MARKERS` that is no card's marker, or
+    under :data:`TASKS` that is no task's file, which no tracker write can change (R-BAL184)."""
 
     cards: frozenset[int]
+    tasks: frozenset[int]
     history: tuple[str, ...]
 
 
@@ -97,19 +114,23 @@ class Entry:
 
 @dataclass(frozen=True)
 class MarkerChange:
-    """One change a commit made to an entry under :data:`MARKERS` (:func:`marker_changes`):
-    the commit's ``sha`` and ``subject``, and the ``entry`` it changed."""
+    """One change a commit made to an entry under :data:`MARKERS`, or :data:`TASKS` where the
+    walk names it (:func:`marker_changes`):
+    the commit's ``sha`` and ``subject``, the ``entry`` it changed, and the blob that entry
+    held before the change (``was``, None where it held none), which a delete's ``entry``
+    no longer names."""
 
     sha: str
     subject: str
     entry: Entry
+    was: str | None
 
 
 @dataclass(frozen=True)
 class Took:
-    """One commit of a branch's own line through which it took a marker's blob in (``sha``),
-    and the next commit of that line that changed the marker again (``until``), None while
-    the branch still holds it (:func:`landings`)."""
+    """One commit of a branch's own line through which it took a marker's or a task file's
+    blob in (``sha``), and the next commit of that line that changed that file again
+    (``until``), None while the branch still holds it (:func:`landings`)."""
 
     sha: str
     until: str | None
@@ -133,8 +154,9 @@ class ClaimTaken(GitError):
 
 
 class MarkerConflict(GitError):
-    """Two commits merge with a conflict on a ship marker (:func:`merged_tree`), so whether
-    those cards shipped is unknown: ``paths`` names each marker that conflicts."""
+    """Two commits merge with a conflict on a ship marker (:func:`merged_tree`), or, where a
+    reader asks, a task's done file (:meth:`Merged.settled`), so whether those cards shipped
+    or those tasks are done is unknown: ``paths`` names each file that conflicts."""
 
     def __init__(self, message: str, paths: tuple[str, ...]) -> None:
         """The error, saying ``message``, over the conflicting markers ``paths``."""
@@ -152,12 +174,29 @@ def marker(number: int) -> str:
     return f"{MARKERS}/{number}"
 
 
+def task_file(number: int) -> str:
+    """``plan/tasks/<number>``: the one file recording task ``number`` done."""
+    return f"{TASKS}/{number}"
+
+
+def _numbered(path: str, directory: str) -> int | None:
+    """The number the path ``path`` names as a file directly under ``directory``
+    (``<directory>/<number>``); None for any other path, under ``directory`` or not: a name
+    that is no number, a file in a directory below it, or ``directory`` itself."""
+    name = path.removeprefix(f"{directory}/")
+    return int(name) if path.startswith(f"{directory}/") and _NUMBER.fullmatch(name) else None
+
+
 def card_of(path: str) -> int | None:
     """The card whose marker the path ``path`` names (``plan/ships/<number>``, :func:`marker`);
-    None for any other path, under :data:`MARKERS` or not: a name that is no card number, a
-    file in a directory below it, or :data:`MARKERS` itself."""
-    name = path.removeprefix(f"{MARKERS}/")
-    return int(name) if path.startswith(f"{MARKERS}/") and _NUMBER.fullmatch(name) else None
+    None for any other path (:func:`_numbered`)."""
+    return _numbered(path, MARKERS)
+
+
+def task_of(path: str) -> int | None:
+    """The task whose done file the path ``path`` names (``plan/tasks/<number>``,
+    :func:`task_file`); None for any other path (:func:`_numbered`)."""
+    return _numbered(path, TASKS)
 
 
 def claimed_card(branch: str) -> int | None:
@@ -209,7 +248,7 @@ def on_origin(root: Path) -> dict[int, str]:
 
 
 def fetch(root: Path, cards: Iterable[int] = ()) -> None:
-    """Bring :data:`tools.ci.trailers.DEV`, :data:`tools.ci.trailers.MAIN` and the branch
+    """Bring :data:`tools.ci.gitcmd.DEV`, :data:`tools.ci.gitcmd.MAIN` and the branch
     ``card/N`` of each of ``cards`` up to date in ONE fetch, each by its name into its own
     tracking ref, so "shipped" and "claimed" are today's answers: the refs a claim's push
     writes too (git's update of a pushed branch's tracking ref), and no other."""
@@ -223,81 +262,181 @@ def fetch(root: Path, cards: Iterable[int] = ()) -> None:
 TIPS = (tracking(DEV), tracking(MAIN))
 
 
-def _shown(ref: str) -> str:
-    """``ref`` as a line names it: a remote-tracking branch by its short name, a commit id by
-    its first twelve characters."""
+def shown(ref: str) -> str:
+    """``ref`` as a sentence names it: a remote-tracking branch by its short name
+    (``origin/dev``), a commit id by its first twelve characters."""
     return ref[:12] if FULL_ID.fullmatch(ref) else ref.removeprefix("refs/remotes/")
 
 
-def merged_tree(root: Path, tips: tuple[str, str]) -> str:
-    """The tree of the merge of the two ``tips``, as git's three-way merge writes it: what
-    :func:`shipped` reads, and what a release of a cut into ``main`` leaves production
-    running (``tools/release/_cards.py``).  A
-    conflict outside :data:`MARKERS` is no record's, and the tree still holds every marker; a
-    conflict on a marker leaves that card's record unknown, so it is refused.  The merge
-    detects no rename (``-X no-renames``, which no setting can turn back on): two markers
-    hold the same line when claimed in the same second, so a marker deleted beside another
-    added reads as a rename, and the other side's change to the deleted one would land
-    silently in the added one, never the conflict it is (M1's review L1, measured).  So in
-    that one case alone it differs from the merge GitHub's queue writes, which detects
-    renames: it reads as the conflict it is what that merge would land in the wrong marker
-    (M3's review, its 8).
+@dataclass(frozen=True)
+class Merged:
+    """The merge of two commits as git's three-way merge writes it (:func:`merge`): the two
+    ``tips``, its ``tree``, ``conflicts``, each path under :data:`MARKERS` that conflicts
+    there, and ``task_conflicts``, each under :data:`TASKS`, each sorted.  Where a marker
+    conflicts the tree still holds a file, which is no settled record: the side that kept
+    it, for a change against a delete, or git's conflict text, for two lines (measured
+    2026-10-23, git 2.56), and so does a task's file.  So a reader of the tree reads the
+    conflicts first.  Quill's own read (:func:`shipped`) and CI's landing check
+    (``tools/quill/landing.py``) ask after the tasks; the release tool reads markers alone
+    and never reads a task (R-BAL386)."""
+
+    tips: tuple[str, str]
+    tree: str
+    conflicts: tuple[str, ...]
+    task_conflicts: tuple[str, ...]
+
+    def settled(self, *, tasks: bool = False) -> str:
+        """``tree``, when no marker conflicts in it, nor, with ``tasks``, a task's file.
+
+        Raises:
+            MarkerConflict: When one does, naming each.
+        """
+        paths = (*self.conflicts, *(self.task_conflicts if tasks else ()))
+        if paths:
+            one, other = self.tips
+            what = "those cards shipped" + (" or those tasks are done" if tasks else "")
+            raise MarkerConflict(f"{shown(one)} and {shown(other)} merge with a conflict on "
+                                 f"{', '.join(paths)}, so whether {what} is unknown: settle it "
+                                 f"in the merge of {MAIN} into {DEV} first", paths)
+        return self.tree
+
+
+def merge(root: Path, tips: tuple[str, str]) -> Merged:
+    """The merge of the two ``tips`` as git's three-way merge writes it, with each marker and
+    task file that conflicts there (:class:`Merged`), written to the object store and to no
+    branch: the ONE merge :func:`merged_tree` and :func:`shipped` settle, and the one CI's
+    landing check reads before and after a change, conflicts and all
+    (``tools/quill/landing.py``, rule 8).  A conflict outside :data:`MARKERS` and
+    :data:`TASKS` is no record's, and is not named.  The merge detects no rename (``-X
+    no-renames``, which no setting can turn back on): two markers hold the same line when
+    claimed in the same second, so a marker deleted beside another added reads as a rename,
+    and the other side's change to the deleted one would land silently in the added one,
+    never the conflict it is (M1's review L1, measured).  So in that one case alone it
+    differs from the merge GitHub's queue writes, which detects renames: it reads as the
+    conflict it is what that merge would land in the wrong marker (M3's review, its 8).
 
     Raises:
-        MarkerConflict: When a path under :data:`MARKERS` conflicts.
         GitError: When the merge fails.
     """
     one, other = tips
     done = run(root, "merge-tree", "--write-tree", "-X", "no-renames", "--name-only",
                "--no-messages", "-z", one, other)
     if done.returncode not in (0, 1):
-        raise GitError(f"git merge-tree {_shown(one)} {_shown(other)}: {done.stderr.strip()}")
+        raise GitError(f"git merge-tree {shown(one)} {shown(other)}: {done.stderr.strip()}")
     tree, *conflicted = [name for name in done.stdout.split("\0") if name]
-    if records := sorted({name for name in conflicted if name.startswith(f"{MARKERS}/")}):
-        raise MarkerConflict(f"{_shown(one)} and {_shown(other)} merge with a conflict on "
-                             f"{', '.join(records)}, so whether those cards shipped is "
-                             f"unknown: settle it in the merge of {MAIN} into {DEV} first",
-                             tuple(records))
-    return tree
+    paths = {_conflicted(name, tips) for name in conflicted}
+    return Merged(tips, tree, *(tuple(sorted(path for path in paths
+                                             if path.startswith(f"{directory}/")))
+                                for directory in (MARKERS, TASKS)))
 
 
-def markers_in(root: Path, tree: str) -> tuple[frozenset[int], tuple[str, ...]]:
-    """The cards whose markers the tree ``tree`` holds (a commit names its own tree): every
-    file under :data:`MARKERS` whose name is a card number; and the path of each other entry
-    there -- a name that is no number, a file in a directory below it, or :data:`MARKERS`
-    itself a file.  The ONE reading of a tree's markers: :func:`shipped` reads the merge of
-    ``dev`` and ``main`` with it, and the release tool what production holds before and after
-    a release (``tools/release/_cards.py``), and which entries a release changes are
-    markers.
+def _conflicted(name: str, tips: tuple[str, str]) -> str:
+    """The path that conflicts, for a name git's merge lists: where a file meets a directory
+    at its path, git lists the file it moved aside as ``<path>~<tip>``, the tip as it was
+    given with each ``/`` read as ``_`` (measured 2026-10-23, git 2.56), so two merges whose
+    tips are spelled differently would name one conflict two ways (L1's review, its L1)."""
+    for tip in tips:
+        if name.endswith(suffix := f"~{tip.replace('/', '_')}"):
+            return name.removesuffix(suffix)
+    return name
+
+
+def merged_tree(root: Path, tips: tuple[str, str]) -> str:
+    """The tree of the merge of the two ``tips`` (:func:`merge`): what :func:`shipped` reads,
+    and what a release of a cut into ``main`` leaves production running
+    (``tools/release/_cards.py``).  A conflict on a marker leaves that card's record
+    unknown, so it is refused.
+
+    Raises:
+        MarkerConflict: When a path under :data:`MARKERS` conflicts.
+        GitError: When the merge fails.
+    """
+    return merge(root, tips).settled()
+
+
+def lines_in(root: Path, tree: str,
+             directory: str = MARKERS) -> tuple[dict[int, str], tuple[str, ...]]:
+    """Each card whose marker the tree ``tree`` holds (a commit names its own tree), with
+    that marker's line (its blob): every file under :data:`MARKERS` whose name is a card
+    number; and the path of each other entry there -- a name that is no number, a file in a
+    directory below it, or :data:`MARKERS` itself a file.  Named :data:`TASKS` as
+    ``directory``, each task whose done file it holds, and every other entry there, alike.
+    The ONE reading of a tree's markers and task files: :func:`markers_in` names its cards,
+    :func:`tasks_in` its tasks, and CI's landing check compares the lines two merges hold
+    (``tools/quill/landing.py``, rule 8).
 
     Raises:
         GitError: When git cannot read ``tree``.
     """
-    cards, strays = set(), []
-    out = git(root, "ls-tree", "-r", "-z", tree, "--", MARKERS)
+    lines, strays = {}, []
+    out = git(root, "ls-tree", "-r", "-z", tree, "--", directory)
     for entry in filter(None, out.split("\0")):
-        kind, path = entry.split(" ")[1], entry.partition("\t")[2]
-        if kind == "blob" and (number := card_of(path)) is not None:
-            cards.add(number)
+        meta, _, path = entry.partition("\t")
+        _, kind, blob = meta.split(" ")
+        if kind == "blob" and (number := _numbered(path, directory)) is not None:
+            lines[number] = blob
         else:
             strays.append(path)
-    return frozenset(cards), tuple(strays)
+    return lines, tuple(strays)
+
+
+def markers_in(root: Path, tree: str) -> tuple[frozenset[int], tuple[str, ...]]:
+    """The cards whose markers the tree ``tree`` holds, and the path of each other entry
+    under :data:`MARKERS` there (:func:`lines_in`, its lines aside): :func:`shipped` reads the
+    merge of ``dev`` and ``main`` with it, and the release tool what production holds before
+    and after a release (``tools/release/_cards.py``), and which entries a release changes
+    are markers.
+
+    Raises:
+        GitError: When git cannot read ``tree``.
+    """
+    lines, strays = lines_in(root, tree)
+    return frozenset(lines), strays
+
+
+def tasks_in(root: Path, tree: str) -> tuple[frozenset[int], tuple[str, ...]]:
+    """The tasks whose done files the tree ``tree`` holds, and the path of each other entry
+    under :data:`TASKS` there (:func:`lines_in`, its lines aside), as :func:`markers_in`
+    reads the markers: :func:`shipped` reads the merge of ``dev`` and ``main`` with it.
+
+    Raises:
+        GitError: When git cannot read ``tree``.
+    """
+    lines, strays = lines_in(root, tree, TASKS)
+    return frozenset(lines), strays
 
 
 def shipped(root: Path, tips: tuple[str, str] = TIPS) -> Shipped:
     """What git says shipped: every card whose marker the merge of the two ``tips``
-    (:func:`merged_tree`; ``dev`` and ``main`` unless named) holds (:func:`markers_in`); any other
-    entry under :data:`MARKERS` there is a HISTORY line, acted on nowhere.  CI's landing check
-    names a pull request's merge and the other branch, to read what will have shipped once
-    that change and the other branch meet.
+    (:func:`merge`; ``dev`` and ``main`` unless named) holds (:func:`markers_in`), and every
+    task whose done file it holds (:func:`tasks_in`); any other entry under :data:`MARKERS`
+    or :data:`TASKS` there is a HISTORY line, acted on nowhere.
 
     Raises:
-        MarkerConflict: When a marker conflicts in that merge (:func:`merged_tree`).
+        MarkerConflict: When a marker or a task's file conflicts in that merge
+            (:meth:`Merged.settled`).
     """
-    cards, strays = markers_in(root, merged_tree(root, tips))
-    return Shipped(cards, tuple(f"{path} on {DEV} or {MAIN} is no card's marker (a marker is "
-                                f"a file {MARKERS}/<card number>): it is not acted on"
-                                for path in strays))
+    tree = merge(root, tips).settled(tasks=True)
+    cards, strays = markers_in(root, tree)
+    tasks, loose = tasks_in(root, tree)
+    return Shipped(cards, tasks, (
+        *(f"{path} on {DEV} or {MAIN} is no card's marker (a marker is a file "
+          f"{MARKERS}/<card number>): it is not acted on" for path in strays),
+        *(f"{path} on {DEV} or {MAIN} is no task's file (a task's file is a file "
+          f"{TASKS}/<task number>): it is not acted on" for path in loose)))
+
+
+def blob_at(root: Path, treeish: str, path: str) -> str | None:
+    """The blob of the file at ``path`` in ``treeish`` (a commit or a tree); None when nothing
+    is there, or no file is: a directory, or a submodule's commit (a gitlink).
+
+    Raises:
+        GitError: When git cannot read ``treeish``.
+    """
+    entry = git(root, "ls-tree", "-z", treeish, "--", path).rstrip("\0")
+    if not entry or entry.split(" ")[1] != "blob":
+        return None
+    return entry.split(" ")[2].partition("\t")[0]
 
 
 def _claimed_at(root: Path, sha: str, number: int) -> str | None:
@@ -307,11 +446,30 @@ def _claimed_at(root: Path, sha: str, number: int) -> str | None:
     Raises:
         GitError: When git cannot read ``sha``'s tree or the marker.
     """
-    entry = git(root, "ls-tree", "-z", sha, "--", marker(number)).rstrip("\0")
-    if not entry or entry.split(" ")[1] != "blob":
+    if (blob := blob_at(root, sha, marker(number))) is None:
         return None
-    line = git(root, "cat-file", "blob", entry.split(" ")[2].partition("\t")[0]).strip()
+    line = git(root, "cat-file", "blob", blob).strip()
     return line.removeprefix(_CLAIMED) if line.startswith(_CLAIMED) else line
+
+
+def own_tasks(root: Path, tip: str) -> frozenset[int]:
+    """Each task whose done file the claim at ``tip`` wrote itself: one the tip holds
+    (:func:`lines_in`) with a line no commit its own commits grew from holds there.  Its own
+    commits are those neither ``dev`` nor ``main`` holds, and the commits they grew from are
+    that set's boundary, each a commit one of them holds: where the claim was cut, and each
+    tip of either a merge brought in.  So a file it took in unchanged from either is not its
+    own -- ``quill claim`` cuts from ``dev`` by default, whose every task file a claim would
+    otherwise name as its own (T1's review, its H1) -- and a file its own commits added or
+    changed is.
+
+    Raises:
+        GitError: When git cannot read ``tip`` or a commit it grew from.
+    """
+    lines = lines_in(root, tip, TASKS)[0]
+    out = git(root, "rev-list", "--boundary", tip, "--not", *TIPS)
+    grew_from = [lines_in(root, line[1:], TASKS)[0] for line in out.split() if line[0] == "-"]
+    return frozenset(number for number, blob in lines.items()
+                     if all(held.get(number) != blob for held in grew_from))
 
 
 def claims(root: Path, cards: Iterable[int]) -> dict[int, Claim]:
@@ -324,7 +482,8 @@ def claims(root: Path, cards: Iterable[int]) -> dict[int, Claim]:
         if is_ancestor(root, tip, tracking(DEV)) or is_ancestor(root, tip, tracking(MAIN)):
             continue
         committed = git(root, "log", "-1", "--format=%cI", tip).strip()
-        found[number] = Claim(number, tip, committed, _claimed_at(root, tip, number))
+        found[number] = Claim(number, tip, committed, _claimed_at(root, tip, number),
+                              own_tasks(root, tip))
     return found
 
 
@@ -341,12 +500,22 @@ def read(root: Path) -> Reads:
     return Reads(shipped(root), found, merged)
 
 
-def _entry(meta: str, path: str) -> Entry:
-    """The entry at ``path`` a raw diff line names: ``meta`` is the line before its path,
+def _blobs(meta: str) -> tuple[str | None, str | None, str]:
+    """What a raw diff line says of its entry: ``meta`` is the line before its path,
     ``:<mode> <mode> <blob before> <blob after> <status>``, each blob in full (``--raw
-    --no-abbrev``), the blob after all zeros once deleted."""
-    _, _, _, after, status = meta.split(" ")
-    return Entry(status[0], path, None if set(after) == {"0"} else after)
+    --no-abbrev``) and all zeros where the entry holds none (before it is added, once it is
+    deleted).  The blob before and the blob after, each None where all zeros, and the status
+    letter."""
+    _, _, before, after, status = meta.split(" ")
+    return (None if set(before) == {"0"} else before,
+            None if set(after) == {"0"} else after, status[0])
+
+
+def _entry(meta: str, path: str) -> Entry:
+    """The entry at ``path`` a raw diff line names, ``meta`` the line before its path
+    (:func:`_blobs`)."""
+    _, after, status = _blobs(meta)
+    return Entry(status, path, after)
 
 
 def changes(root: Path, old: str, new: str, *paths: str) -> tuple[Entry, ...]:
@@ -365,15 +534,23 @@ def changes(root: Path, old: str, new: str, *paths: str) -> tuple[Entry, ...]:
                  for meta, path in zip(fields[0:-1:2], fields[1::2], strict=True))
 
 
-def marker_changes(root: Path, refs: tuple[str, ...] = TIPS, *,
-                   first_parent: bool = False) -> list[MarkerChange]:
+def marker_changes(root: Path, refs: tuple[str, ...] = TIPS, *, first_parent: bool = False,
+                   no_merges: bool = False,
+                   directories: tuple[str, ...] = (MARKERS,)) -> list[MarkerChange]:
     """Every change a commit of ``refs``' history (``dev``'s and ``main``'s unless named) made
-    to an entry under :data:`MARKERS`, newest first (:class:`MarkerChange`); with
+    to an entry under :data:`MARKERS`, or under each of ``directories`` when named (CI's
+    landing check names :data:`TASKS` beside it, R-BAL386), newest first
+    (:class:`MarkerChange`); with
     ``first_parent``, of each ref's OWN line alone, its first-parent history, the states the
-    branch itself was in.  The ONE walk of the markers' history: :func:`history`,
-    :func:`ever_marked` and :func:`landings` all read it, and the release tool reads it over
-    a release's range (``<base>..<cut>``) for the commits there that changed each marker
-    (``tools/release/_cards.py``).
+    branch itself was in; with ``no_merges``, of each commit that is no merge alone (one
+    parent, or none: a root, which only adds), whose change is the one it shows in history,
+    never a merge's resolution.  The ONE walk of the
+    markers' history: :func:`history`, :func:`ever_marked` and :func:`landings` all read it,
+    the release tool reads it over a release's range (``<base>..<cut>``) for the commits
+    there that changed each marker (``tools/release/_cards.py``), and CI's landing check
+    reads its commits of one parent over what a change brings, for a delete shown in
+    history (``tools/quill/landing.py``, rule 8, ``R-BAL391``); with :data:`TASKS` named, the
+    same walk over each task's done file, which is read as a marker is.
 
     **It lists a commit for every marker any commit of that history ever held, and for every
     blob one held.**  Such a marker (or blob) arrived through a commit holding it whose
@@ -392,20 +569,29 @@ def marker_changes(root: Path, refs: tuple[str, ...] = TIPS, *,
     whose first parent does not lists it as the blob after its change.  On one line alone
     (``--first-parent``) every state is its first parent's plus that commit's change against
     it, so the walk lists every commit of the line through which the line took a marker or
-    blob in.  Read with no rename detection, which git turns on by default, so a marker
+    blob in.  With ``no_merges`` the walk keeps no such promise, by design: a marker a
+    merge's resolution alone added or deleted is not listed, since no commit shows that
+    change on its own.  Read with no rename detection, which git turns on by default, so a marker
     moved to another name reads as deleted and added, never ``R``; and each blob in full
     (``--raw --no-abbrev``)."""
     out = git(root, "log", "--format=%x01%H%x02%s", "--raw", "--no-abbrev", "--no-renames",
               "--full-history", "--diff-merges=first-parent",
-              *(("--first-parent",) if first_parent else ()), *refs, "--", MARKERS)
+              *(("--first-parent",) if first_parent else ()),
+              *(("--no-merges",) if no_merges else ()), *refs, "--", *directories)
     found = []
     for record in filter(None, out.split("\x01")):
         head, _, lines = record.partition("\n")
         sha, _, subject = head.partition("\x02")
-        for line in filter(str.strip, lines.splitlines()):
-            meta, _, path = line.partition("\t")
-            found.append(MarkerChange(sha, subject, _entry(meta, path)))
+        found.extend(_change(sha, subject, line) for line in filter(str.strip, lines.splitlines()))
     return found
+
+
+def _change(sha: str, subject: str, line: str) -> MarkerChange:
+    """The change one raw diff line of commit ``sha`` (its ``subject``) names: the line
+    before its path read once (:func:`_blobs`)."""
+    meta, _, path = line.partition("\t")
+    was, blob, status = _blobs(meta)
+    return MarkerChange(sha, subject, Entry(status, path, blob), was)
 
 
 def history(root: Path, number: int) -> list[tuple[str, str, str]]:
@@ -426,8 +612,10 @@ def ever_marked(root: Path) -> frozenset[int]:
     return frozenset(number for number in cards if number is not None)
 
 
-def landings(root: Path, ref: str) -> dict[tuple[str, str], tuple[Took, ...]]:
-    """Each blob the branch ``ref`` itself ever held at an entry under :data:`MARKERS`, as
+def landings(root: Path, ref: str, directories: tuple[str, ...] = (MARKERS,)
+             ) -> dict[tuple[str, str], tuple[Took, ...]]:
+    """Each blob the branch ``ref`` itself ever held at an entry under :data:`MARKERS` (or
+    under each of ``directories`` when named: CI's write rule names :data:`TASKS` too), as
     ``(path, blob)``, with every commit of its OWN line (its first-parent history, the states
     the branch itself was in) through which it took that blob in, newest first, each beside
     the next commit of the line that changed that entry again (:class:`Took`), all read from
@@ -440,12 +628,21 @@ def landings(root: Path, ref: str) -> dict[tuple[str, str], tuple[Took, ...]]:
     and undid it."""
     found: dict[tuple[str, str], list[Took]] = {}
     newer: dict[str, str] = {}
-    for change in marker_changes(root, (ref,), first_parent=True):
+    for change in marker_changes(root, (ref,), first_parent=True, directories=directories):
         path, blob = change.entry.path, change.entry.blob
         if blob is not None:
             found.setdefault((path, blob), []).append(Took(change.sha, newer.get(path)))
         newer[path] = change.sha
     return {key: tuple(took) for key, took in found.items()}
+
+
+def checked_out(root: Path) -> str | None:
+    """The branch checked out in ``root``'s working tree, by its short name; None when none
+    is (a detached HEAD)."""
+    done = run(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if done.returncode not in (0, 1):
+        raise GitError(f"git symbolic-ref HEAD: {done.stderr.strip()}")
+    return done.stdout.strip() if done.returncode == 0 else None
 
 
 def has_branch(root: Path, name: str) -> bool:
@@ -567,7 +764,9 @@ def author_date(root: Path, ref: str) -> str:
 
 def started(root: Path, ref: str) -> str:
     """When the work on branch ``ref`` started: the earliest author date among its own
-    commits (those not on :data:`tools.ci.trailers.DEV`) and the commits they grew from.
+    commits (those not on :data:`tools.ci.gitcmd.DEV`, read by its full name, so no tag or
+    local branch named like it stands in: :func:`tools.ci.gitcmd.tracking`) and the commits
+    they grew from.
 
     The commits they grew from are the boundary of that set -- every commit not
     of the branch that one of its own commits sits on, under any line a merge
@@ -579,7 +778,7 @@ def started(root: Path, ref: str) -> str:
     starts at its tip.  So is a branch already MERGED into dev, whose start git
     no longer records; its window then starts at its last commit.
     """
-    dates = git(root, "log", "--boundary", "--format=%aI", ref, "--not", DEV).split()
+    dates = git(root, "log", "--boundary", "--format=%aI", ref, "--not", tracking(DEV)).split()
     if not dates:
         return author_date(root, ref)
     return min(dates, key=datetime.fromisoformat)

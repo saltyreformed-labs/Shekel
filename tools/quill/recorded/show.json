@@ -1,0 +1,1600 @@
+{
+ "scratch": {
+  "numbers": [
+   223,
+   224,
+   225,
+   226,
+   227,
+   228
+  ],
+  "ids": [
+   6014866479,
+   6014866579,
+   6014866681,
+   6014866771,
+   6014866875,
+   6014866952
+  ],
+  "nodes": [
+   "I_kwDOVSOvzs8AAAABZoOU-Q",
+   "I_kwDOVSOvzs8AAAABZoOULw",
+   "I_kwDOVSOvzs8AAAABZoOUkw",
+   "I_kwDOVSOvzs8AAAABZoOVUw",
+   "I_kwDOVSOvzs8AAAABZoOVuw",
+   "I_kwDOVSOvzs8AAAABZoOWCA"
+  ],
+  "items": [],
+  "board": "PVT_kwDOFB5GWc4BoEsZ",
+  "place": [
+   "saltyreformed-labs",
+   "plan-views-demo",
+   "Plan views demo"
+  ]
+ },
+ "exchanges": [
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c223: issue(number: 223) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c223": {
+       "id": "I_kwDOVSOvzs8AAAABZoOULw",
+       "number": 223,
+       "fullDatabaseId": "6014866479",
+       "title": "[L2 measurement] scratch show S (step), R-BAL395",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "number": 224,
+          "state": "OPEN",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "blockedBy": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "number": 227,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number\n    blocking(first: 100) { totalCount nodes {\n      number state issueType { name } repository { nameWithOwner } } } } } }",
+    "variables": {
+     "number": 223
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 223,
+       "blocking": {
+        "totalCount": 3,
+        "nodes": [
+         {
+          "number": 228,
+          "state": "OPEN",
+          "issueType": {
+           "name": "step"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         },
+         {
+          "number": 226,
+          "state": "CLOSED",
+          "issueType": {
+           "name": "ruling"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         },
+         {
+          "number": 225,
+          "state": "OPEN",
+          "issueType": {
+           "name": "finding"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c224: issue(number: 224) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c225: issue(number: 225) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c226: issue(number: 226) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c227: issue(number: 227) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c224": {
+       "id": "I_kwDOVSOvzs8AAAABZoOUkw",
+       "number": 224,
+       "fullDatabaseId": "6014866579",
+       "title": "[L2 measurement] scratch show T (task), R-BAL395",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 223,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c225": {
+       "id": "I_kwDOVSOvzs8AAAABZoOU-Q",
+       "number": 225,
+       "fullDatabaseId": "6014866681",
+       "title": "[L2 measurement] scratch show F (finding), R-BAL395",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "finding"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "number": 223,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c226": {
+       "id": "I_kwDOVSOvzs8AAAABZoOVUw",
+       "number": 226,
+       "fullDatabaseId": "6014866771",
+       "title": "[L2 measurement] scratch show R (ruling), R-BAL395",
+       "state": "CLOSED",
+       "stateReason": "COMPLETED",
+       "issueType": {
+        "name": "ruling"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "number": 223,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": [
+         {
+          "__typename": "ClosedEvent",
+          "actor": {
+           "login": "SaltyReformed"
+          }
+         }
+        ]
+       }
+      },
+      "c227": {
+       "id": "I_kwDOVSOvzs8AAAABZoOVuw",
+       "number": 227,
+       "fullDatabaseId": "6014866875",
+       "title": "[L2 measurement] scratch show B (step), R-BAL395",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {\n  items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {\n    pageInfo { hasNextPage endCursor }\n    nodes { id content { ... on Issue { number repository { nameWithOwner } } } } } } } }",
+    "variables": {
+     "id": "PVT_kwDOFB5GWc4BoEsZ",
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "node": {
+      "items": {
+       "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwODMzMzMzMzMzMzMzM84Qmul_"
+       },
+       "nodes": [
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4vM",
+         "content": {
+          "number": 36,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa31M",
+         "content": {
+          "number": 20,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa35M",
+         "content": {
+          "number": 21,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa390",
+         "content": {
+          "number": 22,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4AQ",
+         "content": {
+          "number": 23,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4GA",
+         "content": {
+          "number": 24,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4K0",
+         "content": {
+          "number": 25,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4Oc",
+         "content": {
+          "number": 26,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4RM",
+         "content": {
+          "number": 27,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4UU",
+         "content": {
+          "number": 28,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4XM",
+         "content": {
+          "number": 29,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4ak",
+         "content": {
+          "number": 30,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4e4",
+         "content": {
+          "number": 31,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4hQ",
+         "content": {
+          "number": 32,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4kU",
+         "content": {
+          "number": 33,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4n8",
+         "content": {
+          "number": 34,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4rQ",
+         "content": {
+          "number": 35,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4yM",
+         "content": {
+          "number": 37,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa41o",
+         "content": {
+          "number": 38,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa45c",
+         "content": {
+          "number": 39,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa474",
+         "content": {
+          "number": 40,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4-8",
+         "content": {
+          "number": 41,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Bo",
+         "content": {
+          "number": 42,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Fg",
+         "content": {
+          "number": 43,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Ik",
+         "content": {
+          "number": 44,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5L4",
+         "content": {
+          "number": 45,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Rw",
+         "content": {
+          "number": 46,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5UY",
+         "content": {
+          "number": 47,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Y8",
+         "content": {
+          "number": 48,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5ck",
+         "content": {
+          "number": 49,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5gE",
+         "content": {
+          "number": 50,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5j4",
+         "content": {
+          "number": 51,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5oQ",
+         "content": {
+          "number": 52,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5qM",
+         "content": {
+          "number": 53,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5tU",
+         "content": {
+          "number": 54,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5w0",
+         "content": {
+          "number": 55,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5ys",
+         "content": {
+          "number": 56,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa50g",
+         "content": {
+          "number": 57,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa53w",
+         "content": {
+          "number": 58,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa568",
+         "content": {
+          "number": 59,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5_A",
+         "content": {
+          "number": 60,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6B4",
+         "content": {
+          "number": 61,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6EY",
+         "content": {
+          "number": 62,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Jc",
+         "content": {
+          "number": 63,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Mc",
+         "content": {
+          "number": 64,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Pg",
+         "content": {
+          "number": 65,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6TI",
+         "content": {
+          "number": 66,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6X8",
+         "content": {
+          "number": 67,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/223",
+   "body": null,
+   "status": 200,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/223",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/223/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/223/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/223/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/223",
+    "id": 6014866479,
+    "node_id": "I_kwDOVSOvzs8AAAABZoOULw",
+    "number": 223,
+    "title": "[L2 measurement] scratch show S (step), R-BAL395",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 1,
+    "created_at": "2026-10-24T16:04:42Z",
+    "updated_at": "2026-10-24T16:04:50Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [],
+    "type": {
+     "id": 891387282,
+     "node_id": "IT_kwDOFB5GWc41IX2S",
+     "name": "step",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 1,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 1,
+     "total_blocked_by": 1,
+     "blocking": 2,
+     "total_blocking": 3
+    },
+    "body": "THROWAWAY recording of quill show, card S; deleted after.",
+    "closed_by": null,
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/223/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!, $after: String) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number\n    comments(first: 100, after: $after) {\n      pageInfo { hasNextPage endCursor }\n      nodes { author { login } createdAt body } } } } }",
+    "variables": {
+     "number": 223,
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 223,
+       "comments": {
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": "Y3Vyc29yOnYyOpHPAAAAAXyoy6Q="
+        },
+        "nodes": [
+         {
+          "author": {
+           "login": "SaltyReformed"
+          },
+          "createdAt": "2026-10-24T16:04:50Z",
+          "body": "A comment the recorder posts on step S."
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c225: issue(number: 225) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c225": {
+       "id": "I_kwDOVSOvzs8AAAABZoOU-Q",
+       "number": 225,
+       "fullDatabaseId": "6014866681",
+       "title": "[L2 measurement] scratch show F (finding), R-BAL395",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "finding"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "number": 223,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c223: issue(number: 223) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c223": {
+       "id": "I_kwDOVSOvzs8AAAABZoOULw",
+       "number": 223,
+       "fullDatabaseId": "6014866479",
+       "title": "[L2 measurement] scratch show S (step), R-BAL395",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "number": 224,
+          "state": "OPEN",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "blockedBy": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "number": 227,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {\n  items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {\n    pageInfo { hasNextPage endCursor }\n    nodes { id content { ... on Issue { number repository { nameWithOwner } } } } } } } }",
+    "variables": {
+     "id": "PVT_kwDOFB5GWc4BoEsZ",
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "node": {
+      "items": {
+       "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwODMzMzMzMzMzMzMzM84Qmul_"
+       },
+       "nodes": [
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4vM",
+         "content": {
+          "number": 36,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa31M",
+         "content": {
+          "number": 20,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa35M",
+         "content": {
+          "number": 21,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa390",
+         "content": {
+          "number": 22,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4AQ",
+         "content": {
+          "number": 23,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4GA",
+         "content": {
+          "number": 24,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4K0",
+         "content": {
+          "number": 25,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4Oc",
+         "content": {
+          "number": 26,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4RM",
+         "content": {
+          "number": 27,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4UU",
+         "content": {
+          "number": 28,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4XM",
+         "content": {
+          "number": 29,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4ak",
+         "content": {
+          "number": 30,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4e4",
+         "content": {
+          "number": 31,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4hQ",
+         "content": {
+          "number": 32,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4kU",
+         "content": {
+          "number": 33,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4n8",
+         "content": {
+          "number": 34,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4rQ",
+         "content": {
+          "number": 35,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4yM",
+         "content": {
+          "number": 37,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa41o",
+         "content": {
+          "number": 38,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa45c",
+         "content": {
+          "number": 39,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa474",
+         "content": {
+          "number": 40,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa4-8",
+         "content": {
+          "number": 41,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Bo",
+         "content": {
+          "number": 42,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Fg",
+         "content": {
+          "number": 43,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Ik",
+         "content": {
+          "number": 44,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5L4",
+         "content": {
+          "number": 45,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Rw",
+         "content": {
+          "number": 46,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5UY",
+         "content": {
+          "number": 47,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Y8",
+         "content": {
+          "number": 48,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5ck",
+         "content": {
+          "number": 49,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5gE",
+         "content": {
+          "number": 50,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5j4",
+         "content": {
+          "number": 51,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5oQ",
+         "content": {
+          "number": 52,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5qM",
+         "content": {
+          "number": 53,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5tU",
+         "content": {
+          "number": 54,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5w0",
+         "content": {
+          "number": 55,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5ys",
+         "content": {
+          "number": 56,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa50g",
+         "content": {
+          "number": 57,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa53w",
+         "content": {
+          "number": 58,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa568",
+         "content": {
+          "number": 59,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa5_A",
+         "content": {
+          "number": 60,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6B4",
+         "content": {
+          "number": 61,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6EY",
+         "content": {
+          "number": 62,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Jc",
+         "content": {
+          "number": 63,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Mc",
+         "content": {
+          "number": 64,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Pg",
+         "content": {
+          "number": 65,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6TI",
+         "content": {
+          "number": 66,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4BoEsZzhCa6X8",
+         "content": {
+          "number": 67,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "GET",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/225",
+   "body": null,
+   "status": 200,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/225",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/225/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/225/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/225/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/225",
+    "id": 6014866681,
+    "node_id": "I_kwDOVSOvzs8AAAABZoOU-Q",
+    "number": 225,
+    "title": "[L2 measurement] scratch show F (finding), R-BAL395",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-24T16:04:43Z",
+    "updated_at": "2026-10-24T16:04:43Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [],
+    "type": {
+     "id": 891387478,
+     "node_id": "IT_kwDOFB5GWc41IX5W",
+     "name": "finding",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 0,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 1,
+     "total_blocked_by": 1,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "body": "THROWAWAY recording of quill show, card F; deleted after.",
+    "closed_by": null,
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/225/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!, $after: String) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number\n    comments(first: 100, after: $after) {\n      pageInfo { hasNextPage endCursor }\n      nodes { author { login } createdAt body } } } } }",
+    "variables": {
+     "number": 225,
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 225,
+       "comments": {
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": null
+        },
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

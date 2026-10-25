@@ -13,17 +13,16 @@ that is no sub-issue of the parent named is refused 403, as GitHub answers both
 (``recorded/twice.json``, ``recorded/unlink.json``) -- and FAILS LOUDLY on a write
 the tool must never send
 (re-parenting a card, under a parent inside the tracker or out), rather than
-guessing GitHub's answer to it.  A number it was told was deleted (:attr:`FakeTracker.gone`)
-answers a read by number as GitHub answers a deleted issue's, and no create takes it,
-as GitHub's one numbering sequence gives no number out twice.  Its board shows a
+guessing GitHub's answer to it.  Its board shows a
 placement at once unless told to lag (:attr:`FakeBoard.lagging`); the lag
 itself is graded against a recording.
 Nothing here calls GitHub.
 
-What git says -- a card shipped, a card claimed -- is never faked: :func:`ship`,
-:func:`unship` and :func:`claim` write the ship markers and claims (ruling
-``balance:R-BAL359``) to the ``code`` fixture's bare ``origin`` (``conftest.py``), which
-every command then reads as it reads the real one.
+What git says -- a card shipped, a card claimed, a task done -- is never faked:
+:func:`ship`, :func:`unship` and :func:`claim` write the ship markers and claims (ruling
+``balance:R-BAL359``), and :func:`finish`, :func:`unfinish`, :func:`piece` and
+:func:`unpiece` the task files (ruling ``balance:R-BAL386``), to the ``code`` fixture's bare
+``origin`` (``conftest.py``), which every command then reads as it reads the real one.
 """
 from __future__ import annotations
 
@@ -31,21 +30,12 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 
+from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV, tracking
 from tools.quill import _git, quill
 from tools.quill._github import GitHubError
-from tools.quill._tracker import (
-    Card,
-    Child,
-    Comment,
-    Edit,
-    Milestone,
-    NumberState,
-    TrackerError,
-    WholeCard,
-)
+from tools.quill._tracker import Card, Child, Comment, Edit
 from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN
 
 
@@ -93,15 +83,17 @@ class FakeBoard:
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (26/20) -- it stands in for
-    :class:`_tracker.Tracker`, so it has each of that class's 25 reads and
-    writes (its own disable says why there are so many), and ``add``, which
-    puts a card in.  ``too-many-instance-attributes`` (10/7) -- **one per kind
-    of fact it keeps**: nine a command reads back (cards, bodies, saved
-    versions, comments, the board, the deleted numbers, the milestones, each
-    card's milestone, and how GitHub renders a text) and the log of writes the
-    tests read.  The claims and the merged pull requests it kept left it at
-    X-cx's M1, when a claim became a branch of the code repository (R-BAL359).
+    Pylint: ``too-many-public-methods`` (24/20, measured at X-cx's S3b) -- it
+    stands in for :class:`_tracker.Tracker`, so it has each of that class's 22
+    reads and writes but ``connect`` (its own disable says why there are so many),
+    and ``add`` and ``add_task``, which put a card or a task in.
+    ``too-many-instance-attributes`` (8/7) -- **one per kind
+    of fact it keeps**: seven a command reads back (cards, bodies, saved
+    versions, comments, the board, the milestones that exist, and each card's
+    milestone) and the log of writes the tests read.  The claims and the merged
+    pull requests it kept left it at X-cx's M1, when a claim became a branch of
+    the code repository (R-BAL359); the deleted numbers and how GitHub renders a
+    text, which only X-cx's migration read, left with it at X-cx's S3b.
     """
 
     app_login = APP_LOGIN
@@ -113,10 +105,8 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.bodies: dict[int, str] = {}
         self.versions: dict[int, list[Edit]] = {}
         self.notes: dict[int, list[Comment]] = {}
-        self.gone: set[int] = set()
-        self.milestones_by_number: dict[int, Milestone] = {}
+        self.milestones: set[int] = set()
         self.milestone_of: dict[int, int] = {}
-        self.renderer = None
         self.writes: list[tuple] = []
         self.board = FakeBoard(self.writes)
 
@@ -132,6 +122,15 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         if on_board and values["is_open"] and kind in quill.ON_BOARD:
             self.board.items.append(number)
         return self.cards_by_number[number]
+
+    def add_task(self, number, parent, **fields):
+        """Put a task in the tracker (R-BAL386): a sub-issue of type ``task`` under the card
+        ``parent``, which lists it, as GitHub links one; open and carrying no label by
+        default, and never on the board."""
+        task = self.add(number, "task", labels=(), parent=parent, **fields)
+        held = self.cards_by_number[parent]
+        self._set(parent, children=(*held.children, Child(number, "task", task.is_open)))
+        return task
 
     def _set(self, number, **fields):
         """Change a held card."""
@@ -162,36 +161,21 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         """The cards that exist among ``numbers``."""
         return {n: self._view(n) for n in numbers if n in self.cards_by_number}
 
-    def all_cards(self):
-        """Every card, open and closed, with its body, its comments and its milestone."""
-        return {n: WholeCard(self._view(n), self.bodies[n], tuple(self.notes.get(n, ())),
-                             self.milestone_of.get(n))
-                for n in self.cards_by_number}
+    def milestones_of(self, numbers):
+        """The milestone each card that exists among ``numbers`` is in, None for none."""
+        return {n: self.milestone_of.get(n) for n in numbers if n in self.cards_by_number}
 
-    def milestones(self):
-        """Every milestone, by title; two of one title refused, as
-        :meth:`_tracker.Tracker.milestones` refuses them."""
-        titles = [held.title for held in self.milestones_by_number.values()]
-        if len(set(titles)) != len(titles):
-            raise TrackerError(f"two milestones share a title among {sorted(titles)}")
-        return {held.title: held for held in self.milestones_by_number.values()}
-
-    def number_state(self, number):
-        """What a read by number finds: a card, a deleted number, or nothing filed."""
-        if number in self.cards_by_number:
-            return NumberState.ISSUE
-        return NumberState.DELETED if number in self.gone else NumberState.NOT_FOUND
+    def blocking(self, number):
+        """The cards ``number`` blocks: each whose blocked-by edges name it, with its kind and
+        state as they stand, in card order (GitHub lists the newest link first, which no
+        command reads)."""
+        return tuple(Child(n, card.kind, card.is_open)
+                     for n, card in sorted(self.cards_by_number.items())
+                     if number in card.blocked_by)
 
     def body(self, number):
         """A card's body."""
         return self.bodies[number]
-
-    def render(self, text):
-        """``text`` as :attr:`renderer` answers it: a test that renders sets the answer GitHub
-        gives, and with none set a render fails loudly rather than guess GitHub's HTML."""
-        if self.renderer is None:
-            raise AssertionError(f"rendered with no renderer set: {text[:80]!r}")
-        return self.renderer(text)
 
     def edits(self, number):
         """A card's body and its versions (the body as filed when it was never edited)."""
@@ -213,9 +197,9 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         ``labels``, as :meth:`_tracker.Tracker.create` files every card, in ``milestone``
         when one is given.  One the tracker lacks is a write the tool must never send, so it
         fails loudly rather than guess GitHub's answer."""
-        number = max({*self.cards_by_number, *self.gone}, default=0) + 1
+        number = max(self.cards_by_number, default=0) + 1
         labels = tuple(sorted({*labels, FILING}))
-        assert milestone is None or milestone in self.milestones_by_number, (
+        assert milestone is None or milestone in self.milestones, (
             f"no milestone #{milestone} to file plan#{number} in")
         self.writes.append(("create", number, kind, title, labels)
                            + (() if milestone is None else (milestone,)))
@@ -224,12 +208,13 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
             self.milestone_of[number] = milestone
         return number
 
-    def create_milestone(self, title, description):
-        """Make a milestone at the next number."""
-        number = max(self.milestones_by_number, default=0) + 1
-        self.writes.append(("create_milestone", number, title))
-        self.milestones_by_number[number] = Milestone(number, title, description)
-        return number
+    def set_milestone(self, number, milestone):
+        """Put a card in milestone number ``milestone``, or with None in none."""
+        self.writes.append(("set_milestone", number, milestone))
+        if milestone is None:
+            self.milestone_of.pop(number, None)
+        else:
+            self.milestone_of[number] = milestone
 
     def retype(self, number, kind):
         """Change a card's kind."""
@@ -281,14 +266,6 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
                                    '{"message":"Label does not exist"}')
         self.writes.append(("unmark", number))
         self._set(number, labels=tuple(label for label in labels if label != FILING))
-
-    def close_unmarked(self, number, labels):
-        """Close a card as completed and set its labels to ``labels`` without the mark, in
-        one write, as the tool."""
-        kept = tuple(sorted(set(labels) - {FILING}))
-        self.writes.append(("close_unmarked", number, kept))
-        self._set(number, is_open=False, state_reason="COMPLETED", closed_by_tool=True,
-                  touched_by_hand=False, labels=kept)
 
     def add_child(self, parent, child):
         """Make ``child`` a sub-issue of ``parent``; the tool never re-parents a card, in the
@@ -410,6 +387,44 @@ def unship(root, *numbers):
     """Delete from ``origin``'s ``dev`` the ship marker of each card in ``numbers``, as a
     revert of the change that shipped it does; its sha."""
     return _onto_dev(root, "Revert ship", dict.fromkeys(map(_git.marker, numbers)))
+
+
+def finish(root, *numbers):
+    """Land on ``origin``'s ``dev`` the file of each task in ``numbers`` (R-BAL386), as the
+    merge of its card's branch lands it; its sha."""
+    return _onto_dev(root, "finish", {_git.task_file(number): f"done {_git.instant(CLAIMED)}\n"
+                                      for number in numbers})
+
+
+def unfinish(root, *numbers):
+    """Delete from ``origin``'s ``dev`` the file of each task in ``numbers``, as a revert of the
+    commit that wrote it does; its sha."""
+    return _onto_dev(root, "Revert finish", dict.fromkeys(map(_git.task_file, numbers)))
+
+
+def _onto_claim(root, card, message, files):
+    """A commit on ``origin``'s ``card/<card>`` (a claim :func:`claim` made) writing or deleting
+    ``files``, pushed there from another clone (:func:`scratch.elsewhere`), as a session pushes
+    the commit finishing a piece; its sha."""
+    other, branch = elsewhere(root), _git.card_branch(card)
+    _run(other, "fetch", "--quiet", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    sha = commit_files(other, _run(other, "rev-parse", f"refs/remotes/origin/{branch}"), message,
+                       files)
+    _run(other, "push", "--quiet", "origin", f"{sha}:refs/heads/{branch}")
+    return sha
+
+
+def piece(root, card, *numbers):
+    """Push onto ``card/<card>`` the file of each task in ``numbers`` (R-BAL386), as the commit
+    finishing each piece writes it; its sha."""
+    return _onto_claim(root, card, "piece", {
+        _git.task_file(number): f"done {_git.instant(CLAIMED)}\n" for number in numbers})
+
+
+def unpiece(root, card, *numbers):
+    """Push onto ``card/<card>`` a commit deleting the file of each task in ``numbers``, as a
+    revert of the commit finishing the piece does on the branch; its sha."""
+    return _onto_claim(root, card, "Revert piece", dict.fromkeys(map(_git.task_file, numbers)))
 
 
 def claim(root, number, when=CLAIMED):

@@ -2,10 +2,12 @@
 ignore file, and the files outside the image that build or run production (the publish
 workflow among them, ``R-BAL401``).
 
-**Every expectation of the reader below was measured on a REAL BuildKit build** (Docker
-29.9.2, buildx 0.38.1, 2026-10-24, X-cx L8's S3b part 5): each case's ignore file and files
-made a context, ``FROM scratch`` + ``COPY . /`` built it with ``--output type=local``, and
-the files it copied are the ones each case keeps; each refused case's build failed.  The
+**Every expectation of the reader below but one was measured on a REAL BuildKit build**
+(Docker 29.9.2, buildx 0.38.1, 2026-10-24, X-cx L8's S3b part 5): each case's ignore file and
+files made a context, ``FROM scratch`` + ``COPY . /`` built it with ``--output type=local``,
+and the files it copied are the ones each case keeps; each refused case's build failed.  The
+one not built is the refusal of ``"! "``, which ``ReadAll`` trims to the lone ``!`` before
+it judges it, the path the built ``"!"`` case takes.  The
 documented cases are Docker's own examples (its documentation, "Build context",
 ``.dockerignore files``); the others pin what ``moby/patternmatcher``'s source does where the
 documentation says nothing, the walk's parent results above all, where its other matcher
@@ -135,17 +137,19 @@ def test_no_ignore_file_keeps_every_file():
 @pytest.mark.parametrize(("path", "runs"), [
     ("Dockerfile", True), ("docker-compose.yml", True), ("deploy/shekel-deploy.sh", True),
     ("deploy/nginx-shared/conf.d/shekel.conf", True), ("deploy/NOTES.md", True),
-    (".github/workflows/docker-publish.yml", True),
+    (".github/workflows/docker-publish.yml", True), ("scripts/_container_lib.sh", True),
     ("deploy/README.md", False), ("deploy/postgres/README.md", False),
     ("docker-compose.dev.yml", False), ("docker-compose.build.yml", False),
     ("cloudflared/config.yml", False), ("deployed.txt", False), ("app/Dockerfile", False),
     (".github/workflows/ci.yml", False), ("docker-publish.yml", False),
+    ("scripts/_backup_lib.sh", False),
 ])
 def test_the_files_outside_the_image_that_build_or_run_production(path, runs):
     """R-BAL400: the Dockerfile, the compose file production copies, and deploy/ whole but a
-    README.md; R-BAL401: the workflow that builds and signs the image.  Never the dev or
-    build compose files, the tunnel's template, another workflow, or a name that only starts
-    or ends like one."""
+    README.md, with the helper the deploy script sources (R-BAL254: the deploy script is two
+    files); R-BAL401: the workflow that builds and signs the image.  Never the dev or build
+    compose files, the tunnel's template, another workflow, the backup scripts' helper (no
+    production path loads it), or a name that only starts or ends like one."""
     assert _production.runs_it(path) is runs
 
 

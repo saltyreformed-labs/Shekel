@@ -17,35 +17,40 @@ import pytest
 
 from tools.ci.scratch import commit_files, point_dev, point_main
 from tools.quill._git import marker
-from tools.quill._histories import card_node, claim, judging, landed, never, reader, start
+from tools.quill._histories import card_node, claim, judging, landed, merge, never, reader, start
 from tools.quill._histories import tracker, undone, verdict
 from tools.quill._histories import Lookup
 
 #: The base's ignore file: what the image leaves out, as the repository's own leaves it out.
-_IGNORED = "plan/\ndocs/\ntools/\nDockerfile\n.dockerignore\ndeploy/\n.github/\n"
+_IGNORED = ("plan/\ndocs/\ntools/\nDockerfile\n.dockerignore\ndeploy/\n.github/\n"
+            "scripts/_container_lib.sh\n")
 #: The workflow that builds and signs the image (R-BAL401), by its path.
 _PUBLISH = ".github/workflows/docker-publish.yml"
+#: The helper the deploy script sources from its own checkout (R-BAL254), by its path.
+_HELPER = "scripts/_container_lib.sh"
 
 
 def _refused(head, paths):
     """Rule 9's sentence for a change from ``head`` to production's ``paths``, as named."""
     return (f"REFUSED -- {head} changes what production runs ({paths}), but adds, changes or "
             "deletes no ship marker, so no release would count it: a change to a file the "
-            "production image holds, the Dockerfile, docker-compose.yml, deploy/ (a "
-            "README.md there excepted) or .github/workflows/docker-publish.yml lands from a "
-            "card's claim (quill claim <card>), whose marker records it")
+            "production image holds, Dockerfile, docker-compose.yml, "
+            ".github/workflows/docker-publish.yml, scripts/_container_lib.sh or deploy/ (a "
+            "README.md there excepted) lands from a card's claim (quill claim <card>), whose "
+            "marker records it")
 
 
 @pytest.fixture(name="image")
 def _image(tmp_path):
     """A repository whose ``origin/dev`` and ``origin/main`` hold one base (the start of
     every history) with :data:`_IGNORED` for its ignore file, an app file the image holds,
-    and the Dockerfile, a deploy script, deploy's README, the publish workflow, another
-    workflow, a tool and a document it does not; the repository and the base."""
+    and the Dockerfile, a deploy script and its helper, deploy's README, the publish
+    workflow, another workflow, a tool and a document it does not; the repository and the
+    base."""
     root, start_ = start(tmp_path)
     base = commit_files(root, start_, "the image", {
         ".dockerignore": _IGNORED, "Dockerfile": "FROM python\n", "deploy/run.sh": "deploy\n",
-        "deploy/README.md": "how\n", _PUBLISH: "on: push\n",
+        _HELPER: "running\n", "deploy/README.md": "how\n", _PUBLISH: "on: push\n",
         ".github/workflows/ci.yml": "on: pull_request\n", "tools/t.py": "tool\n",
         "docs/d.md": "doc\n"})
     point_dev(root, base)
@@ -72,21 +77,22 @@ def _check(capsys, image):
     ({"app.py": None}, "app.py"),
     ({"Dockerfile": "FROM python:slim\n"}, "Dockerfile"),
     ({"deploy/run.sh": "deploy twice\n"}, "deploy/run.sh"),
+    ({_HELPER: "running, paused counted\n"}, _HELPER),
     ({_PUBLISH: "on: [push, workflow_dispatch]\n"}, _PUBLISH),
     ({_PUBLISH: "# builds the image\non: push\n"}, _PUBLISH),
     ({".dockerignore": _IGNORED.replace("tools/\n", "")}, "tools/t.py"),
     ({f"app/{n}.py": "new\n" for n in range(7)},
      "app/0.py, app/1.py, app/2.py, app/3.py, app/4.py and 2 more"),
 ], ids=["an app edit", "an app delete", "the Dockerfile", "the deploy script",
-        "the publish workflow", "a comment in the publish workflow",
-        "tools/ taken into the image", "seven files"])
+        "the deploy script's helper", "the publish workflow",
+        "a comment in the publish workflow", "tools/ taken into the image", "seven files"])
 def test_a_change_to_what_production_runs_writing_no_marker_is_refused(check, image, change,
                                                                        paths):
     """fix/grid-total, no card's claim, changes production: an image file edited or deleted,
-    the Dockerfile, the deploy script or the publish workflow (read whole, a comment
-    included, R-BAL401) although the image excludes them, or the ignore file taking a file
-    into the image.  It is refused, naming at most five paths, and the tracker is not
-    read."""
+    the Dockerfile, the deploy script, the helper it sources (R-BAL254) or the publish
+    workflow (read whole, a comment included, R-BAL401) although the image excludes them, or
+    the ignore file taking a file into the image.  It is refused, naming at most five paths,
+    and the tracker is not read."""
     root, base = image
     head = commit_files(root, base, "fix", change)
     status, out, _ = check(base, head, "fix/grid-total")
@@ -149,6 +155,26 @@ def test_a_resync_bringing_mains_hotfix_lands(check, image):
     point_main(root, hotfix)
     dev = commit_files(root, base, "dev's own work", {"docs/d.md": "dev\n"})
     assert check(dev, hotfix, "main")[:2] == (0, verdict("main", 1, 0) + "\n")
+
+
+def test_a_marker_deleted_after_merging_mains_hotfix_in_is_refused_where_its_code_runs(check,
+                                                                                     image):
+    """R-BAL391's shown delete, which ``test_landing_done.py`` passes on rules 1-8 alone
+    (``test_a_commit_deleting_only_the_marker_after_merging_main_in_lands``), meets rule 9:
+    a branch that merged main's hotfix 700 in deletes card 700's marker alone, keeping its
+    code, which the image holds, so dev would gain production code recording no card, and it
+    is refused (S3b's review, its finding 4).  The way out lands: once a resync has brought
+    the hotfix to dev, the same delete on dev's own line changes no production file."""
+    root, base = image
+    point_main(root, hotfix := landed(root, base, 700))
+    brought = merge(root, base, hotfix, "Merge origin/main")
+    not_done = commit_files(root, brought, "card 700 is not done", {marker(700): None})
+    status, out, _ = check(base, not_done, "feat/x")
+    assert (status, out.splitlines()) == (
+        1, [_refused("feat/x", "w700.txt"), verdict("feat/x", 0, 1)])
+    point_dev(root, hotfix)
+    on_dev = commit_files(root, hotfix, "card 700 is not done", {marker(700): None})
+    assert check(hotfix, on_dev, "feat/x")[:2] == (0, verdict("feat/x", 1, 0) + "\n")
 
 
 def test_a_release_of_code_whose_marker_dev_deleted_is_refused(check, image):

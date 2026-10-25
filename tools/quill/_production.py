@@ -24,17 +24,25 @@ directories, none included; what a pattern says of a directory it says of everyt
 it; and the last pattern that matches decides, a ``!`` line making an exception.  A file
 Docker refuses builds no image, so production cannot change through it: this port refuses
 the lone ``!``, a pattern ending in a lone ``\\``, and one Python's regular expressions cannot
-compile (:class:`IgnoreFileError`), and reads any other as written, though Go's
-``filepath.Match``, which Docker asks first, also refuses a class opening with ``]`` or
-``-``.
+compile (:class:`IgnoreFileError`), and reads any other as written.  **Where it reads
+otherwise than Docker** (S3b's review, its finding 5; no line of this repository's ignore
+file, nor any edit it plausibly takes): Go's ``filepath.Match``, which Docker asks first,
+refuses a malformed class (``[a-]``, ``[]a]``), which this port reads as an expression; Go's
+expressions read a POSIX class (``[[:alpha:]]``) and accept ``\\Q``, which Python reads as a
+set and refuses; and ``New`` trims a pattern again after ``ReadAll`` has cleaned it, so
+``foo/ /`` names ``foo`` to Docker and ``foo/ `` here.
 
 **Outside the image** (:func:`runs_it`, ``R-BAL400``): the ``Dockerfile``, the image's
 recipe; ``docker-compose.yml``, which production keeps a byte-for-byte copy of; every file
 under ``deploy/`` but a ``README.md``: the deploy script production runs from the main
 checkout, the compose override and the nginx settings it keeps copies of, the release's
 post-deploy check, and the bundled nginx file the production override disables (measured
-2026-10-24 by X-cx L8, read only on the host); and (``R-BAL401``) the workflow that builds
-the image on ``main`` and signs it, read whole, its comments included, as the others are.
+2026-10-24 by X-cx L8, read only on the host); ``scripts/_container_lib.sh``, the running
+check the deploy script sources from that same checkout (``R-BAL254``: "the production
+deploy script becomes two files from the same checkout instead of one"), the only file the
+image excludes that production's deploy loads (S3b's review, its finding 1); and
+(``R-BAL401``) the workflow that builds the image on ``main`` and signs it, read whole, its
+comments included, as the others are.
 ``docker-compose.dev.yml``, ``docker-compose.build.yml``, ``cloudflared/config.yml`` (a
 template the host's copy differs from) and the other workflows, which only test, are none
 of production's.
@@ -53,8 +61,10 @@ from tools.ci.gitcmd import git
 DOCKERFILE = "Dockerfile"
 #: The workflow that builds the image on ``main`` and signs it (R-BAL401).
 PUBLISH = ".github/workflows/docker-publish.yml"
+#: The helper the deploy script sources from its own checkout, beside ``deploy/`` (R-BAL254).
+DEPLOY_HELPER = "scripts/_container_lib.sh"
 #: The files outside the image that build or run production, by path (R-BAL400, R-BAL401).
-RECIPE = (DOCKERFILE, "docker-compose.yml", PUBLISH)
+RECIPE = (DOCKERFILE, "docker-compose.yml", PUBLISH, DEPLOY_HELPER)
 #: The directory of the deploy script and the settings production keeps copies of.
 DEPLOY = "deploy"
 #: A file under :data:`DEPLOY` that production never reads, by its name.
@@ -234,8 +244,8 @@ def ignore_file(root: Path, commit: str) -> str:
 def runs_it(path: str) -> bool:
     """Whether ``path`` is a file outside the image that builds or runs production
     (``R-BAL400``, ``R-BAL401``): the image's recipe, the compose file production copies, the
-    workflow that builds and signs the image, or a file under :data:`DEPLOY` but a
-    :data:`README`."""
+    workflow that builds and signs the image, the helper the deploy script sources
+    (``R-BAL254``), or a file under :data:`DEPLOY` but a :data:`README`."""
     return path in RECIPE or (path.startswith(f"{DEPLOY}/")
                               and posixpath.basename(path) != README)
 

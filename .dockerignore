@@ -37,12 +37,15 @@
 # scripts, build context noise, or documentation -- none of which is
 # referenced from inside the container.
 #
-# This file is also the one list of what production runs (ruling
-# R-BAL364): CI's write rule refuses a change to any file the image
-# holds unless the change records a plan card (ruling R-BAL362,
+# This file is also the one list of what the production IMAGE holds
+# (ruling R-BAL364): CI's write rule refuses a change to any file the
+# image holds unless the change records a plan card (ruling R-BAL362,
 # tools/quill/landing.py, which reads this file with Docker's own
-# rules), so a file production never runs is excluded here, never
-# left in.
+# rules), so a file the container never runs is excluded here, never
+# left in.  The files OUTSIDE the image that build or run production
+# (the rule's other half, rulings R-BAL400 and R-BAL401) are not this
+# file's: tools/quill/_production.py lists them, so a file excluded
+# here still needs a card where production runs it from the host.
 
 # ── Version control ────────────────────────────────────────────────
 .git

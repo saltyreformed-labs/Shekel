@@ -15,7 +15,7 @@ graded here:
   landing day (**R-CC118**).  The scope's clause leaving out a transfer's
   shadow has had no case since plan step ``balance:X-bi-6-4d-2`` (ruling
   **R-BAL313**): it planted a payment under a shadow, which cannot be stored
-  since that step's first checkpoint (ruling **R-BAL258**);
+  since revision ``82f7b7ed4332`` deleted them (ruling **R-BAL258**);
 * the offer: priced, boxed (**R-CC110**) and posted (**R-CC116**) exactly as
   the row's own list does, worded per **R-CC111** / **R-CC117**, and an
   envelope's tick closing it (**R-CC119**);

@@ -198,9 +198,9 @@ def _a_transfer(seed_user, *, amount="100.00"):
     chokepoint, so the transfer and its invariants are the real ones.  A
     case ticks it as its leg on checking, the EXPENSE side.  It returned
     that side's shadow row until plan step ``balance:X-bi-6-4d-2`` (ruling
-    **R-BAL167** class 4): no shadow can be stored since that step's first
-    checkpoint (ruling **R-BAL258**), and its one caller read the shadow's
-    transfer.
+    **R-BAL167** class 4): no shadow can be stored since revision
+    ``82f7b7ed4332`` deleted them (ruling **R-BAL258**), and its one caller
+    read the shadow's transfer.
 
     Args:
         seed_user: The seeded user bundle.

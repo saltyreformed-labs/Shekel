@@ -241,8 +241,9 @@ def test_a_derive_payment_on_the_same_fixture_does_follow_the_escrow(
 
     P&I 1,199.10 + the raised escrow 400.00 = 1,599.10.
 
-    **It graded NOTHING from plan step balance:X-bi-6-4d-2's first checkpoint
-    until it was re-expressed** (CLAUDE.md rule 4; ruling R-BAL167 class 1).
+    **It graded NOTHING from the checkpoint of plan step balance:X-bi-6-4d-2
+    that deleted the shadows (revision ``82f7b7ed4332``) until it was
+    re-expressed** (CLAUDE.md rule 4; ruling R-BAL167 class 1).
     Its row set was every shadow in the scenario, none is born since that
     step, so both ``all()`` reads ran over an empty map and passed --
     measured: zero rows, an empty map.  It prices the payments' LEGS now, and

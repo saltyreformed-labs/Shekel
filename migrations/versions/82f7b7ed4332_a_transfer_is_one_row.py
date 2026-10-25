@@ -11,8 +11,9 @@ kept copy)
 Plan step **balance:X-bi-6-4d-2** of ``docs/audits/balance_architecture/README.md``
 (design ``X-bi-6-4d`` D6).  **Every transfer had two hidden twin
 ``budget.transactions`` rows**, one on each account, which the transfer service
-created with it and kept equal to it.  Since ``e616adf7fe22`` (the step before,
-in the same release) each side's payment record hangs off the transfer by a side
+created with it and kept equal to it.  Since ``e616adf7fe22`` (the revision
+before it, in the same plan step and release) each side's payment record hangs
+off the transfer by a side
 link and nothing reads a twin, so this revision deletes them:
 
   1. **It refuses, writing nothing, while a twin could not go cleanly**, each

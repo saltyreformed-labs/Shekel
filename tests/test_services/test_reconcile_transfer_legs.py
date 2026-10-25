@@ -25,9 +25,9 @@ Plan step ``balance:X-bi-6-4d-2`` deleted three cases that planted a
 transfer's shadow (ruling **R-BAL313**) -- the records predicate's own case
 (a movement under a hidden shadow), a broken pair offered and settled, and a
 loader case under a Cancelled shadow -- and re-expressed two panel cases
-that hid one: no shadow can be stored since that step's first checkpoint
-(ruling **R-BAL258**), and what each deleted case still read on a plain
-transfer is read by another passing case.
+that hid one: no shadow can be stored since revision ``82f7b7ed4332``
+deleted them (ruling **R-BAL258**), and what each deleted case still read
+on a plain transfer is read by another passing case.
 """
 
 from dataclasses import replace

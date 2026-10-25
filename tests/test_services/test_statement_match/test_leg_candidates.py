@@ -21,10 +21,10 @@ Plan step ``balance:X-bi-6-4d-2`` deleted three of the four cases that read
 or hid a transfer's shadow (ruling **R-BAL313**) -- no shadow ever a
 candidate, and a damaged pair (rulings **R-BAL158**, **R-BAL235**) offered at
 its price and once after a revert; the fourth, a renamed account's label,
-lost its shadow contrast.  No shadow can be stored since that step's first
-checkpoint (ruling **R-BAL258**), and what each deleted case still read on a
-plain transfer is read by another passing case (the bill beside one, by
-``test_candidates``).
+lost its shadow contrast.  No shadow can be stored since revision
+``82f7b7ed4332`` deleted them (ruling **R-BAL258**), and what each deleted
+case still read on a plain transfer is read by another passing case (the
+bill beside one, by ``test_candidates``).
 """
 
 from datetime import timedelta

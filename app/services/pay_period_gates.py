@@ -710,9 +710,10 @@ def can_reset_pay_periods(user_id: int) -> bool:
     """Return whether a full reset is currently offered to the user.
 
     The read-only UI predicate: reset is offered only when the user has no
-    settled row or transfer and none holding a payment or purchase, the same
-    bounds :func:`reset_pay_periods` enforces.  The settings page calls this
-    to show or hide the reset control; the service's own gate (which raises
+    settled, non-deleted row or transfer and none holding a payment or
+    purchase, the same bounds :func:`reset_pay_periods` enforces.  The
+    settings page calls this to show or hide the reset control; the
+    service's own gate (which raises
     :class:`~app.exceptions.PayPeriodResetBlocked`) remains the
     authoritative defense, so a stale page that posts anyway is still
     refused.

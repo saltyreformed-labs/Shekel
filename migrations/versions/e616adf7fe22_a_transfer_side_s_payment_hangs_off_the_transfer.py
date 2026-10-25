@@ -70,8 +70,8 @@ the app writes a twin's status, settle day, day basis and statement link with
 its transfer and its record, so such a twin is a drift no door wrote; from
 this revision the app
 writes those facts on the transfer and the record alone, after which the
-drift could not be told from the app's own, and plan step
-``balance:X-bi-6-4d-2``'s revision deletes the twin.  Every count is 0 where
+drift could not be told from the app's own, and revision
+``82f7b7ed4332`` deletes the twin.  Every count is 0 where
 the transfer service wrote the rows.
 
 **Measured on a production dump** (at ``1f431fec6547``; the figures stay in
@@ -107,7 +107,7 @@ saying Paid) -- what the code below this revision reads as a drifted pair.
 **So the downgrade REFUSES, writing nothing, while any twin disagrees**
 (:func:`refuse_drifted_twins`; the cp2b-1 review's L-4, fail-closed): this
 revision is never downgraded alone on a database the app has written at it.  It
-ships with plan step ``balance:X-bi-6-4d-2``'s revision in ONE release, and
+ships with revision ``82f7b7ed4332`` in ONE release, and
 that revision's downgrade, which rebuilds the twins, rebuilds each twin's
 status, settle day, basis and statement link from its transfer and its side's
 record first, after which the census reads zero.  **The census reads what a
@@ -127,9 +127,9 @@ digest-identical to the pristine restore.
 has no day"), and a side closed at ``$0.00`` holds no record, so its day lives
 only on its twins: one closed below this revision keeps the day its twins
 carry, and the downgrade leaves it there; one closed AT this revision has
-none anywhere, so ``X-bi-6-4d-2``'s downgrade rebuilds its twins settled with
+none anywhere, so ``82f7b7ed4332``'s downgrade rebuilds its twins settled with
 NO day -- the dateless settled pair the code below calls legacy (finding
-N-181), declared here rather than restorable.  ``X-bi-6-4d-2``'s own revision,
+N-181), declared here rather than restorable.  Revision ``82f7b7ed4332``,
 which deletes the twins, owes the same declaration for the older closes' days.
 No money moves in either: a ``$0.00`` close records none.  The stored
 money is exact either way: no record, posting or match is written by the
@@ -490,18 +490,17 @@ def refuse_drifted_twins(bind, *, at_the_upgrade: bool = False) -> None:
             "app below this revision writes those facts on a twin with its "
             "transfer and its record, so each is a drift no door wrote; from "
             "this revision it writes them on the transfer and the record "
-            "alone, and plan step balance:X-bi-6-4d-2's revision deletes the "
-            "twin.  Nothing is kept: the revision rolls back whole; each is "
-            "the developer's to rule."
+            "alone, and revision 82f7b7ed4332 deletes the twin.  Nothing is "
+            "kept: the revision rolls back whole; each is the developer's to "
+            "rule."
         )
     raise RuntimeError(
         f"X-bi-6-4d-2's downgrade refuses: {len(drifted)} twin row(s) no "
         "longer say what their transfer and its side's payment record say "
         f"{named}.  The app writes those facts on the transfer and the record "
         "alone from this revision, so the code below it would read each as a "
-        "drifted pair: downgrade through plan step balance:X-bi-6-4d-2's "
-        "revision, whose downgrade rebuilds the twins first.  Nothing was "
-        "written."
+        "drifted pair: downgrade through revision 82f7b7ed4332, whose "
+        "downgrade rebuilds the twins first.  Nothing was written."
     )
 
 

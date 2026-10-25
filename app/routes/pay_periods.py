@@ -612,10 +612,11 @@ def reset():
     """Wipe and rebuild the entire schedule (first-time-setup correction).
 
     Refuses unless the user explicitly confirmed and -- enforced by the
-    service -- has no settled row or transfer and none holding a payment or
-    purchase.  The whole rebuild runs in one transaction this route commits;
-    a service-side failure (the settled refusal, or an invalid start/cadence
-    after the wipe) rolls back so nothing partial ships.
+    service -- has no settled, non-deleted row or transfer and none holding a
+    payment or purchase.  The whole rebuild runs in one transaction this
+    route commits; a service-side failure (either reset refusal, or an
+    invalid start/cadence after the wipe) rolls back so nothing partial
+    ships.
     """
     errors = _reset_schema.validate(request.form)
     if errors:
@@ -643,8 +644,8 @@ def reset():
         # ``reset_pay_periods`` wipes every period before it records the new
         # schedule, so a refusal raised after that leaves the wipe, the
         # rebuild and both posting re-syncs staged in the session -- as does
-        # one raised by the repopulation below it.  The settled-transaction
-        # refusal happens before any of it; the rollback is for the rest.
+        # one raised by the repopulation below it.  Both reset refusals happen
+        # before any of it; the rollback is for the rest.
         db.session.rollback()
         flash(str(exc), "danger")
         return _pay_periods_redirect()

@@ -4,10 +4,10 @@ money and which deploy-together groups it is under, and what the reader cannot r
 (step X-cx's L9a, T-a a1).
 
 **One reader.**  Before the cutover a second one read the plan's registries for a cut
-whose tree held ``steps.md``; step X-cx's S3b deleted it with them (ruling
-``balance:R-BAL389``).  The cutover's freeze ends with a release, so production holds
-every step an old-form ``Ships: <arc>:<id>`` claims (ruling ``R-BAL287``), and no
-release after it carries a commit made before it.
+whose tree held ``steps.md``; step X-cx's S3b deleted it (ruling ``balance:R-BAL389``),
+and the cutover's pull request deleted the registries.  The cutover's freeze ends with a
+release, so production holds every step an old-form ``Ships: <arc>:<id>`` claims (ruling
+``R-BAL287``), and no release after it carries a commit made before it.
 """
 from __future__ import annotations
 

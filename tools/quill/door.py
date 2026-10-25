@@ -10,14 +10,10 @@ imported directly, never through here.
 
 Each name, and who reads it:
 
-- ``step_labels``: ``tools/release``'s pre-cutover arm (``_carried``), for each step row
-  it reads: its money flag and whether it is a deploy-together container, by the ONE
-  producer the migration writes a step card's labels with (CLAUDE.md rule 14).  The
-  cutover (L8) deletes this name with ``_migrate_*.py`` and that arm.
-- ``Tracker``: the type of the tracker ``tools/release`` reads for a cut after the
-  cutover (``_plan``'s and ``release``'s connection to it, ``_cards``' reads of it); the
-  connection itself is ``quill.CONNECT``.  ``Card``: the type of a card it reads
-  (``_cards``' walk up, ``_line_up``).
+- ``Tracker``: the type of the tracker ``tools/release`` reads (``_plan``'s and
+  ``release``'s connection to it, ``_cards``' reads of it); the connection itself is
+  ``quill.CONNECT``.  ``Card``: the type of a card it reads (``_cards``' walk up,
+  ``_line_up``).
 - ``with_closure``: ``tools/release._cards``, for the cards a release's markers name and
   every card a decision over them reads, by quill's one closure read.
 - ``leaves_below`` and ``dropped``: ``tools/release._cards``, for a deploy-together
@@ -63,7 +59,6 @@ from tools.quill._git import (
     merged_tree,
 )
 from tools.quill._github import CredentialsError, GitHubError
-from tools.quill._migrate_source import step_labels
 from tools.quill._state import (
     OWNED,
     SHIPPABLE,
@@ -97,6 +92,5 @@ __all__ = [
     "markers_in",
     "merged_tree",
     "owner",
-    "step_labels",
     "with_closure",
 ]

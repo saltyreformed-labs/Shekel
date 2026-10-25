@@ -347,8 +347,8 @@ class TestTheCensus:
         repository's config.  With this process bound to a sentinel (proven bound, its
         indexes not empty: ``scratch._prove_bound``), the census answers the directory named
         and the sentinel -- its refs, config, HEADs and indexes -- is byte-identical
-        afterwards.  The trailer rules and the tracker tool are held the same way
-        (``tools/ci/test_trailers.py``, ``tools/quill/test__git.py``)."""
+        afterwards.  The tests' builder and the tracker tool are held the same way
+        (``tools/ci/test_gitcmd.py``, ``tools/quill/test__git.py``)."""
         sentinel, before = scratch.bound_sentinel(tmp_path, binding, monkeypatch.setenv)
         assert census(self.tracked_notes(tmp_path), parse_plan(plan_dict())) == self.NOTES_HIT
         assert scratch.sentinel_state(sentinel) == before

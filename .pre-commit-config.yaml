@@ -191,8 +191,8 @@ repos:
         pass_filenames: false
         args: [tools/ci, -c, /dev/null, -q]
       # tools/release: what a release carries (step X-cx's L9a).  It reads
-      # through tools/ci, tools/quill, tools/plan_gate and the migration
-      # parser, so an edit to any of them runs it.  The same 10.00/10 floor and
+      # through tools/ci, tools/quill and the migration parser, so an edit to
+      # any of them runs it.  The same 10.00/10 floor and
       # the same tests ci.yml step 4b runs in every scope.
       - id: pylint-release
         name: pylint tools/release (10.00/10 floor)
@@ -209,7 +209,7 @@ repos:
         name: tools/release unit tests
         entry: pytest
         language: system
-        files: ^(tools/(release|ci|quill|plan_gate)/.*|scripts/migration_chain)\.py$
+        files: ^(tools/(release|ci|quill)/.*|scripts/migration_chain)\.py$
         pass_filenames: false
         args: [tools/release, -c, /dev/null, -q]
       # tools/split: the proved test-file split (step balance:X-er, ruling

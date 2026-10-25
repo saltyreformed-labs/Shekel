@@ -124,10 +124,10 @@ def point_main(root: Path, sha: str) -> None:
 
 
 def leaf_on_dev(parent: Path) -> tuple[Path, str]:
-    """A repository ``parent / "work"`` whose branch ``dev`` holds one commit, a leaf
-    carrying ``Ships: plan#3``: the repository and the leaf's sha."""
+    """A repository ``parent / "work"`` whose branch ``dev`` holds one commit, a leaf: the
+    repository and the leaf's sha."""
     work = repository(parent, "work")
-    leaf = commit(work, "leaf", "Ships: plan#3")
+    leaf = commit(work, "leaf")
     run(work, "update-ref", "refs/heads/dev", leaf)
     return work, leaf
 

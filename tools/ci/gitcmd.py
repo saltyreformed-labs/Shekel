@@ -2,17 +2,17 @@
 
 Every call runs ``git -C <root>`` through :func:`run`, with the variables that
 bind git to some OTHER repository removed, so ``root`` alone decides which
-repository is read or written.  The card-trailer rules (:mod:`tools.ci.trailers`),
-the tracker tool's own git calls (``tools/quill/_git.py``) and the tests'
-throwaway repositories (:mod:`tools.ci.scratch`) all start git here, but for one
+repository is read or written.  The tracker tool's own git calls
+(``tools/quill/_git.py``) and the tests' throwaway repositories
+(:mod:`tools.ci.scratch`) all start git here, but for one
 call: ``scratch._prove_bound``'s control, which must reach the binding this module
 removes, to prove a test's sentinel is bound.  Moved here from what is now
 ``tools/quill/_git.py`` by step X-cx's L4.
 
 The two integration branches are named here too (:data:`DEV`, :data:`MAIN`, each
 by its full name through :func:`tracking`), with the one question of ancestry
-(:func:`is_ancestor`): moved from :mod:`tools.ci.trailers` by step X-cx's S3b,
-which deletes the trailers (ruling ``balance:R-BAL389``).
+(:func:`is_ancestor`): moved from ``tools/ci/trailers.py`` by step X-cx's S3b,
+which deleted that module (ruling ``balance:R-BAL389``).
 """
 from __future__ import annotations
 

@@ -1,8 +1,8 @@
 """The tracker tool's own git calls, read from throwaway repositories under pytest's tmp_path.
 
-What a card's trailers mean (``Ships:``, ``Reopens:``) moved with :mod:`tools.ci.trailers` to
-``tools/ci/test_trailers.py`` (step X-cx's L4); quill reads none since the ship marker (X-cx's
-M1, ruling ``balance:R-BAL359``).  The marker and the claim are read and written here against a
+Quill reads no trailer (``Ships:``, ``Reopens:``) since the ship marker (X-cx's M1, ruling
+``balance:R-BAL359``), and step X-cx's S3b deleted the trailer reader (ruling
+``balance:R-BAL389``).  The marker and the claim are read and written here against a
 real bare ``origin`` (:func:`_origin`), so the pushes, the lease and the fetch run as git runs
 them.
 """

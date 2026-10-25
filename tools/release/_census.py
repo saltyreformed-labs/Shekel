@@ -42,7 +42,7 @@ from pathlib import Path
 import yaml
 
 from tools.ci.gitcmd import git
-from tools.release._carried import ReleaseError
+from tools.release._model import ReleaseError
 
 #: The dev compose file and the service whose server holds the dev databases.
 COMPOSE, DB_SERVICE = "docker-compose.dev.yml", "db"

@@ -1,5 +1,5 @@
-"""Which cards a release carries after the cutover, whether each moves money, and which
-deploy-together groups each is under: the release tool's card reader (step X-cx's
+"""Which cards a release carries, whether each moves money, and which deploy-together
+groups each is under: the release tool's card reader (step X-cx's
 L9a-1b, T-a a1; rulings ``balance:R-BAL287`` - ``R-BAL289``), read from the ship markers
 since step X-cx's M3 (ruling ``R-BAL359``).
 
@@ -23,8 +23,7 @@ card's commits are those of ``<base>..<cut>`` that changed its marker, by quill'
 **A card moves money when it carries the moves-money label**: its OWN label, as the
 tracker holds it when the release is judged, split or not (the coordinator, under
 R-BAL207, 2026-10-14).  A label is no sentence a tick rewrites, so a card keeps its flag
-after it ships (the registries' ``recurrence:R20`` shape, which the pre-cutover reader
-reads around, has no counterpart here).  A step split into leaves since its marker
+after it ships.  A step split into leaves since its marker
 landed is judged as the work it was, by its own label: a split writes the step only its
 sub-issue link, so its labels stay (``tools/quill/test_quill_file.py``), and each leaf is
 judged by its own when the window names it.  No card inherits a leaf's label: a label a
@@ -124,23 +123,17 @@ refused every later release.  The way out can meet the money rule's cap (a group
 two money movers comes out in no one release): that is the developer's question, asked
 at X-cx's piece L9d.
 
-**What it cannot read refuses the release**, and nothing is declared after the cutover
-(R-BAL287, R-BAL289):
+**No trailer is read**: every one is prose -- an old-form ``<arc>:<id>`` one, a
+``plan#N`` one, a value of neither form -- since a marker is the record.  Refusing one
+would wedge every release over it, since no check refuses a trailer's shape before it
+lands (``R-BAL184``; X-cx's ``m2_plan.md`` s.3).  The cutover's freeze ends with a
+release, so production holds every commit made before it, each old-form trailer's
+included (R-BAL287), and no release after it carries a commit made before it (step
+X-cx's S3b deleted the reader that judged them, ruling ``R-BAL389``).
 
-- an old-form ``Ships: <arc>:<id>`` that a cut holding ``steps.md`` on ``dev``'s line in
-  the window holds: the cutover's freeze ends with a release, so production held every
-  one merged before the cutover (R-BAL287), and this one the freeze missed.  Only such a
-  cut can judge it, so the refusal names the newest one, to release first with the
-  release tool as that cut holds it;
-- an old-form ``Reopens: <arc>:<id>`` such a cut holds: it undoes a step that has no
-  card, and no reader judges what it takes out of production, the release tool as that
-  cut holds it included (``tools/release/_carried.py`` reads no ``Reopens:``), so the
-  refusal names no cut to release first (M3's review, its 2).  None exists on ``dev`` or
-  ``main`` (measured 2026-10-23).  Every other trailer is prose -- an old-form one merged
-  after the cutover, a ``plan#N`` one, a value of neither form -- since a marker is the
-  record and nothing after the cutover reads a trailer: refusing one would wedge every
-  release over it, once no check refuses a trailer's shape before it lands
-  (``R-BAL184``; X-cx's ``m2_plan.md`` s.3);
+**What it cannot read refuses the release**, and nothing is declared (R-BAL287,
+R-BAL289):
+
 - a marker naming a card the tracker does not hold: CI's landing check refuses one before
   it lands (R-BAL289; ``tools/quill/landing.py``, its rule 7), so what reaches here is a
   card deleted after its marker landed;
@@ -178,7 +171,6 @@ from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-from tools.ci import trailers
 from tools.quill.door import (
     MARKERS,
     OWNED,
@@ -199,14 +191,7 @@ from tools.quill.door import (
     with_closure,
 )
 from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, MOVES_MONEY_LABEL
-from tools.release._model import (
-    Carried,
-    Group,
-    ReleaseError,
-    Step,
-    first_parent_line,
-    steps_blob,
-)
+from tools.release._model import Carried, Group, ReleaseError, Step, first_parent_line
 
 
 @dataclass(frozen=True)
@@ -501,49 +486,17 @@ def _keys(numbers: Collection[int]) -> str:
     return ", ".join(f"plan#{number}" for number in numbers)
 
 
-def _judgeable(root: Path, base: str, cut: str, claim: str) -> str | None:
-    """The newest cut on ``dev``'s first-parent line in ``<base>..<cut>`` whose tree holds
-    ``steps.md`` and whose history holds the commit ``claim``, so that releasing it
-    carries the claim; None when none does (the claim was merged after the cutover)."""
-    return next((sha for sha, _ in first_parent_line(root, base, cut)
-                 if steps_blob(root, sha) is not None
-                 and trailers.is_ancestor(root, claim, sha)), None)
-
-
-@cache
-def _old_form(root: Path, base: str, cut: str) -> tuple[str, ...]:
-    """Each old-form trailer in ``<base>..<cut>`` that a cut before the cutover holds: a
-    ``Ships:``, naming the newest such cut to release first, and a ``Reopens:``, which no
-    reader judges; read once per range, as :func:`_window` is.  Every other trailer is
-    prose (the module's docstring)."""
-    found = trailers.history(root, f"{base}..{cut}")
-    lines = []
-    for claim in found.old_form:
-        judgeable = _judgeable(root, base, cut, claim.sha)
-        if judgeable is not None:
-            lines.append(f"{claim.sha[:12]} claims `{claim.key}` in the old form, which only a "
-                         "cut holding steps.md can judge (R-BAL287: the cutover's freeze ends "
-                         f"with a release of every one): release {judgeable[:12]} first, with "
-                         "the release tool as that cut holds it")
-    lines += [f"{undo.sha[:12]} carries `Reopens: {undo.key}` in the old form: it undoes a "
-              "step that has no card, so no reader judges what it takes out of production "
-              "(R-BAL287, R-BAL288)" for undo in found.old_form_reopens
-              if _judgeable(root, base, cut, undo.sha) is not None]
-    return tuple(lines)
-
-
 def _at(shas: Collection[str]) -> str:
     """Where a card's marker changed in the window, for a refusal; empty when no commit of
     it changed the marker."""
     return f" (its marker changed at {', '.join(sha[:12] for sha in shas)})" if shas else ""
 
 
-def _unreadable(root: Path, base: str, cut: str, window: _Window, known: Cards) -> list[str]:
-    """Each thing this reader cannot read in ``window``, the window of ``<base>..<cut>``:
-    an old-form trailer a cut before the cutover holds; a card the tracker does not hold,
-    or holds as no work; a finding blocked by cards that name no one owner; and an entry
-    under the markers' directory that is no card's marker."""
-    lines = list(_old_form(root, base, cut))
+def _unreadable(window: _Window, known: Cards) -> list[str]:
+    """Each thing this reader cannot read in ``window``, a release's window: a card the
+    tracker does not hold, or holds as no work; a finding blocked by cards that name no
+    one owner; and an entry under the markers' directory that is no card's marker."""
+    lines: list[str] = []
     for number, shas in sorted(window.named.items()):
         if number in known.unowned:
             lines.append(f"plan#{number}{_at(shas)} is a finding blocked by "
@@ -652,4 +605,4 @@ def carried(root: Path, base: str, cut: str, known: Cards) -> Carried:
         for number, shas in sorted(window.named.items()) if number in known.money)
     groups = tuple(_group(group, known, touching, before, standing)
                    for group in sorted({group for each in touching.values() for group in each}))
-    return Carried(steps, groups, tuple(_unreadable(root, base, cut, window, known)))
+    return Carried(steps, groups, tuple(_unreadable(window, known)))

@@ -73,6 +73,6 @@ RIGHT.
 
 The standard above is what every arc owes. A step whose acceptance needs a WALK through the app --
 the credit-card arc's end-to-end run from creating a card to the next payment shrinking, for
-instance -- states that walk in its own card, because it is a specification of one step's proof
+instance -- states that walk in its own document, because it is a specification of one step's proof
 rather than a rule about proofs. The distinction is the planning conventions':
 **merge what shares KEYS, split what shares only a READER.**

@@ -126,27 +126,6 @@ repos:
         files: ^tools/pylint/.*\.py$
         pass_filenames: false
         args: [tools/pylint/tests, -c, /dev/null, -q]
-      - id: pylint-plan-gate
-        name: pylint plan gate (10.00/10 floor)
-        entry: pylint
-        language: system
-        types: [python]
-        # tools/ci/arcs.py and tools/ci/arc_steps.py too: the gate imports the
-        # arc table and an arc document's steps producer from there.
-        files: ^tools/(plan_gate/.*|ci/arcs|ci/arc_steps)\.py$
-        pass_filenames: false
-        # The plan gate was RUN by the pytest hook below and LINTED by nothing
-        # -- not this file, not ci.yml (whose pylint step is `app/` only) --
-        # found by audit 2026-08-11 when an `invalid-name` in a new control
-        # reached a commit and only a hand-run pylint caught it.  It is the
-        # machinery that guards the planning registries a cold session reads,
-        # so it holds the same 10.00/10 floor the other two tools/ packages do.
-        # The package was already at 10.00/10 when this hook was added, so it
-        # locks in a clean floor rather than deferring a cleanup.
-        args:
-          - tools/plan_gate/
-          - --fail-under=10
-          - --fail-on=E,F
       - id: pylint-quill
         name: pylint quill (10.00/10 floor)
         entry: pylint
@@ -156,8 +135,8 @@ repos:
         files: ^tools/(quill|ci)/.*\.py$
         pass_filenames: false
         # The private tracker's tooling (ruling balance:R-BAL170) holds the
-        # 10.00/10 floor tools/pylint and tools/plan_gate hold, from its first
-        # commit; ci.yml step 4b runs the same command in every scope.
+        # 10.00/10 floor tools/pylint holds, from its first commit; ci.yml
+        # step 4b runs the same command.
         args:
           - tools/quill/
           - --fail-under=10
@@ -169,9 +148,9 @@ repos:
         files: ^tools/(quill|ci)/.*\.py$
         pass_filenames: false
         args: [tools/quill, -c, /dev/null, -q]
-      # tools/ci: the classifier and verdict ci.yml runs, and the arc list the
-      # plan gate and quill import (step X-cx's L4).  The same 10.00/10
-      # floor and the same tests ci.yml step 4b runs in every scope.
+      # tools/ci: the verdict ci.yml runs, the archive banner, and the arc list
+      # quill imports (step X-cx's L4).  The same 10.00/10 floor and the same
+      # tests ci.yml step 4b runs.
       - id: pylint-ci
         name: pylint tools/ci (10.00/10 floor)
         entry: pylint
@@ -193,7 +172,7 @@ repos:
       # tools/release: what a release carries (step X-cx's L9a).  It reads
       # through tools/ci, tools/quill and the migration parser, so an edit to
       # any of them runs it.  The same 10.00/10 floor and
-      # the same tests ci.yml step 4b runs in every scope.
+      # the same tests ci.yml step 4b runs.
       - id: pylint-release
         name: pylint tools/release (10.00/10 floor)
         entry: pylint
@@ -258,44 +237,18 @@ repos:
         pass_filenames: false
         args: [tools/rehearsal, -c, /dev/null, -q, -m, not cluster]
 
-      # The planning REGISTRIES and the four arc documents.  Every finding
-      # names a LIVE owner, the stated row count matches the table, every
-      # document is under its line cap, each orientation section is still an
-      # orientation, an identity class shares one tick state, and an UNRULED
-      # FORK refuses a tick on either competing remedy.
-      #   docs/plans/ledger.md       every finding, every arc, one table
-      #   docs/plans/steps.md        every step + the unruled forks
-      #   docs/plans/conventions.md  the rules, one copy
-      #   docs/plans/verification.md what "done" means, one copy
-      #   docs/plans/lessons.md      what this project already paid to learn
-      #   the four arc documents     argument, rulings, step specifications
-      # Rule 16 (added 2026-08-11) grades the four documents for a SECOND COPY
-      # of what a registry already states: the order restated outside steps.md,
-      # a registry's row count quoted where nothing reconciles it, and a
-      # section a document has retired in place instead of archiving.  All
-      # three had already produced a wrong statement in a live document -- one
-      # of them a README contradicting itself about which step comes next.
-      # The registries were split out of the four documents on 2026-08-09
-      # because a cross-arc fact stored 2-3 times in prose has no reconciler:
-      # C2 == X-l == R-F12 is one step under three names, and P3 == N-123 is
-      # one defect whose two arcs answered it OPPOSITELY for months.
-      # It runs HERE, at commit time, because the rules it enforces rot between
-      # pull requests -- this repo opens them at the end of an arc, and three
-      # hand-passes in two days each found rows naming a step that had already
-      # shipped.  Scoped so EDITING A REGISTRY OR AN ARC DOCUMENT is what
-      # triggers it.  Database-free by construction (it lives outside tests/,
-      # so no autouse db fixture), which is what lets it be a commit-time hook.
-      - id: shekel-plan-ledger-gate
-        name: plan ledger integrity (every finding has a live owner)
+      # Every archived document says so on its first line (tools/ci/archive.py,
+      # moved out of the plan gate when step X-cx's S3b deleted it): graded
+      # when an archived document is added or edited, since a reader who
+      # arrives by grep must be told before they read a word of it.  An edit
+      # to the rule or its test runs tools/ci's tests above.
+      - id: shekel-archive-banner
+        name: an archived document says so on its first line
         entry: pytest
         language: system
-        # ONE LINE, and `test_gate_coverage` is what keeps it one: a YAML
-        # folded scalar joins its lines with a SPACE, which puts a space inside
-        # the alternation. It HAD been re-split, and bank_import's document
-        # went ungated for as long as nobody re-read this comment.
-        files: ^(docs/plans/ledger\.md|docs/plans/steps\.md|docs/plans/rulings\.md|docs/plans/conventions\.md|docs/plans/verification\.md|docs/plans/lessons\.md|docs/audits/balance_architecture/README\.md|docs/plans/implementation_plan_recurrence_redesign\.md|docs/plans/implementation_plan_pay_calendar\.md|docs/plans/implementation_plan_credit_card\.md|docs/plans/implementation_plan_bank_import\.md|docs/plans/implementation_plan_salary\.md|tools/ci/arcs\.py|tools/ci/arc_steps\.py|tools/plan_gate/.*\.py)$
+        files: ^docs/(.*/)?(archive|historical)/.*\.md$
         pass_filenames: false
-        args: [tools/plan_gate, -c, /dev/null, -q]
+        args: [tools/ci/test_archive.py, -c, /dev/null, -q]
 
       # ── Polyglot-cleanup Phase 5 floors ─────────────────────────────
       # Non-Python linters adopted in docs/audits/polyglot-cleanup. Each

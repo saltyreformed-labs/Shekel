@@ -214,18 +214,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The plan gate's git arms (tools/plan_gate/_shipped.py) READ this
-          # history: they resolve every SHIPPED step's commit and refuse an
-          # open leaf that a commit on this tree says it shipped.  The default
-          # depth-1 checkout makes both arms blind, and rule 7's hash arm used
-          # to grade a hash's FORM only for exactly that reason -- "a gate that
-          # passes on nothing".  ``test_shipped_against_git`` asserts the
-          # history IS gradeable, so removing this line fails the suite loudly
-          # instead of silently switching two arms off.
-          fetch-depth: 0
-          # The arms only READ local history, so the GITHUB_TOKEN still need
-          # not persist in .git/config.  Avoids the credential-persistence
-          # vector (zizmor artipacked).
+          # The default depth-1 checkout: no tools test reads this checkout's
+          # history (the plan gate's git arms did, until step X-cx's S3b deleted
+          # the gate; the rehearsal bench's HEAD~1 case runs in the test job).
+          # Nothing here pushes, so the GITHUB_TOKEN need not persist in
+          # .git/config.  Avoids the credential-persistence vector (zizmor
+          # artipacked).
           persist-credentials: false
 
       - name: Set up Python 3.14
@@ -247,11 +241,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       # ── 4b. Every tools package, at one floor, in one step ───────
-      # Each package's 10.00/10 pylint floor and its tests: the plan gate
-      # (tools/plan_gate; its floor was enforced by pre-commit alone until
-      # 2026-09-11), quill (tools/quill/: the private tracker's setup and the
-      # ``quill`` command; ruling balance:R-BAL170), ``tools/ci`` (this
-      # workflow's verdict and the arc list the tools read; step X-cx's L4),
+      # Each package's 10.00/10 pylint floor and its tests: quill
+      # (tools/quill/: the private tracker's setup and the ``quill`` command;
+      # ruling balance:R-BAL170), ``tools/ci`` (this workflow's verdict, the
+      # archive banner and the arc list the tools read; step X-cx's L4),
       # ``tools/release`` (what a release carries; step X-cx's L9a),
       # ``tools/split`` (the proved test-file split; step balance:X-er, ruling
       # R-BAL301) and ``tools/rehearsal`` (the release rehearsal kit; step
@@ -265,8 +258,6 @@ jobs:
       # test job, step 7c (the coordinator's K1 leaf-plan ruling, item 3).
       - name: Lint and test every tools package
         run: |
-          pylint tools/plan_gate/ --fail-under=10 --fail-on=E,F --output-format=colorized
-          pytest tools/plan_gate -c /dev/null -q
           pylint tools/quill/ --fail-under=10 --fail-on=E,F --output-format=colorized
           pytest tools/quill -c /dev/null -q
           pylint tools/ci/ --fail-under=10 --fail-on=E,F --output-format=colorized

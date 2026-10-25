@@ -38,9 +38,9 @@ not refused when only its labels change.
 
 Real production figures are ALLOWED in the private tracker (``R-BAL172``), so
 nothing here looks for them.  Nothing here reads GitHub: a caller describes
-the card as a :class:`Draft`.  Until step X-cx's cutover (L8) deletes the plan
-gate's registry arms, ``tools/plan_gate/_rulings.RULINGS_ROW_CAP`` spells
-R-BAL136's 2,000 again, for a ``rulings.md`` row.
+the card as a :class:`Draft`.  :data:`RULING_CAP` is R-BAL136's 2,000's one
+spelling since step X-cx's S3b deleted the plan gate, whose ``RULINGS_ROW_CAP``
+spelled it again for a ``rulings.md`` row.
 """
 from __future__ import annotations
 

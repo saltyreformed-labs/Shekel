@@ -24,8 +24,8 @@ pytest loads this file in the suite's runs, and also in the tools' own suites
 ``conftest.py`` in every directory above the tool but ``/``, this one's among them, and puts
 this directory on ``sys.path`` to import it.  It changed no outcome there: measured
 2026-10-16, tools/split, tools/testrecord, tools/ci and tools/pylint/tests gave the same
-results with it and without it, and tools/plan_gate, tools/quill and tools/release the counts
-they gave before it.
+results with it and without it, and tools/plan_gate (deleted since, at step X-cx's S3b),
+tools/quill and tools/release the counts they gave before it.
 """
 import pytest
 

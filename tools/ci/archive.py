@@ -15,9 +15,12 @@ throughout the incident it was meant to prevent.  The banner goes on the
 ARTIFACT instead, at the first line, where a reader arriving from anywhere
 cannot get around it.
 
-Separate from ``_registry.py`` because it grades neither registry: its subject
-is every markdown file under an archived directory, and its only shared input is
-the repository root (:data:`tools.ci.arcs.REPO`).
+Moved here from the plan gate (``tools/plan_gate/_archive.py``) when step X-cx's
+S3b deleted the gate: it never graded a registry, its subject is every markdown
+file under an archived directory, its only shared input is the repository root
+(:data:`tools.ci.arcs.REPO`), and CLAUDE.md still holds every archived document
+to it.  ``test_archive.py`` grades it, and pre-commit runs that test whenever an
+archived document is edited.
 """
 from __future__ import annotations
 
@@ -46,7 +49,7 @@ def archived_docs() -> Iterator[Path]:
 
 
 def archive_banner_violations() -> list[str]:
-    """Rule 15: an archived document SAYS SO on its first line.
+    """An archived document SAYS SO on its first line.
 
     Returns:
         One message per archived document that does not carry the banner.
@@ -59,6 +62,6 @@ def archive_banner_violations() -> list[str]:
                 f"{path.relative_to(arcs.REPO)} is archived and its first "
                 f"line does not say so.  It must open with {ARCHIVE_BANNER!r} "
                 f"... so a reader who arrives by grep is told before they read "
-                f"a word of it (conventions.md rule 15)",
+                f"a word of it",
             )
     return problems

@@ -2,8 +2,9 @@
 
 ``shekel-private-module-import`` refuses another package's import of a private module,
 so a name another package must read is re-exported here, and this module holds no logic
-and no name of its own (the shape of ``tools/plan_gate/registries.py``, ruling
-``balance:R-BAL244``; this door decided by the coordinator under ruling
+and no name of its own (the shape of the plan gate's one door, ``registries.py``, ruling
+``balance:R-BAL244``, until step X-cx's S3b deleted the gate; this door decided by the
+coordinator under ruling
 ``balance:R-BAL207``, 2026-10-13, as ``plan_labels``, and renamed when the release
 tool's card reader joined it, 2026-10-14).  ``quill.py`` is a public module and is
 imported directly, never through here.

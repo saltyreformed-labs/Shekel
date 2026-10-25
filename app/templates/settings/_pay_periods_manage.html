@@ -366,8 +366,8 @@
 </div>
 
 {# --- Full reset (first-time-setup correction) ---
-   Offered only to users with no settled transactions (pp_can_reset).
-   Once a paycheck has settled, the whole-schedule rewrite is unsafe and
+   Offered only to users with no settled row or transfer and none holding
+   a payment or purchase (pp_can_reset).  Once a paycheck has settled, the whole-schedule rewrite is unsafe and
    the service refuses it; the form is hidden and an explanatory note
    points to Regenerate instead. #}
 <div class="card mt-3 border-danger-subtle">

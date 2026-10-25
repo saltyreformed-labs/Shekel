@@ -88,7 +88,8 @@ There is ONE spelling of it here rather than five at the call sites, because
 the ordering rule is one rule and five copies are five places for it to come
 apart.  What keeps the five honest is not this module: it is that each of the
 five doors has a ROUTE-level test asserting the recurring ROWS rather than the
-period count (``tests/test_routes/test_pay_period_admin.py``,
+period count
+(``tests/test_routes/test_pay_period_admin/test_every_door_populates.py``,
 ``TestEveryDoorThatCreatesAPeriodPopulatesIt``), so a door that records and
 does not populate is a red test rather than a silently empty paycheck.
 """
@@ -122,7 +123,7 @@ def populate_new_periods(user_id, new_periods):
 
     Returns:
         The number of template-linked records created (transactions plus
-        transfers; a transfer counts once, not its two shadow rows).
+        transfers; a transfer is one row and counts once).
     """
     period_ids = {period.id for period in new_periods}
     if not period_ids:

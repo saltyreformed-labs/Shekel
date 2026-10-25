@@ -612,10 +612,10 @@ def reset():
     """Wipe and rebuild the entire schedule (first-time-setup correction).
 
     Refuses unless the user explicitly confirmed and -- enforced by the
-    service -- has no settled transactions.  The whole rebuild runs in one
-    transaction this route commits; a service-side failure (the settled
-    refusal, or an invalid start/cadence after the wipe) rolls back so
-    nothing partial ships.
+    service -- has no settled row or transfer and none holding a payment or
+    purchase.  The whole rebuild runs in one transaction this route commits;
+    a service-side failure (the settled refusal, or an invalid start/cadence
+    after the wipe) rolls back so nothing partial ships.
     """
     errors = _reset_schema.validate(request.form)
     if errors:

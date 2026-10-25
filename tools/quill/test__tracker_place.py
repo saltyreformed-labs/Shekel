@@ -108,12 +108,11 @@ def test_every_read_of_a_rehearsal_tracker_names_the_rehearsal_repository_whole(
         return {"repository": {"c5": None}}
 
     path = REHEARSAL.path
+    search = ("/search/issues?q=repo%3Asaltyreformed-labs%2Fshekel-plan-rehearsal"
+              "%20in%3Atitle%20%22x%22&per_page=100")
     github = _Scripted(
         rest={("GET", f"{path}/issues/5"): {"body": "b"},
-              ("GET", f"{path}/git/matching-refs/claims/"): [],
-              ("GET", "/search/issues?q=repo%3Asaltyreformed-labs%2Fshekel-plan-rehearsal"
-                      "%20in%3Atitle%20%22x%22&per_page=100"): {
-                  "total_count": 0, "incomplete_results": False, "items": []}},
+              ("GET", search): {"total_count": 0, "incomplete_results": False, "items": []}},
         graphql=answer)
     tracker = Tracker(github, Board(github, REHEARSAL, "PVT_r"), APP)
     assert tracker.place is REHEARSAL
@@ -122,16 +121,15 @@ def test_every_read_of_a_rehearsal_tracker_names_the_rehearsal_repository_whole(
     tracker.all_cards()
     tracker.cards([5])
     tracker.body(5)
-    tracker.claims()
     tracker.edits(5)
     tracker.comments(5)
     tracker.find_titles("x")
     queries = [query for kind, query, _ in github.sent if kind == "GRAPHQL"]
-    assert len(queries) == 6  # claims() reads no commit when no claim exists
+    assert len(queries) == 6
     for query in queries:
         assert _names_in(query) == [(REHEARSAL.owner, REHEARSAL.name)], query
-    assert [path for kind, path, _ in github.sent if kind == "GET"][:2] == [
-        f"{path}/issues/5", f"{path}/git/matching-refs/claims/"]
+    assert [path for kind, path, _ in github.sent if kind == "GET"] == [
+        f"{path}/issues/5", search]
 
 
 def test_a_link_to_the_real_tracker_is_outside_a_rehearsal_card_and_the_reverse():
@@ -502,7 +500,7 @@ def test_quill_stops_with_exit_2_on_credentials_of_another_app(monkeypatch, caps
 
 class _AnyWrite(_Scripted):
     """A GitHub that answers every REST call as a filed issue would be answered (a create
-    reads its type and labels back; a claim reads a commit), keeping each call."""
+    reads its type and labels back; a retype its type), keeping each call."""
 
     def rest(self, method, path, body=None):
         """Keep the call; answer it."""
@@ -510,13 +508,13 @@ class _AnyWrite(_Scripted):
         if path.endswith("/issues") and method == "POST":
             return {"number": 5, "type": {"name": body["type"]},
                     "labels": [{"name": name} for name in body["labels"]]}
-        return {"type": {"name": "step"}, "object": {"sha": "m"}, "tree": {"sha": "t"},
-                "sha": "c", "author": {"date": "d"}}
+        return {"type": {"name": "step"}}
 
 
 def test_every_write_to_a_rehearsal_tracker_goes_to_the_rehearsal_repository():
-    """Review A2 finding 4: each REST write and the claim's references, on the rehearsal's
-    path and never the real one's (which is not a prefix of it once the ``/`` is on)."""
+    """Review A2 finding 4: each REST write, on the rehearsal's path and never the real
+    one's (which is not a prefix of it once the ``/`` is on).  A claim is no tracker write
+    since R-BAL359: it is the code repository's branch ``card/N``."""
     github = _AnyWrite()
     tracker = Tracker(github, Board(github, REHEARSAL, "PVT_r"), APP)
     card = card_from(_recorded_open_node(2), REHEARSAL, "PVT_r", APP)
@@ -532,10 +530,8 @@ def test_every_write_to_a_rehearsal_tracker_goes_to_the_rehearsal_repository():
     tracker.remove_child(5, card)
     tracker.block(5, card)
     tracker.unblock(5, card)
-    tracker.claim(5, "feat/x")
-    tracker.release(5)
     paths = [path for _, path, _ in github.sent]
-    assert len(paths) == 17
+    assert len(paths) == 12
     assert all(path.startswith(REHEARSAL.path + "/") for path in paths), paths
 
 

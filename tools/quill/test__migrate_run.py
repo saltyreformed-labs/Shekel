@@ -104,6 +104,21 @@ def test_history_then_open_files_every_card_and_orders_the_board(corpus):
                if not key.startswith(("balance:R-", "salary:R-"))) == 5
 
 
+def test_a_split_steps_leaves_are_filed_in_its_outcomes_milestone_and_it_in_none(corpus):
+    """The outcome scoping A-2 as well as A-3: the run files A-2's leaves in its milestone
+    and A-2 in none (the coordinator's code call, 14:4x 10-21), and the plan read afterwards,
+    which ``migrate verify`` grades by, refuses nothing and has nothing left."""
+    split = replace(corpus, outcomes=(("O1 the first", ("balance:A-2", "balance:A-3")),))
+    tracker = _empty()
+    assert not _run(split, tracker).history()
+    assert not _run(split, tracker).open()
+    assert _settled(split, tracker)
+    numbers = corpus_plan(split, tracker).numbers
+    assert {key: tracker.milestone_of.get(numbers[key]) for key in (
+        "balance:A-2", "balance:A-2a", "balance:A-2b", "balance:A-3", "salary:S-1")} == {
+        "balance:A-2": None, "balance:A-2a": 1, "balance:A-2b": 1, "balance:A-3": 1,
+        "salary:S-1": None}
+
 def test_a_second_run_of_each_phase_writes_nothing(corpus):
     """A finished migration run again: neither phase writes, and the board moves nothing
     (draft 4 s.4: a second run moves nothing)."""
@@ -389,32 +404,34 @@ def test_a_re_sent_create_is_refused_offering_its_other_card_and_settled_by_dele
         corpus, stop):
     """F-1's create performed by GitHub, refused for a rate limit and sent again (as
     :mod:`_github` re-sends it): two cards of F-1, and the run goes on with the last made --
-    to the board's re-plan, which refuses the key, or to its link, which fails.  The next
-    plan names each card's state and offers the others for deletion (review 2 of B2b-1,
-    MEDIUM-A: the one machine state), and the board phase's stop names a create GitHub
-    performed twice among its causes (review 5 of B2b-1, LOW-C); deleting the first, as it
-    says, the next run finishes with nothing refused."""
+    to the board's re-plan, which refuses the key, or to its owner's link, blocked by its
+    owner step (R-BAL395), which fails.  The next plan names each card's state and offers
+    the others for deletion (review 2 of B2b-1, MEDIUM-A: the one machine state), and the
+    board phase's stop names a create GitHub performed twice among its causes (review 5 of
+    B2b-1, LOW-C); deleting the first, as it says, the next run finishes with nothing
+    refused."""
     tracker = _empty()
     _run(corpus, tracker).history()
-    create, add_child, sent = tracker.create, tracker.add_child, []
+    create, block, sent = tracker.create, tracker.block, []
 
     def re_sent(kind, title, body, labels, milestone=None):
         if title.startswith("[F-1]") and not sent:
             sent.append(create(kind, title, body, labels, milestone=milestone))
         return create(kind, title, body, labels, milestone=milestone)
 
-    def link(parent, child):
-        if stop and sent and child.number == sent[0] + 1:
+    def owned(number, blocker):
+        if stop and sent and number == sent[0] + 1:
             raise GitHubError(502, "bad gateway")
-        return add_child(parent, child)
+        return block(number, blocker)
 
-    tracker.create, tracker.add_child = re_sent, link
+    tracker.create, tracker.block = re_sent, owned
     with pytest.raises((Stopped, GitHubError)) as raised:
         _run(corpus, tracker).open()
     assert isinstance(raised.value, GitHubError if stop else Stopped)
     first = sent[0]
     later = (f"plan#{first + 1} {_BARE}" if stop else
-             f"plan#{first + 1} unmarked, under plan#{tracker.cards_by_number[first + 1].parent}")
+             f"plan#{first + 1} unmarked, blocked by "
+             f"plan#{tracker.cards_by_number[first + 1].blocked_by[0]}")
     refusal = _resent("balance:F-1", first + 1, f"plan#{first} {_BARE}; {later}")
     assert corpus_plan(corpus, tracker).refusals == (refusal,)
     if not stop:
@@ -424,7 +441,7 @@ def test_a_re_sent_create_is_refused_offering_its_other_card_and_settled_by_dele
             "`migrate open` again once GitHub's reads catch up, and settle what it still refuses "
             f"as each says, else by hand): {refusal}")
     _delete(tracker, first)
-    tracker.create, tracker.add_child = create, add_child
+    tracker.create, tracker.block = create, block
     assert not _run(corpus, tracker).open()
     assert _settled(corpus, tracker)
 

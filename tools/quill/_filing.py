@@ -1,8 +1,12 @@
-"""The ``quill file`` command: a step, finding, ruling or question filed after
+"""The ``quill file`` command: a step, finding, ruling, question or task filed after
 :func:`check.violations` passes, a filing a failure cut short finished by the same
 command (R-BAL186), and nothing written over one an earlier run filed -- ruling
 ``balance:R-BAL202``'s mark, its leaf rule (R-BAL204) and ruling closes (R-BAL206) --
-and no leaf filed under a step a branch has claimed.  ``quill.py``'s module docstring is
+and no leaf filed under a step a branch has claimed, or one with a task still open.  A
+task (ruling ``balance:R-BAL386``) is filed under the piece of work it is part of, and
+carries no arc label; a finding and a ruling are blocked by their owner step, never its
+sub-issues (``R-BAL395``); a leaf is filed in its split step's milestone while that step
+holds one, which it then gives up (:func:`_leaf_milestone`).  ``quill.py``'s module docstring is
 the command's usage.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
@@ -14,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from tools.quill import _git
 from tools.quill._command import (
     ON_BOARD,
     Refused,
@@ -21,16 +26,18 @@ from tools.quill._command import (
     _one,
     _outside_parent,
     _read,
-    _shipped,
     with_closure,
 )
 from tools.quill._state import (
+    OWNED,
     filing_ended,
     filing_unfinished,
     holder,
+    is_container,
     is_live,
     leaf_placement,
     leaves,
+    leaves_below,
     release_hint,
     withdrawn_filing,
 )
@@ -44,7 +51,7 @@ from tools.quill.check import (
     ruling_question,
     violations,
 )
-from tools.quill.setup_tracker import FILING
+from tools.quill.setup_tracker import FILING, TASK
 
 
 @dataclass(frozen=True)
@@ -86,23 +93,74 @@ def _converted_body(asked: _Asked, answer: str) -> str:
     return ruling_body(asked.body if question is None else question, answer)
 
 
+#: What a filing with no parent holds of git, which it does not read (:func:`_filing_for`).
+_NOTHING_READ = _git.Reads(_git.Shipped(frozenset(), frozenset(), ()), {}, {})
+
+
+@dataclass(frozen=True)
+class _LeafMilestone:
+    """The milestone a new leaf is filed in, its split step's, which the filing then clears
+    (``leaf``), and, when the split step holds none, each leaf below it in one, by number,
+    with that milestone's (``below``), named for a person to choose from; None, or empty,
+    for none."""
+
+    leaf: int | None
+    below: tuple[tuple[int, int], ...]
+
+
+#: What a filing that is no leaf reads of milestones: nothing.
+_NO_MILESTONE = _LeafMilestone(None, ())
+
+
+def _leaf_milestone(tracker: Tracker, parent: Card, cards: dict[int, Card],
+                    shipped: frozenset[int]) -> _LeafMilestone:
+    """The milestone a new leaf of ``parent`` is filed in: its split step's (the
+    coordinator's code call, 14:4x 2026-10-21, under ruling ``balance:R-BAL274``'s one
+    milestone per card), ``parent``'s own while it holds one, which the filing then clears:
+    a step split into smaller steps leaves the board, and its milestone would count it
+    beside its leaves.
+
+    Once ``parent`` holds none -- split already, or never in one -- the leaf is filed in
+    none, and each leaf below it in a milestone (nested splits included,
+    :func:`_state.leaves_below`) is named with it, as that leaf's, for a person to set one
+    on the web: the tracker records no outcome for the split step.  None is
+    taken from them: a leaf the migration filed may hold its OWN outcome's, not one carried
+    from ``parent`` (``_migrate_source._carried_outcomes``), and the tracker cannot tell
+    the two apart (X-cx S3a's review, HIGH 1: on the plan at the cutover, 17 of 32 split
+    steps would have filed a new leaf in a sibling's outcome, recurrence R5's in place of
+    R5's own).
+    Where a split step's outcome should live once its first leaf carries it is a question
+    for after the cutover."""
+    below = [card.number for card in leaves_below(parent, cards, shipped)]
+    held = tracker.milestones_of([parent.number, *below])
+    if (own := held.get(parent.number)) is not None:
+        return _LeafMilestone(own, ())
+    return _LeafMilestone(None, tuple((number, held[number]) for number in below
+                                      if held.get(number) is not None))
+
+
 @dataclass(frozen=True)
 class _Filing:
     """What ``file`` writes, and what it read to write it.
 
-    ``draft``: the card.  ``parent``: its owner, or the step it splits, read by
-    number; None for a top-level card.  ``cards``: every card a decision over
-    that parent reads (:func:`with_closure`: the cards linked under it among
-    them, each read by number), and ``shipped``: the cards git says shipped --
-    both empty with no parent.  ``asked``: for a ruling converted from a
-    question, that question as read.
+    ``draft``: the card.  ``parent``: the card it is linked to, read by number -- a
+    finding's or ruling's owner, which it is blocked by (``R-BAL395``), or the step or piece
+    of work a step or task is a sub-issue of; None for a top-level card.  ``cards``: every
+    card a decision over that parent reads (:func:`with_closure`: the cards linked under it among
+    them, each read by number); ``shipped``: the cards git says shipped; and
+    ``claims``: every claim, by card, from the same read of git
+    (:func:`_git.read`) -- all three empty with no parent.  ``asked``: for a
+    ruling converted from a question, that question as read.  ``milestone``: for a leaf,
+    the milestone it is filed in, which its split step gives up (:func:`_leaf_milestone`).
     """
 
     draft: Draft
     parent: Card | None
     cards: dict[int, Card]
     shipped: frozenset[int]
+    claims: dict[int, _git.Claim]
     asked: _Asked | None
+    milestone: _LeafMilestone
 
 
 def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
@@ -110,7 +168,9 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
 
     Whether the parent is still LIVE is git's answer and the cards', read the
     way ``next`` reads a step (:func:`_state.is_live`), never the card's open
-    state alone, which is display.
+    state alone, which is display.  A task's parent is a piece of work whose own filing
+    has finished, never a step split into smaller steps: no change ships one, so no task
+    under it is ever done.
     """
     parent_number = getattr(args, "owner", None) or getattr(args, "parent", None)
     parent = _one(tracker, parent_number) if parent_number else None
@@ -118,14 +178,19 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
         raise Refused(f"{_label(parent)}'s own filing has not finished (R-BAL202): finish it "
                       "with the same `quill file` command first, then split it -- a leaf under "
                       "it would make it a split step its own filing puts on the board")
-    owner, cards, shipped = None, {}, frozenset()
+    if args.kind == TASK and filing_unfinished(parent):
+        raise Refused(f"{_label(parent)}'s own filing has not finished (R-BAL202): finish it "
+                      "with the same `quill file` command first, then file its tasks")
+    owner, cards, reads = None, {}, _NOTHING_READ
     if parent is not None:
-        _, found, _ = _shipped(root)
-        shipped = frozenset(found)
+        reads = _git.read(root)
         cards = with_closure(tracker, {parent.number: parent})
-        owner = Owner(parent.kind, is_live(parent.number, cards, shipped))
+        owner = Owner(parent.kind, is_live(parent.number, cards, reads.shipped.cards))
+    if args.kind == TASK and is_container(parent, cards, reads.shipped.cards):
+        raise Refused(f"{_label(parent)} is split into smaller steps (R-BAL177): a task is a "
+                      "piece of one of them, so file it under that one")
     asked = None
-    if args.kind in ("step", "question"):
+    if args.kind in ("step", "question", TASK):
         body = _read(args.body_file)
     elif args.kind == "finding":
         body = args.text
@@ -138,9 +203,12 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
         body = _converted_body(asked, _read(args.answer_file))
     else:
         body = ruling_body(_read(args.question_file), _read(args.answer_file))
-    labels = tuple(dict.fromkeys((args.arc, *(getattr(args, "label", None) or ()))))
-    return _Filing(Draft(args.kind, args.title, body, labels, owner), parent, cards, shipped,
-                   asked)
+    arc = () if args.kind == TASK else (args.arc,)
+    labels = tuple(dict.fromkeys((*arc, *(getattr(args, "label", None) or ()))))
+    return _Filing(Draft(args.kind, args.title, body, labels, owner), parent, cards,
+                   reads.shipped.cards, reads.claims, asked,
+                   _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
+                   if args.kind == "step" and parent is not None else _NO_MILESTONE)
 
 
 def _place_leaf(tracker: Tracker, leaf: Card, filing: _Filing) -> None:
@@ -170,25 +238,25 @@ def _same_filing(tracker: Tracker, draft: Draft, parent: Card | None) -> Card | 
     """The card an earlier run of this filing made, if one exists: a card with ``draft``'s
     kind, title and text that is OPEN, or still MARKED in any state (a filing the tool
     began: unfinished, or ended by a person's or ``quill drop``'s close) -- or, for a
-    RULING, the one kind its own filing closes, ANY ruling linked under its owner, read
-    by number.  A ruling is linked before its filing closes it and removes its mark, so
-    one whose filing finished is found under its owner, whatever answer a write of it
-    lost.  The caller finishes a filing cut short and files nothing over one that ended
-    (R-BAL186, R-BAL202).
+    RULING, the one kind its own filing closes, ANY ruling its owner blocks
+    (:meth:`_tracker.Tracker.blocking`, ``R-BAL395``), read by number.  A ruling is
+    blocked by its owner before its filing closes it and removes its mark, so one whose
+    filing finished is found by its owner, whatever answer a write of it lost.  The caller
+    finishes a filing cut short and files nothing over one that ended (R-BAL186, R-BAL202).
 
     Not found: a card of another kind closed after its filing finished (by ``sync`` as
     shipped, or dropped since), whose command run again files another; and a ruling a
-    person re-homed under another owner, or unlinked, which this command files again
-    under the owner it names (a listing that lags such a close may still show the card
-    open: it is then read closed, and nothing is written).  A filing that ended
+    person re-homed to another owner, or whose owner link a person removed, which this
+    command files again for the owner it names (a listing that lags such a close may still
+    show the card open: it is then read closed, and nothing is written).  A filing that ended
     (:func:`_state.filing_ended`) is the answer only when no other card matches:
     closing one as a duplicate is how a person withdraws an extra.  Refused when two
     matching cards stand."""
     found = {number: card for number, card in tracker.marked().items()
              if card.kind == draft.kind}
     if draft.kind == "ruling":
-        found.update(tracker.cards(child.number for child in parent.children
-                                   if child.kind == "ruling"))
+        found.update(tracker.cards(card.number for card in tracker.blocking(parent.number)
+                                   if card.kind == "ruling"))
     candidates = {**tracker.open_cards(), **found}
     same = [
         card for _, card in sorted(candidates.items())
@@ -213,10 +281,14 @@ def _refuse_relabel(card: Card, draft: Draft) -> None:
                       f"{labels}, not {sorted(draft.labels)}: relabel it by hand")
 
 
-def _refuse_rehoming(card: Card, parent: Card | None) -> None:
-    """Refuse to file ``card`` under ``parent`` (None: at the top level) when it is a
-    sub-issue of another card, in the tracker or outside it: re-homing a card is a
-    person's call."""
+def _refuse_rehoming(card: Card, kind: str, parent: Card | None) -> None:
+    """Refuse to file ``card`` as a ``kind`` under ``parent`` (None: at the top level) when it
+    is a sub-issue of another card, in the tracker or outside it -- or, filed as a finding or
+    ruling, a sub-issue of any card, or blocked by any card but ``parent``, its owner
+    (``R-BAL395``): re-homing a card is a person's call."""
+    if kind in OWNED:
+        _refuse_reowning(card, parent)
+        return
     if outside := _outside_parent(card):
         raise Refused(f"{_label(card)} is a sub-issue of {outside}, outside the tracker: "
                       "re-homing a card is done by hand")
@@ -226,10 +298,35 @@ def _refuse_rehoming(card: Card, parent: Card | None) -> None:
                       "re-homing a card is done by hand")
 
 
-def _attach(tracker: Tracker, card: Card, parent: Card | None) -> None:
-    """Make ``card`` a sub-issue of ``parent`` (None: none), unless it already is one;
-    the caller has already refused a card under another parent."""
+def _refuse_reowning(card: Card, owner: Card) -> None:
+    """Refuse to file ``card``, a finding or ruling, for ``owner`` when a link of it says
+    otherwise: a sub-issue of any card, which the parent's progress would count, or blocked
+    by any card but ``owner`` (``R-BAL395``), in the tracker or outside it."""
+    outside = {what: [f"{link.issue}, outside the tracker" for link in card.outside
+                      if link.what == what] for what in ("parent", "blocker")}
+    if under := ([f"plan#{card.parent}"] if card.parent is not None else []) + outside["parent"]:
+        raise Refused(f"{_label(card)} is a sub-issue of {under[0]}, but a finding or ruling is "
+                      f"blocked by its owner, plan#{owner.number}, and is no card's sub-issue "
+                      "(R-BAL395): re-homing a card is done by hand")
+    if others := [f"plan#{number}" for number in card.blocked_by
+                  if number != owner.number] + outside["blocker"]:
+        raise Refused(f"{_label(card)} is blocked by {', '.join(others)}, not only by "
+                      f"plan#{owner.number}, the owner this filing names (R-BAL395): re-homing a "
+                      "card is done by hand")
+
+
+def _attach(tracker: Tracker, card: Card, kind: str, parent: Card | None) -> None:
+    """Link ``card``, filed as a ``kind``, to ``parent`` (None: no card), unless it already
+    is: a finding or ruling blocked by it, its owner (``R-BAL395``), any other kind its
+    sub-issue; the caller has already refused a card linked otherwise."""
     if parent is None:
+        return
+    if kind in OWNED and parent.number in card.blocked_by:
+        print(f"  already blocked by plan#{parent.number}, its owner")
+        return
+    if kind in OWNED:
+        tracker.block(card.number, parent)
+        print(f"  blocked by plan#{parent.number}, its owner (R-BAL395)")
         return
     if card.parent == parent.number:
         print(f"  already a sub-issue of plan#{parent.number}")
@@ -259,7 +356,7 @@ def _refuse_beside_unfinished(filing: _Filing, leaf: Card | None) -> None:
                       "(`quill show` shows its parent and board place)")
 
 
-def _refuse_under_a_claim(tracker: Tracker, filing: _Filing, leaf: Card | None) -> None:
+def _refuse_under_a_claim(filing: _Filing, leaf: Card | None) -> None:
     """Refuse to file a leaf of ``filing``'s parent -- a new one, or ``leaf``'s filing again
     -- while a claim names that parent (C2 review M4): a branch is building it as one piece
     of work, and a step split into smaller steps is never shipped itself (R-BAL177), so a
@@ -272,7 +369,7 @@ def _refuse_under_a_claim(tracker: Tracker, filing: _Filing, leaf: Card | None) 
     earlier run created, git does not say it shipped, and no other leaf splits the step
     -- drop it, which keeps the step whole (R-BAL205).
 
-    The claims are read here, before any write of the leaf's.  A claim this refusal
+    The claims are ``filing``'s, read before any write of the leaf's.  A claim this refusal
     cannot see still lands on a split step: one made after this read and before the
     link lands (GitHub has no conditional sub-issue write); one made while a leaf closed
     while still being filed left the step plain, before a person reopened that leaf or
@@ -280,19 +377,34 @@ def _refuse_under_a_claim(tracker: Tracker, filing: _Filing, leaf: Card | None) 
     under a claimed step on the web.  ``sync`` reports every such claim
     (:func:`_state.sync_plan`)."""
     parent = filing.parent
-    claim = tracker.claims().get(parent.number)
+    claim = filing.claims.get(parent.number)
     if claim is None:
         return
     others = set(leaves(parent, filing.cards, filing.shipped)) - {getattr(leaf, "number", None)}
     keep = ("" if leaf is None or leaf.number in filing.shipped or others else
             f"; or, to keep plan#{parent.number} whole, `quill drop plan#{leaf.number}`: its "
             "filing never finished, so it was never part of the split (R-BAL205)")
-    raise Refused(f"plan#{parent.number} is claimed by {holder(claim)} since "
-                  f"{claim.made or '?'}: a branch is building it as one piece of work, and a step "
+    raise Refused(f"plan#{parent.number} is claimed, {holder(claim)}: a branch is "
+                  "building it as one piece of work, and a step "
                   "split into smaller steps is never shipped itself (R-BAL177), so no leaf is "
                   "filed under it while it is claimed.  Release the claim first "
                   f"({release_hint(claim)}, by the session that holds it, or once its work is "
                   "abandoned), then run this again" + keep)
+
+
+def _refuse_over_tasks(filing: _Filing) -> None:
+    """Refuse to file a leaf of ``filing``'s parent -- a new one, or one's filing again -- while
+    a task under that parent is open (R-BAL386): a step split into smaller steps is never
+    shipped itself (R-BAL177), so no task under it could ever be done.  Its tasks are dropped
+    first, and each filed again under the smaller step it is a piece of."""
+    parent = filing.parent
+    if tasks := [child.number for child in parent.children
+                 if child.kind == TASK and child.is_open]:
+        names = ", ".join(f"plan#{number}" for number in tasks)
+        raise Refused(f"plan#{parent.number} has tasks still open ({names}): a step split into "
+                      "smaller steps is never shipped itself (R-BAL177), so no task under it "
+                      "could ever be done.  Drop each first (`quill drop plan#N`), then file it "
+                      "again under the smaller step it is a piece of")
 
 
 def _ended_unfinished(card: Card) -> str:
@@ -312,16 +424,21 @@ def _ended_unfinished(card: Card) -> str:
             "web, then run this again to finish its filing")
 
 
-def _filed_already(card: Card, parent: Card | None) -> int:
+def _filed_already(card: Card, kind: str, parent: Card | None) -> int:
     """Nothing is written over a filing that finished, or is moot.  ``card`` carries no
     filing mark -- open, a ruling closed as completed, or a card closed since that a
     lagging listing still showed open -- so each of its filing's writes landed (R-BAL202),
     and a person may have moved or edited it since; or it shipped in git and was closed
     still marked, its filing stopped at its last write, which decides nothing now
     (:func:`_state.withdrawn_filing`).  Refused when it sits at the top level and this
-    filing names ``parent``: re-homing a card is a person's call (one under another parent
-    the caller has already refused, :func:`_refuse_rehoming`)."""
-    if card.parent is None and parent is not None:
+    filing names ``parent`` -- for a ``kind`` that is a finding or ruling, when no card
+    blocks it (``R-BAL395``): re-homing a card is a person's call (one linked otherwise the
+    caller has already refused, :func:`_refuse_rehoming`)."""
+    if kind in OWNED and parent is not None and parent.number not in card.blocked_by:
+        raise Refused(f"{_label(card)} has this kind, title and text, and its filing finished "
+                      f"blocked by no card, not by plan#{parent.number}, its owner: re-homing "
+                      "a card is done by hand")
+    if card.parent is None and parent is not None and kind not in OWNED:
         raise Refused(f"{_label(card)} has this kind, title and text, and its filing finished "
                       f"at the top level, not under plan#{parent.number}: re-homing a card is "
                       "done by hand")
@@ -342,18 +459,18 @@ def _shipped_for(filing: _Filing, card: Card, root: Path) -> frozenset[int]:
     when ``card`` was closed while still marked, the one card the answer decides."""
     if filing.parent is not None or card.is_open or FILING not in card.labels:
         return filing.shipped
-    _, found, _ = _shipped(root)
-    return frozenset(found)
+    return _git.read(root).shipped.cards
 
 
 def cmd_file(args, tracker: Tracker, root: Path) -> int:
-    """File a step, finding, ruling or question, after :func:`check.violations` passes;
+    """File a step, finding, ruling, question or task, after :func:`check.violations` passes;
     finish one a failure cut short (R-BAL186); write nothing over one the earlier run
     filed (:func:`_same_filing`): refused when a decision ended it
     (:func:`_ended_unfinished`), else filed already (:func:`_filed_already`).  A leaf
     whose filing would write anything is refused under a claimed step
-    (:func:`_refuse_under_a_claim`) and beside an unfinished sibling
-    (:func:`_refuse_beside_unfinished`).
+    (:func:`_refuse_under_a_claim`), beside an unfinished sibling
+    (:func:`_refuse_beside_unfinished`) and under a step with a task still open
+    (:func:`_refuse_over_tasks`).
 
     Every card is created marked, :data:`setup_tracker.FILING` sent in the call
     that creates it (by :meth:`_tracker.Tracker.create`, never through ``--label``,
@@ -381,15 +498,16 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
         card = fresh
         if withdrawn_filing(card, _shipped_for(filing, card, root)):
             raise Refused(_ended_unfinished(card))
-        _refuse_rehoming(card, filing.parent)
+        _refuse_rehoming(card, args.kind, filing.parent)
         _refuse_relabel(card, filing.draft)
         if not filing_unfinished(card):
-            return _filed_already(card, filing.parent)
+            return _filed_already(card, args.kind, filing.parent)
     if args.kind == "step" and filing.parent is not None:
-        _refuse_under_a_claim(tracker, filing, card)
+        _refuse_under_a_claim(filing, card)
         _refuse_beside_unfinished(filing, card)
+        _refuse_over_tasks(filing)
     if card is None:
-        card = _created(args.kind, tracker, filing.draft)
+        card = _created(args.kind, tracker, filing.draft, filing.milestone)
     else:
         print(f"finishing {_label(card)}: its filing has not finished (it is still marked "
               f"{FILING!r}), so this command finishes it rather than filing another (R-BAL186, "
@@ -398,12 +516,22 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
     return 0
 
 
-def _created(kind: str, tracker: Tracker, draft: Draft) -> Card:
-    """A new card filed from ``draft``, marked in the call that creates it (R-BAL202), as
-    read back; a card that cannot be read back yet is a failed call, not a refusal: it
-    was filed."""
-    number = tracker.create(kind, draft.title, draft.body, draft.labels)
+def _created(kind: str, tracker: Tracker, draft: Draft, milestone: _LeafMilestone) -> Card:
+    """A new card filed from ``draft``, marked in the call that creates it (R-BAL202), and a
+    leaf in its split step's milestone, while that step holds one, in that call too
+    (:func:`_leaf_milestone`), as read back; a card that cannot be read back yet is a
+    failed call, not a refusal: it was filed."""
+    number = tracker.create(kind, draft.title, draft.body, draft.labels,
+                            milestone=milestone.leaf)
     print(f"filed plan#{number}")
+    if milestone.leaf is not None:
+        print(f"  in milestone #{milestone.leaf}, its split step's")
+    if milestone.below:
+        held = ", ".join(f"plan#{leaf} is in milestone #{number}"
+                         for leaf, number in milestone.below)
+        print(f"  in no milestone: its split step holds none, so the tracker records no "
+              f"outcome for it; below it, {held}: if this leaf belongs with one of them, set "
+              "it on the web")
     card = tracker.cards([number]).get(number)
     if card is None:
         raise TrackerError(f"plan#{number} was filed but cannot be read back yet: once "
@@ -417,9 +545,11 @@ def _created(kind: str, tracker: Tracker, draft: Draft) -> Card:
 def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
     """Every write of a filing after the create that ``card`` does not show done, each
     printed as it lands, then its mark removed, last (R-BAL202): the link, a ruling's
-    close, a leaf's place, a top-level step's or question's board place."""
+    close, a leaf's place and its split step's milestone cleared (after the leaf's create
+    carried it, so a run cut short between them leaves it held, and the same command run
+    again clears it), a top-level step's or question's board place."""
     kind, parent = filing.draft.kind, filing.parent
-    _attach(tracker, card, parent)
+    _attach(tracker, card, kind, parent)
     if kind == "ruling" and card.is_open:
         tracker.close(card.number, "completed")
         print("  closed: a ruling is a record")
@@ -427,6 +557,9 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
         print("  closed already")
     elif kind == "step" and parent is not None:
         _place_leaf(tracker, card, filing)
+        if (split := filing.milestone.leaf) is not None:
+            tracker.set_milestone(parent.number, None)
+            print(f"  plan#{parent.number} left milestone #{split}: a split step keeps none")
     elif kind in ON_BOARD and card.board_item is None:
         tracker.board.add(card)
         print("  board: added at the bottom")
@@ -452,7 +585,7 @@ def _convert_question(args, tracker: Tracker, draft: Draft, owner: Card, asked: 
                       "the `quill file` command that filed it first, then convert it")
     if args.arc not in question.labels:
         raise Refused(f"{_label(question)} is not in the {args.arc} arc; pass its own --arc")
-    _refuse_rehoming(question, owner)
+    _refuse_rehoming(question, "ruling", owner)
     if question.kind == "ruling":
         print(f"finishing {_label(question)}: its conversion into a ruling was cut short "
               "(R-BAL186)")
@@ -465,7 +598,7 @@ def _convert_question(args, tracker: Tracker, draft: Draft, owner: Card, asked: 
     if draft.title.strip() != question.title.strip():
         tracker.retitle(question.number, draft.title)
         print(f"  retitled {draft.title!r}")
-    _attach(tracker, question, owner)
+    _attach(tracker, question, "ruling", owner)
     if question.board_item is not None:
         tracker.board.remove(question.board_item)
         print("  board: taken off it (a ruling is not in the order)")

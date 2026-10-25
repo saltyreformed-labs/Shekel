@@ -445,6 +445,9 @@ class TestDockerignoreCoverage:
         ".git",
         ".github/",
         ".vscode/",
+        # Ship markers (ruling R-BAL359): git reads them, the app never
+        # does, so a claim must not change the image.
+        "plan/",
         # Secrets
         ".env",
         # Dev-only scripts (host-side or build-time)

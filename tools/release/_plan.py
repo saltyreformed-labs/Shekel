@@ -35,8 +35,9 @@ branch's own commits, and an offered cut can hold a leaf's code without its clai
 reader the cut's tree calls for: before the cutover
 (:class:`~tools.release._carried.Knowledge`), each step's flag read over the CUT's
 window (or declared) and the groups' leaves at the cut; after it
-(:class:`~tools.release._cards.Cards`), the cards the cut's window names, read from the
-tracker once.  Before the cutover, a candidate's own window is narrower and can miss a
+(:class:`~tools.release._cards.Cards`), the cards the window of any cut on the cut's
+first-parent line names (every candidate's), read from the tracker once.  Before the
+cutover, a candidate's own window is narrower and can miss a
 version that marks a step, or a leaf filed later, so judged on its own it could pass
 what the cut was refused for (the delta review of 2026-10-13 built four such
 histories).  So a step the cut reads as a money mover is one at every
@@ -127,9 +128,11 @@ class Inputs:
 def _split(group: Group) -> str | None:
     """Why a cut leaves production holding part of ``group``; None when, released, it
     leaves production holding every member or none (R-BAL288).  A member the plan will
-    never ship is named with the way out no plan can block: a ``Reopens:`` for each member
-    the cut keeps, which leaves production holding none of the group (after the cutover,
-    every step below a group that production holds at a cut is a member of it)."""
+    never ship is named with the way out no plan can block: reverting the merge that landed
+    each member the cut keeps, which deletes its ship marker with its code and leaves
+    production holding none of the group (after the cutover, every step below a group that
+    production holds at a cut is a member of it).  Never "delete the marker": one deleted
+    by hand leaves the code in production unseen (M3's review, its 4)."""
     held = group.carried + group.released
     if not held or not group.undone + group.missing:
         return None
@@ -143,13 +146,13 @@ def _split(group: Group) -> str | None:
                f"({', '.join(group.carried)}) without {', '.join(group.missing)}")
     else:
         why = (f"it leaves {', '.join(group.undone)} of the deploy-together group {group.key} "
-               f"out of production (a Reopens: names it) and keeps {', '.join(held)}"
+               f"out of production (its marker deleted) and keeps {', '.join(held)}"
                + (f", without {', '.join(group.missing)}" if group.missing else ""))
     if group.dead:
         why += (f"; a step the plan will never ship ({', '.join(group.dead)}) is a member "
                 "while production holds it, at the base or the cut: a release that leaves "
-                "production holding none of the group is whole (a Reopens: naming each of "
-                f"{', '.join(held)})")
+                "production holding none of the group is whole (reverting the merge that "
+                f"landed each of {', '.join(held)})")
     return why + "; the group ships whole"
 
 

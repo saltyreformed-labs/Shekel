@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from tools.quill._fake import FailOnce, FakeTracker, run, ship
+from tools.quill._fake import FailOnce, FakeTracker, run, ship, unship
 from tools.quill._tracker import Child
 from tools.quill.setup_tracker import FILING
 
@@ -18,13 +18,14 @@ from tools.quill.setup_tracker import FILING
 def _low6_path(tracker, code):
     """C2 review LOW 6's state: plan#1's only leaf plan#2 (its unmark failed) shipped and
     was closed by a person, so `sync` showed plan#1 completed and off the board; then a
-    ``Reopens:`` undid plan#2 and a person reopened it.  No sync has run since."""
+    revert deleting its marker undid plan#2 and a person reopened it.  No sync has run
+    since."""
     tracker.add(1, is_open=False, state_reason="COMPLETED", closed_by_tool=True,
                 children=(Child(2, "step", True),))
     tracker.add(2, parent=1, labels=("balance", FILING), state_reason="REOPENED",
                 touched_by_hand=True)
-    ship(code, "Ships: plan#2")
-    ship(code, "Reopens: plan#2")
+    ship(code, 2)
+    unship(code, 2)
     assert tracker.board.items == [2]
 
 
@@ -108,14 +109,14 @@ def test_a_tool_closed_split_step_left_split_is_shown_as_its_other_leaves_say(co
 
 
 def test_a_split_step_shipped_as_plain_work_is_not_reopened_when_its_leaf_is_dropped(code):
-    """Leaf C3 delta review LOW 3 (D3): a trailer ships plan#1 itself, so once the drop
+    """Leaf C3 delta review LOW 3 (D3): a marker ships plan#1 itself, so once the drop
     leaves it a plain step, git says it shipped: shown completed is right, and neither the
     drop nor `sync` reopens it."""
     tracker = FakeTracker()
     tracker.add(1, is_open=False, state_reason="COMPLETED", closed_by_tool=True,
                 children=(Child(2, "step", True),))
     tracker.add(2, parent=1, labels=("balance", FILING))
-    ship(code, "Ships: plan#1")
+    ship(code, 1)
     assert run(tracker, code, "drop", "plan#2", "--why", "no") == 0
     assert tracker.writes == [("remove_child", 1, 2), ("comment", 2, "Dropped: no"),
                               ("close", 2, "not_planned")]
@@ -138,14 +139,14 @@ def test_dropping_a_leaf_under_a_split_step_a_person_closed_unlinks_it_at_once(c
 def test_a_drop_under_a_finding_the_tool_closed_shows_it_as_sync_would(code):
     """A step a person linked under a finding by hand, still marked.  The finding splits
     nothing (R-BAL177); shipped, it stays closed and the drop only unlinks the step.  A
-    `Reopens:` of the finding makes its close a display git no longer backs, and the
-    unlink removes the one card that led `sync` to it, so the drop reopens it first, as
-    `sync` would; nothing goes on the board."""
+    revert deleting the finding's marker makes its close a display git no longer backs,
+    and the unlink removes the one card that led `sync` to it, so the drop reopens it
+    first, as `sync` would; nothing goes on the board."""
     tracker = FakeTracker()
     tracker.add(1, kind="finding", is_open=False, state_reason="COMPLETED", closed_by_tool=True,
                 children=(Child(2, "step", True),))
     tracker.add(2, parent=1, labels=("balance", FILING))
-    ship(code, "Ships: plan#1")
+    ship(code, 1)
     assert run(tracker, code, "drop", "plan#2", "--why", "no") == 0
     assert tracker.writes == [("remove_child", 1, 2), ("comment", 2, "Dropped: no"),
                               ("close", 2, "not_planned")]
@@ -153,7 +154,7 @@ def test_a_drop_under_a_finding_the_tool_closed_shows_it_as_sync_would(code):
     tracker.add(1, kind="finding", is_open=False, state_reason="COMPLETED", closed_by_tool=True,
                 children=(Child(2, "step", True),))
     tracker.add(2, parent=1, labels=("balance", FILING))
-    ship(code, "Reopens: plan#1")
+    unship(code, 1)
     assert run(tracker, code, "drop", "plan#2", "--why", "no") == 0
     assert tracker.writes == [("reopen", 1), ("remove_child", 1, 2), ("comment", 2, "Dropped: no"),
                               ("close", 2, "not_planned")]
@@ -162,17 +163,19 @@ def test_a_drop_under_a_finding_the_tool_closed_shows_it_as_sync_would(code):
 
 def test_an_open_split_steps_state_is_left_to_sync_when_its_leaf_is_dropped(code):
     """An open split step is read by every `sync`, so the drop of its unfinished leaf
-    writes nothing to its state, though its only other leaf shipped: `sync` closes it."""
+    writes nothing to its state, though its only other leaf shipped: `sync` closes it, and
+    the shipped leaf too -- git's marker alone closes it (R-BAL359), where the claim check
+    that marker replaced reported a leaf no claim named and left it open."""
     tracker = FakeTracker()
     tracker.add(1, children=(Child(2, "step", True), Child(3, "step", True)), on_board=False)
     tracker.add(2, parent=1)
     tracker.add(3, parent=1, labels=("balance", FILING))
-    ship(code, "Ships: plan#2")
+    ship(code, 2)
     assert run(tracker, code, "drop", "plan#3", "--why", "no") == 0
     assert tracker.writes == [("remove_child", 1, 3), ("comment", 3, "Dropped: no"),
                               ("close", 3, "not_planned")]
-    assert run(tracker, code, "sync") == 1
-    assert ("close", 1, "completed") in tracker.writes
+    assert run(tracker, code, "sync") == 0
+    assert tracker.writes[3:] == [("close", 1, "completed"), ("close", 2, "completed")]
 
 
 def test_a_step_a_drop_closed_stays_dropped_when_a_leaf_linked_under_it_is_dropped(code):

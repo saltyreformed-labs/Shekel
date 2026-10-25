@@ -47,9 +47,10 @@ jobs:
   # From December 1 no release image is built until next year's tax law is
   # in app/tax_law/ (plan step salary:X-at-4; rulings salary:R-SAL74,
   # R-SAL86, R-SAL88).  ci.yml's ``tax-law`` job refuses the same thing on a
-  # pull request, but GitHub judges that when the PR is pushed and does not
-  # re-run it at merge: a release PR checked green on November 30 could merge
-  # on December 2, and a v* tag skips pull requests altogether.  This check is
+  # pull request, judged when the PR is pushed and again on the merge-queue
+  # group that lands it (main's included, measured 2026-10-23), but a group
+  # is judged before it lands: one judged green on November 30 could land on
+  # December 1, and a v* tag skips pull requests altogether.  This check is
   # judged when the release is BUILT, so neither can ship one.  A December
   # merge without next year leaves production on the previous image until the
   # law is added (R-SAL88); the code on main runs ahead of it meanwhile.

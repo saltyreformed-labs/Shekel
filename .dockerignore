@@ -107,6 +107,13 @@ state/
 docs/
 *.md
 
+# ── Ship markers ───────────────────────────────────────────────────
+# plan/ships/<N> records that card N of the plan tracker shipped
+# (ruling R-BAL359): ``quill claim`` writes one, and git reads them on
+# the host and in CI; the app never does.  Excluded so a claim does
+# not change the image, and a marker is no file production runs.
+plan/
+
 # ── Editor / IDE / OS ──────────────────────────────────────────────
 .vscode/
 .idea/

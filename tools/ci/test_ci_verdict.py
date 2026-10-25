@@ -109,7 +109,8 @@ class TestARegistryOnlyRunSkipsOnlyTheCodeGraders:
 
     @pytest.mark.parametrize("result", ["failure", "cancelled", "skipped"])
     def test_the_landing_check_must_still_succeed(self, result):
-        """The tracker is asked about a registry pass's trailers too (step X-cx's L9d)."""
+        """A registry pass's merge is judged against the ship markers' write rule too (step
+        X-cx's M2)."""
         reasons = ci_verdict.verdict(
             _needs(scope_output="registry-only", landing=result, lint="skipped", test="skipped")
         )

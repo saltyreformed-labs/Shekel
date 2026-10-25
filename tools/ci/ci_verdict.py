@@ -41,8 +41,8 @@ from tools.ci.ci_scope import REGISTRY_ONLY
 
 #: Jobs that grade in every scope: the classifier itself, the card-trailer
 #: check (a registry-only pass carries commits too; step X-cx's L4), the
-#: landing check, which asks the tracker about those same trailers (step
-#: X-cx's L9d), the plan gate, and the tax-law check, which refuses EVERY pull
+#: landing check, which judges which change may write a ship marker (step
+#: X-cx's M2), the plan gate, and the tax-law check, which refuses EVERY pull
 #: request from December 1 until next year's tax law is in the app (plan step
 #: salary:X-at-4, ruling salary:R-SAL74) -- a registry-only pass included.
 EVERY_SCOPE = ("scope", "commit-trailers", "landing", "plan-gate", "tax-law")

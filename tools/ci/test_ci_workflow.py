@@ -8,9 +8,11 @@ developer confirming the change under rule 5, 2026-09-22.)  Since step X-cx's
 L4 the scope job also hands each event's change set to the ``commit-trailers``
 job, and the merge queue's ``merge_group`` event triggers the workflow.  Split
 out of ``test_ci_scope.py`` by that step, unchanged but for this docstring and
-the imports.  Since L9d the change set also goes to the ``landing`` job, which
-asks the tracker about its trailers through a token minted for that run alone
-(ruling balance:R-BAL311).
+the imports.  Since L9d the ``landing`` job reads the tracker through a token
+minted for that run alone (ruling balance:R-BAL311).  Since M2 it judges the
+ship markers the merge it checked out writes, for the one pull request the
+scope job names, which it reads through the job's own token (ruling
+balance:R-BAL359); the expected wiring below changed with it, by that plan.
 """
 from __future__ import annotations
 
@@ -50,7 +52,7 @@ UNGUARDED_CODE_STEPS = {
     ("commit-trailers", "Card trailers (every scope)"),
     ("landing", "Install dependencies"),
     ("landing", "Read the tracker's place"),
-    ("landing", "Card trailers against the tracker (every scope)"),
+    ("landing", "Ship markers against the write rule (every scope)"),
     ("plan-gate", "Install dependencies"),
     ("plan-gate", "Plan gate (every scope)"),
     ("tax-law", "Install dependencies"),
@@ -66,7 +68,7 @@ UNGUARDED_CODE_STEPS = {
 #: job's mint grades nothing: it is skipped on a run handed no key (GitHub
 #: documents that a Dependabot run and a fork's pull request get no Actions
 #: secrets), and the check after it, which has no condition, then refuses to
-#: judge a change set naming a card, so the skip can never turn a needed read
+#: judge a change that records a card, so the skip can never turn a needed read
 #: green (step X-cx's L9d).
 #: The test job's step that runs the rehearsal kit's cluster tests, and the shard it runs on.
 REHEARSAL_STEP = "Run the rehearsal kit's cluster tests (shard 3)"
@@ -109,6 +111,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
             "scope": "${{ steps.scope.outputs.scope }}",
             "base": "${{ steps.scope.outputs.base }}",
             "head": "${{ steps.scope.outputs.head }}",
+            "pull": "${{ steps.scope.outputs.pull }}",
         }
 
     def test_the_classifier_step_is_unconditional(self):
@@ -426,8 +429,16 @@ class TestTheChangeSetIsHandedOver:
 
     Step X-cx's L4: the scope job is the one place that reads which payload
     field holds a pull request's, a merge group's or a push's two ends; the
-    ``commit-trailers`` job reads them from its outputs.
+    ``commit-trailers`` job reads them from its outputs.  Since M2 it names the
+    pull request the ``landing`` job judges there too: a pull request's number,
+    or a queue group's branch.
     """
+
+    #: A pull request's number and a queue group's branch for it, set on every run, so an
+    #: event that read the other's field would hand over the wrong pull request.
+    NUMBER = "594"
+    QUEUED = f"refs/heads/gh-readonly-queue/dev/pr-{NUMBER}-{'b' * 40}"
+    NAMES = {"PR_NUMBER": NUMBER, "GROUP_REF": QUEUED}
 
     def test_the_merge_queue_triggers_the_workflow(self):
         """``merge_group`` beside ``pull_request``, neither filtered; ``push`` still only to
@@ -478,7 +489,8 @@ class TestTheChangeSetIsHandedOver:
             env = {"PATH": f"{tmp_path}:/usr/bin:/bin", "GITHUB_OUTPUT": str(output),
                    "EVENT_NAME": event, "HOME": str(tmp_path)}
             env.update({name: ends.get(name, "") for name in (
-                "PR_BASE", "PR_HEAD", "GROUP_BASE", "GROUP_HEAD", "PUSH_BEFORE", "PUSH_AFTER")})
+                "PR_BASE", "PR_HEAD", "PR_NUMBER", "GROUP_BASE", "GROUP_HEAD", "GROUP_REF",
+                "PUSH_BEFORE", "PUSH_AFTER")})
             done = subprocess.run(["bash", "--noprofile", "--norc", "-e", "-c", run], cwd=repo,
                                   env=env, capture_output=True, text=True, check=False)
             assert done.returncode == 0, done.stderr
@@ -488,31 +500,37 @@ class TestTheChangeSetIsHandedOver:
         return _run, base, head
 
     def test_a_pull_request_and_a_merge_group_are_classified_and_handed_over(self, ran):
-        """Each reads its own payload fields, asks the classifier, and hands both ends on."""
+        """Each reads its own payload fields, asks the classifier, and hands both ends on, and
+        the pull request it names in a form the landing check reads as that one."""
         run, base, head = ran
-        assert run("pull_request", PR_BASE=base, PR_HEAD=head)[0] == {
-            "base": base, "head": head, "scope": "registry-only"}
-        assert run("merge_group", GROUP_BASE=base, GROUP_HEAD=head)[0] == {
-            "base": base, "head": head, "scope": "registry-only"}
+        assert run("pull_request", PR_BASE=base, PR_HEAD=head, **self.NAMES)[0] == {
+            "base": base, "head": head, "pull": self.NUMBER, "scope": "registry-only"}
+        assert run("merge_group", GROUP_BASE=base, GROUP_HEAD=head, **self.NAMES)[0] == {
+            "base": base, "head": head, "pull": self.QUEUED, "scope": "registry-only"}
+        for event, pull in (("pull_request", self.NUMBER), ("merge_group", self.QUEUED)):
+            assert landing.named([event, head, pull]) == int(self.NUMBER), event
 
     def test_a_push_is_full_and_still_hands_its_range_over(self, ran):
-        """A release runs everything; its before and after are still the commits to check."""
+        """A release runs everything; its before and after are still the commits to check, and
+        it names no pull request (the landing check says a push was judged in main's queue)."""
         run, base, head = ran
-        outputs, log = run("push", PUSH_BEFORE=base, PUSH_AFTER=head)
-        assert outputs == {"base": base, "head": head, "scope": "full"}
+        outputs, log = run("push", PUSH_BEFORE=base, PUSH_AFTER=head, **self.NAMES)
+        assert outputs == {"base": base, "head": head, "pull": "", "scope": "full"}
         assert "has no pull-request change set" in log
 
     def test_an_unreadable_change_set_is_full_and_its_ends_are_handed_over_as_given(self, ran):
         """A diff git cannot take answers ``full``; the trailer check then fails on the ends."""
         run, _base, head = ran
-        outputs, log = run("pull_request", PR_BASE="e" * 40, PR_HEAD=head)
-        assert outputs == {"base": "e" * 40, "head": head, "scope": "full"}
+        outputs, log = run("pull_request", PR_BASE="e" * 40, PR_HEAD=head, **self.NAMES)
+        assert outputs == {"base": "e" * 40, "head": head, "pull": self.NUMBER, "scope": "full"}
         assert "not trusting an unreadable change set" in log
 
     def test_any_other_event_hands_over_no_range(self, ran):
-        """No change set: ``full`` here, and an empty range the trailer check refuses."""
+        """No change set: ``full`` here, an empty range the trailer check refuses, and no
+        pull request, which the landing check refuses to judge."""
         run, _base, _head = ran
-        assert run("workflow_dispatch")[0] == {"base": "", "head": "", "scope": "full"}
+        assert run("workflow_dispatch", **self.NAMES)[0] == {
+            "base": "", "head": "", "pull": "", "scope": "full"}
 
 
 class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
@@ -523,10 +541,12 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
     in the ``PLAN_READER_KEY`` secret, narrowed to reading issues of the
     tracker, and only the check step is handed it.  The tracker's owner and
     name come from quill's ``PLAN``, their one home, never from this file.
+    Since M2 the check also reads the pull request it judges through the job's
+    own token, which the job widens by ``pull-requests: read`` alone.
     """
 
     MINT = "Mint the tracker read token"
-    CHECK = "Card trailers against the tracker (every scope)"
+    CHECK = "Ship markers against the write rule (every scope)"
     PLACE = "Read the tracker's place"
     #: Every key each step may hold.  A ``shell:`` could run something other than the
     #: check and exit 0, an ``env:`` could hand a step the key or move pip's index, and a
@@ -540,8 +560,10 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         CHECK: {"name", "env", "run"},
     }
 
-    def test_the_job_checks_the_scope_jobs_range_over_full_history_in_order(self):
-        """Unguarded, waiting on the scope job, a full checkout, every install before the mint."""
+    def test_the_job_judges_the_merge_checked_out_over_full_history_in_order(self):
+        """Unguarded, waiting on the scope job, a full checkout, every install before the mint,
+        and the check handed the event, the commit checked out and the pull request the scope
+        job names, with each token under the name the check reads it by."""
         job = _jobs()["landing"]
         assert job["needs"] == "scope" and "if" not in job
         assert [step["name"] for step in job["steps"]] == [
@@ -550,25 +572,29 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         ]
         assert job["steps"][0]["with"] == {"fetch-depth": 0, "persist-credentials": False}
         check = _steps("landing")[self.CHECK]
-        assert check["env"] == {"BASE_SHA": "${{ needs.scope.outputs.base }}",
-                                "HEAD_SHA": "${{ needs.scope.outputs.head }}",
-                                landing.TOKEN_VARIABLE: "${{ steps.token.outputs.token }}"}
+        assert check["env"] == {"EVENT_NAME": "${{ github.event_name }}",
+                                "MERGE_SHA": "${{ github.sha }}",
+                                "PULL": "${{ needs.scope.outputs.pull }}",
+                                landing.TOKEN_VARIABLE: "${{ steps.token.outputs.token }}",
+                                landing.PULL_TOKEN_VARIABLE: "${{ github.token }}"}
         # EXACTLY this, with no condition: the check decides whether a read is
         # needed, and a ``|| true`` would let a refusal fall on the floor.
         assert "if" not in check
         assert check["run"].strip() == (
-            'python -m tools.quill.landing "${BASE_SHA}" "${HEAD_SHA}"'
+            'python -m tools.quill.landing "${EVENT_NAME}" "${MERGE_SHA}" "${PULL}"'
         )
 
     def test_the_job_and_every_step_hold_exactly_their_keys(self):
         """Nothing beyond these keys on the job or any step, and every action pinned by sha.
 
         A job-level ``defaults`` (a ``shell:`` for every step) could make the check
-        exit 0 unrun, and ``permissions:`` widen the job's GitHub token, as each
-        step's extra key could (:attr:`SHAPES`).
+        exit 0 unrun, and a wider ``permissions:`` widen the job's GitHub token, as each
+        step's extra key could (:attr:`SHAPES`): the job's token reads the code and the
+        pull request, and nothing else.
         """
         job = _jobs()["landing"]
-        assert set(job) == {"needs", "runs-on", "env", "steps"}
+        assert set(job) == {"needs", "runs-on", "permissions", "env", "steps"}
+        assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
         assert {step["name"]: set(step) for step in job["steps"]} == self.SHAPES
         for step in job["steps"]:
             if "uses" in step:

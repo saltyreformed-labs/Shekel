@@ -64,11 +64,14 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from types import TracebackType
 from typing import IO
+from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg import sql
@@ -83,6 +86,16 @@ PRISTINE = "rehearsal_pristine"
 _STATE_NAME = re.compile(r"[a-z][a-z0-9_]{0,29}")
 #: The line of ``pg_restore -l`` naming the server a custom-format archive was made by.
 _DUMPED_FROM = re.compile(r"^;\s+Dumped from database version: (\d+)", re.MULTILINE)
+#: The line of ``pg_restore -l`` naming when the archive was made, as the dumper's wall clock
+#: read in the reader's zone (:class:`Listing` says why that zone is UTC).
+_ARCHIVE_CREATED = re.compile(
+    r"^; Archive created at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (\S+)$", re.MULTILINE)
+#: The zone the cluster's own ``pg_restore`` prints the archive's time in: its container sets
+#: no ``TZ``, as production's database container does not.
+_LISTING_ZONE = "UTC"
+#: The hour of the dump's civil day the rehearsal's clock is pinned at (``design.md`` s.3
+#: item 4).
+_PINNED_HOUR = 12
 #: ``server_version_num`` is the major times 10,000 plus the minor (180006 is 18.6).
 _VERSION_NUM_PER_MAJOR = 10_000
 #: The one line of a side's ``requirements-dev.txt`` its venv takes beside ``requirements.txt``.
@@ -100,21 +113,75 @@ class BenchError(RuntimeError):
 @dataclass(frozen=True)
 class State:
     """One state of the rehearsal: its name, the commit its worktree holds, the worktree,
-    the URL of its own clone of the dump, and the interpreter of its venv."""
+    the name and URL of its own clone of the dump, and the interpreter of its venv."""
 
     name: str
     commit: str
     worktree: Path
+    database: str
     url: str
     python: Path
 
 
-def _run(argv: list[str], env: dict[str, str] | None = None, *,
-         stdin: IO[bytes] | int | None = None, stdout: IO[bytes] | int = subprocess.PIPE
-         ) -> subprocess.CompletedProcess[str]:
-    """Run ``argv`` to its end, in ``env`` (this process's when None), reading ``stdin`` (this
-    process's when None), its stderr captured, and its stdout too unless ``stdout`` names where
-    it goes; what is captured is decoded with ``errors="replace"``.
+@dataclass(frozen=True)
+class Listing:
+    """What the dump says of itself in its ``pg_restore -l`` listing: the PostgreSQL major of
+    the server it was dumped from, and the instant it was made.
+
+    THE INSTANT IS READ AS UTC.  A custom-format archive stores the dumper's local wall clock
+    and no zone, and ``pg_restore`` prints it in its own local zone, so the printed time is
+    the true instant only when both zones agree.  Production's dump runs in its database
+    container, which sets no ``TZ`` (``postgres:18-alpine``: UTC), and so does the cluster's
+    ``pg_restore``; a listing printed in another zone is refused (:func:`read_listing`).
+    Measured 2026-10-20: the nightly dump named ``...-020720`` (02:07 New York) lists
+    ``Archive created at 2026-10-20 06:07:21 UTC``, and production's database container's
+    environment names no ``TZ``.  That the DUMPER runs in UTC is the one thing the archive
+    cannot say; a dumper moved to another zone would shift the instant by its offset."""
+
+    major: int
+    created: datetime
+
+    def noon(self, zone: str) -> datetime:
+        """Noon in ``zone`` on the civil day the dump was made there: the instant the
+        rehearsal pins every side's clock at (``design.md`` s.3 item 4)."""
+        here = ZoneInfo(zone)
+        day = self.created.astimezone(here).date()
+        return datetime(day.year, day.month, day.day, _PINNED_HOUR, tzinfo=here)
+
+
+class _Teardown:
+    """What the bench undoes on the way out and what those undoings report as left: each
+    undoing is handed over as its part is made (:meth:`callback`), they run in reverse of
+    the making (:meth:`close`), and one that could not finish its work says so (:meth:`note`)
+    rather than raising, so every later undoing still runs."""
+
+    def __init__(self) -> None:
+        """Nothing to undo, nothing left."""
+        self._undoings = ExitStack()
+        self._left: list[str] = []
+
+    def callback(self, undo: Callable[..., object], *args: object, **kwargs: object) -> None:
+        """Hand over ``undo(*args, **kwargs)``, to run before every undoing handed over
+        earlier."""
+        self._undoings.callback(undo, *args, **kwargs)
+
+    def note(self, *left: str) -> None:
+        """Record what an undoing could not undo, each thing named."""
+        self._left.extend(left)
+
+    def close(self) -> list[str]:
+        """Run every undoing, the last handed over first; everything noted as left."""
+        self._undoings.close()
+        return list(self._left)
+
+
+def run(argv: list[str], env: dict[str, str] | None = None, *,
+        stdin: IO[bytes] | int | None = None, stdout: IO[bytes] | int = subprocess.PIPE,
+        cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    """Run ``argv`` to its end, in ``env`` (this process's when None) and ``cwd`` (this
+    process's when None), reading ``stdin`` (this process's when None), its stderr captured,
+    and its stdout too unless ``stdout`` names where it goes; what is captured is decoded with
+    ``errors="replace"``.
 
     A terminal's Ctrl-C reaches the child as it reaches this process (one process group), so
     the child is WAITED FOR and never killed: ``subprocess.run`` SIGKILLs a child 0.25 s after
@@ -128,7 +195,7 @@ def _run(argv: list[str], env: dict[str, str] | None = None, *,
     """
     try:
         process = subprocess.Popen(argv, stdin=stdin, stdout=stdout, stderr=subprocess.PIPE,
-                                   text=True, errors="replace", env=env)
+                                   text=True, errors="replace", env=env, cwd=cwd)
     except OSError as exc:
         raise BenchError(f"{argv[0]} cannot be run: {exc}") from exc
     with process:
@@ -146,7 +213,7 @@ def cluster(*args: str) -> str:
     Raises:
         BenchError: when it exits non-zero, with what it said.
     """
-    done = _run([sys.executable, str(_CLUSTER), *args])
+    done = run([sys.executable, str(_CLUSTER), *args])
     if done.returncode:
         raise BenchError(f"private_cluster.py {args[0]} exited {done.returncode}: "
                          f"{(done.stderr or done.stdout).strip()}")
@@ -163,7 +230,7 @@ def in_cluster(container: str, argv: list[str], *, stdin: IO[bytes] | None = Non
     Raises:
         BenchError: when the cluster module cannot be run.
     """
-    return _run([sys.executable, str(_CLUSTER), "client", "--", container, *argv],
+    return run([sys.executable, str(_CLUSTER), "client", "--", container, *argv],
                 stdin=subprocess.DEVNULL if stdin is None else stdin,
                 stdout=subprocess.PIPE if stdout is None else stdout)
 
@@ -177,7 +244,7 @@ def image_tag() -> str:
         BenchError: when the daemon is refused or the image cannot be prepared.
     """
     chosen = cluster("daemon").strip()
-    done = _run([sys.executable, str(_IMAGE_BUILDER), "--json"],
+    done = run([sys.executable, str(_IMAGE_BUILDER), "--json"],
                 env={**os.environ, "DOCKER_HOST": chosen} if chosen else None)
     if done.returncode:
         raise BenchError(f"build_test_db_image.py exited {done.returncode}: "
@@ -188,17 +255,25 @@ def image_tag() -> str:
     return tag.group(1)
 
 
-def dump_major(listing: str) -> int:
-    """The PostgreSQL major that made a dump, from its ``pg_restore -l`` listing.
+def read_listing(listing: str) -> Listing:
+    """What a dump says of itself, from its ``pg_restore -l`` listing.
 
     Raises:
-        BenchError: when the listing names no server, so it is no custom-format archive.
+        BenchError: when the listing names no server (so it is no custom-format archive), no
+            time it was made, or a time in another zone than the one :class:`Listing` reads.
     """
-    found = _DUMPED_FROM.search(listing)
-    if found is None:
+    major = _DUMPED_FROM.search(listing)
+    if major is None:
         raise BenchError("the dump's listing names no server it was dumped from, so it is not "
                          "a pg_dump -Fc archive")
-    return int(found.group(1))
+    created = _ARCHIVE_CREATED.search(listing)
+    if created is None:
+        raise BenchError("the dump's listing names no time it was created at")
+    if created.group(2) != _LISTING_ZONE:
+        raise BenchError(f"the dump's listing prints its creation time in {created.group(2)}, "
+                         f"not {_LISTING_ZONE}, so the instant it was made is not known")
+    return Listing(int(major.group(1)), datetime.fromisoformat(created.group(1)).replace(
+        tzinfo=ZoneInfo(_LISTING_ZONE)))
 
 
 def refuse_another_major(dump: int, server_version_num: int) -> None:
@@ -249,13 +324,13 @@ def venv_for(worktree: Path) -> Path:
         return python
     shutil.rmtree(venv, ignore_errors=True)
     venv.parent.mkdir(parents=True, exist_ok=True)
-    made = _run([sys.executable, "-m", "venv", str(venv)])
+    made = run([sys.executable, "-m", "venv", str(venv)])
     if made.returncode:
         raise BenchError(f"python -m venv {venv} exited {made.returncode}: "
                          f"{made.stderr.strip()}")
     pinned = venv / "rehearsal-requirements.txt"
     pinned.write_text(pins, encoding="utf-8")
-    installed = _run([str(python), "-m", "pip", "install", "--quiet",
+    installed = run([str(python), "-m", "pip", "install", "--quiet",
                       "--disable-pip-version-check", "-r", str(pinned)])
     if installed.returncode:
         quoted = "\n".join(installed.stderr.strip().splitlines()[-_QUOTED_LINES:])
@@ -298,8 +373,9 @@ class Bench:
     #: Each state, once made.
     made: dict[str, State] = field(default_factory=dict)
     socket_dir: Path | None = None
-    _stack: ExitStack = field(default_factory=ExitStack)
-    _left: list[str] = field(default_factory=list)
+    #: What the dump says of itself, once its listing is read.
+    listing: Listing | None = None
+    _teardown: _Teardown = field(default_factory=_Teardown)
 
     def _timed(self, part: str, began: float) -> None:
         """Record that ``part`` took the time since ``began``."""
@@ -335,10 +411,10 @@ class Bench:
         image = image_tag()
         self._timed("image", began)
         scratch = Path(tempfile.mkdtemp(prefix="shekel-rehearsal-"))
-        self._stack.callback(self._census, scratch)
-        self._stack.callback(shutil.rmtree, scratch, ignore_errors=True)
+        self._teardown.callback(self._census, scratch)
+        self._teardown.callback(shutil.rmtree, scratch, ignore_errors=True)
         token = cluster("token").strip()
-        self._stack.callback(self._stop_cluster, token)
+        self._teardown.callback(self._stop_cluster, token)
         began = time.monotonic()
         socket_dir, container = cluster(
             "start", "--", f"shekel-rehearsal-{os.getpid()}-{token[:8]}", token,
@@ -353,6 +429,18 @@ class Bench:
         """The URL of ``database`` on this bench's cluster (``private_cluster.py url``)."""
         return cluster("url", str(self.socket_dir), database).strip()
 
+    def clone(self, source: str, database: str) -> str:
+        """Clone ``source``, a database on this bench nothing is connected to, as ``database``
+        (``CREATE DATABASE ... TEMPLATE``); the clone's URL.  It goes when the cluster does.
+
+        Raises:
+            psycopg.Error: when the clone cannot be made, ``source`` in use included.
+        """
+        with psycopg.connect(self._url("postgres"), autocommit=True) as connection:
+            connection.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                sql.Identifier(database), sql.Identifier(source)))
+        return self._url(database)
+
     def _restore(self, container: str) -> None:
         """Restore the dump into :data:`PRISTINE`, once its major is known to be the cluster's,
         by the cluster's own ``pg_restore``, run in its ``container`` (:meth:`_on_the_dump`).
@@ -363,9 +451,10 @@ class Bench:
         listed = self._on_the_dump(container, ["pg_restore", "--list"])
         if listed.returncode:
             raise BenchError(f"pg_restore cannot read {self.dump}: {listed.stderr.strip()}")
+        self.listing = read_listing(listed.stdout)
         admin = self._url("postgres")
         with psycopg.connect(admin, autocommit=True) as connection:
-            refuse_another_major(dump_major(listed.stdout), connection.info.server_version)
+            refuse_another_major(self.listing.major, connection.info.server_version)
             connection.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(PRISTINE)))
         began = time.monotonic()
         restored = self._on_the_dump(container, ["pg_restore", "--exit-on-error", "--no-owner",
@@ -399,12 +488,10 @@ class Bench:
         """
         database = f"rehearsal_{name}"
         began = time.monotonic()
-        with psycopg.connect(self._url("postgres"), autocommit=True) as connection:
-            connection.execute(sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
-                sql.Identifier(database), sql.Identifier(PRISTINE)))
+        url = self.clone(PRISTINE, database)
         self._timed(f"clone {name}", began)
         began = time.monotonic()
-        self._stack.callback(self._remove_worktree, worktree)
+        self._teardown.callback(self._remove_worktree, worktree)
         try:
             gitcmd.git(arcs.REPO, "worktree", "add", "--detach", str(worktree), revision)
             commit = gitcmd.git(worktree, "rev-parse", "HEAD").strip()
@@ -414,7 +501,7 @@ class Bench:
         began = time.monotonic()
         python = venv_for(worktree)
         self._timed(f"venv {name}", began)
-        self.made[name] = State(name, commit, worktree, self._url(database), python)
+        self.made[name] = State(name, commit, worktree, database, url, python)
 
     def _remove_worktree(self, worktree: Path) -> None:
         """Remove one state's worktree; a refusal is noted for the census, which names it."""
@@ -423,25 +510,25 @@ class Bench:
         try:
             gitcmd.git(arcs.REPO, "worktree", "remove", "--force", str(worktree))
         except gitcmd.GitError as exc:
-            self._left.append(f"worktree {worktree} could not be removed: {exc}")
+            self._teardown.note(f"worktree {worktree} could not be removed: {exc}")
 
     def _stop_cluster(self, token: str) -> None:
         """Stop what carries ``token``; what the stop names as surviving is noted."""
-        done = _run([sys.executable, str(_CLUSTER), "stop", token])
+        done = run([sys.executable, str(_CLUSTER), "stop", token])
         if done.returncode:
-            self._left.append(f"private_cluster.py stop exited {done.returncode}: "
-                              f"{done.stderr.strip()}")
+            self._teardown.note(f"private_cluster.py stop exited {done.returncode}: "
+                                f"{done.stderr.strip()}")
 
     def _census(self, scratch: Path) -> None:
         """The teardown's last step: the scratch directory, and with it every worktree path,
         is gone, and git lists no worktree under it; anything left is noted."""
         listed = gitcmd.run(arcs.REPO, "worktree", "list", "--porcelain")
         under = str(scratch) + os.sep
-        self._left.extend(f"git still lists worktree {path}" for path in (
+        self._teardown.note(*(f"git still lists worktree {path}" for path in (
             line.removeprefix("worktree ") for line in listed.stdout.splitlines()
-            if line.startswith("worktree ")) if path.startswith(under))
+            if line.startswith("worktree ")) if path.startswith(under)))
         if scratch.exists():
-            self._left.append(f"{scratch} survived teardown")
+            self._teardown.note(f"{scratch} survived teardown")
 
     def _tear_down(self) -> None:
         """Undo every part made, in reverse, the census last.
@@ -450,10 +537,10 @@ class Bench:
             BenchError: naming everything left.
         """
         began = time.monotonic()
-        self._stack.close()
+        left = self._teardown.close()
         self._timed("teardown", began)
-        if self._left:
-            raise BenchError("the teardown left something: " + "; ".join(self._left))
+        if left:
+            raise BenchError("the teardown left something: " + "; ".join(left))
 
 
 def main(argv: list[str] | None = None) -> int:

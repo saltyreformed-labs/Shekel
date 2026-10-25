@@ -1,22 +1,18 @@
-"""The tracker's cards, board order and claims, read and written by quill.
+"""The tracker's cards and board order, read and written by quill.
 
 Every card write goes through quill's GitHub App (ruling
 ``balance:R-BAL170``), a separate identity from the developer's login, so a
 reader can tell the tool's write from his own edit and never act on his.  This
-module is the only place quill speaks to the tracker; it decides
-nothing about the plan (``_state`` does), it only reads and writes.
+module is the only place quill speaks to the tracker -- the daily backup
+(:mod:`_export`) keeps GitHub's own answers to the reads here, each built on the one
+walk of a connection, :func:`_github.paged` -- and it decides nothing about the plan
+(``_state`` does), it only reads and writes.
+
+**No claim is the tracker's**: since the ship marker (ruling ``balance:R-BAL359``) a
+claim is the code repository's branch ``card/N``, read and written by ``_git``.
 
 **What each read can see, measured on the tracker 2026-10-04:**
 
-- A claim is the git reference ``refs/claims/<card>``.  REST
-  ``git/matching-refs/claims/`` lists claims; GraphQL ``refs()`` lists NONE of
-  them, but GraphQL reads a claim's commit by its id.  So two calls read every
-  claim, whatever their number.
-- A claim's commit is one the App makes with no parent and the default
-  branch's tree, whose message names the branch that will ship the card; its
-  author date is when the card was claimed.  GitHub refuses to create a
-  reference that exists (422 "Reference already exists"), so exactly one
-  session wins a claim -- the listing is display, the refusal is the lock.
 - A card's REST id (what the sub-issue and blocked-by calls take) is its
   GraphQL ``fullDatabaseId``.
 - The board's order is ``items(orderBy: {field: POSITION})``, and it LAGS a
@@ -67,11 +63,11 @@ reader that reads each card with its board item, a :class:`Card`.
 """
 from __future__ import annotations
 
-import re
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from typing import overload
 from urllib.parse import quote
 
@@ -83,17 +79,18 @@ from tools.quill._github import (
     app_installation,
     app_jwt,
     installation_token,
+    paged,
 )
 from tools.quill.setup_tracker import (
     APP_LOGIN,
     FILING,
+    TASK,
     Place,
     another_app,
     find_board,
     linked,
 )
 
-CLAIM_PREFIX = "refs/claims/"
 #: How long a write waits for the board to show what it placed: three times
 #: the ~20 seconds L1 measured, so a slow read is waited out and a stuck one
 #: is reported rather than waited on forever.
@@ -125,10 +122,6 @@ BOARD_AFTER = ("mutation($p: ID!, $i: ID!, $a: ID!) { updateProjectV2ItemPositio
 
 class TrackerError(RuntimeError):
     """The tracker refused a write or answered something quill cannot read."""
-
-
-class ClaimTaken(TrackerError):
-    """Another session already holds the claim (GitHub refused to create its reference)."""
 
 
 @dataclass(frozen=True)
@@ -193,6 +186,12 @@ class BareCard:  # pylint: disable=too-many-instance-attributes
         the plan says otherwise (``_state.leaves``, the one spelling of a leaf)."""
         return tuple(child.number for child in self.children if child.kind == "step")
 
+    @property
+    def task_children(self) -> tuple[int, ...]:
+        """The tasks linked under this card, as GitHub lists them (R-BAL386): each a piece of
+        its work, done by its own file (``_state.done_tasks``), never a leaf."""
+        return tuple(child.number for child in self.children if child.kind == TASK)
+
 
 @dataclass(frozen=True)
 class Card(BareCard):
@@ -201,16 +200,6 @@ class Card(BareCard):
     board does not hold it."""
 
     board_item: str | None
-
-
-@dataclass(frozen=True)
-class Claim:
-    """Who is building a card: the branch that will ship it, and since when."""
-
-    card: int
-    branch: str | None
-    made: str
-    sha: str
 
 
 @dataclass(frozen=True)
@@ -277,7 +266,7 @@ class Comment:
     body: str
 
 
-def _listed(connection: dict | None, what: str, number: int) -> list:
+def connection_nodes(connection: dict | None, what: str, number: int) -> list:
     """A connection's nodes, refusing one GitHub answered as null, which would read as none,
     and one holding a null node, which no fact can be read from: GitHub's schema lets it
     answer an issue's ``labels`` so, any connection's ``nodes``, and each node in them
@@ -292,15 +281,61 @@ def _listed(connection: dict | None, what: str, number: int) -> list:
 
 
 def _counted(connection: dict | None, what: str, number: int) -> list:
-    """A connection's nodes (:func:`_listed`), refusing one GitHub truncated (a silent
+    """A connection's nodes (:func:`connection_nodes`), refusing one GitHub truncated (a silent
     partial read)."""
-    nodes = _listed(connection, what, number)
+    nodes = connection_nodes(connection, what, number)
     if connection["totalCount"] > len(nodes):
         raise TrackerError(
             f"plan#{number} has {connection['totalCount']} {what}; the read holds "
             f"{len(nodes)}"
         )
     return nodes
+
+
+def listing(github: GitHub, query: str) -> list[dict]:
+    """Every issue node a listing ``query`` holds (:func:`_queries.open_cards`,
+    :func:`_queries.marked_cards`, :func:`_queries.all_cards`,
+    :func:`_queries.export_cards`), read page by page (:func:`_github.paged`)."""
+    return paged(partial(github.graphql, query),
+                 lambda answer: answer["repository"]["issues"])[0]
+
+
+def saved_versions(github: GitHub, place: Place, number: int) -> tuple[list[dict], dict]:
+    """Every saved version of card ``number``'s text as GitHub answers it
+    (:func:`_queries.edits`), and the last answer read, which holds the card's text, who
+    filed it and when.
+
+    Raises:
+        TrackerError: When a page answers the card as null.
+    """
+    def saved(answer: dict) -> dict:
+        if answer["repository"]["issue"] is None:
+            raise TrackerError(f"plan#{number} does not exist")
+        return answer["repository"]["issue"]["userContentEdits"]
+
+    return paged(partial(github.graphql, _queries.edits(place), number=number), saved)
+
+
+def comment_nodes(github: GitHub, place: Place, number: int,
+                  fields: str = _queries.COMMENT_FIELDS) -> list[dict]:
+    """Every comment on card ``number`` as GitHub answers it, each read as ``fields``
+    (:func:`_queries.comments`)."""
+    return paged(partial(github.graphql, _queries.comments(place, fields), number=number),
+                 lambda answer: answer["repository"]["issue"]["comments"])[0]
+
+
+def comment_versions(github: GitHub, comment: str) -> list[dict]:
+    """Every saved version of the comment whose node id is ``comment``, as GitHub answers
+    it (:data:`_queries.COMMENT_EDITS`)."""
+    return paged(partial(github.graphql, _queries.COMMENT_EDITS, id=comment),
+                 lambda answer: answer["node"]["userContentEdits"])[0]
+
+
+def milestone_nodes(github: GitHub, place: Place) -> list[dict]:
+    """Every milestone of ``place``, open and closed, as GitHub answers it
+    (:func:`_queries.milestones`)."""
+    return paged(partial(github.graphql, _queries.milestones(place)),
+                 lambda answer: answer["repository"]["milestones"])[0]
 
 
 def _is_tracker_issue(node: dict, place: Place) -> bool:
@@ -331,7 +366,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
     None), a :class:`BareCard` (:data:`_queries.BARE_CARD_FIELDS`).  ``app_login`` is the
     reader's: a close by it is the tool's."""
     number = node["number"]
-    events = _listed(node["timelineItems"], "close events", number)
+    events = connection_nodes(node["timelineItems"], "close events", number)
     last_actor = ((events[-1].get("actor") or {}).get("login")) if events else None
     is_open = node["state"] == "OPEN"
     links = [(node["parent"], "parent")] if node["parent"] else []
@@ -366,14 +401,6 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
         if item["project"]["id"] == board_id
     ]
     return Card(**facts, board_item=items[0] if items else None)
-
-
-_CLAIM_BRANCH = re.compile(r"^branch: (.+)$", re.MULTILINE)
-
-
-def claim_message(card: int, branch: str) -> str:
-    """The message of a claim's commit: the card, and the branch that will ship it."""
-    return f"claim plan#{card}\n\nbranch: {branch}\n"
 
 
 def numbering(listed: Iterable[int], state_of: Callable[[int], NumberState]) -> Numbering:
@@ -484,17 +511,10 @@ class Board:
 
     def order(self) -> list[tuple[int, str]]:
         """The board's cards in their drag order: ``(card number, board item id)``."""
-        order, after = [], None
-        while True:
-            items = self.github.graphql(_queries.BOARD_ORDER, id=self.board_id,
-                                        after=after)["node"]["items"]
-            order += [
-                (item["content"]["number"], item["id"]) for item in items["nodes"]
-                if _is_tracker_issue(item["content"] or {}, self.location)
-            ]
-            if not items["pageInfo"]["hasNextPage"]:
-                return order
-            after = items["pageInfo"]["endCursor"]
+        items, _ = paged(partial(self.github.graphql, _queries.BOARD_ORDER, id=self.board_id),
+                         lambda answer: answer["node"]["items"])
+        return [(item["content"]["number"], item["id"]) for item in items
+                if _is_tracker_issue(item["content"] or {}, self.location)]
 
     def add(self, card: Card) -> str:
         """Put a card on the board (GitHub adds it at the bottom); its board item id."""
@@ -554,11 +574,12 @@ class CardReader:
         absent from the answer (a trailer can name a number nobody filed)."""
         return self._lookup(numbers, _queries.BARE_CARD_FIELDS, self._card)
 
-    def _lookup[CardT: BareCard](self, numbers: Iterable[int], card_fields: str,
-                                 card: Callable[[dict], CardT]) -> dict[int, CardT]:
+    def _lookup[T](self, numbers: Iterable[int], card_fields: str,
+                   card: Callable[[dict], T]) -> dict[int, T]:
         """The cards numbered ``numbers`` that exist, each read with ``card_fields`` and
         built by ``card``: the one walk of a read by number, which each reader's
-        :meth:`cards` names its fields and its card type to.  A number past
+        :meth:`cards` names its fields and its card type to (and
+        :meth:`Tracker.milestones_of` its one field).  A number past
         :data:`GRAPHQL_INT_MAX` is never asked, so it is absent like one nobody filed: asked,
         it is an argument GraphQL's ``Int`` cannot hold, which the specification's input
         coercion refuses, and with it the read's every other card (GitHub's own answer is
@@ -579,20 +600,24 @@ class CardReader:
 
 
 class Tracker(CardReader):  # pylint: disable=too-many-public-methods
-    """A tracker as the App sees it: its cards, each with its board item, its claims, and
-    its :class:`Board`.
+    """A tracker as the App sees it: its cards, each with its board item, and its
+    :class:`Board`.
 
     Pylint: ``too-many-public-methods`` (29/20) -- ``connect``, then **one
     method per read or write quill makes of the tracker** (most one
-    request, ``claim`` four; this module is the one place it speaks to
-    GitHub), the board's own writes already apart in :class:`Board`.  Three
-    of them, the filing mark's read and its removal (R-BAL202) and a leaf's
-    unlink (R-BAL205), took it past 20; ``show``'s read of a card's comments
-    is the fourth; X-cx's migration (L7) reads every card whole and asks GitHub
-    what a number is, the fifth and sixth, and reads and makes milestones and
-    closes a ruling with its mark's removal in one write, the seventh to ninth.
-    The claims' three (``claims``, ``claim``, ``release``: git references, not
-    cards) could stand apart the same way; that split is not this change's.
+    request; this module is the one place it speaks to GitHub), the board's
+    own writes already apart in :class:`Board`.  The filing mark's read and its
+    removal (R-BAL202), a leaf's unlink (R-BAL205), ``show``'s read of a card's
+    comments, X-cx's migration's (L7) whole-card read, its question of what a
+    number is, its read and make of milestones and its close of a ruling with
+    its mark's removal in one write, and its grade's (R-BAL355) render of a
+    card's Markdown as GitHub does here took it past 20.  The claims' three
+    reads and writes and the read of a commit's pull requests left it at X-cx's
+    M1: a claim is a branch of the code repository since R-BAL359 (``_git``).
+    ``quill file step --parent``'s read of the milestones a split step and its
+    leaves are in, and its move of a card's milestone (the split step's to its
+    leaf, and back when the leaf is dropped unfinished), came with X-cx's S3a
+    (measured 29 then; 27 before it, where this line said 26).
 
     ``github`` is any object with :class:`_github.GitHub`'s ``rest``,
     ``graphql`` and ``graphql_lookup``.  The tracker's :class:`setup_tracker.Place`
@@ -627,18 +652,6 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
     # -- reads ---------------------------------------------------------------
 
-    def _nodes(self, query: str) -> Iterator[dict]:
-        """Every issue node a listing ``query`` (:func:`_queries.open_cards`,
-        :func:`_queries.marked_cards`, :func:`_queries.all_cards`) holds, read page by page:
-        the one walk of a listing."""
-        after = None
-        while True:
-            page = self.github.graphql(query, after=after)["repository"]["issues"]
-            yield from page["nodes"]
-            if not page["pageInfo"]["hasNextPage"]:
-                return
-            after = page["pageInfo"]["endCursor"]
-
     def _card(self, node: dict) -> Card:
         """A :class:`Card` of this tracker from one GraphQL issue node, its board item read."""
         return card_from(node, self.place, self.board_id, self.app_login)
@@ -651,7 +664,7 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
     def _listing(self, query: str) -> dict[int, Card]:
         """Every card a listing ``query`` holds, by number."""
-        return {node["number"]: self._card(node) for node in self._nodes(query)}
+        return {node["number"]: self._card(node) for node in listing(self.github, query)}
 
     def open_cards(self) -> dict[int, Card]:
         """Every open card, by number."""
@@ -663,6 +676,14 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         ``_state.filing_unfinished``'s answer (one dropped while marked is not)."""
         return self._listing(_queries.marked_cards(self.place))
 
+    def milestones_of(self, numbers: Iterable[int]) -> dict[int, int | None]:
+        """The number of the milestone each card numbered ``numbers`` is in, None for none;
+        one that does not exist is absent: ``quill file step --parent``'s read of a split
+        step's milestone and its leaves' (``_filing``), the one field it reads, so no listing
+        a recording replays changes."""
+        return self._lookup(numbers, "milestone { number }",
+                            lambda node: (node["milestone"] or {}).get("number"))
+
     def all_cards(self) -> dict[int, WholeCard]:
         """Every card, open and closed, by number, each WHOLE: its body and every comment.
 
@@ -670,7 +691,7 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         all read by :meth:`comments`, so no card's comments are cut short.
         """
         cards = {}
-        for node in self._nodes(_queries.all_cards(self.place)):
+        for node in listing(self.github, _queries.all_cards(self.place)):
             number, held = node["number"], node["comments"]
             comments = ([_comment(each) for each in held["nodes"]]
                         if held["totalCount"] <= len(held["nodes"]) else self.comments(number))
@@ -729,31 +750,31 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         """A card's body as it stands."""
         return self.github.rest("GET", f"{self.place.path}/issues/{number}")["body"] or ""
 
-    def claims(self) -> dict[int, Claim]:
-        """Every claim, by card: one REST listing, then one read of their commits."""
-        refs = self.github.rest("GET", f"{self.place.path}/git/matching-refs/claims/") or []
-        shas = {}
-        for ref in refs:
-            number = ref["ref"].removeprefix(CLAIM_PREFIX)
-            if number.isdigit():
-                shas[int(number)] = ref["object"]["sha"]
-        if not shas:
-            return {}
-        fields = " ".join(
-            f'c{n}: object(oid: "{sha}") {{ ... on Commit {{ message authoredDate }} }}'
-            for n, sha in shas.items()
-        )
-        answer = self.github.graphql_lookup(
-            f'query {{ repository(owner: "{self.place.owner}", name: "{self.place.name}") '
-            f'{{ {fields} }} }}'
-        )["repository"]
-        claims = {}
-        for number, sha in shas.items():
-            commit = answer[f"c{number}"] or {}
-            branch = _CLAIM_BRANCH.search(commit.get("message") or "")
-            claims[number] = Claim(number, branch.group(1).strip() if branch else None,
-                                   commit.get("authoredDate") or "", sha)
-        return claims
+    def render(self, text: str) -> str:
+        """``text`` as GitHub renders a card's Markdown in this tracker, as HTML: its
+        Markdown API in ``gfm`` mode with the tracker as context, which links ``#N`` to card
+        N where card N exists, and stores nothing (X-cx's migration grades the cards'
+        numbers by it, ``_migrate_numbers.grade_rendered``)."""
+        return self.github.rest_text("POST", "/markdown", {
+            "text": text, "mode": "gfm", "context": self.place.full_name})
+
+    def blocking(self, number: int) -> tuple[Child, ...]:
+        """The cards of this tracker that card ``number`` blocks, each with its type and state
+        as they stand (:func:`_queries.blocking`): a step's are the findings and rulings it
+        owns (ruling ``balance:R-BAL395``), beside any card waiting on it.  An issue outside
+        the tracker is no card, and is passed over.
+
+        Raises:
+            TrackerError: When GitHub answers the card as null, or cut the list short.
+        """
+        issue = self.github.graphql(_queries.blocking(self.place),
+                                    number=number)["repository"]["issue"]
+        if issue is None:
+            raise TrackerError(f"plan#{number} could not be read: GitHub answered it as null")
+        return tuple(
+            Child(node["number"], (node["issueType"] or {}).get("name"), node["state"] == "OPEN")
+            for node in _counted(issue["blocking"], "cards it blocks", number)
+            if _is_tracker_issue(node, self.place))
 
     def edits(self, number: int) -> tuple[str, list[Edit]]:
         """A card's body as it stands and every saved version of it, oldest first.
@@ -762,21 +783,10 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         diff; measured 2026-10-04), and on the first edit adds one for the body
         as filed.  A card never edited has none: its body is the filed text.
         """
-        versions, after = [], None
-        while True:
-            issue = self.github.graphql(_queries.edits(self.place), number=number,
-                                        after=after)["repository"]["issue"]
-            if issue is None:
-                raise TrackerError(f"plan#{number} does not exist")
-            page = issue["userContentEdits"]
-            versions += [
-                Edit(node["id"], node["editedAt"], (node["editor"] or {}).get("login"),
-                     node["diff"] or "")
-                for node in page["nodes"]
-            ]
-            if not page["pageInfo"]["hasNextPage"]:
-                break
-            after = page["pageInfo"]["endCursor"]
+        nodes, last = saved_versions(self.github, self.place, number)
+        versions = [Edit(node["id"], node["editedAt"], (node["editor"] or {}).get("login"),
+                         node["diff"] or "") for node in nodes]
+        issue = last["repository"]["issue"]
         body = issue["body"] or ""
         if not versions:
             versions = [Edit(None, issue["createdAt"], (issue["author"] or {}).get("login"), body)]
@@ -785,27 +795,7 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     def comments(self, number: int) -> list[Comment]:
         """Every comment on a card, oldest first, read page by page.  A number nobody
         filed is GitHub's NOT_FOUND error, which :meth:`_github.GitHub.graphql` raises."""
-        comments, after = [], None
-        while True:
-            answer = self.github.graphql(_queries.comments(self.place), number=number,
-                                         after=after)
-            page = answer["repository"]["issue"]["comments"]
-            comments += [_comment(node) for node in page["nodes"]]
-            if not page["pageInfo"]["hasNextPage"]:
-                return comments
-            after = page["pageInfo"]["endCursor"]
-
-    def merged_into_dev(self, repository: str, sha: str) -> set[str]:
-        """The head branches of the merged pull requests into ``dev`` that carried
-        ``sha`` -- the branch that SHIPPED it, which git alone does not record.
-
-        ``repository`` is the code repository (``owner/name``); it is public, so
-        the App reads its pull requests (measured 2026-10-04; and through a token
-        narrowed to the tracker, 2026-10-09 08:00 EDT, X-cx L7 A2).
-        """
-        pulls = self.github.rest("GET", f"/repos/{repository}/commits/{sha}/pulls")
-        return {pull["head"]["ref"] for pull in pulls
-                if pull.get("merged_at") and pull["base"]["ref"] == "dev"}
+        return [_comment(node) for node in comment_nodes(self.github, self.place, number)]
 
     def find_titles(self, text: str) -> list[tuple[int, str]]:
         """Cards whose title holds ``text`` (GitHub's search: words, not characters), read
@@ -846,8 +836,10 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         filing's last write, :meth:`unmark`, removes the mark.  Its number, once GitHub's
         answer shows the type, labels and milestone sent.
 
-        ``milestone``: the number of the milestone the card is filed in, which only X-cx's
-        migration sets (L7 draft 4 s.3: a scope step's create carries its outcome's).
+        ``milestone``: the number of the milestone the card is filed in: X-cx's migration's
+        (L7 draft 4 s.3: a step's create carries its outcome's, a split step's carried to its
+        leaves instead, ``_migrate_source._carried_outcomes``), and a leaf's that ``quill file
+        step --parent`` files in its split step's while that step holds one (``_filing``).
         None sends no milestone at all, so every other create's request is what it was.
 
         A create naming a label the tracker lacks makes that label (grey, no description;
@@ -881,6 +873,22 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         """Make a milestone (X-cx's migration, one per outcome, R-BAL243); its number."""
         return self.github.rest("POST", f"{self.place.path}/milestones",
                                 {"title": title, "description": description})["number"]
+
+    def set_milestone(self, number: int, milestone: int | None) -> None:
+        """Put a card in the milestone numbered ``milestone``, or with None take it out of its
+        one, reading it back: a step split into smaller steps keeps none once its leaf carries
+        it (``_filing``), and gets it back from a leaf dropped before its filing finished
+        (``quill._unsplit``).
+
+        Raises:
+            TrackerError: When GitHub's answer shows the card in any other milestone, or none.
+        """
+        issue = self.github.rest("PATCH", f"{self.place.path}/issues/{number}",
+                                 {"milestone": milestone})
+        held = (issue.get("milestone") or {}).get("number")
+        if held != milestone:
+            raise TrackerError(f"plan#{number} is in milestone {held}, not {milestone}: fix it "
+                               "by hand")
 
     def retype(self, number: int, kind: str) -> None:
         """Change a card's kind, reading it back."""
@@ -957,23 +965,3 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         self.github.rest(
             "DELETE", f"{self.place.path}/issues/{number}/dependencies/blocked_by/{blocker.id}"
         )
-
-    def claim(self, number: int, branch: str) -> Claim:
-        """Claim a card for ``branch``; :class:`ClaimTaken` when another session holds it."""
-        main = self.github.rest("GET", f"{self.place.path}/git/ref/heads/main")["object"]["sha"]
-        tree = self.github.rest("GET", f"{self.place.path}/git/commits/{main}")["tree"]["sha"]
-        commit = self.github.rest("POST", f"{self.place.path}/git/commits", {
-            "message": claim_message(number, branch), "tree": tree, "parents": [],
-        })
-        try:
-            self.github.rest("POST", f"{self.place.path}/git/refs",
-                             {"ref": f"{CLAIM_PREFIX}{number}", "sha": commit["sha"]})
-        except GitHubError as error:
-            if error.status == 422 and "Reference already exists" in str(error):
-                raise ClaimTaken(f"plan#{number} is already claimed") from error
-            raise
-        return Claim(number, branch, commit["author"]["date"], commit["sha"])
-
-    def release(self, number: int) -> None:
-        """Delete a card's claim."""
-        self.github.rest("DELETE", f"{self.place.path}/git/refs/claims/{number}")

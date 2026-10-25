@@ -13,7 +13,7 @@ import pytest
 
 from tools.quill import _migrate_source
 from tools.quill._migrate_fake import BALANCE, FINDINGS, STEPS, complete_input
-from tools.quill._migrate_input import InputError, Preamble, grade, load
+from tools.quill._migrate_input import InputError, Numbered, Preamble, grade, load
 from tools.quill._migrate_source import read_source, source_hash
 from tools.quill.check import card_title
 
@@ -86,12 +86,13 @@ def _drop(path):
      "names: balance:A-3: its source changed since it was written"),
     (_set(("unknown",), {}), "input: 'unknown' is no map of the input file"),
     (_drop(("milestones",)), "input: 'milestones' is missing or not a JSON object"),
+    (_drop(("numbers",)), "input: 'numbers' is missing or not a JSON object"),
     (_set(("notes",), {}), "input: 'notes' is missing or not a JSON array"),
 ])
 def test_names_and_the_files_own_shape(corpus, edit, problem):
     """Every card has a name and only cards have one; a title is one line (its length is
     ``check.violations``' to grade on the built card); an entry is an object of exactly
-    its fields; a stale hash is refused; the six maps, and only they."""
+    its fields; a stale hash is refused; the seven maps, and only they."""
     _, problems = _graded(corpus, edit)
     assert any(line.startswith(problem) for line in problems), problems
 
@@ -245,8 +246,55 @@ def test_two_milestones_may_not_share_a_title(corpus):
         "milestones: the title 'The first' is given twice"]
 
 
+_FORM = "its numbers [1] are not [\"#N\", treatment], the treatment one of ('card', 'pr', 'plain')"
+
+
+@pytest.mark.parametrize("entry, problem", [
+    ({"each": [["#1", "plain"]], "source": "s"}, None),
+    ({"each": [["#1", "card"], ["#22", "pr"]], "source": "s"}, None),
+    ({"each": [], "source": "s"}, "its 'each' is a non-empty list of [\"#N\", treatment]"),
+    ({"each": "#1 plain", "source": "s"}, "its 'each' is a non-empty list"),
+    ({"source": "s"}, "its 'each' is a non-empty list"),
+    ("plain", "its 'each' is a non-empty list"),
+    ({"each": [["1", "plain"]], "source": "s"}, _FORM),
+    ({"each": [["#1x", "plain"]], "source": "s"}, _FORM),
+    ({"each": [["#1", "link"]], "source": "s"}, _FORM),
+    ({"each": [["#1"]], "source": "s"}, _FORM),
+    ({"each": [["#1", "plain", "x"]], "source": "s"}, _FORM),
+    ({"each": [{"#1": "plain"}], "source": "s"}, _FORM),
+    ({"each": [["#1", "plain"]]}, "missing ['source']"),
+    ({"each": [["#1", "plain"]], "source": " "}, "['source'] must be text"),
+    ({"each": [["#1", "plain"]], "source": "s", "note": "x"},
+     "fields ['note'] are not this entry's"),
+])
+def test_a_cards_numbers_are_a_list_of_number_and_treatment_with_a_hash(corpus, entry, problem):
+    """R-BAL277: each card's numbers are decided in order, ``card``, ``pr`` or ``plain``,
+    with the hash of the text decided; the text itself is ``_migrate_numbers``' to grade
+    them against, so here only their form and the card are."""
+    decisions, problems = _graded(corpus, _set(("numbers", "balance:R-A"), entry))
+    if problem is None:
+        assert problems == [] and decisions.numbers == {"balance:R-A": Numbered(
+            tuple(tuple(pair) for pair in entry["each"]), "s")}
+    else:
+        assert len(problems) == 1 and problems[0].startswith(
+            f"numbers: balance:R-A: {problem}"), problems
+        assert decisions.numbers == {}
+
+
+def test_numbers_for_no_card_or_a_card_filed_already_are_refused(corpus, monkeypatch):
+    """A key naming no card the migration writes decides nothing; nor one filed already."""
+    monkeypatch.setitem(_migrate_source.MAPPED, "salary:S-1", 1)
+    data = complete_input(corpus)
+    data["numbers"] = {key: {"each": [["#1", "plain"]], "source": "s"}
+                       for key in ("balance:A-9", "salary:S-1")}
+    decisions, problems = grade(data, read_source(corpus), corpus)
+    assert problems == ["numbers: balance:A-9 names no card the registries move",
+                        "numbers: salary:S-1 is plan#1 already, whose text is not rewritten"]
+    assert decisions.numbers == {}
+
+
 def test_load_reads_an_object_and_refuses_anything_else(tmp_path):
-    """The file is a JSON object of the six maps."""
+    """The file is a JSON object of the seven maps."""
     good, listed, broken = (tmp_path / name for name in ("good.json", "list.json", "bad.json"))
     good.write_text(json.dumps({"names": {}}))
     listed.write_text("[1]")
@@ -259,6 +307,19 @@ def test_load_reads_an_object_and_refuses_anything_else(tmp_path):
     for path in (broken, latin):
         with pytest.raises(InputError, match="is not UTF-8 JSON"):
             load(path)
+
+
+def test_load_refuses_a_key_named_twice_in_one_object(tmp_path):
+    """JSON keeps a key's last value, so a card's numbers decided twice would file the
+    second where a reviewer read the first: refused, at any depth (review of S2, L6)."""
+    twice, nested = tmp_path / "twice.json", tmp_path / "nested.json"
+    twice.write_text('{"names": {}, "names": {}}')
+    nested.write_text('{"numbers": {"balance:R-A": {"each": [], "source": "a", '
+                      '"source": "b"}}}')
+    with pytest.raises(InputError, match=r"names \['names'\] twice in one object"):
+        load(twice)
+    with pytest.raises(InputError, match=r"names \['source'\] twice in one object"):
+        load(nested)
 
 
 def test_a_questions_hash_covers_its_finding_cell_as_well_as_its_note(corpus):
@@ -319,3 +380,19 @@ def test_a_paragraph_given_to_the_card_filed_already_is_refused(corpus, monkeypa
     assert ("preambles[0]: balance:A-3 is plan#1 already, whose text the migration does not "
             "rewrite, so a paragraph given to it would land nowhere"
             in grade(data, read_source(corpus), corpus)[1])
+
+
+def test_an_outcome_holding_no_card_for_its_split_steps_leaves_takes_no_milestone(corpus):
+    """recurrence R5's shape: its scope's one open step is split, and every leaf carries an
+    outcome of its own, so it holds no card; nothing is required of it, and a milestone given
+    is refused for that reason, not as a shipped scope."""
+    split = (("O1 the first", ("balance:A-3", "balance:A-2a", "balance:A-2b")),
+             ("O2 the split", ("balance:A-2",)))
+    edited = replace(corpus, outcomes=split)
+    data = complete_input(edited)
+    assert "O2 the split" not in data["milestones"]
+    assert grade(data, read_source(edited), edited)[1] == []
+    data["milestones"]["O2 the split"] = {"title": "Split", "description": "d", "source": "s"}
+    assert grade(data, read_source(edited), edited)[1] == [
+        "milestones: 'O2 the split' holds no card: its open steps are all split steps, whose "
+        "leaves are filed in other outcomes' milestones, so it gets no milestone"]

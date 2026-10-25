@@ -18,12 +18,13 @@ card of its key; a card whose key is no item's is the tracker's own, and moves n
 - HISTORY, first, inside the cutover's freeze: each ruling filed born marked, then closed
   with its mark removed in ONE write (:data:`CLOSE_UNMARKED`);
 - the FREEZE: each outcome's milestone, found by its TITLE (R-BAL243); then the steps in
-  an order that files a card's parent and its blockers before it; then the findings, under
-  their steps; then the questions.  A card's writes are its create (born marked, its
-  labels and milestone in it), its parent link, a link per open blocker, a question's As
-  filed comment, its board place (a ranked step's or a question's), and last its mark's
-  removal -- a container's only after every step's writes, so after its last leaf is
-  linked (draft 4 s.4, R9).  A card filed already takes its links alone.
+  an order that files a card's parent and its blockers before it; then the findings, each
+  blocked by its owner step (R-BAL395); then the questions.  A card's writes are its
+  create (born marked, its labels and milestone in it), its parent link, a link per open
+  blocker, a question's As filed comment, its board place (a ranked step's or a
+  question's), and last its mark's removal -- a container's only after every step's
+  writes, so after its last leaf is linked (draft 4 s.4, R9).  A card filed already takes
+  its links alone.
 
 **The board** is put in its desired order apart, once every card is on it
 (:func:`desired_board`, :func:`moves`): the ranked steps by rank, the card filed already
@@ -60,11 +61,12 @@ still missing; a title whose alias does not read back as its item's; and steps w
 cycle.  Each is stated once: a card or item already refused is not refused again for what
 follows from it.  **A plan that refuses anything writes nothing** (:func:`plan`): one
 refusal leaves other items' writes leaning on it -- a container unmarked over a leaf that
-was refused, a finding linked under a step with no card -- so every refusal is settled
+was refused, a finding blocked by a step with no card -- so every refusal is settled
 before any write.
 The registries' and the input file's own refusals (:func:`_migrate_source.read_source`,
-:func:`_migrate_input.grade`, :func:`_migrate_bodies.build` and its census) are the
-executor's to gate on: it runs no plan while any of them refuses.
+:func:`_migrate_input.grade`, :func:`_migrate_bodies.build` and its census,
+:func:`_migrate_numbers.link`) are the executor's to gate on: it runs no plan while any of
+them refuses.
 
 **A card filed already** (:data:`_migrate_source.MAPPED`, card #1) is graded on its kind,
 labels and links -- parent, blockers and links outside the tracker -- and on its state
@@ -74,13 +76,16 @@ no link is written onto a card in a state the migration does not expect.
 
 **What the tracker may hold besides the items' cards** (:func:`_unclaimed`): the cards
 filed already, and the TRACKER'S OWN cards below them -- X-cx's own, of any kind (#2-#10,
-#26 and #27 under #1, all steps, measured read-only 2026-10-09; a finding or a ruling
-``quill file`` puts below #1 is its own too) -- and nothing else, so the cutover starts on a
-tracker holding X-cx's cards and the migration's only.  A card no item claims is told the
-tracker's own by its NUMBER, which no hand edit changes, never by what its title, labels,
-body or comments still say: the migration makes every write inside the freeze (R-BAL242),
-and no card is filed natively inside it (draft 4 s.4), so every card numbered above the
-migration's first card is the migration's.  Its first card is the lowest-numbered card an
+#26 and #27 under #1, all steps, measured read-only 2026-10-09 and again 2026-10-24; a
+finding or a ruling ``quill file`` files with #1 or a card below it as its owner, blocked
+by it and below nothing, R-BAL395, is its own too, and a task under one, :func:`_own`) --
+and nothing else, so the cutover starts on a tracker holding X-cx's cards and the
+migration's only.  A card no
+item claims is told the tracker's own by its NUMBER, which no hand edit changes, never by
+what its title, labels, body or comments still say: the migration makes every write
+inside the freeze (R-BAL242), and no card is filed natively inside it (draft 4 s.4), so
+every card numbered above the migration's first card is the migration's.  Its first card
+is the lowest-numbered card an
 item's key names (a card filed already apart), which rests on two PREMISES: no card the
 tracker held before the migration carries an item's key (an X-cx leaf's ``[X-cx Ln]``
 alias is no registry id), and the freeze holds from the migration's first create to its
@@ -103,8 +108,10 @@ is left to call :func:`plan` once natively filed cards are allowed again.  A run
 ``migrate verify`` and that merge is inside the freeze still, and refuses every card filed
 natively (fail closed).
 What this cannot see: a card of the migration's numbered lower than every card that still
-carries an item's key (a card filed already apart), sitting below a card filed already,
-where it reads as the tracker's own.  That takes every card the migration filed before it
+carries an item's key (a card filed already apart), sitting below a card filed already (a
+sub-issue, or a finding owned by one or by a card below one, or a card below such a
+finding: :func:`_own`), where it reads as the
+tracker's own.  That takes every card the migration filed before it
 to have lost its key, been deleted by hand or lost its item from the registries; the first
 cards it files are closed rulings (HISTORY runs first, R-BAL242, once the executor runs it
 first), so it is a person rekeying or deleting the first rulings filed, or their rows
@@ -120,7 +127,7 @@ from dataclasses import dataclass, replace
 from tools.ci.arcs import ARCS
 from tools.quill._migrate_bodies import AS_FILED, Built, differences, filed_commit
 from tools.quill._migrate_source import MAPPED, Item
-from tools.quill._state import filing_ended
+from tools.quill._state import filing_ended, owner
 from tools.quill._tracker import Card, Comment, Milestone, WholeCard
 from tools.quill.check import card_title, title_alias
 from tools.quill.setup_tracker import FILING
@@ -197,8 +204,8 @@ def plan(items: Sequence[Item], built: Mapping[str, Built],
 
     Args:
         items: Every item, as :func:`_migrate_source.read_source` orders them.
-        built: Each item's card text, by key (:func:`_migrate_bodies.build`; a card filed
-            already has none).
+        built: Each item's card text as filed, by key (``migrate.prepare``: built, then its
+            bare ``#N`` written; a card filed already has none).
         milestones: Each outcome's milestone, ``(title, description)``, as the input file
             gives it (:attr:`_migrate_input.Decisions.milestones`).
         tracked: The tracker as this run read it.
@@ -448,8 +455,9 @@ def _first_card(by_key: Mapping[str, list[int]], keys: set[str]) -> int | None:
 
 def milestone_title(item: Item, milestones: Mapping[str, tuple[str, str]]) -> str | None:
     """The title of the milestone ``item``'s card is filed in, by its outcome's name in
-    ``milestones`` (the input file's), None for an item in no outcome's scope: what the plan
-    grades a card's milestone by and the run files a create in.
+    ``milestones`` (the input file's), None for an item with no outcome (``Item.outcome``:
+    a split step's is carried to its leaves): what the plan grades a card's milestone by
+    and the run files a create in.
 
     Raises:
         KeyError: When ``milestones`` lacks the item's outcome, which
@@ -475,9 +483,9 @@ def _unclaimed(keys: set[str], tracked: Tracked,
     """Each card no item claims that is not the tracker's own, with its refusal: one
     numbered above ``first``, the migration's first card (None: it has filed none), wherever
     it sits; one numbered below it outside every card filed already, its filing ended
-    (dropped while marked, or a ruling withdrawn) or not.  Below a card filed already, a
-    card numbered below it is the tracker's own, of any kind (the module docstring says why,
-    and what this cannot see)."""
+    (dropped while marked, or a ruling withdrawn) or not.  Below a card filed already
+    (:func:`_own`), a card numbered below it is the tracker's own, of any kind (the module
+    docstring says why, and what this cannot see)."""
     mapped = set(MAPPED.values())
     found = []
     for number, whole in sorted(tracked.cards.items()):
@@ -494,7 +502,7 @@ def _unclaimed(keys: set[str], tracked: Tracked,
                           "title or arc label "
                           "changed by hand, or its item left the registries, or it was filed "
                           "natively inside the freeze; settle it before the run"))
-        elif _ancestor(number, mapped, tracked.cards) is not None:
+        elif _own(number, mapped, tracked.cards):
             continue
         elif filing_ended(whole.card):
             found.append((number, f"{label}'s filing ended (dropped while marked, or a ruling "
@@ -505,13 +513,16 @@ def _unclaimed(keys: set[str], tracked: Tracked,
                           "card a person unlinked from a card filed already, or one of the "
                           "migration's first cards with its title or arc label changed by hand "
                           "or its item gone from the registries; re-link one a person unlinked "
-                          "under its card filed already, and delete any other on the web, "
-                          "before the run"))
+                          "under its card filed already (a finding or a ruling: block it by its "
+                          "owner again, R-BAL395), and delete any other on the web, before the "
+                          "run"))
         else:
             found.append((number, f"{label} is no item's card, numbered lower than every card "
                           "an item's key names (a card filed already apart) and under no card "
                           "filed already: a card filed outside X-cx before the migration, an "
-                          "X-cx leaf unlinked from a card filed already by hand, or one of the "
+                          "X-cx leaf unlinked from a card filed already by hand (a finding or a "
+                          "ruling: its owner link removed; block it by its owner again, "
+                          "R-BAL395), or one of the "
                           "migration's first cards with its title or arc label changed by hand "
                           "or its item gone from the registries; settle it before the run"))
     return found
@@ -612,8 +623,9 @@ class _Grading:
         return [*writes, Write(UNMARK, item.key)]
 
     def _milestone(self, item: Item) -> int | None:
-        """The number of the milestone ``item``'s card is filed in, None for none (an item in
-        no outcome's scope, or one whose milestone does not exist yet)."""
+        """The number of the milestone ``item``'s card is filed in, None for none (an item
+        with no outcome, :func:`milestone_title`, or one whose milestone does not exist
+        yet)."""
         title = milestone_title(item, self.milestones)
         found = None if title is None else self.tracked.milestones.get(title)
         return None if found is None else found.number
@@ -690,7 +702,8 @@ class _Grading:
     def _misplaced(self, item: Item, whole: WholeCard) -> str | None:
         """Why ``item``'s card stands where the migration would not put it: a card filed
         already still marked, an open ruling whose filing finished, a closed card of work,
-        another parent, a blocker steps.md does not record."""
+        another parent, a blocker the registries do not record (a step's in ``steps.md``, a
+        finding's owner in ``ledger.md``, R-BAL395)."""
         card = whole.card
         if item.key in MAPPED and FILING in card.labels:
             return ("a card filed already still carrying the filing mark: its own filing is "
@@ -707,8 +720,8 @@ class _Grading:
         expected = {self.numbers.get(key) for key in item.links.blockers}
         extra = sorted(set(card.blocked_by) - expected - self.unaccounted)
         if extra:
-            return (f"it is blocked by {_named(extra)}, which steps.md does not record: a "
-                    "person's call")
+            return (f"it is blocked by {_named(extra)}, which the registries do not record: "
+                    "a person's call")
         return None
 
     def _missing(self, item: Item, whole: WholeCard) -> list[Write]:
@@ -812,6 +825,23 @@ def desired_board(items: Sequence[Item], numbers: Mapping[str, int],
             refusals.append(f"{item.key} has a place on the board and no card yet: file it "
                             "before the board is ordered")
     return desired, refusals
+
+
+def _own(number: int, mapped: set[int], cards: Mapping[int, WholeCard]) -> bool:
+    """Whether card ``number`` sits below one of the cards filed already, ``mapped``, at any
+    depth, read up each card's links: its parent and, for a finding or a ruling, its owner
+    -- the one card it is blocked by (:func:`_state.owner`, R-BAL395), which it sits below
+    in place of a parent -- so a task under a finding owned below one is below it too."""
+    seen, wanted = {number}, [number]
+    while wanted:
+        card = cards[wanted.pop()].card
+        for up in (card.parent, owner(card)):
+            if up in mapped:
+                return True
+            if up is not None and up not in seen and up in cards:
+                seen.add(up)
+                wanted.append(up)
+    return False
 
 
 def _ancestor(number: int, among: set[int], cards: Mapping[int, WholeCard]) -> int | None:

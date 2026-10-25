@@ -6,11 +6,13 @@ and a fresh reviewer grades it before anything is filed (rulings ``balance:R-BAL
 file lives OUTSIDE the repository: its text may quote a real figure, which the private
 tracker allows (``R-BAL172``) and this public repository does not (``R-BAL132``).
 
-Six maps, each GRADED BOTH WAYS against what the registries hold (:func:`grade`): an
+Seven maps, each GRADED BOTH WAYS against what the registries hold (:func:`grade`): an
 entry the registries need and the file lacks is refused, and so is one the file holds
 that names nothing the registries need.  Every entry records the hash of the text it
 was written from (:func:`_migrate_source.source_hash`, draft 4 s.11 V3-3), so an entry
-whose source changed since is refused until it is written and reviewed again.
+whose source changed since is refused until it is written and reviewed again.  One map is
+graded here for its form alone: ``numbers``, whose text is a card's as built, which
+:mod:`_migrate_numbers` grades it against both ways.
 
 - ``names``: ``{"arc:alias": {"name", "source"}}``, every card's short name (R-BAL237);
   its title is ``[alias] name`` (:func:`check.card_title`), and its length is
@@ -33,6 +35,11 @@ whose source changed since is refused until it is written and reviewed again.
   only disposition the migration writes), or ``reasoning`` (L8's keep-or-drop list).
 - ``milestones``: ``{"outcome": {"title", "description", "source"}}``, each OUTCOMES row's
   milestone (R-BAL243), titled with no number: the order among outcomes is the board's.
+- ``numbers``: ``{"arc:alias": {"each": [["#N", treatment], ...], "source"}}``, each bare
+  ``#N`` a card's text holds, in reading order, and its treatment, one of
+  :data:`TREATMENTS` (R-BAL277): ``card`` stays a link to the tracker's card N, ``pr``
+  becomes a link to the app's pull request N, ``plain`` links nothing.  Its ``source`` is
+  the hash of the card's text as built (:func:`_migrate_numbers.decided_from`).
 """
 from __future__ import annotations
 
@@ -50,15 +57,21 @@ from tools.quill._migrate_source import (
     Registries,
     Source,
     MAPPED,
+    no_milestone,
     question_source,
     source_hash,
     source_text,
 )
 from tools.quill.check import card_title
 
-#: The file's six maps.
-MAPS = ("names", "questions", "notes_kept", "notes", "preambles", "milestones")
+#: The file's seven maps.
+MAPS = ("names", "questions", "notes_kept", "notes", "preambles", "milestones", "numbers")
 NOTE_DISPOSITIONS = ("own", "note")
+#: How a bare ``#N`` is written on its card (R-BAL277; :mod:`_migrate_numbers` writes each).
+TREATMENTS = ("card", "pr", "plain")
+#: A number as its card writes it, ``#`` and its digits (group 1): what a ``numbers`` entry
+#: names, and the one spelling :data:`_migrate_numbers.CANDIDATE` finds in a card's text.
+NUMBER = re.compile(r"#(\d+)")
 #: Each preamble disposition and the fields it carries beside ``arc``, ``first_line``,
 #: ``disposition`` and ``source``.
 PREAMBLE_FIELDS = {
@@ -89,27 +102,46 @@ class Preamble:
 
 
 @dataclass(frozen=True)
+class Numbered:
+    """One card's bare ``#N`` as the input file decides them: each number and its treatment,
+    in reading order, and the hash of the card's text they were decided for."""
+
+    each: tuple[tuple[str, str], ...]
+    source: str
+
+
+@dataclass(frozen=True)
 class Decisions:
     """What the input file decides, entry by entry, for the entries it states well: each
     card's name, each rewritten question, each entry paragraph's and each preamble's
-    disposition, and each outcome's milestone (title, description)."""
+    disposition, each outcome's milestone (title, description), and each card's numbers."""
 
     names: Mapping[str, str]
     questions: Mapping[str, str]
     notes: Mapping[tuple[str, str, str], str]
     preambles: Mapping[tuple[str, str], Preamble]
     milestones: Mapping[str, tuple[str, str]]
+    numbers: Mapping[str, Numbered]
 
 
 def load(path: Path) -> dict:
     """The input file as JSON.
 
     Raises:
-        InputError: When it is not UTF-8 JSON, or is JSON but not an object.
+        InputError: When it is not UTF-8 JSON, is JSON but not an object, or names a key
+            twice in one object, where JSON keeps the last and the entry a reviewer read
+            first would be dropped unseen.
         OSError: When it cannot be read.
     """
+    def unique(pairs: list[tuple[str, object]]) -> dict:
+        """One object's pairs, refused when a key comes twice."""
+        keys = [key for key, _ in pairs]
+        if twice := sorted({key for key in keys if keys.count(key) > 1}):
+            raise InputError(f"{path} names {twice} twice in one object")
+        return dict(pairs)
+
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique)
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise InputError(f"{path} is not UTF-8 JSON: {error}") from error
     if not isinstance(data, dict):
@@ -178,7 +210,8 @@ def grade(data: dict, source: Source, registries: Registries) -> tuple[Decisions
                            problems)
     milestones = _milestones(_map(data, "milestones", dict, problems), registries, source,
                              problems)
-    return Decisions(names, questions, notes, preambles, milestones), problems
+    numbers = _numbers(_map(data, "numbers", dict, problems), items, problems)
+    return Decisions(names, questions, notes, preambles, milestones, numbers), problems
 
 
 def _names(given: dict, items: Mapping[str, Item], source: Source, registries: Registries,
@@ -387,13 +420,15 @@ def _target_problem(disposition: str, fields: Mapping[str, str], steps: Mapping,
 def _milestones(given: dict, registries: Registries, source: Source,
                 problems: list[str]) -> dict[str, tuple[str, str]]:
     """Each milestone, a title with no number and a description: one for every OUTCOMES row
-    with an open step in its scope, and none for a row whose whole scope has shipped
-    (``_migrate_source`` reports it), which would hold no card."""
+    some card is filed in (``Item.outcome``), and none for a row that holds no card -- its
+    whole scope shipped, or its open steps all split steps whose leaves are filed in other
+    outcomes' milestones (``_migrate_source`` reports either, :func:`no_milestone`)."""
     outcomes = dict(registries.outcomes)
     held = {item.outcome for item in source.items if item.outcome is not None}
+    moving = {item.key for item in source.items}
     problems += [f"milestones: {name!r} is no outcome in steps.md's OUTCOMES table"
                  for name in sorted(set(given) - set(outcomes))]
-    problems += [f"milestones: {name!r}'s whole scope has shipped, so it gets no milestone"
+    problems += [f"milestones: {no_milestone(name, shipped=moving.isdisjoint(outcomes[name]))}"
                  for name in sorted(set(given) & set(outcomes) - held)]
     milestones = {}
     for name, scope in outcomes.items():
@@ -416,3 +451,32 @@ def _milestones(given: dict, registries: Registries, source: Source,
     problems += [f"milestones: the title {title!r} is given twice" for title in sorted(
         {title for title in titles if titles.count(title) > 1})]
     return milestones
+
+
+def _numbers(given: dict, items: Mapping[str, Item], problems: list[str]) -> dict[str, Numbered]:
+    """Each card's bare ``#N`` decisions, graded for their form and for naming a card the
+    migration writes; :mod:`_migrate_numbers` grades them against the card's text, both
+    ways (a card holding a number no entry decides, an entry for a card holding none)."""
+    problems += [f"numbers: {key} names no card the registries move" for key in sorted(
+        set(given) - set(items))]
+    problems += [f"numbers: {key} is plan#{MAPPED[key]} already, whose text is not rewritten"
+                 for key in sorted(set(given) & set(MAPPED))]
+    numbers = {}
+    for key in sorted(set(given) & set(items) - set(MAPPED)):
+        where, entry = f"numbers: {key}", given[key]
+        each = entry.get("each") if isinstance(entry, dict) else None
+        if not (isinstance(each, list) and each):
+            problems.append(f"{where}: its 'each' is a non-empty list of [\"#N\", treatment]")
+            continue
+        wrong = [index + 1 for index, pair in enumerate(each) if not (
+            isinstance(pair, list) and len(pair) == 2 and all(isinstance(part, str)
+                                                              for part in pair)
+            and NUMBER.fullmatch(pair[0]) and pair[1] in TREATMENTS)]
+        if wrong:
+            problems.append(f"{where}: its numbers {wrong} are not [\"#N\", treatment], the "
+                            f"treatment one of {TREATMENTS}")
+        if _strings({name: value for name, value in entry.items() if name != "each"},
+                    ("source",), where, problems) and not wrong:
+            numbers[key] = Numbered(tuple((text, treatment) for text, treatment in each),
+                                    entry["source"])
+    return numbers

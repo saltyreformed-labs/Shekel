@@ -58,8 +58,9 @@ def test_the_old_form_is_left_to_the_plan_gate_and_anything_else_is_reported(rep
 def test_an_old_form_ships_is_returned_as_its_own_record_over_the_range_named(repo):
     """The release tool asks which steps ``base..cut`` carries in the old form: each
     ``Ships: <arc>:<id>`` is one record, with its commit, arc and id; an old-form
-    ``Reopens:`` is one record of its own, never a claim (its card reader refuses it after
-    the cutover, R-BAL287); a card trailer and a malformed value stay where they were; and
+    ``Reopens:`` is one record of its own, never a claim (the card reader refuses one a cut
+    holding steps.md holds, and reads any other as prose); a card trailer and a malformed
+    value stay where they were; and
     a claim on ``base`` is outside the range."""
     base = _commit(repo, "base", "Ships: balance:X-bi-6-4d-1")
     leaf = _commit(repo, "leaf", "Ships: balance:X-bi-6-4d-2\nShips: pay_calendar:C21\n"
@@ -189,7 +190,7 @@ def test_a_range_reads_only_the_commits_it_names(repo):
 
 def test_several_tips_are_read_as_one_history_each_commit_once(repo):
     """Two lines beside each other, each named: one walk reads both, and the commit they
-    share once (CI's landing check reads dev, main and a change set's head so)."""
+    share once."""
     base = _commit(repo, "base", "Ships: plan#2")
     left = _commit(repo, "left", "Ships: plan#3", parents=[base])
     right = _commit(repo, "right", "Ships: plan#4", parents=[base])

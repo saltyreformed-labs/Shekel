@@ -56,7 +56,11 @@ paragraph break the assembly dropped or added (two paragraphs merged, one split)
 it; and the DEDENT, which the census reads through the same :func:`dedent` the builder
 writes with, so a wrong one is wrong on both sides alike.  The dedent is graded by its own
 tests; the stored text, every blank line and indent of it, by ``migrate verify``, which
-holds each fetched body EQUAL to its built one (draft 4 s.5).
+holds each fetched body EQUAL to its built one (draft 4 s.5).  Nor the bare ``#N`` each
+card's text holds, which :func:`_migrate_numbers.link` writes as the input file decides
+AFTER the census (R-BAL277), so the census reads what this module builds: a marker or a
+link it writes changes no line's place, and ``migrate verify`` holds the stored text to
+what it wrote.
 """
 from __future__ import annotations
 
@@ -65,7 +69,7 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from tools.ci.arc_steps import CHECKBOX_RX, Entry, fenced_lines
+from tools.ci.arc_steps import CHECKBOX_RX, Entry
 from tools.quill._migrate_input import Decisions
 from tools.quill._migrate_source import (
     MAPPED,
@@ -97,10 +101,6 @@ AS_FILED_OPENING = f"{_FENCE}text\n{FILED_FROM}"
 #: An As filed block's first line after :data:`FILED_FROM`: its registry, then its commit
 #: (:func:`_filed_line`).
 _FILED_LINE = re.compile(r"(\S+ at )(\S+)")
-#: A bare ``#N`` in prose, which GitHub links to the tracker's card N (draft 4 s.3).
-_BARE_NUMBER = re.compile(r"(?<![\w#&/])#\d+\b")
-#: An inline code span: a run of backticks, then text, then a run of as many.
-_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 
 #: The census's places for a line (:func:`census`).
 ON_A_CARD = "on a card"
@@ -337,17 +337,6 @@ def _built(item: Item, inputs: Inputs, bound: Sequence[Paragraph],
     refusals += [f"{item.key}: {problem}" for problem in violations(
         Draft(item.kind, title, body, item.labels), {TITLE})]
     return Built(title, body, comment)
-
-
-def bare_numbers(built: Built) -> int:
-    """How many bare ``#N`` a card's title, body and comment hold outside fenced blocks and
-    code spans: each would link the tracker's card N (draft 4 s.3)."""
-    count = 0
-    for text in (built.title, built.body, built.comment or ""):
-        lines = text.splitlines()
-        count += sum(len(_BARE_NUMBER.findall(_CODE_SPAN.sub("", line)))
-                     for line, fenced in zip(lines, fenced_lines(lines)) if not fenced)
-    return count
 
 
 def step_regions(body: str) -> tuple[str, list[str], list[list[str]], str] | None:

@@ -24,6 +24,12 @@ everything with a person or a judgment in it is here.
   `gh pr merge` is a permission prompt Josh cannot see from the web: STOP and say so. Work in that
   session's own worktree with `dev` checked out, never in `~/projects/Shekel`, which stays clean on
   `main` because production's deploy script is a symlink into it (trap u).
+- **The auto-mode classifier can refuse an act outright, even one Josh's word already covers**
+  (10-20: inside the approved release, a copy into `/opt/docker/shekel` as 'Production Deploy';
+  after it, a repository settings change as 'Permission Grant'; and under his standing merge
+  grant, an enqueue into `dev`'s queue as 'Merge Without Review', where the release's own enqueue
+  passed). Each refusal is a question to Josh for that one act, its alert first; never route
+  around it.
 - **Each Bash call is a fresh shell**: no variable or `source` carries to the next call, and the
   working directory may not. So the run keeps its values in ONE file,
   `~/projects/shekel-handoffs/releases/current.sh`; every block below starts by sourcing it and
@@ -127,10 +133,14 @@ Then, line by line:
   `--unrehearsed <arc>:<id>` (a card after the cutover: `--unrehearsed plan#N`) or
   `--unrehearsed <revision>`; `plan` then refuses the release for it.
 - After the cutover (the cut holds no `steps.md`), `plan` reads the cards through quill's App, so
-  a failed tracker read exits 2. A card reading `UNDONE` is a `Reopens:` leaving it out of
-  production, judged as a ship is (R-BAL288): a money mover's undo needs its kit too. A refusal
-  naming an old-form `<arc>:<id>` trailer, a card the tracker does not hold, or a card that is
-  no work (R-BAL287, R-BAL289) is no judgment for this run to make: STOP and report it to Josh.
+  a failed tracker read exits 2. What it carries is the change the release makes to the ship
+  markers (`plan/ships/<N>`, R-BAL359). A card reading `UNDONE` is one whose marker the release
+  deletes, judged as a ship is (R-BAL288): a money mover's undo needs its kit too. A group's way
+  out is reverting the merge that landed each member it names, never deleting a marker by hand
+  (that leaves the code in production, unseen). A refusal
+  naming an old-form `<arc>:<id>` trailer, a card the tracker does not hold, a card that is no
+  work, or an entry under `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no
+  judgment for this run to make: STOP and report it to Josh.
 
 Re-run with every flag at once until nothing more changes; the last run is `plan.txt`.
 
@@ -254,8 +264,9 @@ the first attempt. A failure near the diff is a STOP. Then put the pull request 
 queue, the only way into `main`: ruleset `main-queue`, whose bypass list is empty, so it binds
 everyone (R-BAL322); `--admin` is refused. The queue runs the checks again on the exact merge
 commit it will land, and lands it as a MERGE COMMIT, never a squash or rebase (commits are cited by
-sha), one pull request at a time. `--match-head-commit "$H"` asks gh to refuse any head but `$H`,
-the cut Josh approved; whether gh holds to that on an enqueue, not only on a merge, is unmeasured:
+sha), one pull request at a time. `--match-head-commit "$H"` makes gh refuse any head but `$H`,
+the cut Josh approved, on an enqueue as on a merge (measured 10-20 on a pull request into `dev`: a
+wrong head exits 1, `expected head oid does not match the current head oid`, and queues nothing):
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1

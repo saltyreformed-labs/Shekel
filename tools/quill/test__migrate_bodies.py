@@ -19,7 +19,6 @@ from tools.quill._migrate_bodies import (
     SHIPPED,
     Built,
     Inputs,
-    bare_numbers,
     build,
     census,
     differences,
@@ -190,15 +189,6 @@ def test_an_undecided_paragraph_is_counted_as_such(corpus):
         SHIPPED: 1}
 
 
-def test_a_bare_number_outside_code_is_counted_and_one_inside_is_not():
-    """GitHub links ``#12`` in prose to card 12; inside a code span of one backtick or
-    more, a fence, a word or a URL fragment it does not."""
-    card = Built("[A-1] see #12",
-                 "Fixed in #3 and #44.\n`#5` ``#10`` x#6 a/#7\n```\n#8\n```",
-                 "As filed\n\n```text\nid: #9\n```")
-    assert bare_numbers(card) == 3
-
-
 def test_the_corpus_is_read_under_the_live_arc_tables_heading():
     """The corpus's balance section opens with the heading ``tools.ci.arcs`` names for
     balance, so moving that heading fails here as it fails the live gate."""
@@ -305,14 +295,6 @@ def test_a_line_bound_to_a_card_nothing_builds_is_refused(corpus):
     del built["balance:A-3"]
     assert ("census: line 5 of balance's document belongs on balance:A-3's card, which "
             "nothing builds") in census(inputs, built)[1]
-
-
-def test_a_code_span_starts_at_the_start_of_its_backtick_run():
-    """#5 after a doubled backtick that no doubled run closes, and #6 after an unmatched
-    pair, are links GitHub makes; neither run is opened in its middle (review of B1's
-    fixes, LOW-6).  On one line, the doubled runs would pair and hide #5 as code."""
-    assert [bare_numbers(Built("t", text, None)) for text in ("``#5`", "x `` #6 `")] == [1, 1]
-    assert bare_numbers(Built("t", "``#5` and x `` #6 `", None)) == 1
 
 
 def test_a_cards_text_is_compared_with_its_commit_left_out_and_nothing_else(corpus):

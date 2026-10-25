@@ -32,7 +32,7 @@ time-machine==3.5.1
 PyYAML==6.0.3
 
 # Linting
-pylint==4.1.2
+pylint==4.1.3
 pylint-flask==0.6
 pylint-flask-sqlalchemy==0.2.0
 
@@ -91,7 +91,7 @@ rumdl==0.2.78
 # (pylint app/ + the custom checkers) before each commit, mirroring the CI
 # gate. A pre-merge belt-and-suspenders layer for commits made outside a
 # Claude Code session; CI remains the enforced gate.
-pre-commit==4.6.2
+pre-commit==4.7.0
 
 # Manual mobile / browser verification harness.  Drives a headless
 # Chromium at iPhone-sized viewports against the local dev Flask

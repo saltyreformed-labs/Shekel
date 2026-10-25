@@ -1,0 +1,1663 @@
+{
+ "scratch": {
+  "numbers": [],
+  "ids": [],
+  "nodes": [],
+  "items": [],
+  "board": null,
+  "place": [
+   "saltyreformed-labs",
+   "shekel-plan",
+   "Shekel plan"
+  ]
+ },
+ "exchanges": [
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "\nquery($org: String!) {\n  organization(login: $org) { id projectsV2(first: 100) { nodes { id title } } }\n}",
+    "variables": {
+     "org": "saltyreformed-labs"
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "organization": {
+      "id": "O_kgDOFB5GWQ",
+      "projectsV2": {
+       "nodes": [
+        {
+         "id": "PVT_kwDOFB5GWc4Bln4u",
+         "title": "Shekel plan"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($id: ID!) { node(id: $id) { ... on ProjectV2 {\n  repositories(first: 100) { totalCount nodes { nameWithOwner } } } } }",
+    "variables": {
+     "id": "PVT_kwDOFB5GWc4Bln4u"
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "node": {
+      "repositories": {
+       "totalCount": 1,
+       "nodes": [
+        {
+         "nameWithOwner": "saltyreformed-labs/shekel-plan"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($after: String) { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") {\n  issues(first: 25, after: $after, states: [OPEN, CLOSED]) {\n    pageInfo { hasNextPage endCursor } nodes { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n body author { login } createdAt closedAt\n      milestone { number }\n      userContentEdits(first: 100) {\n        totalCount pageInfo { hasNextPage endCursor } nodes { id editedAt editor { login } diff } }\n      comments(first: 100) {\n        totalCount pageInfo { hasNextPage endCursor } nodes { id author { login } createdAt body lastEditedAt } } } } } }",
+    "variables": {
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issues": {
+       "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wNlQxODozNzozOFrPAAAAAVW_X0w="
+       },
+       "nodes": [
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5CxrQ",
+         "number": 1,
+         "fullDatabaseId": "5696958893",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": null,
+         "subIssues": {
+          "totalCount": 11,
+          "nodes": [
+           {
+            "number": 2,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 3,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 4,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 5,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 6,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 9,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 7,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 8,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 10,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 26,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 27,
+            "state": "OPEN",
+            "issueType": {
+             "name": "step"
+            },
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           }
+          ]
+         },
+         "blockedBy": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "projectItems": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:02Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 4,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHO_zw0LA=="
+          },
+          "nodes": [
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cxrc8AAAABBan41w",
+            "editedAt": "2026-10-13T16:51:33Z",
+            "editor": {
+             "login": "SaltyReformed"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cxrc8AAAABBannRg",
+            "editedAt": "2026-10-13T16:51:18Z",
+            "editor": {
+             "login": "SaltyReformed"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cxrc7_PDQy",
+            "editedAt": "2026-10-07T00:53:46Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cxrc7_PDQs",
+            "editedAt": "2026-10-04T06:47:02Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           }
+          ]
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5Cx6w",
+         "number": 2,
+         "fullDatabaseId": "5696958955",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-aIIE",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:03Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 7,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHO_LefVg=="
+          },
+          "nodes": [
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cx687_PDbI",
+            "editedAt": "2026-10-07T00:53:50Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cx6879Xvfn",
+            "editedAt": "2026-10-05T09:33:28Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cx6879GzxZ",
+            "editedAt": "2026-10-05T02:15:34Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cx68788q3e",
+            "editedAt": "2026-10-04T20:31:51Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cx6878yh_L",
+            "editedAt": "2026-10-04T14:26:31Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cx6878t59Y",
+            "editedAt": "2026-10-04T11:28:14Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cx6878t59W",
+            "editedAt": "2026-10-04T06:47:03Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           }
+          ]
+         },
+         "comments": {
+          "totalCount": 2,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHPAAAAAWRnQHk="
+          },
+          "nodes": [
+           {
+            "id": "IC_kwDOU6wSSs8AAAABZEiQiA",
+            "author": {
+             "login": "shekel-quill"
+            },
+            "createdAt": "2026-10-04T06:48:34Z",
+            "body": "[redacted: not a scratch card]",
+            "lastEditedAt": null
+           },
+           {
+            "id": "IC_kwDOU6wSSs8AAAABZGdAeQ",
+            "author": {
+             "login": "shekel-quill"
+            },
+            "createdAt": "2026-10-04T11:28:15Z",
+            "body": "[redacted: not a scratch card]",
+            "lastEditedAt": null
+           }
+          ]
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5CyNw",
+         "number": 3,
+         "fullDatabaseId": "5696959031",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-aIIU",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:04Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5Cyig",
+         "number": 4,
+         "fullDatabaseId": "5696959114",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-aIIo",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:05Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 2,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHO_zw40w=="
+          },
+          "nodes": [
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cyis7_PDjY",
+            "editedAt": "2026-10-07T00:53:52Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cyis7_PDjT",
+            "editedAt": "2026-10-04T06:47:05Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           }
+          ]
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5Cy6A",
+         "number": 5,
+         "fullDatabaseId": "5696959208",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-aII4",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:06Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 2,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHPAAAAAQ1yusY="
+          },
+          "nodes": [
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cy6M8AAAABDXK6yg",
+            "editedAt": "2026-10-20T18:35:54Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5Cy6M8AAAABDXK6xg",
+            "editedAt": "2026-10-04T06:47:06Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           }
+          ]
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5CzOQ",
+         "number": 6,
+         "fullDatabaseId": "5696959289",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJM",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:07Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 2,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHO_zw6oQ=="
+          },
+          "nodes": [
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5CzOc7_PDqj",
+            "editedAt": "2026-10-07T00:53:55Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5CzOc7_PDqh",
+            "editedAt": "2026-10-04T06:47:07Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           }
+          ]
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5CzoA",
+         "number": 7,
+         "fullDatabaseId": "5696959392",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 6,
+          "nodes": [
+           {
+            "number": 9,
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 6,
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 5,
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 4,
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 3,
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           },
+           {
+            "number": 2,
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           }
+          ]
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJs",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:08Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 3,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHPAAAAAQWp5QY="
+          },
+          "nodes": [
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5CzoM8AAAABBan2Mw",
+            "editedAt": "2026-10-13T16:51:31Z",
+            "editor": {
+             "login": "SaltyReformed"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5CzoM8AAAABBanlCA",
+            "editedAt": "2026-10-13T16:51:16Z",
+            "editor": {
+             "login": "SaltyReformed"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5CzoM8AAAABBanlBg",
+            "editedAt": "2026-10-04T06:47:08Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           }
+          ]
+         },
+         "comments": {
+          "totalCount": 1,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHPAAAAAWRrrrU="
+          },
+          "nodes": [
+           {
+            "id": "IC_kwDOU6wSSs8AAAABZGuutQ",
+            "author": {
+             "login": "shekel-quill"
+            },
+            "createdAt": "2026-10-04T12:06:21Z",
+            "body": "[redacted: not a scratch card]",
+            "lastEditedAt": null
+           }
+          ]
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5C0Kg",
+         "number": 8,
+         "fullDatabaseId": "5696959530",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "number": 7,
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           }
+          ]
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJ4",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:09Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 5,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHO_zw8pg=="
+          },
+          "nodes": [
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5C0Ks8AAAABDXK-MA",
+            "editedAt": "2026-10-20T18:35:57Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5C0Ks8AAAABBan0FQ",
+            "editedAt": "2026-10-13T16:51:29Z",
+            "editor": {
+             "login": "SaltyReformed"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5C0Ks8AAAABBanjMA",
+            "editedAt": "2026-10-13T16:51:15Z",
+            "editor": {
+             "login": "SaltyReformed"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5C0Ks7_PDyo",
+            "editedAt": "2026-10-07T00:53:57Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABU5C0Ks7_PDym",
+            "editedAt": "2026-10-04T06:47:09Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           }
+          ]
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5C1Hg",
+         "number": 9,
+         "fullDatabaseId": "5696959774",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJg",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:10Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABU5C1dw",
+         "number": 10,
+         "fullDatabaseId": "5696959863",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "number": 8,
+            "repository": {
+             "nameWithOwner": "saltyreformed-labs/shekel-plan"
+            }
+           }
+          ]
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-aIKI",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-04T06:47:11Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABVW4Z-A",
+         "number": 26,
+         "fullDatabaseId": "5728246264",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-4ELQ",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-06T12:19:57Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 2,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHO_zw-vw=="
+          },
+          "nodes": [
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABVW4Z-M7_PD7C",
+            "editedAt": "2026-10-07T00:54:00Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABVW4Z-M7_PD6_",
+            "editedAt": "2026-10-06T12:19:57Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           }
+          ]
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        },
+        {
+         "id": "I_kwDOU6wSSs8AAAABVb9fTA",
+         "number": 27,
+         "fullDatabaseId": "5733572428",
+         "title": "[redacted: not a scratch card]",
+         "state": "OPEN",
+         "stateReason": null,
+         "issueType": {
+          "name": "step"
+         },
+         "labels": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "name": "balance"
+           }
+          ]
+         },
+         "parent": {
+          "number": 1,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         },
+         "subIssues": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "blockedBy": {
+          "totalCount": 0,
+          "nodes": []
+         },
+         "projectItems": {
+          "totalCount": 1,
+          "nodes": [
+           {
+            "id": "PVTI_lADOFB5GWc4Bln4uzg-9VP4",
+            "project": {
+             "id": "PVT_kwDOFB5GWc4Bln4u"
+            }
+           }
+          ]
+         },
+         "timelineItems": {
+          "nodes": []
+         },
+         "body": "[redacted: not a scratch card]",
+         "author": {
+          "login": "shekel-quill"
+         },
+         "createdAt": "2026-10-06T18:37:38Z",
+         "closedAt": null,
+         "milestone": null,
+         "userContentEdits": {
+          "totalCount": 2,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": "Y3Vyc29yOnYyOpHO_zxApA=="
+          },
+          "nodes": [
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABVb9fTM7_PECn",
+            "editedAt": "2026-10-07T00:54:03Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           },
+           {
+            "id": "UCE_lAHOU6wSSs8AAAABVb9fTM7_PECk",
+            "editedAt": "2026-10-06T18:37:38Z",
+            "editor": {
+             "login": "shekel-quill"
+            },
+            "diff": "[redacted: not a scratch card]"
+           }
+          ]
+         },
+         "comments": {
+          "totalCount": 0,
+          "pageInfo": {
+           "hasNextPage": false,
+           "endCursor": null
+          },
+          "nodes": []
+         }
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($after: String) { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") {\n  milestones(first: 100, after: $after, states: [OPEN, CLOSED]) {\n    pageInfo { hasNextPage endCursor }\n    nodes { number title description state dueOn closedAt } } } }",
+    "variables": {
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "milestones": {
+       "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": null
+       },
+       "nodes": []
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {\n  items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {\n    pageInfo { hasNextPage endCursor }\n    nodes { id content { ... on Issue { number repository { nameWithOwner } } } } } } } }",
+    "variables": {
+     "id": "PVT_kwDOFB5GWc4Bln4u",
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "node": {
+      "items": {
+       "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDEuMDkwOTA5MDkwOTA5MDkwOc4PvVT-"
+       },
+       "nodes": [
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-aIIE",
+         "content": {
+          "number": 2,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-aIIU",
+         "content": {
+          "number": 3,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-aIIo",
+         "content": {
+          "number": 4,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-aII4",
+         "content": {
+          "number": 5,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJM",
+         "content": {
+          "number": 6,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJg",
+         "content": {
+          "number": 9,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJs",
+         "content": {
+          "number": 7,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJ4",
+         "content": {
+          "number": 8,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-aIKI",
+         "content": {
+          "number": 10,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-4ELQ",
+         "content": {
+          "number": 26,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        },
+        {
+         "id": "PVTI_lADOFB5GWc4Bln4uzg-9VP4",
+         "content": {
+          "number": 27,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/shekel-plan"
+          }
+         }
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!, $after: String) { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") {\n  issue(number: $number) { number body createdAt author { login }\n    userContentEdits(first: 100, after: $after) {\n      pageInfo { hasNextPage endCursor }\n      nodes { id editedAt editor { login } diff } } } } }",
+    "variables": {
+     "number": 2,
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 2,
+       "body": "[redacted: not a scratch card]",
+       "createdAt": "2026-10-04T06:47:03Z",
+       "author": {
+        "login": "shekel-quill"
+       },
+       "userContentEdits": {
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": "Y3Vyc29yOnYyOpHO_LefVg=="
+        },
+        "nodes": [
+         {
+          "id": "UCE_lAHOU6wSSs8AAAABU5Cx687_PDbI",
+          "editedAt": "2026-10-07T00:53:50Z",
+          "editor": {
+           "login": "shekel-quill"
+          },
+          "diff": "[redacted: not a scratch card]"
+         },
+         {
+          "id": "UCE_lAHOU6wSSs8AAAABU5Cx6879Xvfn",
+          "editedAt": "2026-10-05T09:33:28Z",
+          "editor": {
+           "login": "shekel-quill"
+          },
+          "diff": "[redacted: not a scratch card]"
+         },
+         {
+          "id": "UCE_lAHOU6wSSs8AAAABU5Cx6879GzxZ",
+          "editedAt": "2026-10-05T02:15:34Z",
+          "editor": {
+           "login": "shekel-quill"
+          },
+          "diff": "[redacted: not a scratch card]"
+         },
+         {
+          "id": "UCE_lAHOU6wSSs8AAAABU5Cx68788q3e",
+          "editedAt": "2026-10-04T20:31:51Z",
+          "editor": {
+           "login": "shekel-quill"
+          },
+          "diff": "[redacted: not a scratch card]"
+         },
+         {
+          "id": "UCE_lAHOU6wSSs8AAAABU5Cx6878yh_L",
+          "editedAt": "2026-10-04T14:26:31Z",
+          "editor": {
+           "login": "shekel-quill"
+          },
+          "diff": "[redacted: not a scratch card]"
+         },
+         {
+          "id": "UCE_lAHOU6wSSs8AAAABU5Cx6878t59Y",
+          "editedAt": "2026-10-04T11:28:14Z",
+          "editor": {
+           "login": "shekel-quill"
+          },
+          "diff": "[redacted: not a scratch card]"
+         },
+         {
+          "id": "UCE_lAHOU6wSSs8AAAABU5Cx6878t59W",
+          "editedAt": "2026-10-04T06:47:03Z",
+          "editor": {
+           "login": "shekel-quill"
+          },
+          "diff": "[redacted: not a scratch card]"
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!, $after: String) { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") {\n  issue(number: $number) { number\n    comments(first: 100, after: $after) {\n      pageInfo { hasNextPage endCursor }\n      nodes { id author { login } createdAt body lastEditedAt } } } } }",
+    "variables": {
+     "number": 2,
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 2,
+       "comments": {
+        "pageInfo": {
+         "hasNextPage": false,
+         "endCursor": "Y3Vyc29yOnYyOpHPAAAAAWRnQHk="
+        },
+        "nodes": [
+         {
+          "id": "IC_kwDOU6wSSs8AAAABZEiQiA",
+          "author": {
+           "login": "shekel-quill"
+          },
+          "createdAt": "2026-10-04T06:48:34Z",
+          "body": "[redacted: not a scratch card]",
+          "lastEditedAt": null
+         },
+         {
+          "id": "IC_kwDOU6wSSs8AAAABZGdAeQ",
+          "author": {
+           "login": "shekel-quill"
+          },
+          "createdAt": "2026-10-04T11:28:15Z",
+          "body": "[redacted: not a scratch card]",
+          "lastEditedAt": null
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on IssueComment {\n  userContentEdits(first: 100, after: $after) {\n    pageInfo { hasNextPage endCursor } nodes { id editedAt editor { login } diff } } } } }",
+    "variables": {
+     "id": "IC_kwDOU6wSSs8AAAABZEiQiA",
+     "after": null
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "node": {
+      "userContentEdits": {
+       "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": null
+       },
+       "nodes": []
+      }
+     }
+    }
+   }
+  }
+ ]
+}

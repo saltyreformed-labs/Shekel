@@ -206,7 +206,7 @@ keys `salary.paycheck_lines`, the table DC-09 reads, or DC-09 stays.
   commit-boundary grader and `X-d`'s per-visible-date assert; `X-ek` decides.
 - T-91's second list, graded by an arm at `X-dh` rather than deleted; `X-dz` deletes it.
 - T-216, the code-reviewer agent's mirror of the rules, rewritten and kept by `X-cx`'s last card and
-  `X-bi-6-4d-3`.
+  `X-bi-6-4d-2`.
 - A-39 and A-16's `$0.00` arm, the reconcile panel's and the loan walk's, by `X-db`'s one refusal at
   the status seam.
 - T-60's two producers of whether a docker daemon is safe, by `X-bt`'s one predicate.

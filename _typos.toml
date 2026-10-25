@@ -33,6 +33,10 @@ extend-exclude = [
   # (tools/quill/_recorded.py): GitHub's machine text -- node ids, commit
   # signatures -- not ours to spell.
   "tools/quill/recorded/**",
+  # GitHub's rendered HTML the migration's number grade is tested against
+  # (tools/quill/test__migrate_numbers.py): GitHub's machine text -- the
+  # misspelt name of its own table element among it -- not ours to spell.
+  "tools/quill/markdown_renders.json",
 ]
 
 # A git SHORT HASH is never a typo, and this is the STRUCTURAL form of that

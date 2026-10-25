@@ -47,14 +47,15 @@ def first_parent_line(root: Path, base: str, cut: str) -> list[tuple[str, str]]:
 @dataclass(frozen=True)
 class Step:
     """One piece of work a release carries: its key, the commits in the range that name it
-    (newest first), whether it moves money (None when no version holds it open and it is
-    not declared), the deploy-together groups it is a leaf of (after the cutover, each it
-    touches, nearest first: each it is under, its own card's group included, unless it
-    will never ship and production holds it on neither side; a card re-planned since its
-    trailer landed, or a finding, is under a group without being a leaf of it), the
+    (newest first; after the cutover, those that changed its ship marker), whether it moves
+    money (None when no version holds it open and it is not declared), the deploy-together
+    groups it is a leaf of (after the cutover, each it touches, nearest first: each it is
+    under, its own card's group included, unless it will never ship and production holds
+    it on neither side; a card re-planned since its marker landed, or a finding, is under a
+    group without being a leaf of it), the
     source of its declaration when its flag was declared (None when it was read), and
     whether the release takes it out of production: held there at the base and not at
-    the cut (a ``Reopens:`` undid it, ruling ``balance:R-BAL288``)."""
+    the cut (its ship marker deleted, ruling ``balance:R-BAL288``)."""
 
     key: str
     claims: tuple[str, ...]

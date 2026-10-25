@@ -19,22 +19,27 @@ as GitHub's one numbering sequence gives no number out twice.  Its board shows a
 placement at once unless told to lag (:attr:`FakeBoard.lagging`); the lag
 itself is graded against a recording.
 Nothing here calls GitHub.
+
+What git says -- a card shipped, a card claimed, a task done -- is never faked:
+:func:`ship`, :func:`unship` and :func:`claim` write the ship markers and claims (ruling
+``balance:R-BAL359``), and :func:`finish`, :func:`unfinish`, :func:`piece` and
+:func:`unpiece` the task files (ruling ``balance:R-BAL386``), to the ``code`` fixture's bare
+``origin`` (``conftest.py``), which every command then reads as it reads the real one.
 """
 from __future__ import annotations
 
 import dataclasses
 import json
+from datetime import UTC, datetime
 
-from tools.ci.scratch import point_dev
+from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV
-from tools.quill import quill
+from tools.ci.trailers import DEV, tracking
+from tools.quill import _git, quill
 from tools.quill._github import GitHubError
 from tools.quill._tracker import (
     Card,
     Child,
-    Claim,
-    ClaimTaken,
     Comment,
     Edit,
     Milestone,
@@ -87,18 +92,19 @@ class FakeBoard:
 
 
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
-    """The tracker in memory: cards, bodies, comments, claims, its board, and every write.
+    """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (29/20) -- it stands in for
+    Pylint: ``too-many-public-methods`` (30/20, measured at X-cx's S3a; this
+    line said 27 while 28 stood) -- it stands in for
     :class:`_tracker.Tracker`, so it has each of that class's 28 reads and
-    writes (its own disable says why there are so many), and ``add``, which
-    puts a card in.  ``too-many-instance-attributes`` (11/7) -- **one per kind
-    of fact it keeps**: ten a command reads back (cards, bodies, saved
-    versions, comments, claims, merged pull requests, the board, the deleted
-    numbers, the milestones, and each card's milestone) and the log of writes
-    the tests read; the comments ``show`` reads (X-cx leaf B) made the eighth,
-    the numbering X-cx's migration reads (L7) the ninth, and its milestones the
-    tenth and eleventh.
+    writes (its own disable says why there are so many), and ``add`` and
+    ``add_task``, which put a card or a task in.
+    ``too-many-instance-attributes`` (10/7) -- **one per kind
+    of fact it keeps**: nine a command reads back (cards, bodies, saved
+    versions, comments, the board, the deleted numbers, the milestones, each
+    card's milestone, and how GitHub renders a text) and the log of writes the
+    tests read.  The claims and the merged pull requests it kept left it at
+    X-cx's M1, when a claim became a branch of the code repository (R-BAL359).
     """
 
     app_login = APP_LOGIN
@@ -110,11 +116,10 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.bodies: dict[int, str] = {}
         self.versions: dict[int, list[Edit]] = {}
         self.notes: dict[int, list[Comment]] = {}
-        self.held: dict[int, Claim] = {}
-        self.pulls: dict[str, set[str]] = {}
         self.gone: set[int] = set()
         self.milestones_by_number: dict[int, Milestone] = {}
         self.milestone_of: dict[int, int] = {}
+        self.renderer = None
         self.writes: list[tuple] = []
         self.board = FakeBoard(self.writes)
 
@@ -130,6 +135,15 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         if on_board and values["is_open"] and kind in quill.ON_BOARD:
             self.board.items.append(number)
         return self.cards_by_number[number]
+
+    def add_task(self, number, parent, **fields):
+        """Put a task in the tracker (R-BAL386): a sub-issue of type ``task`` under the card
+        ``parent``, which lists it, as GitHub links one; open and carrying no label by
+        default, and never on the board."""
+        task = self.add(number, "task", labels=(), parent=parent, **fields)
+        held = self.cards_by_number[parent]
+        self._set(parent, children=(*held.children, Child(number, "task", task.is_open)))
+        return task
 
     def _set(self, number, **fields):
         """Change a held card."""
@@ -160,6 +174,10 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         """The cards that exist among ``numbers``."""
         return {n: self._view(n) for n in numbers if n in self.cards_by_number}
 
+    def milestones_of(self, numbers):
+        """The milestone each card that exists among ``numbers`` is in, None for none."""
+        return {n: self.milestone_of.get(n) for n in numbers if n in self.cards_by_number}
+
     def all_cards(self):
         """Every card, open and closed, with its body, its comments and its milestone."""
         return {n: WholeCard(self._view(n), self.bodies[n], tuple(self.notes.get(n, ())),
@@ -180,13 +198,24 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
             return NumberState.ISSUE
         return NumberState.DELETED if number in self.gone else NumberState.NOT_FOUND
 
+    def blocking(self, number):
+        """The cards ``number`` blocks: each whose blocked-by edges name it, with its kind and
+        state as they stand, in card order (GitHub lists the newest link first, which no
+        command reads)."""
+        return tuple(Child(n, card.kind, card.is_open)
+                     for n, card in sorted(self.cards_by_number.items())
+                     if number in card.blocked_by)
+
     def body(self, number):
         """A card's body."""
         return self.bodies[number]
 
-    def claims(self):
-        """Every claim."""
-        return dict(self.held)
+    def render(self, text):
+        """``text`` as :attr:`renderer` answers it: a test that renders sets the answer GitHub
+        gives, and with none set a render fails loudly rather than guess GitHub's HTML."""
+        if self.renderer is None:
+            raise AssertionError(f"rendered with no renderer set: {text[:80]!r}")
+        return self.renderer(text)
 
     def edits(self, number):
         """A card's body and its versions (the body as filed when it was never edited)."""
@@ -201,10 +230,6 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     def find_titles(self, text):
         """Cards whose title holds ``text``."""
         return [(n, c.title) for n, c in self.cards_by_number.items() if text in c.title]
-
-    def merged_into_dev(self, _repository, sha):
-        """The branches recorded as having merged ``sha`` into dev."""
-        return self.pulls.get(sha, set())
 
     # -- writes
     def create(self, kind, title, body, labels, milestone=None):
@@ -229,6 +254,14 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.writes.append(("create_milestone", number, title))
         self.milestones_by_number[number] = Milestone(number, title, description)
         return number
+
+    def set_milestone(self, number, milestone):
+        """Put a card in milestone number ``milestone``, or with None in none."""
+        self.writes.append(("set_milestone", number, milestone))
+        if milestone is None:
+            self.milestone_of.pop(number, None)
+        else:
+            self.milestone_of[number] = milestone
 
     def retype(self, number, kind):
         """Change a card's kind."""
@@ -327,19 +360,6 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         held = self.cards_by_number[number]
         self._set(number, blocked_by=tuple(b for b in held.blocked_by if b != blocker.number))
 
-    def claim(self, number, branch):
-        """Claim a card; refused when held."""
-        if number in self.held:
-            raise ClaimTaken(f"plan#{number} is already claimed")
-        self.writes.append(("claim", number, branch))
-        self.held[number] = Claim(number, branch, "2026-10-04T12:00:00Z", f"sha{number}")
-        return self.held[number]
-
-    def release(self, number):
-        """Delete a claim."""
-        self.writes.append(("release", number))
-        del self.held[number]
-
 
 class Sent:
     """A ``requests`` session that answers each request with ``status`` and ``answer`` (and
@@ -396,13 +416,78 @@ class AnswerLostOnce:
         return answer
 
 
-def ship(root, *trailers):
-    """Put a commit carrying ``trailers`` on origin/dev; its sha."""
-    tree = _run(root, "hash-object", "-t", "tree", "/dev/null")
-    parent = _run(root, "rev-parse", DEV)
-    sha = _run(root, "commit-tree", tree, "-p", parent, "-m", "leaf", "-m", "\n".join(trailers))
-    point_dev(root, sha)
+#: When a claim :func:`claim` makes says it was made, unless a test names another instant.
+CLAIMED = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
+
+
+def _onto_dev(root, message, files):
+    """A commit on ``origin``'s ``dev`` writing or deleting ``files``, made on the ``dev``
+    ``origin`` holds and pushed there from another clone (:func:`scratch.elsewhere`), as
+    GitHub's merge of a ``card/N`` moves ``dev``: ``root`` sees it only through a fetch of
+    its own; its sha."""
+    other = elsewhere(root)
+    sha = commit_files(other, _run(other, "rev-parse", tracking(DEV)), message, files)
+    _run(other, "push", "--quiet", "origin", f"{sha}:refs/heads/dev")
     return sha
+
+
+def ship(root, *numbers):
+    """Land on ``origin``'s ``dev`` the ship marker of each card in ``numbers`` (R-BAL359), as
+    a merged ``card/N`` branch lands it; its sha."""
+    return _onto_dev(root, "ship", {_git.marker(number): f"claimed {_git.instant(CLAIMED)}\n"
+                                    for number in numbers})
+
+
+def unship(root, *numbers):
+    """Delete from ``origin``'s ``dev`` the ship marker of each card in ``numbers``, as a
+    revert of the change that shipped it does; its sha."""
+    return _onto_dev(root, "Revert ship", dict.fromkeys(map(_git.marker, numbers)))
+
+
+def finish(root, *numbers):
+    """Land on ``origin``'s ``dev`` the file of each task in ``numbers`` (R-BAL386), as the
+    merge of its card's branch lands it; its sha."""
+    return _onto_dev(root, "finish", {_git.task_file(number): f"done {_git.instant(CLAIMED)}\n"
+                                      for number in numbers})
+
+
+def unfinish(root, *numbers):
+    """Delete from ``origin``'s ``dev`` the file of each task in ``numbers``, as a revert of the
+    commit that wrote it does; its sha."""
+    return _onto_dev(root, "Revert finish", dict.fromkeys(map(_git.task_file, numbers)))
+
+
+def _onto_claim(root, card, message, files):
+    """A commit on ``origin``'s ``card/<card>`` (a claim :func:`claim` made) writing or deleting
+    ``files``, pushed there from another clone (:func:`scratch.elsewhere`), as a session pushes
+    the commit finishing a piece; its sha."""
+    other, branch = elsewhere(root), _git.card_branch(card)
+    _run(other, "fetch", "--quiet", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    sha = commit_files(other, _run(other, "rev-parse", f"refs/remotes/origin/{branch}"), message,
+                       files)
+    _run(other, "push", "--quiet", "origin", f"{sha}:refs/heads/{branch}")
+    return sha
+
+
+def piece(root, card, *numbers):
+    """Push onto ``card/<card>`` the file of each task in ``numbers`` (R-BAL386), as the commit
+    finishing each piece writes it; its sha."""
+    return _onto_claim(root, card, "piece", {
+        _git.task_file(number): f"done {_git.instant(CLAIMED)}\n" for number in numbers})
+
+
+def unpiece(root, card, *numbers):
+    """Push onto ``card/<card>`` a commit deleting the file of each task in ``numbers``, as a
+    revert of the commit finishing the piece does on the branch; its sha."""
+    return _onto_claim(root, card, "Revert piece", dict.fromkeys(map(_git.task_file, numbers)))
+
+
+def claim(root, number, when=CLAIMED):
+    """Claim card ``number`` on ``origin`` as a session in another clone would
+    (:func:`_git.claim` on the ``dev`` ``origin`` holds, from :func:`scratch.elsewhere`):
+    ``root`` learns of it only through a read of its own, and its HEAD and branches are left
+    as they were; the claim's sha."""
+    return _git.claim(elsewhere(root), number, tracking(DEV), when)
 
 
 

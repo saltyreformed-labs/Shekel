@@ -83,9 +83,10 @@ def _outside(number, title):
     return (f"plan#{number} ({title!r}) is no item's card, numbered lower than every card an "
             "item's key names (a card filed already apart) and under no card filed already: a "
             "card filed outside X-cx before the migration, an X-cx leaf unlinked from a card "
-            "filed already by hand, or one of the migration's first cards with its title or arc "
-            "label changed by hand or its item gone from the registries; settle it before the "
-            "run")
+            "filed already by hand (a finding or a ruling: its owner link removed; block it by "
+            "its owner again, R-BAL395), or one of the migration's first cards with its title "
+            "or arc label changed by hand or its item gone from the registries; settle it "
+            "before the run")
 
 
 # -- a card whose key was changed by hand (review of B2a, M3; its delta review) ----
@@ -126,8 +127,8 @@ def test_a_marked_card_no_item_claims_is_refused(corpus):
 def test_a_card_whose_key_now_names_no_item_is_refused(corpus, key, change):
     """Its key read whole but no item's -- its one arc label changed, or its alias (delta
     review of B2a, MEDIUM-2: every earlier case read no key at all) -- refused ONCE: what
-    follows from it is not refused again (A-3's finding under it; for A-2a, the finding F-1
-    under it, the steps A-2b and A-3 it blocks, and its board place)."""
+    follows from it is not refused again (the finding A-3 owns; for A-2a, the finding F-1 it
+    owns, the steps A-2b and A-3 it blocks, and its board place)."""
     tracker, numbers = filed_tracker(corpus)
     with_change(tracker, numbers[key], **change)
     found = corpus_plan(corpus, tracker)
@@ -176,7 +177,8 @@ def _ended(number, title):
             "dropped (R-BAL205), an X-cx card a person unlinked from a card filed already, or "
             "one of the migration's first cards with its title or arc label changed by hand or "
             "its item gone from the registries; re-link one a person unlinked under its card "
-            "filed already, and delete any other on the web, before the run")
+            "filed already (a finding or a ruling: block it by its owner again, R-BAL395), and "
+            "delete any other on the web, before the run")
 
 
 def _mapped_with_leaf(corpus, monkeypatch, start=2):
@@ -199,10 +201,11 @@ def _mapped_with_leaf(corpus, monkeypatch, start=2):
 def test_a_card_of_the_trackers_own_below_a_card_filed_already_is_let_be(corpus, monkeypatch,
                                                                          kind, where):
     """X-cx's own cards (#2-#10, #26 and #27 under #1 today), filed before the migration:
-    no item's, and not refused, whatever their kind (``quill file finding --owner 7`` puts a
-    finding there; review of PR #549, L3) and whatever they hold -- an As filed block in a
-    body (a fenced example quoting one) or in a comment, the tool's or a person's.  Only its
-    number tells a card of the tracker's own (review of PR #549, M1)."""
+    no item's, and not refused, whatever their kind (a finding or a ruling as ``quill file``
+    filed one before R-BAL395, a sub-issue of its owner, review of PR #549, L3; one filed
+    since, blocked by its owner, is the next test's) and whatever they hold -- an As filed
+    block in a body (a fenced example quoting one) or in a comment, the tool's or a
+    person's.  Only its number tells a card of the tracker's own (review of PR #549, M1)."""
     texts = corpus_texts(corpus)
     block = texts["balance:F-1"].body
     tracker = _mapped_with_leaf(corpus, monkeypatch)
@@ -212,6 +215,63 @@ def test_a_card_of_the_trackers_own_below_a_card_filed_already_is_let_be(corpus,
     tracker.notes[1] = {"a-persons-comment": [Comment("a-person", "t", block)],
                         "tool-comment": [Comment(FakeTracker.app_login, "t",
                                                  texts["balance:Q-1"].comment)]}.get(where, [])
+    found = plan(corpus_items(corpus), texts, MILESTONES, tracked(tracker))
+    assert (found.refusals, found.history, found.freeze) == ((), (), ())
+
+
+@pytest.mark.parametrize("kind, owners, own", [
+    ("finding", ("leaf",), True),
+    ("finding", ("filed",), True),
+    ("ruling", ("leaf",), True),
+    ("finding", ("leaf", "filed"), False),
+    ("finding", ("leaf", "outside"), False),
+    ("finding", ("outside",), False),
+    ("finding", ("item",), False),
+    ("step", ("leaf",), False),
+], ids=["owned-by-its-leaf", "owned-by-the-card-filed-already", "a-ruling-owned-by-its-leaf",
+        "blocked-by-two", "an-outside-blocker-beside-its-owner", "blocked-from-outside-alone",
+        "owned-by-an-items-card", "a-step-no-card-owns"])
+def test_a_finding_or_ruling_owned_below_a_card_filed_already_is_the_trackers_own(
+        corpus, monkeypatch, kind, owners, own):
+    """R-BAL395: ``quill file finding|ruling --owner`` files a card blocked by its owner and
+    under nothing.  One whose owner -- its one blocker, with none outside the tracker
+    (:func:`_state.owner`) -- is the card filed already or a card below it is the tracker's
+    own (``_migrate_plan._own``), let be while it is numbered below the migration's first
+    card, and refused as the migration's once numbered above it, as a sub-issue is.  Blocked
+    by two cards, by an issue outside the tracker beside its owner or alone, or by an item's
+    card, it has no owner below a card filed already, and a step has no owner at all: each
+    is refused as a card under no card filed already.  ``owners`` names what blocks it: X-cx's
+    own leaf, the card filed already, an item's card, or an issue outside the tracker."""
+    texts = corpus_texts(corpus)
+    tracker = _mapped_with_leaf(corpus, monkeypatch, start=10)
+    by = {"leaf": 1, "filed": _migrate_source.MAPPED["salary:S-1"],
+          "item": next(number for number, card in tracker.cards_by_number.items()
+                       if card.title.startswith("[A-3]"))}
+    state = {"is_open": False, "state_reason": "COMPLETED"} if kind == "ruling" else {}
+    below = () if own else (_outside(2, "Its own card"),)
+    for number, refused in ((2, below), (90, (*below, _rekeyed(90, "Its own card", first=10)))):
+        tracker.add(number, kind, "One sentence.", on_board=False, title="Its own card",
+                    labels=("salary",),
+                    blocked_by=tuple(by[name] for name in owners if name != "outside"),
+                    outside=tuple(OutsideLink("blocker", "o/code#9") for name in owners
+                                  if name == "outside"), **state)
+        found = plan(corpus_items(corpus), texts, MILESTONES, tracked(tracker))
+        assert found.refusals == refused
+        assert not found.freeze and not found.history
+
+
+def test_a_task_under_a_finding_owned_below_a_card_filed_already_is_the_trackers_own(
+        corpus, monkeypatch):
+    """R-BAL386 and R-BAL395: ``quill file task --parent`` hangs a task under a finding,
+    and the finding hangs under nothing, blocked by its owner.  A task under a finding the
+    tracker owns is its own too: the walk up takes a finding's owner where it has no parent
+    (``_migrate_plan._own``; R395's review, F2)."""
+    texts = corpus_texts(corpus)
+    tracker = _mapped_with_leaf(corpus, monkeypatch, start=10)
+    tracker.add(2, "finding", "One sentence.", on_board=False, title="Its own finding",
+                labels=("salary",), blocked_by=(1,))
+    tracker.add(3, "task", "One sentence.", on_board=False, title="Its own task",
+                labels=("salary",), parent=2)
     found = plan(corpus_items(corpus), texts, MILESTONES, tracked(tracker))
     assert (found.refusals, found.history, found.freeze) == ((), (), ())
 
@@ -382,7 +442,7 @@ def test_the_live_trackers_own_cards_refuse_nothing_before_or_after_the_first_ca
         write.key for write in (*empty.history, *empty.freeze) if write.what == CREATE} == {
         item.key for item in corpus_items(corpus) if item.key != "salary:S-1"}
     filed, numbers = filed_tracker(corpus, skip=("salary:S-1",), start=31)
-    with_change(_with_own_cards(filed), numbers["salary:N-391"], parent=1)
+    with_change(_with_own_cards(filed), numbers["salary:N-391"], blocked_by=(1,))
     found = corpus_plan(corpus, filed)
     assert (found.refusals, found.history, found.freeze) == ((), (), ())
 
@@ -410,7 +470,7 @@ def test_a_card_of_the_trackers_own_on_the_board_below_an_unranked_card_filed_al
      "it is linked outside the tracker (o/code#5): a person's call"),
     ({"parent": 3}, "it is a sub-issue of plan#3, not none: re-homing is a person's call"),
     ({"blocked_by": (3,)},
-     "it is blocked by plan#3, which steps.md does not record: a person's call"),
+     "it is blocked by plan#3, which the registries do not record: a person's call"),
     ({"is_open": False, "state_reason": "COMPLETED"}, "it is closed, and a step moves open"),
     ({"labels": ("salary", FILING), "is_open": False, "state_reason": "NOT_PLANNED"},
      "its filing ended (dropped while marked, or a ruling withdrawn): nothing is filed over "
@@ -493,12 +553,13 @@ def test_a_card_of_the_trackers_own_given_a_filed_items_key_is_never_to_be_delet
     monkeypatch.setitem(_migrate_source.MAPPED, "salary:S-1", 1)
     filed, numbers = filed_tracker(corpus, skip=("salary:S-1",), start=31)
     tracker = _with_own_cards(filed)
-    with_change(tracker, numbers["salary:N-391"], parent=1)
+    with_change(tracker, numbers["salary:N-391"], blocked_by=(1,))
     with_change(tracker, 3, title=card_title("F-1", "A leaf"), labels=("balance",))
     found = corpus_plan(corpus, tracker)
     assert found.refusals == (
         _by_hand("balance:F-1", "plan#3 unmarked, under plan#1",
-                 f"plan#{numbers['balance:F-1']} unmarked, under plan#{numbers['balance:A-2a']}"),
+                 f"plan#{numbers['balance:F-1']} unmarked, blocked by "
+                 f"plan#{numbers['balance:A-2a']}"),
         *(_rekeyed(number, f"[X-cx L{number}] A leaf", first=3)
           for number in (*range(4, 11), 26, 27)))
     assert (found.history, found.freeze) == ((), ())
@@ -527,6 +588,9 @@ def test_x_cx_s_own_card_a_person_unlinked_is_refused_naming_that_cause(
 #: How a refusal names a card as its create left it.
 _BARE = ("still marked and open, linked to nothing the tool reads, off the board, with no "
          "comment")
+#: How a refusal names F-1's card as a finished filing leaves it: blocked by its owner, A-2a's
+#: card (R-BAL395).
+_F1 = "unmarked, blocked by plan#3"
 
 
 def _copy(tracker, number, of):
@@ -550,10 +614,10 @@ def test_a_re_sent_creates_other_cards_are_offered_for_deletion(corpus, lagging)
     tracker, numbers = filed_tracker(corpus)
     _copy(tracker, 1, numbers["balance:F-1"])
     if lagging:
-        with_change(tracker, 7, labels=("balance", FILING), parent=None)
+        with_change(tracker, 7, labels=("balance", FILING), blocked_by=())
     found = corpus_plan(corpus, tracker)
     assert found.refusals == (_resent("balance:F-1", f"plan#1 {_BARE}",
-                                      f"plan#7 {_BARE if lagging else 'unmarked, under plan#3'}"),)
+                                      f"plan#7 {_BARE if lagging else _F1}"),)
     assert (found.history, found.freeze) == ((), ())
 
 
@@ -567,13 +631,13 @@ def test_two_re_sent_creates_are_each_refused_by_key_with_its_own_card_to_keep(c
     _copy(tracker, 2, numbers["balance:F-1"])
     found = corpus_plan(corpus, tracker)
     assert found.refusals == (
-        _resent("balance:F-1", f"plan#2 {_BARE}", "plan#8 unmarked, under plan#4"),
+        _resent("balance:F-1", f"plan#2 {_BARE}", "plan#8 unmarked, blocked by plan#4"),
         _resent("salary:S-1", f"plan#1 {_BARE}",
-                "plan#7 unmarked, holding 1 sub-issue(s), on the board"))
+                "plan#7 unmarked, blocking plan#12, on the board"))
     assert (found.history, found.freeze) == ((), ())
 
 
-_A2A = "holding 1 sub-issue(s), blocking plan#5, plan#6, on the board"
+_A2A = "blocking plan#5, plan#6, plan#8, on the board"
 
 
 @pytest.mark.parametrize("change, refusals", [
@@ -615,17 +679,18 @@ def test_two_re_sent_creates_one_the_others_parent_are_graded_on_each_others_kep
 
 def test_a_re_sent_last_card_under_a_card_refused_already_is_settled_by_hand(corpus):
     """F-1's create re-sent, #1 a bare copy; a person retitles A-3's card (#5) away from its
-    key and links #7, F-1's last card, under it (review 4 of B2b-1, LOW-1, its probe).  #5 is
-    refused as no item's card, and the read excuses a link to a card refused already; but
-    once #5 is retitled back, #7 stands under A-3's card, not A-2a's, so the last card is
-    graded as it is and neither card is offered for deletion."""
+    key and makes it #7's owner, F-1's last card blocked by it in place of A-2a's (review 4 of
+    B2b-1, LOW-1, its probe; R-BAL395).  #5 is refused as no item's card, and the read
+    excuses a link to a card refused already; but once #5 is retitled back, #7 is owned by
+    A-3's card, not A-2a's, so the last card is graded as it is and neither card is offered
+    for deletion."""
     tracker, numbers = filed_tracker(corpus)
     _copy(tracker, 1, numbers["balance:F-1"])
     with_change(tracker, numbers["balance:A-3"], title="Last part, renamed by hand")
-    with_change(tracker, numbers["balance:F-1"], parent=numbers["balance:A-3"])
+    with_change(tracker, numbers["balance:F-1"], blocked_by=(numbers["balance:A-3"],))
     found = corpus_plan(corpus, tracker)
     assert found.refusals == (
-        _by_hand("balance:F-1", f"plan#1 {_BARE}", "plan#7 unmarked, under plan#5"),
+        _by_hand("balance:F-1", f"plan#1 {_BARE}", "plan#7 unmarked, blocked by plan#5"),
         _rekeyed(5, "Last part, renamed by hand", first=1))
     assert (found.history, found.freeze) == ((), ())
 
@@ -633,21 +698,22 @@ def test_a_re_sent_last_card_under_a_card_refused_already_is_settled_by_hand(cor
 def test_a_re_sent_last_card_under_a_card_given_its_parents_key_by_hand_is_settled_by_hand(
         corpus):
     """F-1's create re-sent, #1 a bare copy; a person retitles A-3's card (#5) to A-2a's
-    key, F-1's parent's, and links #7, F-1's last card, under it (review 5 of B2b-1, LOW-A,
-    its P1).  A-2a's key is on two cards, neither as its create left it, so a person keeps
-    either: graded with no card of A-2a's, #7 stands under a card no grading names, and
-    neither F-1 card is offered for deletion.  Graded under A-2a's last card, #5, #7 was
-    offered, and once #5 was retitled back as A-2a's refusal says, the next run refused it."""
+    key, F-1's owner's, and makes it #7's owner, F-1's last card blocked by it (review 5 of
+    B2b-1, LOW-A, its P1; R-BAL395).  A-2a's key is on two cards, neither as its create left
+    it, so a person keeps either: graded with no card of A-2a's, #7 is owned by a card no
+    grading names, and neither F-1 card is offered for deletion.  Graded under A-2a's last
+    card, #5, #7 was offered, and once #5 was retitled back as A-2a's refusal says, the next
+    run refused it."""
     tracker, numbers = filed_tracker(corpus)
     _copy(tracker, 1, numbers["balance:F-1"])
     with_change(tracker, numbers["balance:A-3"], title=corpus_texts(corpus)["balance:A-2a"].title)
-    with_change(tracker, numbers["balance:F-1"], parent=numbers["balance:A-3"])
+    with_change(tracker, numbers["balance:F-1"], blocked_by=(numbers["balance:A-3"],))
     found = corpus_plan(corpus, tracker)
     assert found.refusals == (
         _by_hand("balance:A-2a", "plan#3 unmarked, under plan#2, blocking plan#4, plan#5, on the "
-                 "board", "plan#5 unmarked, holding 2 sub-issue(s), blocked by plan#3, on the "
+                 "board", "plan#5 unmarked, blocked by plan#3, blocking plan#7, plan#8, on the "
                  "board"),
-        _by_hand("balance:F-1", f"plan#1 {_BARE}", "plan#7 unmarked, under plan#5"))
+        _by_hand("balance:F-1", f"plan#1 {_BARE}", "plan#7 unmarked, blocked by plan#5"))
     assert (found.history, found.freeze) == ((), ())
 
 
@@ -665,50 +731,52 @@ def test_a_re_sent_last_card_in_a_milestone_made_by_hand_is_settled_by_hand(corp
     found = corpus_plan(corpus, tracker)
     assert found.refusals == (
         _by_hand("balance:A-3", f"plan#1 {_BARE}",
-                 "plan#5 unmarked, holding 1 sub-issue(s), blocked by plan#3, on the board"),
+                 "plan#5 unmarked, blocked by plan#3, blocking plan#8, on the board"),
         "milestone #2 'Made by hand' is none the input file names (renamed on the web?): settle "
         "it before the run")
     assert (found.history, found.freeze) == ((), ())
 
 
-@pytest.mark.parametrize("parent, refusal, states", [
-    (1, _resent, ("plan#1 unmarked, holding 12 sub-issue(s)", "plan#26 unmarked, under plan#1")),
+@pytest.mark.parametrize("owner, refusal, states", [
+    (1, _resent, ("plan#1 unmarked, holding 11 sub-issue(s), blocking plan#39",
+                  "plan#26 unmarked, under plan#1")),
     (26, _by_hand, ("plan#1 unmarked, holding 11 sub-issue(s)",
-                    "plan#26 unmarked, under plan#1, holding 1 sub-issue(s)")),
+                    "plan#26 unmarked, under plan#1, blocking plan#39")),
 ], ids=["under-the-card-filed-already", "under-the-card-given-its-key"])
 def test_a_re_sent_last_card_is_graded_under_a_card_filed_alreadys_own_card(
-        corpus, monkeypatch, parent, refusal, states):
-    """N-391's create re-sent, its last card under card #1, filed already as S-1's, while
-    X-cx's own leaf #26 carries S-1's key by hand.  S-1's refusal keeps card #1 (retitle
-    #26), so N-391's last card is graded under #1, not under #26, the last card of S-1's
-    key: under #1 its copy is offered; under #26, which a run refuses once #26 is retitled
-    as S-1's refusal says, it is settled by hand."""
+        corpus, monkeypatch, owner, refusal, states):
+    """N-391's create re-sent, its last card owned by card #1 (blocked by it, R-BAL395),
+    filed already as S-1's, while X-cx's own leaf #26 carries S-1's key by hand.  S-1's
+    refusal keeps card #1 (retitle #26), so N-391's last card is graded as #1's, not as
+    #26's, the last card of S-1's key: owned by #1 its copy is offered; owned by #26, which
+    a run refuses once #26 is retitled as S-1's refusal says, it is settled by hand."""
     monkeypatch.setitem(_migrate_source.MAPPED, "salary:S-1", 1)
     filed, numbers = filed_tracker(corpus, skip=("salary:S-1",), start=31)
     tracker = _with_own_cards(filed)
     _copy(tracker, 30, numbers["salary:N-391"])
-    with_change(tracker, numbers["salary:N-391"], parent=parent)
+    with_change(tracker, numbers["salary:N-391"], blocked_by=(owner,))
     with_change(tracker, 26, title=card_title("S-1", "A leaf"))
     found = corpus_plan(corpus, tracker)
+    assert numbers["salary:N-391"] == 39
     assert found.refusals == (
-        refusal("salary:N-391", f"plan#30 {_BARE}",
-                f"plan#{numbers['salary:N-391']} unmarked, under plan#{parent}"),
+        refusal("salary:N-391", f"plan#30 {_BARE}", f"plan#39 unmarked, blocked by plan#{owner}"),
         _filed_already("salary:S-1", 1, *states),
         _rekeyed(27, "[X-cx L27] A leaf", first=26))
     assert (found.history, found.freeze) == ((), ())
 
 
 @pytest.mark.parametrize("change, state", [
-    ({"parent": None}, "unmarked"),
-    ({"is_open": False, "state_reason": "COMPLETED"}, "unmarked, closed, under plan#3"),
+    ({"blocked_by": ()}, "unmarked"),
+    ({"is_open": False, "state_reason": "COMPLETED"}, "unmarked, closed, blocked by plan#3"),
     ({"outside": (OutsideLink("parent", "o/code#5"),)},
-     "unmarked, under plan#3, linked outside the tracker"),
-    ({"kind": "step"}, "unmarked, under plan#3"),
+     "unmarked, blocked by plan#3, linked outside the tracker"),
+    ({"kind": "step"}, _F1),
 ], ids=["unmarked-unlinked", "closed", "linked-outside", "both-retyped"])
 def test_a_re_sent_create_whose_last_card_is_refused_is_settled_by_hand(corpus, change, state):
     """F-1's create re-sent, #1 a bare copy, and #7, the last made, one the next run refuses
-    as F-1's card: unmarked without its link (a person's unlink, or a read that lags the
-    link's write, both of which the refusal names: review 5 of B2b-1, LOW-B), closed, or
+    as F-1's card: unmarked without its owner link, blocked by A-2a (R-BAL395; a person's
+    unlink, or a read that lags the link's write, both of which the refusal names: review 5
+    of B2b-1, LOW-B), closed, or
     linked outside the tracker by a person, or both cards retyped (copies still).  Keeping
     #7 would be refused, so neither card is offered for deletion (review 3 of B2b-1, LOW-1,
     a condition of MEDIUM-1's keeper)."""
@@ -730,7 +798,7 @@ def _held_by_hand(tracker, edit):
         tracker.notes[1] = [Comment("a-person", "t", "Seen.")]
     elif edit in ("sub-issue", "blocking"):
         with_change(tracker, 8, **({"parent": 1} if edit == "sub-issue" else
-                                   {"blocked_by": (1,)}))
+                                   {"blocked_by": (*tracker.cards_by_number[8].blocked_by, 1)}))
     else:
         with_change(tracker, 1, **{
             "unmarked": {"labels": ("balance",)},
@@ -755,8 +823,7 @@ def test_a_re_sent_copy_holding_any_later_write_is_settled_by_hand(corpus, edit,
     _copy(tracker, 1, numbers["balance:F-1"])
     _held_by_hand(tracker, edit)
     found = corpus_plan(corpus, tracker)
-    assert found.refusals == (_by_hand("balance:F-1", f"plan#1 {state}",
-                                       "plan#7 unmarked, under plan#3"),)
+    assert found.refusals == (_by_hand("balance:F-1", f"plan#1 {state}", f"plan#7 {_F1}"),)
     assert (found.history, found.freeze) == ((), ())
 
 
@@ -776,17 +843,16 @@ def test_three_cards_of_one_create_are_each_graded(corpus, held, refusal):
     found = corpus_plan(corpus, tracker)
     assert found.refusals == (refusal(
         "balance:F-1", f"plan#1 {_BARE}",
-        f"plan#2 {'marked, 1 comment(s)' if held else _BARE}", "plan#9 unmarked, under plan#5"),)
+        f"plan#2 {'marked, 1 comment(s)' if held else _BARE}",
+        "plan#9 unmarked, blocked by plan#5"),)
     assert (found.history, found.freeze) == ((), ())
 
 
 @pytest.mark.parametrize("retitled, key, states", [
     ("balance:A-3", "A-2", ("plan#2 unmarked, holding 2 sub-issue(s)",
-                            "plan#5 unmarked, holding 1 sub-issue(s), blocked by plan#3, on the "
-                            "board")),
+                            "plan#5 unmarked, blocked by plan#3, blocking plan#8, on the board")),
     ("balance:A-2b", "A-3", ("plan#4 unmarked, under plan#2, blocked by plan#3, on the board",
-                             "plan#5 unmarked, holding 1 sub-issue(s), blocked by plan#3, on the "
-                             "board")),
+                             "plan#5 unmarked, blocked by plan#3, blocking plan#8, on the board")),
 ], ids=["onto-a-lower-card", "onto-a-higher-card"])
 def test_a_card_retitled_to_another_items_key_is_settled_by_hand(corpus, retitled, key,
                                                                   states):
@@ -811,12 +877,13 @@ def test_a_card_given_a_card_filed_alreadys_key_offers_no_card_for_deletion(corp
     monkeypatch.setitem(_migrate_source.MAPPED, "salary:S-1", 1)
     filed, numbers = filed_tracker(corpus, skip=("salary:S-1",), start=31)
     tracker = _with_own_cards(filed)
-    with_change(tracker, numbers["salary:N-391"], parent=1)
+    with_change(tracker, numbers["salary:N-391"], blocked_by=(1,))
     with_change(tracker, 26, title=card_title("S-1", "A leaf"))
     found = corpus_plan(corpus, tracker)
+    assert numbers["salary:N-391"] == 39
     assert found.refusals == (
-        _filed_already("salary:S-1", 1, "plan#1 unmarked, holding 12 sub-issue(s)",
-                       "plan#26 unmarked, under plan#1"),
+        _filed_already("salary:S-1", 1, "plan#1 unmarked, holding 11 sub-issue(s), blocking "
+                       "plan#39", "plan#26 unmarked, under plan#1"),
         _rekeyed(27, "[X-cx L27] A leaf", first=26))
     assert (found.history, found.freeze) == ((), ())
 
@@ -846,7 +913,7 @@ def test_cards_each_as_a_create_left_it_but_no_copies_of_one_are_settled_by_hand
                 "a-copy-kind-changed": {"kind": "step"},
                 "a-copy-label-added": {"labels": ("balance", FILING, "moves-money")},
             }[state])
-        key, states = "balance:F-1", (f"plan#1 {_BARE}", "plan#7 unmarked, under plan#3")
+        key, states = "balance:F-1", (f"plan#1 {_BARE}", f"plan#7 {_F1}")
     else:
         kept = ("balance:A-2", "balance:A-2a")
         tracker, numbers = filed_tracker(
@@ -870,6 +937,5 @@ def test_a_key_on_two_cards_is_refused_and_nothing_written_for_it(corpus):
     tracker.add(40, "finding", "dup", on_board=False,
                 title=card_title("F-1", "Stale row"), labels=("balance", FILING))
     found = corpus_plan(corpus, tracker)
-    assert found.refusals == (_by_hand("balance:F-1", "plan#7 unmarked, under plan#3",
-                                       f"plan#40 {_BARE}"),)
+    assert found.refusals == (_by_hand("balance:F-1", f"plan#7 {_F1}", f"plan#40 {_BARE}"),)
     assert not found.freeze and "balance:F-1" not in found.numbers

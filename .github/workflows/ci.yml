@@ -4,12 +4,13 @@
 # for the seven it needs (polyglot-lint is a required check of its own):
 #
 #   scope          classifies the change set: ``registry-only`` or ``full``
-#                  (tools/ci/ci_scope.py; step 2b below), and hands its two
-#                  ends to commit-trailers and landing.
+#                  (tools/ci/ci_scope.py; step 2b below), hands its two
+#                  ends to commit-trailers, and names its pull request to
+#                  landing.
 #   commit-trailers  refuses a commit that breaks the card-trailer rules
 #                  (tools/ci/commit_trailers.py), in EVERY scope (step 4d).
-#   landing        refuses a trailer naming a card the tracker says no commit
-#                  may land (tools/quill/landing.py), in EVERY scope (step 4e).
+#   landing        refuses a merge writing a ship marker the one write rule
+#                  forbids (tools/quill/landing.py), in EVERY scope (step 4e).
 #   plan-gate      the plan gate, quill and tools/ci, in EVERY scope
 #                  (step 4b).
 #   tax-law        refuses from December 1 until next year's tax law is in
@@ -104,6 +105,7 @@ jobs:
       scope: ${{ steps.scope.outputs.scope }}
       base: ${{ steps.scope.outputs.base }}
       head: ${{ steps.scope.outputs.head }}
+      pull: ${{ steps.scope.outputs.pull }}
     steps:
       # The three-dot diff below reads history, so this checkout is full.
       - name: Checkout code
@@ -143,34 +145,41 @@ jobs:
       # A pull_request event and a merge-queue group have a change set: a
       # push to main is a release and runs everything.  The step hands every
       # event's two ends -- a push's included, its before and after -- to the
-      # commit-trailers and landing jobs, so which payload field holds them is
-      # read here and nowhere else.  The three-dot diff is the branch's own
-      # changes since it forked from its base, so a ``git merge origin/dev``
-      # on the branch does not drag dev's files into the set; --no-renames
-      # shows a rename as its old AND new path, so a file renamed out of
-      # docs/plans is seen leaving.  Both SHAs are in the fetch-depth-0
-      # history; a diff that fails for any reason is reported and answered
-      # ``full`` rather than trusted.
+      # commit-trailers job, and the pull request it judges -- a pull
+      # request's number, or a queue group's branch, which ends with the
+      # number of the one it merges -- to the landing job, so which payload
+      # field holds them is read here and nowhere else.  The three-dot diff
+      # is the branch's own changes since it forked from its base, so a ``git
+      # merge origin/dev`` on the branch does not drag dev's files into the
+      # set; --no-renames shows a rename as its old AND new path, so a file
+      # renamed out of docs/plans is seen leaving.  Both SHAs are in the
+      # fetch-depth-0 history; a diff that fails for any reason is reported
+      # and answered ``full`` rather than trusted.
       - name: Classify the change set
         id: scope
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           GROUP_BASE: ${{ github.event.merge_group.base_sha }}
           GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
+          GROUP_REF: ${{ github.event.merge_group.head_ref }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.event.after }}
         run: |
           set -euo pipefail
           case "${EVENT_NAME}" in
-              pull_request) BASE_SHA="${PR_BASE}" HEAD_SHA="${PR_HEAD}" ;;
-              merge_group) BASE_SHA="${GROUP_BASE}" HEAD_SHA="${GROUP_HEAD}" ;;
-              push) BASE_SHA="${PUSH_BEFORE}" HEAD_SHA="${PUSH_AFTER}" ;;
-              *) BASE_SHA="" HEAD_SHA="" ;;
+              pull_request) BASE_SHA="${PR_BASE}" HEAD_SHA="${PR_HEAD}" PULL="${PR_NUMBER}" ;;
+              merge_group) BASE_SHA="${GROUP_BASE}" HEAD_SHA="${GROUP_HEAD}" PULL="${GROUP_REF}" ;;
+              push) BASE_SHA="${PUSH_BEFORE}" HEAD_SHA="${PUSH_AFTER}" PULL="" ;;
+              *) BASE_SHA="" HEAD_SHA="" PULL="" ;;
           esac
-          echo "base=${BASE_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "head=${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+          {
+              echo "base=${BASE_SHA}"
+              echo "head=${HEAD_SHA}"
+              echo "pull=${PULL}"
+          } >> "${GITHUB_OUTPUT}"
           if [ "${EVENT_NAME}" != "pull_request" ] && [ "${EVENT_NAME}" != "merge_group" ]; then
               echo "scope=full" >> "${GITHUB_OUTPUT}"
               echo "scope: full (a ${EVENT_NAME} event has no pull-request change set)"
@@ -226,6 +235,13 @@ jobs:
   landing:
     needs: scope
     runs-on: ubuntu-24.04
+    # The job's own token reads the pull request it judges (its base, head
+    # branch and head commit), so this job alone adds ``pull-requests: read``
+    # to the workflow's least privilege.  A job's permissions replace the
+    # workflow's, so ``contents: read`` is restated for the checkout.
+    permissions:
+      contents: read
+      pull-requests: read
     env:
       # Whether this run was handed the reader App's key at all: GitHub
       # documents that a Dependabot run and a fork's pull request get no
@@ -233,14 +249,15 @@ jobs:
       # job's env.
       # It decides the mint step alone; whether the tracker must be read is
       # tools/quill/landing.py's to decide, and with no token it refuses to
-      # judge a change set naming a card (exit 2), so a skipped mint never
+      # judge a change that records a card (exit 2), so a skipped mint never
       # turns a needed read green.
       PLAN_READER_KEY_PRESENT: ${{ secrets.PLAN_READER_KEY != '' }}
     steps:
-      # The check reads the whole history of dev, main and the head -- what
-      # will have shipped once the head and main reach dev -- and which of the
-      # change set's commits dev or main already holds, so this checkout is
-      # full; the history is only READ.
+      # The check reads the merge it judges beside the whole history of dev
+      # and main -- the lines each branch took in and the commits that took
+      # them, every card either ever marked, and what will have shipped once
+      # the merge and the other branch meet -- so this checkout is full; the
+      # history is only READ.
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -278,7 +295,7 @@ jobs:
           print(f"name={PLAN.name}")
           EOF
 
-      # ── 4e. The card trailers against the tracker, in EVERY scope ─
+      # ── 4e. The one write rule over ship markers, in EVERY scope ─
       # Ruling balance:R-BAL289 (CI reads the tracker with a read-only token)
       # as balance:R-BAL311 makes it: the read-only App "Shekel plan reader"
       # (Issues read-only, installed on the tracker only), its private key in
@@ -305,23 +322,27 @@ jobs:
           repositories: ${{ steps.plan.outputs.name }}
           permission-issues: read
 
-      # A trailer naming a card the tracker lacks, a Ships: naming no work,
-      # or one naming a card that carries the filing mark (still being filed,
-      # or dropped while it was) is refused, each trailer judged once, by the
-      # pull request or merge group that lands its commit on dev or main (step
-      # X-cx's L9d).  Never judged: a commit pushed straight to dev, and the
-      # merge commit GitHub writes when it merges a pull request into dev or
-      # main outside a merge queue (main's protection binds administrators,
-      # R-BAL319, so no commit is pushed straight to main).
-      # The tracker is read only when a trailer names a card.  No condition:
-      # with the mint skipped the token is empty, and the check decides.
+      # Which change may add, change or delete a card's ship marker
+      # ``plan/ships/N`` (ruling balance:R-BAL359; step X-cx's M2): the merge
+      # this run checked out (``github.sha``: a pull request's trial merge,
+      # or the commit a queue group's target becomes) is judged as the change
+      # it makes to its first parent, the target's tip, for the ONE pull
+      # request the scope job names.  The job's own token reads that pull
+      # request's base, head branch and head commit, and a merge whose second
+      # parent is not that head is not judged (exit 2).  A push to main was
+      # judged in main's queue, its only way in (R-BAL322), so the check says
+      # so and exits 0.  The tracker is read only when a card the change
+      # records must be.  No condition: with the mint skipped the token is
+      # empty, and the check decides.
       # The rules: tools/quill/landing.py.
-      - name: Card trailers against the tracker (every scope)
+      - name: Ship markers against the write rule (every scope)
         env:
-          BASE_SHA: ${{ needs.scope.outputs.base }}
-          HEAD_SHA: ${{ needs.scope.outputs.head }}
+          EVENT_NAME: ${{ github.event_name }}
+          MERGE_SHA: ${{ github.sha }}
+          PULL: ${{ needs.scope.outputs.pull }}
           PLAN_READ_TOKEN: ${{ steps.token.outputs.token }}
-        run: python -m tools.quill.landing "${BASE_SHA}" "${HEAD_SHA}"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m tools.quill.landing "${EVENT_NAME}" "${MERGE_SHA}" "${PULL}"
 
   plan-gate:
     runs-on: ubuntu-24.04
@@ -458,15 +479,18 @@ jobs:
       # because the ruling refuses EVERY release and a registry-only PR is
       # one.  It reads the REAL clock, in the display timezone, so the TZ skew
       # above cannot move it and the calendar sweep's faked date never
-      # reaches it.  It is judged when the PR is PUSHED: GitHub does not
-      # re-run it at merge, so a PR checked green on November 30 can still
-      # merge in December.  That merge -- and a tag, which skips PRs -- is
-      # what the same check in docker-publish.yml stops, before the release
-      # image is built.  (Step X-cx's L5 requires the merge queue on dev
-      # only: a merge into dev is then judged again on its merge group, but
-      # a release merge into main is never queued, so docker-publish.yml's
-      # check still stops that one.)  The banner on every owner page and the
-      # weekly tax-law.yml run give the month's warning before either refuses.
+      # reaches it.  It is judged when the PR is pushed, and again on the
+      # merge-queue group that lands it: dev and main each take a change only
+      # through a queue (R-BAL322), and this workflow runs on every group, a
+      # release into main's included (measured 2026-10-23: main's one queued
+      # run so far, 39463907960 for release PR #587, ran this job's refuse
+      # check, as dev's groups do).  A group is judged before it lands (that
+      # one at 17:11 UTC, landed 17:24 UTC on 2026-10-20), so a group judged
+      # green on November 30 can still land in December.  Such a group into
+      # main -- and a tag, which skips PRs -- is what the same check in
+      # docker-publish.yml stops, before the release image is built.  The banner on every owner
+      # page and the weekly tax-law.yml run give the month's warning before
+      # either refuses.
       - name: Is next year's tax law in? (refuses from December 1)
         run: python scripts/check_tax_law.py refuse
 

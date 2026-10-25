@@ -9,12 +9,12 @@ from collections.abc import Sequence
 from dataclasses import replace
 
 from tools.quill._fake import FakeTracker
-from tools.quill._migrate_bodies import Built, Inputs, build
+from tools.quill._migrate_bodies import Built
 from tools.quill._migrate_fake import complete_input
-from tools.quill._migrate_input import grade
 from tools.quill._migrate_plan import Plan, Tracked, plan
 from tools.quill._migrate_source import Item, Registries, read_source
 from tools.quill._tracker import Comment
+from tools.quill.migrate import prepare
 from tools.quill.setup_tracker import FILING
 
 OUTCOME = "O1 the first"
@@ -28,12 +28,11 @@ def corpus_items(corpus: Registries) -> tuple[Item, ...]:
 
 
 def corpus_texts(corpus: Registries) -> dict[str, Built]:
-    """Each item's card text, as the input file :func:`_migrate_fake.complete_input` writes
-    makes it (:func:`_migrate_bodies.build`)."""
-    source = read_source(corpus)
-    decisions, problems = grade(complete_input(corpus, source), source, corpus)
-    assert not problems and decisions.milestones == MILESTONES
-    return build(Inputs(source, corpus, decisions))[0]
+    """Each item's card text as filed, as the input file :func:`_migrate_fake.complete_input`
+    writes makes it (:func:`migrate.prepare`: built, then its numbers written)."""
+    prepared = prepare(corpus, complete_input(corpus))
+    assert not prepared.refusals and prepared.decisions.milestones == MILESTONES
+    return dict(prepared.built)
 
 
 def corpus_plan(corpus: Registries, tracker: FakeTracker,

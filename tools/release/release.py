@@ -123,10 +123,10 @@ def _verdict_lines(verdict: Verdict) -> list[str]:
         money = {True: "yes", False: "no", None: "UNREADABLE"}[step.money] + (
             f" (declared from {step.declared})" if step.declared else "")
         groups = f"  deploy-together: {', '.join(step.groups)}" if step.groups else ""
-        undone = "  UNDONE: a Reopens: leaves it out of production" if step.undone else ""
+        undone = "  UNDONE: its marker deleted" if step.undone else ""
         claims = ", ".join(sha[:12] for sha in step.claims)
         lines.append(f"  {step.key}  moves money: {money}{groups}{undone}  "
-                     f"(claimed at {claims})")
+                     f"({'deleted' if step.undone else 'claimed'} at {claims})")
     for group in verdict.carried.groups:
         lines.append(f"group {group.key}: carried {', '.join(group.carried) or 'none'}; "
                      f"released {', '.join(group.released) or 'none'}; missing "

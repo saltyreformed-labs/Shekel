@@ -22,9 +22,9 @@ def _items(source):
 
 def test_each_registry_row_becomes_the_card_draft_4_names(corpus):
     """Open steps under their nearest container, OPEN blockers only, the arc and marker
-    labels, the outcome on its scope step; findings under their FIRST step owner; a
-    question for each row naming no step and for N-391 too; every ruling, closed later
-    and parentless now; the shipped step nowhere."""
+    labels, the outcome on its scope step; findings blocked by their FIRST step owner and
+    under no card (R-BAL395); a question for each row naming no step and for N-391 too;
+    every ruling, closed later and parentless now; the shipped step nowhere."""
     source = read_source(corpus)
     assert (source.refusals, source.reports) == ((), ())
     items = _items(source)
@@ -37,11 +37,11 @@ def test_each_registry_row_becomes_the_card_draft_4_names(corpus):
         "balance:A-3": ("step", Links(None, ("balance:A-2a",), (0, 3)), ("balance",),
                         "O1 the first"),
         "salary:S-1": ("step", Links(None, (), (0, 4)), ("salary",), None),
-        "balance:F-1": ("finding", Links("balance:A-2a"), ("balance",), None),
-        "balance:F-2": ("finding", Links("balance:A-3"), ("balance",), None),
+        "balance:F-1": ("finding", Links(blockers=("balance:A-2a",)), ("balance",), None),
+        "balance:F-2": ("finding", Links(blockers=("balance:A-3",)), ("balance",), None),
         "balance:Q-1": ("question", Links(place=(1, 2)), ("balance",), None),
         "balance:Q-2": ("question", Links(place=(1, 3)), ("balance",), None),
-        "salary:N-391": ("finding", Links("salary:S-1"), ("salary",), None),
+        "salary:N-391": ("finding", Links(blockers=("salary:S-1",)), ("salary",), None),
         "salary:N-391 question": ("question", Links(place=(1, 4)), ("salary",), None),
         "balance:R-A": ("ruling", Links(), ("balance",), None),
         "salary:R-SAL1": ("ruling", Links(), ("salary",), None),
@@ -158,16 +158,20 @@ def test_a_step_with_no_single_checkbox_is_refused_once_its_arc_is_read(corpus):
 
 def test_githubs_sub_issue_caps_are_refusals_at_one_past_the_cap(corpus, monkeypatch):
     """GitHub holds 100 sub-issues a parent and nests eight deep; the corpus's A-2 holds
-    two and A-2a's finding sits three deep, so caps of one and two refuse them, and caps
-    of exactly two and three refuse nothing."""
+    two and its leaf A-2a sits two deep, so caps of one refuse them, and caps of exactly
+    two refuse nothing.  A finding is blocked by its owner and is no sub-issue of it
+    (R-BAL395), so A-2a's finding F-1 sits one deep and is in no step's count: no cap
+    refuses it."""
     monkeypatch.setattr(_migrate_source, "SUB_ISSUE_CAP", 1)
-    monkeypatch.setattr(_migrate_source, "NESTING_CAP", 2)
+    monkeypatch.setattr(_migrate_source, "NESTING_CAP", 1)
     refusals = read_source(corpus).refusals
     assert "balance:A-2 would hold 2 sub-issues; GitHub holds 1" in refusals
-    assert "balance:F-1 would sit more than 2 cards deep; GitHub nests 2" in refusals
-    assert not [line for line in refusals if line.startswith("balance:A-2a would sit")]
+    assert "balance:A-2a would sit more than 1 cards deep; GitHub nests 1" in refusals
+    assert not [line for line in refusals
+                if line.startswith(("balance:A-2 would sit", "balance:A-2a would hold",
+                                    "balance:F-1"))]
     monkeypatch.setattr(_migrate_source, "SUB_ISSUE_CAP", 2)
-    monkeypatch.setattr(_migrate_source, "NESTING_CAP", 3)
+    monkeypatch.setattr(_migrate_source, "NESTING_CAP", 2)
     assert not read_source(corpus).refusals
 
 
@@ -275,3 +279,69 @@ def test_a_steps_hash_ignores_the_blank_lines_that_end_its_entry(corpus):
         "A-3's own flush-left spec paragraph.\n", "A-3's own flush-left spec paragraph.\n\n\n")})
     assert source_text(item, read_source(corpus).specs, corpus.documents) == source_text(
         item, read_source(widened).specs, widened.documents)
+
+
+# -- a split step's outcome (the coordinator's code call, 14:4x 10-21; R-BAL274) -------------
+
+def _outcomes(source):
+    """Each step item's outcome, by key."""
+    return {item.key: item.outcome for item in source.items if item.kind == "step"}
+
+
+def test_a_split_steps_outcome_is_carried_to_its_leaves_and_it_keeps_none(corpus):
+    """A-2 split into A-2a and A-2b: an outcome scoping A-2 files both leaves in its
+    milestone and A-2 in none, so the leaves group under it and its progress counts no
+    split step; nothing is reported."""
+    split = (("O1 the first", ("balance:A-3",)), ("O2 the split", ("balance:A-2",)))
+    source = read_source(replace(corpus, outcomes=split))
+    assert (source.refusals, source.reports) == ((), ())
+    assert _outcomes(source) == {
+        "balance:A-2": None, "balance:A-2a": "O2 the split", "balance:A-2b": "O2 the split",
+        "balance:A-3": "O1 the first", "salary:S-1": None}
+
+
+def test_a_leaf_keeps_an_outcome_of_its_own(corpus):
+    """A-2a scoped by its own outcome keeps it; A-2b, scoped by none, takes A-2's."""
+    split = (("O1 the first", ("balance:A-3", "balance:A-2a")), ("O2 the split", ("balance:A-2",)))
+    source = read_source(replace(corpus, outcomes=split))
+    assert (source.refusals, source.reports) == ((), ())
+    assert _outcomes(source) == {
+        "balance:A-2": None, "balance:A-2a": "O1 the first", "balance:A-2b": "O2 the split",
+        "balance:A-3": "O1 the first", "salary:S-1": None}
+
+
+@pytest.mark.parametrize("outcomes, carried, unheld", [
+    ((("O1 the top", ("balance:X",)),), "O1 the top", []),
+    ((("O1 the top", ("balance:X",)), ("O2 the middle", ("balance:X-1",))), "O2 the middle",
+     ["O1 the top"]),
+    ((("O2 the middle", ("balance:X-1",)),), "O2 the middle", []),
+])
+def test_a_leaf_split_twice_takes_the_nearest_split_steps_outcome(outcomes, carried, unheld):
+    """X splits into X-1, which splits into X-1a: neither split step keeps an outcome, and
+    X-1a takes the nearest one above it that holds one (bank_import X-f6b and salary X-av-3's
+    shape, measured at dev e9ab6e0ab).  With both scoped, X's outcome holds no card, which is
+    reported."""
+    steps = (StepRow("balance", "X", "--", "Split (decomposed parent).", "container", "--", "--"),
+             StepRow("balance", "X-1", "--", "Split again (decomposed parent).", "container",
+                     "--", "--"),
+             StepRow("balance", "X-1a", "--", "Do it.", "#1", "--", "NOW"))
+    text = "## 5. The steps\n\n- [ ] **X** x\n  - [ ] **X-1** x\n    - [ ] **X-1a** x\n"
+    source = read_source(registries(steps=steps, findings=(), rulings=(), outcomes=outcomes,
+                                    documents={"balance": text, "salary": "## 4. The steps\n"}))
+    assert [line for line in (*source.refusals, *source.reports) if "outcome" in line] == [
+        f"outcome {name!r} holds no card: its open steps are all split steps, whose leaves are "
+        "filed in other outcomes' milestones, so it gets no milestone" for name in unheld]
+    assert _outcomes(source) == {"balance:X": None, "balance:X-1": None, "balance:X-1a": carried}
+
+
+def test_an_outcome_whose_split_steps_leaves_all_carry_their_own_is_reported(corpus):
+    """recurrence R5's shape (measured at dev e9ab6e0ab): its one leaf carries an outcome of
+    its own, so R5's holds no card and gets no milestone; it is reported, not refused."""
+    split = (("O1 the first", ("balance:A-3", "balance:A-2a", "balance:A-2b")),
+             ("O2 the split", ("balance:A-2",)))
+    source = read_source(replace(corpus, outcomes=split))
+    assert not source.refusals
+    assert source.reports == ("outcome 'O2 the split' holds no card: its open steps are all "
+                              "split steps, whose leaves are filed in other outcomes' "
+                              "milestones, so it gets no milestone",)
+    assert "O2 the split" not in _outcomes(source).values()

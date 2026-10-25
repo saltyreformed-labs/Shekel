@@ -3,16 +3,15 @@ listing of cards, a card's histories, and the board's order and links.
 
 What pins each text: the recordings (``_recorded.Replay``) replay most of them word for
 word, so a change to one no longer matches its recording: re-record it, never edit an
-answer by hand.  Three no recording holds: :func:`all_cards` (its milestone is graded by
-``test__tracker_place.py``), :data:`BARE_CARD_FIELDS` (graded against the recorded lookup,
-less its board items, by ``test__tracker_card_reader.py``), and :data:`BOARD_REPOSITORIES`,
-which nothing pins.
+answer by hand.  Two no recording holds: :func:`all_cards` (its milestone is graded by
+``test__tracker_place.py``) and :data:`BARE_CARD_FIELDS` (graded against the recorded
+lookup, less its board items, by ``test__tracker_card_reader.py``).
 
 Split out of :mod:`_tracker`, which sends them and reads their answers, at X-cx L9d's
 card-only reader, whose change would otherwise take that module past the 1,000 lines
-``too-many-lines`` allows.  The lookups of cards and claims by number compose these fields
-there, and the board's writes stay there beside :meth:`_tracker.Board._write`, the one
-door they are sent through.
+``too-many-lines`` allows.  The lookups of cards by number compose these fields there,
+and the board's writes stay there beside :meth:`_tracker.Board._write`, the one door they
+are sent through.
 """
 from __future__ import annotations
 
@@ -76,9 +75,11 @@ def all_cards(place: Place) -> str:
     """The listing of every card of ``place``, open and closed, each with its body, its
     milestone's number and its first hundred comments (and how many it has).
 
-    Only X-cx's migration reads it, and only it reads a milestone (L7 draft 4 s.12): the
-    milestone is selected HERE, not in :data:`CARD_FIELDS`, which every other query
-    selects and whose text the recordings replay word for word."""
+    Only X-cx's migration reads it, and it is the one listing that reads a milestone (L7
+    draft 4 s.12; ``quill file step --parent`` reads one by number since X-cx's S3a,
+    ``_tracker.Tracker.milestones_of``): the milestone is selected HERE, not in
+    :data:`CARD_FIELDS`, which every other query selects and whose text the recordings
+    replay word for word."""
     return (
         """query($after: String) { repository(owner: "%s", name: "%s") {
   issues(first: 100, after: $after, states: [OPEN, CLOSED]) {
@@ -96,6 +97,13 @@ BOARD_ORDER = """query($id: ID!, $after: String) { node(id: $id) { ... on Projec
     nodes { id content { ... on Issue { number repository { nameWithOwner } } } } } } } }"""
 
 
+#: What quill reads of one saved version of a card's text or a comment's.  GitHub keeps
+#: each version of a card's text in full in ``diff`` (measured 2026-10-04,
+#: :meth:`_tracker.Tracker.edits`); whether a comment's ``diff`` is whole too is
+#: unmeasured, since no comment on the tracker was ever edited.
+EDIT_FIELDS = "id editedAt editor { login } diff"
+
+
 def edits(place: Place) -> str:
     """The read of one card's saved versions, a page at a time."""
     return (
@@ -103,21 +111,88 @@ def edits(place: Place) -> str:
   issue(number: $number) { number body createdAt author { login }
     userContentEdits(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { id editedAt editor { login } diff } } } } }"""
+      nodes { %s } } } } }"""
+        % (place.owner, place.name, EDIT_FIELDS)
+    )
+
+
+def blocking(place: Place) -> str:
+    """The read of the cards one card blocks, each with its state and type (ruling
+    ``balance:R-BAL395``: a step's are the findings and rulings it owns, beside any card
+    waiting on it).  Its own read, never a field of every card's: only ``quill show`` and a
+    ruling's filing run again ask it."""
+    return (
+        """query($number: Int!) { repository(owner: "%s", name: "%s") {
+  issue(number: $number) { number
+    blocking(first: 100) { totalCount nodes {
+      number state issueType { name } repository { nameWithOwner } } } } } }"""
         % (place.owner, place.name)
     )
 
 
-def comments(place: Place) -> str:
-    """The read of one card's comments, a page at a time."""
+def comments(place: Place, fields: str = COMMENT_FIELDS) -> str:
+    """The read of one card's comments, a page at a time, each read as ``fields``:
+    :data:`COMMENT_FIELDS`, or the backup's :data:`EXPORT_COMMENT_FIELDS`."""
     return (
         """query($number: Int!, $after: String) { repository(owner: "%s", name: "%s") {
   issue(number: $number) { number
     comments(first: 100, after: $after) {
       pageInfo { hasNextPage endCursor }
       nodes { %s } } } } }"""
-        % (place.owner, place.name, COMMENT_FIELDS)
+        % (place.owner, place.name, fields)
     )
+
+
+#: What the daily backup (:mod:`_export`) reads of a comment: quill's fields, its id, and
+#: when it was last edited, which says whether its saved versions are read too
+#: (:data:`COMMENT_EDITS`).  Measured 2026-10-21 on 202 comments of a public repository
+#: (``cli/cli``; no comment on the tracker or the code repository was ever edited): the 4
+#: holding saved versions each had a last edit, and none of the 198 without did.
+EXPORT_COMMENT_FIELDS = f"id {COMMENT_FIELDS} lastEditedAt"
+
+
+def export_cards(place: Place) -> str:
+    """The listing of every card of ``place``, open and closed, as the daily backup
+    (:mod:`_export`) reads it: :data:`CARD_FIELDS`, its text, who filed it and when, when it
+    closed, its milestone's number, and its first hundred saved versions and comments, each
+    connection saying whether more follow.
+
+    Twenty-five cards a page: measured 2026-10-21 on a public repository's issues
+    (``cli/cli``, long texts and threads), a page of 100 took 7.0 s and the next was refused
+    502 at 11 s, past GitHub's limit; 600 cards read 50 a page took at most 5.1 s a page,
+    and 25 a page at most 4.0 s, so 25 leaves room for histories that only grow.  A
+    comment's own saved versions are not nested here: GitHub refuses the listing that nests
+    them, at up to 1,000,000 possible nodes past its 500,000 (measured the same day on the
+    tracker, ``MAX_NODE_LIMIT_EXCEEDED``), so they are read apart (:data:`COMMENT_EDITS`)."""
+    return (
+        """query($after: String) { repository(owner: "%s", name: "%s") {
+  issues(first: 25, after: $after, states: [OPEN, CLOSED]) {
+    pageInfo { hasNextPage endCursor } nodes { %s body author { login } createdAt closedAt
+      milestone { number }
+      userContentEdits(first: 100) {
+        totalCount pageInfo { hasNextPage endCursor } nodes { %s } }
+      comments(first: 100) {
+        totalCount pageInfo { hasNextPage endCursor } nodes { %s } } } } } }"""
+        % (place.owner, place.name, CARD_FIELDS, EDIT_FIELDS, EXPORT_COMMENT_FIELDS)
+    )
+
+
+def milestones(place: Place) -> str:
+    """The listing of every milestone of ``place``, open and closed, whole, a page at a time
+    (the daily backup, :mod:`_export`)."""
+    return (
+        """query($after: String) { repository(owner: "%s", name: "%s") {
+  milestones(first: 100, after: $after, states: [OPEN, CLOSED]) {
+    pageInfo { hasNextPage endCursor }
+    nodes { number title description state dueOn closedAt } } } }"""
+        % (place.owner, place.name)
+    )
+
+
+#: The read of one comment's saved versions, by the comment's node id, a page at a time.
+COMMENT_EDITS = """query($id: ID!, $after: String) { node(id: $id) { ... on IssueComment {
+  userContentEdits(first: 100, after: $after) {
+    pageInfo { hasNextPage endCursor } nodes { %s } } } } }""" % EDIT_FIELDS
 
 
 #: The repositories a board is linked to, read when quill connects

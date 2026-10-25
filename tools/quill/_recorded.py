@@ -27,8 +27,8 @@ tracker it reads is private: real production figures are allowed there
   every request before it goes out, and of every request a recording keeps): a
   REST write takes one of the routes in :data:`_ROUTES` on the tracker, with
   exactly the body keys quill sends (their values are not checked but
-  for the cards they name) and every card it names -- in its path, by its REST
-  id, or as a claim -- a scratch card; a GraphQL write is one of the
+  for the cards they name) and every card it names -- in its path, or by its
+  REST id -- a scratch card; a GraphQL write is one of the
   board's four, word for word, on the plan board, moving a scratch card's
   board item.  A body sent other than as JSON is refused too.  Anything else is
   refused, unsent.
@@ -52,8 +52,8 @@ tracker it reads is private: real production figures are allowed there
 What a recording can still hold: a string under a :data:`_KEPT` key, of any
 card (so a key enters that set only when no card's text can be stored under
 it); everything on the REQUEST side, kept as sent because the replay matches it
--- read URLs, search terms, GraphQL variables, a claim commit's message -- so a
-recording session puts no private text in a request; a scratch card's own
+-- read URLs, search terms, GraphQL variables -- so a recording session puts no
+private text in a request; a scratch card's own
 text, including any edit history or comment from before it carried a scratch
 title (the recording sessions file their scratch cards as scratch); and, where
 the request reads the tracker's own cards, the text of an object carrying a
@@ -106,7 +106,6 @@ _REPOSITORY_ALIAS = re.compile(r"\brepository\s*:")
 #: comma, and a byte-order mark.
 _STRING_OR_IGNORED = re.compile(
     r'"""(?:\\"""|[^"]|"(?!""))*"""|"(?:\\.|[^"\\\n\r])*"|#[^\n\r]*|[,\ufeff]')
-_CLAIM = re.compile(r"refs/claims/(?:([0-9]+)|recording-[a-z0-9-]+)")
 #: The bodies quill PATCHes an issue with: retype, retitle, a new body, close, reopen.
 _PATCHES = frozenset(frozenset(keys) for keys in (
     {"type"}, {"title"}, {"body"}, {"state", "state_reason"}, {"state"}))
@@ -165,12 +164,6 @@ class Scratch:
                    set(kept["items"]), kept["board"], place)
 
 
-def _scratch_claim(ref: str, scratch: Scratch) -> bool:
-    """Whether ``ref`` claims a scratch card, or is a recording's own stray claim ref."""
-    found = _CLAIM.fullmatch(ref)
-    return bool(found) and (found[1] is None or int(found[1]) in scratch.numbers)
-
-
 _Allows = Callable[[re.Match, dict, Scratch], bool]
 #: Every REST write a recording may send, under the tracker's repository: its method,
 #: its path, and whether its body is exactly what quill sends, naming scratch cards
@@ -198,13 +191,6 @@ _ROUTES: tuple[tuple[str, re.Pattern, _Allows], ...] = tuple(
          lambda m, body, s: int(m[1]) in s.numbers and int(m[2]) in s.ids and not body),
         ("DELETE", rf"/issues/([0-9]+)/labels/{FILING}",
          lambda m, body, s: int(m[1]) in s.numbers and not body),
-        ("POST", r"/git/commits",
-         lambda _m, body, _s: set(body) == {"message", "tree", "parents"}
-         and body["parents"] == []),
-        ("POST", r"/git/refs",
-         lambda _m, body, s: set(body) == {"ref", "sha"} and _scratch_claim(str(body["ref"]), s)),
-        ("DELETE", r"/git/refs/(claims/.+)",
-         lambda m, body, s: _scratch_claim(f"refs/{m[1]}", s) and not body),
     )
 )
 

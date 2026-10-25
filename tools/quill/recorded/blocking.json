@@ -1,0 +1,202 @@
+{
+ "scratch": {
+  "numbers": [
+   220,
+   221,
+   222
+  ],
+  "ids": [
+   6014714953,
+   6014715061,
+   6014715164
+  ],
+  "nodes": [
+   "I_kwDOVSOvzs8AAAABZoFESQ",
+   "I_kwDOVSOvzs8AAAABZoFEtQ",
+   "I_kwDOVSOvzs8AAAABZoFFHA"
+  ],
+  "items": [],
+  "board": null,
+  "place": [
+   "saltyreformed-labs",
+   "plan-views-demo",
+   "Plan views demo"
+  ]
+ },
+ "exchanges": [
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c220: issue(number: 220) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c221: issue(number: 221) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c222: issue(number: 222) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c220": {
+       "id": "I_kwDOVSOvzs8AAAABZoFESQ",
+       "number": 220,
+       "fullDatabaseId": "6014714953",
+       "title": "[L2 measurement] scratch R-BAL395 step",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c221": {
+       "id": "I_kwDOVSOvzs8AAAABZoFEtQ",
+       "number": 221,
+       "fullDatabaseId": "6014715061",
+       "title": "[L2 measurement] scratch R-BAL395 finding",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "finding"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "number": 220,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c222": {
+       "id": "I_kwDOVSOvzs8AAAABZoFFHA",
+       "number": 222,
+       "fullDatabaseId": "6014715164",
+       "title": "[L2 measurement] scratch R-BAL395 ruling",
+       "state": "CLOSED",
+       "stateReason": "COMPLETED",
+       "issueType": {
+        "name": "ruling"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "number": 220,
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": [
+         {
+          "__typename": "ClosedEvent",
+          "actor": {
+           "login": "SaltyReformed"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number\n    blocking(first: 100) { totalCount nodes {\n      number state issueType { name } repository { nameWithOwner } } } } } }",
+    "variables": {
+     "number": 220
+    }
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issue": {
+       "number": 220,
+       "blocking": {
+        "totalCount": 2,
+        "nodes": [
+         {
+          "number": 222,
+          "state": "CLOSED",
+          "issueType": {
+           "name": "ruling"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         },
+         {
+          "number": 221,
+          "state": "OPEN",
+          "issueType": {
+           "name": "finding"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

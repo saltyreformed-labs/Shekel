@@ -11,10 +11,10 @@ from dataclasses import replace
 
 import pytest
 
-from tools.quill.door import FakeTracker, above
+from tools.quill.door import OWNED, FakeTracker, above
 from tools.release import _cards, release
 from tools.release._plan import CLEAN
-from tools.release.conftest import deploy_group, judge, release_after, replan
+from tools.release.conftest import deploy_group, judge, release_after, replan, ship, undo
 
 
 # -- the two walks agree, and no step hangs unread ---------------------------------------------
@@ -32,13 +32,13 @@ def test_a_groups_links_read_down_and_up_give_the_same_steps(repo):
     """Under a read whose links agree, the steps below a group read down its links are
     the steps whose line up reaches it, at every depth, a finding's line up included and
     the finding no step of it."""
-    base, cut = release_after(repo, ("Ships: plan#52",), ("Ships: plan#5111",))
+    base, cut = release_after(repo, (ship(52),), (ship(5111),))
     tracker = FakeTracker()
     deploy_group(tracker)
     replan(tracker, 51, (511, 512))
     replan(tracker, 511, (5111, 5112))
     tracker.add(55, kind="finding")
-    tracker.add_child(511, tracker.cards_by_number[55])
+    tracker.block(55, tracker.cards_by_number[511])
     cards = tracker.cards_by_number
     up = sorted(number for number, card in cards.items() if card.kind == "step"
                 and 50 in [step.number for step in above(card, cards)])
@@ -47,13 +47,13 @@ def test_a_groups_links_read_down_and_up_give_the_same_steps(repo):
 
 
 def test_a_finding_linked_under_the_group_card_itself_is_no_member(repo):
-    """#57, a finding linked directly under the group's own card, ships: it touches the
-    group and is no step of it, so the group #51 and #52 make is whole."""
-    base, cut = release_after(repo, ("Ships: plan#51", "Ships: plan#52"), ("Ships: plan#57",))
+    """#57, a finding the group's own card owns (blocked by it, R-BAL395), ships: it
+    touches the group and is no step of it, so the group #51 and #52 make is whole."""
+    base, cut = release_after(repo, (ship(51), ship(52)), (ship(57),))
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.add(57, kind="finding")
-    tracker.add_child(50, tracker.cards_by_number[57])
+    tracker.block(57, tracker.cards_by_number[50])
     verdict = judge(repo, base, cut, tracker).verdict
     assert verdict.status == CLEAN
     (group,) = verdict.carried.groups
@@ -64,7 +64,7 @@ def test_a_link_seen_only_from_the_groups_side_judges_nothing(repo, capsys):
     """The tracker is read in rounds: #52 is read under #50 in one, and its own parent,
     read in the next, is gone (a person unlinked it between them).  A walk either way
     alone would judge the group with #52 or without it; nothing is judged."""
-    base, cut = release_after(repo, ("Ships: plan#51",), ("Ships: plan#51",))
+    base, cut = release_after(repo, (ship(51),), (ship(51),))
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.cards_by_number[52] = replace(tracker.cards_by_number[52], parent=None)
@@ -77,7 +77,7 @@ def test_a_link_seen_only_from_the_groups_side_judges_nothing(repo, capsys):
 def test_a_link_seen_only_from_the_cards_side_judges_nothing(repo, capsys):
     """The reverse tear: #53's parent reads #51, and #51's links, read in a later round,
     no longer list it."""
-    base, cut = release_after(repo, ("Ships: plan#51", "Ships: plan#52"), ("Ships: plan#53",))
+    base, cut = release_after(repo, (ship(51), ship(52)), (ship(53),))
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.add(53, parent=51)
@@ -105,7 +105,7 @@ class _Lagging(FakeTracker):
 def test_a_card_retyped_while_the_tracker_was_read_judges_nothing(repo, capsys):
     """#50 lists #52 as a step in one round; #52, read in the next, is a finding (a person
     changed its type between them)."""
-    base, cut = release_after(repo, ("Ships: plan#51",), ("Ships: plan#51",))
+    base, cut = release_after(repo, (ship(51),), (ship(51),))
     tracker = _Lagging()
     deploy_group(tracker)
     tracker.lagging[50] = tracker.cards([50])[50].children
@@ -120,8 +120,8 @@ def test_every_group_whose_links_disagree_is_named(repo, capsys):
     """Two groups torn in one read, #52 under #50 and #62 under #60: both are named, so
     one judging again is not followed by a second refusal for the other."""
     base, cut = release_after(
-        repo, ("Ships: plan#51", "Ships: plan#61"),
-        ("Ships: plan#51", "Ships: plan#61"))
+        repo, (ship(51), ship(61)),
+        (ship(51), ship(61)))
     tracker = FakeTracker()
     deploy_group(tracker)
     deploy_group(tracker, container=60, leaves=(61, 62))
@@ -137,14 +137,14 @@ def test_every_group_whose_links_disagree_is_named(repo, capsys):
 
 
 def test_a_step_linked_under_a_finding_judges_nothing_until_it_is_moved(repo, capsys):
-    """A person links #56, a step, under #55, a finding under #51, on the web (quill links
-    a step only under the step it splits): nothing is judged, naming the link.  Moved
-    under #51, the step it splits, the same release is judged."""
-    base, cut = release_after(repo, ("Ships: plan#51", "Ships: plan#52"), ("Ships: plan#56",))
+    """A person links #56, a step, under #55, a finding #51 owns (blocked by it, R-BAL395,
+    as quill files one), on the web (quill links a step only under the step it splits):
+    nothing is judged, naming the link.  Moved under #51, the step it splits, the same
+    release is judged."""
+    base, cut = release_after(repo, (ship(51), ship(52)), (ship(56),))
     tracker = FakeTracker()
     deploy_group(tracker)
-    tracker.add(55, kind="finding")
-    tracker.add_child(51, tracker.cards_by_number[55])
+    tracker.add(55, kind="finding", blocked_by=(51,))
     tracker.add(56)
     tracker.add_child(55, tracker.cards_by_number[56])
     assert _unread(repo, base, cut, tracker, capsys) == (
@@ -157,18 +157,19 @@ def test_a_step_linked_under_a_finding_judges_nothing_until_it_is_moved(repo, ca
     assert judge(repo, base, cut, tracker).verdict.status == CLEAN
 
 
-def test_a_held_step_hung_under_a_finding_no_trailer_names_judges_nothing(repo, capsys):
+def test_a_held_step_hung_under_a_finding_no_marker_names_judges_nothing(repo, capsys):
     """The full-leaf review's H-1: #56 and #57, steps production holds, hang under #55, a
-    finding under #51, and no trailer names #55, #56 or #57, so quill's closure never
-    holds them.  A release taking #51 and #52 out would leave #56 and #57 in production
-    without their group: every card below the group is read, so nothing is judged."""
+    finding #51 owns (blocked by it, R-BAL395, as quill files one: below #51 by #51's
+    blocking read, R395's review, F1), and the window changes no marker of #55, #56 or #57,
+    so quill's closure never holds them.  A release taking #51 and #52 out would leave #56
+    and #57 in production without their group: every card below the group is read, so
+    nothing is judged."""
     base, cut = release_after(
-        repo, ("Ships: plan#51", "Ships: plan#52", "Ships: plan#56", "Ships: plan#57"),
-        ("Reopens: plan#51", "Reopens: plan#52"))
+        repo, (ship(51), ship(52), ship(56), ship(57)),
+        (undo(51), undo(52)))
     tracker = FakeTracker()
     deploy_group(tracker)
-    tracker.add(55, kind="finding")
-    tracker.add_child(51, tracker.cards_by_number[55])
+    tracker.add(55, kind="finding", blocked_by=(51,))
     for step in (56, 57):
         tracker.add(step)
         tracker.add_child(55, tracker.cards_by_number[step])
@@ -183,7 +184,7 @@ def test_a_split_step_whose_type_a_person_changed_judges_nothing(repo, capsys):
     """The full-leaf review's H-1 and L-2: #52, split into #521 and #522, retyped a finding
     on the web.  quill's leaf rule no longer reaches #521 or #522; the remedy names #52's
     type."""
-    base, cut = release_after(repo, ("Ships: plan#51",), ("Ships: plan#51",))
+    base, cut = release_after(repo, (ship(51),), (ship(51),))
     tracker = FakeTracker()
     deploy_group(tracker)
     replan(tracker, 52, (521, 522))
@@ -195,16 +196,16 @@ def test_a_split_step_whose_type_a_person_changed_judges_nothing(repo, capsys):
         "plan#52 the step type if a person changed it)")
 
 
-def test_a_ruling_under_a_group_named_by_a_trailer_is_no_work_not_a_torn_read(repo):
-    """#58, a ruling under #51, named by a mistyped trailer: it is refused as no work, and
+def test_a_ruling_under_a_group_named_by_a_marker_is_no_work_not_a_torn_read(repo):
+    """#58, a ruling #51 owns, named by a mistyped marker: it is refused as no work, and
     no walk counts it as a step of the group."""
-    base, cut = release_after(repo, ("Ships: plan#51", "Ships: plan#52"), ("Ships: plan#58",))
+    base, cut = release_after(repo, (ship(51), ship(52)), (ship(58),))
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.add(58, kind="ruling")
-    tracker.add_child(51, tracker.cards_by_number[58])
+    tracker.block(58, tracker.cards_by_number[51])
     (refusal,) = judge(repo, base, cut, tracker).verdict.refusals
-    assert refusal.startswith("plan#58 (named at ")
+    assert refusal.startswith("plan#58 (its marker changed at ")
     assert refusal.endswith(") is a ruling, which no commit ships, so it names no work whose "
                             "flag can be read")
 
@@ -221,10 +222,14 @@ def _hung(steps, card, what, groups):
 
 
 def _hang(tracker, card, kind, step, under=51):
-    """``card``, of ``kind``, linked under ``under``, and ``step``, a step, linked under
-    ``card``, as a person links them on the web."""
-    tracker.add(card, kind=kind)
-    tracker.add_child(under, tracker.cards_by_number[card])
+    """``card``, of ``kind``, below ``under`` -- a finding or a ruling blocked by it, its
+    owner, as quill files one (R-BAL395); a card of any other kind linked under it -- and
+    ``step``, a step, linked under ``card``, as a person links them on the web."""
+    if kind in OWNED:
+        tracker.add(card, kind=kind, blocked_by=(under,))
+    else:
+        tracker.add(card, kind=kind)
+        tracker.add_child(under, tracker.cards_by_number[card])
     tracker.add(step)
     tracker.add_child(card, tracker.cards_by_number[step])
 
@@ -232,10 +237,10 @@ def _hang(tracker, card, kind, step, under=51):
 def test_a_group_the_release_does_not_touch_is_read_below_it_all_the_same(repo, capsys):
     """M-1, kept strict by the coordinator: the release ships #71 alone, which the group
     #50 blocks, so quill's closure holds the group and the release touches nothing in it.
-    #53, a step, hangs under #60, a finding linked under the group's own card: nothing is
+    #53, a step, hangs under #60, a finding the group's own card owns: nothing is
     judged, naming the link.  Moved under #51, the step it splits, the same release is
     judged, and gives no verdict on the group it does not touch."""
-    base, cut = release_after(repo, (), ("Ships: plan#71",))
+    base, cut = release_after(repo, (), (ship(71),))
     tracker = FakeTracker()
     deploy_group(tracker)
     _hang(tracker, 60, "finding", 53, under=50)
@@ -251,7 +256,7 @@ def test_a_group_the_release_does_not_touch_is_read_below_it_all_the_same(repo, 
 def test_a_step_hung_below_a_group_with_no_step_of_its_own_judges_nothing(repo, capsys):
     """The group #50 holds no step, only #60, a finding, and #53, a step, hangs under #60:
     a group with no step to judge as a member is read below all the same."""
-    base, cut = release_after(repo, (), ("Ships: plan#53",))
+    base, cut = release_after(repo, (), (ship(53),))
     tracker = FakeTracker()
     deploy_group(tracker, leaves=())
     _hang(tracker, 60, "finding", 53, under=50)
@@ -263,7 +268,7 @@ def test_a_torn_read_below_a_group_the_release_does_not_touch_judges_nothing(rep
     """M-1's other check: the release ships #71 alone, which the group #50 blocks, and
     #52's own parent, read in a later round than #50's links, is gone.  The walks are
     compared for the group the release does not touch too: nothing is judged."""
-    base, cut = release_after(repo, (), ("Ships: plan#71",))
+    base, cut = release_after(repo, (), (ship(71),))
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.cards_by_number[52] = replace(tracker.cards_by_number[52], parent=None)
@@ -278,7 +283,7 @@ def test_a_torn_read_below_a_group_with_no_step_of_its_own_judges_nothing(repo, 
     """#53's own parent reads the group #50, and #50's links, read in another round, list
     no step: the walks of a group with no step down are compared too, so #53 is not
     dropped unseen."""
-    base, cut = release_after(repo, (), ("Ships: plan#53",))
+    base, cut = release_after(repo, (), (ship(53),))
     tracker = FakeTracker()
     deploy_group(tracker, leaves=())
     tracker.add(53, parent=50)
@@ -289,12 +294,12 @@ def test_a_torn_read_below_a_group_with_no_step_of_its_own_judges_nothing(repo, 
 
 
 def test_a_step_hung_under_a_closed_finding_judges_nothing(repo, capsys):
-    """#55, a finding under #51 closed as fixed, still holds #56, a step production holds:
+    """#55, a finding #51 owns, closed as fixed, still holds #56, a step production holds:
     a closed card the group lists is read as an open one is, so a release taking #51 and
     #52 out judges nothing."""
     base, cut = release_after(
-        repo, ("Ships: plan#51", "Ships: plan#52", "Ships: plan#56"),
-        ("Reopens: plan#51", "Reopens: plan#52"))
+        repo, (ship(51), ship(52), ship(56)),
+        (undo(51), undo(52)))
     tracker = FakeTracker()
     deploy_group(tracker)
     _hang(tracker, 55, "finding", 56)
@@ -304,12 +309,12 @@ def test_a_step_hung_under_a_closed_finding_judges_nothing(repo, capsys):
 
 
 def test_a_closed_step_hung_under_a_finding_judges_nothing(repo, capsys):
-    """#56, a step that shipped and was closed, hangs under #55, a finding under #51: a
+    """#56, a step that shipped and was closed, hangs under #55, a finding #51 owns: a
     closed step a card below the group lists is read as an open one is, so a release
     taking #51 and #52 out judges nothing."""
     base, cut = release_after(
-        repo, ("Ships: plan#51", "Ships: plan#52", "Ships: plan#56"),
-        ("Reopens: plan#51", "Reopens: plan#52"))
+        repo, (ship(51), ship(52), ship(56)),
+        (undo(51), undo(52)))
     tracker = FakeTracker()
     deploy_group(tracker)
     _hang(tracker, 55, "finding", 56)
@@ -322,9 +327,10 @@ def test_a_closed_step_hung_under_a_finding_judges_nothing(repo, capsys):
                                             (None, "a card of no type")])
 def test_a_step_hung_under_a_card_of_any_kind_that_is_no_step_judges_nothing(
         repo, capsys, kind, what):
-    """#56, a step, hangs under #55, a card of a kind no step is, under #51: nothing is
-    judged, naming what #55 is."""
-    base, cut = release_after(repo, ("Ships: plan#51", "Ships: plan#52"), ("Ships: plan#56",))
+    """#56, a step, hangs under #55, a card of a kind no step is, below #51 (a ruling #51
+    owns, or a card of another kind linked under it): nothing is judged, naming what #55
+    is."""
+    base, cut = release_after(repo, (ship(51), ship(52)), (ship(56),))
     tracker = FakeTracker()
     deploy_group(tracker)
     _hang(tracker, 55, kind, 56)
@@ -333,8 +339,8 @@ def test_a_step_hung_under_a_card_of_any_kind_that_is_no_step_judges_nothing(
 
 def test_a_step_hung_below_nested_groups_names_each_group(repo, capsys):
     """The group #50 is a step of the group #40, and #56, a step, hangs under #55, a finding
-    under #51: the refusal names both groups the hang is below."""
-    base, cut = release_after(repo, ("Ships: plan#51", "Ships: plan#52"), ("Ships: plan#56",))
+    #51 owns: the refusal names both groups the hang is below."""
+    base, cut = release_after(repo, (ship(51), ship(52)), (ship(56),))
     tracker = FakeTracker()
     deploy_group(tracker, container=40, leaves=())
     deploy_group(tracker)
@@ -350,7 +356,7 @@ def test_a_card_below_two_groups_is_read_for_each(repo, capsys):
     steps are its own; for #40 they hang under a card that is no step.  #50 is read for
     each group, though the read reached it for #50 two rounds earlier, so the refusal
     names the hang and its mend, not a torn read."""
-    base, cut = release_after(repo, (), ("Ships: plan#51", "Ships: plan#52"))
+    base, cut = release_after(repo, (), (ship(51), ship(52)))
     tracker = FakeTracker()
     deploy_group(tracker, container=40, leaves=())
     deploy_group(tracker)
@@ -366,7 +372,7 @@ def test_a_card_listed_below_a_group_and_gone_when_read_judges_nothing(repo, cap
     """#51 lists #55, a finding, as its sub-issue, and #55 is gone when the read asks for it
     (deleted between the tracker's rounds): what hangs below it cannot be read, so nothing
     is judged."""
-    base, cut = release_after(repo, ("Ships: plan#51",), ("Ships: plan#52",))
+    base, cut = release_after(repo, (ship(51),), (ship(52),))
     tracker = FakeTracker()
     deploy_group(tracker)
     tracker.add(55, kind="finding")

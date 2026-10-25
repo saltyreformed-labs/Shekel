@@ -6,11 +6,14 @@
 item has exactly one card, by key, of its kind, labels and milestone; open, or for a ruling
 closed; its mark removed; under its parent, blocked by its blockers and no others; on the
 board where it has a place; its title equal, and its body and As filed comment equal under
-:func:`_migrate_bodies.masked`, which leaves out the As filed commit alone; a question
-holding exactly one such comment, and no other card any.  A card filed already is graded
-on its kind, labels, links and state, and every card no item claims must be the tracker's
-own.  Each difference is named in the words the plan's refusals use; a second grading here
-would be a second spelling of what a finished migration is (rule 14).
+:func:`_migrate_bodies.masked`, which leaves out the As filed commit alone, to the text a
+run files (``migrate.prepare``: built, then each bare ``#N`` written as the input file
+decides, R-BAL277), so a number left bare where a marker or a link was decided is a
+difference; a question holding exactly one such comment, and no other card any.  A card
+filed already is graded on its kind, labels, links and state, and every card no item
+claims must be the tracker's own.  Each difference is named in the words the plan's
+refusals use; a second grading here would be a second spelling of what a finished
+migration is (rule 14).
 
 **What no plan grades** is graded here, once the plan refuses nothing and leaves nothing to
 write:
@@ -53,11 +56,12 @@ such fact:
   ruling closed as completed is a record whoever closed it (R-BAL206);
 - a card's author, the App by ``create``, which no registry names and the read does not
   fetch;
-- the ORDER of a card's sub-issues (a container's steps, a step's findings), the order
-  ``add_child`` filed them in: a by-product (the same ruling).  The order the registries
-  set is the board's (R-BAL238: the steps by rank, then the questions by the ledger's
-  order), graded above; which cards are a card's sub-issues is graded as each one's
-  parent;
+- the ORDER of a card's sub-issues (a container's steps), the order ``add_child`` filed
+  them in, and of the cards a step blocks (the findings it owns, each blocked by it,
+  R-BAL395), which the read does not fetch: a by-product (the same ruling).  The order the
+  registries set is the board's (R-BAL238: the steps by rank, then the questions by the
+  ledger's order), graded above; which cards are a card's sub-issues is graded as each
+  one's parent, and which a step owns as each finding's blockers;
 - a milestone's state, which ``create_milestone`` leaves open, and its due date: the input
   file gives a milestone its title and description alone;
 - a comment's hidden (minimized) state, which the read does not fetch: a hidden As filed

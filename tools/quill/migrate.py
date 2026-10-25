@@ -8,25 +8,32 @@ its As filed block names; and the input file the developer approved.
 
 ``check`` WRITES NOTHING, anywhere.  It prints what would move, arc by arc,
 and what is filed already (:data:`_migrate_source.MAPPED`); the census of every
-steps-section line
-(:func:`_migrate_bodies.census`); how many cards hold a bare ``#N``, which GitHub would
-link to an unrelated card (draft 4 s.3, decided after the rehearsal measures it); the
-writes a run would make, as the plan counts them (:func:`_migrate_plan.plan`, the one
-producer of what is left to write): with ``--target``, on that tracker as read, and
-without it, if every card were new, a card filed already's links not counted; and every
-refusal, from the registries (:mod:`_migrate_source`), the input file
-(:mod:`_migrate_input`), the cards' text (:mod:`_migrate_bodies`) and the plan -- which
-runs, like every phase's, only once none of the others refuses, and without ``--target``
-plans every item but the cards filed already, so steps waiting in a cycle through one of
-them are refused by ``check --target`` and the runs alone.
+steps-section line (:func:`_migrate_bodies.census`); how many bare ``#N`` the cards hold,
+which GitHub would link to the tracker's card N, by the treatment the input file gives each
+(R-BAL277, :mod:`_migrate_numbers`); the writes a run would make, as the plan counts them
+(:func:`_migrate_plan.plan`, the one producer of what is left to write): with
+``--target``, on that tracker as read, and without it, if every card were new, a card
+filed already's links not counted; and every refusal, from the registries
+(:mod:`_migrate_source`), the input file (:mod:`_migrate_input`), the cards' text
+(:mod:`_migrate_bodies`), their numbers (:mod:`_migrate_numbers`), GitHub's renderer and
+the plan -- which runs, like every phase's, only once none of the others refuses, and
+without ``--target`` plans every item but the cards filed already, so steps waiting in a
+cycle through one of them are refused by ``check --target`` and the runs alone.
+
+**GitHub's renderer grades the cards' numbers** (ruling ``balance:R-BAL355``,
+:func:`_migrate_numbers.grade_rendered`) in the context of the tracker ``--target`` names, through
+quill's App, once nothing the registries, the input file and the cards' text make is
+refused, and before anything is planned or written: by ``check --target``, ``history`` and
+``open``.  ``check`` without ``--target`` reaches no tracker, so it prints that the numbers
+are not graded; ``verify`` grades the tracker as filed and renders nothing.
 
 ``history`` and ``open`` WRITE, on the tracker ``--target`` names (``plan`` or
 ``rehearsal``, with no default, draft 4 s.6), as quill's App: ``history`` files every
 ruling, and ``open``, refused until it has, every other card, then orders the board
 (:mod:`_migrate_run`).  Each runs only when nothing above refuses -- the registries, the
-input file, the cards' text, its census -- and then only on a tracker the plan refuses
-nothing on: a plan that refuses anything writes nothing.  A run cut short is resumed by
-running the same command again.
+input file, the cards' text, its census, its numbers, GitHub's renderer -- and then only on
+a tracker the plan refuses nothing on: a plan that refuses anything writes nothing.  A run
+cut short is resumed by running the same command again.
 
 ``verify`` WRITES NOTHING: it reads the tracker ``--target`` names and grades it against
 the registries both ways (:mod:`_migrate_verify`), printing the tracker's own cards, which
@@ -51,14 +58,14 @@ place of any ``REFUSED:`` line, which may follow writes; 2 nothing checked:
 the input file could not be read (or is not UTF-8), git could not read HEAD or a planning
 file in it (or the file is not text), the input file is inside the repository, the
 command line is not the form above, or for ``check --target`` and ``verify`` the tracker
-could not be read (the App's key file unreadable, GitHub refusing or not answering, the
-connect finding no board for the target or one not linked to its repository, or the read
-refused as a run's is, below); 3 a
+could not be read (the App's key file unreadable, GitHub refusing or not answering, its
+renderer included, the connect finding no board for the target or one not linked to its
+repository, or the read refused as a run's is, below); 3 a
 ``history`` or ``open`` run STOPPED, its cause
 on a ``stopped:`` line: the App's key file could not be read; GitHub refused or did not
-answer (the connect included); the connect found the target no board, or one not linked
-to its repository (:func:`_tracker.board_of`); a write's answer read back otherwise than
-it was sent (a create's type, labels or milestone, or a ruling's close: "fix it by
+answer (the connect and its renderer included); the connect found the target no board, or
+one not linked to its repository (:func:`_tracker.board_of`); a write's answer read back
+otherwise than it was sent (a create's type, labels or milestone, or a ruling's close: "fix it by
 hand"); the tracker's read was refused (its numbering probe, two milestones of one title,
 or a read GitHub cut short: a card holding more labels, sub-issues, blockers or board items
 than one read returns); a card the run writes on was under another parent, or gone; or,
@@ -87,12 +94,12 @@ from tools.quill._migrate_bodies import (
     Built,
     Inputs,
     RowText,
-    bare_numbers,
     build,
     census,
     row_texts,
 )
-from tools.quill._migrate_input import Decisions, InputError, grade, load
+from tools.quill._migrate_input import TREATMENTS, Decisions, InputError, grade, load
+from tools.quill._migrate_numbers import UNDECIDED, grade_rendered, link
 from tools.quill._migrate_plan import MILESTONE, Plan, Tracked, plan
 from tools.quill._migrate_run import Clock, Filing, Run, Stopped, read_tracked
 from tools.quill._migrate_source import (
@@ -119,27 +126,36 @@ _EMPTY = Tracked({}, {}, (), "")
 @dataclass(frozen=True)
 class Prepared:
     """What every phase reads before any tracker: the registries' items, the input file's
-    decisions, each card's text, the census, and every refusal of the four."""
+    decisions, each card's text as filed (its numbers written) and as built (before they
+    are, which GitHub's renderer grades it against:
+    :func:`_migrate_numbers.grade_rendered`), the
+    census, how many bare ``#N`` each treatment took, and every refusal of the five."""
 
     source: Source
     decisions: Decisions
     built: Mapping[str, Built]
+    as_built: Mapping[str, Built]
     places: Mapping[str, Counter]
+    treated: Counter
     refusals: tuple[str, ...]
 
 
 def prepare(registries: Registries, data: dict) -> Prepared:
     """The registries read (:func:`_migrate_source.read_source`), the input file graded
     (:func:`_migrate_input.grade`), the cards' text built and its census taken
-    (:mod:`_migrate_bodies`), with the refusals of all four: what ``check`` reports and
-    a writing phase gates on."""
+    (:mod:`_migrate_bodies`), then its bare ``#N`` written as the input file decides
+    (:func:`_migrate_numbers.link`), with the refusals of all five: what ``check`` reports
+    and a writing phase gates on.  The census reads the text as built, before its numbers
+    are written; every phase files and grades it after."""
     source = read_source(registries)
     decisions, problems = grade(data, source, registries)
     inputs = Inputs(source, registries, decisions)
     built, built_problems = build(inputs)
     places, census_problems = census(inputs, built)
-    return Prepared(source, decisions, built, places,
-                    (*source.refusals, *problems, *built_problems, *census_problems))
+    linked = link(built, decisions.numbers)
+    return Prepared(source, decisions, linked.built, built, places, linked.counts,
+                    (*source.refusals, *problems, *built_problems, *census_problems,
+                     *linked.refusals))
 
 
 def _filing(prepared: Prepared) -> Filing:
@@ -148,15 +164,22 @@ def _filing(prepared: Prepared) -> Filing:
     return Filing(prepared.source.items, prepared.built, prepared.decisions.milestones)
 
 
-def check(registries: Registries, prepared: Prepared,
-          tracked: Tracked | None = None) -> tuple[list[str], int]:
-    """The report ``check`` prints, and how many refusals it holds: its writes counted on
-    ``tracked``, the ``--target`` tracker as read, or if every card were new (None)."""
-    source, built = prepared.source, prepared.built
-    found = None if prepared.refusals else _planned(_filing(prepared), tracked)
-    refusals = [*prepared.refusals, *(found.refusals if found else ())]
+def check(registries: Registries, prepared: Prepared, tracked: Tracked | None = None,
+          rendered: Sequence[str] | None = None) -> tuple[list[str], int]:
+    """The report ``check`` prints, and how many refusals it holds: what GitHub's renderer
+    refused of the numbers, ``rendered`` (None: not graded, with no ``--target`` or while
+    ``prepared`` refuses anything), and its writes counted on ``tracked``, the ``--target``
+    tracker as read, or if every card were new (None) -- none while anything is refused."""
+    source = prepared.source
+    refused = [*prepared.refusals, *(rendered or ())]
+    found = None if refused else _planned(_filing(prepared), tracked)
+    refusals = [*refused, *(found.refusals if found else ())]
     lines = [*_counts("check", source, registries), *_census_lines(prepared.places),
-             _linked(source, built), _writes(found, tracked is None)]
+             _linked(prepared.treated)]
+    if rendered is None:
+        lines.append("bare #N: not graded by GitHub's renderer (`check --target` grades them "
+                     "once nothing above is refused)")
+    lines.append(_writes(found, tracked is None))
     lines += [f"REPORT: {line}" for line in source.reports]
     lines += [f"REFUSED: {line}" for line in refusals]
     lines.append(f"{len(refusals)} refusal(s)")
@@ -197,12 +220,12 @@ def _census_lines(places: Mapping[str, Counter]) -> list[str]:
     return lines
 
 
-def _linked(source: Source, built: Mapping[str, Built]) -> str:
-    """How many cards of each kind hold a bare ``#N`` (:func:`_migrate_bodies.bare_numbers`)."""
-    linked = Counter(item.kind for item in source.items
-                     if item.key in built and bare_numbers(built[item.key]))
-    return ("cards holding a bare #N, which GitHub links to card N: "
-            + (", ".join(f"{kind}s {linked[kind]}" for kind in KINDS if linked[kind])
+def _linked(treated: Counter) -> str:
+    """How many bare ``#N`` the cards hold, by the treatment each took
+    (:func:`_migrate_numbers.link`), a refused card's counted undecided."""
+    return ("bare #N, which GitHub links to the tracker's card N: "
+            + (", ".join(f"{treatment} {treated[treatment]}"
+                         for treatment in (*TREATMENTS, UNDECIDED) if treated[treatment])
                or "none"))
 
 
@@ -235,14 +258,25 @@ def parser() -> argparse.ArgumentParser:
     return top
 
 
+def graded(prepared: Prepared, tracker: Tracker) -> tuple[str, ...]:
+    """What GitHub's renderer refuses of the cards' numbers on ``tracker``
+    (:func:`_migrate_numbers.grade_rendered`), asked once nothing ``prepared`` holds
+    refuses."""
+    return grade_rendered(prepared.as_built, prepared.built, prepared.decisions.numbers,
+                          tracker.render, tracker.place.full_name)
+
+
 def run(command: str, prepared: Prepared, connect: Callable[[], Tracker],
         clock: Clock) -> int:
     """Run the writing phase ``command`` (``history`` or ``open``) on the tracker
-    ``connect`` reaches, once nothing ``prepared`` holds refuses; its exit status."""
+    ``connect`` reaches, once nothing ``prepared`` holds refuses and GitHub's renderer
+    refuses none of its numbers; its exit status."""
     if prepared.refusals:
         return _refused(prepared.refusals)
     try:
         writer = Run(connect, _filing(prepared), clock)
+        if refusals := graded(prepared, writer.tracker):
+            return _refused(refusals)
         refusals = writer.history() if command == "history" else writer.open()
     except (Stopped, GitHubError, TrackerError, requests.RequestException,
             OSError) as error:
@@ -318,6 +352,15 @@ def row_reader(root: Path, read: Callable[[Path, str], Registries]
     return rows_at
 
 
+def _read(command: str, prepared: Prepared,
+          tracker: Tracker) -> tuple[Tracked | None, tuple[str, ...] | None]:
+    """For ``check`` (``--target``) and ``verify``: the tracker as read (None once GitHub's
+    renderer refused anything, as nothing is planned then), and what the renderer refused
+    of the numbers (None for ``verify``, which renders nothing)."""
+    rendered = graded(prepared, tracker) if command == "check" else None
+    return (None if rendered else read_tracked(tracker)), rendered
+
+
 def _refused(refusals: Sequence[str]) -> int:
     """Print ``refusals``, each on a ``REFUSED:`` line, and that nothing was written; exit
     status 1."""
@@ -346,18 +389,17 @@ def main(argv: Sequence[str] | None = None,
         return 2
     prepared = prepare(registries, data)
     if args.command in ("history", "open"):
-        place = TARGETS[args.target]
-        return run(args.command, prepared, lambda: connect(place), clock)
-    tracked = None
+        return run(args.command, prepared, lambda: connect(TARGETS[args.target]), clock)
+    tracked, rendered = None, None
     if args.target is not None and not prepared.refusals:
         try:
-            tracked = read_tracked(connect(TARGETS[args.target]))
+            tracked, rendered = _read(args.command, prepared, connect(TARGETS[args.target]))
         except (GitHubError, TrackerError, requests.RequestException, OSError) as error:
             print(f"failed: {error}", file=sys.stderr)
             return 2
-    lines, refused = (check(registries, prepared, tracked) if args.command == "check" else
-                      verifying(registries, prepared, tracked, resolver(root, commit),
-                                row_reader(root, read)))
+    lines, refused = (
+        check(registries, prepared, tracked, rendered) if args.command == "check" else
+        verifying(registries, prepared, tracked, resolver(root, commit), row_reader(root, read)))
     print("\n".join(lines))
     return 1 if refused else 0
 

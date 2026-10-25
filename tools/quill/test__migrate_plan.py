@@ -58,8 +58,8 @@ from tools.quill.setup_tracker import FILING
 def test_an_empty_tracker_takes_every_write_in_the_order_draft_4_gives(corpus):
     """HISTORY: each ruling's create, then its close with its unmark.  The FREEZE: the
     milestone; the steps, each after its parent and blockers, the container A-2's unmark
-    held to the end of the steps; the findings under their steps; the questions, each with
-    its As filed comment and its board place."""
+    held to the end of the steps; the findings, each blocked by its owner step and under no
+    card (R-BAL395); the questions, each with its As filed comment and its board place."""
     found = corpus_plan(corpus, FakeTracker())
     assert not found.refusals and found.numbers == {}
     assert found.history == (
@@ -77,11 +77,11 @@ def test_an_empty_tracker_takes_every_write_in_the_order_draft_4_gives(corpus):
         Write(BOARD_ADD, "balance:A-3"), Write(UNMARK, "balance:A-3"),
         Write(CREATE, "salary:S-1"), Write(BOARD_ADD, "salary:S-1"), Write(UNMARK, "salary:S-1"),
         Write(UNMARK, "balance:A-2"),
-        Write(CREATE, "balance:F-1"), Write(LINK, "balance:F-1", "balance:A-2a"),
+        Write(CREATE, "balance:F-1"), Write(BLOCK, "balance:F-1", "balance:A-2a"),
         Write(UNMARK, "balance:F-1"),
-        Write(CREATE, "balance:F-2"), Write(LINK, "balance:F-2", "balance:A-3"),
+        Write(CREATE, "balance:F-2"), Write(BLOCK, "balance:F-2", "balance:A-3"),
         Write(UNMARK, "balance:F-2"),
-        Write(CREATE, "salary:N-391"), Write(LINK, "salary:N-391", "salary:S-1"),
+        Write(CREATE, "salary:N-391"), Write(BLOCK, "salary:N-391", "salary:S-1"),
         Write(UNMARK, "salary:N-391"),
         *(write for key in ("balance:Q-1", "balance:Q-2", "salary:N-391 question")
           for write in (Write(CREATE, key), Write(COMMENT, key), Write(BOARD_ADD, key),
@@ -218,14 +218,17 @@ def test_a_card_filed_already_that_the_tracker_lacks_is_refused_never_filed_agai
      "it is linked outside the tracker (o/code#5)"),
     ("balance:R-A", {"is_open": True}, "an open ruling whose filing finished"),
     ("balance:F-2", {"is_open": False}, "it is closed, and a finding moves open"),
-    ("balance:F-1", {"parent": 5}, "it is a sub-issue of plan#5, not plan#3"),
+    ("balance:F-1", {"parent": 5}, "it is a sub-issue of plan#5, not none"),
+    ("balance:F-1", {"blocked_by": (3, 5)},
+     "it is blocked by plan#5, which the registries do not record"),
     ("balance:A-3", {"blocked_by": (3, 6)},
-     "it is blocked by plan#6, which steps.md does not record"),
+     "it is blocked by plan#6, which the registries do not record"),
 ], ids=["kind", "labels", "dropped-marked", "ruling-withdrawn", "outside", "ruling-open",
-        "closed", "rehomed", "extra-blocker"])
+        "closed", "rehomed", "re-owned", "extra-blocker"])
 def test_an_items_card_unlike_it_is_refused_and_left_alone(corpus, key, change, reason):
     """Each way an item's card differs from the item that no write repairs: refused, naming
-    the card, and nothing written to it."""
+    the card, and nothing written to it.  A finding is blocked by its owner and under no card
+    (R-BAL395): any parent, and any blocker but its owner, is refused."""
     tracker, numbers = filed_tracker(corpus)
     with_change(tracker, numbers[key], **change)
     found = corpus_plan(corpus, tracker)
@@ -444,7 +447,7 @@ def test_a_finished_leaf_left_unlinked_keeps_its_marked_container_from_being_unm
 
 def test_a_cycle_files_no_container_and_links_no_finding(corpus):
     """A-2a and A-2b blocked by each other: no create of A-2 left unmarked over no leaf, and
-    no F-1 linked under a card nobody files (probe D)."""
+    no F-1 blocked by a card nobody files (probe D)."""
     items = [_blocked(item, "balance:A-2b") if item.key == "balance:A-2a" else item
              for item in corpus_items(corpus)]
     found = corpus_plan(corpus, FakeTracker(), items)
@@ -452,8 +455,8 @@ def test_a_cycle_files_no_container_and_links_no_finding(corpus):
 
 
 def test_a_refused_step_takes_no_finding_under_it(corpus):
-    """A-2a's card of another kind (refused), F-1 not yet filed: F-1 is not linked under it
-    (probe G)."""
+    """A-2a's card of another kind (refused), F-1 not yet filed: F-1 is not blocked by it,
+    its owner (probe G; R-BAL395)."""
     tracker, numbers = filed_tracker(corpus, skip=("balance:F-1",))
     with_change(tracker, numbers["balance:A-2a"], kind="question")
     found = corpus_plan(corpus, tracker)
@@ -733,9 +736,9 @@ def test_a_card_refused_on_the_board_is_refused_once(corpus):
 
 def test_a_finding_below_a_card_filed_already_put_on_the_board_is_refused(corpus,
                                                                            monkeypatch):
-    """N-391's finding card, below S-1 mapped, put on the board by hand: it is an item's card
-    with no place, never one of X-cx's own to stand at S-1's rank (third review of B2a,
-    L4)."""
+    """N-391's finding card, owned by S-1 mapped (blocked by it, R-BAL395), put on the board
+    by hand: it is an item's card with no place, never one of X-cx's own to stand at S-1's
+    rank (third review of B2a, L4)."""
     tracker, numbers = filed_tracker(corpus)
     texts = corpus_texts(corpus)
     monkeypatch.setitem(_migrate_source.MAPPED, "salary:S-1", numbers["salary:S-1"])

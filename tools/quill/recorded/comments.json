@@ -1406,13 +1406,6 @@
    }
   },
   {
-   "method": "GET",
-   "url": "https://api.github.com/repos/saltyreformed-labs/shekel-plan/git/matching-refs/claims/",
-   "body": null,
-   "status": 200,
-   "answer": []
-  },
-  {
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {

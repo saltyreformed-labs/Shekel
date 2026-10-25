@@ -3,15 +3,15 @@ teardown whose census names anything left (step X-cx's K1a-2).
 
 The cases marked ``cluster`` start a real private cluster (``scripts/private_cluster.py``) on
 the daemon that module chooses (the rootless one, unless CI sanctions its own), and restore a
-dump planted by the module's fixture, so they need docker and the test-db image, whose own
-``pg_dump`` and ``pg_restore`` run inside the cluster (``balance:R-BAL327``); the conftest
-says where they run.  The rest grade the bench's pure parts on planted inputs.
+dump planted by the conftest's ``dump`` fixture, so they need docker and the test-db image,
+whose own ``pg_dump`` and ``pg_restore`` run inside the cluster (``balance:R-BAL327``); the
+conftest says where they run.  The rest grade the bench's pure parts on planted inputs.
 """
 from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -23,13 +23,45 @@ from tools.rehearsal import bench
 from tools.rehearsal.bench import Bench, BenchError
 
 
+_CREATED = "; Archive created at 2026-10-20 06:07:21 UTC\n"
+
+
 def test_the_major_a_dump_was_made_by_is_read_from_its_listing():
     """``pg_restore -l`` names the server a custom-format archive came from; its major is the
     first number, a distribution's suffix or not."""
-    assert bench.dump_major(";\n;     Dumped from database version: 18.6\n") == 18
-    assert bench.dump_major(";     Dumped from database version: 16.4 (Ubuntu 16.4-1)\n") == 16
+    assert bench.read_listing(
+        f";\n{_CREATED};     Dumped from database version: 18.6\n").major == 18
+    assert bench.read_listing(
+        f"{_CREATED};     Dumped from database version: 16.4 (Ubuntu 16.4-1)\n").major == 16
     with pytest.raises(BenchError, match="not a pg_dump -Fc archive"):
-        bench.dump_major("; Archive created at 2026-10-19\n")
+        bench.read_listing(_CREATED)
+
+
+_MAJOR = ";     Dumped from database version: 18.6\n"
+
+
+def test_the_instant_a_dump_was_made_is_read_as_utc_and_another_zone_is_refused():
+    """The listing's creation time, as the cluster's ``pg_restore`` prints it, is an aware
+    UTC instant; no time, or one printed in another zone, is refused by name."""
+    assert bench.read_listing(_CREATED + _MAJOR).created == datetime(
+        2026, 10, 20, 6, 7, 21, tzinfo=timezone.utc)
+    with pytest.raises(BenchError, match="names no time it was created at"):
+        bench.read_listing(_MAJOR)
+    with pytest.raises(BenchError, match="prints its creation time in EDT, not UTC"):
+        bench.read_listing(_CREATED.replace("UTC", "EDT") + _MAJOR)
+
+
+@pytest.mark.parametrize("created, noon", [
+    (datetime(2026, 10, 20, 6, 7, 21, tzinfo=timezone.utc), "2026-10-20T12:00:00-04:00"),
+    (datetime(2026, 10, 21, 2, 30, tzinfo=timezone.utc), "2026-10-20T12:00:00-04:00"),
+    (datetime(2026, 1, 15, 4, 59, tzinfo=timezone.utc), "2026-01-14T12:00:00-05:00"),
+    (datetime(2026, 1, 15, 5, 0, tzinfo=timezone.utc), "2026-01-15T12:00:00-05:00"),
+])
+def test_the_pinned_instant_is_noon_on_the_civil_day_the_dump_was_made_in_the_zone(created,
+                                                                                    noon):
+    """Noon in the zone on the dump's civil day THERE, never the UTC day: a dump made at
+    02:30 UTC is still the evening before in New York, in summer time and in winter."""
+    assert bench.Listing(18, created).noon("America/New_York").isoformat() == noon
 
 
 def test_a_dump_from_another_major_than_the_cluster_s_is_refused_naming_both():
@@ -74,7 +106,7 @@ def test_a_side_s_pins_are_its_requirements_and_its_time_machine_pin(tmp_path):
 
 
 class _Builds:
-    """A stand-in for :func:`bench._run` that records each command and makes a venv's
+    """A stand-in for :func:`bench.run` that records each command and makes a venv's
     directory as ``python -m venv`` would; pip exits ``pip_status``."""
 
     def __init__(self, pip_status: int = 0) -> None:
@@ -96,7 +128,7 @@ def _builds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Builds:
     """A throwaway ``XDG_CACHE_HOME`` and the stand-in builder."""
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     stand_in = _Builds()
-    monkeypatch.setattr(bench, "_run", stand_in)
+    monkeypatch.setattr(bench, "run", stand_in)
     return stand_in
 
 
@@ -145,39 +177,13 @@ def test_a_dump_that_cannot_be_opened_is_refused_by_name_before_any_tool_runs(tm
         return subprocess.CompletedProcess(argv, 0, said.get(argv[2], ""), "")
 
     monkeypatch.setattr(bench, "image_tag", lambda: "stub-image:test")
-    monkeypatch.setattr(bench, "_run", cluster_module)
+    monkeypatch.setattr(bench, "run", cluster_module)
     absent = tmp_path / "absent.dump"
     with pytest.raises(BenchError) as refused:
         with Bench(absent, {"cut": "HEAD"}):
             pass
     assert str(refused.value).startswith(f"the dump {absent} cannot be read: [Errno 2] No such")
     assert commands == ["token", "start", "stop"]
-
-
-@pytest.fixture(name="dump", scope="module")
-def _dump(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
-    """A ``pg_dump -Fc`` archive of a planted database: one table, two rows of money."""
-    path = tmp_path_factory.mktemp("dump") / "planted.dump"
-    token = bench.cluster("token").strip()
-    try:
-        socket_dir, container = bench.cluster(
-            "start", "--", f"shekel-rehearsal-test-{os.getpid()}-{token[:8]}", token,
-            bench.image_tag()).splitlines()
-        with psycopg.connect(bench.cluster("url", socket_dir, "postgres").strip(),
-                             autocommit=True) as connection:
-            connection.execute("CREATE DATABASE planted")
-        planted = bench.cluster("url", socket_dir, "planted").strip()
-        with psycopg.connect(planted, autocommit=True) as connection:
-            connection.execute(
-                "CREATE TABLE ledger (id integer PRIMARY KEY, amount numeric(12, 2))")
-            connection.execute("INSERT INTO ledger VALUES (1, 12.34), (2, 0.01)")
-        with path.open("wb") as archive:
-            dumped = bench.in_cluster(container, ["pg_dump", "--format=custom", "--dbname",
-                                                  "planted"], stdout=archive)
-        assert dumped.returncode == 0, dumped.stderr
-    finally:
-        bench.cluster("stop", token)
-    yield path
 
 
 def _containers() -> str:
@@ -209,6 +215,8 @@ def test_a_bench_restores_the_dump_clones_it_per_state_and_leaves_nothing(dump):
     parent = gitcmd.git(arcs.REPO, "rev-parse", "HEAD~1").strip()
     made = Bench(dump, {"base": parent, "cut": head})
     with made:
+        assert made.listing is not None
+        assert abs(datetime.now(timezone.utc) - made.listing.created) < timedelta(hours=1)
         assert {name: state.commit for name, state in made.made.items()} == {
             "base": parent, "cut": head}
         for state in made.made.values():

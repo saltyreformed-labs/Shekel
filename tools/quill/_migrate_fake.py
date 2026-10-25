@@ -12,6 +12,9 @@ from dataclasses import replace
 
 from tools.ci.arcs import ARCS, STEPS_HEADINGS
 from tools.plan_gate.registries import LedgerRow, RulingRow, StepRow
+from tools.quill._migrate_bodies import Inputs, build
+from tools.quill._migrate_input import grade
+from tools.quill._migrate_numbers import PLAIN, decided_from, numbers
 from tools.quill._migrate_source import (
     MAPPED,
     Registries,
@@ -120,13 +123,15 @@ def complete_input(corpus: Registries, source: Source | None = None) -> dict:
     """The input file a session would write for ``corpus``: every name but a card's filed
     already; Q-2's question written; the flush-left notes NOTES and A-3's own paragraph
     OWN; the preamble given to A-3's card; the outcome's milestone -- each entry hashing
-    its source text (:func:`_migrate_source.source_text`)."""
+    its source text (:func:`_migrate_source.source_text`) -- and each bare ``#N`` a card's
+    text holds decided plain, hashing the card's text as built
+    (:func:`_migrate_numbers.decided_from`); the corpus as written holds none."""
     source = source or read_source(corpus)
     items = {item.key: item for item in source.items}
     paragraphs = [paragraph for spec in source.specs.values() for paragraph in spec.paragraphs]
     preamble = source.preambles[0]
     name, scope = corpus.outcomes[0]
-    return {
+    data = {
         "names": {key: {"name": NAMES[key], "source": source_hash(
             source_text(items[key], source.specs, corpus.documents))} for key in items
                   if key not in MAPPED},
@@ -142,4 +147,10 @@ def complete_input(corpus: Registries, source: Source | None = None) -> dict:
                        "source": source_hash(preamble.text)}],
         "milestones": {name: {"title": "The first", "description": "The first outcome.",
                               "source": source_hash(f"{name}\n" + " / ".join(scope))}},
+        "numbers": {},
     }
+    built = build(Inputs(source, corpus, grade(data, source, corpus)[0]))[0]
+    data["numbers"] = {key: {"each": [[number.text, PLAIN] for number in found],
+                             "source": decided_from(card)}
+                       for key, card in built.items() if (found := numbers(card))}
+    return data

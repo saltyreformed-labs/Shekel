@@ -204,6 +204,17 @@ def test_rest_answers_none_for_an_empty_body():
     assert GitHub("t", session).rest("DELETE", "/repos/o/r/labels/bug") is None
 
 
+def test_rest_text_answers_the_body_as_text_not_json():
+    """``/markdown`` answers HTML, which ``rest`` would try to decode as JSON."""
+    answer = _Response(200)
+    answer.content, answer.text = b'<p dir="auto">x</p>', '<p dir="auto">x</p>'
+    session = _Session(answer)
+    assert GitHub("t", session).rest_text("POST", "/markdown", {"text": "x"}) == (
+        '<p dir="auto">x</p>')
+    method, url, kwargs = session.sent[0]
+    assert (method, url, kwargs["json"]) == ("POST", f"{API}/markdown", {"text": "x"})
+
+
 def test_rest_raises_with_the_status_on_an_error():
     """A 404 is a fact a caller branches on (the repository does not exist yet)."""
     session = _Session(_Response(404, {"message": "Not Found"}))

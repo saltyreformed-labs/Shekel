@@ -23,8 +23,9 @@ plan gate reads, or it is reported as malformed.  An old-form trailer is
 returned as its own record (:class:`OldFormClaim`) for the release tool,
 which asks what a release carries over a range: a ``Ships:`` in
 :attr:`History.old_form`, a ``Reopens:`` in :attr:`History.old_form_reopens`
-(none exists, measured 2026-10-14; after the cutover the release tool's card
-reader refuses either, ruling ``balance:R-BAL287``).  Neither decides anything
+(none exists, measured 2026-10-14 and 2026-10-23; after the cutover the release
+tool's card reader refuses either when a cut holding ``steps.md`` holds it, ruling
+``balance:R-BAL287``, and reads any other as prose).  Neither decides anything
 here.  The plan gate's own walk (``_shipped._shipping_claims``) is the second
 reader of the old-form ``Ships:``, and L8 deletes it with the plan gate's arms.
 

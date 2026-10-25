@@ -10,17 +10,18 @@ from dataclasses import replace
 
 import pytest
 
-from tools.quill._fake import (AnswerLostOnce, FailOnce, FakeTracker, leaf_filing, ruling_filing,
-                              run, ship)
+from tools.quill._fake import (AnswerLostOnce, FailOnce, FakeTracker, claim, leaf_filing,
+                              ruling_filing, run, ship)
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Child, Claim
+from tools.quill._tracker import Child
 from tools.quill.setup_tracker import FILING
 
 
 def test_a_leaf_and_a_ruling_are_created_marked_and_unmarked_by_their_last_write(code,
                                                                                 tmp_path):
     """R-BAL202: a leaf is created marked, linked, added, moved, its split step taken off the
-    board, then unmarked; a ruling is created marked, linked, closed, then unmarked.  (A
+    board, then unmarked; a ruling is created marked, blocked by its owner (R-BAL395),
+    closed, then unmarked.  (A
     finding's and a question's writes are pinned in ``test_quill_file.py``.)"""
     tracker = FakeTracker()
     for number in (1, 2, 3):
@@ -32,7 +33,7 @@ def test_a_leaf_and_a_ruling_are_created_marked_and_unmarked_by_their_last_write
     tracker.writes.clear()
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#4")) == 0
     assert tracker.writes == [("create", 5, "ruling", "Home", ("balance", FILING)),
-                              ("add_child", 4, 5), ("close", 5, "completed"), ("unmark", 5)]
+                              ("block", 5, 4), ("close", 5, "completed"), ("unmark", 5)]
 
 
 class _HandUnmarks:
@@ -103,7 +104,7 @@ def test_a_leaf_cut_short_after_its_create_is_never_offered_and_the_same_command
     out = capsys.readouterr().out
     assert out.startswith("next: nothing\n")
     assert "UNFINISHED FILING: plan#10's filing has not finished" in out
-    assert run(tracker, code, "claim", "plan#10", "--branch", "feat/x") == 1
+    assert run(tracker, code, "claim", "plan#10") == 1
     assert "its filing has not finished (R-BAL202)" in capsys.readouterr().err
     assert run(tracker, code, *args) == 0
     card = tracker.cards_by_number[10]
@@ -391,10 +392,10 @@ def test_a_ruling_withdrawn_before_its_filing_finished_is_no_unfinished_filing(c
     """Review rbal202a M2: only the tool's own close as completed is a ruling filing's close;
     a ruling dropped, or closed by a person, while marked was withdrawn, so ``sync`` stops
     naming it -- it named it on every run, and the one exit it offered re-linked the
-    withdrawn ruling under its owner."""
+    withdrawn ruling to its owner."""
     tracker = FakeTracker()
     tracker.add(1)
-    FailOnce(tracker, "add_child")
+    FailOnce(tracker, "block")
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#1")) == 2
     capsys.readouterr()
     assert run(tracker, code, "next") == 0
@@ -492,10 +493,10 @@ def test_a_ruling_a_person_closed_as_completed_is_finished_by_its_command(code, 
                                                                           capsys):
     """R-BAL206: the ruling's link failed and a person closed it with the web's default close,
     completed; it is still an unfinished filing, named by ``next``, and its command links it
-    under its owner and removes the mark, filing no second ruling."""
+    to its owner (blocked by it, R-BAL395) and removes the mark, filing no second ruling."""
     tracker = FakeTracker()
     tracker.add(1)
-    FailOnce(tracker, "add_child")
+    FailOnce(tracker, "block")
     args = ruling_filing(tmp_path, "plan#1")
     assert run(tracker, code, *args) == 2
     tracker.cards_by_number[2] = replace(tracker.cards_by_number[2], is_open=False,
@@ -506,7 +507,9 @@ def test_a_ruling_a_person_closed_as_completed_is_finished_by_its_command(code, 
     assert "UNFINISHED FILING: plan#2's filing has not finished" in capsys.readouterr().out
     assert run(tracker, code, *args) == 0
     rulings = [card for card in tracker.cards_by_number.values() if card.kind == "ruling"]
-    assert [(card.number, card.parent, card.labels) for card in rulings] == [(2, 1, ("balance",))]
+    assert [(card.number, card.parent, card.blocked_by, card.labels)
+            for card in rulings] == [(2, None, (1,), ("balance",))]
+    assert tracker.writes.count(("block", 2, 1)) == 1
 
 
 def test_a_re_run_waits_on_another_leaf_whose_filing_has_not_finished(code, tmp_path, capsys):
@@ -597,7 +600,7 @@ def test_a_lone_leaf_dropped_after_its_split_step_left_the_board_puts_it_back(co
     for number in (1, 2, 3):
         tracker.add(number)
     tracker.add(4, blocked_by=(2,), on_board=False)
-    tracker.held[1] = Claim(1, "feat/one", "2026-10-04T12:00:00Z", "s")
+    claim(code, 1)
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half", "plan#2")) == 2
     assert tracker.board.items == [1, 5, 3]
@@ -641,7 +644,7 @@ def test_only_a_marked_leaf_is_unlinked_and_shipped_work_never(code, capsys):
     tracker.add(3, parent=1, labels=marked)
     assert run(tracker, code, "drop", "plan#2", "--why", "a duplicate") == 0
     assert not [write for write in tracker.writes if write[0] == "remove_child"]
-    ship(code, "Ships: plan#3")
+    ship(code, 3)
     writes = list(tracker.writes)
     capsys.readouterr()
     assert run(tracker, code, "drop", "plan#3", "--why", "late") == 1
@@ -677,7 +680,7 @@ def test_a_drop_whose_board_add_failed_unlinked_nothing_and_is_finished_by_the_s
     tracker = FakeTracker()
     for number in (1, 2, 3):
         tracker.add(number)
-    tracker.held[1] = Claim(1, "feat/one", "2026-10-04T12:00:00Z", "s")
+    claim(code, 1)
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *leaf_filing(tmp_path, "Half", "plan#2")) == 2
     FailOnce(tracker.board, "add")

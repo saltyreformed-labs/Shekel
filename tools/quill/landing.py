@@ -117,14 +117,23 @@ it leaves as it was (rule 8):**
    so a release counts every change production gets from the cards it brings: where
    production built from M differs from production built from M's first parent
    (:func:`_production.changed`: the files the image holds, read from its ignore file by
-   Docker's own rules, and the ``Dockerfile``, ``docker-compose.yml``, ``deploy/`` but its
-   ``README.md`` files, and the workflow that builds and signs the image), a change writing
-   no marker is refused (:func:`_unrecorded`).  Which marker it writes, and
-   from which branch, rules 1-8 judge.  A release and a resync change production only with
-   the markers they bring, which rules 3 and 4 judge as carried; one that brings none and
-   still changes production carries code ``dev`` kept after deleting its card's marker,
-   which no release could count, so it is refused as well, and a fresh claim recording that
-   code (a marker, no code) lets it pass.
+   Docker's own rules, and the files outside it that build or run production,
+   :data:`_production.RECIPE` and ``deploy/`` but its ``README.md`` files), a change writing
+   no marker is refused (:func:`_unrecorded`).  Which marker it writes, and from which
+   branch, rules 1-8 judge.  A release and a resync change production only with the markers
+   they bring, which rules 3 and 4 judge as carried; one that brings none and still changes
+   production carries code ``dev`` kept after deleting its card's marker, which no release
+   could count, so it is refused as well, and a fresh claim recording that code (a marker,
+   no code) lets it pass.  **The rule is per change, as ruled**, so a change writing any
+   marker passes it whole, and production code recording no card rides beside that marker:
+   in a release bringing another card's marker, code ``dev`` kept after a hand-written "not
+   done" deleted its own card's (no quill command deletes a marker alone); in a branch that
+   merged in ``main``'s hotfix, whose marker it carries, the branch's own change (S3b's
+   review, its finding 3, and part 5's residual (b); both named, neither built).  And a
+   change writing none is refused whatever rule 8 passes: a shown delete (``R-BAL391``) of
+   the marker of a hotfix the branch merged in, keeping its code, is refused where that
+   code is in the image, as ``dev`` then gains production code recording no card; resync
+   first, then delete the marker on ``dev``'s own line (S3b's review, its finding 4).
 
 **A task's done file ``plan/tasks/T`` is judged by the same rules** (``R-BAL386``): a
 task is a piece of one card, a commit inside its one pull request, done when its file is in
@@ -209,6 +218,9 @@ _QUEUED = re.compile(r"(?:refs/heads/)?gh-readonly-queue/.+/pr-(?P<number>[1-9][
 _VERBS = {"A": "adds", "M": "changes", "T": "changes the type of"}
 #: How many of production's changed paths rule 9's sentence names before it counts the rest.
 _NAMED = 5
+#: The files outside the image that rule 9's sentence names, as :mod:`_production` reads them.
+_OUTSIDE = (f"{', '.join(_production.RECIPE)} or {_production.DEPLOY}/ (a "
+            f"{_production.README} there excepted)")
 
 
 @dataclass(frozen=True)
@@ -760,9 +772,8 @@ def _unrecorded(landing: Landing) -> list[str]:
     return [f"{landing.pull.head or 'a branch of another repository'} changes what production "
             f"runs ({', '.join(paths[:_NAMED])}{more}), but adds, changes or deletes no ship "
             "marker, so no release would count it: a change to a file the production image "
-            "holds, the Dockerfile, docker-compose.yml, deploy/ (a README.md there excepted) "
-            f"or {_production.PUBLISH} lands from a card's claim (quill claim <card>), whose "
-            "marker records it"]
+            f"holds, {_OUTSIDE} lands from a card's claim (quill claim <card>), whose marker "
+            "records it"]
 
 
 def _wrong(number: int, card: BareCard | None, cards: Mapping[int, BareCard],

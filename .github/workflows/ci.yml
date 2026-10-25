@@ -7,7 +7,8 @@
 # and the shards.
 #
 #   landing        refuses a merge writing a ship marker the one write rule
-#                  forbids (tools/quill/landing.py; step 4e).
+#                  forbids, or changing what production runs and writing
+#                  none (tools/quill/landing.py; step 4e).
 #   tools          every tools package's pylint floor and tests (step 4b).
 #   tax-law        refuses from December 1 until next year's tax law is in
 #                  the app (step 4c).

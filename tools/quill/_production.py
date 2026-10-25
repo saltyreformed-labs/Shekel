@@ -1,8 +1,8 @@
 """What production runs, as one commit's tree says it (rulings ``balance:R-BAL362``,
-``R-BAL364`` and ``R-BAL400``): every file the image built from that commit holds, and the
-files outside the image that build or run it.  CI's write rule refuses a change to any of them
-that records no card (``tools/quill/landing.py``), so a release counts every change production
-gets from the cards it brings.
+``R-BAL364``, ``R-BAL400`` and ``R-BAL401``): every file the image built from that commit
+holds, and the files outside the image that build or run it.  CI's write rule refuses a
+change to any of them that records no card (``tools/quill/landing.py``), so a release counts
+every change production gets from the cards it brings.
 
 **The image holds what the ``Dockerfile``'s ``COPY . .`` copies of a clean checkout**
 (``.github/workflows/docker-publish.yml`` builds it with the repository's root as its
@@ -29,13 +29,15 @@ compile (:class:`IgnoreFileError`), and reads any other as written, though Go's
 ``-``.
 
 **Outside the image** (:func:`runs_it`, ``R-BAL400``): the ``Dockerfile``, the image's
-recipe; ``docker-compose.yml``, which production keeps a byte-for-byte copy of; and every file
+recipe; ``docker-compose.yml``, which production keeps a byte-for-byte copy of; every file
 under ``deploy/`` but a ``README.md``: the deploy script production runs from the main
 checkout, the compose override and the nginx settings it keeps copies of, the release's
 post-deploy check, and the bundled nginx file the production override disables (measured
-2026-10-24 by X-cx L8, read only on the host).  ``docker-compose.dev.yml``,
-``docker-compose.build.yml`` and ``cloudflared/config.yml`` (a template the host's copy
-differs from) are none of production's.
+2026-10-24 by X-cx L8, read only on the host); and (``R-BAL401``) the workflow that builds
+the image on ``main`` and signs it, read whole, its comments included, as the others are.
+``docker-compose.dev.yml``, ``docker-compose.build.yml``, ``cloudflared/config.yml`` (a
+template the host's copy differs from) and the other workflows, which only test, are none
+of production's.
 """
 from __future__ import annotations
 
@@ -49,8 +51,10 @@ from tools.ci.gitcmd import git
 
 #: The image's recipe, which production's build reads from the context's root.
 DOCKERFILE = "Dockerfile"
-#: The files at the root outside the image that build or run production (R-BAL400).
-RECIPE = (DOCKERFILE, "docker-compose.yml")
+#: The workflow that builds the image on ``main`` and signs it (R-BAL401).
+PUBLISH = ".github/workflows/docker-publish.yml"
+#: The files outside the image that build or run production, by path (R-BAL400, R-BAL401).
+RECIPE = (DOCKERFILE, "docker-compose.yml", PUBLISH)
 #: The directory of the deploy script and the settings production keeps copies of.
 DEPLOY = "deploy"
 #: A file under :data:`DEPLOY` that production never reads, by its name.
@@ -229,8 +233,9 @@ def ignore_file(root: Path, commit: str) -> str:
 
 def runs_it(path: str) -> bool:
     """Whether ``path`` is a file outside the image that builds or runs production
-    (``R-BAL400``): the image's recipe, the compose file production copies, or a file under
-    :data:`DEPLOY` but a :data:`README`."""
+    (``R-BAL400``, ``R-BAL401``): the image's recipe, the compose file production copies, the
+    workflow that builds and signs the image, or a file under :data:`DEPLOY` but a
+    :data:`README`."""
     return path in RECIPE or (path.startswith(f"{DEPLOY}/")
                               and posixpath.basename(path) != README)
 

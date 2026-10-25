@@ -113,12 +113,13 @@ it leaves as it was (rule 8):**
    judge; one that conflicts in both is passed over, so an app change lands in a week the
    two disagree.
 9. **A change to what production runs must add, change or delete a ship marker**
-   (``R-BAL362``; its reach, ``R-BAL364`` and ``R-BAL400``), from any branch, so a release
-   counts every change production gets from the cards it brings: where production built
-   from M differs from production built from M's first parent (:func:`_production.changed`:
-   the files the image holds, read from its ignore file by Docker's own rules, and the
-   ``Dockerfile``, ``docker-compose.yml`` and ``deploy/`` but its ``README.md`` files), a
-   change writing no marker is refused (:func:`_unrecorded`).  Which marker it writes, and
+   (``R-BAL362``; its reach, ``R-BAL364``, ``R-BAL400`` and ``R-BAL401``), from any branch,
+   so a release counts every change production gets from the cards it brings: where
+   production built from M differs from production built from M's first parent
+   (:func:`_production.changed`: the files the image holds, read from its ignore file by
+   Docker's own rules, and the ``Dockerfile``, ``docker-compose.yml``, ``deploy/`` but its
+   ``README.md`` files, and the workflow that builds and signs the image), a change writing
+   no marker is refused (:func:`_unrecorded`).  Which marker it writes, and
    from which branch, rules 1-8 judge.  A release and a resync change production only with
    the markers they bring, which rules 3 and 4 judge as carried; one that brings none and
    still changes production carries code ``dev`` kept after deleting its card's marker,
@@ -741,10 +742,10 @@ def _unwritten(landing: Landing, after: _git.Merged,
 
 
 def _unrecorded(landing: Landing) -> list[str]:
-    """Rule 9 (``R-BAL362``, ``R-BAL364``, ``R-BAL400``): one sentence when ``landing``
-    writes or deletes no entry under :data:`_git.MARKERS` and production built from M differs
-    from production built from M's first parent (:func:`_production.changed`), naming the
-    paths where it does; none otherwise.
+    """Rule 9 (``R-BAL362``, ``R-BAL364``, ``R-BAL400``, ``R-BAL401``): one sentence when
+    ``landing`` writes or deletes no entry under :data:`_git.MARKERS` and production built
+    from M differs from production built from M's first parent (:func:`_production.changed`),
+    naming the paths where it does; none otherwise.
 
     Raises:
         _production.IgnoreFileError: when the ignore file either commit holds is one Docker
@@ -759,8 +760,9 @@ def _unrecorded(landing: Landing) -> list[str]:
     return [f"{landing.pull.head or 'a branch of another repository'} changes what production "
             f"runs ({', '.join(paths[:_NAMED])}{more}), but adds, changes or deletes no ship "
             "marker, so no release would count it: a change to a file the production image "
-            "holds, the Dockerfile, docker-compose.yml or deploy/ (a README.md there excepted) "
-            "lands from a card's claim (quill claim <card>), whose marker records it"]
+            "holds, the Dockerfile, docker-compose.yml, deploy/ (a README.md there excepted) "
+            f"or {_production.PUBLISH} lands from a card's claim (quill claim <card>), whose "
+            "marker records it"]
 
 
 def _wrong(number: int, card: BareCard | None, cards: Mapping[int, BareCard],

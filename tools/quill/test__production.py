@@ -1,5 +1,6 @@
 """What production runs at a commit (:mod:`tools.quill._production`): Docker's own reading of an
-ignore file, and the files outside the image that build or run production.
+ignore file, and the files outside the image that build or run production (the publish
+workflow among them, ``R-BAL401``).
 
 **Every expectation of the reader below was measured on a REAL BuildKit build** (Docker
 29.9.2, buildx 0.38.1, 2026-10-24, X-cx L8's S3b part 5): each case's ignore file and files
@@ -134,14 +135,17 @@ def test_no_ignore_file_keeps_every_file():
 @pytest.mark.parametrize(("path", "runs"), [
     ("Dockerfile", True), ("docker-compose.yml", True), ("deploy/shekel-deploy.sh", True),
     ("deploy/nginx-shared/conf.d/shekel.conf", True), ("deploy/NOTES.md", True),
+    (".github/workflows/docker-publish.yml", True),
     ("deploy/README.md", False), ("deploy/postgres/README.md", False),
     ("docker-compose.dev.yml", False), ("docker-compose.build.yml", False),
     ("cloudflared/config.yml", False), ("deployed.txt", False), ("app/Dockerfile", False),
+    (".github/workflows/ci.yml", False), ("docker-publish.yml", False),
 ])
 def test_the_files_outside_the_image_that_build_or_run_production(path, runs):
     """R-BAL400: the Dockerfile, the compose file production copies, and deploy/ whole but a
-    README.md; never the dev or build compose files, the tunnel's template, or a name that
-    only starts like one."""
+    README.md; R-BAL401: the workflow that builds and signs the image.  Never the dev or
+    build compose files, the tunnel's template, another workflow, or a name that only starts
+    or ends like one."""
     assert _production.runs_it(path) is runs
 
 
@@ -169,26 +173,32 @@ def test_the_dockerfiles_own_ignore_file_comes_first(repo):
 
 
 def test_what_production_runs_at_a_commit(repo):
-    """The files the image holds, by mode and object, and the Dockerfile and deploy/ although
-    the ignore file excludes them; not deploy's README."""
+    """The files the image holds, by mode and object, and the Dockerfile, deploy/ and the
+    publish workflow although the ignore file excludes them; not deploy's README, nor another
+    workflow."""
     sha = _files(repo, _commit(repo, "root"), "base", {
-        ".dockerignore": "Dockerfile\n.dockerignore\ndeploy/\ntools/\n", "Dockerfile": "FROM x\n",
-        "app/a.py": "a\n", "tools/t.py": "t\n", "deploy/run.sh": "r\n", "deploy/README.md": "d\n"})
+        ".dockerignore": "Dockerfile\n.dockerignore\ndeploy/\ntools/\n.github/\n",
+        "Dockerfile": "FROM x\n", "app/a.py": "a\n", "tools/t.py": "t\n", "deploy/run.sh": "r\n",
+        "deploy/README.md": "d\n", _production.PUBLISH: "on: push\n",
+        ".github/workflows/ci.yml": "on: pull_request\n"})
     found = files(repo, sha)
-    assert sorted(found) == ["Dockerfile", "app/a.py", "deploy/run.sh"]
+    assert sorted(found) == [_production.PUBLISH, "Dockerfile", "app/a.py", "deploy/run.sh"]
     assert found["app/a.py"] == f"100644 {_run(repo, 'rev-parse', f'{sha}:app/a.py')}"
 
 
 def test_production_changes_where_its_files_differ_and_nowhere_else(repo):
     """An edit, an add, a delete and a mode change of a file the image holds each change
-    production; so do an ignore-file edit moving a file in or out of the image and an edit to
-    the Dockerfile the image excludes.  An edit to a file the image excludes, to deploy's
-    README, or to the ignore file's comments changes nothing."""
-    ignored = "Dockerfile\n.dockerignore\ndeploy/\ntools/\ndocs/\n"
+    production; so do an ignore-file edit moving a file in or out of the image, and an edit
+    to the Dockerfile or to the publish workflow, a comment there included, which the image
+    excludes.  An edit to a file the image excludes, to another workflow, to deploy's README,
+    or to the ignore file's comments changes nothing."""
+    ignored = "Dockerfile\n.dockerignore\ndeploy/\ntools/\ndocs/\n.github/\n"
+    publish = _production.PUBLISH
     base = _files(repo, _commit(repo, "root"), "base", {
         ".dockerignore": f"# the image\n{ignored}",
         "Dockerfile": "FROM x\n", "app/a.py": "a\n", "app/gone.py": "g\n", "tools/t.py": "t\n",
-        "docs/d.md": "d\n", "deploy/README.md": "r\n"})
+        "docs/d.md": "d\n", "deploy/README.md": "r\n", publish: "on: push\n",
+        ".github/workflows/ci.yml": "on: pull_request\n"})
     edits = {
         "an edit": {"app/a.py": "a2\n"},
         "an add": {"app/new.py": "n\n"},
@@ -196,7 +206,10 @@ def test_production_changes_where_its_files_differ_and_nowhere_else(repo):
         "tools/ taken in": {".dockerignore": f"# the image\n{ignored.replace('tools/', '')}"},
         "app/ taken out": {".dockerignore": f"# the image\n{ignored}app/\n"},
         "the Dockerfile": {"Dockerfile": "FROM y\n"},
+        "the publish workflow": {publish: "on: [push, workflow_dispatch]\n"},
+        "a publish comment": {publish: "# builds the image\non: push\n"},
         "a tools edit": {"tools/t.py": "t2\n"},
+        "another workflow": {".github/workflows/ci.yml": "on: merge_group\n"},
         "deploy's README": {"deploy/README.md": "r2\n"},
         "a comment": {".dockerignore": f"# what the image holds\n{ignored}"},
     }
@@ -205,8 +218,9 @@ def test_production_changes_where_its_files_differ_and_nowhere_else(repo):
     assert found == {
         "an edit": ("app/a.py",), "an add": ("app/new.py",), "a delete": ("app/gone.py",),
         "tools/ taken in": ("tools/t.py",), "app/ taken out": ("app/a.py", "app/gone.py"),
-        "the Dockerfile": ("Dockerfile",), "a tools edit": (), "deploy's README": (),
-        "a comment": ()}
+        "the Dockerfile": ("Dockerfile",), "the publish workflow": (publish,),
+        "a publish comment": (publish,), "a tools edit": (), "another workflow": (),
+        "deploy's README": (), "a comment": ()}
     assert changed(repo, base, _executable(repo, base, "app/a.py")) == ("app/a.py",)
 
 

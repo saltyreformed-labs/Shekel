@@ -1,10 +1,10 @@
-"""CI's landing check, rule 9 (rulings ``balance:R-BAL362``, ``R-BAL364`` and ``R-BAL400``): a
-change to what production runs must add, change or delete a ship marker.
+"""CI's landing check, rule 9 (rulings ``balance:R-BAL362``, ``R-BAL364``, ``R-BAL400`` and
+``R-BAL401``): a change to what production runs must add, change or delete a ship marker.
 
 Every history is a throwaway repository's, built and judged as the other landing tests build
 and judge theirs (:mod:`tools.quill._histories`), on a base whose ignore file keeps the
-markers, ``tools/``, ``docs/``, the ``Dockerfile`` and ``deploy/`` out of the image, as the
-repository's own does (:func:`_image`); the files the image holds are read by
+markers, ``tools/``, ``docs/``, the ``Dockerfile``, ``deploy/`` and ``.github/`` out of the
+image, as the repository's own does (:func:`_image`); the files the image holds are read by
 :mod:`tools.quill._production`, graded on its own in ``test__production.py``.  The other
 landing tests' base keeps everything out of the image, so there each test grades rules 1-8
 alone.
@@ -22,28 +22,32 @@ from tools.quill._histories import tracker, undone, verdict
 from tools.quill._histories import Lookup
 
 #: The base's ignore file: what the image leaves out, as the repository's own leaves it out.
-_IGNORED = "plan/\ndocs/\ntools/\nDockerfile\n.dockerignore\ndeploy/\n"
+_IGNORED = "plan/\ndocs/\ntools/\nDockerfile\n.dockerignore\ndeploy/\n.github/\n"
+#: The workflow that builds and signs the image (R-BAL401), by its path.
+_PUBLISH = ".github/workflows/docker-publish.yml"
 
 
 def _refused(head, paths):
     """Rule 9's sentence for a change from ``head`` to production's ``paths``, as named."""
     return (f"REFUSED -- {head} changes what production runs ({paths}), but adds, changes or "
             "deletes no ship marker, so no release would count it: a change to a file the "
-            "production image holds, the Dockerfile, docker-compose.yml or deploy/ (a "
-            "README.md there excepted) lands from a card's claim (quill claim <card>), whose "
-            "marker records it")
+            "production image holds, the Dockerfile, docker-compose.yml, deploy/ (a "
+            "README.md there excepted) or .github/workflows/docker-publish.yml lands from a "
+            "card's claim (quill claim <card>), whose marker records it")
 
 
 @pytest.fixture(name="image")
 def _image(tmp_path):
     """A repository whose ``origin/dev`` and ``origin/main`` hold one base (the start of
     every history) with :data:`_IGNORED` for its ignore file, an app file the image holds,
-    and the Dockerfile, a deploy script, deploy's README, a tool and a document it does not;
-    the repository and the base."""
+    and the Dockerfile, a deploy script, deploy's README, the publish workflow, another
+    workflow, a tool and a document it does not; the repository and the base."""
     root, start_ = start(tmp_path)
     base = commit_files(root, start_, "the image", {
         ".dockerignore": _IGNORED, "Dockerfile": "FROM python\n", "deploy/run.sh": "deploy\n",
-        "deploy/README.md": "how\n", "tools/t.py": "tool\n", "docs/d.md": "doc\n"})
+        "deploy/README.md": "how\n", _PUBLISH: "on: push\n",
+        ".github/workflows/ci.yml": "on: pull_request\n", "tools/t.py": "tool\n",
+        "docs/d.md": "doc\n"})
     point_dev(root, base)
     point_main(root, base)
     return root, base
@@ -68,17 +72,21 @@ def _check(capsys, image):
     ({"app.py": None}, "app.py"),
     ({"Dockerfile": "FROM python:slim\n"}, "Dockerfile"),
     ({"deploy/run.sh": "deploy twice\n"}, "deploy/run.sh"),
+    ({_PUBLISH: "on: [push, workflow_dispatch]\n"}, _PUBLISH),
+    ({_PUBLISH: "# builds the image\non: push\n"}, _PUBLISH),
     ({".dockerignore": _IGNORED.replace("tools/\n", "")}, "tools/t.py"),
     ({f"app/{n}.py": "new\n" for n in range(7)},
      "app/0.py, app/1.py, app/2.py, app/3.py, app/4.py and 2 more"),
 ], ids=["an app edit", "an app delete", "the Dockerfile", "the deploy script",
+        "the publish workflow", "a comment in the publish workflow",
         "tools/ taken into the image", "seven files"])
 def test_a_change_to_what_production_runs_writing_no_marker_is_refused(check, image, change,
                                                                        paths):
     """fix/grid-total, no card's claim, changes production: an image file edited or deleted,
-    the Dockerfile or the deploy script although the image excludes them, or the ignore file
-    taking a file into the image.  It is refused, naming at most five paths, and the tracker
-    is not read."""
+    the Dockerfile, the deploy script or the publish workflow (read whole, a comment
+    included, R-BAL401) although the image excludes them, or the ignore file taking a file
+    into the image.  It is refused, naming at most five paths, and the tracker is not
+    read."""
     root, base = image
     head = commit_files(root, base, "fix", change)
     status, out, _ = check(base, head, "fix/grid-total")
@@ -88,11 +96,14 @@ def test_a_change_to_what_production_runs_writing_no_marker_is_refused(check, im
 
 @pytest.mark.parametrize("change", [
     {"tools/t.py": "tool v2\n"}, {"docs/d.md": "doc v2\n"}, {"deploy/README.md": "how v2\n"},
+    {".github/workflows/ci.yml": "on: merge_group\n"},
     {".dockerignore": f"# what the image leaves out\n{_IGNORED}"},
-], ids=["a tool", "a document", "deploy's README", "an ignore-file comment"])
+], ids=["a tool", "a document", "deploy's README", "another workflow",
+        "an ignore-file comment"])
 def test_a_change_production_never_runs_lands_without_a_marker(check, image, change):
-    """A change to a tool, a document, deploy's README or the ignore file's comments leaves
-    production as it was, so it lands from any branch, unread."""
+    """A change to a tool, a document, deploy's README, a workflow that only tests or the
+    ignore file's comments leaves production as it was, so it lands from any branch,
+    unread."""
     root, base = image
     head = commit_files(root, base, "docs", change)
     assert check(base, head, "docs/typo")[:2] == (0, verdict("docs/typo", 0, 0) + "\n")

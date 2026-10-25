@@ -148,11 +148,12 @@ class IssueField:
 #: The organization's issue fields, by name (rulings ``balance:R-BAL348``, ``R-BAL354``).
 #: Arc is a single select whose options are the arcs, :data:`tools.ci.arcs.ARCS`.  GitHub
 #: makes four more when issue fields are switched on, Priority, Effort, Start date and Target
-#: date; R-BAL348 deleted them, and the developer kept them on 2026-10-25 ("I want to use
-#: those fields even if they are empty for now"), so each is declared exactly as the
-#: organization held it that day.  An organization's issue fields, like its issue types, are
-#: changed only with the ``admin:org`` scope, so the developer changes them on the web and
-#: this module checks them; any other field is a difference.
+#: date.  R-BAL348 ruled them deleted, a click on the web that was never made, and on
+#: 2026-10-25 the developer kept them ("I want to use those fields even if they are empty for
+#: now"), so each is declared exactly as the organization held it that day.  An
+#: organization's issue fields, like its issue types, are changed only with the ``admin:org``
+#: scope, so the developer changes them on the web and this module checks them; any other
+#: field is a difference.
 ISSUE_FIELDS = {
     "Arc": IssueField("SINGLE_SELECT", ARCS, "the arcs"),
     "Priority": IssueField("SINGLE_SELECT", ("Urgent", "High", "Medium", "Low")),

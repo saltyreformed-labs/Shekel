@@ -814,10 +814,11 @@ def test_the_five_declared_fields_holding_their_options_in_any_order_match():
 
 
 def test_the_organization_as_read_on_2026_10_25_matches():
-    """The developer, 2026-10-25, of GitHub's four default fields, which R-BAL348 had
-    deleted: "I don't want to delete them unless the tracker won't work with them empty. I
-    want to use those fields even if they are empty for now."  So the organization as read
-    that evening, the four beside Arc, differs nowhere."""
+    """The developer, 2026-10-25, of GitHub's four default fields, which R-BAL348 ruled
+    deleted (that click on the web was never made): "I don't want to delete them unless the
+    tracker won't work with them empty. I want to use those fields even if they are empty
+    for now."  So the organization as read that evening, the four beside Arc, differs
+    nowhere."""
     read = _fields(*_KEPT, _issue_field("Arc", options=ARCS))
     assert not setup_tracker.issue_field_differences(read)
 

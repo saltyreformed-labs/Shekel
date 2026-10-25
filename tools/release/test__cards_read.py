@@ -378,7 +378,6 @@ def test_a_card_listed_below_a_group_and_gone_when_read_judges_nothing(repo, cap
     tracker.add(55, kind="finding")
     tracker.add_child(51, tracker.cards_by_number[55])
     del tracker.cards_by_number[55]
-    tracker.gone.add(55)
     assert _unread(repo, base, cut, tracker, capsys) == (
         "plan#55 is listed below the deploy-together group plan#50 and the tracker does not "
         "hold it (the tracker changed while it was read: judge again)")

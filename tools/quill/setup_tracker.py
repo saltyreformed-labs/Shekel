@@ -5,7 +5,7 @@ The plan moves out of ``docs/plans/`` into a private repository's Issues
 issue -- a "card" -- and one Project board holds the open ones in the order
 the developer drags them.  This module is the one home of WHERE that tracker
 lives (:class:`Place`: :data:`PLAN`, and :data:`REHEARSAL`, the throwaway one
-X-cx's migration is rehearsed on) and of its CONFIGURATION: the repository and
+X-cx's migration was rehearsed on) and of its CONFIGURATION: the repository and
 its settings, the labels, the board, and the things only the web can set (the
 organization's issue types and issue fields, which need a scope the shared token
 does not carry; the board's automations and its view's sort, which the API cannot
@@ -109,9 +109,10 @@ class Place:
 #: this module configures and every quill command reads and writes.
 PLAN = Place("saltyreformed-labs", "shekel-plan", "Shekel plan")
 
-#: The throwaway tracker X-cx's migration (L7) is rehearsed on before L8 runs it
-#: on :data:`PLAN`.  Its name holds :data:`PLAN`'s, which is why a place's names
-#: are compared as tokens.
+#: The throwaway tracker X-cx's migration (L7) was rehearsed on before L8 ran it
+#: on :data:`PLAN`; since S3b deleted the migration, only the tests read it, as the
+#: place whose name holds :data:`PLAN`'s, which is why a place's names are compared
+#: as tokens.
 REHEARSAL = Place("saltyreformed-labs", "shekel-plan-rehearsal", "Shekel plan rehearsal")
 
 #: :data:`PLAN`'s names, which this module's checks configure.
@@ -161,8 +162,8 @@ _ARC_COLORS = ("0e8a16", "1d76db", "5319e7", "d93f0b", "006b75", "c5a100")
 FILING = "filing"
 
 #: The two labels a release reads: a step whose release moves money, and a parent
-#: whose leaves ``/release`` ships in one release.  ``quill file step --label`` and X-cx's
-#: migration name them here.
+#: whose leaves ``/release`` ships in one release.  ``quill file step --label`` takes its
+#: choices from here.
 MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL = "moves-money", "deploy-together"
 
 #: Every label the tracker carries: one per arc, the two a release reads, and

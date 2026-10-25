@@ -15,15 +15,14 @@ import pytest
 
 from tools.quill._fake import FailOnce, FakeTracker, leaf_filing, run
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Board, Child, Milestone, Tracker, TrackerError
+from tools.quill._tracker import Board, Child, Tracker, TrackerError
 from tools.quill.setup_tracker import FILING, PLAN
 
 
 def _in_milestones(tracker, **held):
     """``tracker`` holding milestones #1 and #2, and each card ``cN`` named in ``held`` in the
     one given."""
-    for number in (1, 2):
-        tracker.milestones_by_number[number] = Milestone(number, f"O{number}", "d")
+    tracker.milestones.update((1, 2))
     tracker.milestone_of.update({int(name[1:]): number for name, number in held.items()})
     return tracker
 

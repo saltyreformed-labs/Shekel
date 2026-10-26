@@ -25,6 +25,10 @@ A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-is
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, ``task-file`` writes its file for the commit that finishes
 the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
+A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
+``finding-file`` writes its ship marker on its owner's branch, for the commit that fixes it,
+and ``hand`` hands an open finding from its one owner to another step, a step a branch
+builds (ruling plan#1784, :mod:`_findings`).
 A LEAF (``file step --parent``) is filed in its split step's milestone while the split
 step holds one, which the filing then clears; else in none, the milestones its leaves
 hold named for a person to set one on the web (``_filing._leaf_milestone``).  A leaf
@@ -43,6 +47,8 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill file question --arc ARC --title NAME --body-file QUESTION
     python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE
     python -m tools.quill.quill task-file plan#T
+    python -m tools.quill.quill finding-file plan#F
+    python -m tools.quill.quill hand plan#F --to plan#S
     python -m tools.quill.quill edit plan#N [--title NAME] [--body-file TEXT]
     python -m tools.quill.quill comment plan#N --body-file TEXT
     python -m tools.quill.quill block plan#N --by plan#M [--remove]
@@ -83,7 +89,7 @@ import requests
 
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
-from tools.quill import _git, _tasks
+from tools.quill import _findings, _git, _tasks
 from tools.quill._command import (
     ON_BOARD,
     Refused,
@@ -824,6 +830,12 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("task-file", help="write a task's file plan/tasks/T, to commit with "
                                           "its piece on its card's branch").add_argument(
         "task", type=card_number)
+    commands.add_parser("finding-file", help="write a fixed finding's marker plan/ships/F, to "
+                                             "commit with its fix on its owner's branch"
+                        ).add_argument("finding", type=card_number)
+    hand = commands.add_parser("hand", help="hand an open finding to another owner step")
+    hand.add_argument("finding", type=card_number)
+    hand.add_argument("--to", type=card_number, required=True, help="its new owner step")
     commands.add_parser("sync", help="write cards' state from git").add_argument(
         "--dry-run", action="store_true")
     history = commands.add_parser("spec-history", help="a card's body edits")
@@ -841,6 +853,7 @@ COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
     "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment, "block": cmd_block,
     "move": cmd_move, "drop": cmd_drop, "task-file": _tasks.cmd_task_file,
+    "finding-file": _findings.cmd_finding_file, "hand": _findings.cmd_hand,
     "sync": cmd_sync, "spec-history": cmd_spec_history, "spec-revert": cmd_spec_revert,
     "export": cmd_export,
 }

@@ -302,18 +302,22 @@ def _refuse_rehoming(card: Card, kind: str, parent: Card | None) -> None:
 def _refuse_reowning(card: Card, owner: Card) -> None:
     """Refuse to file ``card``, a finding or ruling, for ``owner`` when a link of it says
     otherwise: a sub-issue of any card, which the parent's progress would count, or blocked
-    by any card but ``owner`` (``R-BAL395``), in the tracker or outside it."""
+    by any card but ``owner`` (``R-BAL395``), in the tracker or outside it.  Re-homing is a
+    person's call, made by hand -- for a finding blocked by one other card of the tracker,
+    with ``quill hand`` (step plan#1772), which hands it to the owner this filing names."""
     outside = {what: [f"{link.issue}, outside the tracker" for link in card.outside
                       if link.what == what] for what in ("parent", "blocker")}
     if under := ([f"plan#{card.parent}"] if card.parent is not None else []) + outside["parent"]:
         raise Refused(f"{_label(card)} is a sub-issue of {under[0]}, but a finding or ruling is "
                       f"blocked by its owner, plan#{owner.number}, and is no card's sub-issue "
                       "(R-BAL395): re-homing a card is done by hand")
-    if others := [f"plan#{number}" for number in card.blocked_by
-                  if number != owner.number] + outside["blocker"]:
+    blockers = [number for number in card.blocked_by if number != owner.number]
+    if others := [f"plan#{number}" for number in blockers] + outside["blocker"]:
+        how = (f"`quill hand plan#{card.number} --to plan#{owner.number}` re-homes it"
+               if card.kind == "finding" and len(others) == 1 and blockers else
+               "re-homing a card is done by hand")
         raise Refused(f"{_label(card)} is blocked by {', '.join(others)}, not only by "
-                      f"plan#{owner.number}, the owner this filing names (R-BAL395): re-homing a "
-                      "card is done by hand")
+                      f"plan#{owner.number}, the owner this filing names (R-BAL395): {how}")
 
 
 def _attach(tracker: Tracker, card: Card, kind: str, parent: Card | None) -> None:

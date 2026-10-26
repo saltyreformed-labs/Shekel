@@ -97,9 +97,9 @@ def pricing_load_options() -> tuple:
     plan step X-au-f, which listed the nine.
     **The tenth arrived at plan step X-au-f-2**, when ruling **R-BAL10** moved
     a loan payment's answer onto the PARENT: the derive arm dates its
-    installment from the TRANSFER's two columns now, so the chain it walks is
-    ``Transaction.transfer -> pay_period`` where it was the shadow's own
-    period.  *Since plan step X-bi-6a the tuple holds FOUR entries: the three
+    installment from the TRANSFER's two columns now, so the chain it walked
+    from a shadow was ``Transaction.transfer -> pay_period`` where it had been
+    the shadow's own period.  *Since plan step X-bi-6a the tuple holds FOUR entries: the three
     ``Transaction.transfer -> ...`` chains are one entry composing
     :func:`transfer_pricing_load_options`, so the count of entries is no
     longer the count of chains, and the loader elements the tuple expands to
@@ -108,24 +108,28 @@ def pricing_load_options() -> tuple:
     composed options rather than counted from this list.*  The list:
 
     * ``Transaction.template`` -> ``salary_profiles`` -- amount rule 2's
-      refinement (``_amount_source._rule_within_definition``) asks whether an
+      refinement (``_amount_rule._rule_within_definition``) asks whether an
       ACTIVE profile names the definition;
     * ``Transaction.template`` -> ``amount_versions`` -- rule 3 resolves the
       definition's price series as of the row's own due date;
     * ``Transaction.transfer`` -> ``template`` -> ``settings`` -- rule 4's
-      refinement (``_amount_source._is_loan_payment``) asks whether a loan
-      payment's settings row hangs off the parent's definition;
+      refinement (``_amount_rule._is_loan_payment``) asked whether a loan
+      payment's settings row hung off a shadow's parent's definition;
     * ``Transaction.transfer`` -> ``template`` -> ``amount_versions`` -- rule 5
-      and rule 4's MANUAL arm both price through
+      and rule 4's MANUAL arm both priced a shadow through
       ``_amount_source.resolve_transfer_amount``;
-    * ``Transaction.transfer`` -> ``pay_period`` -- rule 4's DERIVE arm dates
-      the installment it prices, and
-      ``loan_loaders.installment_for`` takes the period start EAGERLY rather
-      than only on its no-``due_date`` fallback, so the relationship is read on
-      every call.  **It was the SHADOW's own period until plan step X-au-f-2**,
-      where ruling R-BAL10 moved the answer to the parent; the parent's period
-      was the same value (Transfer Invariant 3), read from the row that now
-      carries the rule.
+    * ``Transaction.transfer`` -> ``pay_period`` -- rule 4's DERIVE arm dated
+      the installment it priced, and ``loan_loaders.installment_for`` takes
+      the period start EAGERLY rather than only on its no-``due_date``
+      fallback, so the relationship was read on every call.  **It was the
+      SHADOW's own period until plan step X-au-f-2**, where ruling R-BAL10
+      moved the answer to the parent; the parent's period was the same value
+      (Transfer Invariant 3), read from the row that now carries the rule.
+      **These three ``Transaction.transfer`` chains load nothing since plan
+      step ``balance:X-bi-6-4d-2``**, which deleted the shadows: no stored row
+      names a transfer (``ck_transactions_names_no_transfer``), and rule 5
+      (``_amount_source._transfer_answer``), the one rule that follows the
+      relationship, refuses every row that reaches it;
     * ``Transaction.pay_period`` -- **no amount RULE reads this since plan step
       X-au-f-2**, and it is kept rather than dropped because the drop is a
       different question with a different blast radius: five batch loaders
@@ -146,15 +150,16 @@ def pricing_load_options() -> tuple:
       path is shared through :func:`period_load_option` instead, which is
       what stops the two spellings differing.*
 
-    **The per-ROW chains are a true N+1 and the per-DEFINITION ones are not**: a
-    template's collections are identity-mapped, so 44 templates served 452 rows
-    on the 2026-08-12 production clone, while ``Transaction.transfer`` is one
-    query per shadow.  That asymmetry is why this stopped being a paragraph of
-    advice at plan step X-au-g-2c-2.  Before that step a shadow OWNED its
+    **The per-ROW chains were a true N+1 and the per-DEFINITION ones are not**:
+    a template's collections are identity-mapped, so 44 templates served 452
+    rows on the 2026-08-12 production clone, while ``Transaction.transfer`` was
+    one query per shadow.  That asymmetry is why this stopped being a paragraph
+    of advice at plan step X-au-g-2c-2.  Before that step a shadow OWNED its
     figure, so ``amount_rule`` answered ``OWN`` off the column and never touched
-    the relationship; a shadow is DERIVED now -- **350 of them on production,
-    measured 2026-09-01 at stamp ``a4c6f1d92b73``** -- so every surface that
-    loads one walks to its parent, and a loader that forgets pays per row.
+    the relationship; from it a shadow was DERIVED -- **350 of them on
+    production, measured 2026-09-01 at stamp ``a4c6f1d92b73``** -- so every
+    surface that loaded one walked to its parent, and a loader that forgot paid
+    per row, until plan step ``balance:X-bi-6-4d-2`` deleted the shadows.
 
     ``selectinload`` throughout rather than ``joinedload``: three of the chains
     end in a COLLECTION, and a joined load over two collections multiplies the
@@ -179,8 +184,10 @@ def pricing_load_options() -> tuple:
         # The three ``Transaction.transfer -> ...`` chains are the PARENT's own
         # pricing graph, stated once in :func:`transfer_pricing_load_options`
         # and composed under the shadow's link here (plan step X-bi-6a), so a
-        # rule that starts reading a new relationship off a transfer adds it
-        # in one place and both a shadow and a planned leg get it.
+        # rule that started reading a new relationship off a transfer added it
+        # in one place and both a shadow and a planned leg got it.  No row
+        # names a transfer since plan step balance:X-bi-6-4d-2, so this entry
+        # loads nothing (the docstring's list says why).
         selectinload(Transaction.transfer).options(
             *transfer_pricing_load_options(),
         ),
@@ -211,8 +218,9 @@ def transfer_pricing_load_options() -> tuple:
       it.
 
     ONE spelling: :func:`pricing_load_options` composes exactly this tuple under
-    ``Transaction.transfer`` for a shadow that still reaches its parent, so the
-    two paths to a transfer's price cannot name different relationships.
+    ``Transaction.transfer``, the path a shadow took to its parent until plan
+    step ``balance:X-bi-6-4d-2`` deleted the shadows, so the two paths to a
+    transfer's price cannot name different relationships.
 
     Returns:
         A tuple of SQLAlchemy loader options, splatted into ``Query.options``

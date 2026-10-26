@@ -51,10 +51,11 @@ on 2026-10-26 ended in an ``AttributeError`` instead of quill's ``failed:`` line
 plan#1812).  Refused to a WRITE, it says GitHub answered the write, so the tracker is read
 back before the command runs again.
 
-**A failure names the read it cut short** (plan#1809 item 3): each read of the tracker runs
-inside :func:`reading`, which notes what it was reading, the page or the batch, on the error
-that ends it, and every printer of a failure prints it as :func:`described` writes it, one
-line.
+**A failure names the read it cut short** (plan#1809 item 3): each read quill's commands, CI's
+landing check and the release tool make runs inside :func:`reading`, which notes what it was
+reading, the page or the batch, on the error that ends it, and every printer of a failure
+prints it as :func:`described` writes it, one line.  (``setup_tracker``, the developer's own
+check of the tracker's configuration, prints it so too, without naming its reads.)
 
 Nothing in this module reads or writes the code repository.  Its tests feed it
 recorded responses and never call GitHub.
@@ -272,14 +273,23 @@ class GitHub:
         :data:`CUT_OFF_RETRIES` times; raise :class:`GitHubError` on any 3xx, 4xx or 5xx
         left, on a rate limit that outlasts :data:`RATE_LIMIT_RETRIES` waits, and on a wait
         it cannot honour: one it cannot read (:func:`_wait_seconds`), or one that would
-        carry this request's waits past :data:`WAIT_BUDGET_SECONDS`."""
+        carry this request's waits past :data:`WAIT_BUDGET_SECONDS`.  A ``requests`` failure
+        (no answer in time, a reset) is raised as it came, never re-sent; a WRITE's carries
+        the note that GitHub may have done it, as its 5xx's message says."""
         read = _is_read(method, url, body)
         waited, limited, cut_off = 0.0, 0, 0
         while True:
-            response = self._session.request(
-                method, url, headers=self._headers, json=body, timeout=TIMEOUT_SECONDS,
-                allow_redirects=False,
-            )
+            try:
+                response = self._session.request(
+                    method, url, headers=self._headers, json=body, timeout=TIMEOUT_SECONDS,
+                    allow_redirects=False,
+                )
+            except requests.RequestException as error:
+                if not read:
+                    error.add_note(f"while writing {method} {url}, which is never re-sent, as "
+                                   f"GitHub may have done it before the answer was lost: "
+                                   f"{_READ_BACK}")
+                raise
             if _rate_limited(response, url):
                 if limited == RATE_LIMIT_RETRIES:
                     raise GitHubError(

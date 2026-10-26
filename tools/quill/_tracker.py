@@ -575,11 +575,14 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         """
         client_id, key = app_credentials()
         jwt = app_jwt(client_id, key, int(time.time()))
-        login = GitHub(jwt).rest("GET", "/app")["slug"]
+        with reading("quill's App"):
+            login = GitHub(jwt).rest("GET", "/app")["slug"]
         if wrong := another_app(login):
             raise TrackerError(wrong)
-        installation = app_installation(place.owner, jwt)["id"]
-        github = GitHub(installation_token(installation, jwt, repository=place.name))
+        with reading(f"quill's App's installation on {place.owner}"):
+            installation = app_installation(place.owner, jwt)["id"]
+        with reading(f"quill's App's token for {place.full_name}"):
+            github = GitHub(installation_token(installation, jwt, repository=place.name))
         return cls(github, Board(github, place, board_of(github, place)), APP_LOGIN)
 
     # -- reads ---------------------------------------------------------------
@@ -619,7 +622,8 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
     def body(self, number: int) -> str:
         """A card's body as it stands."""
-        return self.github.rest("GET", f"{self.place.path}/issues/{number}")["body"] or ""
+        with reading(f"plan#{number}'s body"):
+            return self.github.rest("GET", f"{self.place.path}/issues/{number}")["body"] or ""
 
     def edits(self, number: int) -> tuple[str, list[Edit]]:
         """A card's body as it stands and every saved version of it, oldest first.
@@ -655,7 +659,8 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         items, page = [], 1
         while True:
             more = "" if page == 1 else f"&page={page}"
-            found = self.github.rest("GET", f"/search/issues?q={query}&per_page=100{more}")
+            with reading(f"the title search for {text!r}, page {page}"):
+                found = self.github.rest("GET", f"/search/issues?q={query}&per_page=100{more}")
             if found["incomplete_results"] or found["total_count"] > _SEARCH_CAP:
                 raise TrackerError(
                     f"GitHub's title search for {text!r} finds {found['total_count']} "

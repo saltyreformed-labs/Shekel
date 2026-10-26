@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 import pytest
 import requests
 
-from tools.quill import quill
+from tools.quill import _tracker, landing, quill, setup_tracker
 from tools.quill._queries import marked_cards, open_cards
 from tools.quill._export import snapshot
 from tools.quill._github import (
@@ -188,7 +188,7 @@ def test_a_write_github_cut_off_is_sent_once_and_its_line_says_to_read_it_back(
                         "again\n")
 
 
-def _tracker(github: GitHub) -> Tracker:
+def _tracker_over(github: GitHub) -> Tracker:
     """A real tracker over ``github``."""
     return Tracker(github, Board(github, PLAN, "PVT_x"), APP_LOGIN)
 
@@ -198,10 +198,10 @@ def _tracker(github: GitHub) -> Tracker:
 #: filing a card, moving it to a milestone, changing its kind, minting the App's token, and
 #: the tracker repository's creation and its settings' correction.
 _WRITES_READ = {
-    "create": (lambda session: _tracker(_github(session)).create("step", "t", "b",
+    "create": (lambda session: _tracker_over(_github(session)).create("step", "t", "b",
                                                                  ["balance"]), []),
-    "set_milestone": (lambda session: _tracker(_github(session)).set_milestone(5, 2), []),
-    "retype": (lambda session: _tracker(_github(session)).retype(5, "finding"), []),
+    "set_milestone": (lambda session: _tracker_over(_github(session)).set_milestone(5, 2), []),
+    "retype": (lambda session: _tracker_over(_github(session)).retype(5, "finding"), []),
     "installation_token": (lambda session: installation_token(
         7, "jwt", repository=PLAN.name, session=session), []),
     "repository created": (lambda session: check_repository(_github(session), True, Report()),
@@ -292,3 +292,82 @@ def test_cards_read_by_number_are_asked_25_a_batch_and_a_failure_names_its_batch
         ("1", "25", 25), ("26", "50", 25), ("51", "60", 10)]
     assert described(failed.value).endswith(
         "; while reading the cards by number, batch 3 of 3, plan#51-plan#60")
+
+
+#: What ``requests`` raises when GitHub does not answer in time, as it words it.
+_TIMEOUT = ("HTTPSConnectionPool(host='api.github.com', port=443): Read timed out. (read "
+            "timeout=30)")
+
+
+@pytest.mark.parametrize("read, named", [
+    (lambda tracker: tracker.body(5), "plan#5's body"),
+    (lambda tracker: tracker.find_titles("x"), "the title search for 'x', page 1"),
+], ids=["body", "find_titles"])
+def test_a_read_that_is_no_walk_names_itself_when_github_does_not_answer(read, named):
+    """Review s56 M3: ``requests``' own message names the host, never the path, so a read
+    outside :func:`_github.reading` failed naming nothing.  A read's failure carries no
+    note of a write."""
+    with pytest.raises(requests.ReadTimeout) as failed:
+        read(_tracker_over(_github(_Script(requests.ReadTimeout(_TIMEOUT)))))
+    assert described(failed.value) == f"{_TIMEOUT}; while reading {named}"
+
+
+_APP = _Answer(200, json.dumps({"slug": APP_LOGIN}))
+_INSTALLATION = _Answer(200, '{"id": 7}')
+
+
+@pytest.mark.parametrize("before, named", [
+    ([], "quill's App"),
+    ([_APP], f"quill's App's installation on {PLAN.owner}"),
+    ([_APP, _INSTALLATION], f"quill's App's token for {PLAN.full_name}"),
+], ids=["app", "installation", "token"])
+def test_connect_s_three_requests_name_themselves(monkeypatch, before, named):
+    """Every command's first three requests, before the board's two reads: each, unanswered,
+    names itself."""
+    monkeypatch.setattr(_tracker, "app_credentials", lambda: ("Iv23client", b"pem"))
+    monkeypatch.setattr(_tracker, "app_jwt", lambda *_: "jwt")
+    session = _Script(*before, requests.ReadTimeout(_TIMEOUT))
+    monkeypatch.setattr(requests, "Session", lambda: session)
+    with pytest.raises(requests.ReadTimeout) as failed:
+        Tracker.connect(PLAN)
+    assert described(failed.value).endswith(f"; while reading {named}")
+    assert (len(session.sent), session.answers) == (len(before) + 1, [])
+
+
+def test_the_landing_check_s_read_of_the_pull_request_names_itself(monkeypatch):
+    """CI's landing check reads the pull request it judges first: unanswered, it says so."""
+    monkeypatch.setenv(landing.PULL_TOKEN_VARIABLE, "t")
+    monkeypatch.setenv(landing.REPOSITORY_VARIABLE, "o/r")
+    monkeypatch.setattr(requests, "Session", lambda: _Script(requests.ReadTimeout(_TIMEOUT)))
+    with pytest.raises(requests.ReadTimeout) as failed:
+        landing.pull_from_environment(7)
+    assert described(failed.value) == f"{_TIMEOUT}; while reading pull request #7 of o/r"
+
+
+def test_a_write_github_did_not_answer_says_to_read_the_tracker_back(code, capsys, tmp_path):
+    """Review s56 M3: a write unanswered in time may have been done, as one cut off may: its
+    line names the write, says it is never re-sent and to read the tracker back."""
+    text = tmp_path / "comment.txt"
+    text.write_text("a note\n", encoding="utf-8")
+    status, out, err, session = _main(
+        code, capsys, ["comment", "plan#2", "--body-file", str(text)],
+        _data({"repository": {"c2": _recorded_card(2)}}), requests.ReadTimeout(_TIMEOUT))
+    assert (status, out, len(session.sent)) == (2, "", 2)
+    assert err == (f"failed: {_TIMEOUT}; while writing POST https://api.github.com/repos/"
+                   "saltyreformed-labs/shekel-plan/issues/2/comments, which is never re-sent, "
+                   "as GitHub may have done it before the answer was lost: read the tracker "
+                   "back before running the command again\n")
+
+
+def test_setup_tracker_prints_a_failure_as_one_line_and_a_timeout_is_no_traceback(
+        monkeypatch, capsys):
+    """Review s56 L6: the configuration check printed GitHub's error raw and let a timeout
+    out as a traceback; both now end in the one ``failed:`` line, exit 2."""
+    monkeypatch.setattr(setup_tracker, "user_token", lambda: "t")
+    for failure in (requests.ReadTimeout(_TIMEOUT), _Answer(500, "<html>\n</html>")):
+        session = _Script(failure)
+        monkeypatch.setattr(setup_tracker, "GitHub", lambda _token, used=session: _github(used))
+        assert setup_tracker.main([]) == 2
+        _, err = capsys.readouterr()
+        assert err.startswith("failed: ") and err.count("\n") == 1
+    assert err == f"failed: GET https://api.github.com{PLAN.path} -> 500: <html> </html>\n"

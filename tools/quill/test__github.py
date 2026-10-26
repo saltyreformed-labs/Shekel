@@ -5,14 +5,16 @@ import base64
 import json
 
 import pytest
+import requests
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
 from tools.quill._github import (
     API,
-    RATE_LIMIT_BUDGET_SECONDS,
+    CUT_OFF_RETRIES,
     RATE_LIMIT_RETRIES,
+    WAIT_BUDGET_SECONDS,
     CredentialsError,
     GitHub,
     GitHubError,
@@ -421,8 +423,8 @@ def test_a_wait_quill_cannot_read_stops_it_unslept_and_unsent(headers):
 def test_a_wait_past_the_budget_stops_quill_rather_than_being_shortened():
     """``retry-after: 100000`` (about 28 hours) is not slept, nor cut short: quill stops at
     once.  Waits add up per request, so a second 3,000 s wait after a first is refused too,
-    and :data:`_github.RATE_LIMIT_BUDGET_SECONDS` bounds the whole."""
-    assert RATE_LIMIT_BUDGET_SECONDS == 3600
+    and :data:`_github.WAIT_BUDGET_SECONDS` bounds the whole."""
+    assert WAIT_BUDGET_SECONDS == 3600
     huge = _Session(_Response(403, _SECONDARY, {"retry-after": "100000"}))
     slept = []
     with pytest.raises(GitHubError, match="wait of 100000 s after 0 s waited, past the 3600 s"):
@@ -440,3 +442,140 @@ def test_a_wait_past_the_budget_stops_quill_rather_than_being_shortened():
     slept = []
     assert _client(whole, slept).rest("GET", "/repos/o/r") == {"ok": 1}
     assert slept == [3600.0]
+
+
+class _NotJson(_Response):
+    """A 200 whose body is not JSON, as an HTML page GitHub's front end serves is not."""
+
+    def __init__(self):
+        """A body of HTML."""
+        super().__init__(200)
+        self.content = b"<html><body>unicorn</body></html>"
+        self.text = self.content.decode()
+
+    def json(self):
+        """What ``requests`` raises for it."""
+        raise requests.JSONDecodeError("Expecting value", self.text, 0)
+
+
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_a_read_github_cut_off_is_re_sent_three_times_waiting_longer_each_time(status):
+    """Ruling plan#1816: "a cut-off READ is re-sent up to 3 times, waiting longer each
+    time" -- the same request each time, then the answer read as if it came first."""
+    session = _Session(*[_Response(status, {"message": "cut off"}) for _ in range(3)],
+                       _Response(200, {"ok": 1}))
+    slept = []
+    assert _client(session, slept).rest("GET", "/repos/o/r/issues/5") == {"ok": 1}
+    assert slept == [2.0, 4.0, 8.0] and CUT_OFF_RETRIES == 3
+    assert [sent[:2] for sent in session.sent] == [("GET", f"{API}/repos/o/r/issues/5")] * 4
+
+
+@pytest.mark.parametrize("query", ["query($after: String) { x }", "  query { x }", "{ x }"])
+def test_a_graphql_query_is_a_read_in_both_its_forms(query):
+    """A GraphQL query is POSTed like a write, so the text decides: its keyword or its
+    shorthand brace (the GraphQL specification) makes it a read, re-sent after a cut-off."""
+    answer = {"data": {"x": 1}}
+    session = _Session(_Response(504, {"message": "timeout"}), _Response(200, answer))
+    slept = []
+    assert _client(session, slept).graphql(query) == {"x": 1}
+    assert slept == [2.0] and len(session.sent) == 2
+
+
+def test_a_read_cut_off_a_fourth_time_stops_quill_naming_its_re_sends():
+    """The third re-send's cut-off is the last: quill stops with the status and how many
+    times it re-sent the read, never a fifth send."""
+    session = _Session(*[_Response(504, {"message": "We couldn't respond in time"})
+                         for _ in range(4)])
+    slept = []
+    with pytest.raises(GitHubError, match=r"GET .*/repos/o/r -> 504 after 3 re-sends: .*"
+                                          "couldn't respond") as raised:
+        _client(session, slept).rest("GET", "/repos/o/r")
+    assert (raised.value.status, slept, len(session.sent)) == (504, [2.0, 4.0, 8.0], 4)
+
+
+@pytest.mark.parametrize(("method", "path", "body"), [
+    ("POST", "/repos/o/r/issues", {"title": "t"}),
+    ("PATCH", "/repos/o/r/issues/5", {"state": "closed"}),
+    ("DELETE", "/repos/o/r/issues/5/labels/filing", None),
+    ("POST", "/graphql", {"query": "mutation($p: ID!) { x }", "variables": {}}),
+    ("POST", "/graphql", {"query": "# a comment first\nquery { x }", "variables": {}}),
+    ("POST", "/graphql", {"variables": {}}),
+], ids=["filing", "edit", "unmark", "mutation", "unreadable-query", "no-query"])
+def test_a_write_github_cut_off_is_sent_once_and_says_to_read_it_back(method, path, body):
+    """GitHub may have done a write before it cut the answer off, and a filing sent twice
+    makes two cards (plan#1816): a write's 5xx is raised at once, and says so.  A GraphQL
+    body whose text is not known to be a query is a write too: never re-sent."""
+    session = _Session(_Response(504, {"message": "cut off"}), _Response(200, {"ok": 1}))
+    slept = []
+    with pytest.raises(GitHubError, match="-> 504: .*a write is never re-sent, as GitHub may "
+                                          "have done it.*read the tracker back") as raised:
+        _client(session, slept).rest(method, path, body)
+    assert (raised.value.status, slept, len(session.sent)) == (504, [], 1)
+
+
+def test_a_500_to_a_read_is_no_cut_off_and_is_raised_at_once():
+    """Only 502, 503 and 504 are a cut-off; a 500 is raised at once, with no write's note."""
+    session = _Session(_Response(500, {"message": "Server Error"}), _Response(200, {"ok": 1}))
+    with pytest.raises(GitHubError) as raised:
+        _client(session, []).rest("GET", "/repos/o/r")
+    assert raised.value.status == 500 and len(session.sent) == 1
+    assert str(raised.value) == f'GET {API}/repos/o/r -> 500: {{"message": "Server Error"}}'
+
+
+def test_a_cut_off_read_waits_as_long_as_its_retry_after_says():
+    """A 503 naming its wait is re-sent no sooner (the module docstring's rule for any
+    re-send), and one naming no time quill can read stops it unsent."""
+    session = _Session(_Response(503, {"message": "busy"}, {"retry-after": "30"}),
+                       _Response(200, {"ok": 1}))
+    slept = []
+    assert _client(session, slept).rest("GET", "/repos/o/r") == {"ok": 1}
+    assert slept == [30.0]
+    unreadable = _Session(_Response(503, {"message": "busy"}, {"retry-after": "soon"}))
+    with pytest.raises(GitHubError, match="answered 503, and GitHub's retry-after 'soon' is "
+                                          "no time quill can read"):
+        _client(unreadable, []).rest("GET", "/repos/o/r")
+
+
+def test_a_rate_limit_and_a_cut_off_share_one_budget():
+    """One request's waits, for either reason, add up against WAIT_BUDGET_SECONDS: 3,595 s
+    for a rate limit, then 2 s for a cut-off, fit; the next cut-off's 4 s does not."""
+    session = _Session(_Response(403, _SECONDARY, {"retry-after": "3595"}),
+                       _Response(504, {"message": "cut off"}),
+                       _Response(504, {"message": "cut off"}),
+                       _Response(200, {"ok": 1}))
+    slept = []
+    with pytest.raises(GitHubError, match="-> 504, and GitHub asks a wait of 4 s after 3597 s "
+                                          "waited, past the 3600 s"):
+        _client(session, slept).rest("GET", "/repos/o/r")
+    assert (slept, len(session.sent)) == ([3595.0, 2.0], 3)
+
+
+def test_a_get_answered_with_an_empty_body_is_an_error_naming_it():
+    """Every GET quill sends reads a JSON body; an empty one would reach a caller as None."""
+    with pytest.raises(GitHubError, match=r"GET .*/repos/o/r/issues/5 -> 200 with an empty body"):
+        GitHub("t", _Session(_Response(200))).rest("GET", "/repos/o/r/issues/5")
+
+
+@pytest.mark.parametrize("call", [
+    lambda github: github.rest("GET", "/repos/o/r"),
+    lambda github: github.graphql("query { x }"),
+    lambda github: github.graphql_lookup("query { x }"),
+], ids=["rest", "graphql", "lookup"])
+def test_a_body_that_is_not_json_is_an_error_naming_the_request(call):
+    """``requests``' JSONDecodeError says only where the parse failed; the error names the
+    request, and the rate-limit check never trips on the body first."""
+    with pytest.raises(GitHubError, match=r"-> 200 with a body that is not JSON: '<html>"):
+        call(GitHub("t", _Session(_NotJson())))
+
+
+@pytest.mark.parametrize("answer", [None, {"data": None}, {}, [1], {"data": [1]}],
+                         ids=["empty", "null", "absent", "a-list", "data-a-list"])
+@pytest.mark.parametrize("lookup", [False, True], ids=["graphql", "lookup"])
+def test_a_graphql_answer_with_no_data_object_is_an_error_not_a_traceback(answer, lookup):
+    """plan#1812: two runs ended in ``AttributeError: 'NoneType' object has no attribute
+    'get'`` while GitHub answered 5xx.  An answer holding no ``data`` object is refused where
+    it is read, so every caller's read takes quill's clean failed path."""
+    github = GitHub("t", _Session(_Response(200, answer)))
+    read = github.graphql_lookup if lookup else github.graphql
+    with pytest.raises(GitHubError, match="graphql: an answer with no data object"):
+        read("query { x }")

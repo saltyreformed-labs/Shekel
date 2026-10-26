@@ -5,9 +5,12 @@ money and which deploy-together groups it is under, and what the reader cannot r
 
 **One reader.**  Before the cutover a second one read the plan's registries for a cut
 whose tree held ``steps.md``; step X-cx's S3b deleted it (ruling ``balance:R-BAL389``),
-and the cutover's pull request deleted the registries.  The cutover's freeze ends with a
-release, so production holds every step an old-form ``Ships: <arc>:<id>`` claims (ruling
-``R-BAL287``), and no release after it carries a commit made before it.
+and the cutover's pull request deleted the registries.  The cutover's freeze ended with a
+release (ruling ``R-BAL287``), so production holds every commit ``dev`` held at the
+freeze, each old-form ``Ships: <arc>:<id>`` trailer's included.  A commit made before the
+freeze on a branch ``dev`` did not hold then (a held card's branch, such as
+``card/1175``) reaches a later release as all work does, by its card's ship marker, and
+its old-form trailer, like every trailer, is prose nothing reads.
 """
 from __future__ import annotations
 

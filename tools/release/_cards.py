@@ -126,10 +126,9 @@ at X-cx's piece L9d.
 **No trailer is read**: every one is prose -- an old-form ``<arc>:<id>`` one, a
 ``plan#N`` one, a value of neither form -- since a marker is the record.  Refusing one
 would wedge every release over it, since no check refuses a trailer's shape before it
-lands (``R-BAL184``; X-cx's ``m2_plan.md`` s.3).  The cutover's freeze ends with a
-release, so production holds every commit made before it, each old-form trailer's
-included (R-BAL287), and no release after it carries a commit made before it (step
-X-cx's S3b deleted the reader that judged them, ruling ``R-BAL389``).
+lands (``R-BAL184``; X-cx's ``m2_plan.md`` s.3).  What the cutover's freeze released,
+and how a commit made before it reaches a later release, is stated once, in
+:mod:`tools.release._model` (R-BAL287, R-BAL389).
 
 **What it cannot read refuses the release**, and nothing is declared (R-BAL287,
 R-BAL289):

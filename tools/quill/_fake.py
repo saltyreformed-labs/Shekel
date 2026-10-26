@@ -36,7 +36,7 @@ from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Card, Child, Comment, Edit
-from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN
+from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, unmarked
 
 
 class FakeBoard:
@@ -178,7 +178,15 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         return self.bodies[number]
 
     def edits(self, number):
-        """A card's body and its versions (the body as filed when it was never edited)."""
+        """A card's body and its versions (the body as filed when it was never edited).  A
+        number nobody filed is GitHub's NOT_FOUND error, which the strict read raises
+        (:meth:`_github.GitHub.graphql`): the type and message ``recorded/tracker.json``
+        records for a missing issue, at this query's path, without the recorded
+        ``locations``."""
+        if number not in self.cards_by_number:
+            raise GitHubError(200, 'graphql: [{"type": "NOT_FOUND", "path": ["repository", '
+                              f'"issue"], "message": "Could not resolve to an Issue with the '
+                              f'number of {number}."}}]')
         versions = self.versions.get(number) or [
             Edit(None, "2026-10-01T00:00:00Z", self.app_login, self.bodies[number])]
         return self.bodies[number], list(versions)
@@ -265,7 +273,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
             raise GitHubError(404, f'DELETE .../issues/{number}/labels/{FILING} -> 404: '
                                    '{"message":"Label does not exist"}')
         self.writes.append(("unmark", number))
-        self._set(number, labels=tuple(label for label in labels if label != FILING))
+        self._set(number, labels=unmarked(labels))
 
     def add_child(self, parent, child):
         """Make ``child`` a sub-issue of ``parent``; the tool never re-parents a card, in the

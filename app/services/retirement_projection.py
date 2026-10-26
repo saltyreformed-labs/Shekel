@@ -815,7 +815,7 @@ def _run_account_projection(  # pylint: disable=too-many-arguments,too-many-posi
     # when the clock falls outside the schedule.  Stated here because
     # ``calculate_employer_contribution`` would otherwise take a ``None``
     # basis and answer ``$0.00`` silently -- the shape ``income_service``'s
-    # deleted helper was deleted FOR (ledger row **N-538**).
+    # deleted helper was deleted FOR (finding **N-538**, plan#1787).
     employer_per_period = (
         Decimal("0") if current_period is None
         else growth_engine.calculate_employer_contribution(

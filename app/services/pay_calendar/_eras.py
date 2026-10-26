@@ -178,11 +178,11 @@ def projected_payday(anchor: date, rhythm: Rhythm, steps: int) -> date:
     ``BA-06`` horizon in SQL cannot call this (ledger row **PC-501**, whose
     remedy is that check's DELETION), and
     ``migrations/versions/b7a41e2c9d63``'s ``_REBUILD_DERIVED_COLUMNS_SQL``
-    restates the same end for a DOWNGRADE (**PC-506**).  ``C14-e-3`` deleted
-    the two it could reach by routing both HERE:
-    :func:`~._rhythm._backdated_paydays` open-coded the walk twice, and the
-    registration window restated the first paycheck's span as
-    ``first_payday + cadence_days - 1``.
+    restates the same end for a DOWNGRADE, in a shipped migration: a historical
+    artifact, kept as written.  ``C14-e-3`` deleted the two it could reach by
+    routing both HERE: :func:`~._rhythm._backdated_paydays` open-coded the
+    walk twice, and the registration window restated the first paycheck's
+    span as ``first_payday + cadence_days - 1``.
 
     **The BOUND is the CALLER's** -- ``C14-a``'s stated obligation on the
     displacement:

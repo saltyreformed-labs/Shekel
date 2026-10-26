@@ -407,6 +407,18 @@ def test_spec_revert_restores_a_version_and_refuses_a_change_since_its_read(code
     assert tracker.bodies[1] == "changed meanwhile"
 
 
+def test_spec_history_and_spec_revert_refuse_a_card_that_does_not_exist(code, capsys):
+    """BAL-612: a number nobody filed is refused as every command naming a card refuses one,
+    before its history is read, with nothing written -- not GitHub's raw NOT_FOUND, a failed
+    call (exit 2)."""
+    tracker = FakeTracker()
+    _versions(tracker)
+    for argv in (("spec-history", "plan#9"), ("spec-revert", "plan#9", "--to", "E1")):
+        assert run(tracker, code, *argv) == 1, argv
+        assert capsys.readouterr().err == "refused: plan#9 does not exist\n"
+    assert not tracker.writes
+
+
 # -- the exit statuses ---------------------------------------------------------------------
 
 def test_a_github_failure_exits_2(code, capsys, monkeypatch):

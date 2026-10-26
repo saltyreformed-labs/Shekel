@@ -501,11 +501,8 @@ def build_contribution_timeline(
     # recorded transfer contributes the deduction alone.  Nobody designed
     # that -- it falls out of the fallback rule meeting the old domain -- and
     # a step ruled about what a DEDUCTION is priced from may not quietly
-    # re-rule what a TRANSFER projects to.  *This comment said "it is filed
-    # as its own finding" from R14-b to S3-e-2, and it never was*: the ids
-    # that commit message named for it (N-536, N-537) appear in no registry.
-    # S3-e-2's registry pass files it; until that row exists, this sentence
-    # is the only record.
+    # re-rule what a TRANSFER projects to.  The developer ruled it a defect
+    # (plan#1786): it is finding plan#1788, which step X-m (plan#1046) owns.
     #
     # **The boundary is the PERIOD's own** (ruling **R-SAL18**, plan step
     # salary:S3-e-2).  The question was never about pricing: it is *has the

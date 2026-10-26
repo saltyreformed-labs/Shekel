@@ -30,7 +30,7 @@ from tests._test_helpers import one_off_row_of, resolved_amount, settlement_if_s
 def _create_projected_expense(seed_user, seed_periods_today):
     """Insert a projected expense -- the typical PATCH starting state.
 
-    Uses the same fixture set as ``tests/test_routes/test_grid.py`` so
+    Uses the same fixture set as ``tests/test_routes/test_grid/`` so
     these tests share the auth_client / seed_user wiring without
     introducing a parallel fixture stack.
     """

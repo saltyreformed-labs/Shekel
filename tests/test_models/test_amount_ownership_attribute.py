@@ -1,7 +1,7 @@
 """The amount-ownership pair is ONE attribute, and the illegal shape is unsayable.
 
 Plan step **X-au-k**, ruling **balance:R-IW**.  Its sibling
-``test_amount_ownership.py`` grades the DATABASE tier -- what
+``test_amount_ownership/test_the_constraints.py`` grades the DATABASE tier -- what
 ``ck_transactions_amount_ownership`` refuses a writer that is not this
 application.  This module grades the tier above it: what this application can
 express at all.
@@ -203,10 +203,13 @@ class TestTheFactoryAbsorbsTheEmptyPair:
     ):
         """The second path SQLAlchemy builds the empty pair on.
 
-        ``transfer_service/_update`` gates the parent's optimistic-lock bump on
-        ``Session.is_modified`` of a shadow, where a spurious answer is a
-        measured lost update on a money figure -- so this path raising would
-        not be a cosmetic failure.
+        ``transfer_service/_update`` gated the parent's optimistic-lock bump on
+        ``Session.is_modified`` of a shadow until plan step
+        ``balance:X-bi-6-4d-2``, where a spurious answer was a measured lost
+        update on a money figure; the status seam's Transfer arm moves the
+        transfer's counter since, and no ``app/`` code calls ``is_modified``
+        now.  The path is still SQLAlchemy's own, so a validating class mapped
+        directly would still raise on it.
         """
         with app.app_context():
             # The claim is that it ANSWERS rather than raises.  What it answers

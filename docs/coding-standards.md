@@ -165,6 +165,15 @@ path-scoped must-knows; a fact lives in one tier and the other tiers point at it
   `request.form.get()` with inline `try/except`.
 - **Validate FK existence before commit.** Verify referenced rows exist and belong to the user.
   Unvalidated FKs produce IntegrityError (500) instead of clean validation errors (400).
+- **A database refusal is a backstop; a code path that can reach one is a bug.** A CHECK, a trigger
+  or a foreign key states what the data may never be, and holds it against every writer. It is not
+  how the app tells a user no. It fires late: at the flush, or at the COMMIT for a deferred trigger,
+  after the request has done its work and away from the act that caused it. It answers badly: an
+  `IntegrityError` (a 500) naming a constraint, not a message saying what the user did. And when it
+  fires, the door's own refusal was missing, so the defect is the door's, not the database's. So the
+  code refuses the state first, with an actionable message, and the database's rule fires only on a
+  defect. The rule is general: a card's, a row's and a transfer's refusals alike. Ruling
+  `balance:R-BAL357`, 2026-10-21.
 - **Range validation must match between schema and database.** No gaps where one is stricter than
   the other.
 

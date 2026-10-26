@@ -1,8 +1,8 @@
 """The fixture the release tool's tests share: a throwaway repository whose commits carry
-files (``steps.md``, migrations, ship markers), built with :mod:`tools.ci.scratch`'s
-isolated git; and the histories the card reader's tests build on it (a cut after the
-cutover, a pull request merged as ``dev`` takes one writing ship markers, a
-deploy-together group in quill's own fake)."""
+files (migrations, ship markers), built with :mod:`tools.ci.scratch`'s isolated git;
+and the histories the card reader's tests build on it (a cut after the cutover, a pull
+request merged as ``dev`` takes one writing ship markers, a deploy-together group in
+quill's own fake)."""
 from __future__ import annotations
 
 import shutil
@@ -15,22 +15,7 @@ from tools.ci import scratch
 from tools.ci.scratch import run
 from tools.quill.door import MARKERS, FakeTracker
 from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, MOVES_MONEY_LABEL
-from tools.release._carried import STEPS_PATH
 from tools.release._plan import Inputs, plan
-
-_HEADER = ("| arc | id | also | what this step does | order | commit | starts |\n"
-           "| --- | --- | --- | --- | --- | --- | --- |\n")
-
-
-def steps(*rows: tuple[str, ...]) -> str:
-    """A ``steps.md`` holding one row per ``(key, sentence, order, commit)``, or per
-    ``(key, sentence, order, commit, also)`` for a row naming the other names it has."""
-    lines = []
-    for key, sentence, order, commit, *also in rows:
-        arc, ident = key.split(":", 1)
-        lines.append(f"| {arc} | {ident} | {also[0] if also else '--'} | {sentence} | {order} "
-                     f"| {commit} | -- |\n")
-    return "# Steps\n\n" + _HEADER + "".join(lines)
 
 
 def migration(revision: str, down: str | None) -> str:
@@ -88,11 +73,6 @@ class Repo:
         changes.update(self._files[branch])
         return self.commit(subject, changes, parents=(onto, branch))
 
-    def plan(self, rows: tuple[tuple[str, ...], ...], *, parents: tuple[str, ...],
-             ships: tuple[str, ...] = (), subject: str = "registry") -> str:
-        """A commit writing ``steps.md`` as ``rows``."""
-        return self.commit(subject, {STEPS_PATH: steps(*rows)}, ships=ships, parents=parents)
-
 
 @pytest.fixture(name="repo")
 def _repo(tmp_path):
@@ -120,9 +100,11 @@ def undo(number: int) -> dict[str, str | None]:
 
 
 def after_cutover(repo):
-    """A base holding steps.md, then the cutover's commit deleting it: ``(base, cutover)``."""
-    base = repo.plan((), parents=())
-    return base, repo.commit("cutover", {STEPS_PATH: None}, parents=(base,))
+    """A base, then the cutover's commit on it: ``(base, cutover)``, the cutover a cut
+    ``dev`` stood at, which an offer can name.  Neither holds ``steps.md``: the release
+    tool reads none since step X-cx's S3b, so the cutover's commit changes no file."""
+    base = repo.commit("base")
+    return base, repo.commit("cutover", parents=(base,))
 
 
 def pull_request(repo, onto, *marks, files=None):
@@ -147,7 +129,7 @@ def release_after(repo, shipped, carried):
 
 def judge(repo, base, cut, tracker, unrehearsed=()):
     """``plan`` over ``<base>..<cut>``, reaching ``tracker``."""
-    return plan(repo.root, base, cut, Inputs(unrehearsed, (), lambda: tracker))
+    return plan(repo.root, base, cut, Inputs(unrehearsed, lambda: tracker))
 
 
 def deploy_group(tracker, container=50, leaves=(51, 52)):

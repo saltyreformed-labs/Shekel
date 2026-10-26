@@ -469,7 +469,7 @@ class TestAMovementsAccountIsItsOwnAndItsOwnerIsItsRows:
         tier -- a raw UPDATE of the parent, the ORM told nothing -- so it
         grades the schema and not any applier.  The one writer that DOES move
         a leg's movement with its leg, the transfer endpoint move, assigns it
-        by hand and is graded in ``test_covering_movement.py``
+        by hand and is graded in ``test_covering_movement/test_a_paycheck_and_a_transfer.py``
         (``TestATransfersMovementsFollowItsLifecycle``).
         """
         with app.app_context():

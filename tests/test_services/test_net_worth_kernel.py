@@ -82,9 +82,9 @@ class TestInterestByPeriodForAccount:
     ``TestTheInterestChipAndTheBalanceAreOneWalk``, ``test_loan_map.py``'s
     ``test_the_interest_chip_reads_the_same_window`` and ``test_grid.py``'s
     ``test_interest_balances_kind_correct_and_reconcile``) and the
-    account-detail route tests in ``test_accounts.py`` -- the accessor's only
-    consumer is that page's "Interest, next 12 mo" chip.  (It was the
-    year-end savings-progress section until plan step F2 deleted that
+    account-detail route tests in ``test_accounts/test_cash_detail.py`` -- the
+    accessor's only consumer is that page's "Interest, next 12 mo" chip.  (It
+    was the year-end savings-progress section until plan step F2 deleted that
     package.)
 
     **Its two no-anchor short-circuit tests were DELETED at plan step

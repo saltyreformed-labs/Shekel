@@ -414,7 +414,7 @@ def _earliest_payment_moved_on(account: Account) -> date | None:
     have, and restates neither:
 
     * WHICH payments: the loan walk's own set of the payments that have
-      happened, :func:`app.services.loan_loaders.settled_income_shadows`, so
+      happened, :func:`app.services.loan_loaders.settled_income_legs`, so
       this refusal and the walk share one candidate set and every exclusion
       -- a deleted or balance-excluded transfer is out, and ruling R-BAL140's
       status drift is counted once, by its movement;
@@ -490,7 +490,7 @@ def _earliest_payment_moved_on(account: Account) -> date | None:
             for scenario_id in loan_posting_service.scenarios_with_loan_payments(
                 account.id,
             )
-            for leg in loan_loaders.settled_income_shadows(
+            for leg in loan_loaders.settled_income_legs(
                 account.id, scenario_id, options=(),
             )
             if leg.settled_on is not None

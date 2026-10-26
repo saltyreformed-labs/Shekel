@@ -295,7 +295,7 @@ Sized when reached.
   all in `implementation_plan_bank_import.md`, which also records the amendments in place on
   R-FP, R-FZ, R-GA and R-FX, and moves the arc's manual-entry bound.
 - **Steps**: `X-ga`/`X-gb`/`X-gc` (Phase 0), `X-gd`/`X-ge`/`X-gf` (Phase 2) and `X-gh` (Phase 4),
-  ranked in `steps.md` (the ranks are its alone); `X-f6b` re-scoped per Phase 5 behind the
+  ranked in the plan (the ranks were its alone); `X-f6b` re-scoped per Phase 5 behind the
   auto-apply door; `X-f6c` beside the rules phase. P-6 rides `X-gb`'s session. The Phase 6
   retirement leaf is MINTED when `X-gf` ships. **Corrected 2026-08-24 (developer approval)**:
   `X-gg`, the Phase 3 design loop, moved BEHIND the card arc's CC3 block with an explicit blocker

@@ -401,8 +401,8 @@ class TestTheFieldWritesFlushInsideTheExceptionNet:
         undated`` -- keyed on its PAYCHECK -- still can, and that is the
         pre-R17 shape no producer writes any more and production still holds
         (six rows, per finding REC-516).  Both rows are the engine's, then put
-        into that shape the way ``test_recurrence_engine`` models the same
-        legacy rows (plan step balance:X-cf); when this suite last built them
+        into that shape the way ``test_recurrence_engine.test_generation``
+        models the same legacy rows (plan step balance:X-cf); when this suite last built them
         by hand it got the shape by accident, and a fixture generated the
         modern way silently stopped grading the ordering -- the review of that
         conversion found it, and this sentence is why the rows are undated on

@@ -123,24 +123,19 @@ crash, which also exits 1: STOP and report it; it is never a refusal and never c
 
 Then, line by line:
 
-- A step reading `moves money: UNREADABLE` was written already ticked. Read its flag from the
-  lane's commit or handoff and re-run with `--declare <arc>:<id>=money@<source>` or
-  `--declare <arc>:<id>=none@<source>`, the source being the commit sha or handoff path you read.
-  Before the cutover only: after it, every step is a card whose flag is its label (R-BAL287).
-- For each step reading `moves money: yes` and each `ADDED` migration, find the rehearsal kit its
+- `plan` reads the cards through quill's App, so a failed tracker read exits 2. What it carries is
+  the change the release makes to the ship markers (`plan/ships/<N>`, R-BAL359), and whether a
+  card moves money is its moves-money label (R-BAL287). A card reading `UNDONE` is one whose
+  marker the release deletes, judged as a ship is (R-BAL288): a money mover's undo needs its kit
+  too. A group's way out is reverting the merge that landed each member it names, never deleting a
+  marker by hand (that leaves the code in production, unseen).
+- For each card reading `moves money: yes` and each `ADDED` migration, find the rehearsal kit its
   lane wrote (the lane's handoff names the kit's directory), and append each directory found to
   `current.sh` as `KITS="<dir> <dir> ..."`. For each with no kit, re-run with
-  `--unrehearsed <arc>:<id>` (a card after the cutover: `--unrehearsed plan#N`) or
-  `--unrehearsed <revision>`; `plan` then refuses the release for it.
-- After the cutover (the cut holds no `steps.md`), `plan` reads the cards through quill's App, so
-  a failed tracker read exits 2. What it carries is the change the release makes to the ship
-  markers (`plan/ships/<N>`, R-BAL359). A card reading `UNDONE` is one whose marker the release
-  deletes, judged as a ship is (R-BAL288): a money mover's undo needs its kit too. A group's way
-  out is reverting the merge that landed each member it names, never deleting a marker by hand
-  (that leaves the code in production, unseen). A refusal
-  naming an old-form `<arc>:<id>` trailer, a card the tracker does not hold, a card that is no
-  work, or an entry under `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no
-  judgment for this run to make: STOP and report it to Josh.
+  `--unrehearsed plan#N` or `--unrehearsed <revision>`; `plan` then refuses the release for it.
+- A refusal naming a card the tracker does not hold, a card that is no work, or an entry under
+  `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no judgment for this run to make:
+  STOP and report it to Josh.
 
 Re-run with every flag at once until nothing more changes; the last run is `plan.txt`.
 
@@ -148,8 +143,8 @@ Re-run with every flag at once until nothing more changes; the last run is `plan
 
 The answer moves the cut, so this comes before any rehearsal.
 
-- **Refused (exit 1):** name the rule and the steps in plain words, then offer the line
-  `newest earlier cut that passes`: "Release up to <its subject> (<its steps>); <the rest> goes in
+- **Refused (exit 1):** name the rule and the cards in plain words, then offer the line
+  `newest earlier cut that passes`: "Release up to <its subject> (<its cards>); <the rest> goes in
   the next release", or "Stop". When that line says `none`, say no earlier cut passes and the one
   option is to stop. On the offered cut, append `CUT="<its sha>"` to `current.sh` and go back to
   step 2.
@@ -210,18 +205,35 @@ grade to the lane.
 
 ## 5. Ask Josh to approve
 
+First list what the release changes of what production runs: the cut's tree against the base's,
+which is what step 6 releases, read as CI's write rule reads it (`tools/quill/_production.py`: the
+files the image holds, by Docker's own reading of `.dockerignore`, and the files outside it that
+build or run production), with each pull request's own part of it and, apart, each file no pull
+request's own change made:
+
+```bash
+. ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
+: "${R:?}" "${BASE:?}" "${CUT:?}"
+.venv/bin/python -m tools.release.release production --base "$BASE" --cut "$CUT" \
+    > "$R/production.txt" 2>&1; echo "exit=$?"
+```
+
+Exit 0 ends with its `verdict:` line. Exit 2 listed nothing (the file says why), and an exit with
+no `verdict:` line is a crash: either is a STOP.
+
 Header "Release ok". The question lists, in plain words with each id after its words:
 
-- each step the release carries, and which moves money;
+- each card the release carries, and which moves money;
 - each migration it adds, edits or deletes, and what it changes;
 - every `APPROVAL MUST NAME` line of `plan.txt`;
-- every declared step, the value declared and its source;
-- every OTHER change to what the image ships, named UNREHEARSED (R-BAL281's interim). Find them:
-  `git log --first-parent --format='%h %s' "$BASE".."$CUT"` gives one merge per pull request;
-  name each whose own diff (`git diff --stat <merge>^1 <merge> -- <paths>`) touches the paths
-  `.dockerignore`'s header lists as living in the image, or `Dockerfile`, and that no kit
-  rehearsed. Name `deploy/` and `.github/workflows/` changes too: the first change production's
-  deploy path, the second the image build that runs on `main`;
+- every OTHER change to what production runs, named UNREHEARSED (R-BAL281's interim, read as
+  every file production runs: the image's and those outside it that build or run it). Name each
+  pull request `production.txt` lists whose change no kit rehearsed, in plain words with how many
+  files it changes (the file, kept in the record, holds each path). Name each file under its
+  `changed by no pull request's own change` heading too, saying in plain words what
+  `git diff "$BASE" "$CUT" -- <file>` shows the release does to it: a merge's resolution kept or
+  dropped a side there, and a hotfix a resync dropped leaves production. This skill keeps no list
+  of production's files: its last one missed `docker-compose.yml`;
 - each kit's verdict, or that nothing needed rehearsal.
 
 Options: "Approve this release" or "Not now". "Not now" merges nothing (step 0's early end).
@@ -246,7 +258,7 @@ across worktrees: chain with `&&` (trap hh).
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
 : "${B:?}"
-gh pr create --base main --head "$B" --title "release: $(date +%F)" --body "<plan.txt's carried steps and migrations>"
+gh pr create --base main --head "$B" --title "release: $(date +%F)" --body "<plan.txt's carried cards and migrations>"
 echo "PR=\"<the number it printed>\"" >> ~/projects/shekel-handoffs/releases/current.sh
 ```
 
@@ -350,7 +362,8 @@ Production's checkout first: the dry run reads it, and nothing waits on `dev`.
 git -C ~/projects/Shekel fetch origin && git -C ~/projects/Shekel merge --ff-only origin/main; echo "exit=$?"
 ```
 
-`~/projects/Shekel` must be clean on `main` before its fast-forward. A `deploy/` change is live from
+`~/projects/Shekel` must be clean on `main` before its fast-forward. A change to `deploy/`, or to
+`scripts/_container_lib.sh`, which the deploy script sources from beside it (R-BAL254), is live from
 this moment: `shekel-deploy` runs that checkout's copy (trap u).
 
 Then `dev`. No one can push to `dev` (ruleset `dev-queue`, whose bypass list is empty, R-BAL322),
@@ -370,7 +383,9 @@ with `gh pr merge "$RS" --merge` (no `--match-head-commit`: whatever `main` hold
 what `dev` should get), find its queue run on the branch `gh-readonly-queue/dev/pr-<RS>-<sha>` and watch it into
 `$R/queue_<run>.txt`. A failed run is read as step 6 reads one: nothing reached `dev`; queue it
 again or STOP. Once it is merged, append `RM="<its merge sha>"` as step 6 appends `M`. Neither
-wait holds the deploy: go on to step 9, and read both before step 13.
+wait holds the deploy: go on to step 9, and read both before step 13. A resync that conflicts over
+a file the tracker switch deleted is settled by CLAUDE.md's resync rule (Git Workflow): it takes
+`dev`'s delete.
 
 ## 9. The dry run
 
@@ -452,10 +467,10 @@ With kits, the guard names `"${KITS:?}"` too, and each directory gets a `--kit` 
 sha, the resync PR and its merge sha (`RS`, `RM`), the image digest old -> new, the dry run's
 stamp, the dump's path, and each verdict with its exit (plan, each kit, the checks, each queue run,
 the build, the dry run, the deploy, verify, main's CI, the census); a run that ended early says
-where and why, and names what it left open. Beside it: `plan.txt`, `dump.txt`, `dump_err.txt` and
-`rehearsal.txt` (when rehearsed), `checks_<PR>.txt`, `checks_<RS>.txt`, each `queue_<run>.txt`,
-`build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`, `deploy.txt`,
-`verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.
+where and why, and names what it left open. Beside it: `plan.txt`, `production.txt`, `dump.txt`,
+`dump_err.txt` and `rehearsal.txt` (when rehearsed), `checks_<PR>.txt`, `checks_<RS>.txt`, each
+`queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`,
+`deploy.txt`, `verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.
 
 The last act of every run, however it ended, moves `current.sh` into the record, so no later block
 reads this run's values: each sources a file that is gone and stops (`exit 1`). A resumed run

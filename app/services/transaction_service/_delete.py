@@ -65,8 +65,9 @@ door's own precondition, asked before the sequence starts.
    remove that hidden row's period or definition with a sentence naming a
    row the grid does not show.  A row this door hides holds nothing now; one
    hidden before this release refuses the release's migration
-   (``c4a4e7d1b9f2``, ruling **R-CC82**), and a transfer leg the TRANSFER's
-   soft delete hides may still hold its kept payment (finding **BAL-532**).
+   (``c4a4e7d1b9f2``, ruling **R-CC82**), and a TRANSFER's soft delete takes
+   its sides' payments off the same way since plan step
+   ``balance:X-bi-6-4d-2`` (finding **BAL-532**).
 3. **Take down the live CC payback chain** (``credit_workflow``), on either
    arm and for a different reason on each.  A SOFT delete never fires
    ``transactions.credit_payback_for_id``, so without this a projected

@@ -7,8 +7,7 @@ was refuted, what survives, and the options a design pass must weigh.
 **It is not a specification and it decides nothing.**
 
 Its subject is ruling `balance:R-GY`'s evidence bound and, behind that, finding `N-314`. The step's
-own specification is `docs/audits/balance_architecture/README.md` section 5; the rulings are
-`docs/plans/rulings.md`.
+own specification is its card in the tracker, and each ruling is a ruling card.
 
 ---
 

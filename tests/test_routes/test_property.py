@@ -193,10 +193,10 @@ class TestPropertyDetailPage:
     ):
         """The APPRECIATING arm of the shared seeder, at the re-class door.
 
-        Its sibling in ``test_accounts.py`` covers the INTEREST arm; this is
-        the one the deleted ``property_detail`` auto-create was standing in
-        for, and without it only one of the seeder's three arms is exercised
-        anywhere.
+        Its sibling in ``test_accounts/test_creation_redirects.py`` covers the
+        INTEREST arm; this is the one the deleted ``property_detail``
+        auto-create was standing in for, and without it only one of the
+        seeder's three arms is exercised anywhere.
         """
         with app.app_context():
             checking = seed_user["account"]

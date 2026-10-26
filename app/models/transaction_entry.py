@@ -41,7 +41,15 @@ class TransactionEntry(
     ``docs/audits/balance_architecture/archive/anchor_settle_partition.md``.
 
     Columns:
-        transaction_id  -- The parent transaction this entry belongs to.
+        transaction_id  -- The parent transaction this entry belongs to, or
+                           NULL when a side link below names a transfer side
+                           instead (plan step ``balance:X-bi-6-4d-2``).
+        expense_transfer_id, income_transfer_id -- The TRANSFER whose from- or
+                           to-side this movement is the payment of, keyed with
+                           ``account_id`` onto that side's endpoint (ruling
+                           **R-BAL88**).  Exactly one of these two and
+                           ``transaction_id`` is set
+                           (``ck_transaction_entries_one_parent``).
         account_id      -- The account this movement's money moved THROUGH:
                            its own, and free to differ from its parent's since
                            plan step ``credit_card:CC-5-1`` (rulings
@@ -66,9 +74,14 @@ class TransactionEntry(
                            and to the account's by
                            ``fk_transaction_entries_owner_account`` -- the
                            construction ``fk_transactions_owner_account`` uses
-                           one table up.  Never the author: a companion who
-                           records a purchase writes ``user_id``, and the
-                           purchase is still the owner's.
+                           one table up.  A side-linked movement names no row,
+                           so the row key skips it (MATCH SIMPLE on a NULL),
+                           and the chain holds it instead: its account is the
+                           owner's, the side key makes that account a
+                           transfer endpoint, and an endpoint is the
+                           transfer owner's (ruling **R-BAL107**).  Never the
+                           author: a companion who records a purchase writes
+                           ``user_id``, and the purchase is still the owner's.
         user_id         -- The user who created the entry (owner or companion):
                            the AUTHOR, never the owner.
         amount          -- What the purchase cost, as a signed figure
@@ -78,6 +91,9 @@ class TransactionEntry(
                            as income (ruling **bank_import:R-II**).  See the
                            constraint below for why the bound is non-zero
                            rather than positive, and where positivity went.
+                           NULL on a transfer side's record, and only there:
+                           a transfer's figure lives once, on the transfer
+                           (ruling **R-BAL366**).
         description     -- Short description of the purchase (e.g. "Kroger").
         purchased_on    -- The day the purchase was MADE (defaults to today).
                            Never after the user's today -- ruling R-M, refused
@@ -129,8 +145,10 @@ class TransactionEntry(
         figure_source_id -- WHO WROTE ``amount``: the settle priced it from the
                            plan (``resolved``), a person stated it (``typed``)
                            or the bank's own line stated it (``observed``).
-                           NOT NULL, no default: both writers of a movement
-                           state it.  Plan step **X-bi-3a**, ruling
+                           No default: both writers of a movement state it,
+                           and it is NULL exactly where ``amount`` is (a
+                           transfer side's record, ruling **R-BAL366**).
+                           Plan step **X-bi-3a**, ruling
                            **R-BAL39**, :class:`app.enums.MovementFigureSourceEnum`.
 
     **A row of this table is a MOVEMENT, and since plan step X-bi-3a a settle
@@ -140,7 +158,9 @@ class TransactionEntry(
     transfer leg's money the way a purchase records an envelope's, in the
     parent's direction (``cash_ledger.movement_cash_leg``, ruling
     **R-BAL35**).  It is an ordinary row here -- its ``amount`` is the figure
-    the settle booked, its ``purchased_on`` the settle day (the only day a
+    the settle booked (a transfer side's record excepted: it states none,
+    and its transfer's ``settled_figure`` is what moved, ruling
+    **R-BAL366**), its ``purchased_on`` the settle day (the only day a
     bill's payment has, so
     ``ck_transaction_entries_settled_not_before_purchase`` holds as
     equality), its ``description`` the plan's name as it read at the settle,
@@ -358,6 +378,89 @@ class TransactionEntry(
             unique=True,
             postgresql_where=db.text("covers_settlement = true"),
         ),
+        # **A MOVEMENT IS FILED UNDER EXACTLY ONE PARENT** (plan step
+        # ``balance:X-bi-6-4d-2``, ruling **R-BAL88**): a plan row, or one side
+        # of a transfer.  What makes ``transaction_id``'s NULL a fact rather
+        # than a gap, and what lets the two side keys below be the whole of a
+        # transfer side's link.
+        db.CheckConstraint(
+            "num_nonnulls(transaction_id, expense_transfer_id, "
+            "income_transfer_id) = 1",
+            name="ck_transaction_entries_one_parent",
+        ),
+        # **A TRANSFER SIDE HOLDS ITS PAYMENT AND NOTHING ELSE**: every door
+        # refuses a purchase on a transfer, so a side link names a transfer
+        # side's settlement record, and the stored mark says so.  A revert
+        # keeps the record un-dated and the mark with it (ruling **R-BAL61**).
+        db.CheckConstraint(
+            "(expense_transfer_id IS NULL AND income_transfer_id IS NULL) "
+            "OR covers_settlement",
+            name="ck_transaction_entries_side_link_is_a_record",
+        ),
+        # **A TRANSFER SIDE'S RECORD STATES NO FIGURE, AND EVERY OTHER
+        # MOVEMENT STATES ONE** (plan step ``balance:X-bi-6-4d-2``'s 4d-4
+        # half, ruling **R-BAL366**): a transfer's money is ONE figure, and
+        # its home is the transfer (``budget.transfers.settled_figure`` /
+        # ``settled_figure_source_id``, ruling **R-BAL365**).  A side record
+        # carried a copy of it until migration ``b7d2e4f19a63``; these make
+        # that copy unstorable, and ``amount`` / ``figure_source_id``'s NOT
+        # NULL for every other movement their right half.  Written as an
+        # equality of IS NULL tests, the ``ck_transfers_amount_ownership``
+        # shape, so neither half can be dropped alone.
+        db.CheckConstraint(
+            "(expense_transfer_id IS NULL AND income_transfer_id IS NULL) "
+            "= (amount IS NOT NULL)",
+            name="ck_transaction_entries_side_record_states_no_figure",
+        ),
+        db.CheckConstraint(
+            "(expense_transfer_id IS NULL AND income_transfer_id IS NULL) "
+            "= (figure_source_id IS NOT NULL)",
+            name="ck_transaction_entries_side_record_names_no_figure_source",
+        ),
+        # **THE SIDE KEYS** (ruling **R-BAL88**): the movement's account IS the
+        # side's endpoint, so a from-side payment on any account but the
+        # transfer's from-account is unstorable.  The transfer's accounts are
+        # its owner's (``fk_transfers_owner_from_account`` /
+        # ``fk_transfers_owner_to_account``, ruling **R-BAL107**), and this
+        # movement's account is ``owner_id``'s (``fk_transaction_entries_owner_
+        # account``), so the record is the transfer owner's by the chain: no
+        # owner key of its own.
+        #
+        # **ON UPDATE CASCADE** (ruling **R-BAL168**): changing a transfer's
+        # endpoint carries the side's record to the new account, in the same
+        # statement; a NO ACTION key would refuse the move in either statement
+        # order.  **No ``ondelete`` -- NO ACTION** (rulings **R-CC54**,
+        # **R-CC64**): a transfer holding a payment is history, and the one
+        # removal act (:mod:`app.services.movement_removal`) takes a record off
+        # first and on purpose.
+        db.ForeignKeyConstraint(
+            ["expense_transfer_id", "account_id"],
+            ["budget.transfers.id", "budget.transfers.from_account_id"],
+            name="fk_transaction_entries_expense_side",
+            onupdate="CASCADE",
+        ),
+        db.ForeignKeyConstraint(
+            ["income_transfer_id", "account_id"],
+            ["budget.transfers.id", "budget.transfers.to_account_id"],
+            name="fk_transaction_entries_income_side",
+            onupdate="CASCADE",
+        ),
+        # AT MOST ONE record per transfer side, the side-link twin of
+        # ``uq_transaction_entries_one_settlement_record``: every linked
+        # movement is a record (the CHECK above), so the count is over the link
+        # alone.  Also the link's index, for the joins and the keys' cascades.
+        db.Index(
+            "uq_transaction_entries_one_expense_side_record",
+            "expense_transfer_id",
+            unique=True,
+            postgresql_where=db.text("expense_transfer_id IS NOT NULL"),
+        ),
+        db.Index(
+            "uq_transaction_entries_one_income_side_record",
+            "income_transfer_id",
+            unique=True,
+            postgresql_where=db.text("income_transfer_id IS NOT NULL"),
+        ),
         {"schema": "budget"},
     )
 
@@ -380,14 +483,34 @@ class TransactionEntry(
     # (migration ``c4a4e7d1b9f2``); it carried Postgres' default
     # ``transaction_entries_transaction_id_fkey`` and ``ON DELETE CASCADE``
     # until then.
+    #
+    # **NULLABLE since plan step ``balance:X-bi-6-4d-2``, and NULL is a fact**:
+    # a movement a side link below files under a TRANSFER names no row
+    # (ruling **R-BAL88**).  ``ck_transaction_entries_one_parent`` makes
+    # exactly one of the three set, so a NULL here always means "a transfer
+    # side's record".  The step's migration filed every stored record that
+    # way, and the status seam's Transfer arm writes every new one so
+    # (:mod:`app.services.status_seam._side`).
     transaction_id = db.Column(
         db.Integer,
         db.ForeignKey(
             "budget.transactions.id",
             name="fk_transaction_entries_transaction_id",
         ),
-        nullable=False,
+        nullable=True,
     )
+    # THE TRANSFER whose FROM side this movement is the payment of (plan step
+    # ``balance:X-bi-6-4d-2``, ruling **R-BAL88**), or NULL.  Keyed with
+    # ``account_id`` onto ``uq_transfers_id_from_account`` by
+    # ``fk_transaction_entries_expense_side``, so the movement's account IS the
+    # transfer's from-account: a side's payment on any other account is
+    # unstorable.  The SIDE is which of the two links is set -- never inferred
+    # from an account.  Nullable because a movement names exactly one parent
+    # (``ck_transaction_entries_one_parent``).
+    expense_transfer_id = db.Column(db.Integer, nullable=True)
+    # The to-side twin of ``expense_transfer_id``: keyed onto
+    # ``uq_transfers_id_to_account`` by ``fk_transaction_entries_income_side``.
+    income_transfer_id = db.Column(db.Integer, nullable=True)
     # The account this movement's money moved THROUGH -- its OWN fact since
     # plan step ``credit_card:CC-5-1`` (rulings **R-BAL75**, **R-BAL76**), read
     # on this account by the fold (``cash_ledger._events._movements_of``), the
@@ -415,7 +538,9 @@ class TransactionEntry(
         nullable=False,
     )
     # WHO OWNS this movement: the parent row's owner, as a co-located key
-    # column (plan step ``credit_card:CC-5-1``, ruling **R-BAL76**).  Not a
+    # column (plan step ``credit_card:CC-5-1``, ruling **R-BAL76**) -- or, for
+    # a side-linked movement, which names no row, its TRANSFER's, by the chain
+    # the side keys' comment states (plan step ``balance:X-bi-6-4d-2``).  Not a
     # copy some writer keeps in step -- ``fk_transaction_entries_owner_transaction``
     # refuses any value but the row's ``user_id`` and
     # ``fk_transaction_entries_owner_account`` refuses an account that owner
@@ -429,7 +554,10 @@ class TransactionEntry(
     # was: a line that cannot be silently wrong, only absent, and absent is a
     # NOT NULL violation.
     owner_id = db.Column(db.Integer, nullable=False)
-    amount = db.Column(db.Numeric(12, 2), nullable=False)
+    # NULL exactly on a transfer side's record, whose figure is its
+    # transfer's (``ck_transaction_entries_side_record_states_no_figure``,
+    # ruling **R-BAL366**); stated on every other movement.
+    amount = db.Column(db.Numeric(12, 2), nullable=True)
     description = db.Column(db.String(200), nullable=False)
     purchased_on = db.Column(
         db.Date, nullable=False, server_default=db.text("CURRENT_DATE"),
@@ -466,8 +594,12 @@ class TransactionEntry(
         db.Boolean, nullable=False, default=False, server_default="false",
     )
     # WHO WROTE ``amount`` (plan step **X-bi-3a**, ruling **R-BAL39**).
+    # NULL exactly where ``amount`` is -- a transfer side's record, whose
+    # figure's source is its transfer's ``settled_figure_source_id``
+    # (``ck_transaction_entries_side_record_names_no_figure_source``, ruling
+    # **R-BAL366**).
     # RESTRICT rather than SET NULL: a vanishing catalogue row would leave a
-    # figure with no source, which the NOT NULL exists to forbid.  No default,
+    # figure with no source, which that CHECK exists to forbid.  No default,
     # server-side or ORM-side: the two writers of a movement (the purchase
     # doors and the status seam) each state it, and a default would answer for
     # a writer that forgot -- the stored guess ruling **R-IY** deletes.  No
@@ -482,7 +614,7 @@ class TransactionEntry(
             name="fk_transaction_entries_figure_source_id",
             ondelete="RESTRICT",
         ),
-        nullable=False,
+        nullable=True,
     )
     # version_id + its version_id_col mapper config: from OptimisticLockMixin.
 
@@ -498,6 +630,28 @@ class TransactionEntry(
     transaction = db.relationship(
         "Transaction", foreign_keys=[transaction_id],
         back_populates="entries",
+    )
+    # The TRANSFER whose side this movement is the record of (plan step
+    # ``balance:X-bi-6-4d-2``): one relationship per side link, joined on the
+    # transfer's id alone.  The side key is composite -- the movement's
+    # account is the endpoint -- but the join path is the id, the choice
+    # ``transaction`` makes over ``fk_transaction_entries_owner_transaction``:
+    # a join that also named the account would make ``account_id`` a column
+    # this relationship wanted to write on flush, beside ``account``.  An
+    # endpoint move carries the account by the key's ``ON UPDATE CASCADE``
+    # (ruling **R-BAL168**), and the transfer service assigns it in the
+    # session too (``transfer_service._endpoints``).
+    expense_transfer = db.relationship(
+        "Transfer",
+        primaryjoin="TransactionEntry.expense_transfer_id == Transfer.id",
+        foreign_keys=[expense_transfer_id],
+        back_populates="expense_movements",
+    )
+    income_transfer = db.relationship(
+        "Transfer",
+        primaryjoin="TransactionEntry.income_transfer_id == Transfer.id",
+        foreign_keys=[income_transfer_id],
+        back_populates="income_movements",
     )
     # The account the money moved through, for a reader that wants the
     # ACCOUNT rather than its id.  Lazy (the default): ``lazy="joined"``

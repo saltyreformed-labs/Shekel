@@ -55,7 +55,7 @@ from tests._test_helpers import (
     make_flat_paycheck_line,
     make_salary_profile,
 )
-from tests.test_services.test_paycheck_calculator import (
+from tests.test_services.test_paycheck_calculator._helpers import (
     FakeBracket,
     FakeBracketSet,
     FakeFicaConfig,

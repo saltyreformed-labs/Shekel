@@ -5,9 +5,10 @@ anything, and the reason it is a script rather than a number written down:
 **the figure is the NET of every assertion's correction, so it moves whenever
 the owner declares a balance.**  Four undated values for that one quantity were
 once spread across the corpus, none contradicting the others -- they were one
-number measured on four dates.  ``docs/plans/ledger.md``'s N-171 row has since
-been struck rather than dated, because a figure in an INDEX cannot be made safe;
-it can only be taken out.
+number measured on four dates.  Finding N-171 still carries
+two of them, undated: striking them, because a figure in an INDEX cannot be made
+safe and can only be taken out, was done only on the unmerged branch
+``feat/x-f3c-4``.
 
 **Run this against a restore, never against a live database**, and quote its
 output with the database and the date beside it.

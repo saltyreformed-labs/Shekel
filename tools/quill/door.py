@@ -2,22 +2,19 @@
 
 ``shekel-private-module-import`` refuses another package's import of a private module,
 so a name another package must read is re-exported here, and this module holds no logic
-and no name of its own (the shape of ``tools/plan_gate/registries.py``, ruling
-``balance:R-BAL244``; this door decided by the coordinator under ruling
+and no name of its own (the shape of the plan gate's one door, ``registries.py``, ruling
+``balance:R-BAL244``, until step X-cx's S3b deleted the gate; this door decided by the
+coordinator under ruling
 ``balance:R-BAL207``, 2026-10-13, as ``plan_labels``, and renamed when the release
 tool's card reader joined it, 2026-10-14).  ``quill.py`` is a public module and is
 imported directly, never through here.
 
 Each name, and who reads it:
 
-- ``step_labels``: ``tools/release``'s pre-cutover arm (``_carried``), for each step row
-  it reads: its money flag and whether it is a deploy-together container, by the ONE
-  producer the migration writes a step card's labels with (CLAUDE.md rule 14).  The
-  cutover (L8) deletes this name with ``_migrate_*.py`` and that arm.
-- ``Tracker``: the type of the tracker ``tools/release`` reads for a cut after the
-  cutover (``_plan``'s and ``release``'s connection to it, ``_cards``' reads of it); the
-  connection itself is ``quill.CONNECT``.  ``Card``: the type of a card it reads
-  (``_cards``' walk up, ``_line_up``).
+- ``Tracker``: the type of the tracker ``tools/release`` reads (``_plan``'s and
+  ``release``'s connection to it, ``_cards``' reads of it); the connection itself is
+  ``quill.CONNECT``.  ``Card``: the type of a card it reads (``_cards``' walk up,
+  ``_line_up``).
 - ``with_closure``: ``tools/release._cards``, for the cards a release's markers name and
   every card a decision over them reads, by quill's one closure read.
 - ``leaves_below`` and ``dropped``: ``tools/release._cards``, for a deploy-together
@@ -40,6 +37,11 @@ Each name, and who reads it:
   whole release judged on nothing: M3's review, its 1), the cards a tree's markers name,
   the entries under :data:`MARKERS` that differ between two trees, and the commits of a
   range that changed each marker, by quill's one reading of each.
+- ``changed``: ``tools/release._changes``, for what a release, and each pull request's own
+  change, changes of what production runs, by CI's write rule's one reading of it
+  (``_production``; rulings ``balance:R-BAL362`` and ``R-BAL400``).  ``IgnoreFileError``:
+  ``tools/release.release``, which reports an ignore file holding a pattern Docker refuses as
+  a listing made of nothing, and its tests.
 - ``GitHubError``, ``TrackerError`` and ``CredentialsError``: ``tools/release.release``,
   which reports a failed read of the tracker, or App credentials it cannot use, as a
   release judged on nothing.
@@ -63,7 +65,7 @@ from tools.quill._git import (
     merged_tree,
 )
 from tools.quill._github import CredentialsError, GitHubError
-from tools.quill._migrate_source import step_labels
+from tools.quill._production import IgnoreFileError, changed
 from tools.quill._state import (
     OWNED,
     SHIPPABLE,
@@ -82,6 +84,7 @@ __all__ = [
     "CredentialsError",
     "FakeTracker",
     "GitHubError",
+    "IgnoreFileError",
     "MarkerConflict",
     "OWNED",
     "OutsideLink",
@@ -89,6 +92,7 @@ __all__ = [
     "TrackerError",
     "above",
     "card_of",
+    "changed",
     "changes",
     "dropped",
     "dropped_above",
@@ -97,6 +101,5 @@ __all__ = [
     "markers_in",
     "merged_tree",
     "owner",
-    "step_labels",
     "with_closure",
 ]

@@ -53,7 +53,7 @@ from app.services.status_seam import (
     apply_status_change,
     honoured_correction,
     honoured_figure,
-    movement_settlement,
+    recorded_leg_settlement,
     recorded_settlement,
     tender_account_id_of,
     tender_for_status,
@@ -175,10 +175,11 @@ def leg_retained_amounts_by_key(legs) -> "dict[tuple[int, int], Decimal | None]"
     (leaf ``X-bi-6-1``, ruling **R-BAL87**), keyed by
     :attr:`~app.services.transfer_legs.TransferLeg.cell_key`.  The same rule
     through the same seam: ``None`` for a leg whose parent is settled (its
-    recorded figure is on screen already) and for one holding no stated
-    record; else what its retained covering movement still states
+    recorded figure is on screen already) and for one whose transfer stores
+    no stated figure; else what its transfer's retained figure still states
     (:func:`~app.services.status_seam.honoured_figure` over
-    :func:`~app.services.status_seam.movement_settlement`) -- the figure a
+    :func:`~app.services.status_seam.recorded_leg_settlement`, the transfer's
+    one figure since plan step ``balance:X-bi-6-4d-2``) -- the figure a
     person read off a statement before the transfer was reverted, which the
     transfer's re-settle honours (``transfer_service._settle``).
 
@@ -192,8 +193,8 @@ def leg_retained_amounts_by_key(legs) -> "dict[tuple[int, int], Decimal | None]"
     settled = settled_status_ids()
     return {
         leg.cell_key: (
-            None if leg.status_id in settled or leg.record is None
-            else honoured_figure(movement_settlement(leg.record))
+            None if leg.status_id in settled
+            else honoured_figure(recorded_leg_settlement(leg))
         )
         for leg in legs
     }
@@ -246,11 +247,11 @@ def settle_amount(txn: Transaction, basis: AmountBasis) -> Decimal:
 
     Raises:
         ValidationError: On a row no door may settle
-            (:func:`reject_unsettleable`).  A shadow's value is the transfer
-            service's and a deleted row's is nothing, and answering for either
-            here would publish a figure :func:`settle_transaction` refuses to
-            book -- which is exactly what plan step X-f2-c3 would otherwise walk
-            into.
+            (:func:`reject_unsettleable`).  A deleted row's value is nothing,
+            and answering for one here would publish a figure
+            :func:`settle_transaction` refuses to book.  The other refusal,
+            a row naming a transfer, answers a row the database refuses to
+            store (``ck_transactions_names_no_transfer``).
 
     **The MANUAL branch was two figures until plan step X-au-d**, resolved
     together by a ``_manual_branch_figures`` helper: what the settle books, and
@@ -415,28 +416,28 @@ def settle_transaction(
 
     Does NOT commit -- the caller owns the session boundary.
 
-    **The shadow refusal is THIS function's, and the first draft borrowed it
-    from a branch a shadow never reaches.**  That draft said
-    :func:`settle_from_entries` refuses one by precondition -- true of that
-    helper, and unreachable here: a shadow carries no ``template_id`` and no
-    ``is_envelope``, so ``tracks_purchases`` is False and a shadow always takes
-    the MANUAL branch, where nothing looked at ``transfer_id``.  An adversarial
-    review ran it and settled one leg of a pair: expense shadow Paid, income
-    shadow still Projected, parent transfer still Projected -- ``CLAUDE.md``
-    transfer invariants **3** and **4** broken in one call, and silently,
-    because ``sync_transaction_postings`` returns ``[]`` for a shadow so the
-    ledger stays flat while the grid shows one leg settled.  No caller can
-    reach it today (since plan step balance:X-bi-6-1 a shadow row is "not
-    found" at every transaction door, so ``mark_done`` never holds one), but
-    this is a PUBLIC verb documented as what a door calls, and
-    X-f2-c3 puts transfer shadows in the reconcile panel.  A verb owns its own
-    preconditions.
+    **The refusal of a row naming a transfer is THIS function's, and the first
+    draft borrowed it from a branch such a row never reached.**  That draft
+    said :func:`settle_from_entries` refuses one by precondition -- true of
+    that helper, and unreachable here: a transfer's twin row carried no
+    ``template_id`` and no ``is_envelope``, so ``tracks_purchases`` was False
+    and a twin always took the MANUAL branch, where nothing looked at
+    ``transfer_id``.  An adversarial review ran it and settled one leg of a
+    pair: expense twin Paid, income twin still Projected, parent transfer
+    still Projected -- ``CLAUDE.md`` transfer invariants **3** and **4**
+    broken in one call, and silently, because ``sync_transaction_postings``
+    returned ``[]`` for a twin then, so the ledger stayed flat while the grid
+    showed one leg settled.  No such row exists now: plan step
+    ``balance:X-bi-6-4d-2`` deleted the twins (ruling **R-BAL166**) and
+    ``ck_transactions_names_no_transfer`` refuses a new one, so the refusal
+    (:func:`reject_unsettleable`) answers a row that cannot be stored; it
+    goes with the ``transfer_id`` column at plan step ``balance:X-bi-6-5``.
+    A verb owns its own preconditions.
 
     Args:
-        txn: The transaction to settle.  Must be a REGULAR row -- a shadow is
-            REFUSED here, because a transfer settles through
-            ``transfer_service.update_transfer`` so both legs and the parent
-            move together.
+        txn: The transaction to settle.  Must not name a transfer -- such a
+            row is REFUSED here, and the database refuses to store one; a
+            transfer is one row and settles through ``transfer_service``.
         submitted: What the row actually cost and WHO SAID SO, when the CALLER
             knows (:class:`~app.services.stated_figure.StatedFigure`; plan step
             **X-bi-3e-1**, ruling **R-BAL61**): ``typed`` from the reconcile
@@ -517,7 +518,8 @@ def settle_transaction(
         entries and honours no submitted figure at all.
 
     Raises:
-        ValidationError: On a transfer shadow or a soft-deleted row, from the
+        ValidationError: On a row naming a transfer (one the database refuses
+            to store) or a soft-deleted row, from the
             envelope branch's remaining preconditions, from an illegal
             transition, from the seam's settle-day refusals, or from the
             tender gate (an archived account, or one outside the owner's
@@ -771,9 +773,10 @@ def settle_from_entries(
 
     Preconditions (defensively validated, not assumed):
 
-      1. Neither a transfer shadow nor a soft-deleted row
-         (:func:`reject_unsettleable`).  Both rules are shared with the two
-         other public settle surfaces rather than restated here -- this
+      1. Neither a row naming a transfer (one the database refuses to store)
+         nor a soft-deleted row (:func:`reject_unsettleable`).  Both rules
+         are shared with the two other public settle surfaces rather than
+         restated here -- this
          helper's own wording of the transfer rule was a SECOND spelling of
          it (finding **N-233**).
       2. ``txn.tracks_purchases`` is True -- the row is purchase-tracked
@@ -820,8 +823,9 @@ def settle_from_entries(
     reject_unsettleable(txn)
     # Resolved purchase-tracking check: the DEFINITION's ``is_envelope``
     # (``tracks_purchases`` accesses the template exactly as the prior guard
-    # did; a link-less shadow or payback answers False off its own columns,
-    # so the cheap-first / autoflush-safe ordering holds for those).
+    # did; a row naming no definition answers False off its own
+    # ``template_id``, so the cheap-first / autoflush-safe ordering holds for
+    # it).
     if not txn.tracks_purchases:
         raise ValidationError(
             f"Transaction {txn.id} is not envelope-tracked; "

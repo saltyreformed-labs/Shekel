@@ -33,8 +33,10 @@ press into a 500.
 Every row here is built BARE, for the reason ``test_settle_day_basis`` gives:
 the door helpers exist precisely to make the refused states unreachable, so a
 control routed through one would grade the helper and never the constraint.
-A bare ``Transfer`` has no shadow pair, which is fine for a constraint over
-the parent's own columns; it is the shape ``test_amount_ownership``'s
+The one exception is the CC payback the transaction class's over-refusal
+control stores, which comes from its producer: that control asserts the
+database ADMITS a row, and a row the database stored was admitted however
+it was built.  A bare ``Transfer`` is the shape ``test_amount_ownership``'s
 Core-insert probe and its ad-hoc arm use, while a transfer OF A DEFINITION
 anywhere else in the suite is the engine's (``generate_transfer_of``, plan
 step X-ch).  **The transfer link-arrival case assigns the link onto an
@@ -45,9 +47,10 @@ cannot be graded any other way.  The transaction table has no such case
 since the family's cutover (plan step ``balance:X-bi-7d-2``): a bare row --
 no definition, no transfer, no credit source -- is unstorable under
 ``ck_transactions_one_pricing_link`` at ``= 1``, so nothing exists for a link
-to arrive on; the control against over-refusal of the due-date CHECK is a
-transfer's undated shadow, and the bare row's refusal is asserted by the
-one-link CHECK's own name.
+to arrive on; the control against over-refusal of the due-date CHECK is an
+undated CC payback (a transfer's undated shadow until plan step
+``balance:X-bi-6-4d-2`` refused the shadow), and the bare row's refusal is
+asserted by the one-link CHECK's own name.
 
 The last class drives the migration's own ``downgrade()`` and ``upgrade()``
 over this test's private database clone, so the refusal the upgrade makes on
@@ -75,10 +78,10 @@ from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from tests._test_helpers import (
     create_savings_account,
-    create_transfer,
     load_migration_module,
     make_expense_template,
     make_transfer_template,
+    payback_row_of,
 )
 
 _TXN_CONSTRAINT = "ck_transactions_template_row_needs_due_date"
@@ -133,7 +136,7 @@ def _savings(seed_user):
 
 
 def _make_transfer(seed_user, seed_periods, savings, **overrides):
-    """Return an UNFLUSHED Projected transfer that OWNS its figure, no shadows.
+    """Return an UNFLUSHED Projected transfer that OWNS its figure.
 
     Args:
         seed_user: The ``seed_user`` fixture payload.
@@ -269,23 +272,34 @@ class TestATransactionOfADefinitionIsDated:
     def test_an_undated_transfer_shadow_is_accepted(
         self, app, db, seed_user, seed_periods,
     ):
-        """The control against over-refusal: a row priced through its transfer may carry no date.
+        """The control against over-refusal: a row priced by the row it repays may carry no date.
 
-        Nothing prices a shadow by its own date -- amount rule 5 reads the
-        parent -- and the transfer form offers the field as optional.  The
-        one undated shape the schema still admits since the cutover.
+        Nothing prices a CC payback by its own date -- it is priced by the
+        row it repays -- and its one constructor,
+        ``credit_workflow.create_cc_payback_transaction`` (both doors that
+        mint a payback reach it), writes none.  The one undated shape the
+        schema still admits since the cutover; a transfer's shadow was the
+        other until plan step ``balance:X-bi-6-4d-2`` refused the shadow, and
+        the card cutover (``credit_card:CC-7``, rulings **R-CC17** /
+        **R-CC20**) deletes the payback, so this case goes with it.  The
+        envelope is built bare like the file's other rows; the payback comes
+        from its producer, for the reason the module docstring gives.
         """
         with app.app_context():
-            savings = _savings(seed_user)
-            xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[0],
+            template = make_expense_template(db.session, seed_user, is_envelope=True)
+            envelope = _make_transaction(
+                seed_user, seed_periods,
+                template_id=template.id, due_date=seed_periods[0].start_date,
+            )
+            db.session.add(envelope)
+            db.session.flush()
+            payback = payback_row_of(
+                db.session, seed_user, envelope, Decimal("40.00"),
+                seed_periods[0].start_date,
             )
             db.session.commit()
-            shadows = xfer.shadow_transactions
-            assert len(shadows) == 2
-            assert all(row.id is not None and row.due_date is None for row in shadows)
-            assert all(row.template_id is None for row in shadows)
+            assert payback.id is not None and payback.due_date is None
+            assert payback.template_id is None
 
     def test_a_dated_row_that_names_a_definition_is_accepted(
         self, app, db, seed_user, seed_periods,

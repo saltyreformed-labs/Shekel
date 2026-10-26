@@ -3,8 +3,12 @@ Shekel Budget App -- C-21 State Machine Integration Tests
 
 Verifies that the state-machine helper (``app.services.state_machine``)
 is correctly wired into the transfer service, and that the partial
-unique index ``uq_transactions_transfer_type_active`` enforces the
-single-active-shadow-of-each-type invariant at the database tier.
+unique index ``uq_transactions_transfer_type_active`` is still declared.
+The index enforced the single-active-shadow-of-each-type invariant at the
+database tier; since plan step ``balance:X-bi-6-4d-2`` a transfer is one
+row and ``ck_transactions_names_no_transfer`` (ruling **R-BAL258**)
+refuses every row naming one, so each row the index would judge is a row
+that CHECK refuses.
 
 Audit reference: F-046 / F-047 / F-161 / commit C-21 of the
 2026-04-15 security remediation plan.
@@ -22,10 +26,14 @@ from app.exceptions import ValidationError
 from app.extensions import db
 from app.models.category import Category
 from app.models.ref import Status
-from app.models.transaction import Transaction
 from app.services import transfer_service
 from app.models.amount_ownership import AmountOwnership
-from tests._test_helpers import one_off_row_of
+from tests._test_helpers import (
+    a_twin_of,
+    constraint_name_from,
+    one_off_row_of,
+    transfer_side_settle_day,
+)
 
 
 UNIQUE_INDEX_NAME = "uq_transactions_transfer_type_active"
@@ -35,12 +43,12 @@ UNIQUE_INDEX_NAME = "uq_transactions_transfer_type_active"
 
 
 @pytest.fixture()
-def transfer_data(app, seed_full_user_data):
+def transfer_data(seed_full_user_data):
     """Provide everything the transfer service needs for these tests.
 
     Adds the default Transfers: Incoming and Transfers: Outgoing
     categories that the conftest seed_full_user_data fixture does not
-    include.  Mirrors the fixture in ``test_transfer_service.py`` so
+    include.  Mirrors the fixture in ``test_transfer_service/conftest.py`` so
     these tests can use the same ``_create_basic_transfer`` helper.
     """
     data = seed_full_user_data
@@ -83,16 +91,22 @@ def _create_basic_transfer(td):
     )
 
 
-# ── Transfer service: legal transitions propagate to shadows ────────
+# ── Transfer service: legal transitions reach both sides ────────────
 
 
 class TestTransferServiceLegalTransitions:
     """update_transfer accepts every legal transition listed in
-    state_machine and propagates the new status to both shadow
-    transactions atomically."""
+    state_machine.  The transfer's status is the one status both sides
+    show, and a settle dates each side's payment record."""
 
     def test_projected_to_done_propagates(self, app, db, transfer_data):
-        """projected -> done is legal and reaches both shadows."""
+        """projected -> done is legal and reaches both sides.
+
+        The transfer's status is the one status, and each side's payment
+        record is dated by the move, where each shadow said Paid until plan
+        step ``balance:X-bi-6-4d-2`` (ruling R-BAL167 class 1, plan step
+        balance:X-bi-6-4d-2).
+        """
         td = transfer_data
         with app.app_context():
             xfer = _create_basic_transfer(td)
@@ -106,12 +120,10 @@ class TestTransferServiceLegalTransitions:
 
             db.session.refresh(xfer)
             assert xfer.status_id == done_id
-            shadows = db.session.query(Transaction).filter_by(
-                transfer_id=xfer.id,
-            ).all()
-            assert len(shadows) == 2
-            for s in shadows:
-                assert s.status_id == done_id
+            for account_id in (xfer.from_account_id, xfer.to_account_id):
+                assert transfer_side_settle_day(
+                    db.session, xfer.id, account_id,
+                ) is not None
 
     def test_done_to_projected_revert_propagates(self, app, db, transfer_data):
         """done -> projected (revert) is legal."""
@@ -156,9 +168,8 @@ class TestTransferServiceLegalTransitions:
 
 class TestTransferServiceIllegalTransitions:
     """update_transfer rejects illegal transitions by raising
-    ValidationError.  No partial mutation occurs -- the parent
-    transfer's status_id and both shadow rows remain at their
-    pre-call values.
+    ValidationError.  No partial mutation occurs -- the transfer's
+    status_id remains at its pre-call value.
 
     **Two cases left this class at plan step balance:X-am**, which deleted the
     terminal ``Settled`` ARCHIVE: ``projected -> settled`` (Projected now
@@ -177,8 +188,12 @@ class TestTransferServiceIllegalTransitions:
         workflow is expense-only, so a Credit transfer would be
         balance-excluded on BOTH accounts with no compensating payback and
         would vanish from both projections.  Graded at the SERVICE tier here
-        because the shadows are what make it dangerous -- the parent and both
-        legs move together, so an accepted move is three rows wrong.
+        because a transfer's status is both legs' status -- each side shows
+        it -- so an accepted move would be wrong on both accounts at once.
+
+        It also read the two shadow rows back as Projected until plan step
+        ``balance:X-bi-6-4d-2`` (ruling R-BAL167 class 1): a transfer is one
+        row, so the transfer's own status read below is the whole of it.
         """
         td = transfer_data
         with app.app_context():
@@ -196,12 +211,6 @@ class TestTransferServiceIllegalTransitions:
             db.session.rollback()
             db.session.refresh(xfer)
             assert xfer.status_id == projected_id
-            shadows = db.session.query(Transaction).filter_by(
-                transfer_id=xfer.id, is_deleted=False,
-            ).all()
-            assert len(shadows) == 2
-            for shadow in shadows:
-                assert shadow.status_id == projected_id
 
     def test_done_to_cancelled_rejected(self, app, db, transfer_data):
         """done -> cancelled would erase the Paid audit trail."""
@@ -231,8 +240,9 @@ class TestTransferServiceIllegalTransitions:
 
 
 class TestPartialUniqueIndexShape:
-    """The partial unique index is present in the live schema with
-    exactly the predicate the application code relies on."""
+    """The partial unique index is still present in the live schema with
+    the predicate it was declared with; the module docstring says why
+    nothing relies on it since plan step ``balance:X-bi-6-4d-2``."""
 
     def test_index_exists_in_pg_catalog(self, app):
         """``pg_indexes`` carries the index with the expected definition."""
@@ -262,96 +272,48 @@ class TestPartialUniqueIndexShape:
 
 
 class TestPartialUniqueIndexBehaviour:
-    """The partial unique index rejects a third active shadow row of
-    the same transaction_type, but allows a re-insert after a
-    soft-delete clears the predicate."""
+    """What the partial unique index governed is refused before it matters.
 
-    def _insert_shadow_directly(self, td, xfer, txn_type_id):
-        """Insert a shadow row that bypasses the transfer service.
+    The index rejected a third active shadow row of the same
+    transaction_type and allowed a re-insert after a soft-delete cleared its
+    predicate.  Since plan step ``balance:X-bi-6-4d-2`` no row may name a
+    transfer (``ck_transactions_names_no_transfer``, ruling **R-BAL258**),
+    so a shadow-shaped row is refused by that CHECK whether live or hidden,
+    and a row naming no transfer is outside the index as it always was.
+    The hidden one is graded here (ruling R-BAL167 class 2).  The live one
+    is the CHECK's own case, ``test_a_transfer_is_one_row``'s
+    ``TestTheUpgrade::test_the_database_refuses_a_twin``, and this class's
+    copy of it was deleted under ruling **R-BAL397**.
+    """
 
-        Used for tests that exercise the database-level partial unique
-        index in isolation.  The service layer's ``_get_shadow_transactions``
-        check is intentionally skipped so the index becomes the only
-        safeguard being asserted.
+    def test_a_hidden_twin_is_refused(self, app, db, transfer_data):
+        """A soft-deleted twin is refused too, so no predicate has one to exclude.
+
+        It soft-deleted the create door's expense shadow, which took it out of
+        the partial index (the predicate excludes ``is_deleted = TRUE``), and
+        then inserted a fresh active expense shadow for the same transfer,
+        asserting the index ALLOWED it -- the predicate guarantee behind
+        restore-after-create, mirroring the credit-payback partial-index
+        lifecycle in commit C-19.  Since plan step ``balance:X-bi-6-4d-2``
+        ``ck_transactions_names_no_transfer`` (ruling R-BAL258) reads no
+        ``is_deleted``: the hidden twin this case staged is refused like a
+        live one (ruling R-BAL167 class 2).  The fresh live twin it inserted
+        after is the live one the class docstring names.
         """
-        projected_id = ref_cache.status_id(StatusEnum.PROJECTED)
-        shadow = Transaction(
-            account_id=td["account"].id,
-            user_id=td['periods'][0].user_id,
-            pay_period_id=td["periods"][0].id,
-            scenario_id=td["scenario"].id,
-            status_id=projected_id,
-            name="Rogue extra shadow",
-            category_id=td["categories"]["Rent"].id,
-            transaction_type_id=txn_type_id,
-            amount_ownership=AmountOwnership.own(Decimal("250.00")),
-            transfer_id=xfer.id,
-            is_deleted=False,
-        )
-        db.session.add(shadow)
-        db.session.flush()
-        return shadow
-
-    def test_third_active_shadow_blocked(self, app, db, transfer_data):
-        """A 3rd active shadow row of an existing transaction_type
-        triggers the partial unique index."""
         td = transfer_data
         with app.app_context():
             xfer = _create_basic_transfer(td)
             db.session.commit()
-            expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
 
-            with pytest.raises(IntegrityError):
-                # Bypass the service layer entirely -- attempt a raw
-                # INSERT of a third active shadow with the same
-                # transaction_type as one of the existing two.
-                self._insert_shadow_directly(td, xfer, expense_type_id)
-
+            hidden = a_twin_of(xfer, is_income=False)
+            hidden.is_deleted = True
+            db.session.add(hidden)
+            with pytest.raises(IntegrityError) as caught:
+                db.session.flush()
             db.session.rollback()
-            shadows = db.session.query(Transaction).filter_by(
-                transfer_id=xfer.id, is_deleted=False,
-            ).all()
-            assert len(shadows) == 2
-
-    def test_insert_allowed_after_soft_delete(self, app, db, transfer_data):
-        """Soft-deleting a shadow removes it from the partial index, so
-        a fresh active shadow of the same transaction_type for the same
-        transfer can then be inserted.  This is the predicate guarantee
-        that makes restore-after-create flows work -- mirrors the
-        credit-payback partial-index lifecycle in commit C-19."""
-        td = transfer_data
-        with app.app_context():
-            xfer = _create_basic_transfer(td)
-            db.session.commit()
-            expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-
-            # Soft-delete the existing expense shadow -- it leaves the
-            # index because the predicate excludes ``is_deleted = TRUE``.
-            existing_expense = (
-                db.session.query(Transaction)
-                .filter_by(
-                    transfer_id=xfer.id,
-                    transaction_type_id=expense_type_id,
-                    is_deleted=False,
-                )
-                .one()
+            assert constraint_name_from(caught.value) == (
+                "ck_transactions_names_no_transfer"
             )
-            existing_expense.is_deleted = True
-            db.session.commit()
-
-            # Insert a fresh active expense shadow for the same
-            # transfer.  Without the partial predicate this would
-            # fail; with it, the index permits the insert because
-            # the soft-deleted row is excluded.
-            self._insert_shadow_directly(td, xfer, expense_type_id)
-            db.session.commit()
-
-            active = db.session.query(Transaction).filter_by(
-                transfer_id=xfer.id,
-                transaction_type_id=expense_type_id,
-                is_deleted=False,
-            ).all()
-            assert len(active) == 1
 
     def test_index_does_not_apply_to_non_transfer_rows(self, app, db, transfer_data):
         """Regular transactions (transfer_id IS NULL) are excluded from

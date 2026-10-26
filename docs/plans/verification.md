@@ -3,13 +3,13 @@
 **One copy of what "done" means for a step in any arc.** It lived in the balance README's section 7
 and, in a shorter and not-quite-equal form, in the credit-card plan; the recurrence and pay-calendar
 arcs had none at all, which is how the two arcs at the front of the queue came to be held to nothing
-written down. That is the same denormalization `conventions.md` and `lessons.md` exist to remove.
+written down. That is the same denormalization `lessons.md` exists to remove.
 
 **This is the ORACLE discipline, not the release checklist.** What every commit owes -- full suite,
-`pylint app/` with the full `--fail-on` set, migrations tested in both directions, the test template
-rebuilt after one -- is `CLAUDE.md`'s Definition of Done, and restating it here would be a second
-copy beside no reconciler. This document answers the question the Definition of Done does not: how
-do you know the number is RIGHT.
+`pylint app/` with the full `--fail-on` set, migrations tested in both directions -- is
+`CLAUDE.md`'s Definition of Done, and restating it here would be a second copy beside no reconciler.
+This document answers the question the Definition of Done does not: how do you know the number is
+RIGHT.
 
 ## The standard
 
@@ -73,6 +73,6 @@ do you know the number is RIGHT.
 
 The standard above is what every arc owes. A step whose acceptance needs a WALK through the app --
 the credit-card arc's end-to-end run from creating a card to the next payment shrinking, for
-instance -- states that walk in its own document, because it is a specification of one step's proof
-rather than a rule about proofs. The distinction is `conventions.md`'s:
+instance -- states that walk in its arc's document, because it is one arc's proof rather than a rule
+about proofs. The distinction is the planning conventions':
 **merge what shares KEYS, split what shares only a READER.**

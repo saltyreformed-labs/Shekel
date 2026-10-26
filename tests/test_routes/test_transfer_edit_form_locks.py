@@ -36,8 +36,8 @@ was written.
 
 Two tests elsewhere had their premise reversed by this step's ruling
 (CLAUDE.md rule 5's exception, developer 2026-09-12):
-``test_transfers.py::TestTemplateList`` no longer asserts an edit form ships no
-sets, and ``test_transfer_create_derived_stop.py``'s help-sentence case asserts
+``test_transfers/test_templates.py::TestTemplateList`` no longer asserts an edit
+form ships no sets, and ``test_transfer_create_derived_stop.py``'s help-sentence case asserts
 the edit form carries both sentences too.
 """
 from dataclasses import replace

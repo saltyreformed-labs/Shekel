@@ -34,14 +34,14 @@ the page shows changed there and not here:
 * plain cash accounts via the cash-flow entry
   ``balance_at.cash_balance_map``.
 
-Both seam entries delegate to the canonical entries-aware producers, so
-the silent-degrade seam fixed by CRIT-01 / F-009 cannot reappear here.
-The F-6 static guard in :mod:`tests.test_routes.test_accounts` pins this
-contract by asserting that the seam (``balance_at.``) is used and that the
-whole-account kind-correct ``balance_map`` is NOT called beside the interest
-map; that guard reads this file directly.  Its third arm forbade the bare
-entries-blind ``calculate_balances``, and plan step X-g4b deleted the arm with
-the producer: a negative arm naming a function that no longer exists is a
+Both seam entries delegate to the canonical entries-aware producers, so the
+silent-degrade seam fixed by CRIT-01 / F-009 cannot reappear here.  The F-6
+static guard in :mod:`tests.test_routes.test_accounts.test_checking_detail`
+pins this contract by asserting that the seam (``balance_at.``) is used and
+that the whole-account kind-correct ``balance_map`` is NOT called beside the
+interest map; that guard reads this file directly.  Its third arm forbade the
+bare entries-blind ``calculate_balances``, and plan step X-g4b deleted the arm
+with the producer: a negative arm naming a function that no longer exists is a
 sentence that can never fail.
 """
 

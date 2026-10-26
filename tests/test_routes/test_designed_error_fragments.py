@@ -15,9 +15,10 @@ suites.
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import StatusEnum
+from app.enums import MovementFigureSourceEnum, StatusEnum
 from app.extensions import db
 from app.models.ref import AccountType, Status, TransactionType
+from app.models.settled_figure import SettledFigure
 from app.services import account_service, status_seam, transfer_service
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
 from tests._test_helpers import one_off_row_of, resolved_amount, settlement_if_settling
@@ -189,7 +190,7 @@ class TestMobileCardErrorFragment:
 def _create_transfer(seed_user, seed_periods_today):
     """Create a projected transfer (with shadows) via the service.
 
-    Mirrors the ``test_transfers`` helper: a second Savings account
+    Mirrors the ``test_transfers._helpers`` helper: a second Savings account
     plus one ad-hoc transfer between it and the seeded checking
     account.
     """
@@ -271,9 +272,20 @@ class TestTransferErrorFragment:
             # is touched.  It walked one step further, to the terminal
             # ``Settled`` archive, until plan step **balance:X-am** deleted
             # that status -- and ``done -> cancelled`` is the refusal the
-            # transfer map has always had underneath it.
+            # transfer map has always had underneath it.  Laid bare, the
+            # Paid transfer holds no side record, the shape of a ``$0.00``
+            # close, so it stores the figure that close stores, ``0.00`` and
+            # typed (ruling R-BAL365): since plan step balance:X-bi-6-4d-2's
+            # 4d-4b-2 leaf the band trigger's figure arm refuses a settled
+            # transfer storing no figure.
             paid_id = ref_cache.status_id(StatusEnum.DONE)
             xfer.status_id = paid_id
+            xfer.settled_figure_pair = SettledFigure(
+                Decimal("0.00"),
+                ref_cache.movement_figure_source_id(
+                    MovementFigureSourceEnum.TYPED,
+                ),
+            )
             db.session.commit()
 
             resp = auth_client.post(f"/transfers/instance/{xfer.id}/cancel")

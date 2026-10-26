@@ -273,7 +273,7 @@ def is_confirmed_payment_eligible(
     **The genesis walk does not call this predicate, and saying it did was
     false.**  :func:`app.services.loan_ledger.compute_loan_payment_splits`
     splits EVERY settled payment with no bound at all
-    (:func:`app.services.loan_loaders.settled_income_shadows` states why), and
+    (:func:`app.services.loan_loaders.settled_income_legs` states why), and
     reproduces this predicate's anchor half STRUCTURALLY instead: it walks
     anchors and payments in one chronological merge, so a payment due at or
     before an anchor is overwritten by that anchor's reset rather than filtered

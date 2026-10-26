@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.quill import _git
+from tools.quill import _findings, _git
 from tools.quill._command import (
     ON_BOARD,
     Refused,
@@ -51,7 +51,7 @@ from tools.quill.check import (
     ruling_question,
     violations,
 )
-from tools.quill.setup_tracker import FILING, TASK
+from tools.quill.setup_tracker import FILING, TASK, unmarked
 
 
 @dataclass(frozen=True)
@@ -124,8 +124,8 @@ def _leaf_milestone(tracker: Tracker, parent: Card, cards: dict[int, Card],
     none, and each leaf below it in a milestone (nested splits included,
     :func:`_state.leaves_below`) is named with it, as that leaf's, for a person to set one
     on the web: the tracker records no outcome for the split step.  None is
-    taken from them: a leaf the migration filed may hold its OWN outcome's, not one carried
-    from ``parent`` (``_migrate_source._carried_outcomes``), and the tracker cannot tell
+    taken from them: a leaf X-cx's migration filed may hold its OWN outcome's, not one it
+    carried down from the nearest split step above holding one, and the tracker cannot tell
     the two apart (X-cx S3a's review, HIGH 1: on the plan at the cutover, 17 of 32 split
     steps would have filed a new leaf in a sibling's outcome, recurrence R5's in place of
     R5's own).
@@ -185,7 +185,8 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
     if parent is not None:
         reads = _git.read(root)
         cards = with_closure(tracker, {parent.number: parent})
-        owner = Owner(parent.kind, is_live(parent.number, cards, reads.shipped.cards))
+        owner = Owner(parent.kind, is_live(parent.number, cards, reads.shipped.cards),
+                      is_container(parent, cards, reads.shipped.cards))
     if args.kind == TASK and is_container(parent, cards, reads.shipped.cards):
         raise Refused(f"{_label(parent)} is split into smaller steps (R-BAL177): a task is a "
                       "piece of one of them, so file it under that one")
@@ -275,7 +276,7 @@ def _same_filing(tracker: Tracker, draft: Draft, parent: Card | None) -> Card | 
 def _refuse_relabel(card: Card, draft: Draft) -> None:
     """Refuse a card with ``draft``'s kind, title and text whose labels, the filing mark
     aside, are not ``draft``'s: relabelling is a person's call."""
-    labels = sorted(label for label in card.labels if label != FILING)
+    labels = sorted(unmarked(card.labels))
     if labels != sorted(draft.labels):
         raise Refused(f"{_label(card)} has this kind, title and text but the labels "
                       f"{labels}, not {sorted(draft.labels)}: relabel it by hand")
@@ -301,18 +302,22 @@ def _refuse_rehoming(card: Card, kind: str, parent: Card | None) -> None:
 def _refuse_reowning(card: Card, owner: Card) -> None:
     """Refuse to file ``card``, a finding or ruling, for ``owner`` when a link of it says
     otherwise: a sub-issue of any card, which the parent's progress would count, or blocked
-    by any card but ``owner`` (``R-BAL395``), in the tracker or outside it."""
+    by any card but ``owner`` (``R-BAL395``), in the tracker or outside it.  Re-homing is a
+    person's call, made by hand -- for a finding blocked by one other card of the tracker,
+    with ``quill hand`` (step plan#1772), which hands it to the owner this filing names."""
     outside = {what: [f"{link.issue}, outside the tracker" for link in card.outside
                       if link.what == what] for what in ("parent", "blocker")}
     if under := ([f"plan#{card.parent}"] if card.parent is not None else []) + outside["parent"]:
         raise Refused(f"{_label(card)} is a sub-issue of {under[0]}, but a finding or ruling is "
                       f"blocked by its owner, plan#{owner.number}, and is no card's sub-issue "
                       "(R-BAL395): re-homing a card is done by hand")
-    if others := [f"plan#{number}" for number in card.blocked_by
-                  if number != owner.number] + outside["blocker"]:
+    blockers = [number for number in card.blocked_by if number != owner.number]
+    if others := [f"plan#{number}" for number in blockers] + outside["blocker"]:
+        how = (f"`quill hand plan#{card.number} --to plan#{owner.number}` re-homes it"
+               if card.kind == "finding" and len(others) == 1 and blockers else
+               "re-homing a card is done by hand")
         raise Refused(f"{_label(card)} is blocked by {', '.join(others)}, not only by "
-                      f"plan#{owner.number}, the owner this filing names (R-BAL395): re-homing a "
-                      "card is done by hand")
+                      f"plan#{owner.number}, the owner this filing names (R-BAL395): {how}")
 
 
 def _attach(tracker: Tracker, card: Card, kind: str, parent: Card | None) -> None:
@@ -547,7 +552,10 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
     printed as it lands, then its mark removed, last (R-BAL202): the link, a ruling's
     close, a leaf's place and its split step's milestone cleared (after the leaf's create
     carried it, so a run cut short between them leaves it held, and the same command run
-    again clears it), a top-level step's or question's board place."""
+    again clears it), then each open finding the split step owns handed to the leaf, which a
+    split step never owns (ruling plan#1784, :func:`_findings.hand_on`: a run cut short
+    between a finding's two writes leaves it two owners, and the same command run again
+    finishes it), a top-level step's or question's board place."""
     kind, parent = filing.draft.kind, filing.parent
     _attach(tracker, card, kind, parent)
     if kind == "ruling" and card.is_open:
@@ -560,6 +568,8 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
         if (split := filing.milestone.leaf) is not None:
             tracker.set_milestone(parent.number, None)
             print(f"  plan#{parent.number} left milestone #{split}: a split step keeps none")
+        for finding in _findings.owned(tracker, parent.number, filing.shipped):
+            _findings.hand_on(tracker, finding, card, parent, prefix="  ")
     elif kind in ON_BOARD and card.board_item is None:
         tracker.board.add(card)
         print("  board: added at the bottom")

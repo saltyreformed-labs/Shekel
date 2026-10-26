@@ -182,7 +182,7 @@ def payment_visible_on(
     Args:
         leg: The settled payment's to-side
             :class:`~app.services.transfer_legs.TransferLeg`, its record
-            attached (:func:`app.services.loan_loaders.settled_income_shadows`
+            attached (:func:`app.services.loan_loaders.settled_income_legs`
             attaches it).  A record-less leg's ``due_date`` and ``pay_period``
             are read, so its parent's period must be loaded -- the producer
             loads it as its sort key.
@@ -232,7 +232,8 @@ def payment_visible_on(
 #: its owner makes through the app: ``payment_visible_on``'s cause sentence
 #: for :func:`~app.utils.balance_predicates.require_settled_day`.  Each claim
 #: about the transfer's door is pinned through that door
-#: (``test_loan_settled_legs.TestTheRefusalsRepairWorksThroughTheApp``): a day
+#: (``test_loan_settled_legs.test_the_undated_refusal
+#: .TestTheRefusalsRepairWorksThroughTheApp``): a day
 #: typed into a side's box dates that side, and a revert then Mark Paid dates
 #: the payment to the day of the click.  It asks for EACH account's day
 #: because, today, a side whose day is only a guess follows the other side's
@@ -280,6 +281,6 @@ def _undated_payment_subject(leg: TransferLeg) -> str:
     return (
         f"The loan-side payment (movement {leg.record.id}) of transfer "
         f"{transfer.id}{named} ({transfer.from_account.name} to "
-        f"{transfer.to_account.name}, ${leg.record.amount:,.2f} in the "
+        f"{transfer.to_account.name}, ${transfer.settled_figure:,.2f} in the "
         f"paycheck of {leg.pay_period.start_date}, {due})"
     )

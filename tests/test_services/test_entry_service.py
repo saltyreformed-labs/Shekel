@@ -34,8 +34,6 @@ from tests._test_helpers import (
     typed,
     account_never_asserted,
     an_entered_day,
-    create_savings_account,
-    create_transfer,
     figure_source_columns,
     generate_row_of,
     make_expense_template,
@@ -166,49 +164,18 @@ class TestCreateEntry:
                     ),
                 )
 
-    def test_create_entry_rejects_a_transfer_shadow(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Reject an entry on a transfer's shadow: it tracks no purchases.
-
-        A shadow names its transfer and no definition, so
-        ``tracks_purchases`` answers ``False`` (ruling **R-BAL73**) and the
-        envelope guard refuses it before anything else is asked.  Until the
-        family's cutover (plan step ``balance:X-bi-7d-2``) this class held
-        two cases in its place: a LEGACY link-less row refused by the same
-        guard off its own cell, and a hand-built shadow carrying
-        ``is_envelope=True`` so the door's TRANSFER guard, one check later,
-        was the one to fire.  Neither shape can be stored now -- the cell is
-        gone and ``ck_transactions_one_pricing_link`` reads ``= 1`` -- so the
-        transfer guard in ``entry_service`` is unreachable by construction
-        (reported at 7d-2, not deleted there) and this case grades the
-        refusal a real shadow meets.
-        """
-        with app.app_context():
-            savings = create_savings_account(
-                seed_user, db.session, "Savings", Decimal("500.00"),
-            )
-            xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[0],
-            )
-            db.session.flush()
-            shadow = next(
-                row for row in xfer.shadow_transactions
-                if row.account_id == seed_user["account"].id
-            )
-            assert shadow.tracks_purchases is False
-
-            with pytest.raises(ValidationError, match="does not support"):
-                entry_service.create_entry(
-                    transaction_id=shadow.id,
-                    user_id=seed_user["user"].id,
-                    details=entry_service.EntryDetails(
-                        figure=typed(Decimal("50.00")),
-                        description="Test",
-                        purchased_on=date(2026, 1, 5),
-                    ),
-                )
+    # ``test_create_entry_rejects_a_transfer_shadow`` stood here until plan
+    # step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer 2026-10-15:
+    # "Delete all 27").  It added a purchase to a transfer's expense SHADOW
+    # row, which names no definition, so ``tracks_purchases`` answered
+    # ``False`` (ruling R-BAL73) and the envelope guard refused it.  No shadow
+    # can exist now (the database refuses one,
+    # ``ck_transactions_names_no_transfer``, ruling R-BAL258, pinned once by
+    # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
+    # and no app code builds one).  The envelope guard's refusal of a row
+    # that tracks no purchases is the case above's, and ``tracks_purchases``
+    # still answers ``False`` for the one link-less row left, a card payback.
 
     def test_create_entry_rejects_income(
         self, app, db, seed_user, seed_periods,

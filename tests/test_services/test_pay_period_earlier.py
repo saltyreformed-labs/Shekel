@@ -22,7 +22,7 @@ Four contracts, one class each:
   writer's own bounds (``pay_era_write.rephase_earliest_era`` moves the phase
   only along the era's own grid, and up only as far as the era still pays --
   ruling **R-PC110**, plan step ``C21``, whose door is graded in
-  ``test_pay_period_remove_earlier.py``);
+  ``test_pay_period_remove_earlier/test_the_door.py``);
 * the HAZARD R-PC105 exists for -- a regenerate keeping only earlier paychecks
   restating a rhythm from the old phase or just past it -- driven through the
   real doors.

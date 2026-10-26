@@ -289,7 +289,7 @@ class TestTheDifferenceTheOwnerAccepted:
         the design says is exact, using the rounding mode
         :mod:`app.utils.money` forbids.  Read verbatim, it simply is not the
         door's own figure, and the door says so
-        (``test_residual.TestTheFigureTheOwnerAcceptedIsReconciled``).
+        (``test_residual.test_what_the_door_refuses.TestTheFigureTheOwnerAcceptedIsReconciled``).
         """
         loaded = _load_one_card(_form([
             ("rows-11", "transaction:42:-180.00:1"),

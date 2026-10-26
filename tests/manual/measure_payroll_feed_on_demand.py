@@ -1,7 +1,7 @@
 """Report what the three forward-projecting surfaces say past the saved calendar.
 
-Plan step **salary:S3-e-2** (``docs/plans/implementation_plan_salary.md``
-section 4; rulings **R-SAL15**, **R-SAL18**).  The step deletes
+Plan step **salary:S3-e-2** (shipped at ``a6af5b3c``;
+rulings **R-SAL15**, **R-SAL18**).  The step deletes
 ``AccountPayrollFeed``'s hold -- the figure the feed INVENTED for a payday
 past the owner's saved schedule -- and prices such a payday through the
 paycheck engine on demand, which **MOVES MONEY** on every surface whose axis

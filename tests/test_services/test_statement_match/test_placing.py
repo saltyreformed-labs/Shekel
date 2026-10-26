@@ -12,7 +12,8 @@ measured is the row the app writes and the rule it rewrites.
 
 The two 7b-3 forks the developer ruled 2026-09-16 are graded beside their
 own doors: R-BAL43 in ``tests/test_routes/test_one_off_row_doors.py`` and
-``test_one_off.py``, R-BAL44 in ``test_carry_forward_service.py``.
+``test_one_off.py``, R-BAL44 in
+``test_carry_forward_service/test_a_leftover_row_is_dated.py``.
 """
 from datetime import timedelta
 from decimal import Decimal

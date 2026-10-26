@@ -61,9 +61,9 @@ def scenarios_with_loan_payments(loan_account_id: int) -> list[int]:
     The distinct ``scenario_id`` set over the live transfers INTO the loan --
     the scenarios whose split corrections a loan-GLOBAL change re-bases.  It
     read the loan's non-deleted income SHADOWS until plan step
-    balance:X-bi-6-4b; every live transfer carries one live income shadow in
-    its own scenario (Transfer Invariants 1 and 3), so the two sets are one
-    (measured equal on the 2026-09-23 21:17 production dump).  A balance
+    balance:X-bi-6-4b; every live transfer carried one live income shadow in
+    its own scenario then (Transfer Invariants 1 and 3), so the two sets were
+    one (measured equal on the 2026-09-23 21:17 production dump).  A balance
     true-up, a rate change, and a params edit all live on the loan ACCOUNT,
     not a scenario, so they move the
     confirmed-payment split in every scenario the loan has payments in;
@@ -232,22 +232,24 @@ def _reconcile_lineage_transfer_entries(
     """
     posted = _movement_nets_by_date(linked_ledger_id, scenario_id)
     # Zero-filtered SYMMETRICALLY with the posted side (its zero-net dates are
-    # dropped): a settled payment with a zero cash contribution -- the waived-fee
-    # ``actual_amount=0`` case -- posts nothing, so expecting ``{date: 0.00}``
+    # dropped): a settled payment with a zero cash contribution -- a ``$0.00``
+    # close, its transfer's settled figure ``0.00`` and no record on either
+    # side -- posts nothing, so expecting ``{date: 0.00}``
     # would flag it stale and re-sync it (a no-op) on every pass forever.
     #
     # A loop rather than a comprehension because the cash is needed BOTH as the
     # value and by the zero filter, and the comprehension form read it twice per
     # split -- two valuations of one payment, which is the shape that lets a
     # filter and the figure it admits come to disagree.  Every source here is
-    # a leg from ``loan_loaders.settled_income_shadows`` (the walk's own
-    # loader, plan step balance:X-bi-6-4b), so it RECORDED what moved and
-    # ``leg_settled_contribution`` answers from that record -- and REFUSES a
-    # leg outside the settled half rather than pricing its plan, so this
-    # loop's precondition is stated by the call it makes and not only by the
-    # loader above it.  A non-zero cash is the leg's RECORD, its covering
-    # movement, whose id is the key the posted side groups by; a ``$0.00``
-    # close carries none and is skipped by the zero filter.  A leg is always
+    # a leg from ``loan_loaders.settled_income_legs`` (the walk's own
+    # loader, plan step balance:X-bi-6-4b), so it has SETTLED and
+    # ``leg_settled_contribution`` answers the figure its transfer stores --
+    # and REFUSES a leg outside the settled half rather than pricing its
+    # plan, so this loop's precondition is stated by the call it makes and
+    # not only by the loader above it.  A leg with a non-zero cash holds its
+    # RECORD, its covering movement, whose id is the key the posted side
+    # groups by; a ``$0.00`` close holds none and is skipped by the zero
+    # filter.  A leg is always
     # a transfer's, so the ``transfer_id is None`` skip the shadow needed is
     # gone.
     expected: dict[int, dict[date, Decimal]] = {}
@@ -272,13 +274,15 @@ def _reconcile_lineage_transfer_entries(
     # parent (``transfer_legs.movement_parent``, plan step
     # balance:X-bi-6-4b), over one load of all of them with the loader
     # options that resolution publishes (``transfer_legs.movement_parent_loads``
-    # since leaf balance:X-bi-6-4d-1, ledger row BAL-579: the chain walks the
-    # shadow, which is that package's to name).  Every one resolves to
-    # a leg: only a transfer's movement posts under the transfer-movement
-    # source, and a hard-deleted movement's residue was excluded above.  NOT
-    # ``transfer_movement_rows``: it drops a movement under a DEAD shadow,
-    # which is exactly one this probe must still name, so its postings
-    # reverse.
+    # since leaf balance:X-bi-6-4d-1, ledger row BAL-579: which relationships
+    # the chain walks -- a movement's row, or its side's transfer -- is that
+    # package's to name).  Every one resolves to a leg: only a transfer's
+    # movement posts under the transfer-movement source, and a hard-deleted
+    # movement's residue was excluded above.  It was NOT
+    # ``transfer_movement_rows`` while a movement could sit under a DEAD
+    # shadow, which that loader dropped and this probe had to name so its
+    # postings reversed; a side record hangs off its transfer since plan
+    # step balance:X-bi-6-4d-2, so no movement sits under a shadow now.
     unresolved = stale_ids - set(transfer_by_movement)
     if unresolved:
         transfer_by_movement.update(

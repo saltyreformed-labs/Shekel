@@ -25,6 +25,12 @@ A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-is
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, ``task-file`` writes its file for the commit that finishes
 the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
+A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
+``finding-file`` writes its ship marker on its owner's branch, for the commit that fixes it,
+and ``hand`` hands an open finding from its one owner to another step, a step a branch
+builds (ruling plan#1784, :mod:`_findings`); ``block``, ``drop`` and the split keep that one
+owner, and CI's landing check refuses the owner's pull request while it owes one neither
+marked nor handed on, and a leaf's while a step above it owns one (``landing``, rule 7).
 A LEAF (``file step --parent``) is filed in its split step's milestone while the split
 step holds one, which the filing then clears; else in none, the milestones its leaves
 hold named for a person to set one on the web (``_filing._leaf_milestone``).  A leaf
@@ -43,6 +49,8 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill file question --arc ARC --title NAME --body-file QUESTION
     python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE
     python -m tools.quill.quill task-file plan#T
+    python -m tools.quill.quill finding-file plan#F
+    python -m tools.quill.quill hand plan#F --to plan#S
     python -m tools.quill.quill edit plan#N [--title NAME] [--body-file TEXT]
     python -m tools.quill.quill comment plan#N --body-file TEXT
     python -m tools.quill.quill block plan#N --by plan#M [--remove]
@@ -82,9 +90,8 @@ from pathlib import Path
 import requests
 
 from tools.ci.arcs import ARCS, REPO
-from tools.ci.gitcmd import GitError
-from tools.ci.trailers import DEV, MAIN, tracking
-from tools.quill import _git, _tasks
+from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
+from tools.quill import _findings, _git, _tasks
 from tools.quill._command import (
     ON_BOARD,
     Refused,
@@ -103,6 +110,7 @@ from tools.quill._state import (
     STALE_CLAIM,
     SyncPlan,
     Unsplit,
+    above,
     drop_shows,
     drop_unlinks,
     filing_unfinished,
@@ -358,12 +366,15 @@ def cmd_comment(args, tracker: Tracker, _root: Path) -> int:
 
 # -- block, move, drop ----------------------------------------------------------
 
-def cmd_block(args, tracker: Tracker, _root: Path) -> int:
-    """Record (or with ``--remove``, delete) that one card is blocked by another."""
+def cmd_block(args, tracker: Tracker, root: Path) -> int:
+    """Record (or with ``--remove``, delete) that one card is blocked by another; for an open
+    finding, only as its one owner allows (:func:`_findings.refuse_block`, ruling plan#1784)."""
     if args.card == args.by:
         raise Refused("a card cannot block itself")
     blocker = _one(tracker, args.by)
     card = _one(tracker, args.card)
+    if card.kind == "finding":
+        _findings.refuse_block(tracker, root, card, blocker, args.remove)
     if args.remove:
         if blocker.number not in card.blocked_by:
             raise Refused(f"plan#{card.number} is not blocked by plan#{blocker.number}")
@@ -525,7 +536,11 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
 
     Work git says shipped is never dropped: undoing it is a revert of the change that
     shipped it, which deletes its marker; nor is a task whose file is on ``dev`` or ``main``,
-    undone the same way.  A card's drop drops each task under it still to do first
+    undone the same way; nor, until each is handed on, a step that owns an open finding, a
+    split step any leaf of which, or which itself, owns one, or a step below one that owns
+    one, which a drop of its last leaf would leave dropped (ruling plan#1784,
+    :func:`_findings.refuse_orphaning`): a task's drop, or a leaf's still being filed, leaves
+    the steps above as they were.  A card's drop drops each task under it still to do first
     (:func:`_drop`, R-BAL190's shape: the tool records the decision where the work is).
     A leaf dropped while its filing has not finished is first taken out of the
     split it began, which it was never part of (R-BAL205, :func:`_leave_split`):
@@ -561,6 +576,9 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
     cards = with_closure(tracker, {card.number: card})
     if not is_container(card, cards, shipped):
         _refuse_drop(card, cards, reads)
+        leaf = card.kind == "step" and not filing_unfinished(card)
+        _findings.refuse_orphaning(tracker, [card, *(above(card, cards) if leaf else ())],
+                                   shipped)
         if card.kind == "step" and card.parent is not None and filing_unfinished(card):
             _leave_split(tracker, card, cards, shipped)
         for undo in drop_unlinks(card, cards, shipped, set()):
@@ -575,6 +593,7 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
     if not below:
         raise Refused(f"{_label(card)} has no leaf below it that is still work; its own state "
                       "shows its leaves, which `quill sync` writes")
+    _findings.refuse_orphaning(tracker, [card, *below, *above(card, cards)], shipped)
     names = ", ".join(f"plan#{leaf.number}" for leaf in below)
     ending = {leaf.number for leaf in below if filing_unfinished(leaf)}
     bare = left_bare(card, cards, shipped, ending)
@@ -710,6 +729,7 @@ def _diff(before: str, after: str, label: str) -> str:
 
 def cmd_spec_history(args, tracker: Tracker, root: Path) -> int:
     """Every saved change to a card's body in a window, for the review R-BAL174 requires."""
+    _one(tracker, args.card)
     _, versions = tracker.edits(args.card)
     since = _since(root, args.since) if args.since else None
     shown = 0
@@ -736,6 +756,7 @@ def cmd_spec_revert(args, tracker: Tracker, _root: Path) -> int:
     change made.  (GitHub offers no conditional issue write, so a change in the
     instant between that read and the write is not seen.)
     """
+    _one(tracker, args.card)
     body, versions = tracker.edits(args.card)
     chosen = [version for version in versions if version.edit_id == args.to]
     if not chosen:
@@ -825,6 +846,12 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("task-file", help="write a task's file plan/tasks/T, to commit with "
                                           "its piece on its card's branch").add_argument(
         "task", type=card_number)
+    commands.add_parser("finding-file", help="write a fixed finding's marker plan/ships/F, to "
+                                             "commit with its fix on its owner's branch"
+                        ).add_argument("finding", type=card_number)
+    hand = commands.add_parser("hand", help="hand an open finding to another owner step")
+    hand.add_argument("finding", type=card_number)
+    hand.add_argument("--to", type=card_number, required=True, help="its new owner step")
     commands.add_parser("sync", help="write cards' state from git").add_argument(
         "--dry-run", action="store_true")
     history = commands.add_parser("spec-history", help="a card's body edits")
@@ -842,6 +869,7 @@ COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
     "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment, "block": cmd_block,
     "move": cmd_move, "drop": cmd_drop, "task-file": _tasks.cmd_task_file,
+    "finding-file": _findings.cmd_finding_file, "hand": _findings.cmd_hand,
     "sync": cmd_sync, "spec-history": cmd_spec_history, "spec-revert": cmd_spec_revert,
     "export": cmd_export,
 }

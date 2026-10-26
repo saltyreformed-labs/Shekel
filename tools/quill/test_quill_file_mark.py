@@ -534,10 +534,12 @@ def test_a_re_run_waits_on_another_leaf_whose_filing_has_not_finished(code, tmp_
     assert tracker.board.items == [3, 5, 6, 4]
 
 
-def test_only_an_unfinished_leaf_holds_a_new_leaf(code, tmp_path):
+def test_only_an_unfinished_leaf_holds_a_new_leaf(code, tmp_path, capsys):
     """R-BAL204: a marked leaf off the board holds the next leaf; a leaf a person closed while
     marked was dropped and holds nothing; a marked finding under the split step is no leaf
-    and holds nothing; and a finding filed under the split step is never held."""
+    and holds nothing; and a finding filed under the split step is never held by its leaf:
+    since plan#1784 ("One owner, always a leaf") it is refused as having no owner a branch
+    builds, which is a different refusal."""
     marked = ("balance", FILING)
     tracker = FakeTracker()
     tracker.add(1, children=(Child(2, "step", False), Child(3, "finding", True),
@@ -550,8 +552,11 @@ def test_only_an_unfinished_leaf_holds_a_new_leaf(code, tmp_path):
     tracker.add(9, children=(Child(10, "step", True),), on_board=False)
     tracker.add(10, parent=9, labels=marked, on_board=False)
     assert run(tracker, code, *leaf_filing(tmp_path, "Held", "plan#9")) == 1
+    capsys.readouterr()
     assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Twice",
-               "--owner", "plan#9", "--text", "The report counts a refund twice.") == 0
+               "--owner", "plan#9", "--text", "The report counts a refund twice.") == 1
+    refused = capsys.readouterr().err
+    assert "its owner is a step split into smaller steps" in refused and "R-BAL204" not in refused
 
 
 def test_a_finished_leaf_a_lagging_listing_still_shows_marked_is_left_alone(code, tmp_path,

@@ -281,8 +281,8 @@ def gate_removable_head(
 
     **What GOES with the paycheck**: an unpaid row its template made that the
     owner never changed (:func:`_regenerable`, the discard gate's own rule,
-    and holding no payment or purchase), and a transfer the same way, whose
-    two shadows the CASCADE takes with it (transfer invariant 2).  They are what
+    and holding no payment or purchase), and a transfer the same way, one row
+    since plan step ``balance:X-bi-6-4d-2`` deleted its twins.  They are what
     populating the paycheck wrote when it was added, so removing it takes
     back exactly that.
 
@@ -300,10 +300,12 @@ def gate_removable_head(
        and set back to Projected is refused too** (ruling **R-PC115**): the
        revert keeps its payment, undated, which is history no bulk door
        deletes (**R-CC54**, **R-CC65**), and the database refuses to delete it
-       with its row.  A transfer set back this way cannot be cleared by
-       deleting it until plan step ``balance:X-bi-6-4`` ends finding
-       **BAL-532** (its delete hides the legs and keeps their payments); the
-       ruling accepted that cost.
+       with its row.  A transfer set back this way can be cleared by
+       deleting it since plan step ``balance:X-bi-6-4d-2``, whose delete
+       takes its sides' payments off on either arm (finding **BAL-532**),
+       unless that frees a bank line, which no page captions (ruling
+       **R-BAL229**); until then its delete hid the legs and kept their
+       payments, a cost the ruling accepted.
     2. A pay stub dated on the paycheck's payday: a stub sits on a paycheck
        the app holds (**R-SAL49**), and this would leave it on none.
     3. Money DATED inside the removed paychecks anywhere in the budget -- a
@@ -370,7 +372,8 @@ def _reject_held_rows(head: "list[DerivedPeriod]") -> None:
     Refusal 1 of :func:`gate_removable_head`, in the ruling's wording: one
     sentence per paycheck naming its items, then the one remedy.  An item is
     named once however many reasons hold it: a changed row that also holds a
-    purchase, or a transfer both of whose legs keep a payment.
+    purchase, or a transfer whose two sides each keep a record of its one
+    payment.
 
     Args:
         head: The periods the removal would take.
@@ -707,9 +710,10 @@ def can_reset_pay_periods(user_id: int) -> bool:
     """Return whether a full reset is currently offered to the user.
 
     The read-only UI predicate: reset is offered only when the user has no
-    settled row or transfer and none holding a payment or purchase, the same
-    bounds :func:`reset_pay_periods` enforces.  The settings page calls this
-    to show or hide the reset control; the service's own gate (which raises
+    settled, non-deleted row or transfer and none holding a payment or
+    purchase, the same bounds :func:`reset_pay_periods` enforces.  The
+    settings page calls this to show or hide the reset control; the
+    service's own gate (which raises
     :class:`~app.exceptions.PayPeriodResetBlocked`) remains the
     authoritative defense, so a stale page that posts anyway is still
     refused.
@@ -805,8 +809,10 @@ def _live_rows_of(model, definition, period_ids, *scope):
     The ONE query shape both arms of :func:`count_discardable_items` load
     through, so the two cannot come to scope a period differently: the
     period set, the live filter and the eager load of the definition are
-    stated here, and each arm adds only what is its own (the transaction arm
-    keeps transfer shadows out).  ``selectinload`` fetches every row's
+    stated here, and each arm adds only what is its own (the transaction
+    arm's ``transfer_id IS NULL``, which excludes nothing since plan step
+    ``balance:X-bi-6-4d-2`` deleted the transfer twins and goes with the
+    column at ``X-bi-6-5``).  ``selectinload`` fetches every row's
     definition in one query rather than one per row, since this runs over
     every period a truncate would drop.
 
@@ -841,10 +847,10 @@ def count_discardable_items(period_ids):
     a manual override, or when it carries a deliberate non-Projected status
     (Credit / Cancelled -- settled rows, and any row or transfer holding a
     payment or purchase, are already hard-locked upstream, so they never
-    reach here).  Transfer shadows always carry ``template_id IS
-    NULL``, so the transaction scan excludes them (``transfer_id IS NULL``)
-    and transfers are counted once on their own table by the same three
-    questions.  That way a recurring transfer (regenerable) does not falsely
+    reach here).  Transfers are counted once on their own table by the same
+    three questions (the transaction scan's ``transfer_id IS NULL`` kept
+    their twin rows out until plan step ``balance:X-bi-6-4d-2`` deleted
+    them).  That way a recurring transfer (regenerable) does not falsely
     trip the gate while a one-time or ad-hoc transfer does.  The
     not-Projected test routes through ``balance_predicates.is_projected``
     (negated) so no inline status-id comparison lives here (D6-09).
@@ -858,8 +864,8 @@ def count_discardable_items(period_ids):
     was that rule spelled a second time in another language, and wrong in
     it: a rule-less definition's row is template-linked, so the SQL counted
     it REGENERABLE and truncate promised a row back that no rule will write
-    (finding **BAL-492**, both halves).  The queries keep the period / live
-    / not-a-shadow scope (:func:`_live_rows_of`); the three owner-held facts
+    (finding **BAL-492**, both halves).  The queries keep the period and
+    live scope (:func:`_live_rows_of`); the three owner-held facts
     are asked in Python, and the two arms ask them through one predicate so
     a transfer and a transaction cannot be graded by different rules.
 
@@ -867,8 +873,8 @@ def count_discardable_items(period_ids):
         period_ids: The pay-period ids being deleted.
 
     Returns:
-        The number of unrecoverable rows (non-shadow transactions plus
-        transfers; a transfer counts once, not its two shadows).
+        The number of unrecoverable rows (transactions plus transfers; a
+        transfer counts once).
     """
     transactions = _live_rows_of(
         Transaction, Transaction.template, period_ids,
@@ -900,7 +906,7 @@ def _regenerable(row) -> bool:
     cases at plan step ``pay_calendar:C22`` and every one is refused.
 
     Args:
-        row: A live ``Transaction`` (not a shadow) or ``Transfer``.
+        row: A live ``Transaction`` or ``Transfer``.
 
     Returns:
         ``True`` when a rule would write the row back exactly.

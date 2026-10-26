@@ -279,10 +279,12 @@ class RecurrenceConflictKind:
             reads it (``planned_rows_books.SaveRegeneration``) to grade each
             row as the save leaves it; stored beside *regenerate_fn* so the
             pair cannot come to name two engines.
-        resolve_fn: The kind's ``resolve_conflicts(ids, action, user_id)``
-            callable.  Both kinds have the same three-argument shape since
-            plan step X-au-f (ruling **R-JD**); the transfer side carried a
-            fourth, ``new_amount=``, until then.
+        resolve_fn: The kind's ``resolve_conflicts(ids, action, ctx)``
+            callable, returning the sentence naming the picked rows it left
+            deleted, or ``None``.  Both kinds have the same three-argument
+            shape since plan step X-au-f (ruling **R-JD**); the transfer side
+            carried a fourth, ``new_amount=``, until then, and both took the
+            owner's id rather than the read pass until ruling **R-BAL253**.
         update_endpoint: The kind's update-route endpoint, resolved with the
             template id for the chooser's Apply action.
     """
@@ -385,7 +387,7 @@ def apply_conflict_decisions(
     kind: RecurrenceConflictKind,
     conflict: RecurrenceConflict,
     decisions: dict[int, str],
-    user_id: int,
+    ctx: BalanceContext,
 ) -> None:
     """Apply the chooser's per-instance keep/use decisions.
 
@@ -398,6 +400,11 @@ def apply_conflict_decisions(
     regeneration already left them untouched).  ``kind.resolve_fn``
     ownership-checks every id and, on the transaction side, refuses transfer
     shadows.
+
+    **"Use" brings back only what un-archiving would** (ruling **R-BAL253**,
+    developer 2026-10-09): a deleted row whose day sits inside its books
+    stays deleted, and the page names it in the unarchive's words, which
+    ``kind.resolve_fn`` returns and this flashes.
 
     **"Use" states NO figure, for EITHER kind, since plan step X-au-f**
     (ruling **R-JD**).  It was the kind's own answer while a generated transfer
@@ -414,8 +421,9 @@ def apply_conflict_decisions(
         conflict: The caught :class:`RecurrenceConflict` (the id allow-list).
         decisions: The ``{row_id: "keep" | "use"}`` map from
             :func:`parse_conflict_decisions`.
-        user_id: The requesting user's id (passed through for the ownership
-            checks inside ``kind.resolve_fn``).
+        ctx: The edit's read pass, the one ``kind.regenerate_fn`` resolved
+            against -- passed through for the ownership checks and the books
+            question inside ``kind.resolve_fn``.
     """
     allowed = set(conflict.overridden) | set(conflict.deleted)
     use_ids = [
@@ -426,8 +434,10 @@ def apply_conflict_decisions(
         rid for rid, choice in decisions.items()
         if choice == _DECISION_KEEP and rid in allowed
     ]
-    kind.resolve_fn(use_ids, "update", user_id)
-    kind.resolve_fn(keep_ids, "keep", user_id)
+    stays_deleted = kind.resolve_fn(use_ids, "update", ctx)
+    kind.resolve_fn(keep_ids, "keep", ctx)
+    if stays_deleted is not None:
+        flash(stays_deleted, "warning")
 
 
 # The Recurring surface is the single list both kinds cancel back to.
@@ -599,7 +609,7 @@ def regenerate_or_conflict_chooser(
                 kind=kind,
                 conflict=conflict,
                 decisions=decisions,
-                user_id=current_user.id,
+                ctx=ctx,
             )
         elif (
             # **A conflict is not automatically a QUESTION** (plan step R10-a,

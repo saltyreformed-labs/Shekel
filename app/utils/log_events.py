@@ -294,19 +294,22 @@ EVT_LOAN_RECURRENCE_START_DATE_UPDATED = _register(
 
 EVT_TRANSFER_CREATED = _register(
     "transfer_created", BUSINESS,
-    "Transfer service created a transfer with its two shadow transactions.",
+    "Transfer service created a transfer (one row; its sides' payments hang "
+    "off it).",
 )
 EVT_TRANSFER_UPDATED = _register(
     "transfer_updated", BUSINESS,
-    "Transfer service updated a transfer and propagated to shadows.",
+    "Transfer service updated a transfer; each side's record follows its status.",
 )
 EVT_TRANSFER_SOFT_DELETED = _register(
     "transfer_soft_deleted", BUSINESS,
-    "Transfer service flagged a transfer (and its shadows) is_deleted=True.",
+    "Transfer service took a transfer's sides' records off the books and "
+    "flagged it is_deleted=True.",
 )
 EVT_TRANSFER_HARD_DELETED = _register(
     "transfer_hard_deleted", BUSINESS,
-    "Transfer service hard-deleted a transfer; CASCADE removed shadows.",
+    "Transfer service took a transfer's sides' records off the books and "
+    "hard-deleted it.",
 )
 EVT_TRANSFER_RESTORED = _register(
     "transfer_restored", BUSINESS,
@@ -383,7 +386,7 @@ EVT_TRANSFERS_RECONCILED = _register(
     "transfers_reconciled", BUSINESS,
     "User confirmed which outstanding TRANSFERS their bank statement shows; "
     "each settled through the transfer service on the day the balance was "
-    "observed, moving both legs and the parent together, some carrying a "
+    "observed, the transfer and both its sides' records together, some carrying a "
     "corrected amount.  Its own event rather than a count folded into the "
     "transaction one, because settling a transfer touches a SECOND account: "
     "an analyst asking why that account's balance moved has to be able to "

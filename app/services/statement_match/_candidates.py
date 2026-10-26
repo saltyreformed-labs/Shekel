@@ -70,11 +70,12 @@ transfer's side on this account from ``transfer_legs.offerable_transfer_legs``
 (keyed by the transfer on this screen), and :func:`_leg_settlement_candidates`
 each paid side's movement from ``transfer_legs.recorded_transfer_legs`` -- the
 owner, live, status and period clauses read off the TRANSFER in both.  The two
-row arms EXCLUDE a transfer's shadow (``transfer_id IS NULL``): through leaf
-``X-bi-6-4c-2`` a transfer was offered as its SHADOW row on this account, a
-TRANSACTION, and its paid side as the shadow's movement joined to the shadow,
-which ``X-bi-6-4d`` -- deleting the shadows -- would have left offering
-nothing.  The two leg arms partition by the movement (ruling **R-BAL79**): a
+row arms still carry ``transfer_id IS NULL``, which excludes nothing now that
+no row can name a transfer (``ck_transactions_names_no_transfer``): through
+leaf ``X-bi-6-4c-2`` a transfer was offered as its SHADOW row on this
+account, a TRANSACTION, and its paid side as the shadow's movement joined to
+the shadow, which ``X-bi-6-4d`` -- deleting the shadows -- would have left
+offering nothing.  The two leg arms partition by the movement (ruling **R-BAL79**): a
 side is a LEG while its transfer is Projected and its money has not moved,
 and its DATED movement is the subject once it has (ruling **R-BAL80**).  Where
 the row arms offer an un-dated kept movement (a row reverted after a
@@ -248,12 +249,13 @@ def _claimed_rows(entries: "frozenset[int]") -> "frozenset[int]":
     migration ``2eabfa596ee0``, ruling **R-CC45**) -- a purchase member's
     parent is NOT a claim on the envelope, whose figure is its purchases.
 
-    **A transfer's payment named by an act adds its shadow's id through the
-    interval** (``None`` from ``balance:X-bi-6-4d``, dropped here), which no
-    candidate's :attr:`~._subjects.CandidateRow.transaction_id` can equal: a
-    transfer's side is a LEG or a leg's payment, whose ``transaction_id`` is
-    ``None``, and it is claimed through :attr:`MatchedSubjects.legs` and its
-    movement's id instead (leaf ``balance:X-bi-6-4c-1``).
+    **A transfer side's payment names no row** -- it is filed under its
+    transfer's side (plan step ``balance:X-bi-6-4d-2``, ruling **R-BAL88**),
+    so its ``transaction_id`` is ``NULL`` and the query asks for a row
+    parent -- and it is claimed through :attr:`MatchedSubjects.legs` and its
+    movement's id instead (leaf ``balance:X-bi-6-4c-1``).  Until that step it
+    hung off a shadow row and added the shadow's id here, which no
+    candidate's :attr:`~._subjects.CandidateRow.transaction_id` could equal.
 
     Args:
         entries: The ``transaction_entries`` ids this account's acts name.
@@ -268,11 +270,12 @@ def _claimed_rows(entries: "frozenset[int]") -> "frozenset[int]":
         db.session.query(TransactionEntry.transaction_id)
         .filter(
             TransactionEntry.id.in_(entries),
+            TransactionEntry.transaction_id.isnot(None),
             status_seam.covering_clause(),
         )
         .all()
     )
-    return frozenset(row[0] for row in rows if row[0] is not None)
+    return frozenset(row[0] for row in rows)
 
 
 def _claimed_legs(entries: "frozenset[int]") -> "frozenset[int]":
@@ -629,17 +632,20 @@ def _leg_candidates(
 
     * this account is one of its endpoints (either side);
     * it is Projected and live, and THIS side holds no dated movement
-      (ruling **R-BAL79**: the movement decides a side, the parent decides a
-      drifted shadow, ruling **R-JM**);
+      (ruling **R-BAL79**: the movement decides a side; ruling **R-JM**: a
+      transfer leg reads its parent);
     * its pay period is one of the OWNER's saved periods -- the owner the
       calendar is, the scope's ownership clause.
 
-    On every door-written state it offers exactly the transfers whose shadow
-    the row arm offered (a Projected parent's two shadows are Projected, live
-    and filed in its period -- Transfer Invariants 1, 3 and 4).  Priced by
-    :func:`~._leg_valuation.leg_price`; a DAMAGED transfer, whose shadow pair
-    the price refuses, is reported among the unpriceable and its still-planned
-    side is not offered (ruling **R-BAL158**).  Not scoped by scenario, for
+    When it replaced the row arm's shadow offer, it offered exactly the
+    transfers whose shadow that arm had offered on every door-written state
+    (a Projected parent's two shadows were Projected, live and filed in its
+    period -- Transfer Invariants 1, 3 and 4).  Priced by
+    :func:`~._leg_valuation.leg_price`, off the transfer alone: a transfer
+    whose twin pair was DAMAGED was offered like any other (ruling
+    **R-BAL235**; it was counted among the unpriceable and not offered,
+    ruling **R-BAL158**, until plan step ``balance:X-bi-6-4d-2``), and a
+    transfer has no twin pair now.  Not scoped by scenario, for
     :func:`_transaction_candidates`' reason.
 
     Args:
@@ -680,8 +686,8 @@ def _leg_settlement_candidates(
     a side whose money moved on this account is offered as its covering
     movement, the leg's RECORD (``transfer_legs.recorded_transfer_legs``,
     ruling **R-BAL80**), through the loader that reaches a movement's
-    transfer and side -- so no clause here names the shadow the movement
-    still hangs off.  Every clause is the row arm's, read off the TRANSFER:
+    transfer and side by its side link.  Every clause is the row arm's, read
+    off the TRANSFER:
 
     * the MOVEMENT is on this account (a transfer's is on its own side's);
     * the transfer CONTRIBUTES and is live, and is filed in one of the
@@ -695,8 +701,9 @@ def _leg_settlement_candidates(
       :func:`~._valuation.leg_settlement_candidate` carries why, and re-asks
       the day in Python for :func:`~._valuation.repriced`'s sake.
 
-    No leg payment is ever unpriceable: its figure is the movement's own
-    (``cash_ledger.movement_cash_leg``), which no amount model can refuse.
+    No leg payment is ever unpriceable: its figure is the one its transfer
+    stores (``cash_ledger.movement_cash_leg`` reads it off the transfer),
+    which no amount model can refuse.
 
     Args:
         account_id: The cash account the statement is for.

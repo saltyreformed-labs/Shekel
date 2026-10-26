@@ -5,12 +5,12 @@ The input-validation and entity-loading guards for
 :mod:`app.services.transfer_service`: validate a submitted amount, refuse a
 transfer OUT of a source no engine models one from (the composed loan-or-card
 set both doors call), load the owned/active
-:class:`~app.models.transfer.Transfer`, and load-and-verify the two shadow
-:class:`~app.models.transaction.Transaction` rows of a transfer.
+:class:`~app.models.transfer.Transfer` a mutation writes, and refuse a
+restore onto an archived account.
 Each is a precondition check the mutation entry points run before they touch
 any row, raising the project's domain exceptions
-(:class:`~app.exceptions.ValidationError` for a bad amount or a shadow-pair
-integrity violation, :class:`~app.exceptions.NotFoundError` for a missing or
+(:class:`~app.exceptions.ValidationError` for a bad amount or a restore onto
+an archived account, :class:`~app.exceptions.NotFoundError` for a missing or
 not-yours transfer -- with an identical message for both the "missing" and
 the "not yours" case, the project security-response rule -- no existence
 oracle).
@@ -20,17 +20,14 @@ module limit as the Build-Order Step 2-4 posting-ledger wiring lands -- the
 same split that moved the ownership loaders into ``_ownership`` and
 the loan-posting glue into ``_loan_posting``.  :func:`assert_restorable`
 joined them at plan step X-aj1 (ruling **R-DR**), bringing ``restore_transfer``'s
-four preconditions to the module whose single responsibility they already were.
+preconditions to the module whose single responsibility they already were.
 
-These helpers plus :class:`TransferRows` and its one loader are a cohesive,
+These helpers plus :class:`TransferRows` are a cohesive,
 transfer-service-private cluster (single responsibility: validate inputs and
-load-and-verify the rows a mutation operates on).  They write no ``status_id``
-and construct no ``Transaction`` -- so they stay clear of the W9907 status fence
-that keeps the status-mirroring appliers in the parent module -- and they
-compute no balance.  :func:`assert_restorable` READS the
-state machine (:func:`~app.services.state_machine.allowed_transitions`) to decide
-whether a drifted shadow is legally repairable; reading the transition rules is
-not writing a status, so the fence is unaffected.
+load the rows a mutation operates on).  They write no ``status_id``
+and construct no ``Transaction`` -- so they stay clear of the W9907 status
+fence, whose one transfer entry is the ``_create`` leaf's constructor write --
+and they compute no balance.
 Flask-isolated like the parent service: plain data in, ORM objects out, no
 ``request`` / ``session`` imports.
 """
@@ -42,13 +39,9 @@ from functools import cached_property
 
 from app.extensions import db
 from app.models.account import Account
-from app.models.transaction import Transaction
 from app.models.transfer import Transfer
-from app import ref_cache
-from app.enums import TxnTypeEnum
 from app.exceptions import NotFoundError, ValidationError
 from app.services.account_projection import is_revolving
-from app.services.state_machine import allowed_transitions
 from app.services.transfer_legs import TransferLeg, transfer_side_leg
 from app.services.transfer_service._loan_posting import (
     _reject_transfer_out_of_loan,
@@ -64,57 +57,50 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class TransferRows:
-    """A transfer and its two shadows: the three rows that move together.
+    """The transfer one act writes, and its expense side read once for the act.
 
-    **Transfer Invariant 1 as a TYPE.**  A transfer IS a parent and exactly two
-    shadow transactions, and invariants 3-5 say their amounts, statuses and
-    periods are always equal -- so the three are not three arguments that
-    happen to travel together, they are one value, and a call site that could
-    pair one transfer with another's shadows is a call site that can break the
-    invariant by typo.  The same reasoning
+    Introduced at plan step X-f2-c3 as Transfer Invariant 1 as a TYPE -- a
+    parent and exactly two shadow transactions, whose statuses and periods
+    were kept equal -- because threading the three through the settle's
+    signature put it over pylint's argument ceiling, and a call site that
+    could pair one transfer with another's shadows could break the invariant
+    by typo.  The same reasoning
     :class:`app.services.reconcile_service._rows.Statement` is built on.
 
-    It was introduced at plan step X-f2-c3, and the gate is what asked for it:
-    threading the three through the settle's signature put that function over
-    pylint's argument ceiling, which is the ceiling asking whether the
-    parameters are really one thing.  They are.
+    **It holds ONE row since plan step ``balance:X-bi-6-4d-2``**, which
+    deleted the twin rows and made the database refuse a new one (rulings
+    **R-BAL166**, **R-BAL258**).  The twins had been mirrors and nothing more
+    since ``X-bi-6-4d-2``: a transfer's status is its own column, and each
+    side's day is its payment record's, hung off the transfer by a side
+    link; while the twins stood, that record held the side's figure too,
+    which is the transfer's own since ``X-bi-6-4d-2``'s 4d-4 half.  The
+    step's leaf 3b deleted the
+    ``shadows`` attribute, the loader that queried the twins
+    (``load_transfer_rows``) and the arms of ``_update``, ``_amount`` and
+    ``_endpoints`` that wrote the mirrors over them.  What the value still
+    carries beside the transfer is :attr:`expense_leg`, the read an act's
+    settle and figure grade share.
 
     Attributes:
-        transfer: The parent :class:`~app.models.transfer.Transfer`.
-        expense: The expense-side shadow
-            :class:`~app.models.transaction.Transaction` -- the leg that leaves
-            the source account.
-        income: The income-side shadow -- the leg that arrives at the
-            destination.
+        transfer: The :class:`~app.models.transfer.Transfer` the act writes.
     """
 
     transfer: Transfer
-    expense: Transaction
-    income: Transaction
-
-    @property
-    def shadows(self) -> "tuple[Transaction, Transaction]":
-        """Return both shadows, for the writes that treat them identically.
-
-        Stated here rather than at each caller because "do this to both legs"
-        is the commonest shape in this package, and a loop over an explicit
-        pair cannot silently become a loop over one.
-        """
-        return (self.expense, self.income)
 
     @cached_property
     def expense_leg(self) -> TransferLeg:
-        """Return the from-side LEG with its record: what the pair already records.
+        """Return the from-side LEG with its record; what the pair records is read through it.
 
-        The settle and the update read what a pair RECORDS off its expense
-        side -- the retained correction a re-settle honours, the record it
-        carries forward, the figure an echoed Actual box is compared against
-        -- and since leaf ``balance:X-bi-6-4d-1`` they read it here, through
+        The settle and the update read what a pair RECORDS through its
+        expense leg -- the retained correction a re-settle honours, the record
+        it carries forward, the figure an echoed Actual box is compared
+        against, each read off the leg's TRANSFER, the settled figure's one
+        home (plan step ``balance:X-bi-6-4d-2``) -- and since leaf
+        ``balance:X-bi-6-4d-1`` they read it here, through
         :func:`app.services.transfer_legs.transfer_side_leg`, rather than off
         the expense shadow's ``entries``: ``transfer_legs`` holds the one join
         ``X-bi-6-4d``'s re-parent moves, so this read moves with it.  The
-        leg's status is its TRANSFER's, which Transfer Invariant 3 holds
-        equal to the shadow's.  It is read by SIDE, never by the transfer's
+        leg's status is its TRANSFER's.  It is read by SIDE, never by the transfer's
         current account, because an endpoint move earlier in the same act
         leaves ``from_account_id`` stale until a flush (see the producer).
 
@@ -122,22 +108,25 @@ class TransferRows:
         correction of one update ask one query between them: a producer asked
         twice in one request is two resolution points, which can come to
         disagree about WHEN they resolved.
-        That is correct because every reader asks BEFORE the act's seam pass
-        writes the record, and nothing earlier in the act writes a movement's
-        figure or source -- an endpoint move re-points the movement's account
-        alone, which neither the side-keyed read nor any reader of this value
-        reads.  A reader AFTER the seam pass would not see the act's own write
-        consistently (a first settle's new movement is absent from the cached
-        value; a kept one is the same object, re-priced in place), so none
-        may be added there.  **Its ``account_id`` is frozen at the read**, too,
-        and an act may move an endpoint around that read: when a figure is
+        That is correct because every reader asks BEFORE the act's seam pass,
+        and asks only for its TRANSFER's facts -- the status and soft delete,
+        the settled figure and its source, and what the transfer resolves to
+        -- which the leg reads off the live transfer at each asking; none asks
+        for the leg's ``record``, which the read freezes (an endpoint move
+        carries it to the new endpoint and may re-date it ``borrowed``, ruling
+        **R-BAL168**).  A reader of the record AFTER the seam pass would not
+        see the act's own write consistently (a first settle's new record is
+        absent from the cached value; a kept one is the same object, re-dated
+        in place), so none may be added there.  **Its ``account_id`` is
+        frozen at the read**, too, and an act may move an endpoint around
+        that read: when a figure is
         graded the read precedes the move (``_update._grade_submitted_figure``
         runs ahead of ``_endpoints._apply_endpoint_move``) and names the OLD
         source after it; otherwise the first read is the settle's, after the
         move has flushed, and names the NEW source.  Either way nothing may
         read this leg's account: every
-        reader takes its ``record``, and one that needs the side's account
-        reads the transfer's.
+        reader reads through its ``transfer``, and one that needs the side's
+        account reads the transfer's.
 
         Returns:
             The :class:`~app.services.transfer_legs.TransferLeg` on the
@@ -146,32 +135,6 @@ class TransferRows:
             ``None`` when it holds none.
         """
         return transfer_side_leg(self.transfer, is_income=False)
-
-
-def load_transfer_rows(transfer_id, user_id) -> TransferRows:
-    """Load an owned transfer's three rows, verified as a pair.
-
-    The ONE loader a mutation entry point calls, composing the two guards
-    below so the ownership check and the pair-integrity check cannot be run
-    apart -- which is what makes :class:`TransferRows` a value a caller can
-    trust rather than three objects it assembled.
-
-    Args:
-        transfer_id: The primary key of the transfer to load.
-        user_id: The expected owner (defense-in-depth).
-
-    Returns:
-        The :class:`TransferRows`.
-
-    Raises:
-        NotFoundError: If the transfer does not exist, belongs to another
-            user, or is soft-deleted (:func:`_get_transfer_or_raise`).
-        ValidationError: If the shadow pair is corrupt
-            (:func:`_get_shadow_transactions`).
-    """
-    xfer = _get_transfer_or_raise(transfer_id, user_id)
-    expense_shadow, income_shadow = _get_shadow_transactions(transfer_id)
-    return TransferRows(xfer, expense_shadow, income_shadow)
 
 
 def _validate_positive_amount(amount):
@@ -312,157 +275,51 @@ def _get_transfer_or_raise(transfer_id, user_id, allow_deleted=False):
     xfer = db.session.get(Transfer, transfer_id)
     if xfer is None or xfer.user_id != user_id:
         raise NotFoundError(f"Transfer {transfer_id} not found.")
-    # Soft-deleted transfers are invisible to normal operations.
-    # Without this check, update_transfer on a deleted transfer would
-    # cascade into a misleading "0 shadow transactions" error from
-    # _get_shadow_transactions (the shadows are also deleted).
+    # Soft-deleted transfers are invisible to normal operations: a deleted
+    # transfer takes no money (ruling R-CC89).
     if not allow_deleted and xfer.is_deleted:
         raise NotFoundError(f"Transfer {transfer_id} not found.")
     return xfer
 
 
-def _get_shadow_transactions(transfer_id):
-    """Load shadow transactions for a transfer and identify types.
-
-    Returns:
-        Tuple (expense_shadow, income_shadow).
-
-    Raises:
-        ValidationError: If the shadow count is not exactly 2 or if
-            both shadows have the same transaction type (data
-            integrity violation).
-    """
-    shadows = (
-        db.session.query(Transaction)
-        .filter_by(transfer_id=transfer_id, is_deleted=False)
-        .all()
-    )
-
-    if len(shadows) != 2:
-        # Differentiate between a soft-deleted transfer (expected state,
-        # not corruption) and a genuinely corrupt transfer missing
-        # shadows (unexpected state).  _get_transfer_or_raise blocks
-        # soft-deleted transfers by default, so this path should only
-        # fire for real corruption -- but defense-in-depth means we
-        # check anyway to produce a helpful diagnostic.
-        xfer = db.session.get(Transfer, transfer_id)
-        is_soft_deleted = xfer is not None and xfer.is_deleted
-
-        shadow_ids = [s.id for s in shadows]
-        if is_soft_deleted and len(shadows) == 0:
-            logger.warning(
-                "Transfer %d is soft-deleted.  Its shadow transactions "
-                "are also soft-deleted and excluded from active queries.  "
-                "This is expected, not data corruption.",
-                transfer_id,
-            )
-            raise ValidationError(
-                f"Transfer {transfer_id} is soft-deleted and cannot be "
-                f"modified.  Use restore_transfer to reactivate it first."
-            )
-
-        # Genuine data integrity violation: transfer is active but has
-        # the wrong number of shadows.  Fail-fast.
-        logger.error(
-            "Transfer %d has %d active shadow transactions (expected 2).  "
-            "Shadow IDs: %s.  This indicates data corruption.",
-            transfer_id, len(shadows), shadow_ids,
-        )
-        raise ValidationError(
-            f"Transfer {transfer_id} has {len(shadows)} shadow "
-            f"transactions instead of the expected 2.  "
-            f"Data integrity issue -- cannot proceed."
-        )
-
-    expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-    income_type_id = ref_cache.txn_type_id(TxnTypeEnum.INCOME)
-
-    expense_shadow = None
-    income_shadow = None
-    for s in shadows:
-        if s.transaction_type_id == expense_type_id:
-            expense_shadow = s
-        elif s.transaction_type_id == income_type_id:
-            income_shadow = s
-
-    if expense_shadow is None or income_shadow is None:
-        raise ValidationError(
-            f"Transfer {transfer_id} shadows do not have the expected "
-            f"expense/income type pairing.  Data integrity issue."
-        )
-
-    return expense_shadow, income_shadow
-
-
-def assert_restorable(xfer, shadows, user_id):
+def assert_restorable(xfer, user_id):
     """Refuse a restore whose preconditions do not hold, before anything moves.
 
-    The four checks ``restore_transfer`` runs before it un-deletes a thing.
-    Extracted here at plan step X-aj1 (ruling **R-DO**) because they are
-    precondition checks on the rows a mutation operates on, which is this
-    module's single responsibility, and because gathering them made the caller's
-    own defect visible: it used to set ``is_deleted = False`` FIRST and then
-    hand-restore the flag on each failing branch -- a rollback written out three
-    times, with three chances for the next branch to forget it.  Validating
-    before mutating makes that class of miss structurally impossible, and the
-    three hand-rollbacks are deleted rather than extended to a fourth.
+    The check ``restore_transfer`` runs before it un-deletes a thing.
+    Extracted here at plan step X-aj1 (ruling **R-DO**) because it is a
+    precondition check on the rows a mutation operates on, which is this
+    module's single responsibility, and because gathering the checks made the
+    caller's own defect visible: it used to set ``is_deleted = False`` FIRST
+    and then hand-restore the flag on each failing branch -- a rollback written
+    out three times, with three chances for the next branch to forget it.
+    Validating before mutating makes that class of miss structurally
+    impossible.
 
-    The checks, in order, each refusing rather than repairing:
+    **Archived endpoints (F-164).**  The account FK is RESTRICT, so the rows
+    cannot be hard-deleted while the transfer references them; the only way an
+    endpoint goes away semantically is ``is_active = False``.  Restoring onto
+    one would resurrect entries against an account the user has withdrawn from
+    active projections, producing balance drift they have no UI affordance to
+    investigate.
 
-    1. **Shadow count.** Exactly two, or the pair is corrupt (Invariant 1).
-    2. **Type pairing.** One expense and one income, or the pair is corrupt.
-    3. **Archived endpoints (F-164).** The account FK is RESTRICT, so the rows
-       cannot be hard-deleted while the transfer references them; the only way
-       an endpoint goes away semantically is ``is_active = False``.  Restoring
-       onto one would resurrect entries against an account the user has
-       withdrawn from active projections, producing balance drift they have no
-       UI affordance to investigate.
-    4. **Unrepairable status drift (ruling R-DO).** A shadow whose status the
-       state machine cannot legally move to the parent's is corruption, not
-       drift.  It used to be rewritten with no transition check at all, which
-       destroys the evidence of how it happened -- and a settled shadow silently
-       reverted to Projected would strand its postings.  It is refused in the
-       same voice as checks 1 and 2, which is what makes the three consistent.
+    Three more checks went with the twin rows they graded.  An **unrepairable
+    status drift** (ruling **R-DO**: a twin whose status could not legally reach
+    the parent's) went at plan step ``balance:X-bi-6-4d-2``, when a twin's
+    status stopped being kept or read; the **twin count** (exactly two) and the
+    **type pairing** (one expense, one income) went at ``balance:X-bi-6-4d-2``,
+    which deleted the twins and made the database refuse a new one (ruling
+    **R-BAL258**).
 
     Args:
         xfer: The soft-deleted :class:`~app.models.transfer.Transfer` being
             restored.  NOT mutated here.
-        shadows: Every :class:`~app.models.transaction.Transaction` linked to
-            it, loaded without an ``is_deleted`` filter.
         user_id: The owner, for the archived-endpoint refusal's structured log.
 
     Raises:
-        ValidationError: On any of the four, with a message naming what a human
-            has to fix.
+        ValidationError: When either endpoint is archived, with a message
+            naming what a human has to fix.
     """
     transfer_id = xfer.id
-    if len(shadows) != 2:
-        logger.error(
-            "Cannot restore transfer %d: expected 2 shadow transactions, "
-            "found %d.  Shadow IDs: %s.  Data integrity issue.",
-            transfer_id, len(shadows), [s.id for s in shadows],
-        )
-        raise ValidationError(
-            f"Transfer {transfer_id} has {len(shadows)} shadow "
-            f"transactions (expected 2).  Cannot restore -- data "
-            f"integrity issue requiring manual intervention."
-        )
-
-    expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-    income_type_id = ref_cache.txn_type_id(TxnTypeEnum.INCOME)
-    type_ids = {s.transaction_type_id for s in shadows}
-    if type_ids != {expense_type_id, income_type_id}:
-        logger.error(
-            "Cannot restore transfer %d: shadow type pairing is invalid.  "
-            "Expected one expense and one income, found type_ids=%s.",
-            transfer_id, type_ids,
-        )
-        raise ValidationError(
-            f"Transfer {transfer_id} shadows do not have the expected "
-            f"expense/income type pairing.  Cannot restore -- data "
-            f"integrity issue requiring manual intervention."
-        )
-
     from_account = db.session.get(Account, xfer.from_account_id)
     to_account = db.session.get(Account, xfer.to_account_id)
     from_active = bool(from_account is not None and from_account.is_active)
@@ -482,22 +339,4 @@ def assert_restorable(xfer, shadows, user_id):
         raise ValidationError(
             "Cannot restore transfer: source or destination account "
             "is archived.  Reactivate the account before restoring."
-        )
-
-    unrepairable = {
-        shadow.id: shadow.status_id for shadow in shadows
-        if shadow.status_id != xfer.status_id
-        and xfer.status_id not in allowed_transitions(shadow)
-    }
-    if unrepairable:
-        logger.error(
-            "Cannot restore transfer %d: shadow(s) %s hold a status that "
-            "cannot legally reach the transfer's status %s.  Data "
-            "integrity issue.",
-            transfer_id, unrepairable, xfer.status_id,
-        )
-        raise ValidationError(
-            f"Transfer {transfer_id} has a shadow transaction whose status "
-            f"cannot legally be reconciled with the transfer's.  Cannot "
-            f"restore -- data integrity issue requiring manual intervention."
         )

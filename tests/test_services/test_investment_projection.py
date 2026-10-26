@@ -171,7 +171,7 @@ class TestAccountPayrollFeed:
 
     Plan steps **salary:R14-b** and **S3-e-2**.  What each figure IS -- the
     raise, the inflation escalation, the cadence, the calendar-year cap -- is
-    the paycheck engine's, graded in ``test_paycheck_calculator.py``; the
+    the paycheck engine's, graded in the ``test_paycheck_calculator/`` package; the
     resolvers the loader builds over the engine's pricer are graded in
     ``test_projection_inputs.py`` against real rows, including the one thing
     this step exists for, a period PAST the saved schedule priced rather
@@ -280,10 +280,13 @@ class TestCalculateInvestmentInputs:
     **The cases that priced a deduction went with the arithmetic.**  Flat
     versus percentage, the half-cent rounding, a two-job owner's per-profile
     salary, a weekly owner's 52 paychecks, and the calendar-year cap's even
-    spread were all this module deriving what the paycheck engine derives --
-    graded in ``test_paycheck_calculator.py`` against a real profile, where
-    the raise and the inflation escalation this module could not see are
-    graded too.  The even spread has no successor anywhere and is not meant to
+    spread were all this module deriving what the paycheck engine derives.
+    The engine's own suites grade it: the ``test_paycheck_calculator/``
+    package grades a paycheck priced from the pay, raises and lines a profile
+    carries, the raise and the inflation escalation this module could not see
+    among them, and ``test_paycheck_count_derivation.py`` grades the
+    paycheck count at every rhythm, a weekly owner's 52 among them.  The even
+    spread has no successor anywhere and is not meant to
     have one: it was the third of four spellings of one cap, and the engine's
     front-loaded clamp is the one that survives (ruling **R-SAL2**).
     """
@@ -668,8 +671,10 @@ class TestBuildContributionTimeline:
     class -- went with it.  The cap is the one to be explicit about: it was a
     private year-state walk here (``_period_capped_total``) reproducing what
     ``paycheck_calculator._calculate_deductions`` applies through the SAME
-    ``cap_period_amount``, and ``test_paycheck_calculator.py`` grades that one
-    against a real profile whose raise this one could not see.
+    ``cap_period_amount``, and the ``test_paycheck_calculator/`` package grades
+    that one: ``test_deductions.py``'s ``TestDeductionAnnualCap``, and in
+    ``test_raises.py`` a capped deduction whose year to date is priced through
+    a raise this one could not see.
     """
 
     def test_payroll_only(self):

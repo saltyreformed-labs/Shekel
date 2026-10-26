@@ -28,8 +28,9 @@ each:
   * **Transfers** (the source period's still-Projected ``budget.transfers``
     rows, walked as transfers since plan step balance:X-bi-6-4c-2, where the
     shadow rows were walked and de-duplicated) -- delegate to
-    ``transfer_service.update_transfer`` so the transfer and both legs move
-    atomically (transfer invariant 5).
+    ``transfer_service.update_transfer``, which every write of a transfer
+    goes through (CLAUDE.md, Architecture): the move writes the transfer's
+    period, and each side's leg reads it there.
 
 The whole batch is atomic.  The envelope branch raises a
 ``ValidationError`` only on the AMBIGUOUS guard -- a destination period

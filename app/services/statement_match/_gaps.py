@@ -211,8 +211,8 @@ class ReviewBounds:
             (:attr:`~._subjects.Candidates.unpriceable`): a row or a row's
             kept payment the amount model had no rule for, and a transfer's
             still-planned side whose price the amount model could not answer
-            or the transfer's damaged shadow pair refused (ruling
-            **R-BAL158**).
+            (a damaged shadow pair was counted here too, ruling **R-BAL158**,
+            until ruling **R-BAL235** priced a leg off its transfer alone).
 
     **The near tier's bound is NOT here, and that is plan step
     ``bank_import:X-f6d-3``'s one deliberate exception to the paragraph above.**
@@ -489,8 +489,9 @@ def search_gap(
             priced (:attr:`~._subjects.Candidates.unpriceable`): a row or a
             row's kept payment the amount model had no rule for, and a
             transfer's still-planned side whose price the amount model could
-            not answer or the transfer's damaged shadow pair refused (ruling
-            **R-BAL158**).
+            not answer (a damaged shadow pair was counted here too, ruling
+            **R-BAL158**, until ruling **R-BAL235** priced a leg off its
+            transfer alone).
 
     Returns:
         One sentence naming the gap, for the receipt that has to say what it

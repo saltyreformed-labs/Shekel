@@ -869,8 +869,8 @@ def _cash_plan(
     is asked to place is the parent ``Transfer`` -- its ``pay_period_id`` and
     ``due_date`` are the leg's, and
     :meth:`~app.services.pay_calendar.FiledRow.for_row` already takes a
-    transfer.  Under Transfer Invariant 3 that is the day the shadow row this
-    leg replaces landed on; where a pair has drifted, the parent's day wins,
+    transfer.  Under Transfer Invariant 3 that was the day the shadow row this
+    leg replaced landed on; where a pair had drifted, the parent's day won,
     which is ruling **R-JA**'s direction.
 
     **The SPAN it clamps against is DERIVED, since pay-calendar plan step

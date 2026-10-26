@@ -1,14 +1,17 @@
 """The git histories CI's landing check is tested over, the tracker it reads, and the one way
 its tests judge one.
 
-Shared by ``test_landing.py`` (rules 1-7), ``test_landing_done.py`` (rule 8) and
-``test_landing_tasks.py`` (a task's done file), so each history and each card's node is
+Shared by ``test_landing.py`` (rules 1-7), ``test_landing_done.py`` (rule 8),
+``test_landing_tasks.py`` (a task's done file) and ``test_landing_findings.py`` (a finding's
+marker, and the findings a claim's card owes), so each history and each card's node is
 spelled once.  Every history is a throwaway repository's (:mod:`tools.ci.scratch`), its
 markers written as files and its merges REAL ones (:func:`merge`: git's three-way merge, two
 parents), judged as CI judges one: the merge of the pull request's head into its base's tip
 (:func:`judging`).  The tracker is a stand-in for GitHub answering the REAL card-only reader
 (:class:`Lookup`, :func:`reader`), each card a node in the shape GitHub answers a read without
-the board (:func:`card_node`), held key for key to the recorded lookup's by ``test_landing.py``.
+the board (:func:`card_node`), held key for key to the recorded lookup's by ``test_landing.py``
+and, with a blocker, to the recorded read of what a card blocks by
+``test_landing_findings.py``, which holds :meth:`Lookup.graphql`'s answer to that read's too.
 Nothing here calls GitHub.
 """
 from __future__ import annotations
@@ -18,6 +21,7 @@ import re
 
 from tools.ci.scratch import commit, commit_files, point_dev, point_main, repository, run
 from tools.quill._git import marker
+from tools.quill._queries import blocking
 from tools.quill._tracker import CardReader
 from tools.quill.landing import PullRequest, main
 from tools.quill.setup_tracker import PLAN
@@ -29,19 +33,35 @@ MON, TUE = "2026-10-19T13:00:00Z", "2026-10-20T09:30:00Z"
 PERSON = "SaltyReformed"
 
 
-def card_node(number, kind="step", parent=None, labels=("balance",)):
+def key_paths(value, prefix=""):
+    """Every key path in ``value``: a dict's keys, joined by dots, a list's items as ``[]``;
+    how a node built here is held key for key to one GitHub answered."""
+    if isinstance(value, dict):
+        return set().union(*({prefix + key} | key_paths(item, f"{prefix}{key}.")
+                             for key, item in value.items()))
+    if isinstance(value, list):
+        return set().union(set(), *(key_paths(item, prefix.rstrip(".") + "[].")
+                                    for item in value))
+    return set()
+
+
+def _issue(number):
+    """A link to card ``number`` of the plan's tracker, as a node names one."""
+    return {"number": number, "repository": {"nameWithOwner": PLAN.full_name}}
+
+
+def card_node(number, kind="step", parent=None, labels=("balance",), blocked_by=()):
     """Open card ``number``'s node as GitHub answers the card-only reader (no board items),
-    never closed or reopened, its sub-issues left for :func:`tracker` to fill from the
-    cards naming it their parent."""
+    never closed or reopened, blocked by the cards numbered ``blocked_by``, its sub-issues
+    left for :func:`tracker` to fill from the cards naming it their parent."""
     return {
         "id": f"I_{number}", "number": number, "fullDatabaseId": str(1000 + number),
         "title": f"card {number}", "state": "OPEN", "stateReason": None,
         "issueType": {"name": kind} if kind else None,
         "labels": {"totalCount": len(labels), "nodes": [{"name": name} for name in labels]},
-        "parent": ({"number": parent, "repository": {"nameWithOwner": PLAN.full_name}}
-                   if parent else None),
+        "parent": _issue(parent) if parent else None,
         "subIssues": {"totalCount": 0, "nodes": []},
-        "blockedBy": {"totalCount": 0, "nodes": []},
+        "blockedBy": {"totalCount": len(blocked_by), "nodes": [_issue(n) for n in blocked_by]},
         "timelineItems": {"nodes": []},
     }
 
@@ -69,14 +89,17 @@ def tracker(*cards):
 
 class Lookup:
     """A GitHub answering each lookup of cards by number from ``nodes``, a number it lacks
-    answered None (as GitHub answers a number nobody filed); it keeps the numbers each
-    lookup asked for.  ``fails``: what every lookup raises instead, if anything."""
+    answered None (as GitHub answers a number nobody filed), and each read of what a card
+    blocks from the cards whose blockers name it; it keeps the numbers each lookup asked
+    for (``asked``), and each card whose blocking was read (``blocks_asked``).  ``fails``: what
+    every read raises instead, if anything."""
 
     def __init__(self, nodes, fails=None):
         """Hold the tracker's nodes."""
         self.nodes = nodes
         self.fails = fails
         self.asked = []
+        self.blocks_asked = []
 
     def graphql_lookup(self, query):
         """Answer the cards ``query`` asks for by number."""
@@ -86,6 +109,20 @@ class Lookup:
         self.asked.append(sorted(numbers))
         return {"repository": {f"c{number}": copy.deepcopy(self.nodes.get(number))
                                for number in numbers}}
+
+    def graphql(self, query, number):
+        """Answer the read of the cards card ``number`` blocks (:func:`_queries.blocking`), in
+        card order, as GitHub answers it: None for a number nobody filed."""
+        if self.fails is not None:
+            raise self.fails
+        assert query == blocking(PLAN), query
+        self.blocks_asked.append(number)
+        nodes = [{"number": node["number"], "state": node["state"],
+                  "issueType": node["issueType"], "repository": {"nameWithOwner": PLAN.full_name}}
+                 for _, node in sorted(self.nodes.items())
+                 if any(link["number"] == number for link in node["blockedBy"]["nodes"])]
+        issue = {"number": number, "blocking": {"totalCount": len(nodes), "nodes": nodes}}
+        return {"repository": {"issue": issue if number in self.nodes else None}}
 
 
 def reader(github):
@@ -100,9 +137,13 @@ def never():
 
 def start(parent):
     """A repository under ``parent`` whose ``origin/dev`` and ``origin/main`` hold one base
-    commit (its ``app.py``), the start of every history; the repository and the base."""
+    commit (its ``app.py``, and a ``.dockerignore`` of ``*``), the start of every history; the
+    repository and the base.  An image built from it holds nothing, so production changes
+    with no file these histories write and the landing check's rule 9 passes every change
+    (``test_landing_image.py`` grades that rule): each test here grades rules 1-8 alone."""
     root = repository(parent)
-    base = commit_files(root, commit(root, "root"), "base", {"app.py": "base\n"})
+    base = commit_files(root, commit(root, "root"), "base",
+                        {"app.py": "base\n", ".dockerignore": "*\n"})
     point_dev(root, base)
     point_main(root, base)
     return root, base

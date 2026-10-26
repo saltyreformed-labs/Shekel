@@ -92,6 +92,7 @@ from tests._test_helpers import (
     restate_account_opening,
     settle_day_columns,
     settle_instant_on,
+    transfer_side_record,
 )
 from app.services.settle_day import record_settle_day
 
@@ -626,7 +627,7 @@ class TestWalkAccountLedger:
     def test_a_transfers_clearing_link_is_read_off_THIS_accounts_leg(
         self, app, db, seed_user,
     ):
-        """Walking one account reads its OWN shadow's link, not the other's.
+        """Walking one account reads its OWN side's link, not the other's.
 
         **The defect this closes was not in ruling R-FL's own amendment**; it
         was found tracing the loader at plan step X-f3a-1.  The walk's transfer
@@ -639,8 +640,12 @@ class TestWalkAccountLedger:
         deliberately NOT mirrored: a transfer leaves one bank and arrives at
         another, and each statement reports its own leg.  The property is
         structural now (a movement sits on one account and carries its own
-        link, mirrored from the shadow on that account by the seam) and this
-        test pins it as such.
+        link) and this test pins it as such.  **The link is planted on the
+        Savings side's RECORD since plan step ``balance:X-bi-6-4d-2``**: the
+        record hangs off the transfer and the twins keep no day, so a link on
+        the Savings twin -- where this planted it, mirrored onto the movement
+        by the seam until then -- is refused by the twin's
+        ``ck_transactions_cleared_needs_settle_day`` (ruling R-BAL167 class 2).
 
         The fixture makes the two answers differ.  A $200.00 Checking ->
         Savings transfer settles the day AFTER Savings' origination.  The
@@ -667,7 +672,7 @@ class TestWalkAccountLedger:
             savings = _make_account(seed_user, "500.00")
             checking = seed_user["account"]
             origin = _origin_day(savings)
-            create_settled_transfer(
+            transfer = create_settled_transfer(
                 seed_user, _db.session, checking, savings,
                 seed_user["bootstrap_period"], amount=Decimal("200.00"),
                 settled_on=origin + timedelta(days=1),
@@ -677,18 +682,13 @@ class TestWalkAccountLedger:
             _add_assertion(
                 checking, "1000.00", _PINNED_OPENING_AT + timedelta(days=40),
             )
-            income_leg = (
-                _db.session.query(Transaction)
-                .filter(
-                    Transaction.account_id == savings.id,
-                    Transaction.transfer_id.isnot(None),
-                )
-                .one()
+            income_record = transfer_side_record(
+                _db.session, transfer.id, savings.id,
             )
             later_savings = _add_assertion(
                 savings, "900.00", _PINNED_OPENING_AT + timedelta(days=50),
             )
-            income_leg.reconciled_by_id = later_savings.id
+            income_record.reconciled_by_id = later_savings.id
             _db.session.commit()
 
             checking_corrections = (

@@ -11,8 +11,8 @@ completely as deleting them would.
 **A lesson MECHANIZED into a gate is RETIRED from here**, its line moving to that gate's own
 rationale, where a reader meets it at the moment it fires.
 
-**Never record STATE here** -- what shipped, what is next, what production runs. That is
-`steps.md`'s, and a sentence about it here would be a second answer beside no reconciler.
+**Never record STATE here** -- what shipped, what is next, what production runs. That is the
+tracker's and git's, and a sentence about it here would be a second answer beside no reconciler.
 
 ## The rule itself
 

@@ -252,7 +252,7 @@ class TestApplyAnchorTrueUpCommitted:
         never guesses a posting day; the user supplies it by ticking the
         purchase off a statement (``reconcile_service.record_settled_days``, whose
         own tests live with that service and whose ROUTE is graded in
-        ``test_routes/test_accounts.py``).
+        ``test_routes/test_accounts/``'s three ``test_reconcile_*.py`` parts).
 
         That reconcile step is deliberately a SEPARATE request: folding it in
         here would put it inside the transaction an UNCHANGED submission rolls
@@ -1626,9 +1626,9 @@ class TestApplyAnchorTrueUpReraisesUnknownIntegrityError:
 # true-up appends an assertion and never UPDATEs the ``accounts`` row that
 # ``version_id`` guards, so ``StaleDataError`` is structurally unreachable on
 # this path.  The append-only contract that replaced it is graded by
-# ``test_accounts.TestTrueUpIsAppendOnly`` (a stale form still records) and by
-# ``test_race_conditions.TestConcurrentAnchorUpdate`` (both concurrent requests
-# 200, both assertions survive).
+# ``test_accounts.test_stale_data.TestTrueUpIsAppendOnly`` (a stale form still
+# records) and by ``test_race_conditions.TestConcurrentAnchorUpdate`` (both
+# concurrent requests 200, both assertions survive).
 
 
 #: Every unique index on either anchor table, with the columns it keys on --

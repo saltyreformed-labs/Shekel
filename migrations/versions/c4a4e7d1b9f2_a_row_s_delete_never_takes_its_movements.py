@@ -87,6 +87,7 @@ from alembic import op
 import sqlalchemy as sa
 
 from app.deleted_row_infrastructure import (
+    ROW_ARM,
     apply_deleted_row_infrastructure,
     remove_deleted_row_infrastructure,
 )
@@ -215,7 +216,9 @@ def upgrade():
     _recreate(row_key, ondelete=None, name=_ROW_KEY_NEW_NAME)
     _recreate(_OWNER_KEY, ondelete=None)
     _recreate(_MEMBER_KEY, ondelete=None)
-    apply_deleted_row_infrastructure(op.execute)
+    # The arm this revision declared, as a LITERAL: the module grows arms that
+    # name columns later revisions add (plan step balance:X-bi-6-4d-2).
+    apply_deleted_row_infrastructure(op.execute, arms=(ROW_ARM,))
     print(
         "CC-5-4a-4: transaction_entries' two row keys and "
         "statement_match_members' movement key are NO ACTION; 0 stranded "

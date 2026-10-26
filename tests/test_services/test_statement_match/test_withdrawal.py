@@ -133,7 +133,7 @@ def _a_savings_account(seed_user):
 
 
 def _a_transfer(seed_user):
-    """Create a checking -> savings transfer and its two shadows."""
+    """Create a $500.00 checking -> savings transfer, flushed; returns it."""
     xfer = transfer_service.create_transfer(
         transfer_service.TransferSpec(
             user_id=seed_user["user"].id,
@@ -424,22 +424,28 @@ class TestEveryDoorThatRemovesARowWithdrawsItsMatches:
         """A transfer's two legs move together, and so do their matches.
 
         Measured on the developer's own dev database at 16 matched shadows.
+        The press is shown the lines the Checking side's RECORD holds, read
+        by this test's own query over the side links (ruling **R-BAL167**
+        class 4): the record hangs off the transfer since plan step
+        ``balance:X-bi-6-4d-2``, where it hung off the side's shadow row.
         """
         statement = an_import(seed_user)
         xfer = _a_transfer(seed_user)
-        shadow = (
-            db.session.query(Transaction)
-            .filter_by(transfer_id=xfer.id, account_id=seed_user["account"].id)
-            .one()
-        )
         line = a_bank_line(seed_user, statement, amount="-500.00")
-        _submit(seed_user, lines=[line], transfers=[shadow.transfer])
+        _submit(seed_user, lines=[line], transfers=[xfer])
         assert line.id in _matched_line_ids(seed_user)
+        records = (
+            db.session.query(TransactionEntry)
+            .filter(
+                (TransactionEntry.expense_transfer_id == xfer.id)
+                | (TransactionEntry.income_transfer_id == xfer.id),
+                TransactionEntry.account_id == seed_user["account"].id,
+            )
+            .all()
+        )
 
         with match_press.Press(match_press.Shown(
-                match_withdrawal.pending_for_movements(
-                    shadow.covering_movements,
-                ).line_ids,
+                match_withdrawal.pending_for_movements(records).line_ids,
             )) as press:
             transfer_service.delete_transfer(
                 xfer.id, seed_user["user"].id, soft=False,
@@ -835,32 +841,29 @@ class TestReleasingAnActDoesNotWithdrawTwice:
 
 
 class TestARowThatIsHalfOfSomethingElseRefusesTheDelete:
-    """Two shapes may not be deleted on their own, and the screen asks first.
+    """A CC payback may not be deleted on its own, and the screen asks first.
 
     ``deletion_refusal`` returns the sentence rather than raising, because the
     action card renders the delete control exactly when it is ``None`` -- the
-    same layering ``entry_service.removal_refusal`` has one table over.
+    same layering ``entry_service.removal_refusal`` has one table over.  It
+    graded a second shape, a transfer's shadow row, until plan step
+    ``balance:X-bi-6-4d-2`` (ruling **R-BAL300**), where no shadow can be
+    stored.
     """
 
-    def test_a_transfer_shadow_is_refused_and_says_where_to_go(
-        self, app, db, seed_user,
-    ):
-        """Both legs move together, so neither leaves alone."""
-        xfer = _a_transfer(seed_user)
-        shadow = (
-            db.session.query(Transaction)
-            .filter_by(transfer_id=xfer.id)
-            .first()
-        )
-
-        refusal = transaction_service.deletion_refusal(shadow)
-
-        assert refusal is not None
-        assert "transfer" in refusal.lower()
-        with pytest.raises(ValidationError, match="transfer"):
-            transaction_service.delete_transaction(
-                shadow, seed_user["user"].id,
-            )
+    # ``test_a_transfer_shadow_is_refused_and_says_where_to_go`` stood here
+    # until plan step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer
+    # 2026-10-15: "Delete all 27").  It asked ``deletion_refusal`` and the
+    # delete verb about a transfer's SHADOW row and asserted the sentence
+    # pointing at the transfer's own delete.  No shadow can exist now (the
+    # database refuses one, ``ck_transactions_names_no_transfer``, ruling
+    # R-BAL258, pinned once by
+    # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
+    # and no app code builds one), so that arm is reachable by no row and
+    # goes with the column at plan step X-bi-6-5.  A transfer's own delete
+    # is ``test_deleting_a_transfer_frees_both_shadows_lines`` in
+    # :class:`TestEveryDoorThatRemovesARowWithdrawsItsMatches`.
 
     def test_a_CC_payback_is_refused_and_names_Undo_CC(
         self, app, db, seed_user,

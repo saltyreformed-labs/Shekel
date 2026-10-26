@@ -182,7 +182,9 @@ class TestDebtSummary:
         """
         from app import ref_cache as rc
         from app.enums import StatusEnum
-        from app.services.transfer_service import TransferSpec, create_transfer
+        from app.services.transfer_service import (
+            TransferSpec, create_transfer, settle_transfer,
+        )
 
         with app.app_context():
             active = _create_small_loan(
@@ -193,7 +195,7 @@ class TestDebtSummary:
                 seed_user, db.session, name="Paid Off Loan",
             )
             # Pay off the second loan with a confirmed transfer.
-            create_transfer(
+            payment = create_transfer(
                 TransferSpec(
                     user_id=seed_user["user"].id,
                     from_account_id=seed_user["account"].id,
@@ -201,10 +203,13 @@ class TestDebtSummary:
                     pay_period_id=seed_periods[7].id,
                     scenario_id=seed_user["scenario"].id,
                     amount_ownership=AmountOwnership.own(Decimal("1100.00")),
-                    status_id=rc.status_id(StatusEnum.DONE),
+                    status_id=rc.status_id(StatusEnum.PROJECTED),
                     category_id=seed_user["categories"]["Rent"].id,
                 ),
             )
+            # Created Projected, then settled: the create makes no
+            # settled transfer (ruling R-BAL379).
+            settle_transfer(payment.id, seed_user["user"].id)
             db.session.commit()
 
             # Payoff is recorded as a balance true-up to $0 (the cash
@@ -231,11 +236,13 @@ class TestDebtSummary:
         """
         from app import ref_cache as rc
         from app.enums import StatusEnum
-        from app.services.transfer_service import TransferSpec, create_transfer
+        from app.services.transfer_service import (
+            TransferSpec, create_transfer, settle_transfer,
+        )
 
         with app.app_context():
             acct = _create_small_loan(seed_user, db.session)
-            create_transfer(
+            payment = create_transfer(
                 TransferSpec(
                     user_id=seed_user["user"].id,
                     from_account_id=seed_user["account"].id,
@@ -243,10 +250,13 @@ class TestDebtSummary:
                     pay_period_id=seed_periods[7].id,
                     scenario_id=seed_user["scenario"].id,
                     amount_ownership=AmountOwnership.own(Decimal("1100.00")),
-                    status_id=rc.status_id(StatusEnum.DONE),
+                    status_id=rc.status_id(StatusEnum.PROJECTED),
                     category_id=seed_user["categories"]["Rent"].id,
                 ),
             )
+            # Created Projected, then settled: the create makes no
+            # settled transfer (ruling R-BAL379).
+            settle_transfer(payment.id, seed_user["user"].id)
             db.session.commit()
 
             # Payoff is recorded as a balance true-up to $0 (cash lump
@@ -527,13 +537,15 @@ class TestPrincipalPaidFraction:
         # pylint: disable=import-outside-toplevel
         from app import ref_cache as rc
         from app.enums import StatusEnum
-        from app.services.transfer_service import TransferSpec, create_transfer
+        from app.services.transfer_service import (
+            TransferSpec, create_transfer, settle_transfer,
+        )
         from tests._test_helpers import insert_trueup_event
 
         with app.app_context():
             acct = _create_small_loan(seed_user, db.session)
             # A confirmed payment so the loan reads as "ever paid off".
-            create_transfer(
+            payment = create_transfer(
                 TransferSpec(
                     user_id=seed_user["user"].id,
                     from_account_id=seed_user["account"].id,
@@ -541,10 +553,13 @@ class TestPrincipalPaidFraction:
                     pay_period_id=seed_periods[7].id,
                     scenario_id=seed_user["scenario"].id,
                     amount_ownership=AmountOwnership.own(Decimal("1100.00")),
-                    status_id=rc.status_id(StatusEnum.DONE),
+                    status_id=rc.status_id(StatusEnum.PROJECTED),
                     category_id=seed_user["categories"]["Rent"].id,
                 ),
             )
+            # Created Projected, then settled: the create makes no
+            # settled transfer (ruling R-BAL379).
+            settle_transfer(payment.id, seed_user["user"].id)
             db.session.commit()
             insert_trueup_event(acct.loan_params, Decimal("0.00"))
             db.session.commit()
@@ -581,7 +596,9 @@ class TestPrincipalPaidFraction:
         # pylint: disable=import-outside-toplevel
         from app import ref_cache as rc
         from app.enums import StatusEnum
-        from app.services.transfer_service import TransferSpec, create_transfer
+        from app.services.transfer_service import (
+            TransferSpec, create_transfer, settle_transfer,
+        )
         from tests._test_helpers import insert_trueup_event
 
         with app.app_context():
@@ -592,7 +609,7 @@ class TestPrincipalPaidFraction:
                 seed_user, db.session, name="Partial Loan",
             )
             # Confirmed payment so the first loan reads as "ever paid off".
-            create_transfer(
+            payment = create_transfer(
                 TransferSpec(
                     user_id=seed_user["user"].id,
                     from_account_id=seed_user["account"].id,
@@ -600,10 +617,13 @@ class TestPrincipalPaidFraction:
                     pay_period_id=seed_periods[7].id,
                     scenario_id=seed_user["scenario"].id,
                     amount_ownership=AmountOwnership.own(Decimal("1100.00")),
-                    status_id=rc.status_id(StatusEnum.DONE),
+                    status_id=rc.status_id(StatusEnum.PROJECTED),
                     category_id=seed_user["categories"]["Rent"].id,
                 ),
             )
+            # Created Projected, then settled: the create makes no
+            # settled transfer (ruling R-BAL379).
+            settle_transfer(payment.id, seed_user["user"].id)
             db.session.commit()
             # Loan A: trued-up to $0 (paid off).
             insert_trueup_event(paid_off.loan_params, Decimal("0.00"))

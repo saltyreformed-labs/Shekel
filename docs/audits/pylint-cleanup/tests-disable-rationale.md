@@ -296,8 +296,8 @@ it. Suggested sequencing:
 1. **`_test_helpers.py` first (48).** It is shared by the whole suite, so its
    conventions propagate; it is already 32% compliant; and 35 of its 48 are
    mechanical. Good calibration for what the rest costs.
-2. **`tools/plan_gate/test__plan_gate.py` (1).** One line, and it sits beside a
-   tree that IS gated -- the odd one out.
+2. **The plan gate's one finding (1): nothing to do.** The tracker switch
+   (`balance:X-cx`, L8) deleted `tools/plan_gate/` with its tests.
 3. **The four heavy files (252).** `test_savings_dashboard_service`, `test_loan`,
    `test_grid`, `test_cash_walk`. One commit each.
 4. **The long tail (557 across 104 files).** Batch by directory.

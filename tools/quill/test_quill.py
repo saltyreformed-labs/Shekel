@@ -14,10 +14,9 @@ from functools import partial
 import pytest
 import requests
 
-from tools.ci.gitcmd import GitError
+from tools.ci.gitcmd import DEV, GitError, tracking
 from tools.ci.scratch import commit, commit_files, elsewhere, point_dev
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV, tracking
 from tools.quill import _git, _github, _tracker
 from tools.quill import quill
 from tools.quill._fake import CLAIMED, FakeTracker, claim, run, ship, unship
@@ -406,6 +405,18 @@ def test_spec_revert_restores_a_version_and_refuses_a_change_since_its_read(code
     assert run(tracker, code, "spec-revert", "plan#1", "--to", "E1") == 1
     assert "changed while its history was read" in capsys.readouterr().err
     assert tracker.bodies[1] == "changed meanwhile"
+
+
+def test_spec_history_and_spec_revert_refuse_a_card_that_does_not_exist(code, capsys):
+    """BAL-612: a number nobody filed is refused as every command naming a card refuses one,
+    before its history is read, with nothing written -- not GitHub's raw NOT_FOUND, a failed
+    call (exit 2)."""
+    tracker = FakeTracker()
+    _versions(tracker)
+    for argv in (("spec-history", "plan#9"), ("spec-revert", "plan#9", "--to", "E1")):
+        assert run(tracker, code, *argv) == 1, argv
+        assert capsys.readouterr().err == "refused: plan#9 does not exist\n"
+    assert not tracker.writes
 
 
 # -- the exit statuses ---------------------------------------------------------------------

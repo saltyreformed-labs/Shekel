@@ -144,9 +144,10 @@ def settled_figure(txn) -> "Decimal | None":
 
     **THE RECORD IS THE ROW'S ENTRIES, and the figure is their sum** (plan
     step ``balance:X-bi-4b-1``, ruling **R-BAL80**; the readers move here,
-    the columns go at ``X-bi-4b-2``).  A bill's, a paycheck's or a transfer
-    leg's money is its one covering movement (``status_seam._covering``,
-    ruling **R-BAL39**); an envelope's is its purchases; a close of nothing
+    the columns go at ``X-bi-4b-2``).  A bill's or a paycheck's money is its
+    one covering movement (``status_seam._covering``, ruling **R-BAL39**; a
+    transfer's figure is the transfer's own, :func:`leg_settled_figure`);
+    an envelope's is its purchases; a close of nothing
     holds no entry and records ``$0.00`` (ruling **R-BAL82**: a movement of
     nothing is not one, so a ``$0.00`` close is a close with no entries).  One
     kind-blind reduction, the same one :func:`purchases_total` performs for
@@ -252,44 +253,24 @@ def leg_settled_figure(leg) -> "Decimal | None":
     ``X-bi-6-1b``, where the calendar and the Spending report ask it per
     item beside the grid's map).  The same rule: ``None`` while the parent
     has not settled, whatever the leg still remembers (**THE STATUS DECIDES,
-    NOT THE RECORD**, as for a row); once it has, the figure its covering
-    movement states -- the record of what left or entered the account -- and
-    ``Decimal("0")`` for a settled leg holding no movement, which is the
-    ``$0.00`` record (ruling **R-BAL82**) exactly as a settled row with no
-    entries is.
+    NOT THE RECORD**, as for a row); once it has, the figure the TRANSFER
+    stores as having moved -- its one home since plan step
+    ``balance:X-bi-6-4d-2`` (rulings **R-BAL365**, **R-BAL366**:
+    :attr:`~app.models.transfer.Transfer.settled_figure`), ``0.00`` for a
+    close of nothing.  Until that step this read the side's record and
+    inferred ``$0.00`` from a side holding none, which ruling **R-BAL368**
+    deletes: a settled transfer stores its figure, and nothing reads a
+    missing record as one.
 
     Args:
-        leg: The :class:`~app.services.transfer_legs.TransferLeg`, its
-            record loaded (``grid_transfer_legs`` loads it; the fold's
-            ``planned_transfer_legs`` never does and never asks this).
+        leg: The :class:`~app.services.transfer_legs.TransferLeg`.
 
     Returns:
-        The recorded figure, or ``None`` when the parent is not settled.
+        The settled figure, or ``None`` when the parent is not settled.
     """
     if leg.status_id not in settled_status_ids():
         return None
-    return _leg_recorded_figure(leg)
-
-
-def _leg_recorded_figure(leg) -> Decimal:
-    """Return what *leg*'s record states moved: its movement's figure, or ``$0.00``.
-
-    The one read of a leg's recorded figure, behind both questions that ask
-    it: :func:`leg_settled_figure` once the parent has settled, and
-    :func:`leg_settled_contribution`'s ruling **R-BAL140** arm for a leg whose
-    money moved under a parent still Projected.  A leg holding no movement
-    states the ``$0.00`` record (ruling **R-BAL82**).
-
-    Args:
-        leg: The :class:`~app.services.transfer_legs.TransferLeg`, its
-            record loaded.
-
-    Returns:
-        The covering movement's ``amount``, or ``Decimal("0")`` with none.
-    """
-    if leg.record is None:
-        return Decimal("0")
-    return leg.record.amount
+    return leg.transfer.settled_figure
 
 
 def leg_settled_amounts_by_key(legs) -> "dict[tuple[int, int], Decimal | None]":
@@ -470,7 +451,7 @@ def settled_contribution(txn) -> Decimal:
     asserted that the row owns its figure.  That is not what this function is
     about and was never what its readers meant, and the stale assertion was
     load-bearing rather than cosmetic: a :class:`~app.models.transfer.Transfer`
-    was handed to it (``tests/test_routes/test_transfers.py``), and a
+    was handed to it (``tests/test_routes/test_transfers/``), and a
     ``Transfer`` defines no ``estimated_amount`` at all, so the Cancelled row's
     ``0`` was the only thing between that call and an ``AttributeError``.
 
@@ -529,13 +510,16 @@ def leg_settled_contribution(leg) -> Decimal:
     **A leg has SETTLED when its parent has, OR when its own money has moved**
     (plan step balance:X-bi-6-4b, ruling **R-BAL140**).  The loan and
     contribution readers read the settled half of
-    :func:`app.services.loan_loaders.income_shadows`, whose membership is the
+    :func:`app.services.loan_loaders.income_legs`, whose membership is the
     plan half's exact complement: a still-Projected transfer whose side
     carries a DATED covering movement -- a status drift no door writes -- is a
-    payment that happened, and it is worth what that movement moved, as the
-    cash fold already counts it (``cash_ledger.movement_cash_leg``).  The
-    Spending report and the savings metric narrow to settled parents in SQL,
-    so that arm never reaches them.  A leg that is neither is still refused:
+    payment that happened, and it is worth the figure its transfer stores, as
+    the cash fold already counts that movement
+    (``cash_ledger.movement_cash_leg``).  The
+    Spending report narrows to settled parents in SQL and the savings metric
+    to DATED records (plan step ``balance:X-bi-6-4d-2``, finding
+    **BAL-534**: equal, since a side's record is dated exactly while its
+    transfer is settled), so that arm never reaches them.  A leg that is neither is still refused:
     its money has not moved and there is nothing recorded to answer with.
 
     Args:
@@ -544,8 +528,8 @@ def leg_settled_contribution(leg) -> Decimal:
 
     Returns:
         ``0`` for a leg whose parent contributes nothing -- soft-deleted,
-        Credit or Cancelled -- else the figure its covering movement RECORDED
-        (``0`` for a settled parent holding none, the ``$0.00`` record).
+        Credit or Cancelled -- else the figure its transfer stores as having
+        moved (``0.00`` for a close of nothing, ruling **R-BAL365**).
 
     Raises:
         AmountUnresolvable: When the parent has NOT settled and the leg's
@@ -553,7 +537,7 @@ def leg_settled_contribution(leg) -> Decimal:
     """
     fixed = leg_fixed_contribution(leg)
     if fixed is None and leg.settled_on is not None:
-        fixed = _leg_recorded_figure(leg)
+        fixed = leg.transfer.settled_figure
     if fixed is None:
         raise AmountUnresolvable(
             f"Transfer {leg.transfer.id}'s leg on account {leg.account_id} "

@@ -818,14 +818,15 @@ class TestTheWalkSeesOnlyItsOwnRows:
     def test_a_non_contributing_row_is_excluded_whatever_it_carries(
         self, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """A soft-deleted transfer's settled leg must not reach the walk.
+        """A soft-deleted transfer's settled leg must move nothing on the walk.
 
         The guard that matters most for money: every valuation is TOTAL over
         the contributing gate -- a movement under a non-contributing parent
         moves nothing (``movement_cash_leg``, ruling **R-FM**) and the row is
         worth nothing (``covered_cash_leg``, ruling **R-BAL81**) -- but without
         the SQL exclusion the row would still enter the stream.  Both defences
-        are pinned: the row is absent, AND every valuation of it is zero.
+        were pinned until plan step ``balance:X-bi-6-4d-2`` (the row absent,
+        AND every valuation of it zero); the second is pinned since (below).
 
         **The hidden row is a transfer's leg because no other can hold a
         movement** (ruling **R-CC92**, plan step ``credit_card:CC-5-4a-4``):
@@ -838,12 +839,32 @@ class TestTheWalkSeesOnlyItsOwnRows:
         through the door; plan step ``balance:X-bi-6-4`` closes it, and this
         staging with it.  Re-expressed under rule 5, developer-confirmed
         2026-09-23.
+
+        **Since plan step ``balance:X-bi-6-4d-2`` the state is STAGED inside
+        the save and refused at its commit** (ruling **R-BAL167** class 2):
+        the delete door takes the payments off (ruling
+        **credit_card:R-CC75**) and the deleted-row rule's transfer arm
+        refuses a transfer hidden holding one.  The transfer is hidden by
+        SQL with the payments left on, the Checking leg -- its transfer and
+        its side's record -- is valued inside the save, and the commit is
+        then refused.  It also hid the transfer's two twin rows by SQL; from
+        plan step ``balance:X-bi-6-4d-2``'s create door on there are none, so
+        that statement touched no row (measured at that step's
+        vacuous-residue checkpoint), and it is dropped.
+        DROPPED: ``settled_cash_facts(...) == []``.  Inside the save the walk
+        lists the hidden transfer's record as a fact at ``0.00``: finding
+        **BAL-534** deleted the walk's hidden-transfer filter, because the
+        state cannot be committed.  Every valuation is still zero and the
+        balance is unmoved.
         """
         # pylint: disable=import-outside-toplevel
-        from app.models.transaction import Transaction
-        from app.services import transfer_service
+        from sqlalchemy import text
+
+        from app.models.transaction_entry import TransactionEntry
         from app.services.cash_ledger import movement_cash_leg
         from app.services.status_seam import covered_cash_leg
+        from app.services.transfer_legs import TransferLeg
+        from tests._test_helpers import refused_by_database_rule
 
         account, scenario = seed_user["account"], seed_user["scenario"]
         period = seed_periods[0]
@@ -860,20 +881,38 @@ class TestTheWalkSeesOnlyItsOwnRows:
             account.id, scenario.id,
         )] == [Decimal("-80.00")], "the leg must reach the walk while it counts"
 
-        transfer_service.delete_transfer(xfer.id, seed_user["user"].id, soft=True)
-        db.session.commit()
-        leg = db.session.query(Transaction).filter_by(
-            transfer_id=xfer.id, account_id=account.id,
-        ).one()
+        # Hidden the way the soft delete left it until the step, less the
+        # twins it also flagged (none exist since plan step
+        # ``balance:X-bi-6-4d-2``): the transfer flagged, the payments in
+        # place.  STAGED.
+        db.session.execute(
+            text("UPDATE budget.transfers SET is_deleted = TRUE WHERE id = :t"),
+            {"t": xfer.id},
+        )
+        db.session.expire_all()
+        leg = TransferLeg(
+            transfer=xfer, account_id=account.id, is_income=False,
+            record=db.session.query(TransactionEntry).filter(
+                TransactionEntry.expense_transfer_id == xfer.id,
+            ).one(),
+        )
 
         assert leg.is_deleted is True
-        assert settled_cash_facts(account.id, scenario.id) == []
         assert covered_cash_leg(leg, leg.account_id) == Decimal("0.00")
-        assert leg.entries, "the leg must carry its payment or this grades nothing"
-        assert {movement_cash_leg(leg, entry) for entry in leg.entries} == {
-            Decimal("0.00"),
-        }
+        assert leg.covering_movements, (
+            "the leg must carry its payment or this grades nothing"
+        )
+        assert {
+            movement_cash_leg(leg, entry) for entry in leg.covering_movements
+        } == {Decimal("0.00")}
         assert _running_balance(account, scenario) == Decimal("1000.00")
+
+        with refused_by_database_rule(
+            "was deleted while it still holds a recorded payment",
+        ) as caught:
+            db.session.commit()
+        db.session.rollback()
+        assert f"transfer {xfer.id} " in str(caught.value)
 
     def test_another_scenarios_rows_do_not_enter_the_walk(
         self, db, seed_user, seed_periods,

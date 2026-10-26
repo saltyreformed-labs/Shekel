@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SessionStart: print the multi-session context every Shekel session needs
-# before its first action -- where it stands, who coordinates merges, and what
-# the plan of record says is next.
+# before its first action -- where it stands, who coordinates merges, and where
+# the next step comes from.
 #
 # It used to report the shared suite slot too.  ``balance:X-br-4`` deleted the
 # slot: ``scripts/test.sh`` gives every run a private cluster, so there is no
@@ -14,7 +14,7 @@
 # worktree the session runs in (measured by two sessions, 2026-08-29), and
 # this hook reports the session's OWN checkout.
 #
-# **IT ALSO REPORTS STANDING CONSTRAINTS, and that is why** (developer ruling
+# **IT ALSO REPORTS A RELEASE PIN, and that is why** (developer ruling
 # 2026-09-05, after it cost two sessions in one evening).  A constraint that
 # lives only in coordinator messages is INVISIBLE to any session that clears
 # its context, and clearing context is ordinary.  On 2026-09-05 the shared
@@ -24,15 +24,14 @@
 # none is about the session reading them.  A second session could not learn
 # why its browser pass was impossible, the same pin being the cause.  Neither
 # could have found out by looking, and one of them is worktree-isolated and
-# could not look at all.
+# could not look at all.  The pin is read off `git worktree list`, so it
+# cannot go stale and nobody has to remember to write it.  (A STATED half, a
+# notice board the coordinator wrote, went with the planning registries at the
+# tracker switch: ruling `balance:R-BAL347`.)
 #
-# TWO HALVES, because neither covers the other:
-#   DERIVED -- the release pin is read off `git worktree list`, so it cannot
-#     go stale and nobody has to remember to write it.
-#   STATED  -- `docs/plans/STANDING.md` carries what the tree does not imply,
-#     such as a service bind-mounting a pinned checkout.  The coordinator
-#     writes it and clears it; empty is the normal state, and staying empty is
-#     what keeps it READ rather than skimmed.
+# The next step is the tracker's answer, `python -m tools.quill.quill next`, and
+# this hook only points at it: reading the tracker needs the network and the
+# App's credentials, and a status hook must never wait on either.
 
 set -u
 
@@ -62,34 +61,6 @@ if [ -n "${main_line}" ]; then
     esac
 fi
 
-# STATED: constraints the tree does not imply.  Absent or empty is normal.
-standing="${toplevel}/docs/plans/STANDING.md"
-if [ -r "$standing" ] && [ -s "$standing" ]; then
-    # A constraint is a BULLET plus the indented lines that continue it, up to
-    # the next blank line.  Everything else in the file is guidance for whoever
-    # edits it.  Two earlier spellings of this filter were wrong in opposite
-    # directions: "not a comment" printed the whole guidance block, and
-    # bullet-lines-only printed each constraint truncated at its first wrap --
-    # a half-sentence being worse than nothing, because it reads as complete.
-    body="$(awk '/^[[:space:]]*-[[:space:]]/ {p=1} /^[[:space:]]*$/ {p=0} p' \
-        "$standing" 2>/dev/null)" || body=""
-    if [ -n "${body}" ]; then
-        echo "- STANDING CONSTRAINTS (docs/plans/STANDING.md):"
-        printf '%s\n' "${body}" | sed 's/^/    /'
-    fi
-fi
-
-steps="${toplevel}/docs/plans/steps.md"
-if [ -r "$steps" ]; then
-    matches="$(grep -c -E '\| *#1 *\|' "$steps" 2>/dev/null)" || matches=0
-    next="$(grep -m 1 -E '\| *#1 *\|' "$steps" 2>/dev/null)" || true
-    if [ -n "${next:-}" ]; then
-        echo "- next step per docs/plans/steps.md (rank #1): ${next}"
-        if [ "${matches}" -gt 1 ]; then
-            echo "  WARNING: ${matches} rows carry rank #1 -- an identity class shares the rank,"
-            echo "  or a merge duplicated it; read the table itself, not just this line."
-        fi
-    fi
-fi
+echo "- next step: the tracker's, by python -m tools.quill.quill next (not read here)"
 
 exit 0

@@ -70,7 +70,7 @@ class PassReporting(NamedTuple):
     Attributes:
         logger: The ENGINE's own logger.  It is per-engine rather than this
             module's deliberately: the structured-log controls capture by
-            logger NAME (``tests/test_services/test_service_log_events.py``),
+            logger NAME (``tests/test_services/test_service_log_events/_helpers.py``),
             so a shared logger would file both engines' events under a module
             no reader associates with either.
         block_message: What a cross-user attempt is logged as

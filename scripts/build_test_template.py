@@ -38,7 +38,9 @@ Three steps, in order:
    :data:`app.audit_infrastructure.AUDITED_TABLES` after commit C-28)
    do not leak into the per-test clones, and the template ships a
    zeroed log -- per-test assertions on audit_log row count are then
-   trivially true at clone time.
+   trivially true at clone time.  Last, it starts every non-ref table's
+   ids in a range of their own, so no two kinds of id coincide in a
+   clone (ruling ``balance:R-BAL356``).
 3. **Verify** the populated template carries the expected state:
    ``ref.account_types`` row count equals the seed list size
    (:data:`_EXPECTED_ACCOUNT_TYPE_COUNT`),
@@ -95,6 +97,15 @@ _REQUIRED_SCHEMAS: tuple[str, ...] = ("ref", "auth", "budget", "salary", "system
 # so an accidental edit to the seed list (e.g. a deleted row) surfaces
 # here, not in test failures.
 _EXPECTED_ACCOUNT_TYPE_COUNT: int = 19
+# How many ids each table's range holds; see
+# :func:`_start_each_table_in_an_id_range_of_its_own`.
+_ID_RANGE_WIDTH: int = 1_000_000
+# The schemas whose tables are given ranges: every required schema but
+# ``ref``, whose rows carry literal ids production shares (the function says
+# why that excludes them).
+_ID_RANGED_SCHEMAS: tuple[str, ...] = tuple(
+    schema for schema in _REQUIRED_SCHEMAS if schema != "ref"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +175,14 @@ from app.level_infrastructure import apply_level_infrastructure
 from app.migration_runner import upgrade_to_head
 from app.sighting_infrastructure import apply_sighting_infrastructure
 from app.pay_stub_infrastructure import apply_pay_stub_infrastructure
-from app.deleted_row_infrastructure import apply_deleted_row_infrastructure
+from app.deleted_row_infrastructure import (
+    ALL_ARMS as DELETED_ROW_ARMS,
+    apply_deleted_row_infrastructure,
+)
+from app.side_band_infrastructure import (
+    ALL_ARMS as SIDE_BAND_ARMS,
+    apply_side_band_infrastructure,
+)
 from app.extensions import db
 from app.opening_infrastructure import ALL_ARMS, apply_opening_infrastructure
 from app.posting_infrastructure import (
@@ -198,6 +216,86 @@ def _recreate_template_database() -> None:
                 sql.Identifier(TEMPLATE_DB)
             )
         )
+
+
+def _start_each_table_in_an_id_range_of_its_own() -> None:
+    """Start every non-ref table's ids in a range no other table's ids share.
+
+    Ruling ``balance:R-BAL356``.  Every identity sequence starts at 1, and a
+    case's first user, scenario, account and period are each row 1 of their
+    table, so in a fresh clone ids of different KINDS coincide: the user and
+    the Checking account are both id 1.  A code path that writes or compares
+    one kind of id where another is meant then gives the right answer by
+    accident, and no case can tell.  The fixture has the coincidence by
+    construction; production has it only where two counters happen to agree,
+    so there the wrong id names a wrong row.  Review 1 of plan step
+    ``balance:X-bi-6-4d-2`` (its MEDIUM-4) measured six account-id writes that
+    no case in the suite caught: four for exactly this reason, and two log
+    fields that no case asserts, which the ranges do not change.
+
+    So the sequence at place *k* (from 1, in schema then name order, over
+    :data:`_ID_RANGED_SCHEMAS`) hands out ``k * _ID_RANGE_WIDTH + 1`` first.
+    In a clone as this template ships it, two non-ref tables' ids can then
+    meet only if one case draws a million ids from one table, and every clone
+    starts fresh, so the counters never carry from one case to the next; and
+    no non-ref row holds an id at or below :data:`_ID_RANGE_WIDTH`, so a
+    case's "no such row" literal (``999_999``) stays absent.  Two things
+    leave that state on purpose, inside one case only: a restart (below), and
+    a migration case that drops and re-creates a table, whose new sequence
+    counts from 1.  A table added next year in one of these schemas is ranged
+    the day it exists, because the sequences come from the catalog, not a
+    list; a table in a NEW schema is not until the schema joins
+    :data:`_REQUIRED_SCHEMAS` (the guard test, which scans every non-ref
+    schema, fails until it does).  Adding a table moves the ranges after it
+    in name order, which is harmless: a case that depends on a literal id is
+    wrong whatever the ranges are.
+
+    **``ref`` is excluded on purpose.**  Its rows are seeded with literal ids
+    (``tests/test_models/test_ref_identity_sequences.py`` says why that leaves
+    their sequences behind), and production holds the same ids, so two ref ids
+    that coincide here coincide there too.  That is a fact of production, not
+    an accident of the fixture.  A restart could not move them anyway: the
+    rows are numbered before this runs.
+
+    **The ranges have no bounds** (no ``MINVALUE`` / ``MAXVALUE``), because a
+    case may restart a sequence ON PURPOSE to build a coincidence it then
+    grades (``_transfer_numbered_like`` in
+    ``tests/test_services/test_reconcile_transfer_legs.py``,
+    ``_the_next_row_takes_id`` in
+    ``tests/test_utils/test_auth_helpers/test_access_denials.py``, and
+    ``test_the_door_settles_the_payments_row_and_not_the_row_sharing_its_id``
+    in ``tests/test_services/test_cc5_4a1_settlement_subject/``), and a bound
+    would refuse it.
+
+    It runs LAST in :func:`_populate_template`, after every step that could
+    create a sequence, so no sequence the template carries is missed.
+    ``setval`` with ``is_called`` true makes the next value one past the given
+    value.  The largest start stays inside ``integer`` while there are fewer
+    than 2,147 sequences.
+    """
+    sequences = db.session.execute(
+        db.text(
+            "SELECT schemaname, sequencename FROM pg_sequences "
+            "WHERE schemaname = ANY(:schemas) "
+            "ORDER BY schemaname, sequencename"
+        ),
+        {"schemas": list(_ID_RANGED_SCHEMAS)},
+    ).all()
+    for place, (schema, sequence) in enumerate(sequences, start=1):
+        db.session.execute(
+            db.text(
+                "SELECT setval("
+                "CAST(format('%I.%I', CAST(:schema AS text), "
+                "CAST(:sequence AS text)) AS regclass), "
+                ":last, true)"
+            ),
+            {
+                "schema": schema,
+                "sequence": sequence,
+                "last": place * _ID_RANGE_WIDTH,
+            },
+        )
+    db.session.commit()
 
 
 def _populate_template(app) -> None:
@@ -257,10 +355,13 @@ def _populate_template(app) -> None:
        deleted and never moved (plan step salary:S11-a), the same
        contract.
     10. ``apply_deleted_row_infrastructure``: a deleted row takes no money
-        (plan step credit_card:CC-5-4a-4), the same contract.  Steps 4-10
-        are each a rule a FIXTURE can trip -- steps 4-7, 9 and 10 refuse a
-        write, step 8 deletes the line its last sighting leaves behind --
-        so the suite runs against the rules the app has.
+        (plan step credit_card:CC-5-4a-4), and
+        ``apply_side_band_infrastructure``: a transfer side's record is dated
+        exactly while its transfer is settled (plan step
+        balance:X-bi-6-4d-2), the same contract.  Steps 4-10 are each a rule
+        a FIXTURE can trip -- steps 4-7, 9 and 10 refuse a write, step 8
+        deletes the line its last sighting leaves behind -- so the suite runs
+        against the rules the app has.
     11. ``apply_ledger_append_only_privileges``: idempotent
         re-application of the ledger append-only posture (review
         M1/R4) -- a no-op unless the cluster-scoped ``shekel_app``
@@ -274,6 +375,9 @@ def _populate_template(app) -> None:
         so the template ships with a zeroed log and every per-test clone
         of it starts from a clean slate (``tests/conftest.py``'s world
         builder truncates after its own seed for the same reason).
+    14. :func:`_start_each_table_in_an_id_range_of_its_own`: every non-ref
+        table's ids start in a range of their own, so no two kinds of id
+        coincide in a clone (ruling ``balance:R-BAL356``).
 
     The audit, append-only, level, sighting, pay-stub and deleted-row
     trigger families are counted by one list,
@@ -361,10 +465,20 @@ def _populate_template(app) -> None:
         db.session.commit()
 
         # A deleted row takes no money (plan step credit_card:CC-5-4a-4):
-        # idempotent re-application, same contract, and a rule a FIXTURE can
-        # trip -- one that stages a movement under a hidden row.
+        # idempotent re-application of EVERY arm, the opening rule's HEAD
+        # contract, and a rule a FIXTURE can trip -- one that stages a
+        # movement under a hidden row or transfer.
         apply_deleted_row_infrastructure(
-            lambda statement: db.session.execute(db.text(statement))
+            lambda statement: db.session.execute(db.text(statement)),
+            arms=DELETED_ROW_ARMS,
+        )
+        db.session.commit()
+
+        # A transfer side's record is dated exactly while its transfer is
+        # settled (plan step balance:X-bi-6-4d-2): the same HEAD contract.
+        apply_side_band_infrastructure(
+            lambda statement: db.session.execute(db.text(statement)),
+            arms=SIDE_BAND_ARMS,
         )
         db.session.commit()
 
@@ -387,6 +501,10 @@ def _populate_template(app) -> None:
         # truncate separately.
         db.session.execute(db.text("TRUNCATE system.audit_log"))
         db.session.commit()
+
+        # LAST, after every step that could create a sequence (its docstring
+        # says why): ids of different kinds stop coinciding.
+        _start_each_table_in_an_id_range_of_its_own()
 
 
 def _verify_template_state() -> None:

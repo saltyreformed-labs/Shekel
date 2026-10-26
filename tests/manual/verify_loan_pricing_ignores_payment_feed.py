@@ -37,8 +37,9 @@ would pass all five arms: ``resolve_loan(...).monthly_payment`` is structurally
 it read the whole payment history and ignored it.  That is exactly the coupling
 that shipped, and no value-based harness can see it.  What sees it is the
 statement-counting arm in
-``test_loan_payment_service.TestALoansPriceDoesNotReadItsOwnPayments``, which
-names the TABLE; the two were mutation-tested and their fail sets are disjoint.
+``test_loan_payment_service.test_the_contractual_payment
+.TestALoansPriceDoesNotReadItsOwnPayments``, which names the TABLE; the two
+were mutation-tested and their fail sets are disjoint.
 Read this file as the value half of that pair, never as the whole control.
 
 Usage::

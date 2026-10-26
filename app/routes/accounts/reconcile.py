@@ -533,15 +533,6 @@ def prompt_fragment(
         governing: The assertion that governs it after the write -- the write
             door's ``AnchorTrueUpReport.governing_after``.
 
-    **A transfer the panel cannot offer does not open it** (ruling
-    **R-BAL148**): the prompt asks which rows the bank has taken, so it is
-    gated on :attr:`~app.services.reconcile_service.OutstandingSet.is_empty`,
-    which counts ticks alone.  Where something else is offerable the modal
-    carries the warning too; where a damaged transfer is ALL that is
-    outstanding there is nothing to tick and no modal, and the warning is on
-    the account's detail page, which renders the same panel permanently --
-    the modal's own promise that dismissing it loses nothing.
-
     Returns:
         The rendered fragment, or ``""`` -- for an account with nothing to
         tick, and for one this panel does not serve.

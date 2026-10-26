@@ -26,7 +26,9 @@ from app import ref_cache
 from app.enums import SettledDayBasisEnum, StatusEnum
 from app.extensions import db
 from app.models.statement_match import StatementMatch
-from app.services import entry_service, transaction_service, transfer_service
+from app.services import (
+    entry_service, transaction_service, transfer_legs, transfer_service,
+)
 from app.services.settle_day import SettleDay
 from app.services.statement_match import accept_match, matched_subjects
 from app.services.transaction_service import settle_transaction
@@ -278,8 +280,13 @@ def _matched_transfer(seed_user, *, legs=("checking",)):
 
     *legs* names which legs' payments are matched, each to its own
     account's line: ``"checking"`` to a -$500.00 TRANSFER OUT line,
-    ``"savings"`` to a +$500.00 TRANSFER IN line.  Returns the transfer and
-    the lines matched, in *legs*' order.
+    ``"savings"`` to a +$500.00 TRANSFER IN line, posted on that side's
+    record's day and ticked as the screen offers a paid side, its record.
+    Returns the transfer and the lines matched, in *legs*' order.
+
+    It read and ticked each side's SHADOW row until leaf
+    ``balance:X-bi-6-4d-2``, which hangs a side's record off the transfer
+    (ruling **R-BAL167**'s class 4, a shared helper re-expressed).
     """
     savings = create_account_of_type(
         seed_user, db.session, "Savings", "Savings",
@@ -296,22 +303,22 @@ def _matched_transfer(seed_user, *, legs=("checking",)):
         status_id=ref_cache.status_id(StatusEnum.DONE),
     )
     db.session.commit()
-    rows = transfer_service.load_transfer_rows(xfer.id, seed_user["user"].id)
     sides = {
-        "checking": (seed_user["account"], rows.expense, "-500.00", "TRANSFER OUT"),
-        "savings": (savings, rows.income, "500.00", "TRANSFER IN"),
+        "checking": (seed_user["account"], False, "-500.00", "TRANSFER OUT"),
+        "savings": (savings, True, "500.00", "TRANSFER IN"),
     }
     lines = []
     for leg in legs:
-        account, shadow, amount, description = sides[leg]
+        account, is_income, amount, description = sides[leg]
+        record = transfer_legs.transfer_side_leg(xfer, is_income=is_income).record
         line = a_bank_line(
             seed_user, an_import(seed_user, account), amount=amount,
-            posted_on=shadow.settled_on, description=description,
+            posted_on=record.settled_on, description=description,
         )
         db.session.commit()
         scope = a_scope(seed_user, account)
         accept_match(
-            a_submission(scope, lines=[line], transactions=[shadow]), scope,
+            a_submission(scope, lines=[line], transfers=[xfer]), scope,
         )
         db.session.commit()
         lines.append(line)

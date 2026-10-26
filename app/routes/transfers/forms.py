@@ -146,19 +146,20 @@ def render_full_edit(xfer, leg_account_id, *, page_refusal):
     # Current + future periods power the in-popover period-move selector,
     # always including the transfer's own period so a transfer sitting in
     # a past period stays selected.  The service re-validates ownership of
-    # the submitted id and moves the transfer plus both shadows together.
+    # the submitted id and moves the transfer; both legs read its period.
     periods = period_move_options(
         calendar_for(current_user.id), xfer.pay_period_id,
     )
-    # The legs' records, loaded ONCE for everything below that reads them --
-    # the figures, both day boxes and the withdrawal caption (ledger row
-    # **BAL-530**: the figures and the caption each loaded them).
+    # The legs' records, loaded ONCE for both of their readers below -- the
+    # two day boxes and the withdrawal caption (ledger row **BAL-530**: the
+    # figures and the caption each loaded them).  The figures read none
+    # since plan step ``balance:X-bi-6-4d-2``: both are the transfer's.
     records = transfer_legs.covering_movements_by_leg([xfer.id])
     # What the pair RECORDED and what a re-settle would RE-BOOK (plan step
     # X-au-c3), through the one helper, so the popover opened from the
     # transfers page and the one opened from a grid leg's cell cannot show
     # different figures for the same transfer.
-    amounts = transfer_settlement_amounts(xfer, current_user.id, records)
+    amounts = transfer_settlement_amounts(xfer, current_user.id)
     return render_template(
         "transfers/_transfer_full_edit.html",
         card_id=full_edit_dom_id(xfer.id),
@@ -235,16 +236,16 @@ def redraw_full_edit(xfer_id, facts):
 def _payment_withdrawal(records):
     """Return what taking BOTH legs' payments out of their matches would withdraw.
 
-    The read twin of the seam's write on a transfer's ``$0.00`` record: the
-    settle hands each leg the one record (``transfer_service._status``), and
-    a ``$0.00`` figure takes each leg's covering movement off the books
-    through ``movement_removal.remove_movements`` (ruling **R-CC54**).  An
-    act names ONE leg's movement -- a member is held to its movement's
-    account, and the legs are on two -- so the two legs' acts are disjoint
-    and one read over both movements is what the two per-leg writes
-    withdraw.  The movements are the popover's ONE load of the legs'
-    records (``transfer_legs.covering_movements_by_leg``), which its figures
-    and day boxes read too (ledger row **BAL-530**, closed at plan step
+    The read twin of the seam's write on a transfer's ``$0.00`` figure: a
+    close of nothing keeps no record on either side, so the seam takes every
+    record the two sides hold off the books in ONE call of
+    ``movement_removal.remove_movements`` (``status_seam._side``, ruling
+    **R-CC54**).  An act names ONE side's record -- a member is held to its
+    movement's account, and the sides are on two -- so the two sides' acts
+    are disjoint and one read over both records is what that call
+    withdraws.  The records are the popover's ONE load of them
+    (``transfer_legs.covering_movements_by_leg``), which its day boxes read
+    too (ledger row **BAL-530**, closed at plan step
     ``balance:X-bi-6-4c-3``: this read made a second call of that join).
 
     Args:

@@ -42,6 +42,14 @@ deliberate: :func:`_one_time` is the app's own producer (the create form's
 default selection, one transfer, one-version series), :func:`_survivors` is
 a cleared cadence (several transfers of one definition, each answering the
 occurrence the cadence named -- what the sibling refusal is graded on).
+
+A file-local ``_shadows`` read the transfer's two twin rows until plan step
+``balance:X-bi-6-4d-2``, which births none and whose CHECK refuses one.  Six
+passing cases read the twins' mirrored columns through it (``is_override``,
+``due_date``, ``pay_period_id``, ``amount_source_id``) in an ``all()`` or a
+loop over an empty list -- VACUOUS -- beside the transfer's own column, which
+each still reads; those reads are dropped.  The seventh counted two twins and
+failed (ruling R-BAL167 classes 1 and 4, plan step balance:X-bi-6-4d-2).
 """
 import io
 import pathlib
@@ -60,7 +68,6 @@ from app.extensions import db
 from app.models.amount_ownership import AmountOwnership
 from app.models.paycheck_line import PaycheckLine
 from app.models.template_amount_version import TemplateAmountVersion
-from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.services import (
@@ -70,7 +77,6 @@ from app.services import (
 )
 from app.services.amount_ownership import state_own_amount
 from app.services.balance_at import BalanceContext
-from app.services.row_valuation import settled_figure
 from app.services.template_amount_service import amount_versions
 from app.utils.dates import display_today
 from tests._test_helpers import (
@@ -82,6 +88,7 @@ from tests._test_helpers import (
     make_transfer_template,
     state_template_price,
     transfer_amount,
+    transfer_side_figure,
 )
 from tests.oracles.recurrence_baseline import MONTHLY_FIRST
 from tests.test_routes._statement_forms import form_fields
@@ -175,12 +182,6 @@ def _submit(auth_client, xfer, **changes):
 def _future(seed_periods_today):
     """The seeded paychecks the card's period select offers (today onward)."""
     return [p for p in seed_periods_today if p.start_date > display_today()]
-
-
-def _shadows(xfer_id):
-    return db.session.query(Transaction).filter_by(
-        transfer_id=xfer_id, is_deleted=False,
-    ).all()
 
 
 def _rename_definition(auth_client, xfer, name):
@@ -319,7 +320,6 @@ class TestTheOverrideFlip:
             db.session.refresh(xfer)
             assert xfer.pay_period_id == future[1].id
             assert xfer.is_override is False
-            assert all(s.is_override is False for s in _shadows(xfer.id))
 
     def test_a_period_move_still_flips_a_recurring_transfer(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -372,8 +372,8 @@ class TestAPeriodMoveRePlaces:
     ):
         """Born on its paycheck's start, moved: due on the new one's start.
 
-        ``occurs_on`` follows (R-BAL94), both shadows carry the date
-        (Transfer Invariant 3), and the price is unchanged (a flat series).
+        ``occurs_on`` follows (R-BAL94), and the price is unchanged (a flat
+        series).  Each side's due date is the transfer's, projected.
         """
         with app.app_context():
             savings = _savings(seed_user)
@@ -386,7 +386,6 @@ class TestAPeriodMoveRePlaces:
             assert xfer.pay_period_id == future[1].id
             assert xfer.due_date == future[1].start_date
             assert xfer.occurs_on == future[1].start_date
-            assert all(s.due_date == future[1].start_date for s in _shadows(xfer.id))
             assert transfer_amount(xfer) == Decimal("500.00")
 
     def test_an_owner_dated_transfer_keeps_its_day(
@@ -483,10 +482,6 @@ class TestTheRestate:
                 Decimal("525.00"),
             ]
             assert xfer.template.default_amount == Decimal("525.00")
-            for shadow in _shadows(xfer.id):
-                assert shadow.amount_source_id == ref_cache.amount_source_id(
-                    AmountSourceEnum.PARENT_TRANSFER,
-                )
 
     def test_a_transfer_the_old_flip_detached_is_re_attached_by_its_next_figure(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -506,7 +501,6 @@ class TestTheRestate:
             db.session.refresh(xfer)
             assert xfer.amount is None
             assert xfer.is_override is False
-            assert all(s.is_override is False for s in _shadows(xfer.id))
             assert transfer_amount(xfer) == Decimal("2100.00")
             assert xfer.template.default_amount == Decimal("2100.00")
 
@@ -540,6 +534,12 @@ class TestTheRestate:
         inside the door booked the pre-restate `$500.00` on both legs while
         the plan read `$525.00`.  The restate is the door's own act now
         (``definition_price``, R-BAL96 as amended), ordered before the settle.
+        What each leg books is its side's payment RECORD since plan step
+        ``balance:X-bi-6-4d-2``; the shadows held it until then (ruling
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  Its count of two
+        shadows went at ``balance:X-bi-6-4d-2``, which births none; the two
+        side records read below are one per endpoint (ruling R-BAL167 class
+        1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _savings(seed_user)
@@ -557,9 +557,10 @@ class TestTheRestate:
             assert transfer_amount(xfer) == Decimal("525.00")
             assert xfer.template.default_amount == Decimal("525.00")
             assert xfer.is_override is False
-            legs = _shadows(xfer.id)
-            assert len(legs) == 2
-            assert [settled_figure(leg) for leg in legs] == [Decimal("525.00")] * 2
+            assert [
+                transfer_side_figure(db.session, xfer.id, account_id)
+                for account_id in (xfer.from_account_id, xfer.to_account_id)
+            ] == [Decimal("525.00")] * 2
 
     def test_the_service_refuses_the_act_on_a_recurring_transfer(
         self, app, seed_user, seed_periods_today,
@@ -651,9 +652,15 @@ class TestTheDueDateGate:
             assert 'name="due_date"' not in html
             assert "Set by this recurring transfer" in html
 
-    def test_moving_the_date_lands_on_all_three_rows(
+    def test_moving_the_date_lands_on_the_transfer(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
+        """A moved date is the transfer's due date and its occurrence.
+
+        Named ``test_moving_the_date_lands_on_all_three_rows`` until plan
+        step ``balance:X-bi-6-4d-2``, which births no twin: its read of the
+        two twins' dates ran over an empty list (see the module docstring).
+        """
         with app.app_context():
             savings = _savings(seed_user)
             future = _future(seed_periods_today)
@@ -663,7 +670,6 @@ class TestTheDueDateGate:
             assert resp.status_code == 200, resp.data
             db.session.refresh(xfer)
             assert (xfer.due_date, xfer.occurs_on) == (moved, moved)
-            assert all(s.due_date == moved for s in _shadows(xfer.id))
             assert xfer.is_override is False
 
     def test_clearing_the_date_is_refused_with_the_reason(
@@ -819,10 +825,6 @@ class TestCarryForward:
             assert (xfer.due_date, xfer.occurs_on) == (
                 future[1].start_date, future[1].start_date,
             )
-            for shadow in _shadows(xfer.id):
-                assert shadow.pay_period_id == future[1].id
-                assert shadow.is_override is False
-                assert shadow.due_date == future[1].start_date
 
 
 class TestAOneTimePaymentIntoALoan:
@@ -909,8 +911,8 @@ class TestTheDoorsKeepTheAdHocShape:
 def _code_lines_matching(pattern, path):
     """Return *path*'s CODE lines matching *pattern* -- strings and comments blanked.
 
-    The plan gate's ``code`` census filter, restated over one file: a
-    docstring naming the old spelling is prose, not a use of it.
+    A ``code`` census filter over one file: a docstring naming the old
+    spelling is prose, not a use of it.
     """
     source = path.read_text()
     by_line = {}
@@ -929,8 +931,7 @@ def test_the_census_reads_three_accessor_bodies():
 
     Twelve code lines spelled ``recurrence_rule is (not) None`` on the base
     tree; the three left are the accessor bodies, one per definition kind
-    (R-BAL97).  The plan gate re-runs the same census from the step's
-    sentence; this pins the ANSWER so a fourth spelling fails here first.
+    (R-BAL97).  This pins the ANSWER, so a fourth spelling fails here.
     """
     pattern = re.compile(r"recurrence_rule is (not )?None")
     hits = {

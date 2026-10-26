@@ -121,8 +121,9 @@ def get_visible_transactions(
 
     Loads the linked owner's live rows for the period in the baseline
     scenario and keeps those whose :attr:`Transaction.visible_to_companion`
-    answers True -- a template-generated row by its definition's flag, an
-    ad-hoc row by its own.  Eager-loads entries for progress computation.
+    answers True -- a row naming a definition by that definition's flag, and
+    a row naming none (a CC payback) never.  Eager-loads entries for progress
+    computation.
 
     **The visibility rule is asked of each row, never restated in SQL**
     (plan step ``balance:X-bi-1b``, ruling **R-BAL19**, finding
@@ -217,11 +218,11 @@ def get_visible_transactions(
         db.session.query(Transaction)
         # Eager-load both the entries (for progress / pct totals) and
         # the template -- which the visibility filter below reads on every
-        # generated row, and which ``txn.template.name`` /
+        # row naming a definition, and which ``txn.template.name`` /
         # ``txn.tracks_purchases`` read again from the shared
         # ``render_row_card`` macro and ``grid_view_service.build_row_keys``
-        # (mobile-first v3 plan Commit 13).  Without it each generated row
-        # would lazy-load its template individually, one SELECT per row.
+        # (mobile-first v3 plan Commit 13).  Without it each such row would
+        # lazy-load its template individually, one SELECT per row.
         .options(
             selectinload(Transaction.entries),
             selectinload(Transaction.template),

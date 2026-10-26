@@ -38,9 +38,9 @@ from app.services.transfer_service._loan_posting import (
 # double-entry ledger effect or its attribution, so a change to any of them
 # triggers a posting reconcile (Build-Order Step 2; see
 # ``posting_service.sync_transfer_postings``).  ``status_id`` flips the
-# settled/unsettled target; ``amount`` (the estimated amount) and
-# ``actual_amount`` together determine what the settled shadow is WORTH
-# (``COALESCE(actual_amount, estimated_amount)``) -- the magnitude posted;
+# settled/unsettled target; ``amount_ownership`` (what prices the transfer)
+# and ``figure`` (a stated settled figure) together determine what a settled
+# transfer moved (its one ``settled_figure``) -- the magnitude posted;
 # ``pay_period_id`` moves the entry's period, so a settled period move
 # reconciles R2-correctly (the per-(account, period) reconcile reverses the old
 # period and posts the new) AND fires the effect-time self-heal for the Step-5
@@ -106,18 +106,20 @@ def _reconcile_postings_after_update(
 
     * **Step-2 cash reconcile** when a magnitude / settled-sense / period field
       changed (``_POSTING_RELEVANT_FIELDS``).  Placed here -- NOT inside
-      ``apply_status_to_all_three`` -- because ``actual_amount`` is applied AFTER
-      ``status_id`` and the grid shadow-edit path can settle and set an actual
-      in one call; the reconcile reads what each shadow's covering movement
-      records, so it must run once everything is in place or it would post
-      the pre-edit figure.  Since plan step ``balance:X-bi-6-3`` (ruling
+      ``apply_status_to_all_three`` -- because the period and due-date arms
+      are applied AFTER the status arm, and the reconcile reads the
+      transfer's settled figure and each side's dated record as they stand,
+      so it must run once everything is in place or it would post the
+      pre-edit state.  Since plan step ``balance:X-bi-6-3`` (ruling
       **R-BAL101**) it is told no settled sense: a movement posts iff it is
       dated under a contributing parent, and the seam has already dated (a
-      settle) or un-dated (a revert) both movements by the time this runs.
-      Idempotent reconcile-to-target: a settle posts the two per-movement
-      entries, a revert / cancel reverses them to zero, an unchanged effect
-      writes nothing.
-    * **Loan-payment genesis reconcile** last (a no-op for a non-loan transfer):
+      settle), un-dated (a revert) or taken off (a ``$0.00`` close) each
+      side's record by the time this runs.  Idempotent reconcile-to-target:
+      a settle posts the per-movement entries, a revert reverses them to
+      zero (a cancel, reached only from Projected, has none to reverse), an
+      unchanged effect writes nothing.
+    * **Loan-payment genesis reconcile** right after the cash reconcile (a
+      no-op for a non-loan transfer):
       a settle / revert / amount / actual / period edit of a loan payment
       re-reconciles that loan's confirmed-payment splits (coupled on the running
       balance) and its opening / true-up anchor corrections.
@@ -215,10 +217,10 @@ def _reconcile_postings_after_update(
     # LAST, and the position is load-bearing rather than tidy: both walks below
     # read the vacated account's ledger, and until ``sync_transfer_postings``
     # above has reversed this transfer's legs off it that ledger still holds a
-    # net for a transfer with no shadow there.  Run first instead, the account
-    # walk raises ``PostingError`` -- *"Ledger account 8 holds a nonzero net for
+    # net for a transfer with no leg there.  Run first instead, the account
+    # walk raised ``PostingError`` -- *"Ledger account 8 holds a nonzero net for
     # transfer ids [409] but no active shadow on account 1 resolves them;
-    # Transfer Invariant 1 is broken"* -- which is the invariant correctly
+    # Transfer Invariant 1 is broken"* -- which was the invariant correctly
     # reporting a ledger this function had not finished moving.  Measured on a
     # production clone before the order was fixed.
     for account_id in vacated:
@@ -227,8 +229,8 @@ def _reconcile_postings_after_update(
         )
     # The LOAN half is the vacated DESTINATION's alone, and that narrowing is a
     # measurement rather than an economy.  A loan reached as a transfer's SOURCE
-    # carries that transfer's EXPENSE shadow, and a loan's payment set is
-    # ``loan_loaders.income_shadows`` -- transfers INTO the loan only -- so such
+    # carries that transfer's EXPENSE leg, and a loan's payment set is
+    # ``loan_loaders.income_legs`` -- transfers INTO the loan only -- so such
     # a transfer was never one of the loan's payments and there is no split to
     # re-derive when it leaves.  Its raw cash leg is reversed by
     # ``sync_transfer_postings`` above, which takes the per-ledger-account delta

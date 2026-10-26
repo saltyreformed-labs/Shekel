@@ -372,7 +372,7 @@ def create_transfer_template():
 
     # Open the amount's dated series at today (plan step X-au-a).  The
     # constructor above also carries the figure because the column is NOT NULL;
-    # this call is what makes the SERIES exist, and plan step X-au-e removes the
+    # this call is what makes the SERIES exist, and plan step X-bp removes the
     # redundancy by removing the column.
     template_amount_service.set_amount(
         template, template.default_amount, effective_on=display_today(),
@@ -550,10 +550,13 @@ def update_transfer_template(template_id):
     # door rather than a rule about transfers -- a RECURRING template with the
     # identical edit had it applied, by a sweep that destroyed and rebuilt every
     # generated row -- so one edit meant two different things depending on
-    # whether the transfer repeated.  ``transfer_service.update_transfer`` moves
-    # a transfer between accounts now, carrying both shadows, so the refusal has
-    # no cause left and :func:`propagate_to_non_repeating_transfers` states the
-    # accounts with the rest of the definition.
+    # whether the transfer repeated.  ``transfer_service.update_transfer`` can
+    # move a transfer between accounts now (ruling **R-BAL168**: a moving
+    # side's payment record goes with it), so the refusal has no cause left
+    # and :func:`propagate_to_non_repeating_transfers` states the accounts with
+    # the rest of the definition; a transfer holding the owner's records (a
+    # note or a payment record) is retained there rather than moved
+    # (``transfer_recurrence.propagate_to_unruled_template``).
     edit_form = RedirectTarget(
         "transfers.edit_transfer_template", {"template_id": template_id},
     )
@@ -603,8 +606,15 @@ def update_transfer_template(template_id):
     # the dated series together (plan step X-au-a).  ``effective_from`` is the
     # form's "Amount effective from" date, which also bounds the regeneration
     # below -- ONE value, applied by two different predicates (the series reads
-    # a row's DUE date, the sweep its pay PERIOD's end); finding **N-247** holds
-    # that seam and X-au-e dissolves it.  Absent from a partial update means the
+    # a transfer's DUE date, the sweep its pay PERIOD's end).  Finding
+    # **N-247** filed that seam: an edit could rewrite a row whose due date
+    # preceded the date it states.  Plan step X-au-e dissolved it on the
+    # template twin (``routes/templates/crud.py``), and plan step X-au-f-2
+    # here, where generation copied ``default_amount`` onto every transfer it
+    # made until then: the sweep writes a DECLARATION
+    # (``derived_ownership(TEMPLATE)``) rather than a figure, so which
+    # transfers it reaches decides nothing about money: a transfer it declares
+    # resolves by its own due date.  Absent from a partial update means the
     # amount was not restated.
     if "default_amount" in data:
         template_amount_service.set_amount(
@@ -791,8 +801,8 @@ def _regenerate_and_commit_template(
         flash("A recurring transfer with that name already exists.", "warning")
         return redirect(url_for("transfers.edit_transfer_template", template_id=template_id))
     # An edit that ended the recurrence removed this template's upcoming
-    # projected transfers (and their shadow pairs); "updated." alone would
-    # report a destructive change as a routine one.
+    # projected transfers; "updated." alone would report a destructive change
+    # as a routine one.
     #
     # **"were removed" was unqualified until plan step R10-b**, and an
     # adversarial review of that step caught it: the maintain pass RETAINS a

@@ -355,8 +355,8 @@ class PayPeriodLocked(ShekelError):
 
     Raised by truncate / regenerate when the window they would delete or
     rebuild contains a period that may never be removed -- it is
-    historical, holds a settled transaction, holds a row or transfer
-    holding a payment or purchase, or holds posted ledger entries
+    historical, holds a settled, non-deleted row or transfer, holds a row or
+    transfer holding a payment or purchase, or holds posted ledger entries
     (:class:`~app.services.pay_period_locks.PeriodLockReason`).  A hard lock
     is NOT overridable (unlike the discard gate); the operation deletes
     nothing.
@@ -484,17 +484,18 @@ class PayPeriodResetBlocked(ShekelError):
 
     Raised by ``pay_period_admin.reset_pay_periods`` when the user has at
     least one settled (Paid or Received), non-deleted
-    transaction.  Reset rebuilds the WHOLE schedule -- including the
+    row or transfer.  Reset rebuilds the WHOLE schedule -- including the
     account anchor period -- and is a first-time-setup correction only; a
     user whose paychecks have begun settling must use Regenerate (which
     rebuilds only the unlocked future tail) so settled money is never
     rewritten under a new schedule.  The operation changes nothing.
 
-    **Or when a row holds a payment or a purchase**, whatever its status
-    (plan step ``credit_card:CC-5-4a-4``, ruling **R-CC65**): the reset
-    deletes every row, and a movement is money that moved.  Its sentence
-    names what is held (ruling **R-CC66**).  Asked only once no settled row
-    blocks, so exactly one of the two counts is non-zero.
+    **Or when a row or transfer holds a payment or a purchase**, whatever its
+    status (plan step ``credit_card:CC-5-4a-4``, ruling **R-CC65**): the
+    reset deletes every row and transfer, and a movement is money that moved.
+    Its sentence names what is held (ruling **R-CC66**).  Asked only once no
+    settled row or transfer blocks, so exactly one of the two counts is
+    non-zero.
 
     Attributes:
         settled_count: The settled rows and transfers blocking the reset,

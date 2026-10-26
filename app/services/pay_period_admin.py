@@ -265,10 +265,10 @@ def remove_earlier_pay_periods(user_id: int, start_from_period_id: int) -> int:
       unrefused, and the ruling covers neither.*
 
     Nothing is populated: a removal records no payday.  Deletion is the
-    writer's one bulk ``DELETE``, whose cascade takes the template rows the
-    gate let go (with both shadows of a transfer) and the head's journal
-    entries.  **R-PC114's refusal arrives after statements** -- the delete
-    and the re-sync it exists to judge -- so they run in a SAVEPOINT this
+    writer's one bulk ``DELETE``, whose cascade takes the template rows and
+    transfers the gate let go and the head's journal entries.  **R-PC114's
+    refusal arrives after statements** -- the delete and the re-sync it
+    exists to judge -- so they run in a SAVEPOINT this
     door rolls back before it re-raises: the refusal leaves nothing behind
     whoever called, not only when a route rolls back.  The gate's refusals
     are asked before any write, R-PC110's inside the savepoint before the
@@ -364,7 +364,7 @@ def truncate_pay_periods(
     from plan step C3-b (both columns materialised from the payday list) or C6
     (mid-schedule insert), an ordinal read in an earlier request names a
     DIFFERENT period than the user reviewed and takes its transactions, its
-    transfers with both shadows, and its journal entries.  ``user_write_lock``
+    transfers, and its journal entries.  ``user_write_lock``
     cannot help -- the stale value crossed a REQUEST boundary, not a concurrent
     one.  Identity is ``id``, so the wire key is ``id``.
 
@@ -373,11 +373,11 @@ def truncate_pay_periods(
     Two gates protect real data, checked in order before anything is deleted:
 
       1. **Hard locks (not overridable).** If any to-delete period is
-         historical, holds a settled transaction, holds a row or transfer
-         holding a payment or purchase (whatever its status, since plan step
-         ``credit_card:CC-5-4a-4``; where that is the period's first lock
-         reason the refusal names each one, its amount and its row, plan
-         step ``pay_calendar:C22``, ruling **R-PC116**),
+         historical, holds a settled, non-deleted row or transfer, holds a
+         row or transfer holding a payment or purchase (whatever its status,
+         since plan step ``credit_card:CC-5-4a-4``; where that is the
+         period's first lock reason the refusal names each one, its amount
+         and its row, plan step ``pay_calendar:C22``, ruling **R-PC116**),
          or carries an unbalanced ledger account, raise
          :class:`PayPeriodLocked` and delete nothing.
       2. **Discard gate (overridable).** If any to-delete period holds a
@@ -386,9 +386,8 @@ def truncate_pay_periods(
          :class:`PayPeriodDiscardRequired` and delete nothing.
 
     Deletion is a single bulk ``DELETE`` so PostgreSQL performs the whole
-    cascade in one pass: transactions and transfers (and both shadows,
-    preserving the transfer invariant) go; DB-level audit triggers
-    still fire.  **RECURRENCE RULES are untouched since plan step R7b-4** --
+    cascade in one pass: transactions and transfers go; DB-level audit
+    triggers still fire.  **RECURRENCE RULES are untouched since plan step R7b-4** --
     a rule's opening bound is a DATE (``start_date``) rather than a pay-period
     FK, so there is no longer anything on that table for a period delete to
     cascade into.  **Balance ASSERTIONS do NOT go** -- ruling R-EO deleted
@@ -616,13 +615,13 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     schedule from ``new_start_date``, then re-anchors each account onto it
     with its balance preserved.
 
-    Bounded for safety: it refuses if the user has ANY settled
-    transaction.  Once a paycheck has settled, rewriting the schedule
+    Bounded for safety: it refuses if the user has ANY settled, non-deleted
+    row or transfer.  Once a paycheck has settled, rewriting the schedule
     under it would corrupt history, so those users use regenerate instead.
-    **And it refuses while ANY row holds a payment or a purchase** (plan
-    step ``credit_card:CC-5-4a-4``, ruling **R-CC65**), whatever its status:
-    the wipe deletes every row through ``transactions.pay_period_id``'s
-    cascade, and a movement is money that moved -- a Projected envelope
+    **And it refuses while ANY row or transfer holds a payment or a
+    purchase** (plan step ``credit_card:CC-5-4a-4``, ruling **R-CC65**),
+    whatever its status: the wipe deletes every row and transfer through
+    their ``pay_period_id`` cascades, and a movement is money that moved -- a Projected envelope
     holding a purchase recorded from the bank is history exactly as a Paid
     bill is.  Until that step the settled gate alone let the wipe destroy
     such a purchase; its key now refuses the delete, and this makes the
@@ -643,17 +642,16 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
 
     Steps, all in one transaction:
 
-      1. Refuse if any settled transaction exists, or any row holds a
-         payment or purchase (delete nothing).
+      1. Refuse if any settled, non-deleted row or transfer exists, or any
+         row or transfer holds a payment or purchase (delete nothing).
       2. (The owner's write lock is already held, so step 1's gates read
          under it: the one caller, ``POST /pay-periods/reset``, is a
          signed-in request, whose command transaction takes the lock before
          its view reads anything of the owner's -- plan step
          ``balance:X-bn``, :mod:`app.db_transaction`.)
       3. Bulk-DELETE every pay period.  PostgreSQL cascades it in one
-         pass: transactions and transfers (+ both shadows, preserving the
-         transfer invariant) go; audit triggers still fire.  Anchor history is
-         NOT in that cascade any more (ruling R-EO), and neither are the
+         pass: transactions and transfers go; audit triggers still fire.
+         Anchor history is NOT in that cascade any more (ruling R-EO), and neither are the
          recurrence rules (plan step R7b-4).  Every era goes too, by the
          writer's own rule rather than a cascade (plan step C17-a).
       4. Generate the fresh schedule from ``new_start_date``, minting its
@@ -662,7 +660,7 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
          rebuilt schedule (:func:`loan_posting_service.resync_user_loan_postings`).
          A loan's opening / true-up ledger entries carry a ``pay_period_id``
          and so CASCADE-delete with the wiped periods, but they exist
-         independently of any settled transaction, so the zero-settled gate
+         independently of any settled row or transfer, so the zero-settled gate
          does NOT keep them; their SOURCE facts (``LoanParams`` and the
          ``user_trueup`` ``LoanAnchorEvent`` rows) survive, so this re-derives
          and re-posts them attributed to the new periods.  Then the same for
@@ -684,7 +682,7 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     ``budget.journal_entries`` -- the linked ledger's nonzero per-row nets on
     the account side (``account_posting_service._walk._source_net_days``), the
     stale lineage transfers and stale payment shadows on the loan side, and
-    the loan walk's own ``settled_income_shadows``.  A freshly generated row is
+    the loan walk's own ``settled_income_legs``.  A freshly generated row is
     ``Projected`` and posts nothing, so it is in none of those sets.  *A first
     draft of this paragraph said the account half "reads no transaction or
     transfer at all" and enumerated two readers on the loan side; an
@@ -739,25 +737,27 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
         objects.
 
     Raises:
-        PayPeriodResetBlocked: The user has at least one settled
-            transaction, or a row holding a payment or purchase; nothing is
-            changed.
+        PayPeriodResetBlocked: The user has at least one settled,
+            non-deleted row or transfer, or a row or transfer holding a
+            payment or purchase; nothing is changed.
         ValidationError: ``record_paydays`` rejects the batch (an invalid
             start date or cadence).
     """
-    # Reset is gated on zero settled transactions.  Build-Order Step 3 note:
-    # this same gate keeps the CASH double-entry postings consistent across a
-    # reset -- the wipe below deletes the user's pay periods, and
-    # journal_entries.pay_period_id is ON DELETE CASCADE, so a period holding
-    # settled (posted) transactions would dispose its cash journal entries + legs
-    # at the DB tier (outside the ORM, where the balanced-journal trigger never
-    # fires on DELETE).  Because any settled row blocks the reset entirely, no
-    # SETTLED-transaction posting is ever wiped.  Whoever relaxes this gate MUST
-    # first reverse those transactions' postings
-    # (posting_service.reverse_postings_before_delete).
+    # Reset is gated on zero settled, non-deleted rows and transfers.
+    # Build-Order Step 3 note: this same gate keeps the CASH double-entry
+    # postings consistent across a reset -- the wipe below deletes the user's
+    # pay periods, and journal_entries.pay_period_id is ON DELETE CASCADE, so a
+    # period holding settled (posted) rows or transfers would dispose its cash
+    # journal entries + legs at the DB tier (outside the ORM, where the
+    # balanced-journal trigger never fires on DELETE).  Because any settled,
+    # non-deleted row or transfer blocks the reset entirely, no live settled
+    # item's posting is ever wiped.  Whoever relaxes this gate MUST first
+    # reverse those postings (a row's through
+    # posting_service.reverse_postings_before_delete, a transfer's through
+    # reverse_transfer_postings_before_delete).
     #
     # The gate does NOT protect a LOAN's genesis postings: a loan's opening /
-    # true-up entries exist without any settled transaction (a payment-less
+    # true-up entries exist without any settled row or transfer (a payment-less
     # configured loan posts its opening at params-create), so the wipe DOES
     # CASCADE-delete them.  That is safe because their source facts (LoanParams,
     # user_trueup LoanAnchorEvent) survive the wipe, and
@@ -767,8 +767,10 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     if settled > 0:
         raise PayPeriodResetBlocked(settled_count=settled)
     # The second gate (plan step credit_card:CC-5-4a-4, ruling R-CC65): a row
-    # holding a movement, whatever its status, is history the wipe below
-    # would take with it -- and fk_transaction_entries_transaction_id refuses.
+    # or transfer holding a movement, whatever its status, is history the wipe
+    # below would take with it -- and the movement's key refuses
+    # (fk_transaction_entries_transaction_id for a row's, the two side keys
+    # fk_transaction_entries_expense_side / _income_side for a transfer's).
     holding = pay_period_gates.movement_holding_row_count(user_id)
     if holding > 0:
         raise PayPeriodResetBlocked(holding_count=holding)

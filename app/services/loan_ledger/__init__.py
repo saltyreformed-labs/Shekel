@@ -115,7 +115,7 @@ step D1b (the leaf had been importing a kind CLASSIFIER to reach its own
 chronology primitive) and :mod:`app.extensions` at C2-d, with the primitive
 itself.
 
-Plan of record: ``docs/audits/balance_architecture/README.md`` (step B1).
+Plan step **B1** (shipped at ``e227de08``).
 """
 
 from ._events import (

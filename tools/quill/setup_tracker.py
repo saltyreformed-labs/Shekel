@@ -5,7 +5,7 @@ The plan moves out of ``docs/plans/`` into a private repository's Issues
 issue -- a "card" -- and one Project board holds the open ones in the order
 the developer drags them.  This module is the one home of WHERE that tracker
 lives (:class:`Place`: :data:`PLAN`, and :data:`REHEARSAL`, the throwaway one
-X-cx's migration is rehearsed on) and of its CONFIGURATION: the repository and
+X-cx's migration was rehearsed on) and of its CONFIGURATION: the repository and
 its settings, the labels, the board, and the things only the web can set (the
 organization's issue types and issue fields, which need a scope the shared token
 does not carry; the board's automations and its view's sort, which the API cannot
@@ -48,10 +48,12 @@ view, so the shipped work kept as closed cards (ruling ``balance:R-BAL352``) wou
 vanish from the view that shows it.  So every automation is off, and any archived
 board item is a difference (the coordinator's call, 14:4x 2026-10-21).
 
-**The organization's issue fields are exactly one, Arc** (rulings ``balance:R-BAL348``,
-``R-BAL354``): a single select of the arcs, which a card's arc moves into after the
-cutover, its matching label then kept as display.  GitHub's four default fields and
-any other are differences, deleted on the web (:data:`ARC_FIELD`).
+**The organization's issue fields are exactly the five declared** (:data:`ISSUE_FIELDS`;
+rulings ``balance:R-BAL348``, ``R-BAL354``, and the developer's word of 2026-10-25): Arc, a
+single select of the arcs, which a card's arc moves into after the cutover, its matching
+label then kept as display; and GitHub's four defaults, Priority, Effort, Start date and
+Target date, which the developer keeps, empty for now.  Any other is a difference, deleted
+on the web.
 
 Usage, from the repository root::
 
@@ -63,6 +65,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
@@ -109,9 +112,10 @@ class Place:
 #: this module configures and every quill command reads and writes.
 PLAN = Place("saltyreformed-labs", "shekel-plan", "Shekel plan")
 
-#: The throwaway tracker X-cx's migration (L7) is rehearsed on before L8 runs it
-#: on :data:`PLAN`.  Its name holds :data:`PLAN`'s, which is why a place's names
-#: are compared as tokens.
+#: The throwaway tracker X-cx's migration (L7) was rehearsed on before L8 ran it
+#: on :data:`PLAN`; since S3b deleted the migration, only the tests read it, as the
+#: place whose name holds :data:`PLAN`'s, which is why a place's names are compared
+#: as tokens.
 REHEARSAL = Place("saltyreformed-labs", "shekel-plan-rehearsal", "Shekel plan rehearsal")
 
 #: :data:`PLAN`'s names, which this module's checks configure.
@@ -130,13 +134,34 @@ TASK = "task"
 ISSUE_TYPES = (*CARD_TYPES, TASK)
 ISSUE_TYPES_URL = f"https://github.com/organizations/{ORG}/settings/issue-types"
 
-#: The organization's one issue field (rulings ``balance:R-BAL348``, ``R-BAL354``): a single
-#: select whose options are the arcs, :data:`tools.ci.arcs.ARCS`.  An organization's issue
-#: fields, like its issue types, are changed only with the ``admin:org`` scope, so the
-#: developer changes them on the web and this module checks them; any other field is a
-#: difference (GitHub makes four, Priority, Effort, Start date and Target date, when issue
-#: fields are switched on).
-ARC_FIELD = "Arc"
+
+@dataclass(frozen=True)
+class IssueField:
+    """One of the organization's issue fields as declared here: its type as GitHub's GraphQL
+    names it (``dataType``) and, for a single select, its options, which match in any order
+    and which a difference names as ``options_named``."""
+
+    data_type: str
+    options: tuple[str, ...] = ()
+    options_named: str = "the options declared here"
+
+
+#: The organization's issue fields, by name (rulings ``balance:R-BAL348``, ``R-BAL354``).
+#: Arc is a single select whose options are the arcs, :data:`tools.ci.arcs.ARCS`.  GitHub
+#: makes four more when issue fields are switched on, Priority, Effort, Start date and Target
+#: date.  R-BAL348 ruled them deleted, a click on the web that was never made, and on
+#: 2026-10-25 the developer kept them ("I want to use those fields even if they are empty for
+#: now"), so each is declared exactly as the organization held it that day.  An
+#: organization's issue fields, like its issue types, are changed only with the ``admin:org``
+#: scope, so the developer changes them on the web and this module checks them; any other
+#: field is a difference.
+ISSUE_FIELDS = {
+    "Arc": IssueField("SINGLE_SELECT", ARCS, "the arcs"),
+    "Priority": IssueField("SINGLE_SELECT", ("Urgent", "High", "Medium", "Low")),
+    "Start date": IssueField("DATE"),
+    "Target date": IssueField("DATE"),
+    "Effort": IssueField("SINGLE_SELECT", ("High", "Medium", "Low")),
+}
 ISSUE_FIELDS_URL = f"https://github.com/organizations/{ORG}/settings/issue-fields"
 
 #: The repository's settings this module holds.  ``auto_init`` is a creation
@@ -160,9 +185,17 @@ _ARC_COLORS = ("0e8a16", "1d76db", "5319e7", "d93f0b", "006b75", "c5a100")
 #: until its filing's last write removes it (ruling ``balance:R-BAL202``).
 FILING = "filing"
 
+
+def unmarked(labels: Iterable[str]) -> tuple[str, ...]:
+    """A card's ``labels`` with the :data:`FILING` mark taken out, in their order: the one
+    producer of them, for a decision that sets the mark aside and for the fake tracker's
+    removal of it (BAL-620)."""
+    return tuple(label for label in labels if label != FILING)
+
+
 #: The two labels a release reads: a step whose release moves money, and a parent
-#: whose leaves ``/release`` ships in one release.  ``quill file step --label`` and X-cx's
-#: migration name them here.
+#: whose leaves ``/release`` ships in one release.  ``quill file step --label`` takes its
+#: choices from here.
 MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL = "moves-money", "deploy-together"
 
 #: Every label the tracker carries: one per arc, the two a release reads, and
@@ -275,7 +308,7 @@ query($owner: String!, $name: String!) {
   }
 }"""
 
-_ISSUE_FIELDS = """
+_ISSUE_FIELDS_QUERY = """
 query($org: String!) {
   organization(login: $org) {
     issueFields(first: 100) {
@@ -574,36 +607,42 @@ def check_issue_types(github: GitHub, report: Report) -> None:
 
 def issue_field_differences(fields: dict) -> list[str]:
     """Each way the organization's issue fields (``issueFields``, read as
-    :data:`_ISSUE_FIELDS`) differ from the one declared: :data:`ARC_FIELD`, a single select
-    whose options are exactly the arcs.  A read GitHub cut short is a difference too: the
-    fields it does not hold are unread."""
+    :data:`_ISSUE_FIELDS_QUERY`) differ from those declared, :data:`ISSUE_FIELDS`: each one
+    present, of its type, and a single select holding exactly its options, in any order.
+    A read GitHub cut short is a difference too: the fields it does not hold are unread."""
     nodes, differences = fields["nodes"], []
     if fields["totalCount"] > len(nodes):
         differences.append(f"the organization has {fields['totalCount']} issue fields and the "
                            f"read holds {len(nodes)}: the rest are unread")
-    arc = [node for node in nodes if node["name"] == ARC_FIELD]
-    if not arc:
-        differences.append(f"issue field {ARC_FIELD!r} is missing: make it")
-    for node in arc:
-        if node["dataType"] != "SINGLE_SELECT":
-            differences.append(f"issue field {ARC_FIELD!r} is a {node['dataType']}, not a single "
-                               "select: correct it")
-        elif sorted(options := [option["name"] for option in node["options"]]) != sorted(ARCS):
-            differences.append(f"issue field {ARC_FIELD!r} holds the options {options}, not the "
-                               f"arcs {list(ARCS)}: correct it")
+    for name, declared in ISSUE_FIELDS.items():
+        found = [node for node in nodes if node["name"] == name]
+        if not found:
+            differences.append(f"issue field {name!r} is missing: make it")
+        for node in found:
+            if node["dataType"] != declared.data_type:
+                differences.append(
+                    f"issue field {name!r} is a {node['dataType']}, not a "
+                    f"{declared.data_type.lower().replace('_', ' ')}: correct it")
+            elif declared.data_type == "SINGLE_SELECT" and sorted(
+                    options := [option["name"] for option in node["options"]]
+            ) != sorted(declared.options):
+                differences.append(
+                    f"issue field {name!r} holds the options {options}, not "
+                    f"{declared.options_named} {list(declared.options)}: correct it")
     differences += [f"issue field {node['name']!r} is not declared here: delete it"
-                    for node in nodes if node["name"] != ARC_FIELD]
+                    for node in nodes if node["name"] not in ISSUE_FIELDS]
     return differences
 
 
 def check_issue_fields(github: GitHub, report: Report) -> None:
-    """Check the organization's issue fields (changed on the web; see :data:`ARC_FIELD`)."""
+    """Check the organization's issue fields (changed on the web; see :data:`ISSUE_FIELDS`)."""
     differences = issue_field_differences(
-        github.graphql(_ISSUE_FIELDS, org=ORG)["organization"]["issueFields"])
+        github.graphql(_ISSUE_FIELDS_QUERY, org=ORG)["organization"]["issueFields"])
     for difference in differences:
         report.differs(f"{difference} at {ISSUE_FIELDS_URL}")
     if not differences:
-        report.ok(f"issue fields: exactly {ARC_FIELD!r}, a single select of the {len(ARCS)} arcs")
+        report.ok(f"issue fields: exactly the {len(ISSUE_FIELDS)} declared: "
+                  f"{', '.join(map(repr, ISSUE_FIELDS))}")
 
 
 def _project(github: GitHub, project_id: str) -> dict:

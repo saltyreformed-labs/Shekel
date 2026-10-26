@@ -13,10 +13,13 @@ purchase's OWN day basis and never by its parent: a purchase the bank observed
 carries the bank's figure, every other one a person's.  Each case below stages
 rows in the pre-backfill state -- dated or not, with NO source -- runs
 ``classify_figure_sources`` against the test connection, and reads the
-classification back by NAME.  The NOT NULL is dropped for the duration of each
-case because the state a backfill classifies is exactly the intermediate the
-migration itself creates before it adds it; DDL is transactional in
-PostgreSQL, so the rollback each case ends with restores it.
+classification back by NAME.  What refuses a movement with no source is
+dropped for the duration of each case -- the NOT NULL until revision
+``b7d2e4f19a63``, and since it the CHECK that a movement off a transfer's
+side names its source (a side's record names none) -- because the state a
+backfill classifies is exactly the intermediate the migration itself creates
+before it adds the NOT NULL; DDL is transactional in PostgreSQL, so the
+rollback each case ends with restores it.
 """
 
 from datetime import timedelta
@@ -53,10 +56,14 @@ class TestTheBackfillArmsAreExactOverTheirOwnPredicates:
 
     @staticmethod
     def _unrequire(db_session):
-        """Drop the NOT NULL, so the pre-backfill state is expressible."""
+        """Drop the CHECK requiring a purchase's source, so the pre-backfill state is expressible.
+
+        The column holds no NOT NULL since ``b7d2e4f19a63`` (a side's record
+        names no source); this CHECK is what refuses a purchase naming none.
+        """
         db_session.session.execute(sqlalchemy.text(
-            "ALTER TABLE budget.transaction_entries "
-            "ALTER COLUMN figure_source_id DROP NOT NULL"
+            "ALTER TABLE budget.transaction_entries DROP CONSTRAINT "
+            "ck_transaction_entries_side_record_names_no_figure_source"
         ))
 
     @staticmethod

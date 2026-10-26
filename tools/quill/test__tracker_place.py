@@ -1,5 +1,5 @@
-"""A tracker's place, its board's fence, the whole-card listing, the numbering probe and the
-paged title search (X-cx L7), against scripted GitHub answers; nothing calls GitHub.
+"""A tracker's place, its board's fence and the paged title search (X-cx L7), against
+scripted GitHub answers; nothing calls GitHub.
 
 No recording holds these reads yet: the rehearsal tracker they are for does not exist,
 and the real tracker's own reads are kept on the real tracker's scratch cards only
@@ -16,8 +16,6 @@ import re
 import pytest
 
 from tools.quill import _tracker, quill
-from tools.quill._fake import FakeTracker
-from tools.quill._github import GitHubError
 from tools.quill._recorded import recording
 from tools.quill._tracker import (
     BOARD_ADD,
@@ -25,14 +23,10 @@ from tools.quill._tracker import (
     BOARD_REMOVE,
     BOARD_TOP,
     Board,
-    Comment,
-    NumberState,
-    Numbering,
     Tracker,
     TrackerError,
     board_of,
     card_from,
-    numbering,
 )
 from tools.quill.setup_tracker import PLAN, REHEARSAL
 
@@ -118,14 +112,13 @@ def test_every_read_of_a_rehearsal_tracker_names_the_rehearsal_repository_whole(
     assert tracker.place is REHEARSAL
     tracker.open_cards()
     tracker.marked()
-    tracker.all_cards()
     tracker.cards([5])
     tracker.body(5)
     tracker.edits(5)
     tracker.comments(5)
     tracker.find_titles("x")
     queries = [query for kind, query, _ in github.sent if kind == "GRAPHQL"]
-    assert len(queries) == 6
+    assert len(queries) == 5
     for query in queries:
         assert _names_in(query) == [(REHEARSAL.owner, REHEARSAL.name)], query
     assert [path for kind, path, _ in github.sent if kind == "GET"] == [
@@ -239,157 +232,6 @@ def test_a_cut_short_read_that_does_not_name_the_repository_is_refused_as_unread
                              "saltyreformed-labs/shekel-plan-rehearsal: whether it is "
                              "linked is unread$"):
         board_of(_short_read([PLAN.full_name]), REHEARSAL)
-
-
-# -- every card, whole -------------------------------------------------------
-
-def _whole(number, body, comments, total=None, milestone=None):
-    """Card ``number``'s recorded node with a body, comments and a milestone (its number, or
-    None for none) added, as the whole-card listing reads it."""
-    node = _recorded_open_node(number)
-    node["body"] = body
-    node["milestone"] = None if milestone is None else {"number": milestone}
-    node["comments"] = {"totalCount": len(comments) if total is None else total,
-                        "nodes": [{"author": {"login": who}, "createdAt": when, "body": text}
-                                  for who, when, text in comments]}
-    return node
-
-
-def test_every_card_is_listed_whole_page_by_page_and_a_long_comment_thread_read_in_full():
-    """Two pages; card #3's thread has more comments than the listing carries, so its
-    comments are read in full by number; a card with no body reads as an empty one."""
-    pages = [
-        {"repository": {"issues": {"pageInfo": {"hasNextPage": True, "endCursor": "C1"},
-                                   "nodes": [_whole(2, "two", [("a", "t1", "hello")])]}}},
-        {"repository": {"issues": {"pageInfo": {"hasNextPage": False, "endCursor": None},
-                                   "nodes": [_whole(3, None, [("a", "t1", "first")], total=101),
-                                             _whole(4, "four", [])]}}},
-    ]
-    thread = {"repository": {"issue": {"number": 3, "comments": {
-        "pageInfo": {"hasNextPage": False, "endCursor": None},
-        "nodes": [{"author": {"login": "a"}, "createdAt": f"t{n}", "body": f"c{n}"}
-                  for n in range(101)]}}}}
-    afters = []
-
-    def answer(query, **variables):
-        if "comments(first: 100, after" in query:
-            assert variables["number"] == 3
-            return copy.deepcopy(thread)
-        afters.append(variables["after"])
-        assert "states: [OPEN, CLOSED]" in query and " body\n" in query
-        return pages.pop(0)
-
-    github = _Scripted(graphql=answer)
-    cards = Tracker(github, Board(github, PLAN, "B"), APP).all_cards()
-    assert afters == [None, "C1"]
-    assert sorted(cards) == [2, 3, 4]
-    assert (cards[2].card.number, cards[2].body, cards[2].comments) == (
-        2, "two", (Comment("a", "t1", "hello"),))
-    assert cards[3].body == "" and len(cards[3].comments) == 101
-    assert cards[3].comments[100] == Comment("a", "t100", "c100")
-    assert cards[4].comments == ()
-
-
-def test_the_whole_card_listing_reads_each_cards_milestone_by_number():
-    """The listing selects a card's milestone (L7 draft 4 s.12: there, not in the fields
-    every query shares) and a card holds its number, None for none."""
-    page = {"repository": {"issues": {"pageInfo": {"hasNextPage": False, "endCursor": None},
-                                      "nodes": [_whole(2, "two", [], milestone=3),
-                                                _whole(3, "three", [])]}}}
-
-    def answer(query, **_variables):
-        assert "milestone { number }" in query
-        return copy.deepcopy(page)
-
-    github = _Scripted(graphql=answer)
-    cards = Tracker(github, Board(github, PLAN, "B"), APP).all_cards()
-    assert (cards[2].milestone, cards[3].milestone) == (3, None)
-
-
-# -- the numbering -----------------------------------------------------------
-
-#: The real tracker on 2026-10-08 (review 3, read-only): #1-#10, #26 and #27 exist;
-#: #11-#25 and #28-#30 answer 410; #31 answers 404.
-TODAY = {**dict.fromkeys([*range(1, 11), 26, 27], NumberState.ISSUE),
-         **dict.fromkeys([*range(11, 26), 28, 29, 30], NumberState.DELETED)}
-
-
-def _state_of(states):
-    """A REST read by number over ``states``; any other number answers 404.  It keeps every
-    number read."""
-    read = []
-
-    def state_of(number):
-        read.append(number)
-        return states.get(number, NumberState.NOT_FOUND)
-    return state_of, read
-
-
-def test_the_numbering_steps_over_deleted_numbers_and_stops_at_the_first_404_above():
-    """Every gap below the highest listed is read, and every number above it up to the
-    first 404: the read stops at #31, not #28."""
-    state_of, read = _state_of(TODAY)
-    listed = [number for number, state in TODAY.items() if state is NumberState.ISSUE]
-    assert numbering(listed, state_of) == Numbering(
-        tuple([*range(11, 26), 28, 29, 30]), (), 31)
-    assert read == [*range(11, 26), 28, 29, 30, 31]
-
-
-def test_a_pull_request_is_stepped_over_and_an_empty_tracker_starts_at_one():
-    """A pull request takes a number from the same sequence and is no card."""
-    state_of, _ = _state_of({1: NumberState.ISSUE, 2: NumberState.PULL_REQUEST})
-    assert numbering([1], state_of) == Numbering((), (2,), 3)
-    assert numbering([], _state_of({})[0]) == Numbering((), (), 1)
-
-
-@pytest.mark.parametrize(("states", "listed", "refusal"), [
-    ({**TODAY, 31: NumberState.ISSUE}, [*range(1, 11), 26, 27], "#31 is an issue the listing"),
-    ({**TODAY, 12: NumberState.ISSUE}, [*range(1, 11), 26, 27], "#12 is an issue the listing"),
-    ({1: NumberState.ISSUE, 3: NumberState.ISSUE}, [1, 3], "#2 answers 404"),
-])
-def test_an_issue_the_listing_lacks_or_a_hole_below_the_highest_is_refused(
-        states, listed, refusal):
-    """A create whose answer was lost, read by number past a listing that lags it, is
-    refused rather than filed again; GitHub's one sequence leaves no unissued number below
-    an issued one."""
-    with pytest.raises(TrackerError, match=refusal):
-        numbering(listed, _state_of(states)[0])
-
-
-@pytest.mark.parametrize(("answer", "state"), [
-    (GitHubError(410, "This issue was deleted"), NumberState.DELETED),
-    (GitHubError(404, "Not Found"), NumberState.NOT_FOUND),
-    ({"number": 5, "pull_request": {"url": "u"}}, NumberState.PULL_REQUEST),
-    ({"number": 5}, NumberState.ISSUE),
-])
-def test_a_number_is_read_by_rest_and_answered_by_its_status(answer, state):
-    """What each answer to ``GET /repos/<place>/issues/<n>`` means."""
-    github = _Scripted(rest={("GET", f"{REHEARSAL.path}/issues/5"): answer})
-    assert Tracker(github, Board(github, REHEARSAL, "B"), APP).number_state(5) is state
-
-
-def test_a_moved_issue_is_refused_and_any_other_refusal_raised():
-    """A 301 (an issue transferred away; never followed) is a refusal naming it; a 500 is
-    GitHub's error, raised as it came."""
-    path = f"{PLAN.path}/issues/5"
-    moved = _Scripted(rest={("GET", path): GitHubError(301, "Moved Permanently")})
-    with pytest.raises(TrackerError, match="#5 of saltyreformed-labs/shekel-plan was moved"):
-        Tracker(moved, Board(moved, PLAN, "B"), APP).number_state(5)
-    broken = _Scripted(rest={("GET", path): GitHubError(500, "boom")})
-    with pytest.raises(GitHubError, match="boom"):
-        Tracker(broken, Board(broken, PLAN, "B"), APP).number_state(5)
-
-
-def test_the_fake_tracker_numbers_as_github_does_over_deleted_numbers():
-    """Code B's migration is graded on the fake: a deleted number is read as GitHub reads one
-    and is never given out again, so the probe's stopping number and the fake's next
-    create agree."""
-    tracker = FakeTracker()
-    for number in (*range(1, 11), 26, 27):
-        tracker.add(number)
-    tracker.gone = {*range(11, 26), 28, 29, 30}
-    assert numbering(tracker.all_cards(), tracker.number_state).stopped_at == 31
-    assert tracker.create("step", "t", "b", ["balance"]) == 31
 
 
 # -- the title search --------------------------------------------------------

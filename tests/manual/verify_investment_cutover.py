@@ -56,7 +56,7 @@ records.
 
 **Two axes it CANNOT vary**, named so the next reader does not over-read a
 clean run.  Both are covered by hand-computed cases in
-``tests/test_routes/test_investment.py`` instead, which is where a state the
+``tests/test_routes/test_investment/`` instead, which is where a state the
 production clone does not hold belongs.
 
 1. **One CLOCK -- the day it runs.**  So it cannot exercise an owner whose

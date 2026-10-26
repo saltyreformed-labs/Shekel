@@ -112,16 +112,22 @@ def _add_expense(
 
 
 def _undated_transfer_out(db_session, seed_user, period, to_account_name, amount):
-    """Create an UNDATED transfer-out shadow on the checking account.
+    """Create an UNDATED transfer out of the checking account.
 
-    The pulse's "anytime this period" shelf exists for rows with no due date.
+    The pulse's "anytime this period" shelf exists for items with no due date.
     Every one-off is dated on its paycheck's start since plan step
     balance:X-bi-7b (R-BAL22) and the cutover (balance:X-bi-7d-2) dated
     production's 26 undated one-offs the same way, so what still feeds the
-    shelf is a row NO definition prices: a transfer's expense shadow (the
-    unpaid-expense query includes transfer-out shadows, the Gate B4b ruling)
-    made without a due date, which the transfer form leaves optional.  The
-    shadow is named ``Transfer to <to_account_name>`` by the service.
+    shelf is an item NO definition prices: a transfer's expense leg (the
+    unpaid-expense loader draws the expense leg of a projected transfer out of
+    the set, the Gate B4b ruling) made without a due date, which the transfer
+    form leaves optional.  The leg is named ``Transfer to <to_account_name>``
+    off the transfer's endpoints.
+
+    It returned the transfer's expense shadow row, guarded undated, until plan
+    step balance:X-bi-6-4d-2 made a transfer one row (ruling R-BAL258); the
+    guard reads the transfer's own due date now, the column the leg projects,
+    and no caller read the return (ruling R-BAL167 class 4).
     """
     savings = create_savings_account(
         seed_user, db_session, to_account_name, Decimal("500.00"),
@@ -131,12 +137,8 @@ def _undated_transfer_out(db_session, seed_user, period, to_account_name, amount
         amount=Decimal(str(amount)),
     )
     db_session.flush()
-    shadow = next(
-        s for s in xfer.shadow_transactions
-        if s.account_id == seed_user["account"].id
-    )
-    assert shadow.due_date is None
-    return shadow
+    assert xfer.due_date is None
+    return xfer
 
 
 def _add_tracked_expense(db_session, seed_user, period, name, estimated):
@@ -1124,25 +1126,27 @@ class TestTheBillsAreThePaychecksAcrossTheSet:
         """Ruling R-CC23 on the bills: the far leg is not a bill.
 
         A $165.00 checking -> card payment is ONE obligation, checking's
-        expense shadow (the Gate B4b transfer-out rule); the card's income
-        shadow is income-typed and the far leg, twice excluded.  A $40.00
-        card -> checking transfer is NO bill: checking's shadow is income
-        and the card's expense shadow is the far leg -- the second view of an
-        act the balance line's side already shows.  Still-due is $165.00 and
-        the due-soon list holds exactly the one transfer row.  Under the
-        ``account_id IN members`` filter without the far-leg arm the card's
-        $40.00 shadow would be a bill and the total $205.00.
+        expense leg (the Gate B4b transfer-out rule); the card's leg is its
+        income leg and the far leg, twice excluded.  A $40.00 card ->
+        checking transfer is NO bill: checking's leg is income and the card's
+        expense leg is the far leg -- the second view of an act the balance
+        line's side already shows.  Still-due is $165.00 and the due-soon
+        list holds exactly the one transfer bill.  Without the far-leg arm the
+        card's $40.00 leg would be a bill and the total $205.00.
 
         The transfer doors refuse a transfer OUT of a card (plan step CC-10),
         so the $40.00 card -> checking transfer is the representable-but-
         refused shape and its state is PLANTED, the way the legacy-source
         tests plant theirs: created from a helper Savings account INTO
-        checking (allowed), then its source and its expense shadow re-pointed
-        onto the card by assignment, past the door.  The savings account is
-        not a member of the set and holds no transaction row once the shadow
-        has moved.  The plant carries its own tell, because an UN-planted
-        fixture (helper -> checking, never re-pointed) reads the same $165.00
-        with or without the far-leg arm and would grade nothing.
+        checking (allowed), then its source re-pointed onto the card by
+        assignment, past the door.  The re-point moved the transfer's expense
+        shadow row too until plan step balance:X-bi-6-4d-2 made a transfer
+        one row (ruling R-BAL258); the transfer is the whole plant now
+        (ruling R-BAL167 class 1).  The savings account is not a member of
+        the set.  The plant carries its own tell, the transfer's endpoints,
+        because an UN-planted fixture (helper -> checking, never re-pointed)
+        reads the same $165.00 with or without the far-leg arm and would
+        grade nothing.
         """
         with app.app_context():
             card = self._card(seed_user, db.session)
@@ -1160,15 +1164,10 @@ class TestTheBillsAreThePaychecksAcrossTheSet:
             )
             db.session.flush()
             out_of_card.from_account = card
-            next(
-                s for s in out_of_card.shadow_transactions
-                if s.account_id == helper.id
-            ).account = card
             db.session.commit()
-            assert out_of_card.from_account_id == card.id
-            assert {s.account_id for s in out_of_card.shadow_transactions} == {
+            assert (out_of_card.from_account_id, out_of_card.to_account_id) == (
                 card.id, seed_user["account"].id,
-            }
+            )
 
             result = dashboard_service.compute_pulse_section(
                 dashboard_section(seed_user["user"].id),
@@ -1256,8 +1255,12 @@ class TestTheBillsAreLegsReadOffTheParent:
                 section.cash_flow, seed_user["scenario"].id, [period.id],
             )
 
+            # "No shadow" is the database's since plan step
+            # balance:X-bi-6-4d-2: a row naming a transfer is refused at the
+            # write (ruling R-BAL258), so a per-row ``transfer_id is None``
+            # check here passed with ``own_rows_clause``'s ``IS NULL`` term
+            # deleted (measured 10-15) and is gone.
             assert [row.name for row in unpaid.rows] == ["Rent"]
-            assert all(row.transfer_id is None for row in unpaid.rows)
             assert [
                 (leg.transfer.id, leg.account_id, leg.is_expense)
                 for leg in unpaid.legs
@@ -1452,7 +1455,7 @@ class TestPulseDueSoon:
 
         Current period 5 starts 2026-03-13.  A bill due 2026-03-22 has
         day_offset = (03-22 - 03-13).days = 9.  An undated transfer-out
-        shadow carries day_offset None and undated True, and sorts AFTER
+        leg carries day_offset None and undated True, and sorts AFTER
         dated rows.
         """
         with app.app_context():
@@ -1630,7 +1633,7 @@ class TestPulseDueSoonStations:
     ):
         """Undated rows stay off the axis but remain in due_soon (shelf).
 
-        An undated transfer-out shadow has no day_offset, so it forms no
+        An undated transfer-out leg has no day_offset, so it forms no
         station, but it still appears in the flat due_soon list the "anytime
         this period" shelf renders.
         """
@@ -1652,7 +1655,7 @@ class TestPulseDueSoonStations:
             # Only the dated bill forms a station.
             assert len(stations) == 1
             assert stations[0]["visible_items"][0]["name"] == "Dated"
-            # The undated shadow is still on the flat list (shelf intact).
+            # The undated leg is still on the flat list (shelf intact).
             undated = [b for b in result["due_soon"] if b["undated"]]
             assert [b["name"] for b in undated] == ["Transfer to Undated jar"]
 

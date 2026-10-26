@@ -282,14 +282,16 @@ def accepted_groups(
         # covering movement names THAT ROW and not a purchase, so a residual the act
         # minted -- created as a row, named as its payment -- still meets
         # its creation here, and a payment member is never mistaken for a
-        # purchase the act would have had to create.
+        # purchase the act would have had to create.  A transfer side's
+        # payment names its LEG (a ``(transfer id, account id)`` pair, plan
+        # step ``balance:X-bi-6-4d-2``), which no creation's key can equal.
         created_keys = {
             (creation.transaction_id, creation.transaction_entry_id)
             for creation in match.creations
         }
-        named_transactions, named_purchases = named_rows(match)
+        named_items, named_purchases = named_rows(match)
         member_keys = (
-            {(row_id, None) for row_id in named_transactions}
+            {(item, None) for item in named_items}
             | {(None, entry_id) for entry_id in named_purchases}
         )
         groups.append(AcceptedGroup(

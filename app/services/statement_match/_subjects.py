@@ -59,7 +59,8 @@ class RowKind(enum.Enum):
     this account (``transfer_service.leg_settle_amount``), its clock is the
     transfer's paycheck, and its door is the transfer's
     (``settle_transfer``).  It is keyed by the TRANSFER's id, not by the
-    hidden shadow row the transfer service still writes on this account:
+    hidden shadow row the transfer service wrote on this account until plan
+    step ``balance:X-bi-6-4d-2``:
     R-BAL87 makes a leg's identity ``(transfer, account)``, and on ONE
     account's screen the account is the scope's, so the transfer names the
     leg and the kind says it is one (R-BAL159) -- no identity test is asked
@@ -415,9 +416,10 @@ class CandidateRow:  # pylint: disable=too-many-instance-attributes
         for and the day the balance was asserted.
 
         **PURCHASES only, and that is a measured scope rather than a
-        half-finished one** (developer decision 2026-08-22).  The panel stamps
-        bills and transfer shadows identically, so the argument for widening
-        them is the same -- but the EVIDENCE is not, and neither is the risk.
+        half-finished one** (developer decision 2026-08-22).  The panel then
+        stamped bills and transfer shadows identically, so the argument for
+        widening them was the same -- but the EVIDENCE was not, and neither
+        was the risk.
         ``budget.transactions`` carries **zero** reconciled rows today, so that
         arm would ship on argument alone; and a purchase's floor is a database
         fact (``ck_transaction_entries_settled_not_before_purchase``) while a
@@ -482,9 +484,10 @@ class CandidateRow:  # pylint: disable=too-many-instance-attributes
 
         The two facts it reads are the row's own, and each is stated once:
 
-        * one side of a TRANSFER cannot be corrected alone -- ``CLAUDE.md``
-          transfer invariant 3 holds both sides equal to the parent, so the
-          correction is to the TRANSFER.  :attr:`transfer_id` is that fact,
+        * one side of a TRANSFER cannot be corrected alone -- a transfer is
+          one row, whose one figure both of its sides carry (the transfer
+          paragraph of ``CLAUDE.md``'s Architecture), so the correction is
+          to the TRANSFER.  :attr:`transfer_id` is that fact,
           for a LEG and a leg's payment alike;
         * a row whose figure is not its own to state cannot be corrected at
           all, because the next sibling write reverts it (finding **N-252**).
@@ -644,13 +647,15 @@ class Candidates:
             legs (LEG), then the purchases
             (:func:`~._candidates.candidates_for`).
         unpriceable: The ``(kind, row_id)`` of every subject that could not
-            be priced -- a row the amount model had no rule for, and since
-            leaf ``balance:X-bi-6-4c-1`` a leg whose transfer is damaged
-            (ruling **R-BAL158**: not offered, and counted in the screen's
-            "could not be priced" note).  Keyed by subject rather than by a
-            bare id because two tables' ids now share it.  Empty on today's
-            data -- every production row still owns its figure and no
-            transfer is damaged -- and live from the first per-kind cutover
+            be priced -- a row or a leg the amount model had no rule for,
+            counted in the screen's "could not be priced" note (a leg whose
+            transfer's twin pair was damaged was counted too from leaf
+            ``balance:X-bi-6-4c-1``, ruling **R-BAL158**, until ruling
+            **R-BAL235** at ``X-bi-6-4d-2`` priced a leg off its transfer
+            alone).  Keyed by subject rather than by a bare id because two
+            tables' ids now share it.  Empty on today's data -- every
+            production row still owns its figure -- and live from the first
+            per-kind cutover
             (plan step ``balance:X-au-d``).  They are NOT candidates: a
             matcher that offered a row it could not price would be guessing.
         held_elsewhere: The rows planned on this account that are NOT offered

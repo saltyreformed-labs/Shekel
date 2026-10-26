@@ -291,11 +291,14 @@ def _own_clauses(statement: _rows.Statement) -> tuple:
     plan step ``credit_card:CC-5-4b``, which made it each scope's; its
     complement is :func:`_settlement_clauses`' first.
 
-    ``transfer_id IS NULL`` -- a transfer settles through
-    ``transfer_service.settle_transfer`` so both legs and the parent move
-    together (``CLAUDE.md`` transfer invariant 3), and
-    ``transaction_service.settle_transaction`` REFUSES a shadow, so admitting
-    one here would turn a design boundary into a 400.  A transfer is the
+    ``transfer_id IS NULL`` -- a transfer is one row and settles through
+    ``transfer_service.settle_transfer`` (the transfer paragraph of
+    ``CLAUDE.md``'s Architecture), and
+    ``transaction_service.settle_transaction`` REFUSES a row naming one, so
+    admitting one here would turn a design boundary into a 400.  No row
+    names a transfer since plan step ``balance:X-bi-6-4d-2``
+    (``ck_transactions_names_no_transfer``), so the clause excludes no
+    stored row.  A transfer is the
     transfer arm's (:mod:`._transfers`), which offers its LEG off
     ``budget.transfers`` since leaf ``balance:X-bi-6-4c-2``; until then its
     clause was this one's complement over this table.
@@ -407,12 +410,12 @@ def _settlement_clauses(statement: _rows.Statement) -> tuple:
       in at most one (ruling **R-CC116**).  The row's own account's list
       leaves it out (ruling **R-CC126**, :func:`_own_clauses`), so it is
       offered here alone.
-    * ``transfer_id IS NULL`` -- a transfer settles through the transfer
-      service and ``settle_transaction`` refuses a shadow.  A shadow's
-      covering movements are kept on the shadow's own account
-      (``transfer_service._endpoints._apply_endpoint_move`` re-points them
-      with the endpoint), so the next clause admits none today; this one
-      keeps the scope inside the verb's domain rather than relying on that.
+    * ``transfer_id IS NULL`` -- a transfer is one row and settles through
+      ``transfer_service.settle_transfer``, and ``settle_transaction``
+      REFUSES a row naming one.  No row names a transfer since plan step
+      ``balance:X-bi-6-4d-2`` (``ck_transactions_names_no_transfer``), so the
+      clause excludes no stored row; it keeps the scope inside the verb's
+      domain rather than relying on that.
     * it holds an UN-DATED covering movement ON THIS ACCOUNT -- the payment
       the statement may show.  Un-dated, because that is the payment R-CC44
       lists: a dated one already posts and folds on its own day, so it is in

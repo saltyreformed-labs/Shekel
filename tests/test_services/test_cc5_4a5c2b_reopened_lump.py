@@ -31,7 +31,7 @@ from app.services.statement_match import accept_match
 from app.services.transaction_service import settle_transaction
 from app.utils.dates import display_today
 from tests._test_helpers import generate_row_of, make_expense_template, typed
-from tests.test_services.test_cc5_4a1_settlement_subject import (
+from tests.test_services.test_cc5_4a1_settlement_subject._helpers import (
     _accept,
     _card,
     _entered,

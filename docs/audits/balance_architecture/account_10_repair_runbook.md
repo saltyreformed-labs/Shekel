@@ -18,12 +18,12 @@ it too: its books open on a plug rather than on its bank's close (**N-275**), an
 lines is recorded nowhere (**BAL-468**).
 
 **An owner performs it by clicking through the app**, never by a migration or a script writing
-money rows (ruling **R-HJ**). The acts, their order and their reasons are ruled in
-`../../plans/rulings.md` at **R-HJ**, **R-HK**, **R-HL**, **R-HM** and **R-BAL3**, amended
+money rows (ruling **R-HJ**). The acts, their order and their reasons are ruled
+at **R-HJ**, **R-HK**, **R-HL**, **R-HM** and **R-BAL3** (ruling cards in the tracker), amended
 2026-10-09 by **R-BAL249** (this file's split), **R-BAL250** (act 9 renames a category),
 **R-BAL255** (act 1 cancels rather than deletes) and **R-BAL256** (every Fidelity side is typed
-its own day). The step's tick filed those four in `rulings.md`, and **BAL-622** in
-`../../plans/ledger.md`; before it their verbatim record was the step's handoff folder. This file
+its own day). The step's tick filed those four as rulings, and **BAL-622** as a
+finding; before it their verbatim record was the step's handoff folder. This file
 is how to carry them out.
 
 **Where the amounts are (ruling R-BAL249).** This file names every amount by its ROLE ("Fidelity's

@@ -353,7 +353,7 @@ Eleven `pay_calendar` steps are unshipped. **Seven are touched by this cause; fo
 ## 6. The order this argues for
 
 **No re-ranking is proposed.** Nothing here makes a ranked step wrong to do in its ranked place, and
-the plan gate reads the order as a sequence.
+the board holds the order as one sequence.
 
 What it argues is narrower:
 

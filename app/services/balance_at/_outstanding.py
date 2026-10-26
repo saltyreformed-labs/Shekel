@@ -1,7 +1,7 @@
 """Balance-at-T seam -- what an account's own BOOKS cannot explain.
 
-Plan step **X-f3c-3** (``docs/audits/balance_architecture/README.md`` section
-5), and it moves no money: it is the INSTRUMENT plan step X-f3c-4's acceptance
+Plan step **X-f3c-3** (shipped at ``a7dbfdca``),
+and it moves no money: it is the INSTRUMENT plan step X-f3c-4's acceptance
 act needs, built one step ahead of it so the figure is on screen before
 anything offers to book it.
 
@@ -256,8 +256,8 @@ def cash_outstanding_difference(
 
     **THREE figures name that leg across the corpus and they do not contradict
     each other -- they are one quantity measured on three dates.**
-    ``ledger.md``'s N-171 row says ``$15,065.08`` gross / ``-$1,495.10`` net
-    "over four months"; the balance README's X-f3c-4 entry says ``$1,776.88``;
+    Finding N-171's card says ``$15,065.08`` gross / ``-$1,495.10`` net
+    "over four months"; X-f3c-4's card says ``$1,776.88``;
     this says ``$2,370.02`` on 2026-09-01.  The plug is the NET of every
     assertion's correction, so it moves every time the owner declares a
     balance -- which is why each of the three needs its date carried beside it,

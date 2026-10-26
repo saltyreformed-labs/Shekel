@@ -7,27 +7,36 @@ input or trusted FK IDs without route-boundary ownership checks
 now goes through a Marshmallow schema and/or a per-FK
 ``current_user.id`` probe.  The plan-cited tests live here:
 
-  * ``transactions.mark_done`` -- both branches (regular path and
-    transfer-shadow path) parse ``actual_amount`` via
+  * ``transactions.mark_done`` -- parses the figure via
     :class:`MarkDoneSchema`; a malformed or negative value is
     rejected at the schema tier instead of the route's old
-    ``InvalidOperation`` catch.
+    ``InvalidOperation`` catch.  Its transfer-shadow branch is gone
+    (plan step ``balance:X-bi-6-1``), and the transfer PATCH a grid
+    leg uses refuses the same figure.
 
   * ``transfers.create_ad_hoc`` -- route-boundary FK ownership for
-    ``from_account_id``, ``to_account_id``, ``pay_period_id``,
-    ``scenario_id``, ``category_id`` collapsed into a single loop
-    that returns 404 on the first failure.
+    ``from_account_id``, ``to_account_id``, ``scenario_id``,
+    ``category_id`` collapsed into a single loop that returns 404 on
+    the first failure (``pay_period_id``'s is the service's since plan
+    step ``pay_calendar:C13-b``).
 
   * ``transfers.update_transfer`` -- route-boundary ownership probe
-    on ``category_id`` (the only user-scoped FK the schema accepts).
+    on ``category_id``, the one user-scoped FK of the two the schema
+    accepts whose ownership the route checks (``pay_period_id``'s is
+    the service's since plan step ``pay_calendar:C13-b``).
 
   * ``transfers.create_transfer_template`` /
     ``transfers.update_transfer_template`` -- ownership probes on
     every user-scoped FK accepted by the form.
 
-The IDOR rejections all return 404 (security response rule:
-"404 for both not found and not yours") and prove no row was
-created or mutated in the victim's namespace.
+The ad-hoc and update IDOR rejections return 404 (security response
+rule: "404 for both not found and not yours"); the two template
+routes are form posts and redirect (302) instead.  Each proves the
+request wrote nothing: a create made no row, and the owner's row was not
+re-pointed at the other user's.  On the
+ad-hoc and update doors the service refuses the same references with
+the same 404, so those cases grade the refusal whichever tier gives
+it.
 """
 
 from datetime import date
@@ -41,7 +50,6 @@ from app.extensions import db
 from app.models.account import Account
 from app.models.category import Category
 from app.models.pay_period import PayPeriod
-from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.models.ref import AccountType
@@ -49,8 +57,11 @@ from app.services import pay_period_write, transfer_service
 from app.services import account_service
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
 from app.models.amount_ownership import AmountOwnership
+from app.services.grid_view_service import leg_dom_id
 from app.services.row_valuation import settled_figure
-from tests._test_helpers import one_off_row_of, rhythm_of
+from tests._test_helpers import (
+    one_off_row_of, open_books_before_the_first_assertion, rhythm_of,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -95,7 +106,7 @@ def _create_savings_account(seed_user):
 
 
 def _create_transfer(seed_user, period, savings):
-    """Create a transfer + 2 shadow transactions via the service."""
+    """Create a Projected $100.00 transfer, checking to *savings*, via the service."""
     projected_id = ref_cache.status_id(StatusEnum.PROJECTED)
     xfer = transfer_service.create_transfer(
         transfer_service.TransferSpec(
@@ -189,18 +200,20 @@ def _seed_second_user_transfer_assets():
 
 
 class TestTransactionsMarkDoneActualAmount:
-    """``transactions.mark_done`` parses ``actual_amount`` via MarkDoneSchema.
+    """``transactions.mark_done`` parses ``settled_amount`` via MarkDoneSchema.
 
-    F-042 / F-162 -- replaces two raw ``Decimal(...)`` calls (one in
+    F-042 / F-162 -- C-27 replaced two raw ``Decimal(...)`` calls (one in
     the regular branch, one in the transfer-shadow branch) with a
-    single schema parse run before the branches diverge.  All
-    behaviour aside from validation is unchanged.
+    single schema parse run before the branches diverged, and changed
+    nothing else.  The transfer-shadow branch is gone (plan step
+    ``balance:X-bi-6-1``); the case that graded it grades the transfer
+    PATCH a grid leg uses.
     """
 
     def test_negative_actual_amount_rejected(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """Negative ``actual_amount`` fails at the schema tier (regular branch)."""
+        """Negative ``settled_amount`` fails at the schema tier."""
         with app.app_context():
             txn = _add_txn(
                 db.session, seed_user, seed_periods_today[0],
@@ -216,13 +229,13 @@ class TestTransactionsMarkDoneActualAmount:
 
             db.session.refresh(txn)
             assert txn.status_id == ref_cache.status_id(StatusEnum.PROJECTED), (
-                "negative actual_amount must not transition the row"
+                "a negative settled_amount must not transition the row"
             )
 
     def test_non_numeric_actual_amount_rejected(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """Non-numeric ``actual_amount`` fails Marshmallow's Decimal coercion.
+        """Non-numeric ``settled_amount`` fails Marshmallow's Decimal coercion.
 
         Refit 2026-07-11 for the marker-header convention (closeout plan
         session 4, developer-ruled): the 422 body changed from a JSON
@@ -259,37 +272,45 @@ class TestTransactionsMarkDoneActualAmount:
         raw ``Decimal(...)`` parse C-27 replaced with the schema; that branch
         is deleted, and the grid's figure door for a transfer is the transfer
         PATCH carrying ``leg_account_id``, whose schema refuses the same
-        figure with the same 422 and no transition.
+        figure with the same 422 and no transition.  The leg is the
+        checking side's, the transfer's own ``from_account_id``: it was
+        read off whichever of the transfer's two shadow rows came first
+        until plan step balance:X-bi-6-4d-2 made a transfer one row.  The
+        422 re-renders that leg's own cell, which is what grades the
+        ``leg_account_id`` the request carries.  The savings books open
+        before the period, so a valid figure WOULD settle here and the
+        refusal is the figure's alone: on books opened today, every settle
+        was refused by the books first and the no-transition read could
+        not fail (found by an adversarial review of 4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
+            open_books_before_the_first_assertion(db.session, savings)
             xfer = _create_transfer(seed_user, seed_periods_today[0], savings)
-            shadow = (
-                db.session.query(Transaction)
-                .filter_by(transfer_id=xfer.id, is_deleted=False)
-                .first()
-            )
 
             resp = auth_client.patch(
                 f"/transfers/instance/{xfer.id}",
                 data={
                     "settled_amount": "-25.00",
                     "status_id": str(ref_cache.status_id(StatusEnum.DONE)),
-                    "leg_account_id": str(shadow.account_id),
+                    "leg_account_id": str(xfer.from_account_id),
                 },
             )
             assert resp.status_code == 422, resp.get_data(as_text=True)[:200]
+            assert leg_dom_id(xfer.id, xfer.from_account_id) in (
+                resp.get_data(as_text=True)
+            ), "the 422 must re-render the leg the request came from"
 
             db.session.expire_all()
             db.session.refresh(xfer)
             assert xfer.status_id == ref_cache.status_id(StatusEnum.PROJECTED), (
-                "negative actual_amount must not transition the transfer"
+                "a negative settled_amount must not transition the transfer"
             )
 
     def test_valid_actual_amount_persists(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """Happy-path: a positive actual_amount transitions the row.
+        """Happy-path: a positive settled_amount transitions the row.
 
         Anchors the schema-based parse to the existing behaviour --
         the regression we are guarding against is "the schema
@@ -358,13 +379,16 @@ class TestTransactionsMarkDoneActualAmount:
 
 
 class TestTransfersAdHocFkOwnership:
-    """``transfers.create_ad_hoc`` rejects cross-user FKs at the route layer.
+    """``transfers.create_ad_hoc`` rejects cross-user FKs with a 404.
 
     Each test asserts (1) the response is 404 (security response
     rule), and (2) no transfer row was created in either user's
-    namespace -- the route's defense-in-depth check must short-
-    circuit before ``transfer_service.create_transfer`` reaches the
-    database.
+    namespace.  The route probes the two accounts, the scenario and
+    the category before it calls ``transfer_service.create_transfer``;
+    the period's 404 is the service's (``_get_owned_period``, plan
+    step ``pay_calendar:C13-b``), and the service refuses the other
+    four with the same 404 too, so a case cannot tell which tier
+    answered.
     """
 
     def _baseline_payload(self, seed_user, period, savings):
@@ -488,19 +512,21 @@ class TestTransfersAdHocFkOwnership:
 class TestUpdateTransferCategoryOwnership:
     """``transfers.update_transfer`` rejects a cross-user category_id.
 
-    The schema only exposes one user-scoped FK on update --
-    ``category_id`` -- and the route now verifies ownership before
-    delegating to ``transfer_service.update_transfer``.
+    The schema accepts two user-scoped FKs on update, ``category_id`` and
+    ``pay_period_id``.  The route verifies the category's ownership before
+    delegating to ``transfer_service.update_transfer``, which checks the
+    period's itself (plan step ``pay_calendar:C13-b``).
     """
 
     def test_cross_user_category_returns_404(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """A cross-user category_id is rejected before the service is called.
+        """A cross-user category_id is rejected with 404 and the transfer keeps its category.
 
-        Asserts the transfer's category_id is unchanged after the
-        rejected request (proves the failure short-circuited
-        before the service mutation).
+        The route probes the category before it delegates, and the
+        service refuses it too (``_reject_unowned_references``), so the
+        case grades the 404 and the unchanged row whichever tier
+        answers.
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -545,15 +571,13 @@ class TestUpdateTransferCategoryOwnership:
             )
             assert resp.status_code in (200, 201)
 
-            # Refresh; the empty-string strip in the schema's
-            # pre_load drops category_id from the loaded dict
-            # rather than coercing it to None, so the service is
-            # called without the field and the transfer's
-            # category_id is unchanged.  The important assertion
-            # here is the lack of 404, proving the ownership probe
-            # correctly skipped the empty input.
+            # The schema's pre_load maps the empty input of a nullable
+            # field to None (``_normalize_empty_inputs``), so the
+            # ownership probe skips it and the service clears the
+            # category.
             db.session.expire_all()
             db.session.refresh(xfer)
+            assert xfer.category_id is None
 
 
 # ── transfers.create_transfer_template -- F-043 ──────────────────────

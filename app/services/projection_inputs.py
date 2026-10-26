@@ -798,8 +798,8 @@ def build_investment_projection_inputs(
     LINE-based and the one call site carrying the pattern closed on the NEXT
     line, so the expression matched zero lines: the gate passed because
     nothing matched, which is indistinguishable from passing because one thing
-    matched -- a safety that is not a predicate, which
-    ``docs/plans/conventions.md`` says is worse than no safety at all.  The
+    matched -- a safety that is not a predicate, which the planning
+    conventions called worse than no safety at all.  The
     duplication it claimed to police IS real -- the splat sat in four services
     before Commit 18 -- and it is really policed, by pylint's
     ``duplicate-code``, which CI enforces as a hard gate.

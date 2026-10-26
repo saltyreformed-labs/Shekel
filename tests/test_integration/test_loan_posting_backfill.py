@@ -69,8 +69,8 @@ from tests._test_helpers import (
     load_init_database_module,
     load_migration_module,
     loan_correction_entries,
-    loan_income_shadow,
     transfer_family_journal_filter,
+    transfer_side_record,
 )
 
 
@@ -241,16 +241,15 @@ class TestBackfillPostsHistoricalCorrection:
             loan = _make_loan(seed_user)
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            shadow = loan_income_shadow(db.session, xfer.id, loan.id)
 
             # Reproduce the pre-Commit-5 historical state: settled, no correction.
             _clear_corrections()
-            assert loan_correction_entries(db.session, shadow) == []
+            assert loan_correction_entries(db.session, xfer.id, loan.id) == []
 
             posted = _backfill()
 
             assert loan.id in posted
-            assert len(loan_correction_entries(db.session, shadow)) == 1
+            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
             # Opening (-250000) + true-up (+150000) + principal (+500).
             assert posting_service.account_posting_total(
                 loan.id, scenario_id,
@@ -283,14 +282,12 @@ class TestBackfillPostsHistoricalCorrection:
             x1 = _settle(seed_user, loan, seed_periods[_P1])
             x2 = _settle(seed_user, loan, seed_periods[_P2])
             db.session.commit()
-            shadow1 = loan_income_shadow(db.session, x1.id, loan.id)
-            shadow2 = loan_income_shadow(db.session, x2.id, loan.id)
 
             _clear_corrections()
             _backfill()
 
-            assert len(loan_correction_entries(db.session, shadow1)) == 1
-            assert len(loan_correction_entries(db.session, shadow2)) == 1
+            assert len(loan_correction_entries(db.session, x1.id, loan.id)) == 1
+            assert len(loan_correction_entries(db.session, x2.id, loan.id)) == 1
             # Opening (-250000) + true-up (+150000) + principal (+1002.50).
             assert posting_service.account_posting_total(
                 loan.id, scenario_id,
@@ -317,12 +314,11 @@ class TestBackfillPostsHistoricalCorrection:
             loan = _make_loan(seed_user, escrow_annual=Decimal("1200.00"))
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            shadow = loan_income_shadow(db.session, xfer.id, loan.id)
 
             _clear_corrections()
             _backfill()
 
-            assert len(loan_correction_entries(db.session, shadow)) == 1
+            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
             # Opening (-250000) + true-up (+150000) + principal (+400).
             assert posting_service.account_posting_total(
                 loan.id, scenario_id,
@@ -385,7 +381,6 @@ class TestBackfillIdempotentNoDoublePost:
             loan = _make_loan(seed_user)
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            shadow = loan_income_shadow(db.session, xfer.id, loan.id)
 
             _clear_corrections()
             _backfill()
@@ -393,7 +388,7 @@ class TestBackfillIdempotentNoDoublePost:
             _backfill()
 
             assert db.session.query(JournalEntry).count() == entries_after_first
-            assert len(loan_correction_entries(db.session, shadow)) == 1
+            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -437,15 +432,13 @@ class TestBackfillCoverage:
             xa = _settle(seed_user, loan_a, seed_periods[_P1])
             xb = _settle(seed_user, loan_b, seed_periods[_P1])
             db.session.commit()
-            shadow_a = loan_income_shadow(db.session, xa.id, loan_a.id)
-            shadow_b = loan_income_shadow(db.session, xb.id, loan_b.id)
 
             _clear_corrections()
             posted = _backfill()
 
             assert loan_a.id in posted and loan_b.id in posted
-            assert len(loan_correction_entries(db.session, shadow_a)) == 1
-            assert len(loan_correction_entries(db.session, shadow_b)) == 1
+            assert len(loan_correction_entries(db.session, xa.id, loan_a.id)) == 1
+            assert len(loan_correction_entries(db.session, xb.id, loan_b.id)) == 1
 
     def test_backfills_every_scenario(
         self, app, db, seed_user, seed_periods,
@@ -469,14 +462,14 @@ class TestBackfillCoverage:
             x_base = _settle(seed_user, loan, seed_periods[_P1], scenario=baseline)
             x_whatif = _settle(seed_user, loan, seed_periods[_P1], scenario=whatif)
             db.session.commit()
-            shadow_base = loan_income_shadow(db.session, x_base.id, loan.id)
-            shadow_whatif = loan_income_shadow(db.session, x_whatif.id, loan.id)
 
             _clear_corrections()
             _backfill()
 
-            assert len(loan_correction_entries(db.session, shadow_base)) == 1
-            assert len(loan_correction_entries(db.session, shadow_whatif)) == 1
+            assert len(loan_correction_entries(db.session, x_base.id, loan.id)) == 1
+            assert len(loan_correction_entries(
+                db.session, x_whatif.id, loan.id,
+            )) == 1
             assert ledger_net(
                 db.session,
                 find_loan_ledger_account(
@@ -507,6 +500,12 @@ class TestBackfillLeavesNonLoansAlone:
         Its income shadow lives on a non-loan account (no LoanParams), so the
         enumerator never visits it: no loan_payment correction is posted for either
         shadow and no per-loan ledger account is minted.
+
+        **The owner's entries are counted since plan step
+        ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 1): a transfer is
+        one row there, so there is no shadow id to filter by, and no split has
+        linked a shadow's row since ruling **R-BAL102**.  The owner has no loan,
+        so any ``loan_payment`` entry is the backfill misfiring.
         """
         with app.app_context():
             savings = create_account_of_type(
@@ -518,15 +517,13 @@ class TestBackfillLeavesNonLoansAlone:
                 seed_periods[_P1], amount=Decimal("250.00"),
             )
             db.session.commit()
-            shadow_ids = [s.id for s in xfer.shadow_transactions]
-            assert len(shadow_ids) == 2  # both shadows exist -> the 0 below is real
 
             _backfill()
 
             loan_payment_entries = (
                 db.session.query(JournalEntry)
                 .filter(
-                    JournalEntry.transaction_id.in_(shadow_ids),
+                    JournalEntry.user_id == xfer.user_id,
                     JournalEntry.source_kind_id
                     == ref_cache.posting_source_id(
                         PostingSourceEnum.LOAN_PAYMENT,
@@ -592,7 +589,10 @@ class TestDeployHookCommitsBackfill:
             loan = _make_loan(seed_user)
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            shadow = loan_income_shadow(db.session, xfer.id, loan.id)
+            # The split's day is the loan side's RECORD's, off the transfer
+            # since plan step balance:X-bi-6-4d-2; it read the income
+            # shadow's own day until then (ruling R-BAL167 class 1).
+            day = transfer_side_record(db.session, xfer.id, loan.id).settled_on
             loan_payment_source_id = ref_cache.posting_source_id(
                 PostingSourceEnum.LOAN_PAYMENT,
             )
@@ -600,7 +600,7 @@ class TestDeployHookCommitsBackfill:
             # Reproduce the pre-Commit-5 historical state (settled, no correction),
             # committed so a separate connection can see the starting point.
             _clear_corrections()
-            assert loan_correction_entries(db.session, shadow) == []
+            assert loan_correction_entries(db.session, xfer.id, loan.id) == []
 
             _INIT_DB.initialise_database()
 
@@ -608,7 +608,9 @@ class TestDeployHookCommitsBackfill:
             # visible only if the deploy committed (not merely flushed).  Read at
             # the split's KEY -- its scenario, period and day (ruling R-BAL102:
             # the split links no row; it was read by ``transaction_id`` here
-            # until plan step ``balance:X-bi-6-3``).
+            # until plan step ``balance:X-bi-6-3``).  The scenario and period
+            # are the transfer's; they were read off its income shadow until
+            # plan step ``balance:X-bi-6-4d-2`` (ruling R-BAL167 class 1).
             with db.engine.connect() as conn:
                 committed = conn.execute(
                     text(
@@ -618,9 +620,9 @@ class TestDeployHookCommitsBackfill:
                     ),
                     {
                         "src": loan_payment_source_id,
-                        "sid": shadow.scenario_id,
-                        "pid": shadow.pay_period_id,
-                        "day": shadow.settled_on,
+                        "sid": xfer.scenario_id,
+                        "pid": xfer.pay_period_id,
+                        "day": day,
                     },
                 ).scalar()
             assert committed == 1
@@ -676,9 +678,8 @@ class TestDowngradeReversible:
             )
             db.session.commit()
 
-            shadow = loan_income_shadow(db.session, xfer.id, loan.id)
             # The go-forward wiring posted the correction + minted the interest ledger.
-            assert len(loan_correction_entries(db.session, shadow)) == 1
+            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
             interest_ledger = find_loan_ledger_account(
                 db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
             )
@@ -709,7 +710,7 @@ class TestDowngradeReversible:
             db.session.commit()
 
             # Step-4 artifacts removed.
-            assert loan_correction_entries(db.session, shadow) == []
+            assert loan_correction_entries(db.session, xfer.id, loan.id) == []
             assert _per_loan_ledger_count(loan) == 0
             # The cash entries + linked ledger accounts survive.
             assert (
@@ -775,7 +776,6 @@ class TestGenesisBoundaryMigration:
             loan = _make_loan(seed_user)
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            shadow = loan_income_shadow(db.session, xfer.id, loan.id)
 
             # Booked go-forward: genesis entries, equity account, payment correction.
             assert _entry_count_for_source(PostingSourceEnum.LOAN_OPENING) == 1
@@ -783,7 +783,7 @@ class TestGenesisBoundaryMigration:
             assert find_loan_ledger_account(
                 db.session, loan.id, LedgerAccountKindEnum.EQUITY_OPENING,
             ) is not None
-            assert len(loan_correction_entries(db.session, shadow)) == 1
+            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
 
             _GENESIS_MIGRATION._remove_loan_genesis_postings(db.session)
             db.session.commit()
@@ -823,7 +823,7 @@ class TestGenesisBoundaryMigration:
             ).count() == 0
             # Payment correction, interest ledger, the cash entries, linked
             # ledger survive.
-            assert len(loan_correction_entries(db.session, shadow)) == 1
+            assert len(loan_correction_entries(db.session, xfer.id, loan.id)) == 1
             assert find_loan_ledger_account(
                 db.session, loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
             ) is not None

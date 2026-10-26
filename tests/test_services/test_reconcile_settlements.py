@@ -11,8 +11,11 @@ graded here:
 
 * the scope, a case per direction of each clause: the row on another account
   (not this one), a payment un-dated (not dated) and on THIS account (not a
-  third), no purchase held (**R-CC113**), not a transfer shadow, Projected,
-  and the bill's own landing day (**R-CC118**);
+  third), no purchase held (**R-CC113**), Projected, and the bill's own
+  landing day (**R-CC118**).  The scope's clause leaving out a transfer's
+  shadow has had no case since plan step ``balance:X-bi-6-4d-2`` (ruling
+  **R-BAL313**): it planted a payment under a shadow, which cannot be stored
+  since revision ``82f7b7ed4332`` deleted them (ruling **R-BAL258**);
 * the offer: priced, boxed (**R-CC110**) and posted (**R-CC116**) exactly as
   the row's own list does, worded per **R-CC111** / **R-CC117**, and an
   envelope's tick closing it (**R-CC119**);
@@ -42,7 +45,6 @@ from app.exceptions import ValidationError
 from app.extensions import db
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.transaction import Transaction
-from app.models.transaction_entry import TransactionEntry
 from app.services import (
     anchor_service,
     cash_ledger,
@@ -60,8 +62,6 @@ from app.utils.log_events import (
 )
 from tests._test_helpers import (
     create_account_of_type,
-    create_transfer,
-    figure_source_columns,
     generate_row_of,
     ledger_net,
     linked_ledger_account,
@@ -304,68 +304,6 @@ class TestTheListOffersAReopenedPaymentFromHere:
             db.session.commit()
 
             assert txn.id not in _groups(seed_user, card.id)
-
-    def test_a_transfer_shadow_is_not_offered(
-        self, app, seed_user, seed_periods,
-    ):
-        """A shadow settles through the transfer service, so the scope never admits one.
-
-        A shadow's movements stay on its own account (an endpoint move
-        re-points them), so this is PLANTED: an un-dated covering movement on
-        the card under a Projected shadow on Checking.
-        """
-        with app.app_context():
-            card = _card(seed_user)
-            savings = create_account_of_type(
-                seed_user, db.session, "Savings", "Savings",
-                anchor_balance=Decimal("100.00"),
-            )
-            transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[0], amount=Decimal("75.00"),
-            )
-            db.session.commit()
-            shadow = (
-                db.session.query(Transaction)
-                .filter(
-                    Transaction.transfer_id == transfer.id,
-                    Transaction.account_id == seed_user["account"].id,
-                )
-                .one()
-            )
-            db.session.add(TransactionEntry(
-                **figure_source_columns(),
-                transaction_id=shadow.id,
-                account_id=card.id,
-                owner_id=seed_user["user"].id,
-                user_id=seed_user["user"].id,
-                amount=Decimal("75.00"),
-                description="Planted",
-                purchased_on=seed_periods[0].start_date,
-                is_credit=False,
-                covers_settlement=True,
-            ))
-            db.session.commit()
-            # The positive control: the SAME planted payment under a plain row
-            # is offered, so only the transfer clause keeps the shadow out.
-            plain = _row(seed_user, seed_periods[0], name="Water")
-            db.session.add(TransactionEntry(
-                **figure_source_columns(),
-                transaction_id=plain.id,
-                account_id=card.id,
-                owner_id=seed_user["user"].id,
-                user_id=seed_user["user"].id,
-                amount=Decimal("75.00"),
-                description="Planted",
-                purchased_on=seed_periods[0].start_date,
-                is_credit=False,
-                covers_settlement=True,
-            ))
-            db.session.commit()
-
-            groups = _groups(seed_user, card.id)
-            assert plain.id in groups
-            assert shadow.id not in groups
 
     def test_a_CANCELLED_row_is_not_offered(self, app, seed_user, seed_periods):
         """Only a Projected row is money the projection still holds."""

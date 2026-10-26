@@ -36,7 +36,6 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from app.deleted_row_infrastructure import DELETED_ROW_TRIGGERS
 from app.extensions import db as _db
 from app.models.statement_match import StatementMatch, StatementMatchMember
 from app.models.transaction import Transaction
@@ -63,6 +62,19 @@ from tests.test_services.test_statement_match._builders import (
 #: This step's own revision, loaded so its SHIPPED callables are what runs.
 _M = load_migration_module(
     "c4a4e7d1b9f2_a_row_s_delete_never_takes_its_movements.py",
+)
+
+#: Plan step ``balance:X-bi-6-4d-2``'s revision, which deletes every transfer
+#: shadow and refuses a new one; its downgrade builds a transfer's two, which
+#: the hidden-leg case below needs.
+_TWINS_DELETED = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
+
+#: Plan step ``balance:X-bi-6-4d-2``'s head revision, which empties a side's
+#: record of the figure its transfer holds; its downgrade, run before
+#: :data:`_TWINS_DELETED`'s, copies the figure back onto the records and
+#: withdraws the band's figure arm, the shape every revision below holds.
+_SIDE_RECORD_FIGURE = load_migration_module(
+    "b7d2e4f19a63_a_side_record_holds_no_figure.py",
 )
 
 #: The three keys this step flips, as ``pg_get_constraintdef`` prints them at
@@ -114,13 +126,19 @@ def _keys(session):
     return dict(rows)
 
 
+#: The ROW arm's two attachments, the ones this revision installs.  Named
+#: rather than read off ``DELETED_ROW_TRIGGERS``, which lists HEAD's set and
+#: grew a third, the transfer arm's, at plan step ``balance:X-bi-6-4d-2``.
+_ROW_ARM_TRIGGERS = ("ck_movement_row_not_deleted", "ck_hidden_row_holds_nothing")
+
+
 def _deleted_row_rule(session):
     """Return ``(triggers, functions)`` of ruling R-CC89's two arms present now."""
     return (
         session.execute(
             text("SELECT count(*) FROM pg_trigger "
                  "WHERE tgname = ANY(:names) AND NOT tgisinternal"),
-            {"names": [name for name, _table in DELETED_ROW_TRIGGERS]},
+            {"names": list(_ROW_ARM_TRIGGERS)},
         ).scalar(),
         session.execute(
             text("SELECT count(*) FROM pg_proc p "
@@ -240,7 +258,9 @@ class TestTheOneActStillRemovesAMovement:
         """No ``delete-orphan`` any more: the act's explicit DELETE is the path.
 
         Removed from the collection BEFORE it was deleted, the flush would
-        NULL ``transaction_id`` and ``NOT NULL`` would refuse it.
+        NULL ``transaction_id`` and ``ck_transaction_entries_one_parent``
+        would refuse it (``NOT NULL`` did until plan step
+        ``balance:X-bi-6-4d-2``).
         """
         with app.app_context():
             row = _unmatched_purchase(seed_user)
@@ -367,9 +387,23 @@ class TestTheMigration:
         """A soft-deleted transfer's leg holding its payment is BAL-532's, not this refusal's.
 
         The developer's follow-up to R-CC82 ("Non-transfer rows"): the
-        transfer's soft delete still makes this state after the release, so
+        transfer's soft delete still made this state after the release, so
         the upgrade does not stop over it.  A settled $100.00 transfer, the
         transfer and both shadows flagged hidden with their payments in place.
+
+        **The shadows are built and the payments put back under them first**,
+        the shape this revision ran against.  No transfer has a shadow since
+        plan step ``balance:X-bi-6-4d-2`` (``82f7b7ed4332`` deletes them and
+        refuses a new one), so the case runs that revision's downgrade, which
+        builds both, each settled like its transfer, after head's own
+        (``b7d2e4f19a63``), which puts the transfer's figure back on each
+        side's record.  Since plan step
+        ``balance:X-bi-6-4d-2`` each side's record hangs off the TRANSFER
+        (ruling **R-BAL88**), and the downgrade leaves it there, so both
+        records are then re-parented under their shadows in one statement,
+        which the status band allows as a ``$0.00`` close's shape (the setup
+        ruling **R-BAL167** approved at that step).  What is asserted is
+        unchanged.
         """
         with app.app_context():
             savings = create_account_of_type(
@@ -379,6 +413,19 @@ class TestTheMigration:
             transfer = create_settled_transfer(
                 seed_user, db.session, seed_user["account"], savings,
                 seed_user["bootstrap_period"], amount=Decimal("100.00"),
+            )
+            db.session.commit()
+            _run(_SIDE_RECORD_FIGURE.downgrade, db.session)
+            _run(_TWINS_DELETED.downgrade, db.session)
+            db.session.execute(
+                text("UPDATE budget.transaction_entries e "
+                     "SET transaction_id = t.id, expense_transfer_id = NULL, "
+                     "income_transfer_id = NULL "
+                     "FROM budget.transactions t "
+                     "WHERE t.transfer_id = :t AND t.account_id = e.account_id "
+                     "AND (e.expense_transfer_id = :t "
+                     "OR e.income_transfer_id = :t)"),
+                {"t": transfer.id},
             )
             db.session.commit()
             _run(_M.downgrade, db.session)

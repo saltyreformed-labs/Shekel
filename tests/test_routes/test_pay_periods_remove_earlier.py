@@ -6,7 +6,7 @@ title, text, label and button, and a select of every paycheck whose first
 option removes nothing), what it posts, the flash each outcome carries, that a
 refusal writes nothing, an id that is not the owner's, and owner-only access
 paired with the route's existence.  The service contract is graded in
-``tests/test_services/test_pay_period_remove_earlier.py``.
+``tests/test_services/test_pay_period_remove_earlier/``.
 """
 from __future__ import annotations
 

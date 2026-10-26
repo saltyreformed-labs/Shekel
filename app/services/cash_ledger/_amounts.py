@@ -78,7 +78,7 @@ gone -- is :func:`contribution_of` for an ordinary row and
 envelope reservation rather than a second amount rule.  What a still-projected
 TRANSFER is worth to one of its two accounts is :func:`planned_leg_contribution`
 over the parent's derived leg (plan step **X-bi-6a**, ruling **R-BAL13**):
-the same figure rule 5 answered for the shadow row that leg replaces, read
+the same figure rule 5 answered for the shadow row that leg replaced, read
 from the parent without the shadow in between.
 
 What money that really MOVED is worth is the other, and it is deliberately
@@ -411,13 +411,14 @@ def leg_contribution_of(leg: TransferLeg, basis: AmountBasis) -> Decimal:
 
     :func:`contribution_of`'s twin over a transfer leg (leaf ``X-bi-6-1b``),
     the same two steps in the same order: what the leg is worth WITHOUT a
-    producer -- ``0`` for a parent that does not contribute, its covering
-    movement's figure once its money has moved
+    producer -- ``0`` for a parent that does not contribute, the figure its
+    transfer stores once it has settled
     (:func:`~app.services.row_valuation.leg_fixed_contribution`) -- else the
     parent's resolved amount through :func:`planned_leg_contribution`, the
-    ONE plan-half producer the cash fold prices a leg with.  A display leg
-    that carries a record therefore reads it, where the fold's legs never
-    carry one; on a still-planned leg the two answers are one call.
+    ONE plan-half producer the cash fold prices a leg with.  A settled
+    display leg therefore reads its transfer's stored figure, where the
+    fold's legs are never settled; on a still-planned leg the two answers
+    are one call.
 
     Args:
         leg: The :class:`~app.services.transfer_legs.TransferLeg`.
@@ -444,7 +445,7 @@ def planned_leg_contribution(
     amortization feed and both investment contribution feeds all price a leg
     here.  It is the parent's resolved amount -- rule 1, rule 3 or rule 4 by
     :func:`~._amount_source.resolve_transfer_amount` -- which is exactly what
-    amount rule 5 answered for the shadow row the leg replaces, with the
+    amount rule 5 answered for the shadow row the leg replaced, with the
     shadow taken out of the walk.
 
     **It composes NOTHING, and the difference from :func:`contribution_of` is
@@ -453,9 +454,12 @@ def planned_leg_contribution(
     has none of those.  It is a PLAN by construction -- the loader admits only
     live still-Projected parents -- so there is no record to prefer, and a
     transfer carries no purchases, so there is no reservation to hold back.
-    What a SETTLED transfer moved is its shadow row's record until plan step
-    ``X-bi-4`` re-points the fold onto movements, and that half is priced by
-    :func:`~app.services.row_valuation.settled_contribution`, never here.
+    What a SETTLED transfer moved is the one figure it stores
+    (:attr:`~app.models.transfer.Transfer.settled_figure`): the cash fold
+    books it per side on that side's dated record
+    (:func:`._cash_leg.movement_cash_leg`), and a display leg reads it
+    through :func:`~app.services.row_valuation.leg_fixed_contribution` --
+    never here.
 
     Args:
         leg: The :class:`~app.services.transfer_legs.TransferLeg`.

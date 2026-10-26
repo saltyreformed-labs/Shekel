@@ -35,7 +35,9 @@ from app.utils.dates import days_paid_before_due
 #: one reader that PARSES a label back out (``grid_view_service
 #: ._short_display_name``, the grid's row label) strips exactly what was
 #: composed rather than a literal of its own -- the coupling
-#: ``transfer_service._create.shadow_names`` reported and left for this leaf.
+#: ``transfer_service._create.shadow_names`` reported and left for this leaf
+#: (that writer went with the twin rows' mirrors at plan step
+#: ``balance:X-bi-6-4d-2``'s leaf 3b).
 TRANSFER_TO_PREFIX = "Transfer to "
 TRANSFER_FROM_PREFIX = "Transfer from "
 
@@ -46,8 +48,10 @@ def leg_label(from_account: Account, to_account: Account) -> tuple[str, str]:
     ONE composition: "Transfer to <to-account>" is what the from-side shows
     (its money leaves for that account), "Transfer from <from-account>" what
     the to-side shows.  :attr:`TransferLeg.name` reads it off the parent's
-    endpoints at render time; ``transfer_service._create.shadow_names`` writes
-    the same pair onto the two shadow rows for as long as those rows exist.
+    endpoints at render time, and nothing stores it:
+    ``transfer_service._create.shadow_names`` wrote the same pair onto the two
+    shadow rows until plan step ``balance:X-bi-6-4d-2`` deleted them, and its
+    leaf 3b deleted that writer.
 
     Args:
         from_account: The source account, the expense leg's.
@@ -93,24 +97,29 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
         account_id: The account this leg is on -- the parent's
             ``from_account_id`` or ``to_account_id``.
         is_income: ``True`` on the to-side (money arrives), ``False`` on the
-            from-side (money leaves).  The same split the transfer service
-            writes as the two shadows' transaction TYPES, stated here from
-            the columns that decide it rather than copied.
+            from-side (money leaves).  The split the two shadows' transaction
+            TYPES carried until plan step ``balance:X-bi-6-4d-2`` deleted
+            them, stated here from the columns that decide it.
         record: The leg's COVERING MOVEMENT
             (:class:`~app.models.transaction_entry.TransactionEntry`,
-            ``covers_settlement``) when one exists: what this side's money DID,
-            written by the status seam at the settle, dated when the money
-            moved and kept un-dated across a revert (ruling **R-BAL61**).
+            ``covers_settlement``) when one exists: where and when this side's
+            money moved -- its account and its day, never a figure (the
+            transfer stores that once,
+            :attr:`~app.models.transfer.Transfer.settled_figure`) -- written
+            by the status seam at the settle, dated when the money moved and
+            kept un-dated across a revert (ruling **R-BAL61**).
             ``None`` when the leg has none -- or when the loader did not ask:
             the fold's :func:`planned_transfer_legs` emits legs whose DATED
             movement does not exist and never loads one (ruling **R-BAL79**
             decides the relation by the movement in SQL), while the grid's
             :func:`grid_transfer_legs` loads every leg's through
-            :func:`covering_movements_by_leg`.  Also ``None`` on the leg
-            :func:`movement_parent` gives a movement that is NOT its leg's
-            record -- through the interval, one under a DEAD shadow, or an
-            entry under a live shadow that covers no settlement -- which is
-            how the ledger writer knows to post nothing for it.
+            :func:`covering_movements_by_leg`.  :func:`movement_parent` gave
+            a leg ``None`` for a movement that was NOT its leg's record (one
+            under a DEAD shadow, or an entry under a live shadow that covered
+            no settlement), which is how the ledger writer knew to post
+            nothing for it, until plan step ``balance:X-bi-6-4d-2``: it reads
+            a movement's side link now, and a side record is always its
+            leg's record.
     """
 
     transfer: Transfer
@@ -258,10 +267,9 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
         So ``status_seam.covered_cash_leg`` values a row's payment and a leg's
         through ONE producer with no shape branch (leaf ``X-bi-6-4c-1``: the
         statement register values every member by what the movement's
-        parent moves on the act's account).  Empty for a leg carrying no
-        record -- a planned one, or the leg :func:`movement_parent` gives a
-        movement under a dead shadow, which is no leg's record and is worth
-        nothing there, as it is to the fold.
+        parent moves on the act's account).  Empty for a leg holding no
+        movement (one never settled, or closed at ``$0.00``) or one whose
+        loader did not ask (:attr:`record`).
         """
         return () if self.record is None else (self.record,)
 
@@ -270,8 +278,8 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
         """The civil day this leg's money moved, or ``None``.
 
         Read off the leg's RECORD -- its covering movement's ``settled_on``
-        (ruling **R-BAL80**: a settled leg's money is its dated movement) --
-        and never off the parent or a shadow row: a leg whose money moved
+        (a record says where and when its side's money moved; the transfer
+        stores how much) -- and never off the parent: a leg whose money moved
         carries a dated movement (ruling **R-BAL79**), a reverted one a
         movement kept un-dated, a planned one none.  What
         ``Transaction.settled_on`` states as a column for a row, for the
@@ -285,8 +293,7 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
         paid on any day, a transfer stores no day of its own, and the
         timeliness metric asks the RECORD of a row and a leg alike since leaf
         ``X-bi-6-4a`` (``spending_analysis._holds_a_record``), so a
-        $0.00-closed row stops counting as a timed bill too.  Reading the
-        shadow's column here would be the read leaf ``X-bi-6-1`` deleted.
+        $0.00-closed row stops counting as a timed bill too.
         """
         if self.record is None:
             return None

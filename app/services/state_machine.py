@@ -125,19 +125,19 @@ Consumers
   that ASSIGNS a status, for both row types.  Every status-changing path
   in the application writes through it.
 
-The other four callers READ the rules without assigning, so they are
+The other three callers READ the rules without assigning, so they are
 listed too rather than left to be discovered -- the sentence above is
 about writes, and a "everything goes through the seam" claim that
 quietly meant "every write" is the kind of overclaim this arc keeps
 paying for:
 
 * ``app/services/transfer_service/_status.py:apply_status_to_all_three`` --
-  verifies all three of a transfer's rows BEFORE the seam assigns any,
-  so an illegal move leaves the trio untouched (F-047 atomicity).
-* ``app/services/transfer_service/_validation.py:assert_restorable`` -- asks
-  :func:`allowed_transitions` whether a drifted shadow can legally be
-  pulled back to its parent, and refuses the restore when it cannot
-  (ruling R-DO).
+  verifies the transfer's transition BEFORE the seam assigns it or its
+  Transfer arm writes either side's record, so an illegal move leaves all
+  three untouched (F-047 atomicity).  It verified each twin row's too, and
+  ``_validation.assert_restorable`` asked :func:`allowed_transitions` of a
+  drifted twin (ruling R-DO), until plan step ``balance:X-bi-6-4d-2``
+  stopped keeping a twin's status.
 * ``app/routes/transactions/mutations.py`` -- the PATCH handler's
   error-precedence pre-check, which deliberately duplicates the seam's
   own verification so an illegal transition reports its own message
@@ -145,7 +145,7 @@ paying for:
 * ``app/routes/transfers/forms.py`` / ``app/routes/transactions/forms.py``
   -- the two status dropdowns' pre-hint.
 
-In all four the seam remains the enforcement point; none of them writes
+In all three the seam remains the enforcement point; none of them writes
 a ``status_id``.
 
 Caching

@@ -21,7 +21,7 @@ equality on every day is the EQUIVALENCE proof C3's cutover rests on -- the
 posted cache faithfully projects the fold -- and NOT an independent proof of the
 split's VALUE.  The split's value is pinned elsewhere and stays there: the
 Step-4 reconciliation oracle's parallel run against the un-seeded resolver
-(``test_posting_ledger_loan_reconciliation.py``), A2's hand-computed Taxes
+(the ``test_posting_ledger_loan_reconciliation`` package), A2's hand-computed Taxes
 oracle, and B1's hand-computed fold figures (``test_loan_ledger.py``).  Do not
 read this file's equalities as the correctness proof; they are the equivalence
 proof.
@@ -374,7 +374,7 @@ class TestFoldMatchesPostingsAcrossTheShapeMatrix:
             # Prove the payment is genuinely PRE-anchor -- its installment
             # precedes the 2026-03-15 true-up, the boundary this shape names.
             params = loan_loaders.load_loan_params(loan.id)
-            shadows = loan_loaders.settled_income_shadows(
+            shadows = loan_loaders.settled_income_legs(
                 loan.id, seed_user["scenario"].id, options=(),
             )
             assert loan_loaders.loan_payment_due_date(
@@ -406,7 +406,7 @@ class TestFoldMatchesPostingsAcrossTheShapeMatrix:
             _settle(seed_user, db, loan, seed_periods[1])
             db.session.commit()
             params = loan_loaders.load_loan_params(loan.id)
-            shadows = loan_loaders.settled_income_shadows(
+            shadows = loan_loaders.settled_income_legs(
                 loan.id, seed_user["scenario"].id, options=(),
             )
             due = loan_loaders.loan_payment_due_date(

@@ -38,16 +38,21 @@ a conflict the moment the owner has records against it.
 Key differences from transaction recurrence:
   - No salary linkage.
   - Single amount column (no estimated/actual split).
-  - Simpler amount logic: always uses template.default_amount.
+  - Simpler amount logic: nothing is priced from a paycheck, and the engine
+    writes no figure on a transfer it generates -- it declares its TEMPLATE
+    and its definition prices it (plan step X-au-f;
+    :class:`DerivedTransferFields`).
   - EVERY write goes through ``transfer_service`` -- create, update and delete
-    alike -- so the two shadow transactions move with their parent atomically
-    (``CLAUDE.md`` Transfer Invariants 1-5).  That is also why the maintain pass
+    alike -- as ``CLAUDE.md`` (Architecture) requires of every write of a
+    transfer: a write anywhere else skips its refusals and the copies it keeps
+    in step, the posted ledger's among them.  That is also why the maintain pass
     sends only the fields that actually DIFFER: the update door reconciles the
     posting ledger and emits an audit row per call, so a pass that changes
     nothing must call it for nothing.
 """
 
 import logging
+from collections.abc import Sequence
 from datetime import date
 from typing import NamedTuple
 
@@ -56,6 +61,8 @@ from app.extensions import db
 from app.models.amount_ownership import AmountOwnership
 from app.models.transfer import Transfer
 from app.services.amount_ownership import derived_ownership
+from app.services.balance_at import BalanceContext
+from app.services.definition_unarchive import restored_by_use
 from app.services._recurrence_common import (
     TemplateRowSelector,
     PlacedRow,
@@ -64,10 +71,12 @@ from app.services._recurrence_common import (
 )
 from app.services.recurrence import compute_due_date
 from app.services.recurrence_engine import (
+    ConflictReporting,
     MaintainActs,
     PassReporting,
     RegenerationPreview,
     create_for_unclaimed_occurrences,
+    log_use_resolved,
     preview_regeneration,
     regenerate_definition,
     resolve_generation_plan,
@@ -155,14 +164,14 @@ class DerivedTransferFields(NamedTuple):
     Attributes:
         from_account_id: The account the money leaves, from the template.
         to_account_id: The account it arrives at.  With *from_account_id* it is
-            the one derived pair whose change is not always applicable: both
-            shadows live on these accounts and a settled leg's records are filed
-            against them, so :func:`_rows_the_definition_reattributes` routes a
-            move on a record-holding row to the owner as a RETAINED conflict
-            instead of applying it.
-        name: The template's name.  The parent's only; each shadow's display
-            name is derived from the ENDPOINTS and re-derived by the door that
-            moves them.
+            the one derived pair whose change is not always applicable: each
+            side's payment record is filed against its endpoint, so
+            :func:`_rows_the_definition_reattributes` routes a move on a
+            record-holding row to the owner as a RETAINED conflict instead of
+            applying it.
+        name: The template's name.  The transfer's only; each leg's label is
+            composed from the ENDPOINTS' names when it is drawn
+            (``transfer_legs.leg_label``).
         category_id: The template's category, or ``None``.
         amount_ownership: WHERE this transfer's amount comes from, as ruling
             **R-FI**'s one attribute rather than a figure.  Since plan step
@@ -270,16 +279,27 @@ def propagate_to_unruled_template(template, transfers) -> "list[int]":
     money exactly once, and its single Transfer is materialised at create time
     rather than generated -- so a regeneration would find no rule, name no
     period, and RETIRE the row (that is defect **D16**, and why the route gates
-    the sweep on "the template IS or WAS recurring").  **Since finding
-    REC-516 that deletion is unreachable by a second route**: the one-time
-    transfer is created UNDATED -- it answers no occurrence (``occurs_on`` is
-    ``None``; it does carry a ``due_date``, the chosen paycheck's start, as
-    ``ck_transfers_template_row_needs_due_date`` requires of every linked
-    transfer) -- and an undated row is now retained rather than retired.  The
-    gate stays as defence in depth and because a retained
-    row still raises a conflict the owner would have no reason to see.  What is
-    left is this: the row is never retired, and everything else is the same
-    rule.
+    the sweep on "the template IS or WAS recurring").  **Finding REC-516 made
+    that deletion unreachable by a second route while the one-time transfer
+    was created UNDATED**: it answered no occurrence (``occurs_on`` was
+    ``None``), and an undated row is retained rather than retired.  Plan step
+    ``balance:X-ci-1`` (ruling **R-BAL94**) creates it answering the occurrence
+    its ``due_date`` names (the chosen paycheck's start), and a date MOVE since
+    then gives an older one its occurrence too
+    (``transfer_service.update_transfer``), so that second route now covers
+    only rows still undated (one-time transfers born before X-ci-1 and a
+    recurring definition's pre-R17 legacy rows among them, R-BAL94).  A dated
+    row is protected by every door that regenerates a definition declining
+    one that has no rule: the edit route's gate, which regenerates only when
+    the definition has a rule or had one before the edit
+    (:func:`~app.routes._recurrence_conflict_chooser.regenerate_or_conflict_chooser`;
+    the edit that clears a cadence sweeps once, and no later edit does), and
+    the unarchive door's and the loan-start sync's own ``template.recurs``
+    checks (``routes/transfers/lifecycle.unarchive_transfer_template``,
+    ``loan_recurrence_sync.sync_loan_payment_start``).
+    The gate would be needed even for an undated row, because a retained row still
+    raises a conflict the owner would have no reason to see.  What is left is
+    this: the row is never retired, and everything else is the same rule.
 
     **It exists because that "everything else" was NOT the same rule, and an
     adversarial review of plan step R10-b measured the gap.**  The route applied
@@ -377,7 +397,7 @@ def generate_for_template(template, schedule, scenario_id, effective_from=None):
     # is this engine's, and that split is the whole of it since plan step
     # balance:X-au-d.
     def _new_row(period, occurrence):
-        """Build one generated transfer and its shadow pair for *occurrence*.
+        """Build one generated transfer for *occurrence*.
 
         Every derived column comes from the ONE statement of them
         (:class:`DerivedTransferFields`), which the maintain pass assigns onto
@@ -437,27 +457,33 @@ def regenerate_for_template(template, schedule, scenario_id, effective_from=None
 
       1. the rule names the period and an auto-generated transfer is there --
          the fields that DIFFER from :class:`DerivedTransferFields` are applied
-         through ``transfer_service.update_transfer``, which carries both shadow
-         rows and reconciles the ledger;
-      2. the rule names the period and nothing is there -- a transfer and its
-         two shadows are created, exactly as :func:`generate_for_template`
-         would;
+         through ``transfer_service.update_transfer``, which reconciles the
+         ledger;
+      2. the rule names the period and nothing is there -- a transfer is
+         created, exactly as :func:`generate_for_template` would;
       3. the rule NO LONGER names the period -- the transfer is removed through
          ``transfer_service.delete_transfer`` if it carries nothing, and
          RETAINED as a conflict if the owner has records against it;
       4. the transfer answers NO occurrence at all (``occurs_on`` is NULL) --
          it is left exactly as found and RETAINED as a conflict (finding
          **REC-516**).  This engine is where that matters most: its retire arm
-         destroys the parent AND BOTH SHADOWS, and the app's one live writer of
-         undated rows is a transfer one
-         (``routes/transfers/_instances._materialize_one_time_transfer``).
+         hard-deletes the transfer.  The app's last writer of an undated
+         transfer a definition links was
+         ``routes/transfers/_instances._materialize_one_time_transfer``,
+         until plan step ``balance:X-ci-1`` dated its birth (ruling
+         **R-BAL94**); its live writer of an undated row a definition links
+         is a TRANSACTION one, carry-forward's rolled-forward ``is_override``
+         row (``carry_forward_service._execute``).  Undated transfers still
+         stand -- one-time transfers born before X-ci-1 and a recurring
+         definition's pre-R17 legacy rows among them (R-BAL94) -- so the arm
+         is live.
 
     Overridden and soft-deleted rows are conflicts wherever they sit, as
     before; immutable rows are never touched.
 
     **What the old sweep destroyed, and it was not only churn.**  It hard-deleted
     every non-overridden generated transfer in the window and re-created it.  A
-    transfer holds no purchases -- ``entry_service`` refuses a transfer row --
+    transfer holds no purchases -- ``entry_service`` refused its shadow rows --
     which is why this leaf came after the transaction one, but two owner-held
     facts still went with each deletion: the transfer's ``notes``, which
     ``create_transfer`` never receives, and a settlement RECORD retained through
@@ -542,8 +568,9 @@ def _rows_holding_owner_records(existing) -> "set[int]":
     "The owner's own records" is what finding **N-292** is about, and the
     transfer table's answer differs from the transaction table's in both
     directions.  A transfer holds no PURCHASES -- ``entry_service.create_entry``
-    refuses a transfer row outright -- which is why this engine was not part of
-    plan step R10-a.  What it does hold is:
+    refused its shadow rows outright, and a side link holds only a payment
+    record (``ck_transaction_entries_side_link_is_a_record``) -- which is why
+    this engine was not part of plan step R10-a.  What it does hold is:
 
       - ``notes`` on the parent: free text the owner typed, which no writer
         derives and which ``create_transfer`` is never handed, so every
@@ -564,50 +591,40 @@ def _rows_holding_owner_records(existing) -> "set[int]":
         ``balance:X-bi-4b-2`` deleted that column (ruling **R-BAL80**): the
         same fact in two homes, and this was one of the readers keeping them
         in step.
-    **A STATEMENT LINK is its own arm again** (plan step
-    ``balance:X-bi-4b-2``).  ``reconciled_by_id`` records which statement was
-    seen to show a leg's money, and it is what makes an ACCOUNT move unsafe
-    (``fk_transactions_reconciled_by`` scopes the link BY ACCOUNT) -- so it
-    belongs in this answer.  Plan step R10-b MEASURED that it needed no
-    condition of its own: ``ck_transactions_cleared_needs_settle_day`` said a
-    link needs a settle day, ``ck_transactions_settle_day_needs_a_record``
-    said a settle day needs a ``settled_basis_id``, so the record arm caught
-    every linked leg, verified against PostgreSQL, and its docstring said a
-    dropped CHECK was the signal to put the arm back.  X-bi-4b-2 dropped the
-    second CHECK with the column: a leg's record is its covering movement,
-    and a ``$0.00`` close holds none (ruling **R-BAL82**) while a statement
-    may still have shown it -- a linked leg the movement arm cannot see.  The
-    pass reaches such a leg only through DRIFT (a leg settled under a
-    Projected parent, which no door writes).  On the endpoint-move branch the
-    composite key would refuse the account move rather than apply it, and
-    the arm makes that a reported CONFLICT instead of an ``IntegrityError``;
-    on the RETIRE branch nothing else stands between the leg and a DELETE --
-    no key references the observing side -- so the arm is what keeps a
-    drifted linked leg, and the statement observation it carries, from being
-    destroyed in silence.  Testable now exactly because the state is storable.  The DAY's basis
+    **A STATEMENT LINK is no arm of its own since plan step
+    ``balance:X-bi-6-4d-2``.**  ``reconciled_by_id`` records which statement
+    was seen to show a side's money, and it makes an ACCOUNT move unsafe
+    (``fk_transaction_entries_reconciled_by`` scopes it BY ACCOUNT) -- but a
+    statement links a side's payment RECORD
+    (``transfer_service.record_leg_clearing``), so every linked side holds a
+    record, which the record arm above already keeps, and a ``$0.00`` close
+    holds neither (ruling **R-BAL141**).  The arm plan step
+    ``balance:X-bi-4b-2`` put back read a link on a twin row, which
+    ``X-bi-6-4d-2`` stopped storing; its test went with it (the developer's
+    2026-10-09 rule-5 answer).  The DAY's basis
     needs no arm of its own: its pairing is a BICONDITIONAL over
-    ``settled_on`` (``ck_transactions_settle_day_basis_pairing``), so any row
+    ``settled_on`` (``ck_transaction_entries_settle_day_basis_pairing``), so any row
     this predicate can see carries it, and a condition no row can satisfy
     alone is untestable by construction -- the kind of guard this project
     has repeatedly found sitting green over nothing.
 
     **Both legs are asked in ONE query, not one per row.**  A regeneration
     considers every future transfer of a template -- 62 of them on one live
-    template on a production clone -- so reading each transfer's shadows in the
+    template on a production clone -- so reading each transfer's records in the
     classifier would issue a query per row on the hot path of every template
     edit.  The query is :func:`app.services.transfer_legs.transfers_holding_records`
-    since leaf ``balance:X-bi-6-4c-2``, moved there unchanged so the one place
-    a transfer's movement is reached through a shadow row answers it (plan step
-    ``X-bi-6-4d`` moves that join once); a leg holds no purchase
-    (``entry_service`` refuses a shadow), so a covering movement is every entry
-    a leg can hold, and the mark is what the seam's own record is called.
+    since leaf ``balance:X-bi-6-4c-2``, so the one join from a transfer to its
+    sides' records answers it (plan step ``balance:X-bi-6-4d-2`` moved that
+    join onto the side links); a side link holds only a payment record
+    (``ck_transaction_entries_side_link_is_a_record``), so a record is every
+    entry a side can hold.
 
     Args:
         existing: The transfers this pass is considering.
 
     Returns:
-        The subset of their ids that hold a note, or on either leg a covering
-        movement or a statement link.
+        The subset of their ids that hold a note, or a payment record on
+        either side (which carries any statement link).
     """
     holding = transfer_legs.transfers_holding_records(
         xfer.id for xfer in existing
@@ -627,9 +644,9 @@ def _rows_the_definition_reattributes(existing, template) -> "set[int]":
 
     The transfer half of what
     :func:`_recurrence_common.classify_maintain_work` needs and cannot ask for
-    itself.  A transaction has ONE account; a transfer has two, and both shadow
-    rows live on them -- so "the definition moved where this row's records are
-    filed" is a question about the PAIR.
+    itself.  A transaction has ONE account; a transfer has two, and each side's
+    record is filed against its own -- so "the definition moved where this
+    row's records are filed" is a question about the PAIR.
 
     The move itself is applicable: ``transfer_service.update_transfer`` carries
     a transfer and both legs between accounts (plan step R10-b), and a transfer
@@ -637,7 +654,7 @@ def _rows_the_definition_reattributes(existing, template) -> "set[int]":
     ordinary case and the behaviour the old sweep had.  What is NOT applicable
     is doing it to a row that RECORDS something: a settled leg's figure is what
     moved between the OLD two accounts, and its statement link is scoped by
-    account (``fk_transactions_reconciled_by``), so re-pointing the pair would
+    account (``fk_transaction_entries_reconciled_by``), so re-pointing the pair would
     re-file both against accounts nobody asserted them on.  Those rows are
     retained and reported instead.
 
@@ -660,12 +677,12 @@ def _rows_the_definition_reattributes(existing, template) -> "set[int]":
 def _create_from_definition(
     fields, template, placed, scenario_id, projected_id,
 ):
-    """Create one transfer and its two shadows from *fields*.
+    """Create one transfer from *fields*.
 
     The ONE create in this engine, shared by :func:`generate_for_template` and
     the maintain pass's create arm so the two cannot come to build a generated
-    transfer two ways.  Routed through ``transfer_service.create_transfer`` so
-    the pair is established atomically (Transfer Invariants 1 and 3-5).
+    transfer two ways.  Routed through ``transfer_service.create_transfer``,
+    which every write of a transfer goes through (``CLAUDE.md``, Architecture).
 
     Args:
         fields: The :class:`DerivedTransferFields` for this (template, period)
@@ -701,11 +718,11 @@ def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
     """Write one classified maintain pass, through the transfer service.
 
     The only writer in this engine's maintain path, and every one of its three
-    arms goes through ``transfer_service``: ``CLAUDE.md`` Transfer Invariant 4
-    says no code path mutates a shadow directly, and a maintain pass that
-    assigned to a parent's columns would leave both shadows behind.  That is the
-    difference from the transaction twin's applier, which assigns fields itself
-    -- an ordinary row has no pair to keep equal.
+    arms goes through ``transfer_service``, which ``CLAUDE.md`` (Architecture)
+    sends every write of a transfer through: a maintain pass that assigned to a
+    transfer's columns would skip its refusals and the copies it keeps in step,
+    the posted ledger's among them.  That is the difference from the
+    transaction twin's applier, which assigns fields itself.
 
     **One field's derived value can disagree with what the CREATE path stored,
     and it is bounded rather than guarded** (adversarial review of R10-b).
@@ -788,9 +805,9 @@ def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
     # of the owner's.  Routed through the canonical hard-delete path (Transfer
     # Invariant 4): ``delete_transfer`` reverses any posted cash effect while
     # the rows still exist to link against, re-syncs a loan the payment left
-    # (its split links no row, ruling **R-BAL102**),
-    # runs the orphan-verification self-check and emits
-    # ``EVT_TRANSFER_HARD_DELETED`` per deletion.  See audit B6-03 / LOW-02.
+    # (its split links no row, ruling **R-BAL102**) and emits
+    # ``EVT_TRANSFER_HARD_DELETED`` per deletion; its orphan self-check went
+    # with the twins at plan step ``balance:X-bi-6-4d-2``.  See audit B6-03 / LOW-02.
     for xfer in work.retire:
         transfer_service.delete_transfer(xfer.id, template.user_id, soft=False)
 
@@ -819,23 +836,42 @@ _PASS = MaintainActs(
 )
 
 
-def resolve_conflicts(transfer_ids, action, user_id):
+#: How this engine's resolution announces itself.
+_RESOLVED = ConflictReporting(
+    logger, EVT_TRANSFER_RECURRENCE_CONFLICTS_RESOLVED,
+    "Transfer recurrence conflicts resolved (update)",
+)
+
+
+def resolve_conflicts(
+    transfer_ids: Sequence[int], action: str, ctx: BalanceContext,
+) -> str | None:
     """Resolve override/delete conflicts after a regeneration.
 
-    Routes all mutations through the transfer service so shadow
-    transactions are updated atomically.  Soft-deleted transfers are
-    restored via ``transfer_service.restore_transfer`` before updating.
+    Routes all mutations through the transfer service, which every write
+    of a transfer goes through (``CLAUDE.md``, Architecture).  Soft-deleted
+    transfers are restored via ``transfer_service.restore_transfer`` before
+    updating --
+    only those the template's unarchive would restore (ruling
+    **R-BAL253**): a deleted transfer its books hold stays deleted,
+    untouched, and is named.
 
     Each transfer is ownership-checked via its direct ``user_id`` column
-    before any modification -- transfers not owned by ``user_id`` are
+    before any modification -- transfers the pass's owner does not own are
     silently skipped (defense-in-depth against IDOR).
 
     Args:
         transfer_ids: List of Transfer IDs to resolve.
         action:       'update' -- hand the row back to its definition.
                       'keep' -- leave the transfer unchanged.
-        user_id:      The requesting user's ID.  Transfers not owned by
-                      this user are skipped.
+        ctx:          The edit's read pass; its ``user_id`` is the
+                      requesting owner's, and transfers it does not own
+                      are skipped.
+
+    Returns:
+        The sentence naming the picked transfers left deleted
+        (:attr:`~app.services.definition_unarchive.UseRestore.notice`), or
+        ``None`` when none is -- always ``None`` for "keep".
 
     **It took a ``new_amount`` until plan step X-au-f** (ruling **R-JD**), and
     the transaction twin lost the same parameter at X-au-e for the same reason.
@@ -844,20 +880,26 @@ def resolve_conflicts(transfer_ids, action, user_id):
     back to its definition* and the definition's own effective-dated series
     prices it as of the row's due date.  Passing a figure here would have
     re-declared the row OWN, which is the state this cutover deletes.
+
+    **It takes the edit's READ PASS rather than an owner id**, as its twin
+    does and for the same reason: which deleted rows come back is asked of
+    the books, the rule and the calendar the save leaves
+    (:func:`~app.services.definition_unarchive.restored_by_use`, the ONE rule
+    both engines ask), and the owner is that pass's.
     """
     if action == "keep":
         log_event(
             logger, logging.INFO,
             EVT_TRANSFER_RECURRENCE_CONFLICTS_RESOLVED, BUSINESS,
             "Transfer recurrence conflicts kept (no mutation)",
-            user_id=user_id, action=action,
+            user_id=ctx.user_id, action=action,
             transfer_id_count=len(transfer_ids),
         )
-        return
+        return None
 
     if action == "update":
-        resolved_count = 0
         skipped_count = 0
+        picked = []
         for xfer_id in transfer_ids:
             xfer = db.session.get(Transfer, xfer_id)
             if xfer is None:
@@ -865,43 +907,46 @@ def resolve_conflicts(transfer_ids, action, user_id):
                 continue
 
             # Ownership check: Transfer has a direct user_id column.
-            if xfer.user_id != user_id:
+            if xfer.user_id != ctx.user_id:
                 log_resource_access_denied(
                     logger,
-                    user_id=user_id,
+                    user_id=ctx.user_id,
                     model="Transfer",
                     pk=xfer_id,
                     owner_id=xfer.user_id,
                 )
                 skipped_count += 1
                 continue
+            picked.append(xfer)
 
+        # **What the unarchive would leave deleted, "use" leaves deleted**
+        # (ruling **R-BAL253**): asked once, of every picked transfer as it
+        # stands, through the one rule the transaction twin asks too.  A
+        # transfer the answer holds is left exactly as found, and so is one
+        # that names no definition (ledger row **N-440**, which this resolver
+        # lacked until the guard moved into the rule).
+        use = restored_by_use(picked, ctx)
+        for xfer in use.handed_back:
             # Soft-deleted transfers must be restored before they can
             # be updated.  restore_transfer sets is_deleted=False on the
-            # transfer and both shadows, and verifies invariants.
+            # transfer.
             if xfer.is_deleted:
-                transfer_service.restore_transfer(xfer_id, user_id)
+                transfer_service.restore_transfer(xfer.id, ctx.user_id)
 
             # The owner is handing the pair BACK to its definition, and since
             # ruling **R-BAL11** that is ONE statement rather than a flag plus
             # a figure plus a claim about who authored it: the ownership names
-            # TEMPLATE, so the parent stores nothing and reads its series and
-            # both legs re-declare their parent.  ``is_override=False`` rides
+            # TEMPLATE, so the transfer stores nothing and reads its series,
+            # and both legs read the transfer.  ``is_override=False`` rides
             # with it still, because the flag means *this row is the OWNER's,
             # not the rule's* (plan step X-au-h) and this act clears exactly
             # that -- it no longer says anything about the amount.
             transfer_service.update_transfer(
-                xfer_id, user_id, is_override=False,
+                xfer.id, ctx.user_id, is_override=False,
                 amount_ownership=derived_ownership(AmountSourceEnum.TEMPLATE),
             )
-            resolved_count += 1
 
         db.session.flush()
-        log_event(
-            logger, logging.INFO,
-            EVT_TRANSFER_RECURRENCE_CONFLICTS_RESOLVED, BUSINESS,
-            "Transfer recurrence conflicts resolved (update)",
-            user_id=user_id, action=action,
-            resolved_count=resolved_count,
-            skipped_count=skipped_count,
-        )
+        log_use_resolved(_RESOLVED, ctx, use, skipped_count)
+        return use.notice
+    return None

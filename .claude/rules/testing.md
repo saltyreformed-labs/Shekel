@@ -92,6 +92,12 @@ this file has not loaded; a change here updates that mirror in the same commit.
 - **Service tests assert exact computed values** -- include a comment showing the
   arithmetic that produces the expected number, not `result > 0`.
 - **Edge-case tests assert the specific edge behavior**, not just "did not crash."
+- **A pay-calendar fixture that tests a derived period END is OFF cadence.** On cadence, a saved
+  period's end (`lead(start) - 1`, the day before the next payday) and a projected one's
+  (`start + cadence - 1`) are the same day, so a defect in either cannot show: it made
+  `pay_calendar:C2-a`'s first P14 test vacuous. The package itself states what else its callers
+  must not assume: `DerivedPeriod` and `derive_periods` in `app/services/pay_calendar/_derive.py`,
+  `saved_window` in `_views.py`, `calendar_for` in `_loader.py`.
 - **Decimals from strings** in assertions -- `Decimal("12.34")` (gate:
   `shekel-decimal-from-float` runs on `tests/`).
 - Every test has a docstring; test behavior, not implementation.

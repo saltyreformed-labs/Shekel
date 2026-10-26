@@ -33,28 +33,25 @@ extend-exclude = [
   # (tools/quill/_recorded.py): GitHub's machine text -- node ids, commit
   # signatures -- not ours to spell.
   "tools/quill/recorded/**",
-  # GitHub's rendered HTML the migration's number grade is tested against
-  # (tools/quill/test__migrate_numbers.py): GitHub's machine text -- the
-  # misspelt name of its own table element among it -- not ours to spell.
-  "tools/quill/markdown_renders.json",
 ]
 
 # A git SHORT HASH is never a typo, and this is the STRUCTURAL form of that
 # rule rather than an allowlist of the hashes that have happened to collide.
-# These registries cite commits by hash on purpose (conventions.md rule 7: a
-# shipped step's specification OPENS with its commit), so the corpus gains
-# hashes continuously and any of them may spell a dictionary word -- `daa9c402`
+# The documents and comments cite commits by hash on purpose (an archived
+# step's record opens with its commit; a comment names the commit it
+# measured), so the corpus gains hashes continuously and any of them may spell
+# a dictionary word -- `daa9c402`
 # reads as "data", and the next one will read as something else.  Matching the
 # 7-40 hex-character shape inside backticks exempts the citation form the
 # documents actually use, and nothing wider.
 # A RULING ID is never a typo either, and this is the same STRUCTURAL rule one
 # vocabulary over.  The arc documents name rulings `R-` plus one to three
-# uppercase letters (conventions.md rule 9), the corpus gains them
-# continuously, and any of them may spell a dictionary word -- `R-FO` reads as
-# "of", `R-BU` as "but", and the next one will read as something else.  An
-# allowlist of the ids that have happened to collide would need an entry every
-# time a ruling is made, which is the rot rule 9's own append-only id space
-# guarantees.  Matching the SHAPE exempts the citation form and nothing wider.
+# uppercase letters (each ruling's id, which titles its card in the tracker),
+# every new citation adds one, and any of them may spell a dictionary word --
+# `R-FO` reads as "of", `R-BU` as "but", and the next one will read as
+# something else.  An allowlist of the ids that have happened to collide would
+# need an entry every time a citation collided.  Matching the SHAPE exempts the
+# citation form and nothing wider.
 [default]
 extend-ignore-re = ["`[0-9a-f]{7,40}`", "\\bR-[A-Z]{1,3}\\b"]
 

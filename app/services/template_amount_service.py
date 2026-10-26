@@ -273,13 +273,17 @@ def _resync_scalar(template) -> None:
     can state it differently.  **The newest price rather than TODAY's**, because
     that is what the column MEANS, and the reason it means that has changed.
     Generation used to write the scalar onto every row an edit rebuilt from
-    ``effective_from`` forward; since plan step balance:X-au-e a transaction's
-    generation writes no figure at all, and the column's readers are the edit
-    form's prefill, the Recurring list, ``obligations_aggregator`` and a
-    transfer's generation.  A scheduled rise still has to reach the column the
-    moment it is stated or the rows it was stated for would be
-    rebuilt at the old figure.  Today's price is a different question, and the
-    edit form asks it separately (:func:`current_amount`).
+    ``effective_from`` forward; since plan steps balance:X-au-e (a
+    transaction) and X-au-f-2 (a transfer) generation writes no figure at
+    all, and the column is read rather than copied (``git grep -n
+    default_amount app/`` is the census): the conflict chooser's
+    amount-change gate, the Recurring list's archived rows,
+    ``obligations_aggregator``, carry-forward's generated target, and
+    :func:`current_amount` for a definition holding no series among them.  A
+    scheduled rise still has to reach the column the moment it is stated, or
+    those readers would go on answering the old figure.  Today's price is a
+    different question, and the edit form asks it separately
+    (:func:`current_amount`).
 
     A no-op for a template with no series, which is only ever one whose amount is
     derived -- there the column IS the statement and has already been set.
@@ -345,12 +349,15 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     **The one write door for a recurring definition's amount.**  It keeps the
     scalar (``default_amount``) and the dated series in step within one call, so
     no caller can move one without the other.  **The scalar stopped PRICING a
-    transaction row at plan step balance:X-au-e** -- generation writes no figure
-    and the series answers on each row's own due date -- but it did not go with
-    that step and no step in ``docs/plans/steps.md`` removes it: a generated
-    TRANSFER still stores it (until X-au-f), ``salary_profile_service`` opens an
-    archived profile's series AT it, the conflict chooser gates on it, and the
-    cutover migration's downgrade restores from it.
+    transaction row at plan step balance:X-au-e and a transfer at X-au-f-2** --
+    generation writes no figure and the series answers on each row's own due
+    date (a generated transfer stored it until X-au-f-2) -- but it did not go
+    with either step: plan step X-bp deletes it from both template tables
+    (rulings **R-IY**, **R-BAL16**), and until then it is still READ.  The
+    census of its readers is ``git grep -n default_amount app/``; among them,
+    a salary profile's archive (``routes/salary/profiles.delete_profile``)
+    opens the template's series AT it, the conflict chooser gates on it, and
+    the X-au-e and X-au-f cutover migrations' downgrades restore from it.
 
     Every route that states a template's amount goes through this door: the
     two create forms, the two edit forms, the investment contribution and loan
@@ -377,16 +384,16 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     and an adversarial review is why.**  ``default_amount`` means "the NEWEST
     stated price" -- which is the argument only when the argument IS the newest.
     *It meant that because generation wrote the scalar onto the rows an edit
-    rebuilt from ``effective_from`` forward; since plan step balance:X-au-e a
-    transaction's generation writes no figure at all, and the meaning now rests
-    on the two readers below rather than on that write -- the edit form
-    prefills from this column, and a transfer's generation still writes it.*
-    Assigning it directly broke both other cases:
+    rebuilt from ``effective_from`` forward; since plan steps balance:X-au-e
+    (a transaction) and X-au-f-2 (a transfer) generation writes no figure at
+    all, and the meaning now rests on the column's readers rather than on that
+    write (the census above).*  Assigning it directly broke both other cases:
     stating a FUTURE price moved the scalar to it immediately, so the edit form
-    (which prefills from that column) then offered the December figure with a
-    blank date meaning today, and the next save -- a rename -- recorded the
-    December rise as having happened today; and BACK-dating a price below an
-    already-scheduled one silently cancelled the scheduled rise.
+    (which prefilled from that column until :func:`current_amount` replaced
+    it) then offered the December figure with a blank date meaning today, and
+    the next save -- a rename -- recorded the December rise as having happened
+    today; and BACK-dating a price below an already-scheduled one silently
+    cancelled the scheduled rise.
     :func:`_resync_scalar` states the rule once, and
     :func:`delete_amount_version` applies the same one.
 

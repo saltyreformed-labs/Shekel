@@ -1,7 +1,7 @@
 """The pay calendar as ONE value, answering every "which paycheck" question.
 
-Plan step **C2-a** (``docs/plans/implementation_plan_pay_calendar.md`` section
-4), the first leaf of the step three arcs share -- it is also ``balance:X-l``
+Plan step **C2-a** (shipped at ``3cb3082f``), the
+first leaf of the step three arcs share -- it is also ``balance:X-l``
 and ``recurrence:R-F12``.
 
 **The first consumer arrived at plan step C2-d**, and until then nothing in

@@ -4,8 +4,8 @@ Drives Playwright Chromium at 375x812 (iPhone XS portrait) against the
 local dev Flask server and asserts the structural / interactive
 behaviour of the new "This Period" tab and partial.  This is the
 runtime counterpart to the static-render coverage in
-``tests/test_routes/test_grid.py::TestMobileThisPeriodPartial``: pytest
-proves the HTML the server emits; this script proves the headless
+``tests/test_routes/test_grid/test_mobile_partials.py::TestMobileThisPeriodPartial``:
+pytest proves the HTML the server emits; this script proves the headless
 browser puts the right pixels in the right place, the Bootstrap tab
 JS responds to taps, and the prev/next arrows actually navigate.
 

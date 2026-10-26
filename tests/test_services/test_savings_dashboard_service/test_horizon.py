@@ -135,7 +135,8 @@ class TestNetWorthHorizon:
         The producer's side of the contract plan step X-q2 established; the
         route's side -- each key removed in turn must break
         ``_serialize_horizon`` -- is
-        ``test_savings.TestHorizonSerialization.test_every_published_key_is_read``.
+        ``test_savings.test_the_cockpit.TestHorizonSerialization``'s
+        ``test_every_published_key_is_read``.
         Pinned as a literal here so a key added without a consumer fails a test
         rather than living on as a producer output no screen reaches, which is
         what ``horizon_end`` and ``is_loan_free`` did until X-q2.
@@ -595,7 +596,7 @@ class TestNetWorthHorizon:
             assert _DEBT_FREE_MILESTONE_LABEL == "All loans paid off"
             # The milestone's complete key set -- the producer's half of the
             # nested contract whose route half is
-            # ``test_savings.TestHorizonSerialization
+            # ``test_savings.test_the_cockpit.TestHorizonSerialization
             # .test_every_published_key_is_read``.
             for milestone in horizon["milestones"]:
                 assert set(milestone) == {"date", "label"}

@@ -13,9 +13,7 @@ that is no sub-issue of the parent named is refused 403, as GitHub answers both
 (``recorded/twice.json``, ``recorded/unlink.json``) -- and FAILS LOUDLY on a write
 the tool must never send
 (re-parenting a card, under a parent inside the tracker or out), rather than
-guessing GitHub's answer to it.  A number it was told was deleted (:attr:`FakeTracker.gone`)
-answers a read by number as GitHub answers a deleted issue's, and no create takes it,
-as GitHub's one numbering sequence gives no number out twice.  Its board shows a
+guessing GitHub's answer to it.  Its board shows a
 placement at once unless told to lag (:attr:`FakeBoard.lagging`); the lag
 itself is graded against a recording.
 Nothing here calls GitHub.
@@ -32,22 +30,13 @@ import dataclasses
 import json
 from datetime import UTC, datetime
 
+from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
-from tools.ci.trailers import DEV, tracking
 from tools.quill import _git, quill
 from tools.quill._github import GitHubError
-from tools.quill._tracker import (
-    Card,
-    Child,
-    Comment,
-    Edit,
-    Milestone,
-    NumberState,
-    TrackerError,
-    WholeCard,
-)
-from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN
+from tools.quill._tracker import Card, Child, Comment, Edit
+from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, unmarked
 
 
 class FakeBoard:
@@ -94,17 +83,17 @@ class FakeBoard:
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (30/20, measured at X-cx's S3a; this
-    line said 27 while 28 stood) -- it stands in for
-    :class:`_tracker.Tracker`, so it has each of that class's 28 reads and
-    writes (its own disable says why there are so many), and ``add`` and
-    ``add_task``, which put a card or a task in.
-    ``too-many-instance-attributes`` (10/7) -- **one per kind
-    of fact it keeps**: nine a command reads back (cards, bodies, saved
-    versions, comments, the board, the deleted numbers, the milestones, each
-    card's milestone, and how GitHub renders a text) and the log of writes the
-    tests read.  The claims and the merged pull requests it kept left it at
-    X-cx's M1, when a claim became a branch of the code repository (R-BAL359).
+    Pylint: ``too-many-public-methods`` (24/20, measured at X-cx's S3b) -- it
+    stands in for :class:`_tracker.Tracker`, so it has each of that class's 22
+    reads and writes but ``connect`` (its own disable says why there are so many),
+    and ``add`` and ``add_task``, which put a card or a task in.
+    ``too-many-instance-attributes`` (8/7) -- **one per kind
+    of fact it keeps**: seven a command reads back (cards, bodies, saved
+    versions, comments, the board, the milestones that exist, and each card's
+    milestone) and the log of writes the tests read.  The claims and the merged
+    pull requests it kept left it at X-cx's M1, when a claim became a branch of
+    the code repository (R-BAL359); the deleted numbers and how GitHub renders a
+    text, which only X-cx's migration read, left with it at X-cx's S3b.
     """
 
     app_login = APP_LOGIN
@@ -116,10 +105,8 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.bodies: dict[int, str] = {}
         self.versions: dict[int, list[Edit]] = {}
         self.notes: dict[int, list[Comment]] = {}
-        self.gone: set[int] = set()
-        self.milestones_by_number: dict[int, Milestone] = {}
+        self.milestones: set[int] = set()
         self.milestone_of: dict[int, int] = {}
-        self.renderer = None
         self.writes: list[tuple] = []
         self.board = FakeBoard(self.writes)
 
@@ -178,26 +165,6 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         """The milestone each card that exists among ``numbers`` is in, None for none."""
         return {n: self.milestone_of.get(n) for n in numbers if n in self.cards_by_number}
 
-    def all_cards(self):
-        """Every card, open and closed, with its body, its comments and its milestone."""
-        return {n: WholeCard(self._view(n), self.bodies[n], tuple(self.notes.get(n, ())),
-                             self.milestone_of.get(n))
-                for n in self.cards_by_number}
-
-    def milestones(self):
-        """Every milestone, by title; two of one title refused, as
-        :meth:`_tracker.Tracker.milestones` refuses them."""
-        titles = [held.title for held in self.milestones_by_number.values()]
-        if len(set(titles)) != len(titles):
-            raise TrackerError(f"two milestones share a title among {sorted(titles)}")
-        return {held.title: held for held in self.milestones_by_number.values()}
-
-    def number_state(self, number):
-        """What a read by number finds: a card, a deleted number, or nothing filed."""
-        if number in self.cards_by_number:
-            return NumberState.ISSUE
-        return NumberState.DELETED if number in self.gone else NumberState.NOT_FOUND
-
     def blocking(self, number):
         """The cards ``number`` blocks: each whose blocked-by edges name it, with its kind and
         state as they stand, in card order (GitHub lists the newest link first, which no
@@ -210,15 +177,16 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         """A card's body."""
         return self.bodies[number]
 
-    def render(self, text):
-        """``text`` as :attr:`renderer` answers it: a test that renders sets the answer GitHub
-        gives, and with none set a render fails loudly rather than guess GitHub's HTML."""
-        if self.renderer is None:
-            raise AssertionError(f"rendered with no renderer set: {text[:80]!r}")
-        return self.renderer(text)
-
     def edits(self, number):
-        """A card's body and its versions (the body as filed when it was never edited)."""
+        """A card's body and its versions (the body as filed when it was never edited).  A
+        number nobody filed is GitHub's NOT_FOUND error, which the strict read raises
+        (:meth:`_github.GitHub.graphql`): the type and message ``recorded/tracker.json``
+        records for a missing issue, at this query's path, without the recorded
+        ``locations``."""
+        if number not in self.cards_by_number:
+            raise GitHubError(200, 'graphql: [{"type": "NOT_FOUND", "path": ["repository", '
+                              f'"issue"], "message": "Could not resolve to an Issue with the '
+                              f'number of {number}."}}]')
         versions = self.versions.get(number) or [
             Edit(None, "2026-10-01T00:00:00Z", self.app_login, self.bodies[number])]
         return self.bodies[number], list(versions)
@@ -237,22 +205,15 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         ``labels``, as :meth:`_tracker.Tracker.create` files every card, in ``milestone``
         when one is given.  One the tracker lacks is a write the tool must never send, so it
         fails loudly rather than guess GitHub's answer."""
-        number = max({*self.cards_by_number, *self.gone}, default=0) + 1
+        number = max(self.cards_by_number, default=0) + 1
         labels = tuple(sorted({*labels, FILING}))
-        assert milestone is None or milestone in self.milestones_by_number, (
+        assert milestone is None or milestone in self.milestones, (
             f"no milestone #{milestone} to file plan#{number} in")
         self.writes.append(("create", number, kind, title, labels)
                            + (() if milestone is None else (milestone,)))
         self.add(number, kind, body, on_board=False, title=title, labels=labels)
         if milestone is not None:
             self.milestone_of[number] = milestone
-        return number
-
-    def create_milestone(self, title, description):
-        """Make a milestone at the next number."""
-        number = max(self.milestones_by_number, default=0) + 1
-        self.writes.append(("create_milestone", number, title))
-        self.milestones_by_number[number] = Milestone(number, title, description)
         return number
 
     def set_milestone(self, number, milestone):
@@ -312,15 +273,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
             raise GitHubError(404, f'DELETE .../issues/{number}/labels/{FILING} -> 404: '
                                    '{"message":"Label does not exist"}')
         self.writes.append(("unmark", number))
-        self._set(number, labels=tuple(label for label in labels if label != FILING))
-
-    def close_unmarked(self, number, labels):
-        """Close a card as completed and set its labels to ``labels`` without the mark, in
-        one write, as the tool."""
-        kept = tuple(sorted(set(labels) - {FILING}))
-        self.writes.append(("close_unmarked", number, kept))
-        self._set(number, is_open=False, state_reason="COMPLETED", closed_by_tool=True,
-                  touched_by_hand=False, labels=kept)
+        self._set(number, labels=unmarked(labels))
 
     def add_child(self, parent, child):
         """Make ``child`` a sub-issue of ``parent``; the tool never re-parents a card, in the
@@ -498,6 +451,12 @@ def leaf_filing(tmp_path, title, parent="plan#1"):
     spec.write_text(f"Build {title}.")
     return ("file", "step", "--parent", parent, "--arc", "balance", "--title", title,
             "--body-file", str(spec))
+
+
+def finding_filing(owner, title="Twice", text="The report counts a refund twice."):
+    """``quill file finding`` filing the finding ``title``, saying ``text``, for ``owner``."""
+    return ("file", "finding", "--arc", "balance", "--title", title, "--owner", owner,
+            "--text", text)
 
 
 def ruling_filing(tmp_path, owner):

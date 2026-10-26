@@ -1,5 +1,5 @@
 > **ARCHIVED. Historical record only -- this document governs nothing and
-> may be out of date.** The live plan is `docs/plans/steps.md`; the code as
+> may be out of date.** The live plan is the tracker, `saltyreformed-labs/shekel-plan`; the code as
 > committed is the source of truth for what the app does.
 
 # The statement importer's core, as built: the X-f6a-1 - X-f6a-3b span (2026-08-19)

@@ -33,10 +33,11 @@ service because every helper consumes Flask globals (``request``,
 ``flash``, ``redirect``, ``url_for``, ``current_user`` -- the redirect /
 url_for pair via :class:`~app.routes._redirect_target.RedirectTarget`);
 ``CLAUDE.md::Architecture`` keeps services isolated from Flask.  None of
-these helpers create or mutate transfer shadow transactions directly --
-shadow atomicity stays inside ``transfer_recurrence.generate_for_template``
-and ``transfer_service`` -- so the transfer invariants are unaffected by
-routing a call through this module.
+these helpers create or mutate a transfer directly -- every write stays
+inside ``transfer_recurrence.generate_for_template`` and
+``transfer_service`` -- so routing a call through this module keeps the
+rule that every write of a transfer goes through ``transfer_service``
+(the transfer paragraph of ``CLAUDE.md``'s Architecture).
 """
 import logging
 from decimal import Decimal
@@ -231,7 +232,8 @@ def flush_template_or_namedup_redirect(
 
 
 #: The transfer-template kind for the shared regenerate-or-chooser flow.
-#: Mutations route through transfer_recurrence (shadow-safe resolve).  It
+#: Mutations route through transfer_recurrence, which writes through
+#: transfer_service.  It
 #: lived in ``transfers/templates.py`` beside the update door until plan step
 #: R7d-g-2, when the entry helper that brings a moved standing payment's rows
 #: along (``_standing_payment.sync_loan_payment_start_or_refuse``, ruling
@@ -262,9 +264,9 @@ def generate_transfers_for_all_periods(template: TransferTemplate) -> None:
 
     The shared ``resolve baseline scenario -> load the owner's schedule ->
     transfer_recurrence.generate_for_template`` idiom used by the
-    investment / loan / transfers create paths.  Shadow-transaction
-    atomicity is owned by ``generate_for_template``; this helper only
-    orchestrates its inputs.  Its ``effective_from`` went at plan step
+    investment / loan / transfers create paths.  Every write of a transfer
+    is ``generate_for_template``'s, through ``transfer_service``; this
+    helper only orchestrates its inputs.  Its ``effective_from`` went at plan step
     R7d-g-2 with its one caller, the unarchive door's fill-forward.
 
     **It REQUIRES the baseline scenario (ruling R-BW), and the silent no-op it

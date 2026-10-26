@@ -1,7 +1,7 @@
 """How often an owner is paid, and the unit conversions that rest on it.
 
-Plan step **R7a-2a** (``docs/plans/implementation_plan_recurrence_redesign.md``
-section 4a).  ``app.utils.money.PAY_PERIODS_PER_YEAR = Decimal("26")`` was a
+Plan step **R7a-2a** (shipped at ``003e3657``).
+``app.utils.money.PAY_PERIODS_PER_YEAR = Decimal("26")`` was a
 module constant while the owner's cadence (``budget.pay_schedule.cadence_days``
 then; an era's on ``budget.pay_eras`` since ``pay_calendar:C17-a``) is
 user-selectable, so every monthly-equivalent figure on ``/savings``, the Recurring
@@ -295,7 +295,8 @@ class PayCadence:
         paycheck a year" and misstate every monthly equivalent derived from it.
         It is graded directly, not inferred:
         ``test_paycheck_calculator`` asserts ``PayCadence(FixedDays(0))``
-        raises, and ``test_grid`` builds one at 365 to drive the range options.
+        raises, and ``test_grid.test_cadence`` builds one at 365 to drive the
+        range options.
 
         *An earlier draft of this paragraph cited "the harness that drives the
         derivation over production's paydays" as a caller that constructs one.

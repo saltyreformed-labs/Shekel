@@ -6,7 +6,7 @@ so these run against a real PostgreSQL database using the shared
 app/db/bare_user fixtures from conftest.
 
 **The writer's tests moved out at plan step C3-b**, with the writer, to
-``test_pay_period_write.py``.  What is left here answers "which periods does
+``test_pay_period_write/``.  What is left here answers "which periods does
 this owner have", which plan step C2-f points at ``pay_calendar.PayCalendar``.
 
 **Three readers' tests moved out at C2-f1, WITH the behaviour they grade** --
@@ -121,8 +121,9 @@ class TestNegativeAndBoundaryPaths:
     """Boundary-condition tests for the pay-period readers.
 
     The batch-size and large-batch cases moved to
-    ``test_pay_period_write.py`` with the writer at plan step C3-b; what is
-    left here is the date-boundary behaviour of the lookups.
+    ``test_pay_period_write/test_what_a_batch_records.py`` with the writer at
+    plan step C3-b; what is left here is the date-boundary behaviour of the
+    lookups.
     """
 
     def test_the_current_period_includes_its_own_start_date(

@@ -284,10 +284,14 @@ class TestForeignKeyActions:
             # Delete the transfer at the storage tier (its shadows cascade).
             # Its payments first, in the same raw SQL: a row holding one is no longer
             # deleted with it (R-CC54; rule-5 re-expression, developer-confirmed
-            # 2026-09-23).
+            # 2026-09-23).  The payments hang off the TRANSFER by its side keys
+            # since plan step balance:X-bi-6-4d-2, which are NO ACTION on
+            # delete, so they are found by those links -- they were found under
+            # the shadows until then, which hold none now, and the transfer's
+            # delete is refused while one survives (ruling R-BAL167 class 2).
             _db.session.execute(_db.text(
-                "DELETE FROM budget.transaction_entries WHERE transaction_id IN "
-                "(SELECT id FROM budget.transactions WHERE transfer_id = :t)"
+                "DELETE FROM budget.transaction_entries "
+                "WHERE expense_transfer_id = :t OR income_transfer_id = :t"
             ), {"t": transfer_id})
             _db.session.execute(_db.text(
                 "DELETE FROM budget.transfers WHERE id = :t"

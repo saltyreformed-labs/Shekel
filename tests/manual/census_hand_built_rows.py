@@ -7,8 +7,8 @@ one_off_row_of``, on ``one_off.place_one_off``) so the cutover's CHECK
 binds on rows the app's own door wrote -- and *which* constructions name no
 link is,
 as the step's own row says, **an AST walk's answer and never a total stated in
-a document**.  ``docs/plans/steps.md`` carries the grep census the plan gate
-re-runs (code lines matching ``\\bTransaction\\(``); this walk is the partition
+a document**.  The step names a grep census (code lines matching
+``\\bTransaction\\(``); this walk is the partition
 of those calls the grep cannot make.
 
 Four classes, over every ``ast.Call`` whose callee is the model

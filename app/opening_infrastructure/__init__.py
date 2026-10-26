@@ -156,7 +156,7 @@ trigger events -- "cannot CREATE INDEX ... because it has pending trigger
 events" -- so a transaction that WRITES a movement row and then alters that
 table fails.  The remedy is ``SET CONSTRAINTS ALL IMMEDIATE`` before the DDL,
 which runs the checks in place rather than deferring them; it is what
-``tests/test_scripts/test_integrity_check.py`` and
+``tests/test_scripts/test_integrity_check/test_the_consistency_checks.py`` and
 ``tests/test_models/test_clearing_link_schema.py`` do before re-creating an
 index and dropping a NOT NULL.
 

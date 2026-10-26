@@ -757,7 +757,8 @@ class TestTheCalendarIsTheOwnershipSCOPE:
 
         The input is the one the keys still permit and the reconcile suite
         already uses for the same clause
-        (``test_reconcile_service.TestTheScopeIsTheCALENDARsNotTheTables``):
+        (``test_reconcile_service.test_the_outstanding_set
+        .TestTheScopeIsTheCALENDARsNotTheTables``):
         the owner's OWN period, missing from the calendar the request was
         scoped to.  Not hypothetical -- it is what a concurrent writer produces
         between a request's calendar read and its scan.

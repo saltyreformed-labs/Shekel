@@ -139,9 +139,13 @@ class TestALinelessActDoesNotBreakTheScreen:
         # the row -- and a first version of this alarm carried the count
         # alone, which tells an operator how many rows they cannot find.
         assert raised[0].__dict__.get("match_ids") == [
-            db.session.execute(db.text(
-                "SELECT id FROM budget.statement_matches WHERE account_id = 1"
-            )).scalar_one(),
+            db.session.execute(
+                db.text(
+                    "SELECT id FROM budget.statement_matches"
+                    " WHERE account_id = :account_id"
+                ),
+                {"account_id": seed_user["account"].id},
+            ).scalar_one(),
         ]
 
     def test_the_FOLD_no_longer_needs_a_guard_of_its_own(

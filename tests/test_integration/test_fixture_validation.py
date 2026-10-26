@@ -646,21 +646,48 @@ class TestGenerateTransferOf:
     refusals that body fires -- no cadence, a paycheck the rule names no
     occurrence in, a cadence firing twice -- are graded above and once.  What
     is this engine's, and graded here: the transfer has the transfer engine's
-    shape WITH its two shadow legs, it is priced by its definition, the
-    occurrence claim refuses a second ask, and another owner's paycheck is
-    refused before any of the three rows is written.
+    shape, it is priced by its definition, the occurrence claim refuses a
+    second ask, and another owner's paycheck is refused before the transfer
+    is written.  It graded the transfer's two shadow legs too until plan step
+    ``balance:X-bi-6-4d-2``: a transfer stores no leg row since migration 82f7
+    (ruling **R-BAL167** class 1).
     """
 
-    def test_the_transfer_is_the_engines_with_both_legs(
+    def test_the_transfer_is_the_engines(
         self, app, db, seed_user, seed_periods,
     ):
-        """Derived, dated, answering an occurrence, Projected, two derived legs.
+        """Derived, dated, answering an occurrence, Projected.
 
         Every column here is one the engine sets and a hand-built fixture
         got wrong or left empty (finding BAL-488): undated, the state the
         CHECK plan step balance:X-bv-2 binds refuses on this table too, and
-        an OWN figure beside the link -- and a bare ``Transfer(...)`` has no
-        legs at all.
+        an OWN figure beside the link.
+
+        Named ``test_the_transfer_is_the_engines_with_both_legs`` until plan
+        step ``balance:X-bi-6-4d-2``, where its reads of the two shadow legs
+        went (ruling **R-BAL167** class 1): a transfer stores no leg row since
+        migration 82f7.  Each side's endpoint and due date are read off the
+        transfer, graded once by ``tests.test_services.test_transfer_legs`` ::
+        ``test_both_sides_show_the_row_in_every_field_the_table_names``; a
+        side names no definition (its ``template_id`` is ``None``), graded for
+        a saved generated transfer, this case's shape, by the same module's
+        ``TestALegsDisplayProjections`` ::
+        ``test_a_saved_generated_transfers_sides_name_no_definition_projected_or_settled``.
+        Its read of the legs' amount declaration -- no figure, priced by
+        ``PARENT_TRANSFER`` -- went with them and moved nowhere, because no
+        live row or value carries a declaration: the rows it read are refused
+        by ``ck_transactions_names_no_transfer``, a
+        :class:`~app.services.transfer_legs.TransferLeg` stores no amount of
+        its own (it holds its parent and, once settled, its record; a
+        still-planned leg is worth what its parent resolves to), and the
+        declaration's one writer in ``app/`` is gone: the loop in
+        ``transfer_service._amount.apply_amount_ownership`` that wrote it onto
+        ``TransferRows.shadows``, empty on every transfer, went with that
+        attribute at the step's second leaf (``TransferRows``'s docstring, in
+        ``app/services/transfer_service/_validation.py``).  Measured
+        2026-10-18, before that deletion: the loop declaring ``TEMPLATE`` in
+        its place failed no test the unmutated suite passed, over the whole
+        suite (the coordinator's ruling, **R-BAL207**).
         """
         with app.app_context():
             savings = create_savings_account(
@@ -682,22 +709,6 @@ class TestGenerateTransferOf:
             assert xfer.amount_ownership.source_id == ref_cache.amount_source_id(
                 AmountSourceEnum.TEMPLATE,
             )
-            legs = (
-                db.session.query(Transaction)
-                .filter_by(transfer_id=xfer.id)
-                .all()
-            )
-            assert len(legs) == 2
-            assert {leg.account_id for leg in legs} == {
-                seed_user["account"].id, savings.id,
-            }
-            for leg in legs:
-                assert leg.template_id is None
-                assert leg.due_date == xfer.due_date
-                assert leg.amount_ownership.figure is None
-                assert leg.amount_ownership.source_id == (
-                    ref_cache.amount_source_id(AmountSourceEnum.PARENT_TRANSFER)
-                )
 
     def test_the_transfer_is_worth_what_its_definition_states(
         self, app, db, seed_user, seed_periods,
@@ -739,9 +750,12 @@ class TestGenerateTransferOf:
     ):
         """A period outside the owner's calendar never reaches the engine.
 
-        Three rows would have been written -- the parent and two legs -- and
-        none is: the refusal is the schedule's, one tier above the composite
-        keys that would refuse the INSERTs.
+        The transfer would have been written, and it is not: the refusal is
+        the schedule's, one tier above the composite keys that would refuse
+        the INSERT.  It counted the owner's transactions naming a transfer too
+        until plan step ``balance:X-bi-6-4d-2``: the database refuses such a
+        row (``ck_transactions_names_no_transfer``), so that count was over
+        rows nothing can write (measured 0; ruling **R-BAL167**).
         """
         with app.app_context():
             savings = create_savings_account(
@@ -752,8 +766,4 @@ class TestGenerateTransferOf:
                 generate_transfer_of(template, seed_second_periods[0])
             assert db.session.query(Transfer).filter_by(
                 transfer_template_id=template.id,
-            ).count() == 0
-            assert db.session.query(Transaction).filter(
-                Transaction.transfer_id.isnot(None),
-                Transaction.user_id == seed_user["user"].id,
             ).count() == 0

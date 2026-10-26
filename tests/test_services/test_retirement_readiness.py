@@ -358,8 +358,6 @@ class TestComputeReadinessData:
             )
             cancelled_id = ref_cache.status_id(StatusEnum.CANCELLED)
             transfer.status_id = cancelled_id
-            for shadow in transfer.shadow_transactions:
-                shadow.status_id = cancelled_id
             db.session.commit()
 
             data = _readiness(seed_user["user"].id)

@@ -192,6 +192,7 @@ def unmarked(labels: Iterable[str]) -> tuple[str, ...]:
     removal of it (BAL-620)."""
     return tuple(label for label in labels if label != FILING)
 
+
 #: The two labels a release reads: a step whose release moves money, and a parent
 #: whose leaves ``/release`` ships in one release.  ``quill file step --label`` takes its
 #: choices from here.

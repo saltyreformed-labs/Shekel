@@ -180,7 +180,9 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     def edits(self, number):
         """A card's body and its versions (the body as filed when it was never edited).  A
         number nobody filed is GitHub's NOT_FOUND error, which the strict read raises
-        (:meth:`_github.GitHub.graphql`; the error as ``recorded/tracker.json`` holds it)."""
+        (:meth:`_github.GitHub.graphql`): the type and message ``recorded/tracker.json``
+        records for a missing issue, at this query's path, without the recorded
+        ``locations``."""
         if number not in self.cards_by_number:
             raise GitHubError(200, 'graphql: [{"type": "NOT_FOUND", "path": ["repository", '
                               f'"issue"], "message": "Could not resolve to an Issue with the '

@@ -89,10 +89,10 @@ from tools.quill.setup_tracker import (
 BOARD_WAIT_SECONDS = 60
 #: How often a board that lags a write is read again.
 POLL_SECONDS = 5
-#: A connection GitHub caps per card (a parent holds at most 100 sub-issues).
-_PAGE = 100
-#: How many cards one read by number asks for (:meth:`CardReader._lookup`).
-_LOOKUP_BATCH = _PAGE // 2
+#: How many cards one read by number asks for (:meth:`CardReader._lookup`), inside GitHub's
+#: limit of about ten seconds a request.  Measured 2026-10-26 15:27-15:33 on the tracker,
+#: three rounds: 50 cards a batch took 1.8-2.5 s, 25 took 1.4 s.
+_LOOKUP_BATCH = 25
 #: The largest number a read by number can ask for: GraphQL's ``Int`` is a signed 32-bit
 #: integer (the GraphQL specification), so no issue is numbered past it.
 GRAPHQL_INT_MAX = 2**31 - 1

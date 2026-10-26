@@ -8,16 +8,25 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from datetime import UTC, datetime
 
 import pytest
 import requests
 
 from tools.quill import quill
+from tools.quill._queries import marked_cards, open_cards
 from tools.quill._export import snapshot
 from tools.quill._github import CUT_OFF_RETRIES, GitHub, GitHubError, described
 from tools.quill._recorded import recording
-from tools.quill._tracker import Board, Tracker, board_of, comment_versions, milestone_nodes
+from tools.quill._tracker import (
+    Board,
+    CardReader,
+    Tracker,
+    board_of,
+    comment_versions,
+    milestone_nodes,
+)
 from tools.quill.setup_tracker import APP_LOGIN, PLAN
 
 #: GitHub's page for a request it cut off, as it answered quill's sync at 14:04 2026-10-26,
@@ -216,3 +225,26 @@ def test_every_paged_read_names_itself(read, named):
     with pytest.raises(GitHubError) as failed:
         read(Tracker(github, Board(github, PLAN, "PVT_x"), APP_LOGIN))
     assert described(failed.value).endswith(f"; while reading {named}, page 1")
+
+
+@pytest.mark.parametrize("listing", [open_cards, marked_cards])
+def test_a_listing_of_cards_asks_25_a_page(listing):
+    """plan#1809 item 1: the open listing at 100 a page was cut off at GitHub's limit, and
+    answered at 25 in about a second (``_queries._LISTING_PAGE``, its measurement); the
+    marked listing reads the same fields."""
+    assert "issues(first: 25, after: $after" in listing(PLAN)
+
+
+def test_cards_read_by_number_are_asked_25_a_batch_and_a_failure_names_its_batch():
+    """plan#1809 item 1: sixty numbers are three reads of at most 25 (``_tracker._LOOKUP_BATCH``,
+    its measurement); the third, cut off, is named with the cards it asked."""
+    session = _Script(_data({"repository": {f"c{n}": None for n in range(1, 26)}}),
+                      _data({"repository": {f"c{n}": None for n in range(26, 51)}}),
+                      _Answer(200, '{"data": null}'))
+    with pytest.raises(GitHubError) as failed:
+        CardReader(_github(session), PLAN).cards(range(1, 61))
+    asked = [re.findall(r"c(\d+): issue", body["query"]) for _, _, body in session.sent]
+    assert [(batch[0], batch[-1], len(batch)) for batch in asked] == [
+        ("1", "25", 25), ("26", "50", 25), ("51", "60", 10)]
+    assert described(failed.value).endswith(
+        "; while reading the cards by number, batch 3 of 3, plan#51-plan#60")

@@ -92,7 +92,7 @@ def _get_owned_period(pay_period_id, user_id):
     the fan-out uses the calendar's own periods, so the submitted id never
     reaches this function and that route resolution is the ONLY thing standing
     between a crafted POST and a silently-ignored foreign period.  Graded by
-    ``test_transfers.TestOneTimeTransfer.test_recurring_transfer_idor_period``.
+    ``test_transfers.test_one_time.TestOneTimeTransfer.test_recurring_transfer_idor_period``.
     *A first version of this paragraph called it "not to check anything"*,
     which would have invited a later reader to delete the control plan step
     R7b-4 moved here to close.  It threads the resolved period to

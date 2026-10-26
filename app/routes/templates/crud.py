@@ -210,9 +210,10 @@ def create_template():
     # series is the only thing that prices this definition's rows -- generation
     # writes no figure, so a template whose series never opened generates rows
     # ``_stated_amount`` REFUSES.  *An earlier version of this comment said
-    # X-au-e "removes the redundancy by removing the column"; it does not, and
-    # ``default_amount`` stays until plan step ``balance:X-bp`` deletes it -- see
-    # ``template_amount_service.set_amount`` for what still reads it.*  A
+    # X-au-e "removes the redundancy by removing the column"; it does not.
+    # Plan step X-bp deletes ``default_amount`` from both template tables
+    # (rulings **R-IY**, **R-BAL16**); until then
+    # ``template_amount_service.set_amount`` says what still reads it.*  A
     # template created today generates rows into historical pay periods too,
     # and those resolve by the series holding flat before its earliest version
     # (``template_amount_service.amount_as_of``).
@@ -343,7 +344,7 @@ def update_template(template_id):
     # the ORDER in which this route invokes those helpers; folding that call
     # sequence into a further helper would couple two separate template
     # domains (transaction-template envelope tracking + name propagation vs
-    # transfer-template name-uniqueness + shadow invariants) behind awkward
+    # transfer-template name-uniqueness + loan-destination rules) behind awkward
     # multi-value returns for no real gain (coding-standards rule 13).
     # Pylint: ``duplicate-code`` -- one-sided disable; only the call sequence
     # is shared with ``transfers.update_transfer_template`` per the R0801

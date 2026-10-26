@@ -14,7 +14,8 @@ cadence from the form would manufacture rule-less definitions holding
 scattered rows listed nowhere.  The transaction class below grades the
 REFUSAL -- the rule and every row stand -- and the sweep's own semantics
 (what a cleared cadence retires and retains) stay graded on the transfer
-twin here and on the engine in ``test_recurrence_engine``.
+twin here and on the engine in ``TestRegenerateForTemplate``
+(``test_recurrence_engine/``).
 
 **It meant none of those things.**  Measured on a real edit of an
 every-paycheck template before this step::
@@ -53,7 +54,7 @@ retires the ``Once`` pattern.
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import AmountSourceEnum, TxnTypeEnum
+from app.enums import AmountSourceEnum
 from app.extensions import db
 from app.models.loan_payment_settings import LoanPaymentSettings
 from app.models.recurrence_rule import RecurrenceRule
@@ -80,9 +81,7 @@ from tests._test_helpers import (
     make_cadence_rule,
     open_books_before_the_first_assertion,
     repriced_by_the_owner,
-    shadow_amount,
     state_template_price,
-    transfer_amount,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 
@@ -502,9 +501,10 @@ class TestClearingATransferTemplatesRecurrence:
     ):
         """The rule row is gone and only transfers before the cut survive.
 
-        Same contract as the transaction half, through the transfer service so
-        each removed Transfer takes its two shadow transactions with it
-        (transfer invariant 1).
+        Same contract as the transaction half, through the transfer service.
+        It read each survivor's two shadow transactions, and counted the eight
+        left, until plan step ``balance:X-bi-6-4d-2``: a transfer stores no
+        leg row since migration 82f7 (ruling **R-BAL167** class 1).
         """
         savings = _savings_account(seed_user)
         template = _recurring_transfer_template(seed_user, savings)
@@ -531,24 +531,10 @@ class TestClearingATransferTemplatesRecurrence:
         ).all()
         assert _period_indices(survivors, seed_periods) == [0, 1, 2, 3]
 
-        # Transfer invariants 1-3, asserted positively.  A subset check would
-        # pass against a sweep that destroyed EVERY shadow, so each surviving
-        # transfer is checked to still carry exactly its pair, one leg each
-        # way, at the parent's amount and in the parent's period.
-        income_id = ref_cache.txn_type_id(TxnTypeEnum.INCOME)
-        expense_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-        for xfer in survivors:
-            pair = db.session.query(Transaction).filter_by(
-                transfer_id=xfer.id,
-            ).all()
-            assert len(pair) == 2
-            assert {t.transaction_type_id for t in pair} == {income_id, expense_id}
-            assert all(shadow_amount(t) == transfer_amount(xfer) for t in pair)
-            assert all(t.pay_period_id == xfer.pay_period_id for t in pair)
-        # 4 survivors x 2 legs; the 6 swept transfers took 12 shadows with them.
-        assert db.session.query(Transaction).filter(
-            Transaction.transfer_id.isnot(None),
-        ).count() == 8
+        # The survivors are LIVE, asserted positively.  The period subset above
+        # would pass against a sweep that soft-deleted the transfers before
+        # the cut too, which keeps every row and hides it.
+        assert all(xfer.is_deleted is False for xfer in survivors)
 
     def test_a_loan_payment_refuses_to_become_one_time(
         self, app, auth_client, seed_user, seed_periods,
@@ -613,7 +599,7 @@ class TestClearingATransferTemplatesRecurrence:
         A transfer template with no rule and exactly one materialised Transfer
         is what "one-time transfer" became when ``Once`` was retired.  An
         unrelated edit must leave that Transfer alone.  Built here through the
-        service; ``test_transfers.py`` covers the same property end-to-end
+        service; ``test_transfers/test_one_time.py`` covers the same property end-to-end
         through the create form, which is what now produces this shape.
         """
         savings = _savings_account(seed_user)

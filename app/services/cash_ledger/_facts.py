@@ -413,24 +413,26 @@ def planned_cash_rows(
 
     **A still-projected transfer's leg is DERIVED from the parent row, not read
     off its shadow** (ruling **R-BAL13**).  The two shadow ``Transaction`` rows
-    the transfer service writes beside each parent are that parent's
+    the transfer service wrote beside each parent were that parent's
     projection onto its two accounts, and until this step this loader was
     kind-blind on ``transfer_id``: it loaded the shadow on this account and
-    the valuation walked it to the parent (amount rule 5).  Now the row half
-    of the plan EXCLUDES shadows -- the one place this loader narrows on
-    ``transfer_id``, and the narrowing plan step ``X-bi-6`` deletes with the
-    rows -- and the leg half is
+    the valuation walked it to the parent (amount rule 5).  The row half of
+    the plan then EXCLUDED shadows -- the one place this loader narrows on
+    ``transfer_id`` -- and it excludes nothing since plan step
+    ``balance:X-bi-6-4d-2`` deleted them (ruling **R-BAL166**); the narrowing
+    goes with the column at plan step ``balance:X-bi-6-5``.  The leg half is
     :func:`app.services.transfer_legs.planned_transfer_legs` over
     ``budget.transfers``: one :class:`~app.services.transfer_legs.TransferLeg`
     per live still-projected transfer the account is on either side of, worth
     the parent's resolved amount -- **and only for a side whose DATED
     movement does not yet exist** (ruling **R-BAL79**, plan step
-    ``balance:X-bi-4a``): the settled twin reads a settled leg as its
-    shadow's covering movement, so the movement, not the parent's status, is
+    ``balance:X-bi-4a``): the settled twin reads a settled leg as its side's
+    covering movement, which hangs off the transfer by a side link since plan
+    step ``balance:X-bi-6-4d-2``, so the movement, not the parent's status, is
     what decides which relation a leg is in, and a leg cannot be counted by
-    both halves.  Where a pair has drifted on period, due date, deletion or
-    scenario the plan follows the PARENT, which is ruling **R-JA**'s
-    direction.
+    both halves.  Where a shadow had drifted from its parent on period, due
+    date, deletion or scenario the plan followed the PARENT, which is ruling
+    **R-JA**'s direction; with the shadows gone the parent is the only row.
 
     * a DATED movement can be dated by this leaf -- its ``settled_on`` is a
       STORED fact and nothing derives it (plan step X-f1, ruling R-EC) -- so

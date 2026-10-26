@@ -48,7 +48,7 @@ from app.services.investment_projection import (
 )
 from app.services.loan_loaders import (
     projected_income_legs,
-    settled_income_shadows,
+    settled_income_legs,
 )
 from app.services.pay_calendar import DerivedPeriod, PeriodWindow
 from app.services.row_valuation import leg_settled_contribution
@@ -171,7 +171,7 @@ def _recorded_contributions(
     read.  **Both halves are legs of their transfers since plan step
     balance:X-bi-6-4b**, divided by one test (ruling **R-BAL140**): a
     contribution that has SETTLED is read by
-    :func:`~app.services.loan_loaders.settled_income_shadows` and worth what
+    :func:`~app.services.loan_loaders.settled_income_legs` and worth what
     its record moved
     (:func:`~app.services.row_valuation.leg_settled_contribution`); one still
     PROJECTED is read by
@@ -218,7 +218,7 @@ def _recorded_contributions(
         a projected one.  ``{}`` for an account with none.
     """
     totals: dict[int, Decimal] = {}
-    for leg in settled_income_shadows(
+    for leg in settled_income_legs(
         account_id, basis.scenario_id, options=(),
     ):
         totals[leg.pay_period_id] = (

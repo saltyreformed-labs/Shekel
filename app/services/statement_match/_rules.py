@@ -201,7 +201,7 @@ def is_inflow(amount: Decimal) -> bool:
     :meth:`~._bars.CreationBars.bar_for` records having had to delete.  The
     CONSTRAINT is what carries the guarantee and it is graded directly, by
     ``test_statement_import_schema.TestALineMustMoveMoney`` and by
-    ``test_income.TestWhichLinesGetAnActAndWhichSTILLDoNot.
+    ``test_income.test_the_reviewed_pass.TestWhichLinesGetAnActAndWhichSTILLDoNot.
     test_a_ZERO_line_cannot_EXIST``.
 
     (An earlier draft of this paragraph named a class

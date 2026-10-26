@@ -478,13 +478,16 @@ class TestTheNamedReaderIsTheLocksReading:
     def test_every_holding_paycheck_and_no_other_is_named(
         self, app, db, auth_client, seed_user, seed_periods_today,
     ):
-        """A purchase, a kept row payment, a live and a HIDDEN transfer's payment.
+        """A purchase, a kept row payment and a live transfer's; a HIDDEN transfer holds none.
 
-        The hidden one is finding ``balance:BAL-532``'s state: a settled
-        transfer soft-deleted, whose legs keep their payments.  The delete
-        would take them, so the lock holds the paycheck and the sentence
-        names it.  The fifth future paycheck holds nothing and is named by
-        neither.
+        The hidden one was finding ``balance:BAL-532``'s state: a settled
+        transfer soft-deleted, whose legs kept their payments, so the lock
+        held its paycheck and the sentence named it.  Since plan step
+        ``balance:X-bi-6-4d-2`` the delete takes them off the books (ruling
+        **R-CC75**, "Same as a one-off"), so that paycheck holds nothing and
+        is named by neither, like the fifth future paycheck.  (Re-expressed
+        with the developer's approval, 2026-10-08: it expected four holding
+        paychecks; the other three and their figures are unchanged.)
         """
         with app.app_context():
             periods = seed_periods_today
@@ -523,7 +526,11 @@ class TestTheNamedReaderIsTheLocksReading:
             assert {movement.period_id for movement in held} == {
                 period_id for period_id in future
                 if locks[period_id] is PeriodLockReason.HOLDS_MOVEMENT
-            } == {periods[n].id for n in (5, 6, 7, 8)}
+            } == {periods[n].id for n in (5, 6, 7)}
+            assert _db.session.query(TransactionEntry).filter(
+                (TransactionEntry.expense_transfer_id == hidden.id)
+                | (TransactionEntry.income_transfer_id == hidden.id),
+            ).count() == 0, "the deleted transfer still holds a payment"
             assert [
                 (m.period_id, m.item, m.item_name, m.is_payment, m.amount)
                 for m in held
@@ -534,6 +541,4 @@ class TestTheNamedReaderIsTheLocksReading:
                  Decimal("1200.00")),
                 (periods[7].id, ("transfer", live.id), "Savings", True,
                  Decimal("60.00")),
-                (periods[8].id, ("transfer", hidden.id), "Emergency", True,
-                 Decimal("70.00")),
             ]

@@ -37,7 +37,7 @@ def _reject_same_account_transfer(data):
 
     Shared cross-field rule for the transfer-template and ad-hoc transfer
     create schemas (DRY -- one implementation of the check).  A
-    self-transfer moves no money and would produce two shadow legs that
+    self-transfer moves no money: its two legs would sit on one account and
     net to zero; the route surfaces the message to the user.
 
     Runs only when both ``from_account_id`` and ``to_account_id`` are
@@ -253,9 +253,10 @@ class TransferUpdateSchema(BaseSchema):
     # carries: the locked fields are budget decisions, and this is an observed
     # fact about the bank.
     #
-    # This door is the ONLY door onto the rows finding **N-181** names: all 8
+    # This door is the ONLY door onto the days finding **N-181** names: all 8
     # settled rows whose day the X-f1b backfill had to invent from a pay
-    # period's start are transfer SHADOWS (four pairs).
+    # period's start were transfer SHADOWS (four pairs), and a transfer's
+    # days are its two side records' since plan step balance:X-bi-6-4d-2.
     #
     # Deliberately NOT ``allow_none``: an empty input loads as ABSENT ("leave
     # the day alone"), never as a request to clear it -- the service's stated
@@ -264,9 +265,10 @@ class TransferUpdateSchema(BaseSchema):
     settled_on_from = fields.Date()
     settled_on_to = fields.Date()
 
-    # WHAT MOVED, for BOTH shadows (developer ruling, 2026-08-17).  The Actual
-    # box: what the bank really took, which is a DIFFERENT fact from the
-    # ``amount`` above and gets its own input rather than overwriting the plan.
+    # WHAT MOVED, the transfer's one figure (developer ruling, 2026-08-17).
+    # The Actual box: what the bank really took, which is a DIFFERENT fact
+    # from the ``amount`` above and gets its own input rather than
+    # overwriting the plan.
     #
     # Editable on a finalised transfer for the reason the day boxes above are,
     # and the two are one assertion's two halves: the #26 lock protects BUDGET
@@ -283,8 +285,8 @@ class TransferUpdateSchema(BaseSchema):
     # the empty ones, and an empty box means nobody typed a figure.
     #
     # **``_NON_NEGATIVE_MONETARY`` rather than a bare lower bound**, and the
-    # ceiling is the load-bearing half: the record's figure (the covering
-    # movement's ``amount``) is ``Numeric(12, 2)``, so a figure at or above
+    # ceiling is the load-bearing half: the figure is stored as the transfer's
+    # ``settled_figure``, ``Numeric(12, 2)``, so a figure at or above
     # `10 ** 10` validates, reaches the seam, and dies at
     # the DATABASE with a ``DataError`` -- which is NOT a subclass of the
     # ``IntegrityError`` this route catches, so it surfaces as a 500 and the

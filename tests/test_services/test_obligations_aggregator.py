@@ -73,16 +73,26 @@ _BIWEEKLY = PayCadence(FixedDays(14))
 #: the conversion, and the paydays for the filter step that has to know when a
 #: bounded rule spent its bound.
 #:
-#: Three years of paydays so a count bound has somewhere to be spent; the
-#: owner is the seed user's, because the filter resolves the rule against this
+#: Three years of paydays so a count bound has somewhere to be spent.  The
+#: schedule has no owner of its own: each case names the owner its pass is
+#: built for (:func:`_pass`), because the filter resolves the rule against this
 #: schedule and ``resolve`` refuses a rule paired with another owner's.  Every
 #: figure below is hand-computed against ``_BIWEEKLY``, which is ``.cadence``
 #: of this schedule, so no assertion moves.
 _SCHEDULE_START = date(2025, 1, 3)
 _SCHEDULE_PAYDAYS = 78
 
+#: The owner of every duck-typed template :func:`_fake_template` builds, and so
+#: of the pass each case that reads one builds.  No user row has this id (every
+#: user the test database holds is numbered above a million, ruling
+#: ``balance:R-BAL356``), which is fine: nothing here reads the owner from the
+#: database, only compares the rule's owner with the pass's.
+_STAND_IN_OWNER = 1
 
-def _pass(as_of: date, cadence_days: int = 14, user_id: int = 1) -> BalanceContext:
+
+def _pass(
+    as_of: date, cadence_days: int = 14, *, user_id: int,
+) -> BalanceContext:
     """Return a read pass over a three-year synthetic schedule, pinned at *as_of*.
 
     Built through the one seam the developer ruled for a pass over
@@ -97,7 +107,9 @@ def _pass(as_of: date, cadence_days: int = 14, user_id: int = 1) -> BalanceConte
             asks about.
         cadence_days: Days between paydays.  14 unless a case is about the
             cadence itself.
-        user_id: The owner.  The rule's ``user_id`` must match it, or
+        user_id: The owner, with no default so every case states it: the
+            seed user's id for a real template, :data:`_STAND_IN_OWNER` for a
+            duck-typed one.  The rule's ``user_id`` must match it, or
             ``resolve`` refuses the pairing.
 
     Returns:
@@ -125,9 +137,10 @@ def _fake_template(
     reads -- not the four the retired filter happened to touch -- because the
     aggregator resolves the rule through the door since plan step R7d-e, and
     a stand-in that lists only what one reader touches stops being one the
-    moment the reader changes.  ``user_id`` is the pass's, ``starts_on`` is
-    the schedule's first payday and the placement is the containing one, so
-    the value resolves for every authorable unit.
+    moment the reader changes.  ``user_id`` is :data:`_STAND_IN_OWNER`, which
+    the case's pass must name too; ``starts_on`` is the schedule's first payday
+    and the placement is the containing one, so the value resolves for every
+    authorable unit.
 
     Args:
         unit_id: The ``ref.recurrence_units`` id -- possibly one the enum does
@@ -141,7 +154,7 @@ def _fake_template(
     """
     return SimpleNamespace(
         recurrence_rule=SimpleNamespace(
-            user_id=1,
+            user_id=_STAND_IN_OWNER,
             unit_id=unit_id,
             interval_n=interval_n,
             starts_on=_SCHEDULE_START,
@@ -218,7 +231,7 @@ class TestObligationsAggregator:
             db.session.commit()
 
             result = obligations_aggregator.committed_monthly(
-                [tmpl], _pass(as_of),
+                [tmpl], _pass(as_of, user_id=seed_user["user"].id),
             )
 
             assert result == Decimal("0.00"), (
@@ -246,7 +259,7 @@ class TestObligationsAggregator:
                 Decimal("100") * _BIWEEKLY.periods_per_year / MONTHS_PER_YEAR
             ).quantize(Decimal("0.01"))
             result = obligations_aggregator.committed_monthly(
-                [tmpl], _pass(as_of),
+                [tmpl], _pass(as_of, user_id=seed_user["user"].id),
             )
 
             assert result == Decimal("216.67"), (
@@ -279,7 +292,8 @@ class TestObligationsAggregator:
             db.session.commit()
 
             result = obligations_aggregator.committed_monthly(
-                [once_tmpl, recurring_tmpl], _pass(as_of),
+                [once_tmpl, recurring_tmpl],
+                _pass(as_of, user_id=seed_user["user"].id),
             )
 
             # Hand-computed: ONCE excluded -> $100 * 26 / 12 = $216.67.
@@ -338,7 +352,7 @@ class TestObligationsAggregator:
                 .all()
             )
             agg_total = obligations_aggregator.committed_monthly(
-                templates, _pass(date.today()),
+                templates, _pass(date.today(), user_id=seed_user["user"].id),
             )
             assert agg_total == Decimal("716.67"), (
                 f"Aggregator total must equal /obligations subtotal "
@@ -372,7 +386,7 @@ class TestObligationsAggregator:
             template = _fake_template(surplus, 1, Decimal("100.00"))
             with pytest.raises(RecurrenceResolutionError):
                 obligations_aggregator.committed_monthly(
-                    [template], _pass(date(2026, 5, 20)),
+                    [template], _pass(date(2026, 5, 20), user_id=_STAND_IN_OWNER),
                 )
 
     def test_the_three_surviving_filters_still_answer_none(self, app):
@@ -399,7 +413,7 @@ class TestObligationsAggregator:
             zero = _fake_template(every_period, 1, Decimal("0.00"))
             for template in (no_rule, expired, zero):
                 assert obligations_aggregator.template_monthly_or_none(
-                    template, _pass(as_of),
+                    template, _pass(as_of, user_id=_STAND_IN_OWNER),
                 ) is None
 
     def test_the_conversion_reproduces_every_retired_branch(self, app):
@@ -431,7 +445,7 @@ class TestObligationsAggregator:
                     Decimal("100.00"),
                 )
                 assert obligations_aggregator.committed_monthly(
-                    [template], _pass(date(2026, 5, 20)),
+                    [template], _pass(date(2026, 5, 20), user_id=_STAND_IN_OWNER),
                 ) == Decimal(expected), (unit, interval_n)
 
     def test_the_conversion_side_paycheck_count_has_one_producer(self):
@@ -494,13 +508,15 @@ class TestObligationsAggregator:
             ref_cache.recurrence_unit_id(RecurrenceUnitEnum.PERIOD), 1,
             Decimal("100.00"),
         )
-        weekly = _pass(date(2026, 5, 20), cadence_days=7)
+        weekly = _pass(
+            date(2026, 5, 20), cadence_days=7, user_id=_STAND_IN_OWNER,
+        )
         assert weekly.calendar().cadence == _Cadence(FixedDays(7))
         assert obligations_aggregator.committed_monthly(
             [weekly_template], weekly,
         ) == Decimal("433.33")
         assert obligations_aggregator.committed_monthly(
-            [weekly_template], _pass(date(2026, 5, 20)),
+            [weekly_template], _pass(date(2026, 5, 20), user_id=_STAND_IN_OWNER),
         ) == Decimal("216.67")
 
     def test_emergency_fund_baseline_excludes_expired(
@@ -775,7 +791,7 @@ class TestACeilingedRulePricesAtItsCeiling:
             db.session.commit()
 
             result = obligations_aggregator.committed_monthly(
-                [tmpl], _pass(as_of),
+                [tmpl], _pass(as_of, user_id=seed_user["user"].id),
             )
 
             # 517.21 x 2 = 1034.42; the uncapped reading would be
@@ -795,7 +811,7 @@ class TestACeilingedRulePricesAtItsCeiling:
             db.session.commit()
 
             result = obligations_aggregator.committed_monthly(
-                [tmpl], _pass(as_of),
+                [tmpl], _pass(as_of, user_id=seed_user["user"].id),
             )
 
             # 12 x 3 = 36 is not below 26, so 100 x 26 / 12 = 216.67.

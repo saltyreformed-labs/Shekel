@@ -212,11 +212,11 @@ def _resolve_salary_profile_url(action: str | None, profile_id: int | None):
 )
 @require_owner
 def create_contribution_transfer(account_id):
-    """Create a recurring biweekly transfer to an investment account.
+    """Create a recurring every-paycheck transfer to an investment account.
 
     Creates a RecurrenceRule (every-period pattern), a TransferTemplate
     (from the selected source to the investment account), and generates
-    Transfer records (with shadow transactions) for existing pay periods.
+    Transfer records for existing pay periods.
 
     The amount defaults to a suggested per-period contribution based on
     the annual limit and remaining periods.  The user may override it.
@@ -331,7 +331,7 @@ def create_contribution_transfer(account_id):
     # Open the amount's dated series at today (plan step X-au-a).  A
     # contribution carries no loan-payment settings row, so nothing re-derives
     # its amount afterwards and the write door records it as stated; the builder
-    # above also sets the column because it is NOT NULL, and plan step X-au-e
+    # above also sets the column because it is NOT NULL, and plan step X-bp
     # removes that redundancy.  **The FIGURE above was computed** -- an annual
     # limit over the pay cadence, or the suggested default -- which is one of
     # the twelve stored-derived values finding **N-243** censuses (owned by

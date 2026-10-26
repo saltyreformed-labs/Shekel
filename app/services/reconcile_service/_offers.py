@@ -662,49 +662,8 @@ class OutstandingGroup:
 
 
 @dataclass(frozen=True)
-class DamagedTransfer:
-    """A transfer on this account the panel cannot offer, because its pair is broken.
-
-    Ruling **R-BAL148** (developer, 2026-09-25, leaf
-    ``balance:X-bi-6-4c-2``), picked as *"Show the rest, warn"*: the panel
-    lists everything else as normal plus a warning naming the transfer, and
-    does not offer it for ticking, so it cannot be settled by a guess.  A leg
-    is priced through its transfer's verified shadow pair
-    (``transfer_service.leg_settle_amount``), and a pair that is not exactly
-    one live expense and one live income shadow is REFUSED there -- a state
-    no door writes (Transfer Invariant 1; integrity check DC-12 reports it)
-    and production held 0 of on 2026-09-24.  Refusing the whole panel would
-    have been a server error on the account's page, because the panel is
-    built inline there and in a true-up's response.  Plan step
-    ``X-bi-6-4d`` deletes the shadows, and with them this state and this
-    value.
-
-    Attributes:
-        label: The leg's label ("Transfer to Savings"), composed from the
-            endpoints' current names.
-        amount: The transfer's own planned figure
-            (``cash_ledger.resolve_transfer_amount``), printed to identify it.
-            It is NOT what a tick would book: nothing can be booked for a
-            broken pair, which is why it is not offered.
-        attributed_on: The day the projection lands it on, the same caption
-            day an offer carries.
-    """
-
-    label: str
-    amount: Decimal
-    attributed_on: date
-
-
-@dataclass(frozen=True)
-class OutstandingSet:  # pylint: disable=too-many-instance-attributes
+class OutstandingSet:
     """What a statement of one civil day could still settle, grouped.
-
-    Pylint: ``too-many-instance-attributes`` (8/7) -- the eighth is
-    :attr:`damaged` (ruling **R-BAL148**), and these eight ARE the panel's one
-    read: its blocks, three count/total pairs the copy pluralises on, and the
-    transfers it must warn about.  The panel renders them together from one
-    value; splitting the warnings into a second return would give the route two
-    producers' answers to keep in step for one render.
 
     **There are THREE tallies and deliberately no fourth that sums them**
     (ruling **R-FA**, extended by **R-FD**).  A single ``total`` double-counts
@@ -740,10 +699,6 @@ class OutstandingSet:  # pylint: disable=too-many-instance-attributes
         deposit_count: How many INCOME rows the set offers -- money the
             projection is still waiting to arrive (ruling **R-FD**).
         deposit_total: What those rows would book.
-        damaged: The transfers on this account the panel cannot offer
-            (:class:`DamagedTransfer`), each printed as a warning.  Counted in
-            none of the tallies above, and not in :attr:`is_empty`: nothing
-            about one can be ticked.
 
     Counting lives here and not in the template because these are the figures
     the panel's copy pluralises on, and money-adjacent counting belongs on the
@@ -757,7 +712,6 @@ class OutstandingSet:  # pylint: disable=too-many-instance-attributes
     payment_total: Decimal
     deposit_count: int
     deposit_total: Decimal
-    damaged: "tuple[DamagedTransfer, ...]"
 
     @classmethod
     def empty(cls) -> "OutstandingSet":
@@ -776,7 +730,6 @@ class OutstandingSet:  # pylint: disable=too-many-instance-attributes
             purchase_count=0, purchase_total=zero,
             payment_count=0, payment_total=zero,
             deposit_count=0, deposit_total=zero,
-            damaged=(),
         )
 
     @property
@@ -785,9 +738,7 @@ class OutstandingSet:  # pylint: disable=too-many-instance-attributes
 
         The steady state for a user who reconciles as they go, and the state
         the panel answers with its "nothing is being held back twice" copy
-        rather than an empty form -- unless :attr:`damaged` is not empty
-        (ruling **R-BAL148**), when the panel prints only the warnings: a
-        transfer it cannot offer is still outstanding.
+        rather than an empty form.
 
         **Read off the COUNTS, not off ``groups``**, and the difference is a
         wrong empty state rather than a style point.  This accessor was written

@@ -326,15 +326,21 @@ class TestDayAssignment:
             assert result.day_entries[2][0].name == "Paycheck"
 
     def test_due_date_none_fallback(self, app, seed_user, seed_periods, db):
-        """An UNDATED row falls back to period.start_date.day.
+        """An UNDATED transfer's leg falls back to period.start_date.day.
 
-        The undated row is a transfer's expense shadow made without a due
-        date (the transfer form leaves it optional): every one-off is dated
-        on its paycheck's start since plan step balance:X-bi-7b, and the
-        cutover (balance:X-bi-7d-2) dated production's remaining undated
-        one-offs the same way, so a row NO definition prices is what still
-        reaches the ``None`` arm of ``attribution_day`` at this door.  (A
-        LEGACY link-less row was the specimen until that cutover.)
+        The undated entry is the from-side leg of a transfer made without a
+        due date (the transfer form leaves it optional); a leg's due date is
+        its parent's.  Every one-off is dated on its paycheck's start since
+        plan step balance:X-bi-7b, and the cutover (balance:X-bi-7d-2) dated
+        production's remaining undated one-offs the same way, so an undated
+        transfer is what still reaches the ``None`` arm of
+        ``attribution_day`` at this door.  (A LEGACY link-less row was the
+        specimen until that cutover.  The calendar has drawn a transfer as
+        legs read off its parent, no shadow, since plan step
+        ``balance:X-bi-6-1b``; the case called its undated entry the
+        transfer's expense shadow, and read that shadow's due date, until plan
+        step ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint.)  The case
+        reads checking's calendar, so it grades the from-side leg only.
         """
         with app.app_context():
             p0 = seed_periods[0]  # starts Jan 2
@@ -346,7 +352,7 @@ class TestDayAssignment:
                 amount=Decimal("50.00"),
             )
             db.session.commit()
-            assert all(row.due_date is None for row in xfer.shadow_transactions)
+            assert xfer.due_date is None, "the plant: the transfer is undated"
 
             result = calendar_service.get_month_detail(
                 user_id=seed_user["user"].id,
@@ -1788,9 +1794,20 @@ class TestATransferIsALegOfItsParent:
     and excluded.
     """
 
-    def test_the_loader_answers_own_rows_and_both_sides_legs_and_no_shadow(
+    def test_the_loader_answers_own_rows_and_both_sides_legs(
         self, app, seed_user, seed_periods, db,
     ):
+        """Each account's load is its own rows and the transfer's leg on its side.
+
+        Checking holds a $300.00 Rent row and the from-side of a $250.00
+        checking -> savings transfer; savings holds no row of its own.
+        Checking's load answers the Rent row alone and one EXPENSE leg on
+        checking; savings' answers no row and one INCOME leg on savings.
+        Until plan step ``balance:X-bi-6-4d-2`` the case also read that no row
+        checking's load answered named a transfer (a shadow); no row can since
+        (``ck_transactions_names_no_transfer``).  Renamed from
+        ``test_the_loader_answers_own_rows_and_both_sides_legs_and_no_shadow``.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = create_savings_account(
@@ -1812,7 +1829,6 @@ class TestATransferIsALegOfItsParent:
                 CashFlowSet.single(checking), ctx.scenario_id, periods,
             )
             assert [row.name for row in on_checking.rows] == ["Rent"]
-            assert all(row.transfer_id is None for row in on_checking.rows)
             assert [
                 (leg.transfer.id, leg.account_id, leg.is_income)
                 for leg in on_checking.legs
@@ -1873,7 +1889,8 @@ class TestATransferIsALegOfItsParent:
         """A $300.00 savings -> card transfer on checking's calendar (set
         ``(checking, card)``): one INCOME cell, the card's leg, 300.00 in --
         R-CC23's one-endpoint arm end to end, the reader-level twin of
-        ``test_transfer_legs``' case (the second review of leaf X-bi-6-1b)."""
+        ``test_transfer_legs/test_the_grids_legs.py``'s case (the second
+        review of leaf X-bi-6-1b)."""
         with app.app_context():
             card = create_account_of_type(
                 seed_user, db.session, "Credit Card", "Rewards Card",

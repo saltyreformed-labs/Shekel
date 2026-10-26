@@ -89,8 +89,9 @@ the loan's own payment history -- only to read
 ``resolve_loan(...).monthly_payment`` back out, a cycle plan step X-au-g-1
 deleted; the terms' one loader since plan step recurrence:R25 is
 :func:`app.services.loan_ledger.build_loan_calendar`, and
-``test_loan_payment_service.TestALoansPriceDoesNotReadItsOwnPayments`` grades
-that it issues no statement against the payment rows.
+``test_loan_payment_service.test_the_contractual_payment
+.TestALoansPriceDoesNotReadItsOwnPayments`` grades that it issues no statement
+against the payment rows.
 
 Imports no sibling, so it is the bottom of this package's pricing line:
 ``_loan_installment`` -> :mod:`._loan_pricing` -> :mod:`._amount_basis` ->

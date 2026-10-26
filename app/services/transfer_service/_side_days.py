@@ -24,15 +24,16 @@ Three names carry the three rules, so each has ONE home:
 
 :class:`SideDay` is what a door STATES ("the money moved on THIS account on
 this day, known this way"), and :func:`stated_by_side` turns the doors' account
-view into the writer's side view once, before any write.  The ONE writer is
-:func:`app.services.transfer_service._status.apply_status_to_all_three`, with
-the born-settled create's identity writer beside it; both call
-:func:`resolve_pair_days`.
+view into the writer's side view once, before any write.  The writer of every
+STATED day is :func:`app.services.transfer_service._status.apply_status_to_all_three`,
+which derives both sides' days through :func:`resolve_pair_days`.  One other
+act writes a side's day, and states none: the endpoint move lands a moved
+side's ``borrowed`` day (``status_seam.land_moved_side_record``), derived
+through the same resolver (``_endpoints._moved_days``).
 
-Through the interval each side's current day is read off its SHADOW -- the row
-the status seam writes, and the only home of a ``$0.00`` close's day -- and
-plan step ``X-bi-6-4d`` re-plumbs that input to the movements when the shadows
-go.  Nothing here reads either.
+Each side's current day is read off its payment RECORD by the writer (plan
+step ``balance:X-bi-6-4d-2``; off its twin row until then); a ``$0.00`` close
+holds no record and so no day.  Nothing here reads either.
 """
 
 from dataclasses import dataclass
@@ -90,10 +91,10 @@ class SideDay:
 class PairDays(NamedTuple):
     """One transfer's two sides' days, expense side then income side.
 
-    The order :class:`~app.services.transfer_service._validation.TransferRows`
-    declares its legs in.  ``None`` on a side means "no day" -- for a stated
-    pair, that nothing was stated for that side; for a current pair, that the
-    side holds no day in the settled band.
+    The ``(expense, income)`` order every pair of sides in this package is
+    written in (``_status._side_legs``).  ``None`` on a side means "no day" --
+    for a stated pair, that nothing was stated for that side; for a current
+    pair, that the side holds no day in the settled band.
     """
 
     expense: SettleDay | None
@@ -133,17 +134,18 @@ def repair_fallback(
 ) -> date:
     """Return the day a pair with no evidence on either side shares.
 
-    The first day recorded in the repair order -- a leg still in the settled
-    band before one that drifted out of it, then expense before income
-    (``_status``'s ordering, kept) -- and otherwise *today*.  So a mark-paid
-    borrows today, a repair never invents a day when either leg records one,
-    and two borrowed sides share one day.
+    The first day recorded in the repair order -- expense before income --
+    and otherwise *today*.  So a mark-paid borrows today, a re-derivation
+    never invents a day when either side records one, and two borrowed sides
+    share one day.  (The order put a twin still in the settled band before
+    one that had drifted out of it until plan step ``balance:X-bi-6-4d-2``:
+    a transfer has one status, so there is no drift left to order.)
 
     Args:
-        recorded_in_repair_order: Each leg's recorded day, in repair order,
-            including a leg out of the band (a drifted leg's stale day is the
-            last thing a repair may fall back on, as it was).
-        today: The owner's today (``display_today()``, read by the writer).
+        recorded_in_repair_order: Each side's recorded day, expense then
+            income.
+        today: The fallback when neither records one -- the writer's own
+            (``_status._fallback_day``).
 
     Returns:
         The day to share.
@@ -164,7 +166,8 @@ def stated_by_side(
     Asked before the first write of the act, against the endpoints the act
     LEAVES the transfer with -- ``_update`` reads them off
     ``_resolve_endpoints``, because an endpoint move assigns relationships and
-    a shadow's ``account_id`` reads the old account until the flush.
+    the transfer's own account columns name the old accounts until the flush
+    after the move.
 
     Args:
         side_days: What the door stated; empty when it stated nothing.
@@ -221,8 +224,9 @@ def resolve_pair_days(
     lender may pull a payment before the borrower's account shows it).
 
     Args:
-        current: Each side's day as it stands, ``None`` for a side out of the
-            settled band (a drifted side is repaired, not believed).
+        current: Each side's day as it stands, ``None`` for a side holding no
+            dated record (and for a side an endpoint move is carrying, whose
+            evidence ``_endpoints._moved_days`` drops).
         stated: What the act states, already admitted by its verb.
         fallback: The day to share when neither side has evidence
             (:func:`repair_fallback`).

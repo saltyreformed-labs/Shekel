@@ -24,7 +24,8 @@ introduced in Commit 7 of the mobile-first v3 implementation:
     the shared ``_mobile_plan.html`` partial.
 
 This script is the runtime counterpart to the static-render
-coverage in ``tests/test_routes/test_grid.py::TestMobileCardActionBar``:
+coverage in
+``tests/test_routes/test_grid/test_mobile_partials.py::TestMobileCardActionBar``:
 pytest proves the partial emits the right HTML; this script proves
 the headless browser routes taps through Bootstrap's Collapse API,
 that HTMX wiring fires the right endpoints, and that the existing

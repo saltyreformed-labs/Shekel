@@ -69,9 +69,9 @@ def _query_unpaid_expense_rows(
     members).  It was ``Transaction.account_id == account_id``, then the
     paycheck-rows clause that carried the near-side shadow in as an expense
     row; the two loads below keep both properties and neither selects a
-    shadow row of its own (a settled leg's RECORD is still reached through
-    the one join in ``transfer_legs``, which walks ``transactions.transfer_id``
-    until ``X-bi-6-4`` re-parents the movement).
+    shadow row of its own (a settled leg's RECORD is reached through the one
+    join in ``transfer_legs``, which walks the movement's side links since
+    plan step ``balance:X-bi-6-4d-2`` re-parented it onto the transfer).
 
     **A transfer's EXPENSE leg is a bill; its income leg is not**
     (:func:`~app.services.transfer_legs.expense_legs`, the one spelling the

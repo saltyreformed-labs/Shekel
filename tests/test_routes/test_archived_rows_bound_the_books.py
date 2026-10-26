@@ -339,7 +339,12 @@ class TestARowTheBooksHavePassedStaysDeleted:
     def test_a_transfer_stays_deleted_with_both_shadows(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """The transfer twin: the later of its two books binds, and the notice names it."""
+        """The transfer twin: the later of its two books binds, and the notice names it.
+
+        The transfer's own flag is what stays deleted.  It also read both of
+        the transfer's shadow rows deleted until plan step balance:X-bi-6-4d-2
+        made a transfer one row.
+        """
         with app.app_context():
             savings = _account_opened_early(seed_user, name="Hidden savings")
             template_id = _monthly_save_into(seed_user, seed_periods, savings).id
@@ -365,11 +370,6 @@ class TestARowTheBooksHavePassedStaysDeleted:
             ) in resp.data
             _db.session.expire_all()
             assert _db.session.get(Transfer, first_id).is_deleted
-            shadows = _db.session.query(Transaction).filter(
-                Transaction.transfer_id == first_id,
-            ).all()
-            assert len(shadows) == 2
-            assert all(shadow.is_deleted for shadow in shadows)
             assert _forecast(seed_user, savings) == forecast
 
     def test_a_later_books_move_while_archived_is_not_refused_over_it(
@@ -628,12 +628,6 @@ class TestARowNoWalkNamesIsJudgedByItsOwnDay:
             ) in resp.data
             _db.session.expire_all()
             assert _db.session.get(Transfer, first_id).is_deleted
-            assert all(
-                shadow.is_deleted
-                for shadow in _db.session.query(Transaction).filter(
-                    Transaction.transfer_id == first_id,
-                )
-            )
             assert {
                 row.id for row in _transfers(template_id, deleted=False)
             } == hidden - {first_id}

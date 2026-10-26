@@ -31,7 +31,6 @@ import pytest
 import time_machine
 
 from app.models.pay_period import PayPeriod
-from app.models.transaction import Transaction
 from app.routes import _period_options
 from app.routes._period_options import period_move_options
 from app.services.pay_calendar import (
@@ -45,7 +44,7 @@ from tests._test_helpers import (
     add_txn as _add_txn,
     select_option_values as _select_option_values,
 )
-from tests.test_routes.test_transfers import (
+from tests.test_routes.test_transfers._helpers import (
     _create_savings_account,
     _create_transfer,
 )
@@ -297,7 +296,7 @@ class TestTheRenderedSelect:
 
         ``_create_transfer`` seats the transfer in period 0, which today has
         left; the force is what keeps it selectable, and without it the save
-        would re-point the transfer -- and both its shadows -- at period 4.
+        would re-point the transfer at period 4.
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
@@ -317,7 +316,7 @@ class TestTheRenderedSelect:
             )
 
     def test_the_transfer_popover_opened_from_a_grid_leg_agrees(
-        self, app, auth_client, seed_user, seed_periods_today, db,
+        self, app, auth_client, seed_user, seed_periods_today,
     ):
         """A grid LEG's cell renders the transfer form, from the leg's own ask.
 
@@ -327,18 +326,17 @@ class TestTheRenderedSelect:
         row's id.  That branch is deleted; a leg's cell asks the transfer's
         own door with ``?leg_account_id=``, one door with one period offer,
         and this pins that the grid-origin ask offers the same periods the
-        transfers page's does.
+        transfers page's does.  The leg is the from-side, named off the
+        transfer where it was read off the first twin until plan step
+        ``balance:X-bi-6-4d-2``, which births none (ruling R-BAL167 class 1,
+        plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _create_savings_account(seed_user)
             xfer = _create_transfer(seed_user, seed_periods_today, savings)
-            shadow = db.session.query(Transaction).filter_by(
-                transfer_id=xfer.id,
-            ).first()
-            assert shadow is not None
 
             resp = auth_client.get(
-                f"/transfers/{xfer.id}/full-edit?leg_account_id={shadow.account_id}",
+                f"/transfers/{xfer.id}/full-edit?leg_account_id={xfer.from_account_id}",
             )
             assert resp.status_code == 200
             html = resp.data.decode()

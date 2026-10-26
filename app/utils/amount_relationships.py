@@ -39,22 +39,23 @@ from app.models.transfer_template import TransferTemplate
 
 
 def period_load_option():
-    """Return the loader option for a row's PAY PERIOD -- one spelling, two askers.
+    """Return the loader option for a row's PAY PERIOD -- one spelling.
 
-    :func:`app.services.loan_loaders.income_shadows` needs it because the period
-    start is its sort key, and :func:`pricing_load_options` still applies it --
-    for amount rule 4's DERIVE arm until plan step X-au-f-2 moved that read onto
+    Its one asker is :func:`pricing_load_options`, which applies it -- for
+    amount rule 4's DERIVE arm until plan step X-au-f-2 moved that read onto
     the PARENT transfer's period, and since then for the reason that set's own
-    entry states (finding **BAL-477**).  Both ask HERE rather than each writing
-    ``selectinload(Transaction.pay_period)``, and the reason is a failure mode
-    rather than tidiness: a caller that states the pricing options ALSO goes
-    through that partition, so the same relationship path is named twice in one
-    query.  Two identical options merge; two options naming one path with
-    DIFFERENT strategies is a hard SQLAlchemy error, and the history of
-    ``loan_loaders.query_shadow_income`` (deleted at plan step
+    entry states (finding **BAL-477**).  The loan partition's SETTLED half
+    asked it too, for its sort key, until plan step balance:X-bi-6-4b moved
+    that half onto ``budget.transfers``; both halves of
+    :func:`app.services.loan_loaders.income_legs` ask
+    :func:`transfer_period_load_option` since.  The option is stated HERE
+    rather than written as ``selectinload(Transaction.pay_period)`` at each
+    asker, and the reason is a failure mode rather than tidiness: two options
+    naming one relationship path in one query merge when they are identical,
+    and are a hard SQLAlchemy error when their strategies differ -- the
+    history of ``loan_loaders.query_shadow_income`` (deleted at plan step
     balance:X-bi-6-4b) records that exact failure being how a duplicate load
-    was found.  One producer makes
-    the strategies unable to differ.
+    was found.  One producer makes the strategies unable to differ.
 
     Returns:
         The ``selectinload`` option for :attr:`Transaction.pay_period`.
@@ -133,9 +134,10 @@ def pricing_load_options() -> tuple:
       silence.  Filed as **BAL-477** against plan step X-bm, which owns this
       set's batch callers.  **It was missing from the first draft
       of this set**, and the control in
-      ``test_a_transfer_shadow_is_derived.TestTheAmountModelsOwnEagerLoad`` is
-      what found it: three ``budget.pay_periods`` reads against an assertion of
-      zero.  Before that step the obligation was one loader's --
+      ``test_a_transfer_shadow_is_derived.test_the_declaration
+      .TestTheAmountModelsOwnEagerLoad`` is what found it: three
+      ``budget.pay_periods`` reads against an assertion of zero.  Before that
+      step the obligation was one loader's --
       ``loan_loaders.query_shadow_income`` eager-loaded it, and every caller of
       that derivation came through there -- and declaring every shadow derived
       is what spread it to the grid and the cash fold.  *That loader carried no

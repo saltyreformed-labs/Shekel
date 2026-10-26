@@ -1,18 +1,16 @@
 """
 Shekel Budget App -- Transaction Route Guard Tests
 
-Tests for the guards on every transaction mutation route: a transfer SHADOW
-row is "not found" at every door and moves nothing (plan step
-balance:X-bi-6-1, the interval fence until the rows are deleted), a
-soft-deleted row cannot be settled, a loan account admits no transaction,
-and regular transactions are unaffected.
+Tests for the guards on every transaction mutation route: a soft-deleted
+row cannot be settled, a loan account admits no transaction, a transfer's
+due date moves through its leg's door, and regular transactions are
+unaffected.  The cases that pressed each door on a transfer SHADOW row were
+deleted at plan step balance:X-bi-6-4d-2 (ruling R-BAL300), where no
+shadow can be stored; the note where they stood says what grades the rest.
 """
 
 from datetime import date
 from decimal import Decimal
-
-import pytest
-
 
 from app.extensions import db
 from app.models.transaction import Transaction
@@ -26,7 +24,6 @@ from tests._test_helpers import (
     one_off_row_of,
     open_books_before_the_first_assertion,
     resolved_amount,
-    shadow_amount,
 )
 from app.models.amount_ownership import AmountOwnership
 from app.services import status_seam
@@ -53,7 +50,14 @@ def _create_savings(seed_user):
 
 
 def _create_test_transfer(seed_user, seed_periods_today):
-    """Create a transfer with shadows via the service.  Returns (transfer, expense_shadow, income_shadow)."""
+    """Create a $300.00 checking -> savings transfer via the service, committed; returns it.
+
+    It returned ``(transfer, expense_shadow, income_shadow)`` until plan step
+    ``balance:X-bi-6-4d-2`` made a transfer one row (ruling **R-BAL167**
+    class 4): no shadow is born, and a caller names a side by the
+    transfer's own endpoint (``from_account_id`` is where the expense shadow
+    sat).
+    """
     savings = _create_savings(seed_user)
     projected = db.session.query(Status).filter_by(name="Projected").one()
     xfer = transfer_service.create_transfer(
@@ -70,13 +74,7 @@ def _create_test_transfer(seed_user, seed_periods_today):
         ),
     )
     db.session.commit()
-
-    expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
-    income_type = db.session.query(TransactionType).filter_by(name="Income").one()
-    shadows = db.session.query(Transaction).filter_by(transfer_id=xfer.id).all()
-    expense = [s for s in shadows if s.transaction_type_id == expense_type.id][0]
-    income = [s for s in shadows if s.transaction_type_id == income_type.id][0]
-    return xfer, expense, income
+    return xfer
 
 
 def _create_regular_txn(seed_user, seed_periods_today):
@@ -99,114 +97,20 @@ def _create_regular_txn(seed_user, seed_periods_today):
 # ── Update Guards ──────────────────────────────────────────────────
 
 
-class TestATransactionDoorRefusesAShadowRow:
-    """Every transaction door answers 404 for a transfer SHADOW row and moves nothing.
-
-    **The interval fence of plan step balance:X-bi-6-1 (ruling R-BAL87).**
-    Until that leaf these eight classes graded the transfer-detection GUARDS:
-    a request landing on a shadow row was re-expressed as a transfer update
-    (``_shadow_mutations``), or refused with a 400 where the act had no
-    transfer meaning (credit, delete).  The grid draws a transfer as a LEG
-    read off its parent now, and the leg's cell calls the transfer's own
-    routes -- so no surface asks a transaction door about a shadow, the
-    re-expressing module is deleted, and a request that still names a shadow
-    (a stale page, a bookmark, a probe) is "not found" at the ownership
-    helper (``_get_owned_transaction`` / ``get_accessible_transaction``),
-    the answer every row a door does not serve gets.
-
-    **Why the fence, and why it is graded by state, not status.**  The shadow
-    rows still exist until ``X-bi-6``'s last leaf deletes them, and the
-    doors' regular paths would write PAST the transfer's invariants if they
-    admitted one: a PATCH would re-price one leg alone, a Mark Paid would
-    settle one leg without its pair, a DELETE would orphan the sibling.  So
-    each case asserts the 404 AND that the parent and both shadows are
-    exactly as created -- remove the fence and the PATCH, mark-done and
-    DELETE cases fire on the second assertion, which is what makes the
-    first one a claim rather than a reading.
-
-    The leg's own doors are graded in ``test_transfers.py``
-    (``TestLegContextResponse`` and the ``_LEG_`` cases).
-    """
-
-    @staticmethod
-    def _state(xfer_id):
-        """The pair's facts a door could move, read fresh."""
-        db.session.expire_all()
-        xfer = db.session.get(Transfer, xfer_id)
-        shadows = (
-            db.session.query(Transaction)
-            .filter_by(transfer_id=xfer_id)
-            .order_by(Transaction.id)
-            .all()
-        )
-        return (
-            xfer.amount, xfer.status_id, xfer.is_deleted, xfer.due_date,
-            [(s.status_id, s.is_deleted, s.due_date, shadow_amount(s)) for s in shadows],
-        )
-
-    @pytest.mark.parametrize(
-        ("method", "url", "data"),
-        [
-            ("get", "/transactions/{id}/cell", None),
-            ("get", "/transactions/{id}/quick-edit", None),
-            ("get", "/transactions/{id}/full-edit", None),
-            (
-                "patch", "/transactions/{id}",
-                {"estimated_amount": "500.00", "estimated_amount_as_rendered": "300.00"},
-            ),
-            ("patch", "/transactions/{id}", {"due_date": "2026-01-20"}),
-            ("delete", "/transactions/{id}", None),
-            ("post", "/transactions/{id}/mark-done", None),
-            ("post", "/transactions/{id}/mark-credit", None),
-            ("delete", "/transactions/{id}/unmark-credit", None),
-            ("post", "/transactions/{id}/cancel", None),
-        ],
-        ids=[
-            "cell", "quick-edit", "full-edit", "patch-amount", "patch-due-date",
-            "delete", "mark-done", "mark-credit", "unmark-credit", "cancel",
-        ],
-    )
-    def test_the_door_is_not_found_and_the_pair_is_untouched(
-        self, app, auth_client, seed_user, seed_periods_today, method, url, data,
-    ):
-        """404 for the shadow, and the parent and both legs exactly as created."""
-        with app.app_context():
-            xfer, expense, _income = _create_test_transfer(
-                seed_user, seed_periods_today,
-            )
-            xfer_id, shadow_id = xfer.id, expense.id
-            before = self._state(xfer_id)
-
-            request = getattr(auth_client, method)
-            resp = request(url.format(id=shadow_id), data=data)
-
-            assert resp.status_code == 404, resp.get_data(as_text=True)[:200]
-            assert self._state(xfer_id) == before, (
-                "a transaction door moved a transfer's pair through a shadow row"
-            )
-
-    def test_the_companion_aware_door_refuses_a_shadow_too(
-        self, app, auth_client, seed_user, seed_periods_today,
-    ):
-        """Mark Paid reaches rows through ``get_accessible_transaction``: same fence.
-
-        The mark-done route reads the companion-aware door rather than the
-        owner one, so the fence is stated in both; this pins the second.
-        """
-        with app.app_context():
-            xfer, _expense, income = _create_test_transfer(
-                seed_user, seed_periods_today,
-            )
-            xfer_id, shadow_id = xfer.id, income.id
-            before = self._state(xfer_id)
-
-            resp = auth_client.post(
-                f"/transactions/{shadow_id}/mark-done",
-                data={"render": "mobile_card", "card_prefix": "tp", "can_edit": "1"},
-            )
-
-            assert resp.status_code == 404
-            assert self._state(xfer_id) == before
+# ``TestATransactionDoorRefusesAShadowRow`` stood here until plan step
+# balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer 2026-10-15: "Delete all
+# 27").  It pressed every transaction door -- the cell, both editors, the
+# PATCHes, delete, Mark Paid, Mark Credit and its undo, Cancel -- on a
+# transfer's SHADOW row and asserted a 404 that moved nothing: plan step
+# X-bi-6-1's interval fence, ``auth_helpers.is_transfer_shadow`` behind both
+# ownership doors.  No shadow can exist now: the database refuses one
+# (``ck_transactions_names_no_transfer``, ruling R-BAL258, pinned once by
+# ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
+# ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``)
+# and no app code builds one, so no request reaches the fence, which goes with
+# the column at plan step X-bi-6-5.  A transfer's leg doors are the
+# transfer's own, graded in ``test_transfers/test_grid_cells.py``
+# (``TestLegContextResponse``).
 
 
 class TestASoftDeletedRowCannotBeSettled:
@@ -250,7 +154,7 @@ class TestASoftDeletedRowCannotBeSettled:
 
 
 class TestRegularTransactionUnaffected:
-    """Verify guards do not interfere with regular (non-shadow) transactions."""
+    """Verify guards do not interfere with regular transactions."""
 
     def test_update_regular_transaction(
         self, app, db, auth_client, seed_user, seed_periods_today
@@ -373,33 +277,43 @@ class TestDueDatePatch:
             db.session.refresh(txn)
             assert txn.due_date == date(2026, 1, 20)
 
-    def test_patch_due_date_from_a_leg_propagates(self, app, auth_client, seed_user, seed_periods_today):
-        """PATCH due_date on a transfer from its grid LEG updates both shadows.
+    def test_patch_due_date_from_a_leg_lands_on_the_transfer(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """PATCH due_date on a transfer from its grid LEG updates the transfer.
 
         **Re-expressed at plan step balance:X-bi-6-1 (ruling R-BAL87)**: it
         PATCHed the SHADOW row through the transaction door; the grid's door
-        is the transfer PATCH carrying ``leg_account_id`` now.
+        is the transfer PATCH carrying ``leg_account_id`` now.  **And at plan
+        step balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1; it was
+        ``test_patch_due_date_from_a_leg_propagates``): it read the date off
+        both shadows, which a transfer no longer has, so it reads the
+        transfer's own column, re-read from the database.  The leg pressed is
+        the from-side's, where the expense shadow sat.  Each side's
+        projection of the date is ``TestBothSidesShowTheTransfer`` in
+        ``test_transfer_legs/test_what_a_side_shows.py``
+        (``test_both_sides_show_the_row_in_every_field_the_table_names``).
         """
         with app.app_context():
             from datetime import date
 
-            transfer, exp_shadow, inc_shadow = _create_test_transfer(
-                seed_user, seed_periods_today,
-            )
+            transfer = _create_test_transfer(seed_user, seed_periods_today)
+            transfer_id = transfer.id
+            # The precondition guard: the date the PATCH writes is not the
+            # one the transfer already holds.
+            assert transfer.due_date != date(2026, 1, 20)
 
             resp = auth_client.patch(
-                f"/transfers/instance/{transfer.id}",
+                f"/transfers/instance/{transfer_id}",
                 data={
                     "due_date": "2026-01-20",
-                    "leg_account_id": str(exp_shadow.account_id),
+                    "leg_account_id": str(transfer.from_account_id),
                 },
             )
             assert resp.status_code == 200
 
-            db.session.refresh(exp_shadow)
-            db.session.refresh(inc_shadow)
-            assert exp_shadow.due_date == date(2026, 1, 20)
-            assert inc_shadow.due_date == date(2026, 1, 20)
+            db.session.expire_all()
+            assert db.session.get(Transfer, transfer_id).due_date == date(2026, 1, 20)
 
     def test_patch_due_date_does_not_affect_other_fields(
         self, app, auth_client, seed_user, seed_periods_today,

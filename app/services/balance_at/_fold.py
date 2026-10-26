@@ -292,8 +292,8 @@ def fold_loan_balances(
     **N-11 (a raw transaction typed onto a loan) is closed by construction (BG,
     ruling R-E), not a live gap.**  A raw settled transaction typed directly onto a
     loan account would post onto the loan's linked ledger where the sum-of-postings
-    readers count it, while the fold -- whose payment set is transfer-linked shadows
-    only (:func:`~app.services.loan_loaders.settled_income_shadows`) -- would not
+    readers count it, while the fold -- whose payment set is transfer legs
+    only (:func:`~app.services.loan_loaders.settled_income_legs`) -- would not
     see it, so the two would disagree by that transaction's amount ($300.00
     measured).  Ruling R-E FORBIDS that write at every source (the two
     transaction-create routes, the recurrence-template form, and the salary-profile

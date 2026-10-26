@@ -25,8 +25,7 @@ the `balance_at` seam (`_resolve_current_balance`, `investment_dashboard_service
 agrees to the cent with the cockpit net-worth tile; the projection seeds from the cash basis via
 `investment_seed_map` (double-count guards DH-#9/#10); limits and suggestions carry the E-12
 zero-cap semantics; percent conversion is schema-owned. The service was extracted to the
-thin-delegator shape in Commit 28 and is regression-pinned by
-`tests/test_routes/test_investment.py`.
+thin-delegator shape in Commit 28 and is regression-pinned by `tests/test_routes/test_investment/`.
 
 ## The screen's job (proposed)
 
@@ -194,7 +193,7 @@ what-if).
   off-by-one on the default slider value around midnight UTC -- cosmetic, note only.
 - No `investment.css` exists; rebuild CSS lands in `accounts.css` (shared `acctd-*` / band classes)
   with a new per-screen file only if the levers need one.
-- Tests: `tests/test_routes/test_investment.py` is the load-bearing regression suite;
+- Tests: `tests/test_routes/test_investment/` is the load-bearing regression suite;
   `tests/test_services/test_investment_projection.py` covers the projection primitives.
 
 ## What the page does not show (candidate additions, Gate A)
@@ -387,8 +386,9 @@ P2; no CSP violations in the changed templates).
   slider's horizon on the synthetic-period basis; history series
   (`history_labels`/`history_balances` via `balance_at.balance_map`) + markers
   (`today_boundary_index`, `retirement_marker_index` on the combined axis, `retirement_year`). The
-  regression assertions this changed were hand-recomputed (documented in `test_investment.py`; e.g.
-  the DH-#9 double-count pin re-expressed against `chart_balances[0]`).
+  regression assertions this changed were hand-recomputed (documented in
+  `test_investment/test_the_projection.py`; e.g. the DH-#9 double-count pin re-expressed against
+  `chart_balances[0]`).
 - C4: `investment` revert surface on the shared anchor editor; `investment.balance_hero` GET +
   `compute_balance_hero_cell` producer + `investment/_balance_hero.html` click-to-edit partial
   (PATCH `accounts.true_up`, dated anchor, `balanceChanged` on save; IDOR 404s; 409 keeps the

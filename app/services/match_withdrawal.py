@@ -23,7 +23,7 @@ first branch until plan step ``credit_card:CC-5-4a-4`` made an act naming no
 app row unrepresentable and deleted that branch.
 
 **Whether a SOFT delete withdraws is the CALLER's to say, and the two callers
-now say different things.**  A TRANSACTION's soft delete -- one occurrence of a
+now say the same thing.**  A TRANSACTION's soft delete -- one occurrence of a
 recurring definition, kept as a tombstone -- takes the row's payments and
 purchases off through the one act exactly as its hard delete does (ruling
 **R-CC75**, developer 2026-09-23: *"Deleting the occurrence takes its payments
@@ -34,12 +34,12 @@ the tombstone counts as leaving, ruling **R-CC84**).  Until R-CC75 it withdrew
 nothing, on the argument that a shipped button reverses a soft delete; what
 that left was a hidden row holding money the balance does not count, under a
 match that read explained.  A
-TRANSFER's soft delete still withdraws nothing
-(``transfer_service.delete_transfer``'s ``if not soft``): its restore paths
-(``transfers.templates``' un-archive through ``restore_transfer``, and
-``transfer_recurrence``'s maintain pass) put the shadows back, and the kept
-payment a reverted leg holds under a soft-deleted shadow is ledger row
-**BAL-532**'s, owned by plan step ``balance:X-bi-6-4``.
+TRANSFER's soft delete withdraws too since plan step ``balance:X-bi-6-4d-2``
+(finding **BAL-532**): ``transfer_service.delete_transfer`` takes its sides'
+records off through the same act on either arm, because the database refuses
+to hide a transfer still holding one (:mod:`app.deleted_row_infrastructure`'s
+transfer arm).  Until then it withdrew nothing, and a reverted leg's kept
+payment stayed under a soft-deleted shadow.
 
 **What it does NOT do is remove rows the withdrawn act CREATED**, and the
 asymmetry is deliberate.  ``release_match`` is the owner's UNDO -- *withdraw
@@ -816,8 +816,9 @@ def _parent_ids(entries, leaving_ids: "set[int]") -> "dict[str, list[int]]":
     deletes beside it, and a transfer's payment under ``transfer_ids``.  It
     read the shadow row's id off a transfer's payment until that step -- an
     id ``X-bi-6-4d`` leaves unset, and one ``sorted`` could not have ordered
-    beside the others.  The rows a transfer delete hands over as leaving are
-    its shadows, so that delete still lists them until the shadows go.
+    beside the others.  The rows a transfer delete handed over as leaving
+    were its shadows until plan step ``balance:X-bi-6-4d-2`` deleted them;
+    it hands over none.
 
     Args:
         entries: The movements leaving their matches.

@@ -60,7 +60,7 @@ shows it, flag or no flag.
 **Where ``gross`` comes from is the CALLER'S, and it must be.**  A projected
 row is worth what settling it would book, which is
 ``transaction_service.settle_amount`` for an ordinary row and
-``transfer_service.settle_amount`` for a shadow leg.  Asking this module to
+``transfer_service.leg_settle_amount`` for a transfer leg.  Asking this module to
 choose between them would put the settle verbs' own partition in a third place,
 and it cannot import either without a cycle.
 
@@ -365,7 +365,34 @@ def movement_cash_leg(txn: Transaction, entry) -> Decimal:
     """
     if entry.is_credit or not is_balance_contributing(txn):
         return Decimal("0.00")
-    return _signed_by_type(txn, entry.amount)
+    return _signed_by_type(txn, _moved_figure(txn, entry))
+
+
+def _moved_figure(txn, entry) -> Decimal:
+    """Return the figure ONE movement moved: the one accessor every kind-blind reader asks.
+
+    A row's movement -- a purchase, or the covering movement a row's settle
+    wrote -- states its own ``amount``.  A transfer side's record does NOT
+    own its figure: a transfer's money is one figure, stored once on the
+    TRANSFER (plan step ``balance:X-bi-6-4d-2``, rulings **R-BAL365**,
+    **R-BAL366**: :attr:`~app.models.transfer.Transfer.settled_figure`), and
+    its two records say where and when it left and arrived.  A side record
+    is the one movement with no parent row (``transaction_id IS NULL``,
+    ``ck_transaction_entries_one_parent``), and its parent here is its
+    :class:`~app.services.transfer_legs.TransferLeg`.  The branch is the
+    single place the two kinds part, until the movement normalization arc
+    ruling **R-BAL366** queued gives them one shape.
+
+    Args:
+        txn: The movement's parent, as :func:`movement_cash_leg` takes it.
+        entry: The movement.
+
+    Returns:
+        The unsigned figure the movement moved.
+    """
+    if entry.transaction_id is None:
+        return txn.transfer.settled_figure
+    return entry.amount
 
 
 def movement_figure_for(txn: Transaction, cash: Decimal) -> Decimal:

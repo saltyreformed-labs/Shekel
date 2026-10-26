@@ -28,8 +28,8 @@ the mobile-first v3 implementation:
     affordance there.
 
 This script complements the static-render coverage in
-``tests/test_routes/test_grid.py::TestMobileJumpToPeriod``: pytest
-verifies the server emits the right HTML; this script verifies the
+``tests/test_routes/test_grid/test_mobile_plan.py::TestMobileJumpToPeriod``:
+pytest verifies the server emits the right HTML; this script verifies the
 delegated change handler actually submits, the navigation lands on
 the right URL, and CSP does not silently reject the JS.
 

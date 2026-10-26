@@ -17,7 +17,8 @@ still holds, so 6-4d finds nothing to move in them:
   settled-row rule, which reads the row;
 * **that refusal names the movement's parent** through ``movement_parent``,
   so a transfer's payment is named by its LEG's label -- the grid's, from the
-  endpoints' current names -- not by the shadow row's stored copy (ruling
+  endpoints' current names -- not by a name stored when it was written (the
+  shadow row's until plan step ``balance:X-bi-6-4d-2`` deleted it; ruling
   **R-BAL160**).
 """
 
@@ -27,6 +28,7 @@ import pytest
 
 from app.exceptions import NotFoundError, ValidationError
 from app.extensions import db
+from app.models.account import Account
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services import entry_service, transaction_service
@@ -35,6 +37,7 @@ from tests._test_helpers import (
     create_settled_transfer,
     generate_row_of,
     make_expense_template,
+    transfer_side_record,
     typed,
 )
 
@@ -172,51 +175,71 @@ class TestATransfersPaymentIsNamedByItsLeg:
     """The refusal names a transfer's payment by the leg label the grid shows."""
 
     @pytest.mark.parametrize("door", ["update", "delete"])
-    def test_the_label_is_the_legs_not_the_shadows_stored_copy(
+    def test_the_label_reads_the_endpoints_current_names(
         self, app, seed_user, seed_periods, door,
     ):
-        """A Paid $250.00 transfer checking -> Rainy Day, its shadow's name gone stale.
+        """A Paid $250.00 transfer checking -> Rainy Day, both endpoints since renamed.
 
-        The shadow's stored name is re-written around the service, the state
-        a renamed account leaves (the shadow keeps the name it was written
-        with; the leg's label reads the endpoints' current names).  The
-        from-side payment is then named "Transfer to Rainy Day", the label
-        ``transfer_legs.leg_label`` composes.
+        Checking is renamed "Everyday" and savings "Storm Fund" after the
+        settle, the state a renamed account leaves: the transfer's stored name
+        keeps the endpoint names it was written with, and each leg's label
+        reads the endpoints' current names.  Each side's payment is then named
+        by its own leg, through either door: the from-side's (on checking)
+        "Transfer to Storm Fund" and never "Rainy Day", the to-side's (on
+        savings) "Transfer from Everyday" and never the old checking name --
+        the labels ``transfer_legs.leg_label`` composes.  Each payment is its
+        side's record on the TRANSFER since plan step ``balance:X-bi-6-4d-2``
+        (ruling **R-BAL88**), where it hung off the shadow until then (ruling
+        **R-BAL167** class 4).  Until plan step ``balance:X-bi-6-4d-2``'s
+        vacuous-residue checkpoint the stale name was planted on the shadow,
+        which that step deleted, so the plant wrote no row and the case read
+        one side's label no rename had moved.  Renamed from
+        ``test_the_label_is_the_legs_not_the_shadows_stored_copy``.
         """
         with app.app_context():
+            # Loaded into THIS session: the fixture's object is bound to
+            # another, so a rename written on it would never be committed.
+            checking = db.session.get(Account, seed_user["account"].id)
+            old_checking_name = checking.name
             savings = create_account_of_type(
                 seed_user, db.session, "Savings", "Rainy Day",
             )
             db.session.commit()
             transfer = create_settled_transfer(
-                seed_user, db.session, seed_user["account"], savings,
+                seed_user, db.session, checking, savings,
                 seed_periods[0], amount=Decimal("250.00"),
             )
             db.session.commit()
-            db.session.execute(db.text(
-                "UPDATE budget.transactions SET name = 'Stale Shadow Name' "
-                "WHERE transfer_id = :id"
-            ), {"id": transfer.id})
+            checking.name = "Everyday"
+            savings.name = "Storm Fund"
             db.session.commit()
             db.session.expire_all()
-            expense_shadow = db.session.query(Transaction).filter_by(
-                transfer_id=transfer.id, account_id=seed_user["account"].id,
-            ).one()
-            (movement,) = expense_shadow.covering_movements
+            assert transfer.name == f"{old_checking_name} to Rainy Day", (
+                "the plant: the transfer's stored name is the one written at create"
+            )
 
-            with pytest.raises(ValidationError) as refused:
-                if door == "update":
-                    entry_service.update_entry(
-                        movement.id, seed_user["user"].id, description="x",
-                    )
-                else:
-                    entry_service.delete_entry(movement.id, seed_user["user"].id)
+            for account, label, stale in (
+                (checking, "Transfer to Storm Fund", "Rainy Day"),
+                (savings, "Transfer from Everyday", old_checking_name),
+            ):
+                movement = transfer_side_record(
+                    db.session, transfer.id, account.id,
+                )
+                with pytest.raises(ValidationError) as refused:
+                    if door == "update":
+                        entry_service.update_entry(
+                            movement.id, seed_user["user"].id, description="x",
+                        )
+                    else:
+                        entry_service.delete_entry(
+                            movement.id, seed_user["user"].id,
+                        )
 
-            message = str(refused.value)
-            assert message.startswith(
-                "This is the payment record of Transfer to Rainy Day,"
-            ), message
-            assert "Stale Shadow Name" not in message
+                message = str(refused.value)
+                assert message.startswith(
+                    f"This is the payment record of {label},"
+                ), (label, message)
+                assert stale not in message, (label, message)
 
 
 class TestTheAdviceIsTheParentsOwn:
@@ -231,7 +254,12 @@ class TestTheAdviceIsTheParentsOwn:
     def test_a_transfers_payment_is_advised_onto_the_transfer(
         self, app, seed_user, seed_periods,
     ):
-        """A Paid $250.00 transfer checking -> Rainy Day: the transfer's own words."""
+        """A Paid $250.00 transfer checking -> Rainy Day: the transfer's own words.
+
+        The payment is the from-side's record on the TRANSFER since plan step
+        ``balance:X-bi-6-4d-2`` (ruling **R-BAL88**), where it was read off
+        the Checking shadow until then (ruling **R-BAL167** class 4).
+        """
         with app.app_context():
             savings = create_account_of_type(
                 seed_user, db.session, "Savings", "Rainy Day",
@@ -242,10 +270,9 @@ class TestTheAdviceIsTheParentsOwn:
                 seed_periods[0], amount=Decimal("250.00"),
             )
             db.session.commit()
-            expense_shadow = db.session.query(Transaction).filter_by(
-                transfer_id=transfer.id, account_id=seed_user["account"].id,
-            ).one()
-            (movement,) = expense_shadow.covering_movements
+            movement = transfer_side_record(
+                db.session, transfer.id, seed_user["account"].id,
+            )
 
             with pytest.raises(ValidationError) as refused:
                 entry_service.delete_entry(movement.id, seed_user["user"].id)

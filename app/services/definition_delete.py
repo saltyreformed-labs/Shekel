@@ -24,8 +24,9 @@ those rows holds a payment or a purchase** (plan step
 ``credit_card:CC-5-4a-4``, rulings **R-CC54**, **R-CC64**): a row holding one
 is history, which the definition door asks
 (:func:`~app.utils.archive_helpers.template_holding_movements`) and archives
-on, the account door asks of its rule-less definitions
-(``account_holding_movements``), and the row door removes through
+on, the account door's history arm archives on for its rule-less
+definitions' live rows (the database refusing a hidden one holding one,
+rulings **R-CC89**, **R-CC92**), and the row door removes through
 :mod:`app.services.movement_removal` before it gets here -- and the database
 refuses the delete otherwise (``fk_transaction_entries_transaction_id``, NO
 ACTION).  Until that step the movements CASCADED with their rows, and this act
@@ -88,9 +89,7 @@ def rows_holding_purchase_postings(*scope):
     in either order of a race too, because the arrival check locks the row
     (**R-CC96**) -- and the release's migration refuses to inherit one
     (**R-CC82**) --
-    :mod:`app.deleted_row_infrastructure`.  (A transfer's leg is the one hidden
-    row that can still hold its kept payment, finding **BAL-532**, and a
-    transfer's leg is no definition's row.)  Kept as the restore's own
+    :mod:`app.deleted_row_infrastructure`.  Kept as the restore's own
     statement of what it re-posts rather than an argument that nothing could.
 
     Args:

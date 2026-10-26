@@ -59,13 +59,10 @@ from app.services.recorded_contributions import (
 from tests._test_helpers import (
     an_entered_day,
     basis_for,
-    cover_bare_settled_row,
     make_line_cadence_rule,
     pricing_over,
-    shadow_amount,
     start_test_pay_list,
 )
-from app.services.settle_day import record_settle_day
 
 
 def _flat_id():
@@ -1096,14 +1093,19 @@ class TestShadowContributionBoundary:
 
     **These four cases are deep-quality-hunt #11, moved here whole with their
     hand-computed figures** from ``test_investment_projection`` .
-    ``TestEstimatedVsEffectiveAlignment``.  A transfer shadow's
-    ``actual_amount`` is normally ``None``, but a settle with a manual amount
-    writes a realized actual onto BOTH shadows (the ``Transfer`` parent has no
-    ``actual_amount`` column).  Once that happens the realized figure diverges
+    ``TestEstimatedVsEffectiveAlignment``.  A contribution is normally worth
+    its transfer's plan, but a settle with a typed figure records that figure
+    as what moved.  Once that happens the realized figure diverges
     from the estimate, and every feed the projection builds -- the averaged
     periodic contribution, the YTD display, the engine seed, and the per-period
     timeline -- has to read the realized one, or the cap/limit accounting
-    charges a different dollar than the growth engine actually applies.
+    charges a different dollar than the growth engine actually applies.  The
+    realized figure is each side's payment RECORD, hanging off the transfer,
+    since plan step ``balance:X-bi-6-4d-2``, and a transfer is ONE row since
+    plan step ``balance:X-bi-6-4d-2`` (ruling R-BAL258): it had two shadow
+    rows, which carried the realized figure until the first step and nothing
+    after it.  :meth:`_contribution` settles through the transfer's door and
+    writes no shadow (ruling R-BAL167 class 4).
 
     They live at this tier now because it is the only tier that can still fail:
     the projection module consumes a record carrying one ``amount`` field, so
@@ -1112,29 +1114,51 @@ class TestShadowContributionBoundary:
     """
 
     @staticmethod
-    def _contribution_shadow(
+    def _contribution(
         seed_user, db_session, period, estimated, actual=None, *,
         settled=False, cancelled=False, account=None,
     ):
-        """Seed a contribution transfer into an investment account.
+        """Seed a contribution transfer into an investment account; return the account.
 
-        Returns ``(account, income_shadow)``.  The shadow is the INCOME leg
-        landing in the investment account, which is exactly what the loader's
-        ``transfer_id IS NOT NULL AND transaction_type_id = Income`` filter
-        selects.
+        The contribution is the transfer's TO-side leg, landing in the
+        investment account, which is the leg the loader prices.  The helper
+        was ``_contribution_shadow`` and returned ``(account,
+        income_shadow)``, the shadow row the loader once selected, until plan
+        step ``balance:X-bi-6-4d-2`` made a transfer one row (ruling
+        R-BAL258).  No case read that row, so it returns the account alone
+        (ruling R-BAL167 class 4, every assertion unchanged).
 
         Pass ``account`` to feed an EXISTING account a second contribution --
         the multi-period cases need one account across several periods, because
         the per-account arithmetic they grade (the average's distinct-period
         denominator, the two YTD windows) is defined over one account's rows.
+
+        A *settled* contribution is settled through the transfer's own door
+        since plan step ``balance:X-bi-6-4d-2`` (ruling R-BAL167 class 4): the
+        TRANSFER's status is the one status and each side's payment record
+        hangs off the transfer, where this helper wrote the status and day
+        onto both twins and the parent and a covering movement under each
+        twin until then.  Nothing reads a twin now, so those plants left the
+        transfer settled with no side record -- a ``$0.00`` close -- and the
+        loader rightly valued it at ``$0``.
+
+        A *cancelled* contribution is cancelled through the same door, the
+        transfer's status being the one status.  The helper wrote Cancelled
+        onto both shadows and the transfer directly until they went; measured
+        10-15, the door's cancel and a direct write of the transfer's status
+        leave every ``budget.transfers`` column equal but the identity,
+        figure, name and timestamps, and neither a side record, so the door
+        changes no state a case reads and writes past no seam.
         """
         # pylint: disable=import-outside-toplevel
         from app.enums import StatusEnum
-        from app.models.transaction import Transaction
+        from app.services import transfer_service
         from tests._test_helpers import (
             basis_for,
             create_transfer,
             make_investment_account,
+            on_both_sides,
+            typed,
         )
 
         if account is None:
@@ -1146,33 +1170,22 @@ class TestShadowContributionBoundary:
             seed_user, db_session, seed_user["account"], account, period,
             amount=Decimal(str(estimated)),
         )
-        shadow = (
-            db_session.query(Transaction)
-            .filter(
-                Transaction.transfer_id == transfer.id,
-                Transaction.account_id == account.id,
-            )
-            .one()
-        )
-        # Mutated on BOTH legs and the parent, never on the income shadow
-        # alone: Transfer Invariants 3 and 4 say a transfer's shadows share
-        # their amount, status and settle day, and a fixture that grades
-        # against a pair the app cannot produce is grading against a state no
-        # defect could ever reach (an adversarial review's finding).
-        rows = [shadow] + [
-            other for other in transfer.shadow_transactions
-            if other.id != shadow.id
-        ]
         if settled:
-            # The settle DAY on both legs; the record -- the figure and who
-            # wrote it -- is each leg's covering movement, written after the
-            # flush below.  *actual* is a figure a HUMAN typed (``typed``);
-            # with none the record is the row's own plan (``resolved``).
-            settled_id = ref_cache.status_id(StatusEnum.RECEIVED)
-            for row in rows:
-                row.status_id = settled_id
-                record_settle_day(row, an_entered_day(period.start_date))
-            transfer.status_id = settled_id
+            # The transfer and both sides' records, through the named verb:
+            # the day entered on both sides, the record's figure the
+            # transfer's own plan (``resolved``) or *actual*, a figure a HUMAN
+            # typed (``typed``).  The verb settles a transfer at Paid (DONE);
+            # this planted Received, a status no transfer door writes.
+            transfer_service.settle_transfer(
+                transfer.id, seed_user["user"].id,
+                submitted=None if actual is None else typed(
+                    Decimal(str(actual)),
+                ),
+                side_days=on_both_sides(
+                    transfer.from_account_id, transfer.to_account_id,
+                    an_entered_day(period.start_date),
+                ),
+            )
         elif actual is not None:
             raise AssertionError(
                 "A figure RECORDS a settle (plan step X-au-c3), so an "
@@ -1181,20 +1194,12 @@ class TestShadowContributionBoundary:
                 "settled=True beside actual, or drop actual."
             )
         if cancelled:
-            cancelled_id = ref_cache.status_id(StatusEnum.CANCELLED)
-            for row in rows:
-                row.status_id = cancelled_id
-            transfer.status_id = cancelled_id
+            transfer_service.update_transfer(
+                transfer.id, seed_user["user"].id,
+                status_id=ref_cache.status_id(StatusEnum.CANCELLED),
+            )
         db_session.flush()
-        if settled:
-            # The record's home is each leg's COVERING MOVEMENT (plan step
-            # balance:X-bi-4b-1; the one home since X-bi-4b-2).
-            for row in rows:
-                cover_bare_settled_row(
-                    db_session, row, shadow_amount(row),
-                    None if actual is None else Decimal(str(actual)),
-                )
-        return account, shadow
+        return account
 
     @staticmethod
     def _params(limit=None):
@@ -1216,7 +1221,7 @@ class TestShadowContributionBoundary:
         carry $500.
         """
         with app.app_context():
-            account, _shadow = self._contribution_shadow(
+            account = self._contribution(
                 seed_user, db.session, seed_periods[0],
                 estimated="500", actual="400", settled=True,
             )
@@ -1242,7 +1247,7 @@ class TestShadowContributionBoundary:
         $400, NOT the estimated $500.
         """
         with app.app_context():
-            account, _shadow = self._contribution_shadow(
+            account = self._contribution(
                 seed_user, db.session, seed_periods[0],
                 estimated="500", actual="400", settled=True,
             )
@@ -1273,7 +1278,7 @@ class TestShadowContributionBoundary:
         limit accounting miss an over-contribution.
         """
         with app.app_context():
-            account, _shadow = self._contribution_shadow(
+            account = self._contribution(
                 seed_user, db.session, seed_periods[0],
                 estimated="400", actual="500", settled=True,
             )
@@ -1308,7 +1313,7 @@ class TestShadowContributionBoundary:
             periods = seed_periods[:3]
             account = None
             for period in periods:
-                account, _shadow = self._contribution_shadow(
+                account = self._contribution(
                     seed_user, db.session, period,
                     estimated="500", actual="400", settled=True,
                     account=account,
@@ -1344,7 +1349,7 @@ class TestShadowContributionBoundary:
         two feeds are what a future edit could re-split.
         """
         with app.app_context():
-            account, _shadow = self._contribution_shadow(
+            account = self._contribution(
                 seed_user, db.session, seed_periods[0],
                 estimated="500", actual="400", settled=True,
             )
@@ -1391,13 +1396,13 @@ class TestShadowContributionBoundary:
         average -- $400 / 2 periods = $200 against the correct $400.
         """
         with app.app_context():
-            account, _shadow = self._contribution_shadow(
+            account = self._contribution(
                 seed_user, db.session, seed_periods[0],
                 estimated="400", settled=True,
             )
             # The SAME account, a later period: the Cancelled row has to be
             # inside the queried set for its absence to mean anything.
-            self._contribution_shadow(
+            self._contribution(
                 seed_user, db.session, seed_periods[1],
                 estimated="999", cancelled=True, account=account,
             )
@@ -1435,7 +1440,7 @@ class TestShadowContributionBoundary:
         contribution as money already in the account.
         """
         with app.app_context():
-            account, _shadow = self._contribution_shadow(
+            account = self._contribution(
                 seed_user, db.session, seed_periods[0], estimated="250",
             )
             db.session.commit()
@@ -1464,7 +1469,7 @@ class TestShadowContributionBoundary:
         review caught this flipping when the screen moved here.
         """
         with app.app_context():
-            account, _shadow = self._contribution_shadow(
+            account = self._contribution(
                 seed_user, db.session, seed_periods[0],
                 estimated="600", cancelled=True,
             )

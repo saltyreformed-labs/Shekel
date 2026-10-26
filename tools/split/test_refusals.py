@@ -35,6 +35,12 @@ def appended(body: str) -> str:
     return SAMPLE + EXTRA_TOP.format(body=body)
 
 
+def inspect_source(binding: str, call: str) -> str:
+    """The sample with ``binding`` imported and a test, test_src, asserting ``call``."""
+    return sample_with("import re\n", f"{binding}\nimport re\n") + EXTRA_TOP.format(
+        body=f'def test_src():\n    """S."""\n    assert {call}')
+
+
 def with_test_first(*names: str) -> dict:
     """The sample plan with ``names`` also placed in test_first."""
     plan = plan_dict()
@@ -192,10 +198,15 @@ class TestTheLayoutRefuses:
         assert "a shape the tool cannot prove" in refusal(
             tmp_path, source, with_test_first("test_any"))
 
-    def test_inspect_on_a_moved_node(self, tmp_path):
-        """inspect reads the file a node now sits in."""
-        source = sample_with("import re\n", "import inspect\nimport re\n") + EXTRA_TOP.format(
-            body='def test_src():\n    """S."""\n    assert inspect.getsource(_make)')
+    @pytest.mark.parametrize("binding, call", [
+        ("import inspect", "inspect.getfile(_make)"),
+        ("import inspect", "inspect.getmodule(_make)"),
+        ("import inspect", "inspect.getsourcelines(_make)"),
+        ("from inspect import getfile", "getfile(_make)"),
+    ])
+    def test_inspect_on_a_moved_node(self, tmp_path, binding, call):
+        """inspect reads the module or file a node now sits in, or its line number there."""
+        source = inspect_source(binding, call)
         assert "inspect reads a moved node" in refusal(
             tmp_path, source, with_test_first("test_src"))
 
@@ -228,6 +239,17 @@ def test_a_patch_whose_readers_are_out_of_reach_is_accepted(tmp_path):
     assert render_all(layout_of(root, plan), line_limit(root))
 
 
+@pytest.mark.parametrize("binding, call", [
+    ("import inspect", "inspect.getsource(_make)"),
+    ("from inspect import getsource as read_source", "read_source(_make)"),
+])
+def test_inspect_getsource_of_a_node_that_moves_whole_is_accepted(tmp_path, binding, call):
+    """getsource returns a node's own text, which a verbatim move keeps, so it reads the same
+    in any part."""
+    root = build(tmp_path, inspect_source(binding, call))
+    assert render_all(layout_of(root, with_test_first("test_src")), line_limit(root))
+
+
 def _split_class_source(member: str) -> str:
     """The sample with ``member`` added to TestBig after its docstring."""
     return sample_with('    """The big class, which is split across two parts."""\n',
@@ -257,6 +279,12 @@ class TestASplitClassIsRefused:
     def test_a_member_that_changes_meaning(self, tmp_path, member, why):
         """Each would mean something different on a mixin or a per-part class."""
         assert why in refusal(tmp_path, _split_class_source(member))
+
+    def test_inspect_getsource_of_a_split_class(self, tmp_path):
+        """Each part holds a slice of a split class, so its text differs part to part."""
+        source = inspect_source("import inspect", "inspect.getsource(TestBig)")
+        assert "inspect.getsource reads a split class" in refusal(
+            tmp_path, source, with_test_first("test_src"))
 
     def test_a_decorated_class(self, tmp_path):
         """Its marks would have to be repeated on every part."""

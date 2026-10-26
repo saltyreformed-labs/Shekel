@@ -23,8 +23,12 @@ that stream.  Two kinds of fact enter it, and nothing else:
   R-BAL13) -- read with its transfer and side
   (:func:`app.services.transfer_legs.recorded_transfer_legs`, leaf
   ``X-bi-6-4a``), so its budget column, direction and contributing gate are
-  the TRANSFER's and nothing here reads the shadow row the movement still
-  hangs off until ``X-bi-6-4d`` re-parents it onto ``budget.transfers``.
+  the TRANSFER's, and so is its figure: a side's record holds none, and the
+  transfer stores it once (plan step ``balance:X-bi-6-4d-2``,
+  :attr:`~app.models.transfer.Transfer.settled_figure`, read by
+  :func:`._cash_leg.movement_cash_leg`).  The movement hangs off its
+  transfer by a side link since plan step ``balance:X-bi-6-4d-2``
+  re-parented it from the shadow row (ruling **R-BAL88**).
   A still-PROJECTED transfer's legs are derived from the parent
   (:mod:`app.services.transfer_legs`) by the plan half below.
 
@@ -321,8 +325,9 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     covering movement the status seam writes when a bill, a paycheck or a
     transfer leg settles (rulings **R-BAL39**, **R-BAL41**).  Its delta is the
     SHARED :func:`app.services.cash_ledger.movement_cash_leg` -- its whole
-    figure in its PARENT's direction (plan step X-bi-3b, ruling **R-BAL35**),
-    the same figure the posting writer books for it
+    figure in its PARENT's direction (plan step X-bi-3b, ruling **R-BAL35**;
+    a transfer side's figure is its transfer's, which its record does not
+    hold), the same figure the posting writer books for it
     (``_posting_purchases._purchase_target``) -- so the walk and the posted
     ledger value one movement identically by construction, not by two rules
     that happen to agree.
@@ -334,11 +339,13 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     ``purchases``-basis envelope it was the envelope's un-dated purchases
     booked on the close day.  Ruling **R-BAL77** reads those as movements in
     flight (:class:`InFlightMovement`), so no row has a leg of its own and
-    the stream is movements alone.  A transfer's two legs are its two
-    covering movements, each on its own account and in its own direction,
-    and since leaf ``X-bi-6-4a`` (ruling **R-BAL106**) each is read as a LEG
-    of its transfer -- budget column, type and contributing gate the
-    TRANSFER's and its side's, never the shadow row's -- through
+    the stream is movements alone.  A settled transfer enters as its two
+    side records (a ``$0.00`` close holds none and enters as nothing), each
+    on its own account and in its own direction, and since leaf
+    ``X-bi-6-4a`` (ruling **R-BAL106**) each is read as a LEG of its
+    transfer -- budget column, type and contributing gate the TRANSFER's and
+    its side's (the shadow row's until then), and its figure the
+    TRANSFER's since plan step ``balance:X-bi-6-4d-2`` -- through
     :func:`app.services.transfer_legs.recorded_transfer_legs`; the posted
     ledger books each of them as its own entry against the owner's transit
     account since plan step ``balance:X-bi-6-3``
@@ -366,11 +373,12 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     Attributes:
         transaction_id: The movement's own ``transaction_id`` column: the
             plan row it records money for (ruling **R-BAL35**; never a fact
-            of its own).  For a transfer leg it is the shadow the movement
-            still hangs off, NULL from ``X-bi-6-4d``; the fold reads no
-            parent through it.  Its one reader is the bank-agreement screen's
-            name lookup (``bank_agreement._rows_on`` / ``_row_names``), which
-            keys both sides by this column, so a NULL matches a NULL.  The
+            of its own).  ``None`` for a transfer side's record, which hangs
+            off its transfer by a side link since plan step
+            ``balance:X-bi-6-4d-2``; the fold reads no parent through it.
+            Its one reader is the bank-agreement screen's name lookup
+            (``bank_agreement._rows_on`` / ``_row_names``), which keys both
+            sides by this column, so a NULL matches a NULL.  The
             sort's tie-break read it until leaf ``X-bi-6-4d-1`` re-keyed that
             on :attr:`entry_id`, because a ``None`` beside an ``int`` does
             not sort.
@@ -429,7 +437,7 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     precision the datum does not have.
     """
 
-    transaction_id: int
+    transaction_id: "int | None"
     transfer_id: "int | None"
     entry_id: int
     pay_period_id: int
@@ -716,9 +724,10 @@ def _movements_of(account_id: int, scenario_id: int, *narrowing):
       here, as they post nothing (``_posting_purchases.purchase_posts``).
     * the parent is a PLAN ROW, not a transfer's shadow (leaf ``X-bi-6-4a``):
       a leg's movement is read with its transfer by :func:`settled_cash_facts`'
-      other arm.  A shadow takes no purchase (``tracks_purchases`` is
-      ``False``), so the in-flight tier loses nothing; the clause excludes
-      nothing from ``X-bi-6-4d`` and goes with the shadows at ``X-bi-6-5``.
+      other arm.  A shadow took no purchase (``tracks_purchases`` was
+      ``False``), so the in-flight tier lost nothing; the clause excludes
+      nothing since ``X-bi-6-4d`` deleted the shadows, and goes with the
+      ``transfer_id`` column at ``X-bi-6-5``.
 
     Deliberately NOT narrowed by the parent's STATUS: a dated purchase
     against a still-Projected envelope has left the bank exactly as one
@@ -770,7 +779,9 @@ def settled_cash_facts(
     seen to take, a bill's or a paycheck's covering movement, a transfer
     leg's -- each is one fact, valued by
     :func:`~._cash_leg.movement_cash_leg` (its whole figure in its PARENT's
-    direction, ruling **R-BAL35**), dated on its own ``settled_on``, filed
+    direction, ruling **R-BAL35**; a transfer side's figure is its
+    transfer's, which its record does not hold), dated on its own
+    ``settled_on``, filed
     under its parent's budget column and type, and linked to the statement
     that showed it.  ``opening + SUM(these)`` is the balance, and that
     identity is provable against the pre-state rather than a second balance
@@ -792,9 +803,14 @@ def settled_cash_facts(
     **Two arms** (leaf ``X-bi-6-4a``, ruling **R-BAL106**): a plan row's
     movements (:func:`_movements_of`), and each transfer LEG's
     (:func:`app.services.transfer_legs.recorded_transfer_legs`) under the
-    same scope stated over the TRANSFER, its period and side read there and
-    never off the shadow -- which Transfer Invariant 3 holds equal, so the
-    arm moved no figure.
+    same scope stated over the TRANSFER, its period, side and figure read
+    there.  **The transfer arm states no contributing gate in
+    SQL** (finding **BAL-534**, deleted at plan step ``balance:X-bi-6-4d-2``
+    rather than graded): a DATED side record cannot sit under a deleted
+    transfer (``app.deleted_row_infrastructure``'s transfer arm) nor under
+    one that is not Paid or Received (``app.side_band_infrastructure``), so
+    the filter selected nothing the dated narrowing did not; the walk's
+    :func:`~._cash_leg.movement_cash_leg` still asks the leg's gate.
 
     **Three narrowings, each load-bearing** (:func:`_movements_of` holds the
     account, scenario and contributing gate):
@@ -848,16 +864,14 @@ def settled_cash_facts(
         for leg in recorded_transfer_legs(
             TransactionEntry.account_id == account_id,
             Transfer.scenario_id == scenario_id,
-            balance_contributing_clause(Transfer),
             TransactionEntry.is_credit.is_(False),
             TransactionEntry.settled_on.isnot(None),
         )
     )
     # The movement's own id breaks a same-day tie: it is the fact's identity
     # (a primary key) and the one id every fact carries, where a transfer
-    # leg's ``transaction_id`` names the shadow it still hangs off and is
-    # NULL once ``X-bi-6-4d`` re-parents it -- a ``None`` beside an ``int``
-    # does not sort.
+    # leg's ``transaction_id`` is NULL since ``X-bi-6-4d-2`` re-parented it
+    # onto its transfer -- a ``None`` beside an ``int`` does not sort.
     facts.sort(key=lambda fact: (fact.settled_on, fact.entry_id))
     return facts
 

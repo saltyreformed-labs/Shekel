@@ -16,7 +16,7 @@ the account: one that has SETTLED is worth what its record moved
 (:func:`app.services.row_valuation.leg_settled_contribution`), one still
 PROJECTED what the parent resolves to
 (:func:`app.services.cash_ledger.planned_leg_contribution`), and WHICH half a
-leg is in is :func:`app.services.loan_loaders.income_shadows`' answer -- the
+leg is in is :func:`app.services.loan_loaders.income_legs`' answer -- the
 same one the balance seam's contribution events read -- so ``is_confirmed``
 is decided by the partition and never by a second reading of the status
 column.  From X-bi-6a (ruling **R-BAL13**) until then this module ran a
@@ -42,7 +42,7 @@ from app.services.investment_projection import (
     PricedContribution,
     ShadowContributions,
 )
-from app.services.loan_loaders import income_shadows
+from app.services.loan_loaders import income_legs
 from app.services.row_valuation import leg_settled_contribution
 
 
@@ -142,7 +142,7 @@ def load_shadow_income_contributions_for_accounts(
     Raises:
         AmountUnresolvable: From the amount model, for a contribution whose
             rule cannot price it.  A refusal is never a fallback.
-        ValueError: From :func:`app.services.loan_loaders.income_shadows`, for
+        ValueError: From :func:`app.services.loan_loaders.income_legs`, for
             a transfer whose status the partition cannot place.
     """
     if not account_ids or not period_ids:
@@ -154,7 +154,7 @@ def load_shadow_income_contributions_for_accounts(
     # payment in different halves.  ``dict.fromkeys`` keeps the caller's order
     # and reads a repeated id once, as the ``IN`` it replaced did.
     for account_id in dict.fromkeys(account_ids):
-        payments = income_shadows(
+        payments = income_legs(
             account_id, basis.scenario_id,
             options=(), leg_options=transfer_pricing_load_options(),
         )

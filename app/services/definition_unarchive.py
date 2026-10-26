@@ -78,9 +78,20 @@ not, and the walk's judgment above asks the named ones as well.  Every door
 that bounds a planned row by the books asks the same two questions, not only
 here (``app.services.planned_rows_books``).
 
+**The conflict chooser's "use the template" restores by this scope too**
+(ruling **R-BAL253**, developer 2026-10-09, "Leave it deleted, both kinds"):
+both engines' ``resolve_conflicts`` ask :func:`restored_by_use`, which
+narrows a definition's scope to the deleted rows the owner picked
+(:attr:`UnarchiveScope.among`), so a row its books hold stays deleted and is
+named in this module's sentence.  Measured before it, through the edit route
+and the chooser's Apply: a deleted ex-Paid transfer due on Savings' opening
+day, its definition re-priced to $60.00, came back as a live plan inside the
+books, Savings $600.00 where the books give $540.00.
+
 **The root is not fixed here.**  An unarchive still restores a row its owner
-deleted by hand ABOVE the books, and the conflict chooser revives one (ledger
-row **REC-535**): both follow from the shared flag, which ledger row
+deleted by hand ABOVE the books, and so does the conflict chooser, which never
+asks whether the rule still names the row's occurrence (ledger row
+**REC-535**): both follow from the shared flag, which ledger row
 **REC-536** holds.  Plan step ``recurrence:R22`` designs the from-scratch
 model -- a recurring item's unpaid occurrences computed from its schedule and
 never stored, only the owner's acts kept -- under which no hidden copy exists
@@ -90,7 +101,8 @@ Services-boundary discipline (``CLAUDE.md`` Architecture): ORM reads in, SQL
 criteria and a sentence out; no Flask symbol, no write, no clock.
 """
 
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import NamedTuple
 
@@ -122,9 +134,12 @@ from app.utils.books_boundary import books_hold, row_books_day
 class UnarchiveScope:
     """What unarchiving one recurring definition does with its hidden rows.
 
-    Read off the definition AS IT STANDS -- its books as they are, before any
-    save the caller is grading -- because that is what an unarchive would
-    act on.
+    Read off the definition AS IT STANDS on the reader's pass: before any
+    save the caller is grading at the unarchive, the edit doors and the
+    opening restatement, because that is what an unarchive would act on;
+    and AFTER the edit's staged write and its regeneration at the conflict
+    chooser (:func:`restored_by_use`, ruling **R-BAL253**), because the rows
+    "use" hands back go to the definition the save leaves.
 
     Attributes:
         definition: The
@@ -147,6 +162,12 @@ class UnarchiveScope:
         is_envelope: Whether the compared day is a paycheck's last day
             (ruling **R-PC89**) rather than a due day, which the notice has
             to say to be true.
+        among: The ids of the hidden rows the scope speaks for, or ``None``
+            for every one.  The conflict chooser asks about the rows its
+            owner picked alone (:func:`restored_by_use`, ruling
+            **R-BAL253**), and narrowing HERE narrows :meth:`restores`,
+            :meth:`stays_deleted` and :func:`stays_deleted_notice` at once,
+            so the sentence counts only those rows.
     """
 
     definition: TransactionTemplate | TransferTemplate
@@ -155,10 +176,15 @@ class UnarchiveScope:
     held_by: dict
     books_opened_on: date | None
     is_envelope: bool
+    among: frozenset | None = None
 
     def _hidden(self) -> tuple:
         """Return the criteria for the definition's soft-deleted, still-Projected rows."""
-        return _hidden_rows(self.definition)
+        hidden = _hidden_rows(self.definition)
+        if self.among is None:
+            return hidden
+        _table_order, model, _template_fk = rows_of(self.definition)
+        return (*hidden, model.id.in_(sorted(self.among)))
 
     def restores(self) -> tuple:
         """Return the SQL criteria selecting the rows the unarchive restores.
@@ -584,14 +610,16 @@ def _own_day_inside(definition, calendar: PayCalendar) -> tuple[dict, dict]:
 def unarchive_scope_on(definition, ctx: BalanceContext) -> UnarchiveScope:
     """Return :func:`unarchive_scope` for *definition* as it stands on a read pass.
 
-    The unarchive routes' and the edit doors' reading: the pass's memoised
-    resolution of the stored rule, books attached
+    The unarchive routes', the edit doors' and the conflict chooser's
+    reading: the pass's memoised resolution of the stored rule, books attached
     (:func:`~app.services.recurring_definition.resolved_rule_of`), walked on
     the pass's calendar.
 
     Args:
         definition: The owner-checked transaction or transfer template.
-        ctx: A PRE-WRITE read pass for its owner.
+        ctx: A PRE-WRITE read pass for its owner at the unarchive and the
+            edit doors; at the conflict chooser, the edit's own pass, after
+            its staged write and its regeneration (:func:`restored_by_use`).
 
     Returns:
         The :class:`UnarchiveScope`.
@@ -694,6 +722,115 @@ def _stays_deleted_sentence(
     )
 
 
+class UseRestore(NamedTuple):
+    """What the conflict chooser's "use the template" does with the rows it is handed.
+
+    **The partition is stated HERE, once**, so neither engine's resolver
+    spells "which picked rows go back to the definition" for itself.
+
+    Attributes:
+        handed_back: The picked rows "use" hands back to their definition,
+            in the order given: every live one that names a definition, and
+            every deleted one the definition's unarchive would restore.
+        left_deleted: The ids of the picked deleted rows it leaves deleted
+            and untouched because the unarchive would not restore them --
+            through the chooser, which offers only Projected rows, because
+            their books hold them.
+        orphaned: The ids of the picked rows that name NO definition, live
+            or deleted, left untouched (ledger row **N-440**): there is no
+            definition to hand them back to.
+        notice: :func:`stays_deleted_notice`'s sentence naming the rows left
+            deleted, or ``None`` when there are none.
+    """
+
+    handed_back: tuple
+    left_deleted: tuple
+    orphaned: tuple
+    notice: str | None
+
+
+def restored_by_use(
+    rows: Sequence[Transaction | Transfer], ctx: BalanceContext,
+) -> UseRestore:
+    """Return which of *rows* the conflict chooser's "use the template" may un-delete.
+
+    **Ruling R-BAL253** (developer 2026-10-09, "Leave it deleted, both
+    kinds": *"'Use the template' brings back only what un-archiving would: an
+    item whose due day sits inside its books stays deleted, and the page
+    names it the way un-archiving does"*).  The one rule both engines'
+    ``resolve_conflicts`` ask, so a transfer and a bill cannot come to
+    disagree: each picked deleted row is judged by its definition's
+    :class:`UnarchiveScope` as it stands on the edit's read pass, narrowed to
+    the picked rows (:attr:`UnarchiveScope.among`) so the sentence names only
+    rows the owner asked back.  A live row naming a definition is not asked
+    about: "use" hands it back to its definition as before.
+
+    **A row that names NO definition is never handed back** (ledger row
+    **N-440**; the guard the transaction resolver spelled for itself until it
+    moved here, and the transfer resolver lacked): a transfer can outlive its
+    definition (``transfer_template_id`` is ON DELETE SET NULL) or never have
+    had one (an ad-hoc transfer), and a card payback names none.  Declaring
+    such a row derived would write the one state no rule can price -- a
+    transaction's amount rule refuses it in a money path, a transfer's
+    ``ck_transfers_adhoc_owns_amount`` refuses it outright -- so it keeps
+    what it owns, live or deleted, and is reported as
+    :attr:`UseRestore.orphaned`; no unarchive restores one either.
+    UNREACHABLE from the route -- the conflict set is built by selecting on
+    the definition, and its hard delete 404s the Apply -- so this is defence
+    in depth for a published service entry.
+
+    Args:
+        rows: The owner-checked rows the owner picked "use" for --
+            :class:`~app.models.transaction.Transaction` or
+            :class:`~app.models.transfer.Transfer`, each read through its
+            ``template``.
+        ctx: The edit's read pass, the one its regeneration resolved
+            against: the books, the rule and the calendar the save leaves.
+            Built after the edit is staged
+            (``routes._recurrence_conflict_chooser.regenerate_or_conflict_chooser``
+            builds it on entry, which both edit routes reach only after
+            writing the edit's fields), so nothing it memoises predates the
+            edit.
+
+    Returns:
+        The :class:`UseRestore`.
+
+    Raises:
+        RecurrenceResolutionError: See :func:`unarchive_scope_on`.
+        RecurrenceGenerationError: See :func:`unarchive_scope_on`.
+    """
+    owned = [row for row in rows if row.template is not None]
+    picked: dict = {}
+    for row in owned:
+        if row.is_deleted:
+            picked.setdefault(
+                (type(row.template), row.template.id), (row.template, set()),
+            )[1].add(row.id)
+    restores: set = set()
+    notices = []
+    for definition, row_ids in picked.values():
+        scope = replace(
+            unarchive_scope_on(definition, ctx), among=frozenset(row_ids),
+        )
+        _table_order, model, _template_fk = rows_of(definition)
+        restores.update(
+            db.session.scalars(select(model.id).where(*scope.restores())),
+        )
+        notice = stays_deleted_notice(scope)
+        if notice is not None:
+            notices.append(notice)
+    return UseRestore(
+        handed_back=tuple(
+            row for row in owned if not row.is_deleted or row.id in restores
+        ),
+        left_deleted=tuple(
+            row.id for row in owned if row.is_deleted and row.id not in restores
+        ),
+        orphaned=tuple(row.id for row in rows if row.template is None),
+        notice=" ".join(notices) or None,
+    )
+
+
 def books_named(holder, books_opened_on: date) -> str:
     """Return the accounts whose books open on *books_opened_on*, as a sentence names them.
 
@@ -744,10 +881,12 @@ __all__ = [
     "BooksReading",
     "OwnDayHeld",
     "UnarchiveScope",
+    "UseRestore",
     "books_named",
     "books_reading",
     "own_books_day",
     "own_day_held",
+    "restored_by_use",
     "rows_held_where_they_sit",
     "rows_of",
     "scope_holding_nothing_back",

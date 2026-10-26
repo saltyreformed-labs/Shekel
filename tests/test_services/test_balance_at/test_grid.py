@@ -544,7 +544,7 @@ class TestGridRowFlags:
         depreciating asset or a down market accrues negative.  A rule that
         tested for a positive figure would hide exactly the column the user most
         needs to see (finding N-88's other half; the rendering of that sign is
-        graded in ``tests/test_routes/test_grid.py``).
+        graded in ``tests/test_routes/test_grid/test_summary_rows.py``).
         """
         view = self._view({1: _column(accrual="-142.11")})
         assert view.row_flags(self._periods(1)).accrual is True

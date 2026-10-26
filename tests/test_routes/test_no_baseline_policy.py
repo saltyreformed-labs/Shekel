@@ -47,24 +47,29 @@ than it does is this arc's most expensive recurring lesson:
   as the projected rows do.  A door whose answer turns on a row's status is
   therefore not something this file has evidence of, and a future one would
   need its own axis the way ``_ACCOUNT_KINDS`` is one;
-* it cannot see a fill that names the WRONG KIND of row, **for eight of the
-  eleven pairs**.  Measured 2026-08-30: eight fill from the first row of their
-  own table, id 1, so handing the ``/transfers`` edit door the transaction
-  template's id emits the byte-identical ``/transfers/1/edit`` -- a valid URL
-  for a real row, 200, indistinguishable from the right one, and two mutations
-  of that shape survived as an unobservable change must.  The three
-  ``period_id`` pairs are the exception and were nearly stated wrong:
-  ``period`` is ``periods[4]``, **id 6**, because ``build_seed_user`` writes an
-  opening period first (taking id 1) and ``build_periods_today`` then RESETS
-  the schedule, retiring that row and writing ten more at ids 2..11 -- so a
-  swap involving one of those WOULD 404 and would be caught.  *The mechanism
-  was a hand-rolled delete until plan step ``pay_calendar:C4-b-1`` moved it
-  onto ``pay_period_admin.reset_pay_periods``; the ids are unchanged, because
-  the door retires and records in one call and a sequence is not rolled
-  back.*  What stands in the
-  other eight is
-  :data:`_CONVERTER_ROWS` being TOTAL over ``(blueprint, name)`` with no
-  fallback, so the mistake has to be WRITTEN DOWN rather than defaulted into.
+* it could not see a fill that names the WRONG KIND of row, **for eight of
+  the eleven pairs the map held on 2026-08-30**, while the test database
+  numbered every table from 1.  Measured that day: eight filled from the first
+  row of their own table,
+  id 1, so handing the ``/transfers`` edit door the transaction template's id
+  emitted the byte-identical ``/transfers/1/edit`` -- a valid URL for a real
+  row, 200, indistinguishable from the right one, and two mutations of that
+  shape survived.  The three ``period_id`` pairs were the exception:
+  ``period`` (``periods[4]``) was id 6, because ``build_seed_user`` writes an
+  opening period first and ``build_periods_today`` then RESETS the schedule
+  (through ``pay_period_admin.reset_pay_periods`` since plan step
+  ``pay_calendar:C4-b-1``), so a swap involving one of those 404'd.  **Each
+  table now numbers its ids from a range of its own** (ruling
+  ``balance:R-BAL356``), so no two rows this world builds share an id: a
+  wrong-kind fill requests an id no row of the door's table holds, and a door
+  answering a missing row with 404 (the app's not-found rule) is refused by
+  :func:`_is_answered_by_its_own_row`.  Measured 2026-10-22 on the template
+  pair, in both directions (each mutation reddens its own door's case); the
+  other pairs rest on the same ranges, which
+  ``tests/test_scripts/test_no_two_kinds_of_id_coincide.py`` guards.
+  :data:`_CONVERTER_ROWS` stays TOTAL over ``(blueprint, name)`` with no
+  fallback, so the mistake still has to be WRITTEN DOWN rather than defaulted
+  into.
 
 **Every GET route is graded, and that is CHECKED** (plan step balance:X-be-3,
 finding **N-388**).  Until it shipped, a rule whose converter the fixture could
@@ -215,19 +220,23 @@ _CONVERTER_TOKEN = re.compile(r"<(?:[^<>:]+:)?([^<>:]+)>")
 #: template amount version under the other two.  ``version_id``'s four rules
 #: are POST-only today, so it is invisible here; a bare-name key with a
 #: fallback would have filled the first GET among them from whichever table
-#: was written down first, and eight of the eleven rows this world hands out
-#: carry id 1, so that fill would have produced a VALID URL for the wrong row
-#: and passed.  A total map cannot express that mistake without an author
-#: writing the wrong pair down.
+#: was written down first, and while eight of the eleven rows it handed out
+#: on 2026-08-30 carried id 1 that fill produced a VALID URL for the wrong row
+#: and passed.  A total map cannot express that mistake without an author writing
+#: the wrong pair down.
 #:
-#: **What this map cannot check is that a VALUE is right**, for the eight
-#: pairs whose row is the first of its table: with both ids at 1, filling
-#: ``("transfers", "template_id")`` from the transaction template emits the
-#: byte-identical ``/transfers/1/edit``.  The three ``period_id`` pairs are not
-#: in that eight -- ``period`` is id 6 -- so a swap involving one is caught.
-#: The two doors reading two different tables is graded on the doors, in each
+#: **That a filled VALUE is the right KIND is checked by the ids, not by this
+#: map.**  Since ruling ``balance:R-BAL356`` no two of the rows share an id, so
+#: filling ``("transfers", "template_id")`` from the transaction template
+#: requests an id no transfer template holds, the door answers 404, and
+#: :func:`_is_answered_by_its_own_row` refuses it (measured 2026-10-22, both
+#: directions of that pair).  Measured 2026-08-30, the eight pairs whose row
+#: was the first of its table emitted byte-identical URLs
+#: (``/transfers/1/edit``), and only a swap involving a ``period_id`` pair
+#: (``period`` was id 6) was caught.
+#: The two doors reading two different tables is ALSO graded on the doors, in each
 #: blueprint's own ``TestTemplateUpdate::test_edit_template_form`` --
-#: ``tests/test_routes/test_templates.py`` and ``test_transfers.py``.  **The
+#: ``tests/test_routes/test_templates.py`` and ``test_transfers/test_templates.py``.  **The
 #: two are not equally strong and the difference was measured** (2026-08-30):
 #: the transfers one asserts ``b"Monthly Savings"``, which only its own row
 #: supplies, while the templates one asserts ``b"Rent"``, which its fixture
@@ -592,11 +601,15 @@ def _is_answered_by_its_own_row(rule):
     Proved by mutation 2026-08-30, and it is the only arm that catches either:
     dropping the transfer from the world reddened its three doors, and adding
     100000 to the transaction's id reddened its four, both still green with
-    this arm alone removed.  **It does not catch a fill naming the WRONG row**,
-    and for eight of the eleven pairs no arm here could: those rows are each
-    the first of their own table, id 1, so a swap between two of them emits a
-    byte-identical URL.  ``period`` is id 6 and is the exception.  That limit
-    is :data:`_CONVERTER_ROWS`'s to state and it does.
+    this arm alone removed.  **It catches a fill naming the WRONG KIND of row
+    since ruling ``balance:R-BAL356``**: no two rows this world builds share
+    an id, so such a fill requests an id no row of the door's table holds and
+    the door answers 404 (measured 2026-10-22 on the template pair, in both
+    directions, each reddening its own door's case).  Measured 2026-08-30,
+    over the eleven pairs the map held then, eight filled from the first row
+    of their own table, id 1, and a swap between two of them emitted a
+    byte-identical URL no arm here could catch; ``period`` was id 6 and the
+    exception.
 
     TWO exclusions, both measured rather than assumed (2026-08-30, over the
     whole sweep):

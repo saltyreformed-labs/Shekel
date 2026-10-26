@@ -2,8 +2,9 @@
 Shekel Budget App -- Transfer Service: WHO OWNS a transfer's stated figure.
 
 One act: a caller states a transfer's amount OWNERSHIP, and this applies it to
-the parent and to each of its two legs.  Ruling **R-FI**'s two states, applied
-to the three rows a transfer is made of.
+the transfer.  Ruling **R-FI**'s two states.  It applied the same answer to
+each of the transfer's two twin rows as well until plan step
+``balance:X-bi-6-4d-2`` deleted them; that step's leaf 3b deleted the loop.
 
 **The caller states ONE value since plan step X-au-f, and ruling R-BAL11 is
 why.**  It took three parameters -- a figure, whether a human authored it, and
@@ -20,16 +21,15 @@ save says nothing about the amount.
 are** (plan step X-au-g-2c-2): ``._update`` ORCHESTRATES the doors, and every
 concern that carries a rule of its own lives beside it rather than inside it.
 The amount arm was four lines in that orchestration while a shadow held a COPY
-of its parent's figure; it carries a decision now, and a decision with an
-argument behind it belongs where the argument can be read.
+of its parent's figure; it carried a decision from that step (which answer
+each twin took) and it still carries a refusal (:func:`grade_amount_ownership`),
+and a rule with an argument behind it belongs where the argument can be read.
 
 Flask-isolated like the rest of the package: ORM rows in, nothing out.  Mutates
 in place; does not flush and does not commit.
 """
 
-from app.enums import AmountSourceEnum
 from app.models.amount_ownership import AmountOwnership
-from app.services.amount_ownership import derived_ownership
 from app.services.transfer_service._validation import (
     TransferRows,
     _validate_positive_amount,
@@ -37,33 +37,28 @@ from app.services.transfer_service._validation import (
 
 
 def apply_amount_ownership(rows: TransferRows, ownership) -> None:
-    """Apply one stated AMOUNT OWNERSHIP to the transfer and both its legs.
+    """Apply one stated AMOUNT OWNERSHIP to the transfer.
 
-    Called for every update that states one.  Ruling **R-FI**'s two states,
-    applied to the three rows a transfer is made of, and ruling **R-BAL11**'s
-    one parameter.
+    Called for every update that states one.  Ruling **R-FI**'s two states and
+    ruling **R-BAL11**'s one parameter.
 
-    **The PARENT takes the stated ownership verbatim.**  It is the row the
+    **The transfer takes the stated ownership verbatim.**  It is the row the
     caller is talking about, and since plan step X-au-f it is also the row that
     decides owner-or-contract for the whole pair (ruling **R-IO**): a figure
     here is the owner's, an absent one hands the pair to the definition that
-    generated it.
+    generated it.  Each side's leg is priced off the transfer while it is
+    planned (:class:`~app.services.transfer_legs.TransferLeg` stores no
+    figure), and once settled off the transfer's one settled figure (a
+    side's record holds none).
 
-    **A LEG's ownership FOLLOWS the parent's, and there are two answers where
-    there used to be three.**  A leg is its parent's projection, so:
+    **A twin row's ownership FOLLOWED the parent's** until plan step
+    ``balance:X-bi-6-4d-2`` deleted the twins (its leaf 3b deleted the loop
+    that wrote it): a twin COPIED an owned figure, and declared
+    :attr:`~app.enums.AmountSourceEnum.PARENT_TRANSFER` under a derived one.
 
-    * the parent OWNS a figure -- someone retyped the amount box -- and each leg
-      stores that same figure.  **This is the one clause that is still a COPY**,
-      and plan step ``X-au-m`` is where it goes: under ruling **R-JM** a leg
-      reads its parent unconditionally, at which point a leg holds no figure in
-      either state and Transfer Invariant 3's amount clause is structural rather
-      than maintained;
-    * the parent DERIVES -- its definition prices it -- and each leg declares
-      :attr:`~app.enums.AmountSourceEnum.PARENT_TRANSFER` and stores nothing,
-      which is what plan step X-au-g-2c-2 already made a leg's birth state.
-
-    **The THIRD answer is gone because it has no caller left to express it.**
-    It was *say nothing and leave each leg as it stands*, and it existed because
+    **A THIRD answer the twins once had is gone because it has no caller left
+    to express it.**  It was *say nothing and leave each leg as it stands*, and
+    it existed because
     a bare ``is_override`` flag could reach this function carrying no figure at
     all.  A caller states an ownership or it does not; ABSENCE is now expressed
     by not calling this at all (``._update`` asks whether the key is present),
@@ -86,7 +81,7 @@ def apply_amount_ownership(rows: TransferRows, ownership) -> None:
     definition prices the pair.
 
     Args:
-        rows: The transfer and both shadows.
+        rows: The transfer.
         ownership: The :class:`~app.models.amount_ownership.AmountOwnership`
             the caller states for the PARENT -- ``own`` over a figure a human
             authored, or ``derived`` naming
@@ -95,12 +90,6 @@ def apply_amount_ownership(rows: TransferRows, ownership) -> None:
             amount does not call this.
     """
     rows.transfer.amount_ownership = ownership
-    leg_ownership = (
-        ownership if ownership.figure is not None
-        else derived_ownership(AmountSourceEnum.PARENT_TRANSFER)
-    )
-    for shadow in rows.shadows:
-        shadow.amount_ownership = leg_ownership
 
 
 def grade_amount_ownership(updates: "dict[str, object]") -> None:
@@ -154,7 +143,7 @@ def grade_amount_ownership(updates: "dict[str, object]") -> None:
             "update_transfer was given amount_ownership=None. A save that "
             "says nothing about the amount OMITS the key (ruling R-BAL11); "
             "an explicit None is a half-written statement, and applying it "
-            "would leave all three rows owning neither a figure nor a "
+            "would leave the transfer owning neither a figure nor a "
             "relation -- the state ck_transfers_amount_ownership refuses."
         )
     if ownership.figure is not None:

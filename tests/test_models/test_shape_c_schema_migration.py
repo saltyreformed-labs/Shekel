@@ -10,9 +10,9 @@ split from the loan-side shadow it carried (the split is a date-keyed
 correction with no row link, R-BAL102; leaf 2).  It re-books NO posting: the
 deploy's cash resync re-books the transfers through the go-forward writer
 (R-BAL98), graded in
-``test_posting_service.py::TestTheDeployResyncReBooksTheLegacyShape``, and the
-unlinked splits already sit at their key, so the deploy's loan hook writes
-nothing over them (graded in ``test_loan_posting_service.py``).
+``test_posting_service/test_the_deploy_resync.py::TestTheDeployResyncReBooksTheLegacyShape``,
+and the unlinked splits already sit at their key, so the deploy's loan hook
+writes nothing over them (graded in ``test_loan_posting_service.py``).
 
 The migration is already at HEAD when these tests run (the template builder
 upgraded it base->head), so the per-worker DB shows the post-migration
@@ -57,12 +57,12 @@ from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db as _db
 from tests._test_helpers import (
     SPLIT_LOAN,
+    add_txn,
     create_account_of_type,
     create_loan_with_trueup,
     create_settled_transfer,
     load_migration_module,
     loan_correction_entries,
-    loan_income_shadow,
 )
 
 
@@ -289,12 +289,19 @@ class TestTheSplitUnlinkExecutes:
     The DML the upgrade adds at leaf 2 (ruling **R-BAL102**), executed against
     the test's OWN database: a ``loan_payment`` entry planted in the OLD shape
     -- linking a settled loan payment's income shadow by ``transaction_id``,
-    exactly as every one of production's 25 does at the base -- is unlinked
+    exactly as every one of production's loan-payment splits did at the base
+    -- is unlinked
     by the statement, the grade query then counts ZERO still linked, and an
     entry the statement did not reach (planted linked again after it ran)
     is what the grade counts.  The migration's own ``upgrade()`` raises on a
     nonzero grade; the statement and the grade are the two halves tested
     here, since the DDL half cannot run under the ORM.
+
+    **The plant links an ordinary row of the owner's since plan step
+    ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 1): a transfer is one
+    row there, so the income shadow the old shape linked cannot be stored, and
+    the statement and the grade read only whether a link is SET, never what
+    it names.
     """
 
     def test_unlink_clears_every_link_and_the_grade_counts_what_is_left(
@@ -304,10 +311,12 @@ class TestTheSplitUnlinkExecutes:
 
         Arithmetic: the ``$1,000`` payment on the ``$100,000`` @ 6% fixture
         posts one split (Loan -500 / Interest +500) which the go-forward
-        writer books sourceless; the test re-links it to its shadow by raw SQL
-        (the pre-leaf-2 shape), runs the unlink (``rowcount`` 1), and reads the
-        grade (0).  Re-linking it once more and reading the grade (1) is what
-        proves the grade counts rather than always answering zero.
+        writer books sourceless; the test re-links it by raw SQL to an ordinary
+        row of the owner's (the pre-leaf-2 shape linked the loan side's shadow,
+        which cannot be stored now: the class docstring), runs the unlink
+        (``rowcount`` 1), and reads the grade (0).  Re-linking it once more and
+        reading the grade (1) is what proves the grade counts rather than
+        always answering zero.
         """
         with app.app_context():
             loan = create_loan_with_trueup(
@@ -325,15 +334,18 @@ class TestTheSplitUnlinkExecutes:
                 seed_periods[SPLIT_LOAN.p1], amount=Decimal("1000.00"),
             )
             _db.session.commit()
-            shadow = loan_income_shadow(_db.session, xfer.id, loan.id)
-            [entry] = loan_correction_entries(_db.session, shadow)
+            [entry] = loan_correction_entries(_db.session, xfer.id, loan.id)
             assert entry.transaction_id is None
+            linked_row = add_txn(
+                _db.session, seed_user, seed_periods[SPLIT_LOAN.p1],
+                "Linked row", Decimal("10.00"),
+            )
 
             relink = text(
                 "UPDATE budget.journal_entries SET transaction_id = :sid "
                 "WHERE id = :eid"
             )
-            db.session.execute(relink, {"sid": shadow.id, "eid": entry.id})
+            db.session.execute(relink, {"sid": linked_row.id, "eid": entry.id})
             grade = text(_MIGRATION._LINKED_LOAN_PAYMENT_ENTRIES_SQL)
             assert db.session.execute(grade).scalar() == 1
 
@@ -347,6 +359,6 @@ class TestTheSplitUnlinkExecutes:
                     entry.transaction_entry_id) == (None, None, None)
 
             # The grade counts: a link the statement did not reach is seen.
-            db.session.execute(relink, {"sid": shadow.id, "eid": entry.id})
+            db.session.execute(relink, {"sid": linked_row.id, "eid": entry.id})
             assert db.session.execute(grade).scalar() == 1
             db.session.rollback()

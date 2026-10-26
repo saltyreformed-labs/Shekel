@@ -284,7 +284,7 @@ def get_payment_history(
 
     **That split also deletes the SECOND producer of a loan's settled history.**
     This function read the status column itself (``txn.status.is_settled``) while
-    :func:`app.services.loan_loaders.settled_income_shadows` -- which calls
+    :func:`app.services.loan_loaders.settled_income_legs` -- which calls
     itself the project's single such derivation -- filtered on
     ``settled_status_ids()``.  The two agreed by a pinned parity, which is rule
     14's tell rather than its answer; the installment producer reads that loader

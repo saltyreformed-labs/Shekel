@@ -63,7 +63,7 @@ from app import create_app
 from app.extensions import db
 from app.models.account import Account
 from app.models.loan_params import LoanParams
-from app.models.transaction import Transaction
+from app.models.transfer import Transfer
 from app.models.user import User
 from app.services import (
     calendar_service,
@@ -79,8 +79,9 @@ from app.services import (
 from app.services.cash_ledger import derived_amount_basis
 from app.services.balance_at import BalanceContext
 from app.services.investment_dashboard_service import compute_dashboard_data
+from app.services.transfer_legs import grid_transfer_leg
 from app.utils.balance_predicates import is_projected_clause
-from tests._test_helpers import all_periods, amount_basis_for
+from tests._test_helpers import all_periods
 
 # Six fixed valuation dates, the same discipline
 # ``verify_balance_baseline`` applies: a producer read at one date is blind
@@ -202,7 +203,7 @@ def _calendar(user_id, account_id):
                     },
                     "day_entries": {
                         str(day): [
-                            [e.transaction_id, _money(e.amount), e.is_large]
+                            [e.item_key, _money(e.amount), e.is_large]
                             for e in entries
                         ]
                         for day, entries in sorted(ms.day_entries.items())
@@ -277,7 +278,7 @@ def _spending(user_id, account_id):
                 "series": [_money(pt.total) for pt in report.series],
                 "surprises_net": _money(report.surprises.net),
                 "surprises": [
-                    [s.transaction_id, _money(s.estimated),
+                    [s.item_key, _money(s.estimated),
                      _money(s.actual), _money(s.delta)]
                     for s in report.surprises.rows
                 ],
@@ -387,32 +388,51 @@ def _loans(user_id, scenario_id, accounts):
 
 
 def _transfer_settle(scenario_id):
-    """What a settle would BOOK for every projected transfer shadow.
+    """What a settle would BOOK on both legs of every projected transfer.
 
-    ``transfer_service.settle_amount`` is a pure read and the reconcile panel
-    calls it per offered row, so every projected shadow is asked -- which is
-    also the widest possible exercise of the one-row basis this step gives it.
+    ``transfer_service.leg_settle_amount`` is a pure read and the reconcile
+    panel calls it per offered leg, so both legs of every live projected
+    transfer are asked, keyed ``<transfer id>:<account id>`` (the leg's
+    ``cell_key``) -- which is also the widest possible exercise of the one-row
+    basis plan step X-au-c2 gave it.
+
+    **It asked ``transfer_service.settle_amount(shadow, basis)`` per projected
+    shadow until plan step balance:X-bi-6-4d-2 deleted that function** (the
+    twins stopped carrying a transfer's status there).  At dev ``22262643c``,
+    the base that leaf is graded against, ``leg_settle_amount(leg, basis)``
+    returns ``settle_amount(_shadow_of(leg), basis)``, ``_shadow_of`` being
+    the live shadow on the leg's side (``transfer_service/_settle.py``:565,
+    :510 there), so on that base this one call IS the deleted path and on the
+    leaf it is the re-bodied one: the arm compares the two, it does not ask
+    one producer twice.
     """
-    shadows = (
-        db.session.query(Transaction)
+    transfers = (
+        db.session.query(Transfer)
         .filter(
-            Transaction.transfer_id.isnot(None),
-            Transaction.is_deleted.is_(False),
-            is_projected_clause(Transaction),
+            Transfer.is_deleted.is_(False),
+            is_projected_clause(Transfer),
         )
-        .order_by(Transaction.id)
+        .order_by(Transfer.id)
         .all()
     )
     _ = scenario_id
-    return {
-        str(shadow.id): _guard(
-            f"settle_amount:{shadow.id}",
-            lambda s=shadow: _money(
-                transfer_service.settle_amount(s, amount_basis_for(s)),
-            ),
-        )
-        for shadow in shadows
-    }
+    out = {}
+    for transfer in transfers:
+        for account_id in (transfer.from_account_id, transfer.to_account_id):
+            key = f"{transfer.id}:{account_id}"
+            out[key] = _guard(
+                f"leg_settle_amount:{key}",
+                lambda t=transfer, a=account_id: _leg_settle_amount(t, a),
+            )
+    return out
+
+
+def _leg_settle_amount(transfer, account_id):
+    """What settling *transfer* would book on its leg on *account_id*."""
+    leg = grid_transfer_leg(transfer, account_id)
+    return _money(transfer_service.leg_settle_amount(
+        leg, derived_amount_basis(leg.user_id, leg.scenario_id),
+    ))
 
 
 def _dump_user(user_id):

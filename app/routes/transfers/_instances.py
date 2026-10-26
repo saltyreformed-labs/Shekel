@@ -21,8 +21,9 @@ half has a transaction twin since plan step ``balance:X-bi-7a``
 holds -- a one-off's placed rows, a cleared cadence's survivors -- are
 reached by nothing else.  A
 transfer template with no rule still moves money exactly once: this module
-materialises that single Transfer (with its two shadow transactions,
-atomically) and then keeps it equal to the definition, because the
+materialises that single Transfer (one row since plan step
+``balance:X-bi-6-4d-2`` deleted its two shadow transactions) and then keeps it
+equal to the definition, because the
 regeneration path that does that job for every recurring template
 deliberately skips a rule-less one -- which is what stops a rename from
 destroying it (defect D16).
@@ -86,8 +87,8 @@ def _materialize_one_time_transfer(template, start_period):
     A transfer that does not repeat still moves money exactly once, so unlike
     a rule-less transaction template -- which generates nothing and waits for
     the user to add rows by hand -- this materializes one Transfer in the
-    chosen period, through ``transfer_service`` so its two shadow
-    transactions are created atomically (Transfer Invariants 1, 2 and 4).
+    chosen period, through ``transfer_service``, which every write of a
+    transfer goes through (``CLAUDE.md``, Architecture).
 
     **It TAKES the resolved period, and re-fetches nothing** (plan step
     ``pay_calendar:C13-b``).  This ran ``db.session.get(PayPeriod, ...)``
@@ -126,11 +127,13 @@ def _materialize_one_time_transfer(template, start_period):
     step ``balance:X-ci-1``, ruling **R-BAL94**: ``occurs_on = due_date`` on
     a one-time transfer, the twin of ``one_off.place_row_of``'s birth
     write).  It was born answering NO occurrence until then -- the one-time
-    branch was the last writer of the undated shape finding **REC-516**
-    names, and the rule ``recurrence:R19-b`` waited on for this table --
-    so a cadence added to the definition later that names this day adopts
-    the transfer as its occurrence, and one that does not retains it as
-    the conflict it is.  Every later writer of the date keeps the pair
+    branch was this table's last writer of the undated, definition-linked
+    shape finding **REC-516** names, and the rule ``recurrence:R19-b``
+    waited on for this table -- so a cadence added to the definition later
+    that names this day adopts the transfer as its occurrence, and one that
+    does not retains it when it holds the owner's records and retires
+    (hard-deletes) a record-free Projected one that is not overridden
+    (R-BAL94, REC-516's stated cost).  Every later writer of the date keeps the pair
     equal inside ``transfer_service.update_transfer`` (**R-BAL96**); the
     two transfers born before this leaf are backfilled at ``X-ci-3``.
 
@@ -293,9 +296,9 @@ def propagate_to_non_repeating_transfers(template):
     template with no rule names none, so a regeneration would retire every row
     it has (that is defect **D16**).  Its already-materialised Transfer is
     therefore brought into line here instead -- through
-    ``transfer_service.update_transfer``, the single door that keeps the two
-    shadow transactions' amounts, statuses and periods equal to their parent's
-    (Transfer Invariants 3 and 4).
+    ``transfer_service.update_transfer``, the transfer service's edit door
+    (every write of a transfer goes through ``transfer_service``:
+    ``CLAUDE.md``, Architecture).
 
     **Without this the template and its Transfer diverge silently.**  Measured
     before it existed, on the transfer create form's DEFAULT selection: a

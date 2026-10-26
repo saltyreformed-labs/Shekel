@@ -52,8 +52,8 @@ from app.routes.grid import partials  # noqa: F401, E402
 
 # ``_ACCRUAL_ROW_LABELS`` and ``_accrual_row_label`` are re-exported for the
 # tests that reach for them by their pre-split path
-# (``tests/test_routes/test_grid.py``); they are internals of the module above,
-# named here only so the split moved no test.
+# (``tests/test_routes/test_grid/test_summary_rows.py``); they are internals of
+# the module above, named here only so the split moved no test.
 #
 # **``PLAN_WINDOW_PERIODS`` was re-exported beside them under the same
 # sentence, and the sentence was false**: NO test ever imported it, measured

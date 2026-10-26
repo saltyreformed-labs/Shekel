@@ -19,6 +19,7 @@ from app.enums import AcctTypeEnum, TxnTypeEnum
 from app.extensions import db
 from app.models.salary_profile import SalaryProfile
 from app.models.transaction import Transaction
+from app.models.transaction_entry import TransactionEntry
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
@@ -366,8 +367,14 @@ def _recent_settled_expenses_monthly(
         Transfer.from_account_id.in_(checking_ids),
         Transfer.pay_period_id.in_(recent_period_ids),
         Transfer.scenario_id == scenario_id,
-        Transfer.is_deleted.is_(False),
-        Transfer.status_id.in_(settled_status_ids()),
+        # A leg's money that MOVED is its DATED record (ruling R-BAL80); a
+        # revert keeps an un-dated one, which is not spending.  The
+        # transfer's live and settled filters this stated went at plan step
+        # balance:X-bi-6-4d-2 (finding BAL-534): a dated side record is
+        # unstorable under a deleted transfer (the deleted-row rule's
+        # transfer arm) and under one not Paid or Received (the side band
+        # rule), so this one clause is both.
+        TransactionEntry.settled_on.isnot(None),
     ))
 
     total_expenses = sum(

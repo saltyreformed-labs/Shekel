@@ -110,7 +110,9 @@ class TestDTI:
         """C-5.12-13: Salary exists, all loans paid off -> DTI = 0.0%."""
         from app import ref_cache as rc
         from app.enums import StatusEnum
-        from app.services.transfer_service import TransferSpec, create_transfer
+        from app.services.transfer_service import (
+            TransferSpec, create_transfer, settle_transfer,
+        )
 
         with app.app_context():
             filing = db.session.query(FilingStatus).first()
@@ -124,7 +126,7 @@ class TestDTI:
             db.session.add(profile)
             start_test_pay_list(profile, Decimal("3000.00"))  # $78,000.00 a year / 26
             acct = _create_small_loan(seed_user, db.session)
-            create_transfer(
+            payment = create_transfer(
                 TransferSpec(
                     user_id=seed_user["user"].id,
                     from_account_id=seed_user["account"].id,
@@ -132,10 +134,13 @@ class TestDTI:
                     pay_period_id=seed_periods[7].id,
                     scenario_id=seed_user["scenario"].id,
                     amount_ownership=AmountOwnership.own(Decimal("1100.00")),
-                    status_id=rc.status_id(StatusEnum.DONE),
+                    status_id=rc.status_id(StatusEnum.PROJECTED),
                     category_id=seed_user["categories"]["Rent"].id,
                 ),
             )
+            # Created Projected, then settled: the create makes no
+            # settled transfer (ruling R-BAL379).
+            settle_transfer(payment.id, seed_user["user"].id)
             db.session.commit()
 
             # All debt paid off -> recorded as a balance true-up to $0.

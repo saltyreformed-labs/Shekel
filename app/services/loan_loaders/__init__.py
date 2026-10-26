@@ -10,11 +10,11 @@ The pure data-loading functions every loan consumer shares, in two leaves:
   :class:`~app.models.escrow_line.EscrowLine` loaders, the synthesized
   origination anchor, and the contract-time due date each loan payment
   satisfies.
-* :mod:`._shadows` -- WHICH transfers are an account's payments and which of
+* :mod:`._legs` -- WHICH transfers are an account's payments and which of
   them have HAPPENED: the single settled/projected partition every
   settled-payment consumer reads.
 
-The graph is a line -- ``_terms`` imports ``_shadows`` for the settled set the
+The graph is a line -- ``_terms`` imports ``_legs`` for the settled set the
 escrow forward-only guard bounds on, and nothing there reads back.
 
 **It was one module until plan step balance:X-bl-2a**, which gave the shadow
@@ -50,11 +50,11 @@ payment that moved -- through the one join in :mod:`app.services.transfer_legs`.
 No amount is read off a transfer for a payment that has settled.
 """
 
-from ._shadows import (
-    ShadowSets,
-    income_shadows,
+from ._legs import (
+    IncomeLegs,
+    income_legs,
     projected_income_legs,
-    settled_income_shadows,
+    settled_income_legs,
 )
 from ._terms import (
     LoanAnchorFact,
@@ -75,9 +75,9 @@ from ._terms import (
 )
 
 __all__ = [
+    "IncomeLegs",
     "LoanAnchorFact",
-    "ShadowSets",
-    "income_shadows",
+    "income_legs",
     "installment_for",
     "precedes_origination",
     "latest_settled_payment_due_date",
@@ -91,6 +91,6 @@ __all__ = [
     "load_standing_loan_assertions",
     "loan_payment_due_date",
     "projected_income_legs",
-    "settled_income_shadows",
+    "settled_income_legs",
     "synthesize_origination_anchor",
 ]

@@ -2,7 +2,9 @@
 Shekel Budget App -- Transfer Shadow Transaction Schema Tests
 
 Tests for the schema additions in Task 2 of the Transfer Architecture Rework:
-  - Transaction.transfer_id (nullable FK to Transfer with ON DELETE CASCADE)
+  - Transaction.transfer_id (nullable FK to Transfer with ON DELETE CASCADE);
+    since plan step balance:X-bi-6-4d-2 a row naming a transfer is refused
+    (ck_transactions_names_no_transfer, ruling R-BAL258)
   - Transfer.category_id (nullable FK to Category)
   - TransferTemplate.category_id (nullable FK to Category)
   - Transfer.shadow_transactions backref
@@ -11,6 +13,8 @@ Tests for the schema additions in Task 2 of the Transfer Architecture Rework:
 
 from decimal import Decimal
 
+import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models.ref import Status, TransactionType
@@ -47,7 +51,13 @@ class TestTransactionTransferId:
         return xfer
 
     def _make_shadow(self, seed_full_user_data, transfer, txn_type_name):
-        """Helper: create a shadow transaction linked to a transfer."""
+        """Helper: stage (unflushed) a twin row naming *transfer*.
+
+        Since plan step ``balance:X-bi-6-4d-2`` the database refuses such a
+        row (``ck_transactions_names_no_transfer``, ruling **R-BAL258**), so
+        the callers below assert the refusal at the flush (ruling **R-BAL167**
+        class 2: a test that plants a state the database refuses).
+        """
         projected = db.session.query(Status).filter_by(name="Projected").one()
         txn_type = db.session.query(TransactionType).filter_by(name=txn_type_name).one()
         data = seed_full_user_data
@@ -68,18 +78,24 @@ class TestTransactionTransferId:
             transfer_id=transfer.id,
         )
         db.session.add(txn)
-        db.session.flush()
         return txn
 
     def test_transaction_model_has_transfer_id(self, app, db, seed_full_user_data):
-        """Transaction with transfer_id saves and resolves the relationship."""
+        """The column is still mapped, and a row naming a transfer is refused.
+
+        It saved and resolved the relationship until plan step
+        ``balance:X-bi-6-4d-2`` (ruling **R-BAL258**); the column goes at
+        ``X-bi-6-5``.
+        """
         with app.app_context():
             xfer = self._make_transfer(seed_full_user_data)
             txn = self._make_shadow(seed_full_user_data, xfer, "Expense")
-
             assert txn.transfer_id == xfer.id
-            assert txn.transfer is not None
-            assert txn.transfer.id == xfer.id
+            with pytest.raises(
+                IntegrityError, match="ck_transactions_names_no_transfer",
+            ):
+                db.session.flush()
+            db.session.rollback()
 
     def test_transaction_transfer_id_nullable(self, app, db, seed_full_user_data):
         """Regular transaction with transfer_id=None saves without error."""
@@ -104,37 +120,41 @@ class TestTransactionTransferId:
     def test_transfer_cascade_deletes_shadow_transactions(
         self, app, db, seed_full_user_data
     ):
-        """ON DELETE CASCADE removes both shadow transactions when transfer is deleted."""
+        """A transfer has no twin for its delete to cascade: the plant is refused.
+
+        ``ON DELETE CASCADE`` took a deleted transfer's two twins with it
+        until plan step ``balance:X-bi-6-4d-2`` made a twin unstorable
+        (ruling **R-BAL258**; re-expressed under ruling **R-BAL167** class 2).
+        """
         with app.app_context():
             xfer = self._make_transfer(seed_full_user_data)
-            shadow_expense = self._make_shadow(seed_full_user_data, xfer, "Expense")
-            shadow_income = self._make_shadow(seed_full_user_data, xfer, "Income")
-            expense_id = shadow_expense.id
-            income_id = shadow_income.id
-
-            # Delete the transfer and commit so the CASCADE executes.
-            db.session.delete(xfer)
-            db.session.commit()
-
-            # Expire all cached objects so get() hits the database.
-            db.session.expire_all()
-
-            # Both shadow transactions should be gone.
-            assert db.session.get(Transaction, expense_id) is None
-            assert db.session.get(Transaction, income_id) is None
+            # Both staged inside the refusal: the second's status lookup
+            # autoflushes the first.
+            with pytest.raises(
+                IntegrityError, match="ck_transactions_names_no_transfer",
+            ):
+                self._make_shadow(seed_full_user_data, xfer, "Expense")
+                self._make_shadow(seed_full_user_data, xfer, "Income")
+                db.session.flush()
+            db.session.rollback()
 
     def test_shadow_transactions_backref(self, app, db, seed_full_user_data):
-        """Transfer.shadow_transactions backref returns both linked transactions."""
+        """The backref is empty, and a twin staged into it is refused.
+
+        It returned both linked twins until plan step
+        ``balance:X-bi-6-4d-2`` (ruling **R-BAL258**; re-expressed under
+        ruling **R-BAL167** class 2).
+        """
         with app.app_context():
             xfer = self._make_transfer(seed_full_user_data)
-            shadow_expense = self._make_shadow(seed_full_user_data, xfer, "Expense")
-            shadow_income = self._make_shadow(seed_full_user_data, xfer, "Income")
-
-            shadows = xfer.shadow_transactions
-            assert len(shadows) == 2
-            shadow_ids = {s.id for s in shadows}
-            assert shadow_expense.id in shadow_ids
-            assert shadow_income.id in shadow_ids
+            db.session.flush()
+            assert not xfer.shadow_transactions
+            self._make_shadow(seed_full_user_data, xfer, "Expense")
+            with pytest.raises(
+                IntegrityError, match="ck_transactions_names_no_transfer",
+            ):
+                db.session.flush()
+            db.session.rollback()
 
 
 class TestTransferCategoryId:

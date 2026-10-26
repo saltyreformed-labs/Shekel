@@ -1124,6 +1124,14 @@ def a_submission(
     not-offerable fallback, keyed by the transfer and revised by its counter.
     Developer approval 2026-09-30 (rule 5): "Yes, inputs only (Recommended)".
 
+    **A PAID transfer is ticked as its side's RECORD on the scope's account**
+    (leaf ``balance:X-bi-6-4d-2``), the leg's twin of the settled row above:
+    a side whose money has moved is offered as its dated record, a
+    SETTLEMENT (ruling **R-BAL80**), which hangs off the transfer by its side
+    link since that leaf, where a case handed the side's shadow row in
+    *transactions* until then (its ``covering_movements`` is empty now).
+    Ruling **R-BAL167**'s class 4, a shared helper re-expressed.
+
     Args:
         scope: The pass being submitted against
             (:func:`a_scope`).
@@ -1132,7 +1140,8 @@ def a_submission(
             screen offers for it.
         entries: Purchase rows.
         transfers: Transfer rows, each ticked as its leg on the scope's
-            account (leaf ``balance:X-bi-6-4c-1``).
+            account (leaf ``balance:X-bi-6-4c-1``), or as that side's record
+            once it is paid (leaf ``balance:X-bi-6-4d-2``).
         residual: The difference the screen showed and the owner ticked, as a
             string or a ``Decimal``; ``None`` for the ordinary case where they
             accepted none (plan step ``bank_import:X-f6d-4``).  **Stated by the
@@ -1186,6 +1195,20 @@ def a_submission(
                 (
                     offered[(RowKind.SETTLEMENT, movement.id)]
                     for movement in orm_row.covering_movements
+                    if (RowKind.SETTLEMENT, movement.id) in offered
+                ),
+                None,
+            )
+        if candidate is None and kind is RowKind.LEG:
+            # The paid side's record, where the screen offers that instead
+            # (the docstring's fourth paragraph): only the side on the
+            # scope's account can be offered here.
+            candidate = next(
+                (
+                    offered[(RowKind.SETTLEMENT, movement.id)]
+                    for movement in (
+                        *orm_row.expense_movements, *orm_row.income_movements,
+                    )
                     if (RowKind.SETTLEMENT, movement.id) in offered
                 ),
                 None,

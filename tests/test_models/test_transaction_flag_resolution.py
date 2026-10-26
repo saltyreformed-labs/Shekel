@@ -4,8 +4,13 @@ Shekel Budget App -- Transaction flag-resolution property tests
 Unit tests for ``Transaction.tracks_purchases`` and
 ``Transaction.visible_to_companion``.  Resolution rule: a row's two flags
 are its DEFINITION's (the definition is the single source of truth for
-every row it generates or places), and a row that names no definition -- a
-transfer shadow, a CC payback -- answers ``False`` (ruling **R-BAL73**).
+every row it generates or places), and a row that names no definition
+answers ``False`` (ruling **R-BAL73**).  That row is a CC payback: the
+transfer shadow was the other until plan step ``balance:X-bi-6-4d-2``, where
+the database began refusing a row that names a transfer, and the card
+cutover (``credit_card:CC-7``, rulings **R-CC17** / **R-CC20**) deletes the
+payback, so these two cases go with the ``template_id is None`` arms they
+grade.
 These properties are the load-bearing abstraction behind F2 (companion
 visibility) and F3 (purchase tracking).
 
@@ -30,11 +35,10 @@ from app.enums import TxnTypeEnum
 from app.extensions import db
 from app.models.transaction import Transaction
 from tests._test_helpers import (
-    create_savings_account,
-    create_transfer,
     generate_row_of,
     make_expense_template,
     one_off_row_of,
+    payback_row_of,
 )
 
 
@@ -67,22 +71,24 @@ def _generated(seed_user, period, *, is_envelope, companion_visible):
     return txn
 
 
-def _shadow(seed_user, period):
-    """Create a transfer through the service and return one of its shadows.
+def _payback(seed_user, period):
+    """Return ``(envelope, payback)``: a card purchase's payback and the row it repays.
 
-    A shadow names its transfer and no definition -- one of the two
-    link-less shapes left since the cutover.
+    The payback names no definition -- its one pricing link is the row it
+    repays, here an envelope -- so it is the link-less shape these cases
+    need.  The envelope's definition states BOTH flags True, so a link-less
+    arm that answered through the payback's link to its envelope would read
+    True where the rule says ``False``.
     """
-    savings = create_savings_account(
-        seed_user, db.session, "Savings", Decimal("500.00"),
+    envelope = _placed(
+        seed_user, period, is_envelope=True, companion_visible=True,
     )
-    xfer = create_transfer(
-        seed_user, db.session, seed_user["account"], savings, period,
+    payback = payback_row_of(
+        db.session, seed_user, envelope, Decimal("40.00"), period.start_date,
     )
     db.session.commit()
-    shadow = xfer.shadow_transactions[0]
-    assert shadow.transfer_id == xfer.id and shadow.template_id is None
-    return shadow
+    assert payback.template_id is None
+    return envelope, payback
 
 
 class TestTracksPurchasesResolution:
@@ -123,15 +129,17 @@ class TestTracksPurchasesResolution:
     def test_a_row_with_no_definition_answers_false(
         self, app, db, seed_user, seed_periods_today,
     ):
-        """A transfer shadow tracks no purchases (ruling R-BAL73).
+        """A card payback tracks no purchases, though its envelope does (ruling R-BAL73).
 
         There is no definition to ask and no cell of the row's own, so the
-        answer is stated without either -- what every shadow's cell held
-        before the cutover dropped it (0 of 354 on the 2026-09-18 restore).
+        answer is stated without either.  The envelope it repays tracks
+        purchases, so the payback's ``False`` is not a copy of its envelope's
+        answer.
         """
         with app.app_context():
-            shadow = _shadow(seed_user, seed_periods_today[0])
-            assert shadow.tracks_purchases is False
+            envelope, payback = _payback(seed_user, seed_periods_today[0])
+            assert envelope.tracks_purchases is True
+            assert payback.tracks_purchases is False
 
 
 class TestVisibleToCompanionResolution:
@@ -172,14 +180,17 @@ class TestVisibleToCompanionResolution:
     def test_a_row_with_no_definition_answers_false(
         self, app, db, seed_user, seed_periods_today,
     ):
-        """A transfer shadow is not companion-visible (ruling R-BAL73).
+        """A card payback is not companion-visible, though its envelope is (ruling R-BAL73).
 
         A SECURITY predicate answered ``False`` where nothing states
-        otherwise: no definition, no cell.
+        otherwise: no definition, no cell.  The envelope it repays IS
+        visible, so the payback's ``False`` is not a copy of its envelope's
+        answer.
         """
         with app.app_context():
-            shadow = _shadow(seed_user, seed_periods_today[0])
-            assert shadow.visible_to_companion is False
+            envelope, payback = _payback(seed_user, seed_periods_today[0])
+            assert envelope.visible_to_companion is True
+            assert payback.visible_to_companion is False
 
 
 class TestTheRowCarriesNoFlag:

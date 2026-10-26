@@ -1,7 +1,7 @@
 """Tests for pay-period CRUD slice (d): truncate (the first destructive op).
 
 Truncate deletes the schedule tail via a single bulk DELETE (PostgreSQL
-cascades transactions, transfers + both shadows, and anchor history).
+cascades its transactions and transfers).
 Two gates run first: the hard lock classifier (historical / settled /
 anchor / rule -- never overridable) and the broadened discard gate
 (hand-entered / override / Credit-Cancelled rows -- overridable with
@@ -240,8 +240,15 @@ class TestTruncateHappyPath:
             assert _txns_in(db.session, doomed_id) == 0
             assert_pay_period_invariants(db.session, user_id)
 
-    def test_cascade_removes_transfers_and_both_shadows(self, app, db, seed_user):
-        """A transfer in a deleted period takes both shadows with it."""
+    def test_cascade_removes_the_doomed_periods_transfer(self, app, db, seed_user):
+        """A transfer in a deleted period goes with it.
+
+        Until plan step ``balance:X-bi-6-4d-2`` the case also read that
+        neither of the transfer's two shadow rows survived in the deleted
+        period.  A transfer is one row since (``ck_transactions_names_no_transfer``),
+        so that count found no row to count.  Renamed from
+        ``test_cascade_removes_transfers_and_both_shadows``.
+        """
         with app.app_context():
             periods = _future_periods(db.session, seed_user, count=4)
             user_id = seed_user["user"].id
@@ -256,6 +263,9 @@ class TestTruncateHappyPath:
             assert db.session.query(Transfer).filter_by(
                 pay_period_id=doomed_id,
             ).count() == 1
+            doomed_transfer_id = db.session.query(Transfer).filter_by(
+                pay_period_id=doomed_id,
+            ).one().id
 
             # confirm_discard not needed: template transfers are regenerable.
             pay_period_admin.truncate_pay_periods(
@@ -265,10 +275,9 @@ class TestTruncateHappyPath:
             assert db.session.query(Transfer).filter_by(
                 pay_period_id=doomed_id,
             ).count() == 0
-            # No orphaned shadow survived in the deleted period.
-            assert db.session.query(Transaction).filter(
-                Transaction.pay_period_id == doomed_id,
-                Transaction.transfer_id.isnot(None),
+            # The transfer itself is gone, not moved to a surviving period.
+            assert db.session.query(Transfer).filter_by(
+                id=doomed_transfer_id,
             ).count() == 0
             assert_pay_period_invariants(db.session, user_id)
 

@@ -11,8 +11,10 @@ principal (only ``is_confirmed`` payments are replayed).
 The test drives the live ``transfer_service`` / ``transactions.py``
 ``mark_done`` path -- not a manual ``status_id`` overwrite -- so the
 assertions prove the assembled production pipeline behaves correctly:
-the income shadow on the loan account moves to a settled status,
-:func:`loan_payment_service.get_payment_history` lists it as a
+the transfer moves to a settled status and its loan side's payment record
+is dated (the income shadow carried both until plan step
+``balance:X-bi-6-4d-2``), :func:`loan_payment_service.get_payment_history`
+lists it as a
 confirmed :class:`PaymentRecord`, :func:`load_loan_context` prepares
 it for the engine, and :func:`loan_resolver.resolve_loan` reduces
 ``current_balance`` by the principal portion only.
@@ -40,7 +42,8 @@ band-aid in the test.
 
 **Every balance here is read AT OR AFTER the day the money moved, and that
 matters since plan step X-an** (finding N-187).  ``mark-done`` stamps the
-shadow's ``settled_on`` with the user's today, and the resolver's
+payment record's ``settled_on`` (the shadow's until plan step
+``balance:X-bi-6-4d-2``) with the user's today, and the resolver's
 replay-vs-projection cut is now that day -- the SAME day the balance seam
 counts the payment's principal from, which is the point of the step.  These
 tests used to read the balance on a fixed ``2026-03-01`` while the payment's
@@ -61,19 +64,20 @@ from app import ref_cache
 from app.enums import (
     AcctTypeEnum,
     StatusEnum,
-    TxnTypeEnum,
 )
 from app.extensions import db
-from app.models.transaction import Transaction
+from app.models.transfer import Transfer
 from app.services import balance_at, transfer_service
 from app.utils.dates import add_months, display_today
 from tests._test_helpers import (
     add_escrow_line,
     create_loan_account,
     loan_params_for,
+    transfer_side_record,
     unseeded_replay_balance,
 )
-from app.services.row_valuation import settled_contribution
+from app.services.row_valuation import leg_settled_contribution
+from tests.test_integration.test_loan_transfer_live_amount._helpers import _side_leg
 from app.models.amount_ownership import AmountOwnership
 
 
@@ -213,11 +217,12 @@ def _create_piti_transfer(  # pylint: disable=too-many-arguments,too-many-positi
 ):
     """Create a PITI transfer in Projected status via the transfer service.
 
-    Routed through :func:`transfer_service.create_transfer` so the
-    two-shadow invariant (Transfer Invariant 1) is established the
-    same way the production transfer route would.  Status is
-    Projected; the caller settles via the live ``mark_done`` route
-    when it wants the resolver to count the payment as confirmed.
+    Routed through :func:`transfer_service.create_transfer` so the transfer
+    is written the same way the production transfer route writes it: one
+    row since plan step ``balance:X-bi-6-4d-2`` (ruling **R-BAL258**), where
+    the door also wrote the two shadows Transfer Invariant 1 named.  Status
+    is Projected; the caller settles via the live ``mark_done`` route when
+    it wants the resolver to count the payment as confirmed.
     """
     projected_id = ref_cache.status_id(StatusEnum.PROJECTED)
     xfer = transfer_service.create_transfer(
@@ -248,26 +253,6 @@ def _mark_done_from_the_loan_leg(auth_client, transfer_id: int, loan_account_id:
     return auth_client.post(
         f"/transfers/instance/{transfer_id}/mark-done",
         data={"leg_account_id": str(loan_account_id)},
-    )
-
-
-def _income_shadow(transfer_id: int, loan_account_id: int) -> Transaction:
-    """Return the income shadow on the loan account for a given transfer.
-
-    The income shadow is the one whose ``account_id`` matches the
-    transfer's destination (the loan); its settle drives the
-    :func:`loan_payment_service.get_payment_history` feed.
-    """
-    income_type_id = ref_cache.txn_type_id(TxnTypeEnum.INCOME)
-    return (
-        db.session.query(Transaction)
-        .filter(
-            Transaction.transfer_id == transfer_id,
-            Transaction.account_id == loan_account_id,
-            Transaction.transaction_type_id == income_type_id,
-            Transaction.is_deleted.is_(False),
-        )
-        .one()
     )
 
 
@@ -349,10 +334,11 @@ class TestLoanPrincipalSettles:
         The grid posts the loan-side LEG's Mark Paid to the transfer's
         door (``/transfers/instance/<id>/mark-done`` with
         ``leg_account_id``, plan step balance:X-bi-6-1); the route settles
-        through ``transfer_service.settle_transfer`` so both shadows reach
-        the DONE status (``is_settled = True``) and the
-        loan-payment feed picks the transfer up as a confirmed
-        :class:`PaymentRecord`.
+        through ``transfer_service.settle_transfer`` so the transfer reaches
+        the DONE status (``is_settled = True``; it is the one status, where
+        both shadows were asserted until ruling R-BAL167 class 1, plan step
+        balance:X-bi-6-4d-2) and the loan-payment feed picks the transfer up
+        as a confirmed :class:`PaymentRecord`.
 
         Hand-computed expectation:
 
@@ -387,23 +373,22 @@ class TestLoanPrincipalSettles:
                 category_id=ctx["category_id"],
             )
             db.session.commit()
-
-            income_shadow_id = _income_shadow(xfer.id, ctx["mortgage_id"]).id
+            xfer_id = xfer.id
 
             resp = _mark_done_from_the_loan_leg(
-                auth_client, xfer.id, ctx["mortgage_id"],
+                auth_client, xfer_id, ctx["mortgage_id"],
             )
             assert resp.status_code == 200, (
                 f"mark_done returned {resp.status_code}; body={resp.data!r}"
             )
 
-            # Re-fetch the shadow so the test's session sees the
+            # Re-fetch the transfer so the test's session sees the
             # commit produced by the request.
             db.session.expire_all()
-            settled_shadow = db.session.get(Transaction, income_shadow_id)
-            assert settled_shadow.status.is_settled is True, (
-                f"Expected income shadow to be settled after mark_done; "
-                f"status={settled_shadow.status.name!r}"
+            settled_transfer = db.session.get(Transfer, xfer_id)
+            assert settled_transfer.status.is_settled is True, (
+                f"Expected the transfer to be settled after mark_done; "
+                f"status={settled_transfer.status.name!r}"
             )
 
             balance_after = _resolve_balance(
@@ -450,6 +435,10 @@ class TestLoanPrincipalSettles:
         asserts the correct value AND the absence of the wrong
         value so a regression that silently swaps the formulae fails
         loudly.
+
+        The checking side is valued as the transfer and its side's record,
+        where it was read off the checking expense twin (ruling R-BAL167
+        class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             ctx = self._setup_loan(
@@ -467,8 +456,6 @@ class TestLoanPrincipalSettles:
             )
             db.session.commit()
 
-            shadow_id = _income_shadow(xfer.id, ctx["mortgage_id"]).id
-
             resp = _mark_done_from_the_loan_leg(
                 auth_client, xfer.id, ctx["mortgage_id"],
             )
@@ -478,29 +465,22 @@ class TestLoanPrincipalSettles:
 
             db.session.expire_all()
 
-            # E-01 cross-cut: the expense shadow on checking carries
-            # the full $2,198.65 PITI -- so when consumers route
-            # through the balance resolver (Commits 5-10) checking
-            # is debited by the full amount.  We assert the shadow
-            # itself here rather than driving the balance resolver
-            # because Commit 14 is loan-focused; the checking-side
-            # producer assertion belongs to the cross-page lock in
-            # Commit 11 (already landed).
-            expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-            expense_shadow = (
-                db.session.query(Transaction)
-                .filter(
-                    Transaction.transfer_id == xfer.id,
-                    Transaction.account_id == ctx["checking_id"],
-                    Transaction.transaction_type_id == expense_type_id,
-                    Transaction.is_deleted.is_(False),
-                )
-                .one()
-            )
-            assert settled_contribution(expense_shadow) == PITI_WITH_ESCROW, (
-                f"Expected checking expense shadow = {PITI_WITH_ESCROW} "
+            # E-01 cross-cut: the checking side carries the full
+            # $2,198.65 PITI -- so when consumers route through the
+            # balance resolver (Commits 5-10) checking is debited by
+            # the full amount.  We assert the side itself here rather
+            # than driving the balance resolver because Commit 14 is
+            # loan-focused; the checking-side producer assertion
+            # belongs to the cross-page lock in Commit 11 (already
+            # landed).  The side is its LEG -- the transfer's status
+            # and the side's record -- since plan step
+            # balance:X-bi-6-4d-2, which stopped keeping the expense
+            # shadow's status and figure.
+            checking_side = _side_leg(xfer.id, ctx["checking_id"])
+            assert leg_settled_contribution(checking_side) == PITI_WITH_ESCROW, (
+                f"Expected checking side = {PITI_WITH_ESCROW} "
                 f"(full PITI per E-01); got "
-                f"{settled_contribution(expense_shadow)}."
+                f"{leg_settled_contribution(checking_side)}."
             )
 
             balance_after = _resolve_balance(
@@ -534,6 +514,11 @@ class TestLoanPrincipalSettles:
         symmetric with the settle-driven cases (and to confirm the
         Flask test context is live), but no HTTP POST is issued --
         the transfer remains Projected.
+
+        The pre-condition reads the transfer and its loan side's record,
+        where it read the loan-side income shadow's status until plan step
+        ``balance:X-bi-6-4d-2`` made a transfer one row (ruling **R-BAL167**
+        class 1): Projected, and no payment recorded on the loan.
         """
         _ = auth_client  # Fixture kept for context-setup symmetry.
         with app.app_context():
@@ -550,11 +535,13 @@ class TestLoanPrincipalSettles:
             )
             db.session.commit()
 
-            shadow = _income_shadow(xfer.id, ctx["mortgage_id"])
-            assert shadow.status.is_settled is False, (
-                f"Pre-condition: shadow must start unsettled; "
-                f"status={shadow.status.name!r}"
+            assert xfer.status.is_settled is False, (
+                f"Pre-condition: the transfer must start unsettled; "
+                f"status={xfer.status.name!r}"
             )
+            assert transfer_side_record(
+                db.session, xfer.id, ctx["mortgage_id"],
+            ) is None, "Pre-condition: the loan side must hold no payment record"
 
             balance = _resolve_balance(
                 ctx["mortgage_id"], ctx["loan_params"],
@@ -613,9 +600,6 @@ class TestLoanPrincipalSettles:
                 )
                 db.session.commit()
 
-                shadow_id = _income_shadow(
-                    xfer.id, ctx["mortgage_id"],
-                ).id
                 resp = _mark_done_from_the_loan_leg(
                     auth_client, xfer.id, ctx["mortgage_id"],
                 )
@@ -683,7 +667,6 @@ def test_resolved_balance_stable_across_future_as_of(  # noqa: D401
         )
         db.session.commit()
 
-        shadow_id = _income_shadow(xfer.id, mortgage.id).id
         resp = _mark_done_from_the_loan_leg(auth_client, xfer.id, mortgage.id)
         assert resp.status_code == 200
 
@@ -718,6 +701,10 @@ def test_the_replay_and_the_balance_seam_agree_on_what_has_happened(
 
     Parametrised across the seam itself: the day BEFORE the money moved (no
     reduction, on both producers) and the day OF (the full $298.65, on both).
+
+    The settle day is read off the loan side's record, where it was read off
+    the income twin's ``settled_on`` (ruling R-BAL167 class 1, plan step
+    balance:X-bi-6-4d-2).
     """
     with app.app_context():
         checking = seed_user["account"]
@@ -739,13 +726,15 @@ def test_the_replay_and_the_balance_seam_agree_on_what_has_happened(
             category_id=category.id,
         )
         db.session.commit()
+        xfer_id = xfer.id
 
-        shadow_id = _income_shadow(xfer.id, mortgage.id).id
-        resp = _mark_done_from_the_loan_leg(auth_client, xfer.id, mortgage.id)
+        resp = _mark_done_from_the_loan_leg(auth_client, xfer_id, mortgage.id)
         assert resp.status_code == 200
         db.session.expire_all()
 
-        cash_day = db.session.get(Transaction, shadow_id).settled_on
+        cash_day = transfer_side_record(
+            db.session, xfer_id, mortgage.id,
+        ).settled_on
         assert cash_day == display_today(), (
             "Pre-condition: the settle door stamps the owner's civil day, "
             f"which this test's dates are derived from; got {cash_day}."

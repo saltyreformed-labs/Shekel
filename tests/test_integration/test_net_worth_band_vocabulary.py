@@ -65,8 +65,8 @@ hole; the comment strip below closes it for all five and
 check that each DECLARATION carries the right keys, never that the client
 USES the declaration.  Rewiring ``readBandColors`` to iterate some other list
 would leave every arm green.  That is N-63's lesson one level up, and the honest
-answer to it is the behavioural render assertions in ``test_savings.py``, not a
-static scan.
+answer to it is the behavioural render assertions in the ``test_savings``
+package, not a static scan.
 """
 
 from __future__ import annotations

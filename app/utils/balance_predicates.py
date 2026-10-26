@@ -305,6 +305,36 @@ def reverts_to_projected(row, new_status_id: int) -> bool:
     )
 
 
+def delete_returns_to_plan(row, *, took_off: bool) -> bool:
+    """Return whether the delete that took *row*'s payments off sets it back to Projected.
+
+    **Ruling R-BAL246's one statement** (developer 2026-10-09, "Back as a
+    plan, now"): a delete that takes a SETTLED item's payment records off the
+    books (ruling **credit_card:R-CC75**) returns it to a plan, so a restore
+    brings back a plan -- never a ``$0.00`` close, "the bank took nothing",
+    which a loan reads as a missed installment and charges its interest.  A
+    settled item that held nothing IS a ``$0.00`` close and keeps its
+    status; an unsettled one keeps its status whatever came off -- a
+    Projected item is a plan already, and a Cancelled one stays Cancelled
+    even when kept payment records came off it.  Polymorphic over both
+    status-bearing models for the reason :func:`enters_settled_band` states:
+    the transfer delete asks it
+    (``transfer_service._status.return_to_plan``), and the row delete is owed
+    the same (ledger row **credit_card:CC-387**), each through its own kind's
+    one status door.
+
+    Args:
+        row: The :class:`~app.models.transaction.Transaction` or
+            :class:`~app.models.transfer.Transfer` being deleted, read for
+            its CURRENT ``status_id``.
+        took_off: Whether the delete took at least one payment record off.
+
+    Returns:
+        True when *row* is settled and the delete took a payment off.
+    """
+    return took_off and row.status_id in settled_status_ids()
+
+
 #: Why a settled ROW can carry no day, and the repair: :func:`settled_day`'s
 #: cause sentence for :func:`require_settled_day`.
 _ROW_UNDATED_CAUSE = (

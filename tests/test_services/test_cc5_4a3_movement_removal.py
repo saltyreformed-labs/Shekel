@@ -49,6 +49,7 @@ from tests._test_helpers import (
     create_transfer,
     generate_row_of,
     make_expense_template,
+    transfer_side_record,
     typed,
 )
 # Pylint: ``shekel-private-module-import`` -- the statement-match builders are
@@ -126,7 +127,8 @@ def _record_zero(txn):
     """The popover's Actual box re-recorded at ``$0.00``, through its door."""
     with match_press.Press(_what_its_page_names(txn.covering_movements)) as press:
         transaction_service.apply_requested_status(
-            txn, txn.status_id, stated=transaction_service.StatedRecord(figure=typed(Decimal("0.00"))),
+            txn, txn.status_id,
+            stated=transaction_service.StatedRecord(figure=typed(Decimal("0.00"))),
             press=press,
         )
     db.session.commit()
@@ -134,6 +136,23 @@ def _record_zero(txn):
 
 def _claimed_lines(seed_user):
     return matched_subjects(seed_user["account"].id).lines
+
+
+def _side_records(xfer):
+    """The payment records *xfer*'s two sides hold, read by their own SQL.
+
+    Each side's record hangs off the TRANSFER since plan step
+    ``balance:X-bi-6-4d-2`` (ruling **R-BAL88**); the transfer cases read
+    their shadows' ``covering_movements`` until then (ruling **R-BAL167**
+    class 4).  A side holding none is left out.
+    """
+    return [
+        record for record in (
+            transfer_side_record(db.session, xfer.id, account_id)
+            for account_id in (xfer.from_account_id, xfer.to_account_id)
+        )
+        if record is not None
+    ]
 
 
 class _Events(logging.Handler):
@@ -454,7 +473,12 @@ class TestEveryDoorWithdrawsTheActItself:
     def test_a_hard_transfer_delete_withdraws_the_act_naming_its_leg(
         self, app, seed_user,
     ):
-        """``transfer_service.delete_transfer(soft=False)``."""
+        """``transfer_service.delete_transfer(soft=False)``.
+
+        The page names the lines its transfer's side records free, where it
+        read the Checking shadow's ``covering_movements`` until plan step
+        ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 4).
+        """
         with app.app_context():
             savings = create_account_of_type(
                 seed_user, db.session, "Savings", "Savings",
@@ -466,15 +490,10 @@ class TestEveryDoorWithdrawsTheActItself:
                 seed_user["bootstrap_period"], Decimal("500.00"),
             )
             db.session.commit()
-            shadow = (
-                db.session.query(Transaction)
-                .filter_by(transfer_id=xfer.id, account_id=seed_user["account"].id)
-                .one()
-            )
             line = _line(seed_user, "-500.00", "TRANSFER")
-            accepted = _match(seed_user, line, transfers=[shadow.transfer])
+            accepted = _match(seed_user, line, transfers=[xfer])
 
-            with match_press.Press(_what_its_page_names(shadow.covering_movements)) as press:
+            with match_press.Press(_what_its_page_names(_side_records(xfer))) as press:
                 transfer_service.delete_transfer(
                     xfer.id, seed_user["user"].id, soft=False,
                     press=press,
@@ -560,7 +579,9 @@ class TestTheEventFilesATransfersPaymentUnderItsTransfer:
         movement.
 
         Returns:
-            ``(transfer, expense_shadow_id)``.
+            The transfer.  It returned the expense shadow's id beside it,
+            for a failure message, until plan step ``balance:X-bi-6-4d-2``
+            made a transfer one row (ruling **R-BAL258**).
         """
         savings = create_account_of_type(
             seed_user, db.session, "Savings", "Savings",
@@ -572,29 +593,23 @@ class TestTheEventFilesATransfersPaymentUnderItsTransfer:
             seed_user["bootstrap_period"], Decimal("500.00"),
         )
         db.session.commit()
-        shadow = (
-            db.session.query(Transaction)
-            .filter_by(transfer_id=xfer.id, account_id=seed_user["account"].id)
-            .one()
-        )
         _match(
             seed_user, _line(seed_user, "-500.00", "TRANSFER"),
             transfers=[xfer],
         )
-        return xfer, shadow.id
+        return xfer
 
     def test_a_zero_figure_files_the_payment_under_the_transfer_alone(
         self, app, seed_user,
     ):
         """The transfer popover's ``$0.00``: no row leaves, so no row is named."""
         with app.app_context():
-            xfer, shadow_id = self._a_matched_transfer(seed_user)
+            xfer = self._a_matched_transfer(seed_user)
 
-            payments = [
-                movement for row in db.session.query(Transaction).filter_by(
-                    transfer_id=xfer.id,
-                ) for movement in row.covering_movements
-            ]
+            # The transfer's side records, where the payments under its
+            # shadows were read until plan step balance:X-bi-6-4d-2 (ruling
+            # R-BAL167 class 4).
+            payments = _side_records(xfer)
             with _Events() as events:
                 with match_press.Press(_what_its_page_names(payments)) as press:
                     transfer_service.update_transfer(
@@ -608,26 +623,28 @@ class TestTheEventFilesATransfersPaymentUnderItsTransfer:
             assert record.getMessage() == match_withdrawal.RE_RECORDED
             assert record.transfer_ids == [xfer.id]
             assert record.transaction_ids == [], (
-                f"the shadow {shadow_id} is no parent the owner sees"
+                "a transfer's payment is filed under its transfer, and no row "
+                f"is a parent the owner sees: {record.transaction_ids}"
             )
 
-    def test_a_hard_delete_names_the_transfer_beside_its_leaving_shadows(
+    def test_a_hard_delete_names_the_transfer_and_no_row(
         self, app, seed_user,
     ):
-        """The delete hands its shadows over as leaving rows until they go."""
-        with app.app_context():
-            xfer, _shadow_id = self._a_matched_transfer(seed_user)
-            shadow_ids = sorted(
-                row.id for row in db.session.query(Transaction).filter_by(
-                    transfer_id=xfer.id,
-                )
-            )
+        """The delete names its transfer, and no row leaves with it.
 
-            payments = [
-                movement for row in db.session.query(Transaction).filter_by(
-                    transfer_id=xfer.id,
-                ) for movement in row.covering_movements
-            ]
+        Renamed from
+        ``test_a_hard_delete_names_the_transfer_beside_its_leaving_shadows``:
+        the delete handed its two shadows over as leaving rows, and the event
+        named their ids, until plan step ``balance:X-bi-6-4d-2`` made a
+        transfer one row (ruling **R-BAL258**).
+        """
+        with app.app_context():
+            xfer = self._a_matched_transfer(seed_user)
+
+            # The transfer's side records, where the payments under its
+            # shadows were read until plan step balance:X-bi-6-4d-2 (ruling
+            # R-BAL167 class 4).
+            payments = _side_records(xfer)
             with _Events() as events:
                 with match_press.Press(_what_its_page_names(payments)) as press:
                     transfer_service.delete_transfer(
@@ -639,7 +656,7 @@ class TestTheEventFilesATransfersPaymentUnderItsTransfer:
             (record,) = events.withdrawn()
             assert record.getMessage() == match_withdrawal.LEFT_THE_BOOKS
             assert record.transfer_ids == [xfer.id]
-            assert record.transaction_ids == shadow_ids
+            assert record.transaction_ids == []
 
 
 class TestTheRemovedMovementLeavesItsParentsLoadedList:
@@ -648,11 +665,12 @@ class TestTheRemovedMovementLeavesItsParentsLoadedList:
     A reconcile later in the same request walks that list -- the settle verbs',
     the entry door's re-derivation -- so a movement deleted but left in it is
     one the walk still meets.  Pinned for a row's payment and for a
-    transfer's, whose list is its shadow's through the interval: plan step
+    transfer's, whose list was its shadow's through the interval: plan step
     ``balance:X-bi-6-4c-4`` moved the act's reach for that list into
     ``transfer_legs.parent_entries``, and the list it answers must stay the
     one the parent loaded (a copy would leave the movement in the parent's).
-    ``X-bi-6-4d`` rewrites the transfer case onto the side links.  Nothing is
+    Plan step ``balance:X-bi-6-4d-2`` rewrote the transfer case onto the side
+    links: the list is the transfer's ``expense_movements``.  Nothing is
     expired between the act and the assertion.
     """
 
@@ -673,8 +691,16 @@ class TestTheRemovedMovementLeavesItsParentsLoadedList:
             assert payment not in hotel.entries
             assert hotel.entries is family
 
-    def test_a_transfers_payment_leaves_its_shadows_entries(self, app, seed_user):
-        """A Paid $500.00 transfer's checking-side payment, taken off by the act."""
+    def test_a_transfers_payment_leaves_the_from_sides_movements(self, app, seed_user):
+        """A Paid $500.00 transfer's checking-side payment, taken off by the act.
+
+        Its list is the transfer's from-side collection since plan step
+        ``balance:X-bi-6-4d-2`` (ruling **R-BAL88**), where it was the
+        Checking shadow's ``entries`` until then (ruling **R-BAL167** class
+        1).  Renamed from
+        ``test_a_transfers_payment_leaves_its_shadows_entries`` at plan step
+        ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint.
+        """
         with app.app_context():
             savings = create_account_of_type(
                 seed_user, db.session, "Savings", "Savings",
@@ -691,13 +717,10 @@ class TestTheRemovedMovementLeavesItsParentsLoadedList:
                 status_id=ref_cache.status_id(StatusEnum.DONE),
             )
             db.session.commit()
-            shadow = (
-                db.session.query(Transaction)
-                .filter_by(transfer_id=xfer.id, account_id=seed_user["account"].id)
-                .one()
+            family = xfer.expense_movements
+            payment = transfer_side_record(
+                db.session, xfer.id, seed_user["account"].id,
             )
-            family = shadow.entries
-            (payment,) = shadow.covering_movements
             assert payment in family
 
             movement_removal.remove_movements(
@@ -706,5 +729,5 @@ class TestTheRemovedMovementLeavesItsParentsLoadedList:
                 press=None,
             )
 
-            assert payment not in shadow.entries
-            assert shadow.entries is family
+            assert payment not in xfer.expense_movements
+            assert xfer.expense_movements is family

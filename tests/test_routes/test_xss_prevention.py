@@ -162,7 +162,7 @@ def _create_transaction(seed_user, seed_periods_today):
 
 
 def _create_transfer(seed_user, seed_periods_today, savings_acct):
-    """Create a transfer with shadow transactions via the service."""
+    """Create a Projected transfer, its one row, via the service."""
     projected = (
         db.session.query(Status).filter_by(name="Projected").one()
     )

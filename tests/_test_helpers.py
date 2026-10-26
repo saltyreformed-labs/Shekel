@@ -40,6 +40,16 @@ from app.tax_law import (
 from app.utils.db_errors import sqlstate_of
 
 
+#: The ``app`` package's directory, read off the package's own import origin,
+#: for a test that reads a file under ``app/`` (a template, a static asset, a
+#: route module).  A read under ``app/`` never counts up from a test file's own
+#: ``__file__``, this module's included: a test module moves (a split puts each
+#: part one directory deeper), and a path counted from where it sat then names
+#: another directory.  This module's two reads OUTSIDE ``app/`` (``migrations/``
+#: and ``scripts/``, below) still count up from it, and wait for its own split.
+APP_PACKAGE_DIR = pathlib.Path(importlib.util.find_spec("app").origin).parent
+
+
 # The synthetic split-loan fixture shared verbatim by the three parallel
 # loan-posting suites (unit / reconciliation-oracle / wiring): a $250,000 loan
 # originated 2025-01-01 at 6%, trued up to $100,000 on 2026-01-10.  The trueup
@@ -832,7 +842,7 @@ def _sync_loan_ledger(loan_account_id):
     built through :func:`create_loan_account` / :func:`create_loan_with_trueup` /
     :func:`insert_trueup_event` / :func:`insert_tracking_start_event`.  Roughly
     twenty test modules still hand-roll a loan (a bare ``LoanParams(...)`` insert;
-    e.g. ``tests/test_services/test_balance_at.py::_make_mortgage``, a near-copy of
+    e.g. ``tests/test_services/test_balance_at/_helpers.py::_make_mortgage``, a near-copy of
     :func:`create_loan_account`).  Such a loan gets a ledger only if one of the
     anchor helpers above happens to be called on it afterwards, and otherwise has
     none at all -- ``test_year_end_summary_service.py``'s hand-built loan is in
@@ -1237,11 +1247,12 @@ def create_loan_account(
     #
     # Origination alone was measured too tight.  An installment may be settled
     # EARLY, before the loan closes, and the developer ruled that legitimate:
-    # ``test_balance_at.TestLoanNotYetOriginated`` pays a 2026-05-01 installment
-    # on 2026-03-10 against a loan originating 2026-04-15, which is the ONE
-    # shape in which the origination guard is the guard doing the work.  So the
-    # bound is the earliest of the origination, the assertion and the owner's
-    # calendar, which is what the shared helper already computes.
+    # ``test_balance_at.test_loan_origination.TestLoanNotYetOriginated`` pays a
+    # 2026-05-01 installment on 2026-03-10 against a loan originating
+    # 2026-04-15, which is the ONE shape in which the origination guard is the
+    # guard doing the work.  So the bound is the earliest of the origination,
+    # the assertion and the owner's calendar, which is what the shared helper
+    # already computes.
     open_books_before_the_first_assertion(
         db_session, account, also_before=origination_date,
     )
@@ -1952,7 +1963,7 @@ def make_balanced_entry(  # pylint: disable=too-many-arguments
     return entry
 
 
-def loan_correction_entries(db_session, shadow):
+def loan_correction_entries(db_session, transfer_id, loan_account_id):
     """Return the loan_payment corrections booked at a payment's KEY.
 
     The ``budget.journal_entries`` rows the loan posting package books for one
@@ -1962,11 +1973,20 @@ def loan_correction_entries(db_session, shadow):
     ``(loan_payment kind, the payment's pay period, its visible day)`` on the
     loan's own chart rows and links NO row, so "the corrections under this
     shadow" is now "the corrections at this payment's key" -- selected by
-    source kind, the shadow's ``pay_period_id``, its settled day and a leg on
-    the loan's chart rows.  Through that step the split carried the shadow's
-    ``transaction_id`` and this read it by that link.  A shadow with no settled
-    day has no key and is REFUSED rather than answered ``[]`` (the leaf-2
-    adversarial review: an empty answer for a reverted shadow would let
+    source kind, the payment's pay period, its settled day and a leg on the
+    loan's chart rows.  Through that step the split carried the shadow's
+    ``transaction_id`` and this read it by that link.  **The key is read off
+    the TRANSFER and the loan side's RECORD since plan step
+    ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 4): the record hangs
+    off the transfer there and the twins' status and day are no longer kept,
+    so the shadow it was passed named only which transfer and which side; it
+    read the shadow's own period, scenario and day until then (the loan walk
+    has read the record's day since ``X-bi-6-4b``).  **It is keyed by the
+    transfer and the loan account since plan step ``balance:X-bi-6-4d-2``**
+    (ruling **R-BAL167** class 4): a transfer is one row there and no
+    shadow exists to name the side.  A side with no dated record
+    has no key and is REFUSED rather than answered ``[]`` (the leaf-2
+    adversarial review: an empty answer for a reverted payment would let
     "after the revert the split is gone" pass without reading the ledger);
     a test that holds a reverted or deleted payment reads
     :func:`loan_correction_entries_at` with the key it captured before the
@@ -1975,26 +1995,34 @@ def loan_correction_entries(db_session, shadow):
 
     Args:
         db_session: The test ``db.session``.
-        shadow: The loan-side income shadow :class:`~app.models.transaction.
-            Transaction` whose payment's corrections to fetch (``account_id``,
-            ``pay_period_id`` and ``settled_on`` are read).
+        transfer_id: The payment's ``budget.transfers`` id.
+        loan_account_id: The loan (to-)account whose side holds the record
+            and whose chart rows scope the read.
 
     Returns:
         list[:class:`~app.models.journal_entry.JournalEntry`] -- the correction
         entries at the payment's key, ascending by id (empty when none).
 
     Raises:
-        ValueError: If *shadow* carries no settled day (it has no key).
+        ValueError: If the loan side holds no dated record (it has no key).
     """
-    if shadow.settled_on is None:
+    # Pylint: import-outside-toplevel -- same lazy-app-import convention
+    # every helper in this module follows.
+    # pylint: disable=import-outside-toplevel
+    from app.models.transfer import Transfer
+
+    record = transfer_side_record(db_session, transfer_id, loan_account_id)
+    if record is None or record.settled_on is None:
         raise ValueError(
-            f"loan_correction_entries: shadow {shadow.id} carries no settled "
-            f"day and so no split key; read loan_correction_entries_at with "
-            f"the key captured before the act that released the day."
+            f"loan_correction_entries: transfer {transfer_id}'s side "
+            f"on account {loan_account_id} holds no dated record and so no "
+            f"split key; read loan_correction_entries_at with the key "
+            f"captured before the act that released the day."
         )
+    transfer = db_session.get(Transfer, transfer_id)
     return loan_correction_entries_at(
-        db_session, shadow.account_id, shadow.scenario_id,
-        shadow.pay_period_id, shadow.settled_on,
+        db_session, loan_account_id, transfer.scenario_id,
+        transfer.pay_period_id, record.settled_on,
     )
 
 
@@ -2003,12 +2031,17 @@ def loan_correction_entries_at(
 ):
     """Return the loan_payment corrections at ONE key on a loan's chart rows.
 
-    The key form of :func:`loan_correction_entries`, for a test that holds the
-    payment's period and day but no longer holds a settled shadow -- after a
-    revert (the shadow's day is released, the correction stays at the day it
-    was posted), after a hard delete (the shadow is gone), or for a key the
-    walk merged two payments into.  The ``loan_payment`` journal entries in
-    *period_id* dated *day* with a leg on any of the loan's own chart rows
+    The key form of :func:`loan_correction_entries`, for a test that holds a
+    key's period and day but no dated loan-side record to read the key off --
+    after a revert (the side keeps its record with its day
+    released, and the correction and the reversal the next reconcile posts
+    both sit at the old key), after a hard delete (the transfer is gone, its
+    sides' records taken off before it), after a ``$0.00`` close or a
+    correction to ``$0.00`` (the side holds no record, and the split is dated
+    by the installment the payment skips, ruling **R-BAL139**), or at a key
+    the walk prices nothing (a residue planted there).  The ``loan_payment``
+    journal entries in *period_id* dated *day* with a leg on any of the loan's
+    own chart rows
     (:func:`app.services._posting_reconcile.account_chart_row_ids`: its linked
     row and its per-loan interest / escrow / refund / opening-equity rows) in
     *scenario_id* (postings are scenario-scoped, and a loan paid in two
@@ -2415,38 +2448,6 @@ def find_loan_ledger_account(db_session, loan_account_id, kind):
             kind_id=ref_cache.ledger_account_kind_id(kind),
         )
         .one_or_none()
-    )
-
-
-def loan_income_shadow(db_session, transfer_id, loan_account_id):
-    """Return the loan-side income shadow of a transfer.
-
-    The income (to-account) shadow of *transfer_id* on *loan_account_id* -- the
-    row the Step-4 correction books under.  Shared by the Step-4 split-service
-    and wiring suites.
-
-    Args:
-        db_session: The test ``db.session``.
-        transfer_id: The parent transfer's id.
-        loan_account_id: The loan (to-)account the income shadow lives on.
-
-    Returns:
-        The loan-side income :class:`~app.models.transaction.Transaction`.
-    """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app import ref_cache
-    from app.enums import TxnTypeEnum
-    from app.models.transaction import Transaction
-
-    return (
-        db_session.query(Transaction)
-        .filter_by(
-            transfer_id=transfer_id,
-            account_id=loan_account_id,
-            transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
-        )
-        .one()
     )
 
 
@@ -3635,7 +3636,10 @@ def create_transfer(
     seed_user, db_session, from_account, to_account, period,
     amount=Decimal("100.00"), *, due_date=None, name=None, scenario=None,
 ):
-    """Create a PROJECTED transfer with its two shadows, via the real service.
+    """Create a PROJECTED transfer via the real service; it is one row.
+
+    It came with two shadow rows until plan step ``balance:X-bi-6-4d-2`` made a
+    transfer one row (ruling **R-BAL258**).
 
     The create half of :func:`create_settled_transfer`, which now builds on this
     one -- so both helpers route through ``transfer_service.create_transfer``,
@@ -3655,16 +3659,18 @@ def create_transfer(
             baseline scenario).
         db_session: The test ``db.session`` (unused directly -- the service owns
             the session -- but accepted so call sites read uniformly).
-        from_account: The account money leaves (the expense shadow lands here).
-        to_account: The account money enters (the income shadow lands here).
+        from_account: The account money leaves (the from-side).
+        to_account: The account money enters (the to-side).
         period: The :class:`~app.models.pay_period.PayPeriod` to place the
-            transfer (and both shadows) in.
+            transfer in.
         amount: The transfer amount (Decimal).  Defaults to
             ``Decimal("100.00")``.
-        due_date: Optional due date stored on the transfer and mirrored to both
-            shadows.  ``None`` (the default) leaves it unset, which is what the
+        due_date: Optional due date stored on the transfer.  ``None`` (the
+            default) leaves it unset, which is what the
             ad-hoc transfer form produces; a loan payment's installment then
-            falls back to its pay-period start.
+            falls back to the loan's first payment day on or after its
+            pay-period start
+            (:func:`app.services.installment_calendar.monthly_due_date`).
         name: Optional transfer display name.
         scenario: The :class:`~app.models.scenario.Scenario` to place the
             transfer in.  Defaults to the seed user's baseline.
@@ -3704,14 +3710,15 @@ def create_settled_transfer(
 ):
     """Create an ad-hoc transfer and settle it (Paid), returning the parent.
 
-    The shared "settled transfer with two real shadows" builder for the
-    posting-ledger (Build-Order Step 2) backfill / lifecycle suites.  Routes
-    the whole thing through ``transfer_service`` -- the sole transfer writer --
-    so the parent transfer plus its expense/income shadow transactions obey
-    every transfer invariant (two balanced shadows, amounts/status/period
-    mirrored), exactly as production produces them.  The transfer is created
-    Projected, then transitioned to Paid via ``update_transfer`` (the same
-    ``mark_done`` chokepoint the route uses).
+    The shared settled-transfer builder for the posting-ledger (Build-Order
+    Step 2) backfill / lifecycle suites.  Routes the whole thing through
+    ``transfer_service`` -- the sole transfer writer -- so the transfer and
+    each side's payment record obey every transfer invariant, exactly as
+    production produces them.  The transfer is created Projected, then
+    transitioned to Paid via ``update_transfer`` (the same ``mark_done``
+    chokepoint the route uses).  It built "a settled transfer with two real
+    shadows" until plan step ``balance:X-bi-6-4d-2`` made a transfer one row
+    (ruling **R-BAL258**).
 
     **It PRESSES Paid, and a Paid press states no day** (ruling **R-BAL163**,
     plan step ``balance:X-bi-6-4c-3``): both sides BORROW the day it was
@@ -3739,16 +3746,16 @@ def create_settled_transfer(
         db_session: The test ``db.session``.  The service owns the writes;
             this reads the two sides back for the check above.
         from_account: The :class:`~app.models.account.Account` money leaves
-            (the expense shadow lands here).
-        to_account: The account money enters (the income shadow lands here).
+            (the from-side).
+        to_account: The account money enters (the to-side).
         period: The :class:`~app.models.pay_period.PayPeriod` to place the
-            transfer (and both shadows) in.
-        amount: The transfer amount (Decimal); also the shadows'
-            ``estimated_amount``.  Defaults to ``Decimal("100.00")``.
+            transfer in.
+        amount: The transfer amount (Decimal).  Defaults to
+            ``Decimal("100.00")``.
         settled_amount: When not ``None``, the figure the owner typed as what
-            moved, recorded on both legs (so their ``effective_amount`` becomes
-            this, not ``amount``).  Defaults to ``None`` (effective ==
-            estimated == amount).
+            moved, passed to the settle as a person's typed figure
+            (:func:`typed`).  Defaults to ``None``: the transfer settles at
+            *amount*.
         settled_on: The civil DAY Paid is pressed on, which both sides then
             borrow.  ``None`` (the default) presses it on the owner's today.
             A loan test reading a PAST balance must pin this to the day it
@@ -3762,15 +3769,17 @@ def create_settled_transfer(
             :class:`~app.services.transfer_service.SideDay` cannot wrap
             ``None``).
         name: Optional transfer display name.
-        due_date: Optional due date stored on the transfer and mirrored to both
-            shadows, passed straight through to :func:`create_transfer`.
+        due_date: Optional due date stored on the transfer, passed straight
+            through to :func:`create_transfer`.
             ``None`` (the default) leaves it unset, and a loan payment's
-            installment then falls back to its pay-period start.  Pass it when a
-            test needs two settled loan payments in ONE accrual period at
-            DIFFERENT installments -- the period-start fallback resolves both to
+            installment then falls back to the loan's first payment day on or
+            after its pay-period start
+            (:func:`app.services.installment_calendar.monthly_due_date`).  Pass
+            it when a test needs two settled loan payments in ONE accrual
+            period at DIFFERENT installments -- that fallback resolves both to
             the same date, so it cannot express that shape.
         scenario: The :class:`~app.models.scenario.Scenario` to place the
-            transfer (and both shadows) in.  Defaults to ``None``, which uses
+            transfer in.  Defaults to ``None``, which uses
             the seed user's baseline scenario (``seed_user["scenario"]``);
             pass a non-baseline scenario to exercise multi-scenario isolation
             (the Commit-6 reconciliation oracle).
@@ -3784,7 +3793,7 @@ def create_settled_transfer(
 
     from app import ref_cache
     from app.enums import SettledDayBasisEnum, StatusEnum
-    from app.models.transaction import Transaction
+    from app.models.transaction_entry import TransactionEntry
     from app.services import transfer_service
     from app.services.settle_day import SettleDay, recorded_settle_day
     from app.services.transfer_service import _status as transfer_status
@@ -3813,13 +3822,22 @@ def create_settled_transfer(
             transfer.id, seed_user["user"].id, **update_kwargs
         )
     pressed = SettleDay(day=settled_on, basis=SettledDayBasisEnum.BORROWED)
+    # Each side's day is its RECORD's since plan step ``balance:X-bi-6-4d-2``
+    # (R-BAL167 class 4: read by its own SQL over the side links, not through
+    # the producer under test); a ``$0.00`` close keeps no record on either
+    # side (R-BAL141), so it has no day to read.
     sides = [
-        recorded_settle_day(shadow)
-        for shadow in db_session.query(Transaction).filter_by(
-            transfer_id=transfer.id, is_deleted=False,
+        recorded_settle_day(record)
+        for record in db_session.query(TransactionEntry).filter(
+            (TransactionEntry.expense_transfer_id == transfer.id)
+            | (TransactionEntry.income_transfer_id == transfer.id),
         )
     ]
-    assert sides == [pressed, pressed], (
+    expected = (
+        [] if settled_amount is not None and not settled_amount
+        else [pressed, pressed]
+    )
+    assert sides == expected, (
         f"create_settled_transfer pressed Paid on {settled_on} but the sides "
         f"read {sides}: the pin on the writer's clock read no longer reaches "
         "it (see this builder's docstring)"
@@ -4245,9 +4263,12 @@ def payback_row_of(db_session, seed_user, envelope, amount, purchased_on):
     is not a one-off: it carries ``credit_payback_for_id`` as its ONE
     pricing link (``ck_transactions_one_pricing_link``) and is priced by
     the row it repays, and the application has exactly one constructor for
-    it -- ``entry_credit_workflow.sync_entry_payback``, run after every
-    entry mutation, which places it in the paycheck AFTER the envelope's.
-    Four cases built a row through a one-off builder and then set the link
+    it -- ``credit_workflow.create_cc_payback_transaction``, which writes it
+    into the paycheck AFTER its source's (the one each door hands it) --
+    reached by two doors:
+    ``credit_workflow.mark_as_credit`` and the one this calls,
+    ``entry_credit_workflow.sync_entry_payback``, run after every entry
+    mutation.  Four cases built a row through a one-off builder and then set the link
     on it, which the CHECK refuses once that row carries a definition; this
     records the credit purchase through :func:`add_entry` and lets the
     producer answer.
@@ -4762,16 +4783,26 @@ def transfer_family_journal_filter(transfer_id):
     **A settled transfer's money is posted under its two covering movements
     since plan step ``balance:X-bi-6-3``** (rulings **R-BAL45** and
     **R-BAL101**): one entry per side, linked by
-    ``journal_entries.transaction_entry_id`` to the shadow's covering movement
-    on that side, each against the owner's Transfers-in-transit account.  A
+    ``journal_entries.transaction_entry_id`` to the movement covering that
+    side (the side's record; it hung off the side's shadow until the
+    re-parent below), each against the owner's Transfers-in-transit account.  A
     suite that reads "the transfer's postings" by ``JournalEntry.transfer_id``
     alone reads only the LEGACY one-entry shape, which the pair's door reverses
     to zero and which no go-forward settle writes.  This is the ONE spelling
-    of the transfer family read -- the movements of EVERY shadow of the
-    transfer, deleted or not (a dead pair's reversed legs are part of the
-    family's history), plus whatever still links the transfer directly -- so
-    the cases the developer confirmed when the shape moved widen their subject
-    the same way and no figure per real account moves.
+    of the transfer family read -- the records of BOTH sides of the transfer,
+    plus whatever still links the transfer directly -- so the cases the
+    developer confirmed when the shape moved widen their subject the same way
+    and no figure per real account moves.
+
+    **Independent SQL over the side links** (plan step
+    ``balance:X-bi-6-4d-2``, ruling **R-BAL167** class 4): a record hangs off
+    the TRANSFER by ``expense_transfer_id`` / ``income_transfer_id`` since
+    that step, and this reads those columns itself rather than through
+    ``transfer_legs``, the producer the suite grades -- a helper selecting
+    money through the producer under test cannot catch that producer's
+    fault.  Until then it read the movements under every shadow of the
+    transfer; a record keeps its id across the re-parent, so a journal entry
+    that linked it still does.
 
     Args:
         transfer_id: The ``budget.transfers`` id.
@@ -4783,13 +4814,13 @@ def transfer_family_journal_filter(transfer_id):
     # convention every helper in this module follows.
     from app.extensions import db
     from app.models.journal_entry import JournalEntry
-    from app.models.transaction import Transaction
     from app.models.transaction_entry import TransactionEntry
 
-    movement_ids = (
-        db.session.query(TransactionEntry.id)
-        .join(Transaction, TransactionEntry.transaction_id == Transaction.id)
-        .filter(Transaction.transfer_id == transfer_id)
+    movement_ids = db.session.query(TransactionEntry.id).filter(
+        db.or_(
+            TransactionEntry.expense_transfer_id == transfer_id,
+            TransactionEntry.income_transfer_id == transfer_id,
+        ),
     )
     return db.or_(
         JournalEntry.transfer_id == transfer_id,
@@ -4800,11 +4831,13 @@ def transfer_family_journal_filter(transfer_id):
 def transfer_side_journal_filter(transfer_id, account_id):
     """Return the SQL clause selecting ONE side's entries of a transfer's family.
 
-    The entries linked to the covering movement of the transfer's shadow on
-    *account_id* -- the loan-side cash entry of a loan payment, or either
-    side of a cash transfer -- since plan step ``balance:X-bi-6-3`` (a side
-    is an entry of its own, rulings **R-BAL45** and **R-BAL101**).  The
-    per-side twin of :func:`transfer_family_journal_filter`.
+    The entries linked to the record of the transfer's side on *account_id*
+    -- the loan-side cash entry of a loan payment, or either side of a cash
+    transfer -- since plan step ``balance:X-bi-6-3`` (a side is an entry of
+    its own, rulings **R-BAL45** and **R-BAL101**).  The per-side twin of
+    :func:`transfer_family_journal_filter`, and independent SQL over the side
+    links for its reason: a side's record is on its endpoint (the side keys),
+    so the side on *account_id* is the linked record on that account.
 
     Args:
         transfer_id: The ``budget.transfers`` id.
@@ -4817,18 +4850,238 @@ def transfer_side_journal_filter(transfer_id, account_id):
     # convention every helper in this module follows.
     from app.extensions import db
     from app.models.journal_entry import JournalEntry
-    from app.models.transaction import Transaction
     from app.models.transaction_entry import TransactionEntry
 
-    movement_ids = (
-        db.session.query(TransactionEntry.id)
-        .join(Transaction, TransactionEntry.transaction_id == Transaction.id)
-        .filter(
-            Transaction.transfer_id == transfer_id,
-            Transaction.account_id == account_id,
-        )
+    movement_ids = db.session.query(TransactionEntry.id).filter(
+        db.or_(
+            TransactionEntry.expense_transfer_id == transfer_id,
+            TransactionEntry.income_transfer_id == transfer_id,
+        ),
+        TransactionEntry.account_id == account_id,
     )
     return JournalEntry.transaction_entry_id.in_(movement_ids)
+
+
+def assert_a_twin_is_refused(db_session, xfer, is_income):
+    """Stage the twin one side of *xfer* used to have, and assert it is refused.
+
+    A ruling **R-BAL167** class 2 re-expression of a test whose subject was a
+    transfer's shadow row: a transfer is one row since plan step
+    ``balance:X-bi-6-4d-2``, and ``ck_transactions_names_no_transfer`` (ruling
+    **R-BAL258**) refuses any ``budget.transactions`` row naming one, so the
+    row such a test drove a door on, priced or read can no longer be stored.
+    The refusal is spelled other ways too (the transfer schema's
+    ``_make_shadow`` cases, ``test_amount_ownership``, the 82f7 migration's
+    own); this is the one a class-2 re-expression calls.  The row is
+    :func:`a_twin_of`'s, which says what it carries and why that CHECK is the
+    one reported.
+
+    **The session is rolled back after the refusal**, which discards anything
+    the caller had not committed; commit first, and re-read what the session
+    held after.
+
+    Args:
+        db_session: The test ``db.session``.
+        xfer: The flushed :class:`~app.models.transfer.Transfer`.
+        is_income: ``True`` for the to-side's (income) twin, ``False`` for
+            the from-side's (expense) twin.
+    """
+    db_session.add(a_twin_of(xfer, is_income))
+    with pytest.raises(sa_exc.IntegrityError) as excinfo:
+        db_session.flush()
+    db_session.rollback()
+    assert constraint_name_from(excinfo.value) == (
+        "ck_transactions_names_no_transfer"
+    ), f"the twin was refused by another rule: {excinfo.value}"
+
+
+def a_twin_of(xfer, is_income):
+    """Return, unsaved, the twin row one side of *xfer* used to have.
+
+    The ONE construction of a twin for a test that plants one (plan step
+    ``balance:X-bi-6-4d-2``): :func:`assert_a_twin_is_refused` adds it as it
+    is, and a test whose planted shape is a twin with something MORE on it --
+    a figure written past the amount seam -- takes it from here and adds that,
+    so the two cannot come to disagree about what the rest of the row is.
+
+    The row carries what ``transfer_service._create._build_shadow`` copied
+    onto a twin at ``5f46d6973`` (the leaf below, where the create door still
+    made two): the transfer's owner, period, scenario, category and due date,
+    the side's endpoint and type, and a figure derived from its parent
+    (``PARENT_TRANSFER``).  It is NOT that builder's row column for column:
+    its ``name`` is this helper's own (the builder wrote "Transfer to / from
+    <account>"), and its status is Projected, the status every transfer door
+    created a transfer in, where the builder wrote the transfer's own (the
+    service's born-settled branch built settled twins).  Neither column bears
+    on ``ck_transactions_names_no_transfer``, and as built the row satisfies
+    every other rule, so that CHECK is the only one it violates.
+
+    Args:
+        xfer: The flushed :class:`~app.models.transfer.Transfer`.
+        is_income: ``True`` for the to-side's (income) twin, ``False`` for
+            the from-side's (expense) twin.
+
+    Returns:
+        The unsaved :class:`~app.models.transaction.Transaction`.
+    """
+    # Pylint: import-outside-toplevel -- same lazy-app-import convention
+    # every helper in this module follows.
+    # pylint: disable=import-outside-toplevel
+    from app import ref_cache
+    from app.enums import AmountSourceEnum, StatusEnum, TxnTypeEnum
+    from app.models.transaction import Transaction
+    from app.services.amount_ownership import declare_derived
+
+    twin = Transaction(
+        user_id=xfer.user_id,
+        account_id=xfer.to_account_id if is_income else xfer.from_account_id,
+        transfer_id=xfer.id,
+        pay_period_id=xfer.pay_period_id,
+        scenario_id=xfer.scenario_id,
+        status_id=ref_cache.status_id(StatusEnum.PROJECTED),
+        name=f"Twin of transfer {xfer.id}",
+        category_id=xfer.category_id,
+        transaction_type_id=ref_cache.txn_type_id(
+            TxnTypeEnum.INCOME if is_income else TxnTypeEnum.EXPENSE,
+        ),
+        due_date=xfer.due_date,
+    )
+    declare_derived(twin, AmountSourceEnum.PARENT_TRANSFER)
+    return twin
+
+
+def transfer_side_record(db_session, transfer_id, account_id):
+    """Return the record of a transfer's side on *account_id*, or ``None``.
+
+    The movement filed under that side (plan step ``balance:X-bi-6-4d-2``,
+    ruling **R-BAL88**): it hangs off the TRANSFER by ``expense_transfer_id``
+    / ``income_transfer_id``, on its endpoint, at most one per side.  It hung
+    off the side's shadow row until then (``shadow.covering_movements``).
+    The row-shaped twin of :func:`transfer_side_journal_filter`, and
+    independent SQL over the side links for that helper's reason (ruling
+    **R-BAL167** class 4): a test reading a side's record through
+    ``transfer_legs``, the producer it grades, could not catch its fault.
+
+    Args:
+        db_session: The test ``db.session``.
+        transfer_id: The ``budget.transfers`` id.
+        account_id: The account the side is on.
+
+    Returns:
+        The side's :class:`~app.models.transaction_entry.TransactionEntry`,
+        or ``None`` when the side holds none (an unsettled side never paid,
+        or a ``$0.00`` close, ruling **R-BAL141**).
+    """
+    # pylint: disable=import-outside-toplevel -- same lazy-app-import
+    # convention every helper in this module follows.
+    from app.extensions import db
+    from app.models.transaction_entry import TransactionEntry
+
+    return (
+        db_session.query(TransactionEntry)
+        .filter(
+            db.or_(
+                TransactionEntry.expense_transfer_id == transfer_id,
+                TransactionEntry.income_transfer_id == transfer_id,
+            ),
+            TransactionEntry.account_id == account_id,
+        )
+        .one_or_none()
+    )
+
+
+def transfer_side_figure(db_session, transfer_id, account_id):
+    """Return what a transfer's side on *account_id* RECORDS, or ``None``.
+
+    The side-shaped twin of ``row_valuation.settled_figure(shadow)``, which a
+    test asked of the side's shadow until plan step ``balance:X-bi-6-4d-2``
+    stopped keeping a shadow's status (ruling **R-BAL167** class 4): ``None``
+    while the TRANSFER is not settled, and once it is, the figure the
+    TRANSFER stores -- its one home since that step's 4d-4 half (rulings
+    **R-BAL365**, **R-BAL366**), ``0.00`` for a ``$0.00`` close.  Until then
+    it read the side's record's ``amount`` and inferred ``0.00`` from a side
+    holding none, the inference ruling **R-BAL368** deletes.  The answers the
+    shadow gave while its status mirrored its transfer's, so a re-pointed
+    assertion keeps its expected figure.  Read off the stored column, never
+    through the producers a test grades.
+
+    Args:
+        db_session: The test ``db.session``.
+        transfer_id: The ``budget.transfers`` id.
+        account_id: The account the side is on: one of the transfer's two
+            endpoints (a transfer's figure is one, so the side names which
+            account the caller is asserting about, and a wrong one fails).
+
+    Returns:
+        The stored ``Decimal``, or ``None`` when the transfer is not settled.
+    """
+    # pylint: disable=import-outside-toplevel -- same lazy-app-import
+    # convention every helper in this module follows.
+    from app.models.transfer import Transfer
+
+    transfer = db_session.get(Transfer, transfer_id)
+    assert account_id in (transfer.from_account_id, transfer.to_account_id), (
+        f"account {account_id} is neither side of transfer {transfer_id}"
+    )
+    if not transfer.status.is_settled:
+        return None
+    return transfer.settled_figure
+
+
+def transfer_side_settle_day(db_session, transfer_id, account_id):
+    """Return the settle day a transfer's side on *account_id* records, or ``None``.
+
+    The side-shaped twin of ``settle_day.recorded_settle_day(shadow)`` (ruling
+    **R-BAL167** class 4, plan step ``balance:X-bi-6-4d-2``): the
+    :class:`~app.services.settle_day.SettleDay` on the side's record, or
+    ``None`` when the side holds no record or its record carries no day (a
+    side never paid, a revert's kept record, a ``$0.00`` close).
+
+    **Decoded by its own query, never the app's decoder** (the X-bi-6-4d-2
+    leaf review's L-7): it read the record through
+    ``settle_day.recorded_settle_day``, the column decoder the writer's own
+    day resolution uses, so a decoder that mis-mapped a basis would have
+    agreed with itself here.  It reads the day and the basis's ``ref`` NAME
+    straight off the tables, and :class:`~app.enums.SettledDayBasisEnum`'s
+    values ARE those names, as :func:`transfer_side_record` and
+    :func:`transfer_side_figure` are already independent SQL.
+
+    Args:
+        db_session: The test ``db.session``.
+        transfer_id: The ``budget.transfers`` id.
+        account_id: The account the side is on.
+
+    Returns:
+        The side's ``SettleDay``, or ``None``.
+    """
+    # pylint: disable=import-outside-toplevel -- same lazy-app-import
+    # convention every helper in this module follows.
+    from app.enums import SettledDayBasisEnum
+    from app.extensions import db
+    from app.models.ref import SettledDayBasis
+    from app.models.transaction_entry import TransactionEntry
+    from app.services.settle_day import SettleDay
+
+    stored = (
+        db_session.query(TransactionEntry.settled_on, SettledDayBasis.name)
+        .outerjoin(
+            SettledDayBasis,
+            SettledDayBasis.id == TransactionEntry.settled_day_basis_id,
+        )
+        .filter(
+            db.or_(
+                TransactionEntry.expense_transfer_id == transfer_id,
+                TransactionEntry.income_transfer_id == transfer_id,
+            ),
+            TransactionEntry.account_id == account_id,
+        )
+        .one_or_none()
+    )
+    if stored is None or stored.settled_on is None:
+        return None
+    return SettleDay(
+        day=stored.settled_on, basis=SettledDayBasisEnum(stored.name),
+    )
 
 
 def family_journal_filter(txn):
@@ -5245,9 +5498,9 @@ def one_off_row_of(  # pylint: disable=too-many-arguments
     door wrote; the sites whose SUBJECT was the legacy shape itself -- the
     accessors' own-cell arm, the frozen flag cells -- built it by hand on
     ``legacy_link_less_row_of`` until 7d-2 retired them with the arm.  The
-    link-less rows left are a transfer's shadows and a CC payback, which
-    have builders of their own (:func:`create_transfer`,
-    :func:`payback_row_of`).
+    one link-less row shape left is a CC payback, which has a builder of
+    its own (:func:`payback_row_of`): a transfer's shadows were the other
+    until plan step ``balance:X-bi-6-4d-2`` deleted them.
 
     Two consequences follow from getting the producer's row, each the point
     rather than a cost, exactly as for :func:`generate_row_of`:
@@ -5264,12 +5517,13 @@ def one_off_row_of(  # pylint: disable=too-many-arguments
       rulings **R-BAL22** / **R-BAL25**): the paycheck's start unless
       *due_date* says otherwise, so ``idx_transactions_template_scenario_
       occurrence`` holds over it.  A fixture that wants a row on the
-      "anytime this period" shelf wants a row no definition prices -- a
-      transfer shadow (:func:`create_transfer` with no ``due_date``) or a
-      CC payback (:func:`payback_row_of`; the producer dates none) -- the
-      two undated shapes left since the cutover.  On the 2026-09-18
-      production restore it is the paybacks that are undated (31 of 31) and
-      no shadow is.
+      "anytime this period" shelf wants a row no definition prices -- a CC
+      payback (:func:`payback_row_of`; the producer dates none), the one
+      undated row shape left since the cutover and plan step
+      ``balance:X-bi-6-4d-2``, which deleted the transfer shadows (a
+      transfer with no ``due_date`` is not a row).  On the 2026-09-18
+      production restore the paybacks were undated (31 of 31) and no
+      shadow was.
 
     The row is placed PROJECTED, which is the only state the producer
     writes.  A fixture wanting a SETTLED row settles this one as the app
@@ -5344,8 +5598,9 @@ def generate_transfer_of(template, period):
     pass's ``_new_row`` and from the maintain pass's create arm alike, which
     splats ``DerivedTransferFields`` (the two accounts, name, category, amount
     OWNERSHIP and due date the definition derives) into a
-    ``transfer_service.TransferSpec`` and so gets the parent AND its two
-    shadow legs from the one door that writes ``budget.transfers``.  This
+    ``transfer_service.TransferSpec`` and so gets the transfer from the one
+    door that writes ``budget.transfers`` (with its two shadow legs, until
+    plan step ``balance:X-bi-6-4d-2`` deleted the shadows).  This
     helper CALLS the generate pass, with a window of exactly one paycheck,
     and hands back what the engine wrote; every promise
     :func:`generate_row_of` makes and every refusal the shared private body
@@ -5360,7 +5615,7 @@ def generate_transfer_of(template, period):
 
     What follows from the engine's transfer, and each is the point:
 
-    * **It is DERIVED, parent and both legs.**  It stores no figure; its
+    * **It is DERIVED.**  It stores no figure; its
       definition's series answers for it on its own due date, so a fixture
       states the figure it expects on the template (:func:`state_template_price`;
       :func:`make_transfer_template` already does).  A reader that asks the
@@ -5374,8 +5629,9 @@ def generate_transfer_of(template, period):
       shape :func:`create_settled_transfer` uses), and one wanting the OWNER's
       transfer takes ownership through the same door with ``is_override=True``
       beside the figure -- the two acts ``routes/transfers/mutations``
-      performs -- because a transfer's three rows are kept equal by that
-      service and nothing else (Transfer Invariants 3 and 4).
+      performs -- because every write of a transfer goes through that service
+      (``CLAUDE.md``, Architecture), which also kept a transfer's three rows
+      equal while it had shadows.
 
     Args:
         template: The flushed
@@ -5388,7 +5644,7 @@ def generate_transfer_of(template, period):
 
     Returns:
         The :class:`~app.models.transfer.Transfer` the engine created,
-        flushed, with its two shadow transactions.
+        flushed.
 
     Raises:
         ValueError: As :func:`generate_row_of` -- no cadence; the engine
@@ -5497,15 +5753,15 @@ def transfer_repriced_by_the_owner(xfer, figure):
     """Re-price the transfer *xfer* the way the transfer edit door does.
 
     :func:`repriced_by_the_owner` one table over (plan step balance:X-ch,
-    ruling R-BAL17 on the twin), with the difference the twin table has: a
-    transfer's figure lives on THREE rows -- the parent and its two shadow
-    legs -- and ``transfer_service.update_transfer`` is the one door that
-    moves them together (Transfer Invariants 3 and 4), so the two acts
-    ``routes/transfers/mutations`` performs on a typed figure go through it:
-    the figure as OWNERSHIP, and ``is_override=True`` beside it because the
-    transfer is the owner's now rather than the rule's.  A fixture that set
-    ``amount_ownership`` on the parent alone would leave the legs declaring
-    a parent that no longer prices them the way it did.
+    ruling R-BAL17 on the twin), through the twin table's own door: every
+    write of a transfer goes through ``transfer_service``, so the two acts
+    ``routes/transfers/mutations`` performs on a typed figure for a recurring
+    transfer go through ``transfer_service.update_transfer``: the figure as
+    OWNERSHIP, and ``is_override=True`` beside it because the transfer is
+    the owner's now rather than the rule's.  The PLANNED figure lives on the
+    transfer alone, and both legs are drawn off it: it lived on THREE rows
+    -- the parent and its two shadow legs, which that door moved together
+    -- until plan step ``balance:X-bi-6-4d-2`` made a transfer one row.
 
     Args:
         xfer: The flushed :class:`~app.models.transfer.Transfer`, the
@@ -5513,7 +5769,7 @@ def transfer_repriced_by_the_owner(xfer, figure):
         figure: The figure the owner typed (str or Decimal-coercible).
 
     Returns:
-        *xfer*, flushed, owning *figure* with both legs following it.
+        *xfer*, flushed, owning *figure*.
     """
     # Pylint: ``import-outside-toplevel`` -- this module imports no app
     # symbols at top level (its collection-time-safety convention).
@@ -5558,6 +5814,47 @@ def moved_by_the_owner(row, *, into):
     row.pay_period_id = into.id
     row.is_override = True
     db.session.flush()
+    return row
+
+
+def a_deleted_occurrence(db_session, owner, period, **definition):
+    """*owner*'s every-period expense, its row in *period* DELETED the way the delete door does.
+
+    A row the owner deleted, built and deleted as the application does both:
+    :func:`make_expense_template` given *definition* (only the keywords a
+    caller passes, so every other default stays that builder's own), its row
+    from :func:`generate_row_of`, committed, then
+    ``transaction_service.delete_transaction`` and a second commit.  A
+    recurring row's delete HIDES it rather than removing it
+    (``transaction_service._delete._leaves_the_books``: ``soft = txn.recurs``,
+    ``app/services/transaction_service/_delete.py:237``; the soft arm sets
+    ``is_deleted`` at ``:446-447``), so the row stays in the table, deleted and
+    carrying its name: the row a transaction door names only to a requester
+    who may reach it (ruling **R-CC104**).  Added at plan step
+    ``balance:X-bi-6-4d-2`` for the stranger's and the companion's probes of
+    such a row, and the two route cases that built it by hand.
+
+    Args:
+        db_session: The test's SQLAlchemy session; committed twice.
+        owner: The owning user's fixture dict (``seed_user``'s shape).
+        period: The owner's :class:`~app.models.pay_period.PayPeriod` the row
+            is generated in.
+        **definition: Keywords for :func:`make_expense_template` (``name``,
+            ``amount``, ``category_key``, ``companion_visible``, ...).
+
+    Returns:
+        The deleted :class:`~app.models.transaction.Transaction`, committed.
+    """
+    # Pylint: ``import-outside-toplevel`` -- the lazy-app-import convention, as
+    # :func:`settlement_if_settling` imports the transaction service.
+    # pylint: disable=import-outside-toplevel
+    from app.services import transaction_service
+
+    template = make_expense_template(db_session, owner, **definition)
+    row = generate_row_of(template, period)
+    db_session.commit()
+    transaction_service.delete_transaction(row, owner["user"].id)
+    db_session.commit()
     return row
 
 
@@ -6394,8 +6691,7 @@ def assert_pay_period_invariants(db_session, user_id):
 
       1. Every account carries at least one balance ASSERTION, so a producer
          can resolve a balance for it.
-      2. Every transfer has exactly two shadow transactions, both in the
-         transfer's (still-existing) period.
+      2. Every transfer is in one of the user's (still-existing) periods.
       3. No transaction references a pay period that no longer exists.
 
     **FOUR invariants were DELETED at plan step ``pay_calendar:C4-c``, and
@@ -6451,24 +6747,17 @@ def assert_pay_period_invariants(db_session, user_id):
             "assertion, so no producer can resolve a balance for it"
         )
 
-    # 2. Transfer invariant: exactly two shadows, both in the transfer's
-    #    own (surviving) period.
+    # 2. Every transfer is in one of the user's own (surviving) periods.  It
+    #    also counted two shadows per transfer, each in the transfer's period,
+    #    until plan step balance:X-bi-6-4d-2 (ruling R-BAL167 class 4): a
+    #    transfer is one row there and ck_transactions_names_no_transfer
+    #    refuses a row naming one, so its legs are drawn off the transfer
+    #    itself and have no period of their own to disagree with.
     for transfer in db_session.query(Transfer).filter_by(user_id=user_id):
-        shadows = transfer.shadow_transactions
-        assert len(shadows) == 2, (
-            f"user {user_id}: transfer {transfer.id} has {len(shadows)} "
-            f"shadow transactions, expected exactly 2"
-        )
         assert transfer.pay_period_id in period_ids, (
             f"user {user_id}: transfer {transfer.id} is in period "
             f"{transfer.pay_period_id}, not among the user's periods"
         )
-        for shadow in shadows:
-            assert shadow.pay_period_id == transfer.pay_period_id, (
-                f"user {user_id}: shadow {shadow.id} of transfer "
-                f"{transfer.id} is in period {shadow.pay_period_id}, not the "
-                f"transfer's period {transfer.pay_period_id}"
-            )
 
     # 3. No transaction (scoped via its account) references a period that
     #    no longer exists -- the CASCADE FK enforces this; re-checking
@@ -7869,17 +8158,17 @@ def inject_cash_backfill_kind_id(monkeypatch, migration_module):
 
     This swaps the two frozen, immutable Pass-A SQL constants on
     *migration_module* for kind-injected equivalents -- reusing the shipped
-    mapping SQL as the single source -- so the migration's real
+    mapping SQL as the single source -- and Pass B's backfill SQL for one whose
+    fallback join reads the head owner-bucket flag, so the migration's real
     ``_backfill_settled_transactions`` orchestration runs unchanged at HEAD with
-    Pass A carrying the kind the Step-4 backfill would assign.  Shared by the
-    cash-backfill suite and the cash reconciliation oracle, the two suites that
-    invoke that backfill (a duplicate-code finding).  ``monkeypatch``
-    auto-reverts the patched constants after each test.
+    Pass A carrying the kind the Step-4 backfill would assign.  Its one caller
+    is the cash-backfill suite (``tests/test_models/test_posting_cash_backfill.py``).
+    ``monkeypatch`` auto-reverts the patched constants after each test.
 
     Args:
         monkeypatch: The test's ``monkeypatch`` fixture.
-        migration_module: The loaded 7d63 migration module (each suite loads its
-            own via :func:`load_migration_module`, so each patches its own copy).
+        migration_module: The loaded 7d63 migration module (the suite loads its
+            own via :func:`load_migration_module`, and patches that copy).
     """
     monkeypatch.setattr(
         migration_module, "_CREATE_CATEGORY_LEDGER_ACCOUNTS_SQL",
@@ -8770,6 +9059,10 @@ def payroll_basis(profile, periods, cadence_days=14, history_opens_on=None):
 
     Args:
         profile: The ``SalaryProfile`` (or a duck-typed stand-in) to price.
+            Its ``user_id`` owns the calendar built here, because a rule is
+            refused against another owner's schedule
+            (``_require_owner`` in ``app/services/recurrence/_resolution.py``),
+            so a stand-in carries one too.
         periods: The owner's WHOLE schedule as
             :class:`~app.services.pay_calendar.DerivedPeriod` values, in any
             order.  Only their paydays are read; the calendar re-derives every
@@ -8802,7 +9095,7 @@ def payroll_basis(profile, periods, cadence_days=14, history_opens_on=None):
 
     return PayrollBasis(profile, derived_calendar(
         [period.start_date for period in periods], cadence_days=cadence_days,
-        history_opens_on=history_opens_on,
+        user_id=profile.user_id, history_opens_on=history_opens_on,
     ))
 
 
@@ -9366,8 +9659,9 @@ class PlantedPricing:
 
     **It answered a LOAN half too until plan step X-au-g-2c-2**, and planting
     was keyed by TRANSACTION id because that half (``LoanPricing.live_cash``)
-    took a row.  That method is deleted -- a transfer shadow is DERIVED and has
-    no stored figure for a read-time override to supersede -- so the seam is
+    took a row.  That method is deleted -- a transfer shadow was DERIVED from
+    that step and had no stored figure for a read-time override to supersede,
+    and plan step ``balance:X-bi-6-4d-2`` deleted the shadows -- so the seam is
     salary alone and the key is the pair the salary derivation is keyed on.
     Answering the old key would have been worse than failing: the loan half was
     asked FIRST, so every planted figure landed there, and a helper that kept
@@ -9478,21 +9772,21 @@ def planted_basis(*rows, overrides=None):
 def transfer_amount(xfer):
     """What one parent TRANSFER is worth -- its amount, resolved.
 
-    **The parent twin of :func:`shadow_amount`, and it exists for the same
-    reason one step later.**  That helper was written when plan step
-    X-au-g-2c-2 moved a SHADOW's figure from a column to a value; plan step
-    X-au-f does the same for the PARENT, so a case asserting
-    ``xfer.amount == Decimal(...)`` on a generated transfer is now comparing a
-    figure against ``None``.  What those cases were ABOUT -- what the transfer
-    is worth -- is asked of the amount model here.
+    **Written when plan step X-au-f moved a generated transfer's figure from a
+    column to a value**, the last per-kind cutover: X-au-g-2c-2 had done the
+    same for each transfer shadow, which a helper of its own priced (deleted at
+    plan step ``balance:X-bi-6-4d-2``, which deleted the shadows), and X-au-d
+    (salary) and X-au-e (ordinary recurring rows) came between.  A case
+    asserting ``xfer.amount == Decimal(...)`` on a generated transfer would
+    compare a figure against ``None``; what those cases were ABOUT -- what the
+    transfer is worth -- is asked of the amount model here.
 
     An AD-HOC transfer still owns its figure, so this answers the same column it
     always did for one; the helper is right for both kinds, which is what stops
     a case having to know which it holds.
 
-    A FRESH basis per call, for the reason :func:`shadow_amount` states: a case
-    that edits a transfer and re-reads must see the new figure, and a basis
-    memoizes for the length of a read pass.
+    A FRESH basis per call: a case that edits a transfer and re-reads must see
+    the new figure, and a basis memoizes for the length of a read pass.
 
     Args:
         xfer: The transfer to price.
@@ -9511,42 +9805,6 @@ def transfer_amount(xfer):
 
     return resolve_transfer_amount(
         xfer, derived_amount_basis(xfer.user_id, xfer.scenario_id),
-    )
-
-
-def shadow_amount(shadow):
-    """What one transfer SHADOW is worth -- Transfer Invariant 3, read.
-
-    **The invariant moved from a COLUMN to a VALUE at plan step X-au-g-2c-2**,
-    and this is what a test asserts it with.  A shadow used to hold a COPY of
-    its parent's ``amount``, kept true by ``update_transfer``'s propagation and
-    by ``restore_transfer``'s drift corrector, so every case could assert
-    ``shadow.estimated_amount == xfer.amount`` and was really asserting that the
-    two repairs had run.  A shadow declares ``PARENT_TRANSFER`` and stores
-    nothing now, so that assertion would compare ``None`` against a figure; what
-    it was ABOUT -- both legs being worth what the transfer is -- is asked of
-    the amount model here.
-
-    A FRESH basis per call: a case that edits a transfer and re-reads must see
-    the new figure, and a basis memoizes for the length of the read pass.
-
-    Args:
-        shadow: A transfer shadow, with its ``account`` reachable.
-
-    Returns:
-        The ``Decimal`` the shadow resolves to.
-
-    Raises:
-        AmountUnresolvable: When the row's rule cannot price it -- which for a
-            shadow means its parent is gone (Transfer Invariant 2 broken).
-    """
-    from app.services.cash_ledger import (  # pylint: disable=import-outside-toplevel
-        derived_amount_basis,
-        resolve_transaction_amount,
-    )
-
-    return resolve_transaction_amount(
-        shadow, derived_amount_basis(shadow.account.user_id, shadow.scenario_id),
     )
 
 
@@ -9860,7 +10118,7 @@ def rebuild_calendar_on(user_id, first_payday, num_periods, rhythm):
     the author typed, and it wrote no ``budget.pay_schedule`` row, so
     ``pay_schedule_service.resolve_schedule`` fell back to INFERRING the
     cadence from that same hand-typed ``end_date``.  Eight cases in
-    ``test_recurrence_engine.TestDueDateGeneration`` passed only through that
+    ``test_recurrence_engine.test_dates.TestDueDateGeneration`` passed only through that
     loop: they wrote a 28-day February period, the fallback read 28 back as
     the owner's cadence, and the derived span therefore matched the typed one.
     Give the owner a real cadence and the same rows derive a 14-day span and
@@ -10355,13 +10613,17 @@ def write_past_the_amount_seam(row, value):
     typo in application code and the wrong one for a control that means to
     write.
 
-    Three tests need this: the two that prove a derived row's answer is
-    invariant under a rival figure (``test_amount_source.py``), and the two
-    that prove the database still refuses the drift a transfer shadow could
-    once hold (``test_a_transfer_shadow_is_derived.py``,
-    ``test_transfer_service.py``).  Each is constructing the shape
-    :class:`~app.models.amount_ownership.AmountOwnership` has no member for, so
-    none of them can go through the seam.
+    Its callers (read 2026-10-20): in ``test_amount_source.py``'s
+    ``TestTheRulesDoNotReadTheColumnTheyReplace``, the two cases that prove a
+    derived answer is invariant under a rival figure (a definition's row
+    under its own column, a generated transfer's leg under its parent's) and
+    the one that proves the database refuses a declared row carrying one; in
+    ``test_a_transfer_shadow_is_derived/test_the_declaration.py``,
+    ``test_a_leg_cannot_hold_a_figure_while_it_declares_a_parent``, which
+    proves the database refuses a transfer's twin holding a figure; and the
+    hand-run ``tests/manual/verify_amount_resolver.py``.  Each is constructing
+    the shape :class:`~app.models.amount_ownership.AmountOwnership` has no
+    member for, so none of them can go through the seam.
 
     Args:
         row: A :class:`~app.models.transaction.Transaction` or
@@ -10420,7 +10682,7 @@ def unseeded_replay_balance(loan_id, scenario_id, as_of):
 
     **The reconciliation oracle deliberately does NOT call this**, and that is
     the one duplication left standing.  ``test_posting_ledger_loan_reconciliation
-    ._resolver_balance`` keeps its own body because
+    ._helpers._resolver_balance`` keeps its own body because
     ``test_the_roots_cover_what_the_reference_calls`` reads the modules the
     reference depends on off THAT FUNCTION'S OWN AST -- a delegation to a helper
     in this file would make the closure check grade an empty root set, which is

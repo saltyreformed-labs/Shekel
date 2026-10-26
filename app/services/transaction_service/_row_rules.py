@@ -201,12 +201,15 @@ def deletion_refusal(
     **Two rows may not be deleted by themselves, and both are rows that are
     half of something else.**
 
-    * **A transfer shadow.**  Every transfer has exactly two, and neither is
-      ever orphaned (``CLAUDE.md`` transfer invariants 1 and 2), so a delete
-      goes through ``transfer_service.delete_transfer``, which takes the parent
-      and both legs together.  The grid never renders this card for a shadow --
-      ``transactions.get_full_edit`` returns the transfer's own card instead --
-      so the sentence is reached by a crafted request rather than by a control.
+    * **A row naming a transfer**, which no stored row is.  Until plan step
+      ``balance:X-bi-6-4d-2`` every transfer had two such twin rows, and a
+      delete of one alone would have orphaned the other, so this arm sent it
+      to ``transfer_service.delete_transfer``.  That step deleted the twins
+      (ruling **R-BAL166**), and the database refuses a row naming a transfer
+      at the write (``ck_transactions_names_no_transfer``,
+      ``app/models/_transaction_table_args.py``), so the arm answers a row
+      that cannot be stored (one reaches it only unflushed); it goes with the
+      ``transfer_id`` column at plan step ``balance:X-bi-6-5``.
     * **A CC PAYBACK.**  A payback exists only because its source is marked
       Credit, and the source stays Credit and out of the balance
       (``ref.statuses.excludes_from_balance``) when the payback goes -- so
@@ -304,7 +307,8 @@ def reject_unsettleable(txn: Transaction) -> None:
     they had drifted apart** (finding **N-233**).  Every public settle surface
     asks it, and since plan step X-au-j they all live NEXT DOOR in
     :mod:`._settle` rather than beside it: :func:`~._settle.settle_transaction`,
-    which would otherwise settle one leg of a transfer pair silently;
+    which would otherwise have settled one of a transfer's twin rows silently
+    while transfers had them;
     :func:`~._settle.settle_amount`, which would otherwise price one off the
     loan-payment seam and hand a caller a figure that module refuses to book;
     and :func:`~._settle.settle_from_entries`, which
@@ -312,9 +316,13 @@ def reject_unsettleable(txn: Transaction) -> None:
     second, shorter spelling.  A verb owns its own preconditions; three verbs
     owning the same two own them once.
 
-    **A transfer shadow** settles through ``transfer_service.update_transfer``
-    so both legs and the parent move together (``CLAUDE.md`` transfer invariants
-    3 and 4).
+    **A row naming a transfer** was one of a transfer's twin rows, which
+    settled through ``transfer_service.update_transfer`` with their transfer.
+    No stored row is one since plan step ``balance:X-bi-6-4d-2`` deleted the
+    twins (ruling **R-BAL166**), and the database refuses a new one
+    (``ck_transactions_names_no_transfer``), so this arm answers a row that
+    cannot be stored (one reaches it only unflushed); it goes with the
+    ``transfer_id`` column at plan step ``balance:X-bi-6-5``.
 
     **A soft-deleted row** must not be resurrected by a status change.  It
     values at ``Decimal("0")`` through the valuation gate, so settling one
@@ -352,7 +360,8 @@ def reject_unsettleable(txn: Transaction) -> None:
         txn: The row to check.  Reads ``transfer_id`` and ``is_deleted``.
 
     Raises:
-        ValidationError: When *txn* is a transfer shadow or is soft-deleted.
+        ValidationError: When *txn* names a transfer (a row the database
+            refuses) or is soft-deleted.
     """
     with db.session.no_autoflush:
         is_shadow = txn.transfer_id is not None

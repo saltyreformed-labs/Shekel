@@ -198,8 +198,8 @@ class TestC24_3ApyFirstSaveExplicit:
     sentinel).  These tests pin the storage-tier removal; the
     auto-create behaviour is pinned in
     ``tests/test_routes/test_hysa.py::TestCreateHysaAccount`` and
-    in ``tests/test_routes/test_accounts.py``'s account-creation
-    suite.
+    in ``tests/test_routes/test_accounts/test_creation_redirects.py``'s
+    account-creation suite.
     """
 
     def test_apy_column_has_no_server_default(self):

@@ -644,13 +644,15 @@ class Candidates:
             legs (LEG), then the purchases
             (:func:`~._candidates.candidates_for`).
         unpriceable: The ``(kind, row_id)`` of every subject that could not
-            be priced -- a row the amount model had no rule for, and since
-            leaf ``balance:X-bi-6-4c-1`` a leg whose transfer is damaged
-            (ruling **R-BAL158**: not offered, and counted in the screen's
-            "could not be priced" note).  Keyed by subject rather than by a
-            bare id because two tables' ids now share it.  Empty on today's
-            data -- every production row still owns its figure and no
-            transfer is damaged -- and live from the first per-kind cutover
+            be priced -- a row or a leg the amount model had no rule for,
+            counted in the screen's "could not be priced" note (a leg whose
+            transfer's twin pair was damaged was counted too from leaf
+            ``balance:X-bi-6-4c-1``, ruling **R-BAL158**, until ruling
+            **R-BAL235** at ``X-bi-6-4d-2`` priced a leg off its transfer
+            alone).  Keyed by subject rather than by a bare id because two
+            tables' ids now share it.  Empty on today's data -- every
+            production row still owns its figure -- and live from the first
+            per-kind cutover
             (plan step ``balance:X-au-d``).  They are NOT candidates: a
             matcher that offered a row it could not price would be guessing.
         held_elsewhere: The rows planned on this account that are NOT offered

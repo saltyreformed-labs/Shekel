@@ -9,9 +9,11 @@ modelled ``$15,279.20`` of monthly gross against a true ``$7,639.60`` -- the
 year's paychecks summing to 200% of salary.
 
 **What these tests hold, and why each is here rather than folded into another
-file.**  The engine's own suite
-(``test_paycheck_calculator.py``) prices ONE paycheck and pins its arithmetic;
-none of it varies the CADENCE, so none of it could see the defect.  The
+file.**  The engine's own suite (the ``test_paycheck_calculator/`` package)
+pins a paycheck's arithmetic: every case of it that prices more than one
+paycheck walks the 14-day cadence, and its one case at another rhythm (the
+once-a-year cadence in ``test_the_pipeline.py``) prices a single paycheck, so
+none of it could see the defect.  The
 property F-16 is about is a year-scale one -- the count the engine divides by
 and the number of paychecks the owner actually receives are the same number --
 and it is only visible across a whole year at more than one rhythm.  That is

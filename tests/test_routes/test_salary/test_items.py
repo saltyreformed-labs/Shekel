@@ -564,7 +564,8 @@ class TestEarningLinesThroughTheDoor:
     """The one line door authors an EARNING kind (plan step salary:R18-b, ruling R-SAL38).
 
     The engine's arithmetic for the two earning kinds is graded in
-    ``tests/test_services/test_paycheck_calculator.py``; what is graded HERE
+    ``tests/test_services/test_paycheck_calculator/test_the_gross.py``
+    (``TestEarningLines``); what is graded HERE
     is the door: that the section offers the four kinds under the
     vocabulary's labels, that a taxable earning added through the form
     reaches the regeneration and raises the paycheck template's amount (the

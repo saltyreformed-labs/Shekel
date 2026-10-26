@@ -29,32 +29,46 @@ them is refused for, is one question and it is this module's.
 
 Flask-isolated like the rest of the package: plain data and ORM rows in,
 mutations applied in place, no ``request`` / ``session`` imports, no flush or
-commit of its own -- the caller owns the session boundary.  (Reading a leg's
-covering movements is a lazy load, which may autoflush pending writes; every
-refusal in the update runs before this module writes.)
+commit of its own but the record move's (``status_seam.free_moving_side_record``
+flushes a freed record before the transfer's accounts move) -- the caller owns
+the session boundary.  (Reading a side's record is a query, which may
+autoflush pending writes.)  Every GATE in the update runs before this module
+writes; the record move's own refusals can fire after its first write, and the
+settle's and the status writer's after the move, so a refused update leaves a
+partial write for the caller's rollback to discard.
 """
 
 from typing import NamedTuple
 
 from app.exceptions import ValidationError
 from app.models.account import Account
-from app.services.transfer_service._create import shadow_names
+from app.services import status_seam
+from app.services.match_press import Press
+from app.services.settle_day import recorded_settle_day
+from app.services.transfer_legs import TransferLeg, transfer_side_leg
+from app.services.transfer_service._side_days import (
+    NO_DAYS,
+    PairDays,
+    repair_fallback,
+    resolve_pair_days,
+)
 from app.services.transfer_service._ownership import _get_owned_account
 from app.services.transfer_service._validation import (
     TransferRows,
     _reject_unmodeled_source,
 )
+from app.utils.dates import display_today
 
 
 class _Endpoints(NamedTuple):
     """The two accounts an update LEAVES a transfer on, and the ones it vacates.
 
     **A transfer's endpoints move together or not at all**, because
-    ``ck_transfers_different_accounts`` is a rule about the PAIR and because a
-    move re-derives BOTH shadow names from BOTH accounts
-    (:func:`app.services.transfer_service._create.shadow_names`).  Passing them
-    as one value is what stops a call site pairing a resolved source with an
-    unresolved destination.
+    ``ck_transfers_different_accounts`` is a rule about the PAIR and because
+    each leg's label is composed from BOTH accounts
+    (:func:`app.services.transfer_legs.leg_label`).  Passing them as one value
+    is what stops a call site pairing a resolved source with an unresolved
+    destination.
 
     Attributes:
         from_account: The account the transfer's money leaves once this update
@@ -110,35 +124,39 @@ def _resolve_endpoints(
     one account to another purely as a side effect of the rebuild.
 
     Everything a MOVE must be refused for is asked here, and this function
-    WRITES NOTHING -- so a move refused for its own reason leaves all three rows
-    exactly as it found them.  **That is not the same as saying the whole update
-    is atomic, and an adversarial review of R10-b is why the difference is
-    spelled out**: :func:`._update.update_transfer` applies the caller-stated
-    facts (the override flag, the endpoints, the amount) and only then dispatches
-    the SETTLE, which can still raise -- on an illegal transition, an
-    unresolvable figure, or one of the seam's settle-day refusals.  So "no write
-    precedes a refusal" holds for every gate, and a raise from the settle still
-    leaves a partially-applied pair in the session for the caller's rollback to
-    discard.  The amount's own refusal was hoisted into that gate block at this
-    step for exactly this reason; the settle's cannot be, because they are
+    WRITES NOTHING -- so a move refused for its own reason leaves the transfer
+    and its sides' records exactly as it found them.  **That is not the same
+    as saying the whole update is atomic, and an adversarial review of R10-b
+    is why the difference is spelled out**: :func:`._update.update_transfer`
+    applies the caller-stated facts (the override flag, the endpoints, the
+    amount) and only then dispatches the SETTLE, which can still raise -- on
+    an illegal transition, an unresolvable figure, or one of the seam's
+    settle-day refusals.  So "no write precedes a refusal" holds for every
+    gate, and a raise from the settle still leaves a partially-applied
+    transfer in the session for the caller's rollback to discard.  The
+    amount's own refusal was hoisted into that gate block at this step for
+    exactly this reason; the settle's cannot be, because they are
     answers the settle computes.  Nothing is re-asked when neither
     endpoint moves, which is the same discipline
     :func:`_reject_installment_move_before_loan` states for the installment
     fields: a pre-existing arrangement stays editable in every OTHER respect
     rather than being re-graded by an unrelated edit.
 
-    The PARENT's name is not touched here; see
-    :func:`app.services.transfer_service._create.shadow_names` for why a
-    derived shadow name is re-derived and a stated transfer name is not.
+    The PARENT's name is not touched here: a transfer's own ``name`` is the
+    caller's, and every template-linked transfer carries its definition's, so
+    re-deriving it on a move would overwrite a stated fact with a default.
     **For an AD-HOC transfer created without a name that leaves a stale label**
     -- ``create_transfer`` defaults the parent's name from the endpoints, and
     nothing afterwards distinguishes that default from a name the owner typed.
     It is latent rather than live: an ad-hoc transfer reaches this arm from no
     route, and both callers that do reach it are template-linked and state the
-    definition's name alongside the accounts.
+    definition's name alongside the accounts.  A LEG's label is not stored at
+    all: it is composed from the endpoints' current names at render time
+    (:func:`app.services.transfer_legs.leg_label`), so a move re-labels both
+    legs with nothing written.
 
     Args:
-        rows: The transfer and both shadows, at their pre-update endpoints.
+        rows: The transfer, at its pre-update endpoints.
         user_id: The expected owner -- both resulting accounts are re-checked
             against it, so a caller that skips the route cannot re-point a
             transfer at an account across an ownership line.
@@ -197,16 +215,18 @@ def _resolve_endpoints(
     )
 
 
-def _apply_endpoint_move(rows: TransferRows, endpoints: _Endpoints) -> None:
-    """Move a transfer and both legs onto *endpoints*, re-deriving the names.
+def _apply_endpoint_move(
+    rows: TransferRows, endpoints: _Endpoints, press: Press | None,
+) -> None:
+    """Move a transfer and both legs onto *endpoints*, carrying each side's record.
 
-    Transfer Invariant 1 read as a write: the parent names the pair of accounts
-    and each shadow LIVES on one of them, so all three move in one act or the
-    pair stops describing the transfer.  The expense leg takes the source and
-    the income leg the destination, which is the pairing
-    :func:`app.services.transfer_service._create.create_transfer` establishes
-    and :class:`~app.services.transfer_service._validation.TransferRows`
-    resolves by transaction TYPE rather than by position.
+    The parent names the pair of accounts and each side's record LIVES on one
+    of them (the side key), so the transfer and its records move in one act.
+    The twin rows followed by their own TYPE (an expense twin the source, an
+    income twin the destination), re-named from both accounts, until plan
+    step ``balance:X-bi-6-4d-2`` deleted them; its leaf 3b deleted that loop.
+    Each leg is derived from the transfer's endpoints now
+    (:mod:`app.services.transfer_legs`), so it moves with them.
 
     **Applied with the caller-stated facts, ahead of the settle dispatch**, for
     the reason the ``is_override`` arm states: everything between those two
@@ -243,72 +263,112 @@ def _apply_endpoint_move(rows: TransferRows, endpoints: _Endpoints) -> None:
     against the wrong loan.  Assigning the relationship writes both halves at
     once and leaves nothing to remember.
 
-    **A settled leg's covering movement moves with it, and THIS function is
-    what moves it** (plan step **X-bi-3c**, ruling **R-BAL46**).  A leg's
-    movement records money that moved through the leg's account, so the leg
-    and its movement are one fact and are re-pointed together.  Through plan
-    step ``credit_card:CC-5-1`` the database moved the movement too:
-    ``fk_transaction_entries_parent_account`` keyed the pair onto the parent's
-    ``(id, account_id)`` and, since migration ``c4e8a2d7f1b3``, CASCADED the
-    parent's UPDATE, and this assignment existed for the SESSION's sake alone
-    (the ORM never learns what a cascade writes).  That key is dropped
-    (ruling **R-BAL76**: a movement's account is its own, so a card purchase
-    in a checking envelope can sit on the card), which makes this assignment
-    the ONE writer of a re-pointed leg's movement account -- what the
-    cascade's one beneficiary needed, stated where the act is (ledger row
-    **CC-353**).  Assigned as the id AND the relationship: the id because
-    ``settle_day.record_settle_day`` reads ``movement.account_id`` for the
-    books boundary before any flush syncs it from the relationship (the
-    CC-5-1 review's L1), the relationship because a loaded ``account`` would
-    otherwise answer the old account until expired -- the defect measured
-    above on ``Transfer.to_account``.  A
-    movement carrying a clearing link refuses the move at the database --
-    ``fk_transaction_entries_reconciled_by`` names a statement of the account
-    it was on -- exactly as the shadow's own ``fk_transactions_reconciled_by``
-    refuses it today (ledger row **BAL-503**), so the movement adds no
-    failure its parent does not have.
+    **A side's payment record moves with its side** (ruling **R-BAL168**, plan
+    step ``balance:X-bi-6-4d-2``, design D5; the carry is rulings **R-BAL46** /
+    **R-BAL72**'s, for every record, dated or kept un-dated across a revert).
+    The record hangs off the TRANSFER, keyed with its account onto the side's
+    endpoint, and the side key is ``ON UPDATE CASCADE``: the transfer's own
+    ``UPDATE`` carries the record's account in the database.  In order:
 
-    **Read for EVERY leg, settled or not** (ruling **R-BAL72**, plan step
-    ``balance:X-bi-3e-2``).  It was read for a settled leg alone while a
-    movement existed only inside the settled band; since that step a revert
-    KEEPS the leg's movement un-dated (ruling **R-BAL61**), so a Projected
-    shadow can hold one, and a loaded survivor left saying the old account
-    would disagree with the row beneath it exactly as a settled leg's would.
-    One total rule, no derived tell for "may hold a movement" (a gate on the
-    row's retained record was rejected as a second spelling of the seam's
-    lifecycle that ``X-bi-4`` deletes; keeping the settled gate as an
-    "nothing reads it in-request" argument was rejected as one unenumerated
-    reader from wrong).  The cost is the read: a never-settled shadow's
-    ``entries`` lazy-load, two per transfer, in the one request that changes
-    a definition's account (62 transfers on one live template, measured when
-    the gate went in at ``X-bi-3c``) -- and nothing on any other request.
+    1. **Each moving side's record is freed** (``status_seam.
+       free_moving_side_record``): out of every match naming it -- a line is
+       freed only where the save's press NAMED it, else nothing saves (ruling
+       **R-BAL229**: no screen reaches this act today, so every caller is
+       refused for a matched record and an unmatched one moves freely) -- its
+       statement link released, and both FLUSHED, because the cascade fires
+       inside the transfer's ``UPDATE`` and the keys holding a member and a
+       link to the old account would refuse it.
+    2. **The transfer's accounts are assigned.**
+    3. **Each record lands on its new endpoint** (``status_seam.
+       land_moved_side_record``): assigned in the session too, because the ORM
+       never learns what a cascade writes; and a DATED record's day becomes
+       ``borrowed`` (its evidence was about the old account), derived by the
+       one rule (``_side_days.resolve_pair_days``, the moved side's evidence
+       dropped) and graded against the NEW account's books by name before any
+       flush (``record_settle_day``).
 
     Args:
-        rows: The transfer and both shadows.
+        rows: The transfer.
         endpoints: The resolved :class:`_Endpoints`; a no-op when its *vacated*
             is empty, which is every update that names no account.
+        press: The save's :class:`~app.services.match_press.Press`, or ``None``
+            when its door named nothing (ruling **R-BAL229**).
+
+    Raises:
+        ValidationError: When a moving record's match would free a line the
+            press did not name, or its day is one the new account's books do
+            not reach.
     """
     if not endpoints.vacated:
         return
-    expense_name, income_name = shadow_names(
-        endpoints.from_account, endpoints.to_account,
+    transfer = rows.transfer
+    moving = tuple(
+        (leg, account)
+        for leg, account in zip(
+            (
+                transfer_side_leg(transfer, is_income=False),
+                transfer_side_leg(transfer, is_income=True),
+            ),
+            (endpoints.from_account, endpoints.to_account),
+        )
     )
-    rows.transfer.from_account = endpoints.from_account
-    rows.transfer.to_account = endpoints.to_account
-    rows.expense.account = endpoints.from_account
-    rows.expense.name = expense_name
-    rows.income.account = endpoints.to_account
-    rows.income.name = income_name
-    for shadow, account in (
-        (rows.expense, endpoints.from_account),
-        (rows.income, endpoints.to_account),
-    ):
-        for movement in shadow.covering_movements:
-            # BOTH the column and the relationship, because each has a
-            # reader before the flush that syncs them: ``record_settle_day``
-            # reads ``account_id`` for the books boundary under
-            # ``no_autoflush`` (a combined move-and-day-correction reaches it
-            # through the seam), and a loaded ``account`` would answer the
-            # old account until expired.  The two write one value at flush.
-            movement.account_id = account.id
-            movement.account = account
+    days = _moved_days(moving)
+    for leg, account in moving:
+        if leg.record is not None and leg.account_id != account.id:
+            status_seam.free_moving_side_record(
+                leg.record, transfer.user_id, press,
+            )
+    transfer.from_account = endpoints.from_account
+    transfer.to_account = endpoints.to_account
+    for (leg, account), day in zip(moving, days):
+        if leg.record is not None and leg.account_id != account.id:
+            status_seam.land_moved_side_record(leg.record, account, day)
+
+
+def _moved_days(
+    moving: "tuple[tuple[TransferLeg, Account], ...]",
+) -> PairDays:
+    """Return each side's day after the move: a moved side's day, ``borrowed``.
+
+    The one derivation (``_side_days.resolve_pair_days``) over each side's
+    record day, with a MOVING side's evidence dropped (ruling **R-BAL168**:
+    the moved payment's date becomes a guess, since the old account's
+    statement says nothing about the new one): a moved side borrows a staying
+    side's evidence.  **When neither side holds evidence after the move --
+    both sides moved, or the staying side's day was itself borrowed -- both
+    take ONE day, the EXPENSE side's recorded day** (``repair_fallback``'s
+    order), so a to-side that recorded 01-08 beside a from-side's 01-06 lands
+    on 01-06, two days earlier.  That is ruling **R-BAL142**'s rule that two
+    borrowed sides share one day, and it is the only stable answer: two
+    borrowed sides kept on different days would be pulled onto one by the
+    next save that re-derives them.  Decided under ruling **R-BAL207** (the
+    cp2a review's p1): no door moves a settled transfer's accounts (the
+    definition edit skips a transfer holding a record, R-BAL168's own
+    premise).  Only a DATED record's day is ever written from this; an
+    un-dated one (a revert kept it) moves with no day.
+
+    Args:
+        moving: Each side's ``(leg with its record, account after the move)``,
+            ``(expense, income)``.
+
+    Returns:
+        Both sides' days after the move.
+    """
+    held = tuple(
+        None if leg.record is None else recorded_settle_day(leg.record)
+        for leg, _account in moving
+    )
+    kept = tuple(
+        None if leg.account_id != account.id else day
+        for (leg, account), day in zip(moving, held)
+    )
+    if held == (None, None):
+        return NO_DAYS
+    days = resolve_pair_days(
+        PairDays(expense=kept[0], income=kept[1]), NO_DAYS,
+        repair_fallback(held, display_today()),
+    )
+    return PairDays(
+        expense=days.expense if held[0] is not None else None,
+        income=days.income if held[1] is not None else None,
+    )

@@ -8,7 +8,7 @@
    ``budgets`` is ``{transfer_id: what this transfer's amount IS}`` from
    ``routes._render_helpers.transfer_budgets``; ``settled`` and ``retained``
    come from ``transfer_settlement_amounts``.  Two producers rather than one
-   because the cell and the quick edit render a plan and no record.
+   because the quick edit renders a plan and no record.
    Optional: leg_account_id -- when opened from a transfer LEG's grid cell
    (plan step balance:X-bi-6-1, ruling R-BAL87: the account that leg is on),
    the form and the quick buttons target that cell,
@@ -154,11 +154,11 @@
 
          Rendered for any SETTLED transfer, because that is exactly when the
          fact exists.  There is no purchases branch here, unlike the transaction
-         card: a shadow cannot carry purchase entries at all -- ``entry_service``
-         refuses one ("Cannot add entries to transfer transactions") and a
-         shadow is built with ``is_envelope`` unset -- so a transfer's figure is
-         always the correctable kind.  Measured on the 2026-08-17 production
-         clone: 0 shadows envelope-tracked, 0 entries attached to a shadow.
+         card: a transfer holds no purchase -- every entry filed under it is a
+         side record (``ck_transaction_entries_side_link_is_a_record``) -- so a
+         transfer's figure is always the correctable kind.  (Measured on the
+         2026-08-17 production clone, while a transfer's legs were shadow rows:
+         0 shadows envelope-tracked, 0 entries attached to a shadow.)
 
          ``min`` / ``max`` mirror the schema's ``_NON_NEGATIVE_MONETARY``,
          the same browser-first / server-backstop layering the "Money moved
@@ -167,17 +167,19 @@
          ``IntegrityError``, so no route caught it and Save 500'd in
          silence (adversarial review, 2026-08-18).
 
-         Prefilled from ``settled[xfer.id]`` -- what the pair RECORDS -- so an
-         untouched Save posts the same figure back and the service writes
-         nothing (``status_seam.correction_record``'s echo rule).  Submitting a
-         DIFFERENT number records it on BOTH legs as a human's correction.
+         Prefilled from ``settled[xfer.id]`` -- the figure the transfer
+         stores -- so an untouched Save posts the same figure back and the
+         service writes nothing (``status_seam.correction_record``'s echo
+         rule).  Submitting a DIFFERENT number records it once, on the
+         transfer, as a human's correction.
 
-         Both legs carry one record (Transfer Invariant 3), so this is one box
-         for the pair, exactly as "Money moved on" is one date for the pair. #}
+         The transfer stores one figure for both sides, so this is one box
+         for the transfer, where "Money moved on" is one box per side (each
+         side's record keeps its own day). #}
       {% if xfer.status and xfer.status.is_settled %}
-      {# A settled leg ALWAYS records a figure since plan step
-         balance:X-bi-4b-1: the sum of its entries, ``0.00`` for a close of
-         nothing (ruling R-BAL82).  The "records NOTHING" legacy shape
+      {# A settled transfer ALWAYS stores a figure since plan step
+         balance:X-bi-6-4d-2: ``0.00`` for a close of nothing (ruling
+         R-BAL365).  The "records NOTHING" legacy shape
          (finding N-181) this box rendered EMPTY for has no spelling now; a
          real figure typed over ``0.00`` is still the repair. #}
       <div class="col">
@@ -212,11 +214,11 @@
        is most likely looking at here is exactly the one carrying a retained
        figure -- and without this the card would show the plan for a pair that
        will book something else.  It reads the SAME rule the settle verb
-       honours (``status_seam.honoured_figure`` over the leg's record, via
-       ``transaction_service.leg_retained_amounts_by_key``; the verb asks it
-       over the expense side's record since leaf ``X-bi-6-4d-1``), so what
-       this promises and what a tick books cannot drift.  Read-only: the record has
-       one write door, which is a settle. #}
+       honours (``status_seam.honoured_figure`` over the transfer's one
+       figure, via ``transaction_service.leg_retained_amounts_by_key``; the
+       verb reads it through the expense leg since leaf ``X-bi-6-4d-1``), so
+       what this promises and what a tick books cannot drift.  Read-only: the
+       record has one write door, which is a settle. #}
     {% set will_book = retained[xfer.id] %}
     {% if will_book is not none %}
     <div class="alert alert-info py-1 px-2 mb-2 small" role="status">
@@ -249,12 +251,11 @@
       </select>
     </div>
 
-    {# Pay period selector -- move this transfer (and both shadow
-       transactions) to a different period.  The service re-validates
-       ownership of the submitted id and propagates it to both shadows
-       (Transfer Invariant 3); the route flags template-generated
-       transfers as overrides on a move.  Only rendered when the route
-       supplies the period list.
+    {# Pay period selector -- move this transfer to a different period;
+       both legs read its period.  The service re-validates ownership of
+       the submitted id; the route flags template-generated transfers as
+       overrides on a move.  Only rendered when the route supplies the
+       period list.
 
        ``p`` is a ``DerivedPeriod`` since plan step C2-f, so its identity is
        ``period_id`` rather than ``id``: the calendar distinguishes a paycheck
@@ -309,8 +310,9 @@
        from the rule and the period and every regeneration rewrites it -- an
        edit here never survived a later template save.  Since X-au-f it is also
        the date the transfer's PRICE is resolved on (amount rule 3), so
-       CLEARING it leaves a row no rule can price: the nine parent-transfer
-       render sites carry no ``AmountUnresolvable`` handler, which on the
+       CLEARING it leaves a row no rule can price: the parent-transfer render
+       sites (every caller of ``_render_helpers.transfer_budgets``) carry no
+       ``AmountUnresolvable`` handler, which on the
        transaction side was measured taking out the grid, the dashboard and the
        companion from one row.  ``routes/transfers/mutations
        ._reject_generated_due_date_edit`` is the backstop for a crafted request
@@ -330,7 +332,8 @@
        AD-HOC transfer (no definition; the shape X-ci-3 deletes) keeps the
        clearable input it always had: an empty submit there loads as an
        explicit None (TransferUpdateSchema strip_empty_strings maps "" to None
-       for nullable fields) and clears the parent and both shadows. #}
+       for nullable fields) and clears the transfer's due date, which both
+       legs read. #}
     <div class="mb-2">
       <label class="form-label mb-0 small">Due Date</label>
       {% if not xfer.recurs %}

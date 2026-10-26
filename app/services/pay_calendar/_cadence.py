@@ -295,7 +295,8 @@ class PayCadence:
         paycheck a year" and misstate every monthly equivalent derived from it.
         It is graded directly, not inferred:
         ``test_paycheck_calculator`` asserts ``PayCadence(FixedDays(0))``
-        raises, and ``test_grid`` builds one at 365 to drive the range options.
+        raises, and ``test_grid.test_cadence`` builds one at 365 to drive the
+        range options.
 
         *An earlier draft of this paragraph cited "the harness that drives the
         derivation over production's paydays" as a caller that constructs one.

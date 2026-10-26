@@ -36,6 +36,7 @@ import pytest
 from app.enums import RecurrenceUnitEnum, StatusEnum
 from app.exceptions import PayPeriodLocked, ValidationError
 from app.models.pay_period import PayPeriod
+from app.models.transfer import Transfer
 from app.services import (
     match_withdrawal,
     movement_removal,
@@ -43,7 +44,6 @@ from app.services import (
     pay_period_gates,
     pay_period_locks,
     pay_schedule_service,
-    transfer_service,
 )
 from app.services.pay_calendar import PayCalendarError, calendar_for
 from app.services.pay_period_locks import PeriodLockReason
@@ -58,6 +58,8 @@ from tests._test_helpers import (
     create_savings_account,
     create_settled_transfer,
     freeze_today,
+    refused_by_database_rule,
+    transfer_side_record,
 )
 
 
@@ -211,21 +213,26 @@ class TestClassifyPeriodLock:
     def test_a_hidden_row_still_holding_its_payment_locks(
         self, app, db, seed_user,
     ):
-        """The other side: a hidden row that still HOLDS money locks its period.
+        """The other side: a hidden item that still HOLDS money cannot be stored.
 
-        No door leaves one since ruling **R-CC75**, but the transfer's soft
-        delete does (ledger row **BAL-532**) and an archive did before plan
-        step ``credit_card:CC-5-4a-4`` -- and the period's delete would take
-        the payment with the row, which its key now refuses.  So the
-        classifier counts EVERY row, hidden or not (ruling **R-CC54**:
+        No door leaves one since ruling **R-CC75**; the transfer's soft
+        delete did until plan step ``balance:X-bi-6-4d-2`` (ledger row
+        **BAL-532**) and an archive did before plan step
+        ``credit_card:CC-5-4a-4`` -- and the period's delete would take the
+        payment with the item, which its key refuses.  So the classifier
+        counts EVERY item, hidden or not (ruling **R-CC54**:
         "truncate/regenerate lock its period").
 
-        **Staged as that transfer, through its door**: the database refuses
-        a commit leaving any other row hidden holding one (ruling
-        **R-CC92**); this was a Paid Rent row flagged hidden with its payment
-        inside.  Plan step ``balance:X-bi-6-4`` closes BAL-532, and this
-        staging with it.  Re-expressed under rule 5, developer-confirmed
-        2026-09-23.
+        **Staged as that transfer**: the database refuses a commit leaving
+        any row hidden holding one (ruling **R-CC92**); this was a Paid Rent
+        row flagged hidden with its payment inside (re-expressed under rule
+        5, developer-confirmed 2026-09-23).  Since plan step
+        ``balance:X-bi-6-4d-2`` the transfer's soft delete takes its payments
+        off and the deleted-row rule's transfer arm refuses a transfer hidden
+        holding one, so the state -- hidden as the soft delete left it until
+        then, both payments in place -- is asserted REFUSED at commit and the
+        payments stay (ruling **R-BAL167** class 2).  The lock's answer on
+        it, ``HOLDS_MOVEMENT``, is not asserted: no commit can leave it.
         """
         with app.app_context():
             periods = _make_future_periods(db.session, seed_user)
@@ -237,15 +244,26 @@ class TestClassifyPeriodLock:
                 periods[1], amount=Decimal("1200.00"),
             )
             db.session.commit()
-            transfer_service.delete_transfer(
-                xfer.id, seed_user["user"].id, soft=True,
+            xfer_id = xfer.id
+            db.session.execute(
+                db.text(
+                    "UPDATE budget.transfers SET is_deleted = TRUE WHERE id = :t"
+                ),
+                {"t": xfer_id},
             )
-            db.session.commit()
-            assert xfer.is_deleted is True
-            assert (
-                _lock(periods[1], display_today())
-                is PeriodLockReason.HOLDS_MOVEMENT
-            )
+            with refused_by_database_rule(
+                "was deleted while it still holds a recorded payment",
+            ) as caught:
+                db.session.commit()
+            db.session.rollback()
+
+            assert f"transfer {xfer_id} " in str(caught.value)
+            assert db.session.get(Transfer, xfer_id).is_deleted is False
+            assert [
+                transfer_side_record(db.session, xfer_id, account_id)
+                is not None
+                for account_id in (seed_user["account"].id, savings.id)
+            ] == [True, True]
 
     def test_cancelled_transaction_not_settled_lock(self, app, db, seed_user):
         """A Cancelled txn is not settled, so it does not SETTLED_TXN-lock.

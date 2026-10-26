@@ -121,7 +121,7 @@ class PaymentDates:
         arbitrating at ONE producer --
         :func:`app.services.loan_ledger.payment_installments`, which reads a
         row's cash day only when
-        :func:`app.services.loan_loaders.income_shadows` placed it in the
+        :func:`app.services.loan_loaders.income_legs` placed it in the
         SETTLED half.  So the resolver and the ledger cannot classify a payment
         differently even on a row a bypass has broken.
 
@@ -143,7 +143,7 @@ class PaymentDates:
 
         Returns:
             ``True`` for a payment from the settled half of
-            :func:`app.services.loan_loaders.income_shadows` -- a settled
+            :func:`app.services.loan_loaders.income_legs` -- a settled
             transfer, or since ruling **R-BAL140** a Projected one whose
             money has moved -- and ``False`` for a planned one.
         """

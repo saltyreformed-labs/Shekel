@@ -20,9 +20,9 @@ module imports this one, never the reverse.
 
 **No function here reaches a transfer through its shadow row**: a leg arrives
 as a ``transfer_legs.TransferLeg`` from ``transfer_legs``' loaders, and its
-figure is asked of the leg (``transfer_service.leg_settle_amount``, whose
-interval body is the one shadow reach).  ``X-bi-6-4d`` moves that body and
-nothing here changes.
+figure is asked of the leg (``transfer_service.leg_settle_amount``, which
+prices it off its transfer and its side's record since plan step
+``balance:X-bi-6-4d-2``; through the leg's shadow until then).
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): reads only, plain
 data in, frozen dataclasses out, no Flask import, no clock read.
@@ -33,7 +33,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from app.exceptions import AmountUnresolvable, ValidationError
+from app.exceptions import AmountUnresolvable
 from app.services import cash_ledger, transfer_legs, transfer_service
 from app.services.transfer_legs import TransferLeg
 from app.utils.amount_relationships import transfer_pricing_load_options
@@ -51,29 +51,21 @@ def leg_price(
 
     :func:`~._valuation.transaction_price`'s LEG twin (leaf ``balance:X-bi-6-4c-1``): the
     figure is the transfer service's (``transfer_service.leg_settle_amount``,
-    the leg price the reconcile panel offers from since leaf ``X-bi-6-4c-2``
-    -- through the interval :func:`transfer_service.settle_amount` over the
-    leg's shadow, the call this module made on the shadow before this leaf),
+    the leg price the reconcile panel offers from since leaf ``X-bi-6-4c-2``),
     signed by :func:`~app.services.cash_ledger.cash_leg_of`, which asks the
     leg its direction and contributing gate off its transfer and side.
 
-    **Two refusals leave the candidate set, and neither is swallowed**:
-    ``AmountUnresolvable`` is :func:`~._valuation.transaction_price`'s case, and a
-    ``ValidationError`` is a DAMAGED transfer -- a shadow pair that is not
-    one live expense and one live income shadow, which the leg price
-    refuses because the settle would (``_validation._get_shadow_transactions``;
-    no door writes the state: 0 of 128 live transfers on the 2026-09-30 00:11
-    production dump).
-    Ruling **R-BAL158** (developer 2026-09-30, "Skip it and say so"): such a
-    leg is not offered and is counted in the screen's "could not be
-    priced" note, the reconcile panel's answer (**R-BAL148**) on this
-    screen's own surface.  **The catch is by TYPE**: every
-    ``ValidationError`` the leg price can raise today is the broken pair's
-    (``settle_amount``'s own refusals cannot fire on a pair the loader
-    verified live), so one added to that chain later reads as unpriceable
-    too -- counted, never a silent drop and never a page that will not
-    render.  ``X-bi-6-4d`` re-bodies the price off the parent and the
-    refusal goes with the pair.
+    **One refusal leaves the candidate set, and it is not swallowed**:
+    ``AmountUnresolvable`` is :func:`~._valuation.transaction_price`'s case,
+    counted in the screen's "could not be priced" note.  A ``ValidationError``
+    was a second, a DAMAGED transfer whose twin pair the leg price refused
+    (ruling **R-BAL158**, "Skip it and say so"), until plan step
+    ``balance:X-bi-6-4d-2`` priced a leg off its transfer and its side's
+    record and the developer ruled such a transfer is offered and settled
+    like any other (**R-BAL235**).  The leg price's one remaining refusal,
+    a soft-deleted transfer, cannot reach it: the loaders offer live
+    transfers only, so one arriving here is a defect to surface, not a row
+    to count.
 
     Args:
         leg: The still-planned leg, its transfer loaded with
@@ -89,7 +81,7 @@ def leg_price(
         return cash_ledger.cash_leg_of(
             leg, transfer_service.leg_settle_amount(leg, basis),
         )
-    except (AmountUnresolvable, ValidationError):
+    except AmountUnresolvable:
         return None
 
 

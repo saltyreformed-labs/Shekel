@@ -83,10 +83,12 @@ class FakeProfile:
     :func:`project_profile_salaries` walks it through
     :meth:`~app.services.payroll_basis.PayrollBasis.base_pay_on`: ONE entry
     paying *pay* (one paycheck's gross) from :data:`_ENTRY_PAYDAY`, raised by
-    *raises*.
+    *raises*.  Its ``user_id`` owns the calendar ``payroll_basis`` derives for
+    it; no user row has that id, and nothing here reads one.
     """
 
-    def __init__(self, pay, raises):
+    def __init__(self, pay, raises, *, user_id=1):
+        self.user_id = user_id
         self.pay_entries = [FakePayEntry(_ENTRY_PAYDAY, Decimal(pay))]
         self.raises = raises
 

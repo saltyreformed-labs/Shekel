@@ -23,7 +23,12 @@ rules 1, 2, 3 and 5; :func:`transfer_amount_rule` classifies a
 salary profile, which names a TRANSACTION template; rule 5 is *= my parent*,
 and a transfer has no parent transfer.  Rule 4 belongs to the TRANSFER
 classifier since ruling **R-BAL10** -- it was a shadow rule until plan step
-X-au-f-2 -- which is what makes rule 5 exceptionless.
+X-au-f-2 -- which is what makes rule 5 exceptionless.  No door writes a row
+rule 5 can answer since plan step ``balance:X-bi-6-4d-2`` deleted the shadows
+(ruling **R-BAL166**): a stored row that still declares the relation is
+classified here and refused one tier down, having no transfer to read
+(:func:`._amount_source._transfer_answer`), and that arm goes at plan step
+``balance:X-bi-6-5``.
 
 Nothing here imports from :mod:`._amount_source`, so the split introduces no
 cycle: this module is strictly below it.  Boundary discipline (``CLAUDE.md``
@@ -43,15 +48,18 @@ class AmountRule(Enum):
     """Which of ruling R-FI's five sources a row's amount comes from.
 
     The dispatch key.  An explicit enum rather than a pair of link tests, because
-    the rules are not a partition over the links -- see this module's docstring
-    for the two subset relations that make the refinement order load-bearing.
+    the rules are not a partition over the links -- see :mod:`._amount_source`'s
+    docstring for the two subset relations (rules 2 and 4 are each a subset of
+    rule 3) that make the refinement order load-bearing; they stayed there when
+    this module was split from it.
 
     **It is NOT what the ``amount_source_id`` column stores, and a first draft of
     this docstring said it was.**  That column names the RELATION that prices a
     row -- its definition, or its parent transfer
     (:class:`app.enums.AmountSourceEnum`) -- and the refinement between SALARY
-    and TEMPLATE, or between LOAN_PAYMENT and TRANSFER, is a property of the
-    DEFINITION rather than of the row, resolved live here.  Storing the rule
+    and TEMPLATE for a transaction, or between LOAN_PAYMENT and TEMPLATE for a
+    transfer, is a property of the DEFINITION rather than of the row, resolved
+    live here.  Storing the rule
     would put a definition-level fact on every generated row, where two live
     routes falsify it (ruling **R-FK**, plan step X-au-c1).
 
@@ -81,13 +89,13 @@ def amount_rule(txn) -> AmountRule:
     **One question to the COLUMN, then one to the DEFINITION.**  A row that
     carries no ``amount_source_id`` owns its figure and is priced by rule 1; a
     row that carries one names the RELATION that prices it, and the refinement
-    inside that relation -- SALARY within a definition, LOAN_PAYMENT within a
-    parent transfer -- is read live off the definition itself.  The refinement
-    order is the rule: SALARY is tested before TEMPLATE because a salary profile
-    names an ordinary transaction template, and LOAN_PAYMENT before TRANSFER
-    because a loan payment is a transfer.  Testing them the other way round would
-    place every paycheck as a template row and every loan payment as a plain
-    shadow.
+    inside a definition -- SALARY or TEMPLATE -- is read live off the
+    definition itself.  The refinement order is the rule: SALARY is tested
+    before TEMPLATE because a salary profile names an ordinary transaction
+    template, and testing them the other way round would place every paycheck
+    as a template row.  The parent-transfer relation refines into rule 5 alone
+    (:func:`_rule_is_parent_transfer`): a loan payment's rule 4 is the TRANSFER
+    classifier's since ruling **R-BAL10** (:func:`transfer_amount_rule`).
 
     **Nothing here reads ``is_override``, ``is_projected`` or ``is_deleted``, and
     that is finding N-262's fix** (plan step X-au-c2).  Those three are facts
@@ -118,9 +126,10 @@ def amount_rule(txn) -> AmountRule:
 
     Args:
         txn: The :class:`~app.models.transaction.Transaction` to classify.  Its
-            ``template`` / ``transfer`` relationship is read only when it
-            DECLARES the matching relation, so an undeclared row costs no lazy
-            load at all.
+            ``template`` relationship is read only when it DECLARES that
+            relation, and its ``transfer`` relationship never is (the
+            parent-transfer refiner reads nothing), so an undeclared row costs
+            no lazy load at all.
 
     Returns:
         The :class:`AmountRule` that prices this row.
@@ -206,13 +215,18 @@ def _rule_is_parent_transfer(_txn) -> AmountRule:
     ``AmountRule.LOAN_PAYMENT if _is_loan_payment(txn.transfer) else
     AmountRule.TRANSFER`` -- so a loan payment's two legs were priced by the
     LOAN while every other shadow was priced by its parent.  A loan payment's
-    occurrence is ONE economic event held as three rows, its legs are the
-    parent's PROJECTION, and the value's home is therefore the parent: rule 4
-    is a TRANSFER rule now (:func:`_rule_within_transfer_definition`) and a
-    shadow's answer is *= my parent* whatever its parent is.  That is R-JM's
-    one chain, and what it deletes is the state where a leg answered a figure
-    its parent did not -- the ``$174.10`` an owner's typed amount lost to the
-    contract, twice.
+    occurrence was ONE economic event held as three rows, its legs were the
+    parent's PROJECTION, and the value's home was therefore the parent: rule 4
+    became a TRANSFER rule (:func:`_rule_within_transfer_definition`) and a
+    shadow's answer became *= my parent* whatever its parent was.  That was
+    R-JM's one chain, and what it deleted is the state where a leg answered a
+    figure its parent did not -- the ``$174.10`` an owner's typed amount lost
+    to the contract, twice.  The occurrence is held as ONE row since plan step
+    ``balance:X-bi-6-4d-2`` deleted the shadows (ruling **R-BAL166**), so no
+    door writes a row declaring this relation: a stored row that still does
+    names no transfer (``ck_transactions_names_no_transfer``) and is answered
+    by the refusal in :func:`._amount_source._transfer_answer`.  Plan step
+    ``balance:X-bi-6-5`` deletes the relation, and this refiner with it.
 
     Kept as a one-line refiner rather than folded into ``_RELATION_RULES`` as a
     constant, because that table's entries are CALLABLES and a member added to
@@ -302,9 +316,10 @@ def transfer_amount_rule(xfer) -> AmountRule:
         raise AmountUnresolvable(
             f"Transfer {xfer.id} declares amount source {relation.value!r}, "
             "and a transfer has no parent transfer for one to name. Only a "
-            "transfer TEMPLATE can price a transfer; a shadow transaction is "
-            "the row that names its parent. This row was stamped by a writer "
-            "that confused the two tables."
+            "transfer TEMPLATE can price a transfer; the parent-transfer "
+            "relation belongs to the transactions table, where a transfer's "
+            "shadow rows used it, and no shadow row exists any more. This row "
+            "was stamped by a writer that confused the two tables."
         )
     return _TRANSFER_RELATION_RULES[relation](xfer)
 

@@ -36,6 +36,11 @@ updates that mirror in the same commit.
   code; extract shared behavior rather than duplicating it.
 - **Catch specific exceptions**, never `except Exception` (gate:
   `broad-exception-caught`). Error messages must be actionable (include the value).
+- **A database refusal is a backstop, never the check.** A CHECK, a trigger or
+  a foreign key that refuses a state is the last line, and a code path that can
+  REACH one is a bug, whatever the rule guards (a card's, a row's or a
+  transfer's): the code refuses the state first, with an actionable message.
+  Why: `docs/coding-standards.md` (Validation).
 - **Substantive docstrings on every module, class, function**; comments explain
   *why*, not *what*. **snake_case**; organized imports (stdlib / third-party /
   local). Fix pylint findings, do not suppress them.

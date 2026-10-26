@@ -56,8 +56,8 @@ from tests._test_helpers import (
     ledger_accounts_for_account,
     load_init_database_module,
     load_migration_module,
-    loan_income_shadow,
     refused_by_database_rule,
+    transfer_side_record,
 )
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -150,7 +150,10 @@ def _uncorrected_payment(app, db, seed_user, seed_periods, monkeypatch) -> dict:
     Returns:
         The correction's key, as plain values a separate connection can query:
         ``source`` (the ``loan_payment`` source id), ``scenario``, ``period``
-        and ``day``.
+        and ``day``.  Read off the TRANSFER and the day off its loan side's
+        RECORD since plan step ``balance:X-bi-6-4d-2``; it read the loan-side
+        income shadow until then, whose day is no longer kept (ruling
+        R-BAL167 class 4).
     """
     freeze_today(monkeypatch, _TODAY)
     loan = create_loan_with_trueup(
@@ -165,16 +168,16 @@ def _uncorrected_payment(app, db, seed_user, seed_periods, monkeypatch) -> dict:
         amount=Decimal("1000.00"),
     )
     db.session.commit()
-    shadow = loan_income_shadow(db.session, xfer.id, loan.id)
+    key = {
+        "source": ref_cache.posting_source_id(PostingSourceEnum.LOAN_PAYMENT),
+        "scenario": xfer.scenario_id,
+        "period": xfer.pay_period_id,
+        "day": transfer_side_record(db.session, xfer.id, loan.id).settled_on,
+    }
     _GENESIS_MIGRATION._remove_loan_genesis_postings(db.session)
     _PAYMENT_MIGRATION._remove_loan_payment_postings(db.session)
     db.session.commit()
-    return {
-        "source": ref_cache.posting_source_id(PostingSourceEnum.LOAN_PAYMENT),
-        "scenario": shadow.scenario_id,
-        "period": shadow.pay_period_id,
-        "day": shadow.settled_on,
-    }
+    return key
 
 
 def _committed(db, payment: dict) -> dict:

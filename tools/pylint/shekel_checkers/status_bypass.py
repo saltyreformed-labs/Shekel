@@ -18,8 +18,8 @@ from ._common import _called_name_in, _is_string_const, _module_in_allowlist
 # Status seam (W9907): the single attribute the transaction status seam owns.
 # Every non-transfer ``Transaction.status_id`` assignment must go through
 # ``status_seam.apply_status_change``; only the seam's own module and the ONE
-# transfer-service leaf that CONSTRUCTS a transfer and its two shadow rows may
-# write it directly. Matched syntactically by attribute
+# transfer-service leaf that CONSTRUCTS a transfer may write it directly.
+# Matched syntactically by attribute
 # name -- precise because ``Transaction`` / ``Transfer`` are the only models with
 # a ``status_id`` column (``filing_status_id`` on the tax tables is a different
 # attribute and is not matched). Listed by fully-qualified module name, matched
@@ -31,8 +31,9 @@ from ._common import _called_name_in, _is_string_const, _module_in_allowlist
 # N-152 / N-156), and prefix matching would have silently extended this
 # exemption over all eight of its leaves -- an allowlist widening nobody
 # decided on, which is the failure mode a fence exists to prevent. ``_create``
-# holds both writes that need it (``Transaction(status_id=...)`` in
-# ``_build_shadow`` and ``Transfer(status_id=...)`` in ``create_transfer``);
+# holds the one write that needs it (``Transfer(status_id=...)`` in
+# ``create_transfer``; the shadow constructor went with the shadows at plan
+# step X-bi-6-4d-2);
 # every other leaf reaches the column through the seam. Plan step X-aj2 makes
 # the write door structural and deletes the entry.
 #
@@ -199,7 +200,9 @@ class ShekelTransactionStatusBypassChecker(BaseChecker):
     be emitted twice or skipped by a forgotten site (the lifecycle-completeness
     risk Build-Order Step 3 names as its highest).  Only the seam's own module
     (``app.services.status_seam``) and ``transfer_service`` may write it -- the
-    latter for its two CONSTRUCTOR writes only, since plan step X-aj1 deleted the
+    latter for its ONE constructor write only (``Transfer(status_id=...)`` in
+    ``_create``; the shadow constructor went with the shadows at plan step
+    ``balance:X-bi-6-4d-2``), since plan step X-aj1 deleted the
     module's own copy of the seam and it now assigns no ``status_id`` attribute
     at all (see the note on :data:`_STATUS_SEAM_MODULES`).  The
     status analog of the balance-seam fence.
@@ -241,8 +244,8 @@ class ShekelTransactionStatusBypassChecker(BaseChecker):
             "it makes the settled-state boundary uniform and impossible to skip, "
             "which is what lets the posting ledger emit a confirmed settle "
             "exactly once (Build-Order Step 3). Only app.services.status_seam "
-            "(the seam) and transfer_service (whose two CONSTRUCTOR writes "
-            "build a transfer and its two shadows; plan step X-aj1 deleted that "
+            "(the seam) and transfer_service (whose ONE constructor write "
+            "builds a transfer; plan step X-aj1 deleted that "
             "module's own copy of the seam, so it assigns no status_id "
             "attribute any more) may write status_id directly; "
             "Transaction and Transfer are the only models carrying "

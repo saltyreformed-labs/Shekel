@@ -274,8 +274,9 @@ def items_holding_a_movement(periods: "list[int] | Query") -> "tuple[Query, Quer
     one the database now refuses to lose.  Dated or not: an un-dated
     purchase is money in flight, as recorded as a dated one.  A transfer is
     asked the ONE ``transfer_legs`` question (rulings **R-BAL125**,
-    **R-BAL157**), which reaches a DEAD shadow's kept payment too (finding
-    **BAL-532**); the cascade takes those.
+    **R-BAL157**), which reads each side's records off the TRANSFER by its
+    side links (plan step ``balance:X-bi-6-4d-2``); a hidden transfer holds
+    none (ruling **credit_card:R-CC75**, finding **BAL-532**).
 
     The pay-period doors' one reading of it: the lock classifier's
     ``HOLDS_MOVEMENT`` (per period), the reset gate's second count
@@ -376,13 +377,14 @@ def movements_held_in(periods: "list[int] | Query") -> "list[HeldMovement]":
     one ``transfer_legs`` join -- and a period the lock calls
     ``HOLDS_MOVEMENT`` is one this names.
 
-    **A transfer's payment is named ONCE**: its two legs each keep a copy
-    of it (one covering movement per side, one ``Settlement`` written onto
-    both), and the owner sees one transfer and one payment.  The copies are
-    collapsed by transfer and amount -- the sides' descriptions are their
-    own rows' names and differ -- and ONLY the copies: every other movement
-    is named, so two equal purchases are two purchases, under a row or
-    (no door writes one) under a transfer's leg.
+    **A transfer's payment is named ONCE**: each side keeps a record of it
+    (one covering movement per side) and the transfer stores its one figure
+    (plan step ``balance:X-bi-6-4d-2``), and the owner sees one transfer and
+    one payment.  The two records are collapsed by transfer -- the sides'
+    descriptions are their legs' labels (``status_seam._side``,
+    ``TransferLeg.name``) and differ, and both name the transfer's figure --
+    and a row's movements are never collapsed: two equal purchases are two
+    purchases.
 
     Args:
         periods: The pay-period ids to look in -- a list or a query of ids.
@@ -399,9 +401,9 @@ def movements_held_in(periods: "list[int] | Query") -> "list[HeldMovement]":
         ):
             item, item_name = item_of(model, item_id, name)
             if model is Transfer and covers:
-                if (item, amount) in copies_named:
+                if item in copies_named:
                     continue
-                copies_named.add((item, amount))
+                copies_named.add(item)
             held.append(HeldMovement(
                 period_id, item, item_name, covers, description, amount,
             ))
@@ -418,7 +420,9 @@ def _movement_arms(periods: "list[int] | Query") -> "tuple[tuple[type, Query], .
     on: a row's through its ``entries``, a transfer's through the one
     ``transfer_legs`` join, scoped to the transfers that pair's query
     selects.  Each yields ``(period id, item id, item name, is a payment,
-    description, amount)``.
+    description, amount)``: a row's movement states its own amount, and a
+    transfer side's record names its TRANSFER's one settled figure (plan
+    step ``balance:X-bi-6-4d-2``).
 
     Args:
         periods: As :func:`movements_held_in`.
@@ -427,19 +431,17 @@ def _movement_arms(periods: "list[int] | Query") -> "tuple[tuple[type, Query], .
         ``((Transaction, row query), (Transfer, transfer query))``, unexecuted.
     """
     rows, transfers = items_holding_a_movement(periods)
-    movement = (
-        TransactionEntry.covers_settlement, TransactionEntry.description,
-        TransactionEntry.amount,
-    )
+    movement = (TransactionEntry.covers_settlement, TransactionEntry.description)
     return (
         (Transaction, rows.join(Transaction.entries).with_entities(
             Transaction.pay_period_id, Transaction.id, Transaction.name,
-            *movement,
+            *movement, TransactionEntry.amount,
         )),
         (Transfer, transfer_legs.held_transfer_entries(
             Transfer.id.in_(transfers.with_entities(Transfer.id)),
         ).with_entities(
             Transfer.pay_period_id, Transfer.id, Transfer.name, *movement,
+            Transfer.settled_figure,
         )),
     )
 
@@ -581,13 +583,15 @@ def settled_items(periods: "list[int] | Query") -> "tuple[Query, Query]":
     count (``pay_period_gates.settled_transaction_count``) both read this,
     so a row that does not lock a period cannot block a reset.
 
-    **On the drift Transfer Invariant 3 forbids, the parent decides**
-    (ruling **R-JM**): a settled parent over Projected shadows is settled
-    here, where the shadow read said it was not, and a Projected parent
-    over a settled shadow is not -- though any movement that shadow holds
-    still holds its period, through :func:`items_holding_a_movement`.  No
-    door writes either state; production held neither on the 2026-09-30
-    00:11 dump (0 shadows whose status differs from their parent's).
+    **The parent decides, and since plan step ``balance:X-bi-6-4d-2`` it is
+    the only status read here**: a settle STORED its twins Projected under a
+    Paid transfer until ``balance:X-bi-6-4d-2`` deleted the twins, but the
+    row query excluded every twin (``transfer_id IS NULL``) and the transfer
+    query asks the transfer, so the drift ruling **R-JM** settled here (a
+    parent over a shadow whose status differed) was stored and never read.
+    No row names a transfer now (``ck_transactions_names_no_transfer``).  A
+    movement either side holds still holds its period, whatever the
+    status, through :func:`items_holding_a_movement`.
 
     Args:
         periods: As :func:`items_holding_a_movement`.
@@ -618,30 +622,28 @@ def _items(
     """Return ``(rows, transfers)``: one query per KIND of item, each yielding its period.
 
     **An item is what the owner sees in a pay period**: a plan row, or a
-    TRANSFER once for its two legs.  A shadow row is never one -- it is its
-    transfer's -- so the row query excludes them (``transfer_id IS NULL``,
-    the discard gate's idiom) and the transfer query asks the transfer.
+    TRANSFER once for its two legs, which the transfer query asks.  The row
+    query's ``transfer_id IS NULL`` (the discard gate's idiom) kept a
+    transfer's shadow rows out until plan step ``balance:X-bi-6-4d-2``
+    deleted them; it excludes nothing since, and goes with the column at
+    plan step ``balance:X-bi-6-5``.
     Each query yields one ``(pay_period_id,)`` per item, so a caller reads
     the set of periods (:func:`_period_ids_of`) or counts the items
     (``Query.count``); one that needs more of each item swaps the columns
     with ``with_entities``, keeping the scope.
 
-    **One premise the DOORS hold and no key does** (the reason
-    :func:`settled_items` gives for status drift, for the period a shadow
-    mirrors; the account a shadow mirrors is
-    ``archive_helpers.account_holding_movements``' premise).  A shadow's
-    ``pay_period_id`` is its transfer's (Transfer Invariant 3:
-    ``transfer_service`` moves both together, a restore re-aligns them,
-    carry-forward's bulk moves exclude shadows), so the row query's
-    ``transfer_id IS NULL`` drops nothing the transfer query does not ask.
-    On the PERIOD drift no door writes -- a shadow filed in period B while
-    its transfer is in period A -- each read misses one of the two: the
-    shadow read locked B and missed A, whose delete takes the transfer and
-    its shadows by cascade; this one locks A and misses B.  Deleting the
-    missed period then, at worst, meets
-    ``fk_transaction_entries_transaction_id``'s refusal (an error page,
-    nothing lost) instead of this designed one.  0 of 358 shadows on the
-    2026-09-30 00:11 production dump.
+    **One premise the DOORS held and no key did until plan step
+    ``balance:X-bi-6-4d-2``** (the reason :func:`settled_items` gives for
+    status drift, for the period a shadow mirrored).  A shadow's
+    ``pay_period_id`` was its transfer's (``transfer_service`` moved both
+    together, a restore re-aligned them, carry-forward's bulk moves excluded
+    shadows), so the row query's ``transfer_id IS NULL`` dropped nothing the
+    transfer query did not ask.  On the PERIOD drift no door wrote -- a
+    shadow filed in period B while its transfer was in period A -- each read
+    missed one of the two (0 of 358 shadows on the 2026-09-30 00:11
+    production dump).  That step deleted the shadows, and
+    ``ck_transactions_names_no_transfer`` refuses a new one: no transaction
+    row names a transfer, so none can sit in a period its transfer is not in.
 
     Args:
         periods: The pay-period ids to look in -- a list or a query of ids.

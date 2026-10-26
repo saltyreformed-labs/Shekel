@@ -29,7 +29,6 @@ from tests._test_helpers import (
     create_loan_account,
     create_settled_transfer,
     create_transfer,
-    shadow_amount,
 )
 from app.models.amount_ownership import AmountOwnership
 
@@ -221,24 +220,26 @@ class TestTheEditPathIsGuardedToo:
                     due_date=date(2026, 2, 1),
                 )
 
-    def test_the_refused_edit_leaves_all_three_rows_untouched(
+    def test_the_refused_edit_leaves_the_transfer_untouched(
         self, app, db, seed_user, seed_periods, loan_and_checking,
     ):
-        """A rejected edit is atomic -- transfer and BOTH shadows unchanged.
+        """A rejected edit is atomic -- the transfer is unchanged.
 
         The check runs before any field is applied, the same discipline
         ``apply_status_to_all_three`` follows for an illegal status transition.  A
-        guard that raised halfway through would leave the three rows disagreeing,
-        breaking Transfer Invariant 3 while reporting an error.
+        guard that raised halfway through would leave part of the edit on the
+        transfer while reporting an error.
 
         The edit deliberately carries an ``amount`` alongside the illegal
-        ``due_date``, and the assertions read the IN-MEMORY objects with NO
+        ``due_date``, and the assertions read the IN-MEMORY transfer with NO
         rollback first.  That ordering is the whole test: ``amount`` is applied
         before ``due_date`` in ``update_transfer``, so a guard placed after the
-        amount block would leave $999.00 on the transfer and both shadows even
-        though the call raised.  Rolling back before asserting would erase that
-        evidence and leave the test proving only that the caller's rollback
-        works.
+        amount block would leave $999.00 on the transfer even though the call
+        raised.  Rolling back before asserting would erase that evidence and
+        leave the test proving only that the caller's rollback works.  The case
+        read the transfer's two shadow rows beside it until plan step
+        ``balance:X-bi-6-4d-2`` deleted them.  Renamed from
+        ``test_the_refused_edit_leaves_all_three_rows_untouched``.
 
         NEGATIVE CONTROL: move the ``_reject_installment_move_before_loan`` call
         below the ``amount`` block in ``update_transfer`` and this goes red on
@@ -251,7 +252,6 @@ class TestTheEditPathIsGuardedToo:
                 amount=Decimal("1200.00"), due_date=date(2026, 5, 1),
             )
             db.session.commit()
-            shadow_ids = sorted(s.id for s in xfer.shadow_transactions)
 
             with pytest.raises(ValidationError):
                 transfer_service.update_transfer(
@@ -263,10 +263,6 @@ class TestTheEditPathIsGuardedToo:
             # No rollback: nothing may have been applied in the first place.
             assert xfer.due_date == date(2026, 5, 1)
             assert xfer.amount == Decimal("1200.00")
-            for shadow in xfer.shadow_transactions:
-                assert shadow.due_date == date(2026, 5, 1)
-                assert shadow_amount(shadow) == Decimal("1200.00")
-            assert sorted(s.id for s in xfer.shadow_transactions) == shadow_ids
 
             # ...and the same holds once the session is re-read from the DB.
             db.session.rollback()
@@ -318,8 +314,6 @@ class TestTheEditPathIsGuardedToo:
             )
             db.session.commit()
             xfer.due_date = date(2026, 2, 1)
-            for shadow in xfer.shadow_transactions:
-                shadow.due_date = date(2026, 2, 1)
             db.session.commit()
 
             # An edit that does not move the installment is unaffected.
@@ -431,8 +425,6 @@ class TestTheMoneyItProtects:
             # Plant the pre-origination installment underneath the guard, which
             # is the only way this state can still arise (legacy data).
             xfer.due_date = date(2026, 2, 1)
-            for shadow in xfer.shadow_transactions:
-                shadow.due_date = date(2026, 2, 1)
             db.session.commit()
 
             bctx = BalanceContext.build(seed_user["user"].id)

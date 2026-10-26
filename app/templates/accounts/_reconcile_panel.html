@@ -187,8 +187,7 @@
                            ``pay_calendar.DerivedPeriod``), ``purchases``,
                            ``total``, ``kind``,
                            ``settle``, ``section``), the three
-                           count/total pairs, ``damaged`` (the transfers it
-                           cannot offer, R-BAL148), and ``is_empty``.  Already scoped
+                           count/total pairs, and ``is_empty``.  Already scoped
                            to this account's owner and to what the asserted day
                            can settle.  Every figure is the producer's; this
                            template computes none.
@@ -206,21 +205,6 @@
   <div class="alert alert-danger py-2 px-3 small mb-3" role="alert">
     <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
     {{ error }}
-  </div>
-  {% endif %}
-  {# A transfer whose hidden pair is broken cannot be priced, so it is NOT
-     offered -- it is named here instead, and everything else is listed as
-     normal (ruling R-BAL148).  Every word of it is the producer's
-     (``outstanding.damaged``); the figure identifies the transfer and is not
-     what a tick would book, since nothing can be booked for it. #}
-  {% if outstanding.damaged %}
-  <div class="alert alert-warning py-2 px-3 small mb-3" role="alert">
-    {% for transfer in outstanding.damaged %}
-    <div>
-      <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
-      {{ transfer.label }}, {{ money(transfer.amount) }}, {{ transfer.attributed_on.strftime('%b %-d') }} is damaged and can't be reconciled here.
-    </div>
-    {% endfor %}
   </div>
   {% endif %}
   {% if not outstanding.is_empty %}
@@ -354,7 +338,7 @@
       </button>
     </div>
   </form>
-  {% elif not outstanding.damaged %}
+  {% else %}
   <p class="small text-body-secondary mb-0">
     <i class="bi bi-check-circle text-success" aria-hidden="true"></i>
     Everything recorded on this account

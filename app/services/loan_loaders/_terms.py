@@ -10,7 +10,7 @@ anchor, and a loan payment's own due date in contract time
 and every other question about a loan's installment grid, is
 :mod:`app.services.installment_calendar`'s.
 
-Sits above :mod:`._shadows`, which owns *which rows are this account's payments*:
+Sits above :mod:`._legs`, which owns *which rows are this account's payments*:
 :func:`_settled_payment_due_dates` reads that partition and nothing there reads
 back.  The two were one 1,054-line module until plan step **balance:X-bl-2a**
 pushed it past pylint's 1,000-line ceiling, and the cut is the seam that step
@@ -45,7 +45,7 @@ from app.services.rate_period_engine import due_after_anchor
 from app.services.transfer_legs import TransferLeg
 from app.utils.dates import anchor_chronology_key
 
-from ._shadows import settled_income_shadows
+from ._legs import settled_income_legs
 
 # the ``(anchor_date, created_at, event_id)`` chronology's second term --
 # exactly as the stored origination row (created at loan setup, before any
@@ -478,8 +478,11 @@ def load_all_loan_account_ids() -> list[int]:
     (:func:`app.services.loan_posting_service.backfill_all_loan_postings`)
     iterates.  Deliberately NOT user-scoped: it is a system / deploy-time sweep
     over every owner's loans -- like the Step-2 / Step-3 settled-row backfills --
-    and each posted correction still carries its own owner (from the payment
-    shadow's pay period), so no row is mis-attributed.
+    and each posted correction still carries its own owner (its loan
+    account's, resolved per loan by ``_posting_reconcile.filing_calendar_for``;
+    a payment split's per-loan ledgers are its transfer's owner's, read
+    through its leg, which ``fk_transfers_owner_to_account`` holds equal), so
+    no row is mis-attributed.
 
     Returns:
         The loan account ids, ascending (``account_id`` is unique per
@@ -565,7 +568,7 @@ def installment_for(
     """Return a loan payment's DUE date in contract time, from PLAIN DATA.
 
     The arithmetic core of :func:`loan_payment_due_date`, over plain values
-    instead of a stored shadow: the payment's own ``due_date`` when it has one,
+    instead of a payment's leg: the payment's own ``due_date`` when it has one,
     else the contractual day reconstructed from its pay-period start
     (:func:`~app.services.installment_calendar.monthly_due_date`).  See that
     function for why the stored value is authoritative and when the fallback is
@@ -656,11 +659,13 @@ def loan_payment_due_date(
     payment is a :class:`~app.services.transfer_legs.TransferLeg` of its
     parent transfer, and the two facts this reads -- the ``due_date`` and the
     pay period's start -- are the PARENT's columns, which a leg exposes under
-    the same two names.  A shadow row carries both facts too
+    the same two names.  A shadow row carried both facts too
     (``16f83aa0`` recorded that neither producer's signature would accept a
-    transfer; this signature does), so the derivation is one function over
-    two row shapes rather than a second spelling per shape, and it keeps
-    accepting a shadow until ``X-bi-6-4d`` deletes the shadows.
+    transfer; this signature does), so the derivation was one function over
+    two row shapes rather than a second spelling per shape, until plan step
+    ``balance:X-bi-6-4d-2`` deleted the shadows.  Every caller hands it a
+    leg now; the annotation still admits a ``Transaction`` and the parameter
+    keeps the shadow era's name.
 
     The payment's OWN ``due_date`` is the answer: the recurrence engine stamps
     each generated instance with the date its rule produced
@@ -726,17 +731,17 @@ def loan_payment_due_date(
     Its ``pay_period`` is read on EVERY call since the derivation moved into the
     shared :func:`installment_for` (previously only the no-``due_date`` branch
     touched it), so a caller must hand it a payment whose ``pay_period`` is
-    loaded.  **:func:`._shadows.income_shadows`' two producers are what
+    loaded.  **:func:`._legs.income_legs`' two producers are what
     guarantee that**: each adds the parent's period to its load because it
     sorts on it, so every production caller comes through the partition; a
     transfer fetched by a bare ``session.get`` costs a lazy load here rather
     than only on the fallback path.
 
     Args:
-        shadow: The payment's leg -- settled or projected -- or, until
-            ``X-bi-6-4d``, a shadow row.  Its ``pay_period`` must be loaded:
-            :func:`._shadows.settled_income_shadows` and
-            :func:`._shadows.projected_income_legs` each eager-load it (see
+        shadow: The payment's leg -- settled or projected.  Its
+            ``pay_period`` must be loaded:
+            :func:`._legs.settled_income_legs` and
+            :func:`._legs.projected_income_legs` each eager-load it (see
             the note above).  The name is the shadow era's.
         payment_day: The loan's contractual day-of-month due day
             (:attr:`app.models.loan_params.LoanParams.payment_day`), used only
@@ -757,7 +762,7 @@ def _settled_payment_due_dates(
 
     The settled-payment-due-date derivation behind
     :func:`latest_settled_payment_due_date` (the escrow effective-date guard),
-    built on the same :func:`settled_income_shadows` set and the same
+    built on the same :func:`settled_income_legs` set and the same
     :func:`loan_payment_due_date` per-payment rule the fold's event stream walks --
     so the guard, the walk, and the Schedule A interest merge
     (:func:`app.services.balance_at.loan_interest_in_year`, which derives its
@@ -787,7 +792,7 @@ def _settled_payment_due_dates(
         # its pay period, and the producer loads the period itself.  It paid
         # for the amount model's five-chain eager set until plan step
         # balance:X-bl-2a made the load the caller's statement.
-        for leg in settled_income_shadows(
+        for leg in settled_income_legs(
             account_id, scenario_id, options=(),
         )
     ]

@@ -572,6 +572,21 @@ def test_a_tracker_that_cannot_be_read_refuses_to_judge(check, code, fails):
                           f"checked: {fails}")
 
 
+def test_a_tracker_read_cut_off_is_one_line_naming_the_batch(check, code):
+    """plan#1809: GitHub's page spread over lines is held on one line, and the read of the
+    cards by number it cut short is named after it (``_github.described``)."""
+    root, base = code
+    fails = GitHubError(504, "POST https://api.github.com/graphql -> 504 after 3 re-sends: "
+                             "<html>\n  <title>Unicorn!</title>\n</html>")
+    status, out, err = check(base, _claim(root, base, 7)[1], "card/7",
+                             github=_Lookup({}, fails))
+    assert (status, out) == (2, "")
+    assert err == ("landing check: the tracker could not be read, so nothing was checked: POST "
+                   "https://api.github.com/graphql -> 504 after 3 re-sends: <html> <title>"
+                   "Unicorn!</title> </html>; while reading the cards by number, batch 1 of 1, "
+                   "plan#7-plan#7\n")
+
+
 def test_a_card_linked_to_one_the_tracker_lacks_refuses_to_judge(check, code):
     """#5 lists #6 under it and the tracker has no #6: whether #5 is split cannot be read."""
     root, base = code
@@ -694,6 +709,17 @@ def test_a_pull_request_that_cannot_be_read_refuses_to_judge(capsys, fails):
     assert main(["pull_request", "a" * 40, "7"], _never, _fails) == 2
     assert capsys.readouterr().err == (
         f"landing check: pull request #7 could not be read, so nothing was checked: {fails}\n")
+
+
+def test_a_pull_request_read_cut_off_is_one_line(capsys):
+    """plan#1809: the pull request's read prints its failure as one line too."""
+    def _fails(number):
+        raise GitHubError(504, f"GET https://api.github.com/repos/o/r/pulls/{number} -> 504 "
+                               "after 3 re-sends: <html>\n</html>")
+    assert main(["pull_request", "a" * 40, "7"], _never, _fails) == 2
+    assert capsys.readouterr().err == (
+        "landing check: pull request #7 could not be read, so nothing was checked: GET "
+        "https://api.github.com/repos/o/r/pulls/7 -> 504 after 3 re-sends: <html> </html>\n")
 
 
 @pytest.mark.parametrize("missing", ["GITHUB_TOKEN", "GITHUB_REPOSITORY"])

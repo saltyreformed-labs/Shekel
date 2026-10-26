@@ -61,6 +61,7 @@ from tools.quill.door import (
     IgnoreFileError,
     Tracker,
     TrackerError,
+    described,
 )
 from tools.quill.quill import CONNECT
 from tools.release._census import (
@@ -240,7 +241,8 @@ def main(argv: list[str] | None = None, root: Path = REPO,
     except (ReleaseError, GitError, IgnoreFileError, OSError, UnicodeDecodeError,
             yaml.YAMLError, subprocess.CalledProcessError, GitHubError, TrackerError,
             CredentialsError, requests.RequestException) as error:
-        print(f"release {args.command}: nothing was judged: {error}", file=sys.stderr)
+        print(f"release {args.command}: nothing was judged: {described(error)}",
+              file=sys.stderr)
         return CANNOT
 
 

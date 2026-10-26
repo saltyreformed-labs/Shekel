@@ -49,6 +49,11 @@ and a GraphQL answer holding no ``data`` object are each a :class:`GitHubError` 
 request, never a value a caller takes a field from (two runs on 2026-10-26 ended in an
 ``AttributeError`` instead of quill's ``failed:`` line, plan#1812).
 
+**A failure names the read it cut short** (plan#1809 item 3): each read of the tracker runs
+inside :func:`reading`, which notes what it was reading, the page or the batch, on the error
+that ends it, and every printer of a failure prints it as :func:`described` writes it, one
+line.
+
 Nothing in this module reads or writes the code repository.  Its tests feed it
 recorded responses and never call GitHub.
 """
@@ -60,7 +65,8 @@ import math
 import re
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -376,23 +382,48 @@ def _refusal(method: str, url: str, response, cut_off: int, read: bool) -> str:
     return message
 
 
-def paged(read: Callable[..., dict],
-          connection: Callable[[dict], dict]) -> tuple[list[dict], dict]:
+@contextmanager
+def reading(what: str) -> Iterator[None]:
+    """Name the read the block makes: a :class:`GitHubError` or a ``requests`` failure
+    raised inside it carries the note ``while reading <what>`` (``what`` naming the page or
+    the batch where there are several), which :func:`described` prints, and is raised on
+    unchanged, so every ``except`` that catches it still does."""
+    try:
+        yield
+    except (GitHubError, requests.RequestException) as error:
+        error.add_note(f"while reading {what}")
+        raise
+
+
+def described(error: BaseException) -> str:
+    """A failure as ONE line: its message, then what was being read when it ended (each
+    note :func:`reading` added), each run of whitespace one space.  One line, because a
+    scheduled run's failure is pushed with that run's last fifteen log lines
+    (``/opt/docker/scripts/notify-failure.sh``), and a 504's HTML page, which GitHub's
+    answer text carries, spread over thirty would push the failure itself out of them."""
+    return " ".join("; ".join([str(error), *getattr(error, "__notes__", ())]).split())
+
+
+def paged(read: Callable[..., dict], connection: Callable[[dict], dict],
+          what: str) -> tuple[list[dict], dict]:
     """Every node of a GraphQL connection, read a page at a time: the one walk of a
     connection, which every read of :mod:`_tracker` that pages takes.
 
     ``read(after=cursor)`` sends one page's query (None for the first page), and
-    ``connection`` finds the connection, with its ``pageInfo``, in that page's answer.  The
-    nodes in GitHub's order, and the last answer read, for a caller that reads what the
-    query holds around the connection (``_tracker.Tracker.edits``)."""
-    nodes, after = [], None
+    ``connection`` finds the connection, with its ``pageInfo``, in that page's answer.
+    ``what`` names the connection, so a page's failure says which read and which page it
+    ended (:func:`reading`).  The nodes in GitHub's order, and the last answer read, for a
+    caller that reads what the query holds around the connection
+    (``_tracker.Tracker.edits``)."""
+    nodes, after, number = [], None, 1
     while True:
-        answer = read(after=after)
+        with reading(f"{what}, page {number}"):
+            answer = read(after=after)
         page = connection(answer)
         nodes += page["nodes"]
         if not page["pageInfo"]["hasNextPage"]:
             return nodes, answer
-        after = page["pageInfo"]["endCursor"]
+        after, number = page["pageInfo"]["endCursor"], number + 1
 
 
 def user_token() -> str:

@@ -71,6 +71,7 @@ from tools.quill._github import (
     app_jwt,
     installation_token,
     paged,
+    reading,
 )
 from tools.quill.setup_tracker import (
     APP_LOGIN,
@@ -90,6 +91,8 @@ BOARD_WAIT_SECONDS = 60
 POLL_SECONDS = 5
 #: A connection GitHub caps per card (a parent holds at most 100 sub-issues).
 _PAGE = 100
+#: How many cards one read by number asks for (:meth:`CardReader._lookup`).
+_LOOKUP_BATCH = _PAGE // 2
 #: The largest number a read by number can ask for: GraphQL's ``Int`` is a signed 32-bit
 #: integer (the GraphQL specification), so no issue is numbered past it.
 GRAPHQL_INT_MAX = 2**31 - 1
@@ -239,12 +242,12 @@ def _counted(connection: dict | None, what: str, number: int) -> list:
     return nodes
 
 
-def listing(github: GitHub, query: str) -> list[dict]:
+def listing(github: GitHub, query: str, what: str) -> list[dict]:
     """Every issue node a listing ``query`` holds (:func:`_queries.open_cards`,
     :func:`_queries.marked_cards`, :func:`_queries.export_cards`), read page by page
-    (:func:`_github.paged`)."""
+    (:func:`_github.paged`); ``what`` names the listing in a failure's line."""
     return paged(partial(github.graphql, query),
-                 lambda answer: answer["repository"]["issues"])[0]
+                 lambda answer: answer["repository"]["issues"], what)[0]
 
 
 def saved_versions(github: GitHub, place: Place, number: int) -> tuple[list[dict], dict]:
@@ -254,7 +257,8 @@ def saved_versions(github: GitHub, place: Place, number: int) -> tuple[list[dict
     :meth:`_github.GitHub.graphql` raises: a command refuses one before it reads here
     (``_command._one``)."""
     return paged(partial(github.graphql, _queries.edits(place), number=number),
-                 lambda answer: answer["repository"]["issue"]["userContentEdits"])
+                 lambda answer: answer["repository"]["issue"]["userContentEdits"],
+                 f"plan#{number}'s saved versions")
 
 
 def comment_nodes(github: GitHub, place: Place, number: int,
@@ -262,21 +266,23 @@ def comment_nodes(github: GitHub, place: Place, number: int,
     """Every comment on card ``number`` as GitHub answers it, each read as ``fields``
     (:func:`_queries.comments`)."""
     return paged(partial(github.graphql, _queries.comments(place, fields), number=number),
-                 lambda answer: answer["repository"]["issue"]["comments"])[0]
+                 lambda answer: answer["repository"]["issue"]["comments"],
+                 f"plan#{number}'s comments")[0]
 
 
 def comment_versions(github: GitHub, comment: str) -> list[dict]:
     """Every saved version of the comment whose node id is ``comment``, as GitHub answers
     it (:data:`_queries.COMMENT_EDITS`)."""
     return paged(partial(github.graphql, _queries.COMMENT_EDITS, id=comment),
-                 lambda answer: answer["node"]["userContentEdits"])[0]
+                 lambda answer: answer["node"]["userContentEdits"],
+                 f"comment {comment}'s saved versions")[0]
 
 
 def milestone_nodes(github: GitHub, place: Place) -> list[dict]:
     """Every milestone of ``place``, open and closed, as GitHub answers it
     (:func:`_queries.milestones`)."""
     return paged(partial(github.graphql, _queries.milestones(place)),
-                 lambda answer: answer["repository"]["milestones"])[0]
+                 lambda answer: answer["repository"]["milestones"], "the milestones")[0]
 
 
 def _is_tracker_issue(node: dict, place: Place) -> bool:
@@ -354,12 +360,14 @@ def board_of(github: GitHub, place: Place) -> str:
         TrackerError: When no board has the title, or the one that has it is not linked
             to the place's repository, or a read GitHub cut short leaves that unread.
     """
-    board_id = find_board(github, place)
+    with reading(f"the board titled {place.board_title!r}"):
+        board_id = find_board(github, place)
     if board_id is None:
         raise TrackerError(f"{place.full_name} has no board titled {place.board_title!r}; "
                            "run python -m tools.quill.setup_tracker")
-    repositories = github.graphql(_queries.BOARD_REPOSITORIES,
-                                  id=board_id)["node"]["repositories"]
+    with reading(f"the repositories the board titled {place.board_title!r} is linked to"):
+        repositories = github.graphql(_queries.BOARD_REPOSITORIES,
+                                      id=board_id)["node"]["repositories"]
     link = linked(place, repositories)
     if link is not True:
         names = [node["nameWithOwner"] for node in repositories["nodes"]]
@@ -411,7 +419,7 @@ class Board:
     def order(self) -> list[tuple[int, str]]:
         """The board's cards in their drag order: ``(card number, board item id)``."""
         items, _ = paged(partial(self.github.graphql, _queries.BOARD_ORDER, id=self.board_id),
-                         lambda answer: answer["node"]["items"])
+                         lambda answer: answer["node"]["items"], "the board's order")
         return [(item["content"]["number"], item["id"]) for item in items
                 if _is_tracker_issue(item["content"] or {}, self.location)]
 
@@ -484,8 +492,9 @@ class CardReader:
         Raises:
             TrackerError: When GitHub answers the card as null, or cut the list short.
         """
-        issue = self.github.graphql(_queries.blocking(self.place),
-                                    number=number)["repository"]["issue"]
+        with reading(f"the cards plan#{number} blocks"):
+            issue = self.github.graphql(_queries.blocking(self.place),
+                                        number=number)["repository"]["issue"]
         if issue is None:
             raise TrackerError(f"plan#{number} could not be read: GitHub answered it as null")
         return tuple(
@@ -502,16 +511,19 @@ class CardReader:
         :data:`GRAPHQL_INT_MAX` is never asked, so it is absent like one nobody filed: asked,
         it is an argument GraphQL's ``Int`` cannot hold, which the specification's input
         coercion refuses, and with it the read's every other card (GitHub's own answer is
-        unmeasured)."""
+        unmeasured).  A batch's failure names the batch (:func:`_github.reading`)."""
         wanted = sorted(number for number in set(numbers) if number <= GRAPHQL_INT_MAX)
         found = {}
-        for start in range(0, len(wanted), _PAGE // 2):
-            batch = wanted[start:start + _PAGE // 2]
+        batches = -(-len(wanted) // _LOOKUP_BATCH)
+        for start in range(0, len(wanted), _LOOKUP_BATCH):
+            batch = wanted[start:start + _LOOKUP_BATCH]
             fields = " ".join(f"c{n}: issue(number: {n}) {{ {card_fields} }}" for n in batch)
-            answer = self.github.graphql_lookup(
-                f'query {{ repository(owner: "{self.place.owner}", name: "{self.place.name}") '
-                f'{{ {fields} }} }}'
-            )["repository"]
+            with reading(f"the cards by number, batch {start // _LOOKUP_BATCH + 1} of "
+                         f"{batches}, plan#{batch[0]}-plan#{batch[-1]}"):
+                answer = self.github.graphql_lookup(
+                    f'query {{ repository(owner: "{self.place.owner}", '
+                    f'name: "{self.place.name}") {{ {fields} }} }}'
+                )["repository"]
             for number in batch:
                 if answer[f"c{number}"] is not None:
                     found[number] = card(answer[f"c{number}"])
@@ -582,19 +594,20 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         filed)."""
         return self._lookup(numbers, _queries.CARD_FIELDS, self._card)
 
-    def _listing(self, query: str) -> dict[int, Card]:
-        """Every card a listing ``query`` holds, by number."""
-        return {node["number"]: self._card(node) for node in listing(self.github, query)}
+    def _listing(self, query: str, what: str) -> dict[int, Card]:
+        """Every card a listing ``query`` holds, by number; ``what`` names it in a failure's
+        line."""
+        return {node["number"]: self._card(node) for node in listing(self.github, query, what)}
 
     def open_cards(self) -> dict[int, Card]:
         """Every open card, by number."""
-        return self._listing(_queries.open_cards(self.place))
+        return self._listing(_queries.open_cards(self.place), "the open cards")
 
     def marked(self) -> dict[int, Card]:
         """Every card carrying the :data:`setup_tracker.FILING` mark, open or closed, by
         number: each a filing quill began; whether it is still unfinished is
         ``_state.filing_unfinished``'s answer (one dropped while marked is not)."""
-        return self._listing(_queries.marked_cards(self.place))
+        return self._listing(_queries.marked_cards(self.place), "the marked cards")
 
     def milestones_of(self, numbers: Iterable[int]) -> dict[int, int | None]:
         """The number of the milestone each card numbered ``numbers`` is in, None for none;

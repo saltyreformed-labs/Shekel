@@ -104,7 +104,7 @@ from tools.quill._command import (
 )
 from tools.quill._export import cmd_export
 from tools.quill._filing import cmd_file
-from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._github import CredentialsError, GitHubError, described
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -886,7 +886,7 @@ def main(argv: list[str] | None = None, connect: Callable[[], Tracker] = CONNECT
         return 1
     except (GitHubError, TrackerError, GitError, requests.RequestException,
             OSError, CredentialsError) as error:
-        print(f"failed: {error}", file=sys.stderr)
+        print(f"failed: {described(error)}", file=sys.stderr)
         return 2
 
 

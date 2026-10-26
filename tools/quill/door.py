@@ -44,7 +44,8 @@ Each name, and who reads it:
   a listing made of nothing, and its tests.
 - ``GitHubError``, ``TrackerError`` and ``CredentialsError``: ``tools/release.release``,
   which reports a failed read of the tracker, or App credentials it cannot use, as a
-  release judged on nothing.
+  release judged on nothing; ``described``, by which it prints that failure, as every
+  printer of one does: one line, naming the read it cut short (plan#1809).
 - ``FakeTracker`` and ``OutsideLink``: ``tools/release``'s tests, which drive the card
   reader against quill's own in-memory tracker, a card's link to an issue outside the
   tracker built as quill's read builds one.  The fake's cost, accepted so quill keeps ONE
@@ -64,7 +65,7 @@ from tools.quill._git import (
     markers_in,
     merged_tree,
 )
-from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._github import CredentialsError, GitHubError, described
 from tools.quill._production import IgnoreFileError, changed
 from tools.quill._state import (
     OWNED,
@@ -94,6 +95,7 @@ __all__ = [
     "card_of",
     "changed",
     "changes",
+    "described",
     "dropped",
     "dropped_above",
     "leaves_below",

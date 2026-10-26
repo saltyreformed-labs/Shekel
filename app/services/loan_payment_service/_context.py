@@ -253,7 +253,8 @@ def get_payment_history(
     **Two valuations, one per half, and the split is the record/plan split
     itself.**  A settled leg is worth what moved, which
     :func:`~app.services.row_valuation.leg_settled_contribution` answers from
-    its record without reaching the amount model; a projected leg is worth its
+    the figure its transfer stores without reaching the amount model; a
+    projected leg is worth its
     parent's resolved amount,
     :func:`~app.services.cash_ledger.planned_leg_contribution`.  WHICH half an
     installment is in is its dates' to say
@@ -406,8 +407,9 @@ def get_payment_history(
     broken the other way -- its transfer Projected
     while its covering movement still carries a day, which only a seam bypass
     can produce -- is a payment whose money MOVED (ruling **R-BAL140**, plan
-    step balance:X-bi-6-4b): it arrives in the SETTLED half, dated and valued
-    by that movement, as the cash fold counts it.  Until that step the shadow's
+    step balance:X-bi-6-4b): it arrives in the SETTLED half, dated by that
+    movement and worth the figure its transfer stores, as the cash fold
+    counts it.  Until that step the shadow's
     own status decided, and a Projected row's stale day was never read.
     ``PaymentRecord.is_confirmed`` is the day's presence.  What this file used to hold
     was a second reading of the status column beside the loader's, and its
@@ -473,8 +475,9 @@ def get_payment_history(
         account_id, basis.scenario_id, params,
         # This function PRICES every payment it is handed, so it is this call
         # that states the eager sets (plan step balance:X-bl-2a).  The settled
-        # half is valued from its RECORD and walks no relationship, so it
-        # states none; the projected half walks its parent's pricing graph.
+        # half is worth the figure its TRANSFER stores and walks no
+        # relationship, so it states none; the projected half walks its
+        # parent's pricing graph.
         options=(),
         leg_options=transfer_pricing_load_options(),
     )

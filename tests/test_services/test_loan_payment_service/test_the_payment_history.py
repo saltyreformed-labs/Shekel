@@ -180,12 +180,15 @@ class TestGetPaymentHistory:
     ):
         """A payment with a CORRECTED figure: PaymentRecord uses the correction.
 
-        The record is the leg's covering movement (plan step
-        ``balance:X-bi-4b-1``, ruling **R-BAL80**), so the correction is
-        stated through the transfer's own door -- a person typing ``$1,450.00``
-        over the ``$1,500.00`` plan -- which re-records both legs' movements.
-        This wrote ``shadow.settled_amount`` straight at the row's own column
-        through ``X-bi-4a``, deleted at ``X-bi-4b-2``.
+        The figure is the transfer's own since plan step
+        ``balance:X-bi-6-4d-2`` (rulings **R-BAL365**, **R-BAL366**), so the
+        correction is stated through the transfer's own door -- a person
+        typing ``$1,450.00`` over the ``$1,500.00`` plan -- which stores it
+        there.  Until that step the leg's covering movement held it (plan
+        step ``balance:X-bi-4b-1``, ruling **R-BAL80**), and the door
+        re-recorded both legs' movements.  This wrote
+        ``shadow.settled_amount`` straight at the row's own column through
+        ``X-bi-4a``, deleted at ``X-bi-4b-2``.
         """
         with app.app_context():
             loan = _create_loan_account(seed_user)
@@ -205,7 +208,7 @@ class TestGetPaymentHistory:
                 loan.id, _basis(seed_user), loan_params_for(db.session, loan.id),
             )
             assert len(result) == 1
-            # A settled payment is worth what its record says moved.
+            # A settled payment is worth the figure its transfer stores.
             assert result[0].amount == Decimal("1450.00")
 
     def test_uses_effective_amount_without_actual(

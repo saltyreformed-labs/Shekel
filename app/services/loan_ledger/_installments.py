@@ -194,7 +194,8 @@ def payment_installments(
             traverse on the SETTLED legs' parents, rooted at
             :class:`~app.models.transfer.Transfer`.  ``()`` for a caller that
             reads only the dates -- the schedule replay's reference -- and,
-            since the settled half is valued from its RECORD, ``()`` for
+            since a settled leg is worth the figure its TRANSFER stores, a
+            column of the parent the producer loads, ``()`` for
             ``get_payment_history`` too: nothing on that valuation's path
             walks a relationship.  THIS function's own reads need only the
             pay period, and the producer loads that itself.

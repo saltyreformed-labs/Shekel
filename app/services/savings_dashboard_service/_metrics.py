@@ -339,7 +339,8 @@ def _recent_settled_expenses_monthly(
     recent_period_ids = [p.period_id for p in recent_periods]
     # "Settled checking EXPENSE" is asked in the queries (a leg's side by
     # ``expense_legs``), not a later ``if`` beside the sum (X-au-c2), so each
-    # accessor below sees only what SETTLED and answers from its RECORD (X-au-c3).
+    # accessor below sees only what SETTLED: a row answers from its RECORD
+    # (X-au-c3), a leg from the figure its transfer stores (balance:X-bi-6-4d-2).
     # ``settled_status_ids()`` is the ``is_settled`` set (Paid, Received).
     recent_txns = (
         db.session.query(Transaction)

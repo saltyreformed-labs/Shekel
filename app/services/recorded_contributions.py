@@ -12,7 +12,7 @@ argument ``transfer_service._posting_sync`` was split out under.
 
 **The loan loaders' ONE partition since plan step balance:X-bi-6-4b**
 (ruling **R-BAL140**).  A contribution is the to-side leg of a transfer into
-the account: one that has SETTLED is worth what its record moved
+the account: one that has SETTLED is worth the figure its transfer stores
 (:func:`app.services.row_valuation.leg_settled_contribution`), one still
 PROJECTED what the parent resolves to
 (:func:`app.services.cash_ledger.planned_leg_contribution`), and WHICH half a
@@ -96,7 +96,7 @@ def load_shadow_income_contributions_for_accounts(
     balance:X-bi-6-4b** (ruling **R-BAL140**), one account at a time, and the
     screen above is that partition's narrowing.  A contribution that has
     SETTLED -- its transfer settled, or its to-side money moved -- is worth
-    what its record moved
+    the figure its transfer stores
     (:func:`~app.services.row_valuation.leg_settled_contribution`); one still
     PROJECTED is worth what the parent resolves to
     (:func:`~app.services.cash_ledger.planned_leg_contribution`).  Neither

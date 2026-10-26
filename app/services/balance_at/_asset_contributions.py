@@ -8,10 +8,12 @@ question it has to ask a second package to resolve -- "what does this account's
 payroll put IN, and when".
 
 **Ruling R-R partitions a contribution by SOURCE**, and this module is the
-modelled half of that partition.  A recorded transfer HAS a transaction row, so
-it is already an ACTUAL / PLANNED event in the cash fold underneath the replay; a
-payroll deduction never has one, so it is the modelled CONTRIBUTION event
-:func:`contribution_events` dates.  The two feeds are therefore disjoint BY
+modelled half of that partition.  A recorded transfer is already an ACTUAL /
+PLANNED event in the cash fold underneath the replay, through its legs, which
+are read off the transfer itself since plan step balance:X-bi-6-4d-2 deleted
+the transaction rows it had; a payroll deduction never is one, so it is the
+modelled CONTRIBUTION event :func:`contribution_events` dates.  The two feeds
+are therefore disjoint BY
 CONSTRUCTION and there is no de-dup rule to get wrong -- which is why nothing
 here reads ``investment_projection._inputs._average_transfer_contribution``,
 the scalar
@@ -171,8 +173,8 @@ def _recorded_contributions(
     read.  **Both halves are legs of their transfers since plan step
     balance:X-bi-6-4b**, divided by one test (ruling **R-BAL140**): a
     contribution that has SETTLED is read by
-    :func:`~app.services.loan_loaders.settled_income_legs` and worth what
-    its record moved
+    :func:`~app.services.loan_loaders.settled_income_legs` and worth the
+    figure its transfer stores
     (:func:`~app.services.row_valuation.leg_settled_contribution`); one still
     PROJECTED is read by
     :func:`~app.services.loan_loaders.projected_income_legs` and worth what
@@ -195,9 +197,10 @@ def _recorded_contributions(
     domain.
 
     **The settled half states no load and the projected half states the
-    transfer's own.**  A settled leg is valued from its record, the covering
-    movement the producer's one join attaches, so that path loads nothing it
-    does not already carry (it took
+    transfer's own.**  A settled leg is worth the figure its transfer stores,
+    a column of the parent the producer loads, and is dated by its record,
+    the covering movement the producer's one join attaches, so that path
+    loads nothing it does not already carry (it took
     :func:`~app.utils.amount_relationships.settlement_load_options` for the
     shadow's ENTRIES until plan step balance:X-bi-6-4b); a projected leg's
     parent is priced through its definition, so that path takes

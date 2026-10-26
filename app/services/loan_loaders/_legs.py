@@ -148,9 +148,10 @@ def income_legs(
         options: The loader options for every relationship the CALLER will
             traverse on the SETTLED legs' parents, rooted at
             :class:`~app.models.transfer.Transfer` -- ``()`` for every caller
-            today: a settled leg is valued from its record, which the one join
-            attaches.  ``Transfer.pay_period`` is added regardless, because
-            the producer reads it -- it is the sort key.
+            today: a settled leg is worth the figure its transfer stores, a
+            column of the parent this loads, and is dated by its record,
+            which the one join attaches.  ``Transfer.pay_period`` is added
+            regardless, because the producer reads it -- it is the sort key.
         leg_options: The same statement for the PROJECTED legs' parents
             (:func:`~app.utils.amount_relationships.transfer_pricing_load_options`
             for a caller that prices them, ``()`` for one that reads dates);
@@ -265,10 +266,10 @@ def settled_income_legs(
         options: The loader options for every relationship the CALLER will
             traverse on the parents, rooted at
             :class:`~app.models.transfer.Transfer` -- ``()`` for every caller
-            today: a settled leg is valued from its record
+            today: a settled leg is worth the figure its transfer stores
             (:func:`~app.services.row_valuation.leg_settled_contribution`),
-            which the join attaches, and dated from it or from the parent's
-            own columns.
+            a column of the parent this loads, and dated from its record,
+            which the join attaches, or from the parent's own columns.
 
     Returns:
         Every settled payment's leg, ascending by ``(pay_period.start_date,

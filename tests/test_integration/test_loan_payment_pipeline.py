@@ -2,17 +2,19 @@
 Integration test for the Section 5.1 loan payment pipeline.
 
 Verifies the end-to-end flow: recurring transfer creation via the loan
-dashboard route -> shadow transaction generation -> payment history
-query -> amortization engine projection -> balance calculator.
+dashboard route -> transfer generation -> payment history query ->
+amortization engine projection -> balance calculator.
 
-Also verifies all five transfer invariants hold throughout the process.
+It also verified the transfer invariants over each transfer's two shadow
+rows until plan step ``balance:X-bi-6-4d-2`` made a transfer one row
+(ruling **R-BAL258**): what they kept equal has one home now, and the
+generated transfers are read directly.
 """
 
 from decimal import Decimal
 
-from app import ref_cache
-from app.enums import AcctTypeEnum, TxnTypeEnum
-from app.models.transaction import Transaction
+from app.enums import AcctTypeEnum
+from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.services import balance_at
 from app.services.balance_at import BalanceContext
@@ -27,8 +29,8 @@ from tests._test_helpers import (
 class TestLoanPaymentPipeline:
     """End-to-end integration test for the Section 5.1 payment pipeline.
 
-    Exercises every layer: route -> transfer service -> shadow
-    transactions -> payment query -> amortization engine -> balance
+    Exercises every layer: route -> transfer service -> generated
+    transfers -> payment query -> amortization engine -> balance
     calculator.  A passing test means the entire payment linkage
     pipeline works correctly.
     """
@@ -36,22 +38,32 @@ class TestLoanPaymentPipeline:
     def test_full_payment_pipeline(  # pylint: disable=too-many-locals,too-many-statements
         self, app, auth_client, seed_user, seed_periods, db,
     ):
-        """Full pipeline: create transfer via route, verify shadows,
-        verify payment query, verify balance calculator.
+        """Full pipeline: create transfer via route, verify the generated
+        transfers, verify payment query, verify balance calculator.
 
         Steps:
         1. Create a checking account (seed_user already has one) and a
            mortgage account with LoanParams.
         2. Use the create_payment_transfer route to set up recurring
            monthly payments.
-        3. Verify shadow transactions were created (invariant 1).
-        4. Verify shadow amounts match (invariant 3).
-        5. Verify shadow statuses match (invariant 4).
-        6. Verify shadow periods match (invariant 5).
-        7. Verify get_payment_history returns correct PaymentRecords.
-        8. Verify the loan dashboard renders with payment-aware projections.
-        9. Verify the balance calculator produces correct balances for
-           both the checking and mortgage accounts.
+        3. Verify the transfer template was created.
+        4. Verify the template's transfers were generated, each from
+           checking to the mortgage.
+        5. Verify get_payment_history returns correct PaymentRecords.
+        6. Verify the loan dashboard renders with payment-aware projections.
+        7. Verify the balance calculator produces correct balances for
+           the checking account.
+
+        **Steps 4 and 7 read the TRANSFERS since plan step
+        balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1).  Step 4
+        checked each transfer's two shadow rows against the invariants it
+        numbered 1, 3, 4 and 5 -- one income and one expense, equal amounts,
+        statuses and periods -- and step 7 took its pay period off the
+        checking shadow.  ``ck_transactions_names_no_transfer`` (ruling
+        **R-BAL258**) refuses every row that loop read, so it was
+        STRUCTURALLY empty over any database the CHECK stands on; what the
+        pairs were kept equal to is each transfer's own row, which step 4
+        now requires to exist.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -94,50 +106,23 @@ class TestLoanPaymentPipeline:
             assert template.from_account_id == checking.id
             assert template.default_amount > 0
 
-            # Step 4: Verify shadow transactions exist.
-            income_type_id = ref_cache.txn_type_id(TxnTypeEnum.INCOME)
-            expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-
-            all_shadows = (
-                db.session.query(Transaction)
+            # Step 4: Verify the template's transfers were generated, each
+            # from checking to the mortgage.  Ordered by id, the order the
+            # generate pass wrote them in.
+            transfers = (
+                db.session.query(Transfer)
                 .filter(
-                    Transaction.transfer_id.isnot(None),
-                    Transaction.is_deleted.is_(False),
+                    Transfer.transfer_template_id == template.id,
+                    Transfer.is_deleted.is_(False),
                 )
+                .order_by(Transfer.id)
                 .all()
             )
-            # Each transfer has exactly 2 shadows (invariant 1).
-            transfer_ids = {s.transfer_id for s in all_shadows}
-            for tid in transfer_ids:
-                pair = [s for s in all_shadows if s.transfer_id == tid]
-                assert len(pair) == 2, (
-                    f"Transfer {tid} has {len(pair)} shadows, expected 2"
-                )
-                types = {s.transaction_type_id for s in pair}
-                assert income_type_id in types, (
-                    f"Transfer {tid} missing income shadow"
-                )
-                assert expense_type_id in types, (
-                    f"Transfer {tid} missing expense shadow"
-                )
-
-                # Invariant 3: amounts match.
-                amounts = {s.estimated_amount for s in pair}
-                assert len(amounts) == 1, (
-                    f"Transfer {tid} shadow amounts differ: {amounts}"
-                )
-
-                # Invariant 4: statuses match.
-                statuses = {s.status_id for s in pair}
-                assert len(statuses) == 1, (
-                    f"Transfer {tid} shadow statuses differ: {statuses}"
-                )
-
-                # Invariant 5: periods match.
-                period_ids = {s.pay_period_id for s in pair}
-                assert len(period_ids) == 1, (
-                    f"Transfer {tid} shadow periods differ: {period_ids}"
-                )
+            assert transfers, "the template generated no transfer"
+            assert {
+                (transfer.from_account_id, transfer.to_account_id)
+                for transfer in transfers
+            } == {(checking.id, mortgage.id)}
 
             # Step 5: Verify get_payment_history returns the payments.
             params = loan_params_for(db.session, mortgage.id)
@@ -150,7 +135,7 @@ class TestLoanPaymentPipeline:
                 assert isinstance(payment.amount, Decimal)
                 assert payment.amount > 0
                 # Each record carries BOTH dates: the pay period the cash moved
-                # in, and the installment it satisfies.  The shadows here are
+                # in, and the installment it satisfies.  The payments here are
                 # on-time, so the due date is the payment_day of the period's
                 # own month or the next.
                 assert payment.dates.due_date.day == params.payment_day
@@ -170,19 +155,17 @@ class TestLoanPaymentPipeline:
             # conditional assertion cannot fail on an empty pipeline, which is
             # exactly the vacuity plan Section 7.3 rules out.  ``as_of`` is
             # pinned inside period 0 so ruling R-G does not clamp the
-            # still-Projected shadow out of the window.
-            checking_shadows = [
-                s for s in all_shadows
-                if s.account_id == checking.id
-            ]
-            assert checking_shadows, "the pipeline produced no checking shadow"
+            # still-Projected payment out of the window.  The period is the
+            # first transfer's; it was the checking shadow's until plan step
+            # balance:X-bi-6-4d-2 (ruling R-BAL167 class 1), which carried its
+            # transfer's period.
             checking_balances = balance_at.cash_balance_map(
                 checking,
                 BalanceContext.build(
                     seed_user["user"].id, as_of=periods[0].start_date,
                 ),
             )
-            period_with_transfer = checking_shadows[0].pay_period_id
+            period_with_transfer = transfers[0].pay_period_id
             assert period_with_transfer in checking_balances
             assert checking_balances[period_with_transfer] < Decimal("1000.00")
 

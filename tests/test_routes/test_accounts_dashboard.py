@@ -463,7 +463,8 @@ class TestAccountHardDelete:
         (ruling **R-BAL23**: the refusal counts definitions with a rule).  It
         was built bare, and a bare definition -- no rule, no row -- defines
         nothing and is disposed of with the account now (developer
-        2026-09-13); ``test_accounts.TestHardDeleteAndTheAccountsDefinitions``
+        2026-09-13);
+        ``test_accounts.test_hard_delete.TestHardDeleteAndTheAccountsDefinitions``
         grades that arm.  What this case grades is guard 3 itself.
         """
         with app.app_context():

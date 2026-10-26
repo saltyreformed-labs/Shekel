@@ -539,7 +539,7 @@ class PostingSourceEnum(enum.Enum):
     ruling **R-FM**): it links ``transaction_entry_id`` and carries NULL in the
     other two source FKs, and it books its own cash leg on its own day so its
     envelope's close books only the remainder.  ``transfer_movement`` is ONE
-    side of a settled transfer -- a shadow's covering movement, booked on its
+    side of a settled transfer -- a side's covering movement, booked on its
     own bank day against the owner's Transfers-in-transit clearing account
     (plan step ``balance:X-bi-6-3``, rulings **R-BAL45** and **R-BAL101**):
     it links ``transaction_entry_id`` exactly as ``purchase`` does and carries
@@ -669,9 +669,10 @@ class AmountSourceEnum(enum.Enum):
                            ``budget.transaction_templates``, or
                            ``Transfer.transfer_template_id`` ->
                            ``budget.transfer_templates``.
-        parent_transfer -- this row is a transfer SHADOW and is worth exactly
-                           what its parent transfer is (``transfer_id``), which
-                           is Transfer Invariant 3 read rather than maintained.
+        parent_transfer -- a row declaring it was a transfer SHADOW, worth
+                           exactly what its parent was (``transfer_id``).  No
+                           row has a parent since ``balance:X-bi-6-4d-2``, and
+                           amount rule 5 refuses a stored row declaring it.
 
     **These name the RELATION that prices the row, not the RULE that computes
     the figure, and the difference is a developer ruling (2026-08-12) amending

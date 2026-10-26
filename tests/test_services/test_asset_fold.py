@@ -1451,7 +1451,7 @@ class TestThePerPeriodIdentity:
 # start a chart's projection line BELOW its own history line by every cent
 # earned since the account's last assertion (up to $292.11 on the real Empower
 # 401(k), finding N-80).  What replaced the rule is pinned where the seed is
-# now read -- ``tests/test_routes/test_investment.py``'s
+# now read -- ``tests/test_routes/test_investment/test_the_projection.py``'s
 # ``TestTheProjectionContinuesTheHistory`` (the seed IS the history line's last
 # point), ``TestTheProjectionAppliesEachContributionOnce`` (applied once),
 # and ``test_retirement_dashboard_service.py``'s three-way seed discrimination.

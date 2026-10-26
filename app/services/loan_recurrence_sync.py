@@ -186,7 +186,7 @@ def loan_payment_window(
     transfer into a loan stop" needs no such answer: **every** recurring
     transfer into a loan is paying it down --
     the settled fold
-    (:func:`~app.services.loan_loaders.settled_income_shadows`) and the PLANNED
+    (:func:`~app.services.loan_loaders.settled_income_legs`) and the PLANNED
     tier (``balance_at._plan.loan_plan``) both already sum every
     one of them with no template filter -- and each of them stops when the loan
     does, because past payoff the ONE allocation

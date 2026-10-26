@@ -1,7 +1,7 @@
 """Tests for commit C-18: stale-form prevention across every PATCH endpoint.
 
-Mirrors the structure of the C-17 tests in test_accounts.py: schema
-invariants, lifecycle behaviour, true concurrent races, and per-route
+Mirrors the structure of the C-17 tests in test_accounts/test_stale_data.py:
+schema invariants, lifecycle behaviour, true concurrent races, and per-route
 stale-form / StaleDataError handling.  Every model that grew a
 ``version_id`` column in commit C-18 is exercised against the same
 contract:
@@ -499,7 +499,7 @@ def test_concurrent_update_raises_stale_data_error(
     """A version-bump out from under the test session raises StaleDataError.
 
     Same shape as test_concurrent_update_raises_stale_data_error
-    in test_accounts.py but parameterised across every C-18
+    in test_accounts/test_stale_data.py but parameterised across every C-18
     versioned model.  This is the load-bearing invariant that
     makes the SQLAlchemy tier of the optimistic lock work.
     """
@@ -1385,7 +1385,7 @@ class TestEditTemplatesEmitVersionPin:
         """The create form has no version pin (no row to lock yet).
 
         Mirrors test_account_create_form_omits_version_pin in
-        test_accounts.py: a copy-paste regression that put a
+        test_accounts/test_stale_data.py: a copy-paste regression that put a
         ``template.version_id`` reference into the create path
         would Jinja-error against ``template = None``.
         """

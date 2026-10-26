@@ -14,7 +14,7 @@ this file reported *997 rows, 0 mismatches, OK*, because for 946 of those rows
 the app's own answer IS that column.  A fixture whose stored figure equals its
 derived one cannot tell the two implementations apart, so none here does.  Since
 plan step X-au-c2 a derived row cannot even hold a rival figure:
-:func:`_declare_derived` empties the column as it stamps the source, because
+``declare_derived`` empties the column as it stamps the source, because
 ``ck_transactions_amount_ownership`` pairs the two, so the same mutation now
 returns ``None`` where a ``Decimal`` is asserted.  The OWN fixtures still carry
 ``_NOT_AN_ANSWER`` -- for them the column IS the answer, and the figure names
@@ -37,6 +37,19 @@ standard 4.
 The LOAN_PAYMENT rule is graded ONLY here: ``budget.loan_payment_settings`` is
 empty on production, so the oracle prices ``$0.00`` through it and a seeded loan
 is the only place it runs.
+
+**No transfer shadow is born since plan step balance:X-bi-6-4d-2**, and
+``ck_transactions_names_no_transfer`` refuses one (ruling **R-BAL258**).  So
+a case that priced a shadow asks the TRANSFER, or prices its legs through
+``leg_amounts_by_key`` -- each leg worth ``resolve_transfer_amount`` on its
+parent (**R-BAL13**), which is what rule 5 answered for the shadow -- with its
+figures unchanged (ruling **R-BAL167** class 1), and a case that planted a
+shadow asserts the database refuses the shape it planted (class 2).  Rule 5
+itself -- a twin's dispatch to its parent and its refusal of an orphan --
+still ships until plan step balance:X-bi-6-5, so the cases that graded it
+ask a twin built UNSAVED (class 4: the fixture rebuilt, the subject
+unchanged; two of them add a refusal).  Each case says which, and the
+commits that made the change list them.
 """
 
 from datetime import date
@@ -44,6 +57,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app import ref_cache
 from app.enums import AcctTypeEnum, AmountSourceEnum, StatusEnum, TxnTypeEnum
@@ -54,6 +68,7 @@ from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import (
     income_service, pay_list_service, status_seam, template_amount_service,
+    transfer_legs,
 )
 from app.services.amount_ownership import declare_derived, state_own_amount
 from app.services.cash_ledger import (
@@ -62,10 +77,11 @@ from app.services.cash_ledger import (
     derived_amount_basis,
     amount_rule,
     amounts_by_id,
-    contribution_of,
     contributions_by_id,
     definition_cash,
     is_loan_payment_definition,
+    leg_amounts_by_key,
+    leg_contribution_of,
     resolve_transaction_amount,
     resolve_transfer_amount,
 )
@@ -80,6 +96,9 @@ from app.services.cash_ledger._amount_source import (
 )
 from tests._test_helpers import NO_TAX_LAW
 from tests._test_helpers import (
+    a_twin_of,
+    assert_a_twin_is_refused,
+    constraint_name_from,
     write_past_the_amount_seam,
     add_escrow_line,
     add_txn,
@@ -104,6 +123,8 @@ from tests._test_helpers import (
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY
 from app.services.balance_at import BalanceContext
+from app.services.cash_flow_set import PlanItems
+from app.routes.grid._items import build_amount_maps
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_service import _settle as transfer_settle
 
@@ -166,44 +187,15 @@ def _basis_for(seed_user):
     return derived_amount_basis(seed_user["user"].id, seed_user["scenario"].id)
 
 
-def _state_own_amount(row, figure):
-    """Take *row*'s figure back: store *figure* and clear its declaration.
-
-    The other direction of :func:`_declare_derived`, and the same rule: the two
-    columns move together or the flush is refused.  It exists because plan step
-    X-au-g-2c-2 births a transfer shadow DERIVED, so a fixture wanting one that
-    holds its own figure has to state that, where before it was the default.
-    Calls the application's writer for the reason that one does.
-    """
-    state_own_amount(row, figure)
-    db.session.flush()
-    return row
-
-
-def _declare_derived(txn, relation=AmountSourceEnum.TEMPLATE):
-    """Declare *txn* priced by *relation*, which EMPTIES its own amount column.
-
-    The two writes are one act because ``ck_transactions_amount_ownership`` makes
-    them one: a row states either a figure it owns or the relation that prices
-    it, never both.  Every derived TRANSFER fixture in this file goes through
-    here (a transaction row of a definition is born derived by the engine,
-    :func:`_template_row`), so no test can accidentally grade a row the schema
-    would refuse -- which is the shape plan step X-au-c1's own build met
-    (finding **N-260**).
-
-    **It calls the application's own writer since plan step X-au-g-2c-2**, where
-    it spelled the two assignments itself.  A fixture that restates a production
-    rule can drift from it, and this one would have: the seam it now calls is
-    what ``transfer_service`` writes shadows through, so a test building a
-    derived row builds it the way the app does.
-    """
-    declare_derived(txn, relation)
-    db.session.flush()
-    return txn
-
-
 def _declare_transfer_derived(xfer):
-    """The transfer twin of :func:`_declare_derived`.
+    """Declare *xfer* priced by its definition, which EMPTIES its amount column.
+
+    The application's own writer (``declare_derived``), flushed: a row states
+    either a figure it owns or the relation that prices it, never both
+    (``ck_transfers_amount_ownership``).  It had a transaction twin,
+    ``_declare_derived``, which declared shadow rows and went with its last
+    caller at plan step balance:X-bi-6-4d-2, where no shadow is born (ruling
+    **R-BAL167** class 4), with ``_state_own_amount``, its other direction.
 
     Only ``template`` can price a transfer -- a transfer has no parent transfer
     -- so the relation is not a parameter here.  ``ck_transfers_adhoc_owns_amount``
@@ -304,15 +296,69 @@ def _template_row(period, template, *, owns=False):
     return repriced_by_the_owner(txn, _NOT_AN_ANSWER) if owns else txn
 
 
-def _shadow_of(xfer, *, income=False):
-    """Return one shadow of *xfer* -- the expense leg by default."""
-    wanted = ref_cache.txn_type_id(
-        TxnTypeEnum.INCOME if income else TxnTypeEnum.EXPENSE,
-    )
-    return next(
-        shadow for shadow in xfer.shadow_transactions
-        if shadow.transaction_type_id == wanted
-    )
+def _legs_of(xfer):
+    """Return *xfer*'s two legs, from-side first, as a screen reads them.
+
+    ``transfer_legs.leg_of`` on each endpoint.  It replaces ``_shadow_of``,
+    which returned one of the two shadow ROWS and went with its last caller at
+    plan step balance:X-bi-6-4d-2, where no shadow is born (ruling
+    **R-BAL167** class 4): a leg is read off its transfer, and
+    ``leg_amounts_by_key`` prices it.
+    """
+    return [
+        transfer_legs.leg_of(xfer, xfer.from_account_id),
+        transfer_legs.leg_of(xfer, xfer.to_account_id),
+    ]
+
+
+def _twin_holding_its_parent(xfer):
+    """Return *xfer*'s expense twin, unsaved, holding its parent in memory.
+
+    :func:`~tests._test_helpers.a_twin_of` sets foreign-key ids and no
+    relationship, so its unsaved row loads no parent and a rule that read
+    one could not see it.  The parent is set as LOADED state
+    (``set_committed_value``): the row reads ``.transfer`` exactly as a
+    stored shadow did, and nothing is added to the session or flushed --
+    the plain assignment would cascade the row toward the transfer's
+    collection and warn at the next autoflush.  For the rule-5 cases, which
+    grade an arm that ships until plan step balance:X-bi-6-5 on a twin the
+    database refuses (an adversarial review of plan step
+    balance:X-bi-6-4d-2's checkpoint 2d-a found the parentless twin let
+    the refinement ruling **R-BAL10** deleted pass them).
+
+    Args:
+        xfer: The flushed :class:`~app.models.transfer.Transfer`.
+
+    Returns:
+        The unsaved twin, its ``transfer`` loaded as *xfer*.
+    """
+    twin = a_twin_of(xfer, is_income=False)
+    set_committed_value(twin, "transfer", xfer)
+    return twin
+
+
+def _refused_by(row):
+    """Add *row*, flush, and return the name of the constraint that refused it.
+
+    For a ruling **R-BAL167** class-2 case whose planted twin carries
+    something more than :func:`~tests._test_helpers.a_twin_of`'s -- a figure
+    it owns -- so the case asserts which CHECK refuses its own shape.  The
+    session is rolled back after the refusal, so the caller commits first.
+    The two orphan cases planted the twin with its parent link gone through
+    it until their re-expression at plan step balance:X-bi-6-4d-2's
+    checkpoint 2d-a, which asks the resolver of that twin unsaved instead.
+
+    Args:
+        row: The unsaved row to plant.
+
+    Returns:
+        The refusing constraint's name.
+    """
+    db.session.add(row)
+    with pytest.raises(IntegrityError) as excinfo:
+        db.session.flush()
+    db.session.rollback()
+    return constraint_name_from(excinfo.value)
 
 
 def _generated_transfer(
@@ -391,7 +437,7 @@ def _loan_payment(
     seed_user, *, derive, extra=None, to_account=None,
     series=Decimal("1300.00"), stored=Decimal("1250.00"), owns=False,
 ):
-    """A mortgage payment transfer in one of its two modes, and its rows.
+    """A mortgage payment transfer in one of its two modes.
 
     The ENGINE's transfer of the loan's own definition
     (:func:`make_loan_payment_template` -- a MONTHLY rule on the loan's
@@ -411,20 +457,25 @@ def _loan_payment(
     UNREPRESENTABLE rather than merely unused.**  Each shadow held ``$1,200.00``
     so that a manual-mode assertion could prove the rule did not read the
     shadow's own column -- which is exactly what the deleted
-    ``_manual_shadow_amount`` did read.  A shadow declares ``PARENT_TRANSFER``
-    from birth now and ``ck_transactions_amount_ownership`` refuses it a figure,
-    so the distinction the third number graded is made by the schema.  Writing
-    it here raises ``CheckViolation`` at the flush, which is the constraint
-    saying so.
+    ``_manual_shadow_amount`` did read.  From that step a shadow declared
+    ``PARENT_TRANSFER`` from birth and ``ck_transactions_amount_ownership``
+    refused it a figure, so the distinction the third number graded was made
+    by the schema while shadows were born.  None is born now, and
+    ``ck_transactions_names_no_transfer`` refuses a row naming a transfer, so
+    writing one here raises ``CheckViolation`` at the flush, which is the
+    constraint saying so.
 
-    ``owns=True`` takes the pair for the OWNER at ``stored`` through the
-    transfer door (:func:`transfer_repriced_by_the_owner`) and then takes each
-    shadow's figure back to ``$1,200.00`` -- production's shape, where nothing
-    is declared and ``budget.loan_payment_settings`` is empty -- and is what
-    the one test that must watch the PRODUCER read the column uses.
+    ``owns=True`` takes the transfer for the OWNER at ``stored`` through the
+    transfer door (:func:`transfer_repriced_by_the_owner`).  It also took each
+    shadow's figure back to ``$1,200.00`` until plan step balance:X-bi-6-4d-2,
+    where no shadow is born and the database refuses one (ruling
+    **R-BAL258**), so that figure went with its row: the one case that named
+    it names the transfer's own ``$1,250.00`` as the rival base instead
+    (ruling **R-BAL272**).
 
-    Returns ``(shadow, rows)``: the checking-side expense shadow, and both
-    shadows, which is what a basis is built over.
+    Returns the transfer.  It returned ``(the checking-side shadow, both
+    shadows)`` until that step (ruling **R-BAL167** class 4); a case that
+    priced a shadow asks the transfer or its legs (:func:`_legs_of`).
     """
     loan = _mortgage(seed_user) if to_account is None else to_account
     template = make_loan_payment_template(
@@ -437,16 +488,17 @@ def _loan_payment(
     )
     if owns:
         transfer_repriced_by_the_owner(xfer, stored)
-    shadows = list(xfer.shadow_transactions)
-    if owns:
-        for shadow in shadows:
-            _state_own_amount(shadow, Decimal("1200.00"))
     db.session.flush()
-    return _shadow_of(xfer), shadows
+    return xfer
 
 
 def _declare_loan_payment_derived(xfer):
-    """Declare a loan payment's parent and its CHECKING-side shadow derived.
+    """Declare a loan payment's transfer derived.
+
+    **It declares the TRANSFER alone since plan step balance:X-bi-6-4d-2**,
+    where no shadow is born (ruling **R-BAL167** class 4); it looped the
+    transfer's shadows first, and the paragraphs below are the history of
+    that loop's scope.
 
     Separate from :func:`_generated_transfer` for two reasons.  One is ordering:
     a test builds the payment, watches the producer price it off the stored
@@ -475,8 +527,6 @@ def _declare_loan_payment_derived(xfer):
     X-au-g-2c routed.  Three weeks between the diagnosis and its true cause,
     which is why a finding's claim is re-measured before its remedy is built.
     """
-    for shadow in xfer.shadow_transactions:
-        _declare_derived(shadow, AmountSourceEnum.PARENT_TRANSFER)
     return _declare_transfer_derived(xfer)
 
 
@@ -616,7 +666,7 @@ class TestWhichRulePricesARow:
         txn = _template_row(seed_periods[0], template)
         assert amount_rule(txn) is AmountRule.SALARY
 
-    def test_a_loan_payment_SHADOW_is_priced_by_its_parent_like_any_other(
+    def test_a_loan_payment_SHADOW_is_refused_like_any_other(
         self, app, db, seed_user, seed_periods,
     ):
         """The precedence this used to assert is DELETED, not re-ordered.
@@ -634,9 +684,30 @@ class TestWhichRulePricesARow:
         row does not take rule 4* is exactly what a re-introduced refinement
         would break, and it is a derive-mode payment -- the shape that DID take
         it.
+
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
+        ``test_a_loan_payment_SHADOW_is_priced_by_its_parent_like_any_other``;
+        ruling **R-BAL167** class 4, with a refusal added).  It planted
+        nothing: it classified the expense shadow the ENGINE made, and no
+        shadow is born now.  Its subject stands -- rule 5's dispatch,
+        ``_rule_is_parent_transfer`` answering TRANSFER for a twin whatever its
+        parent is -- and is asked of the same twin built UNSAVED and holding
+        its parent in memory (:func:`_twin_holding_its_parent`), the one
+        fixture change.  The parent is what a re-introduced refinement would
+        read: restoring the one ruling R-BAL10 deleted answers LOAN_PAYMENT
+        for this derive-mode payment's twin and fails here (measured; the
+        twin cp2d-a asked held no parent and passed it).  The added refusal
+        is why that twin exists only in memory: the database
+        refuses it (``ck_transactions_names_no_transfer``, ruling
+        **R-BAL258**), so no stored row of a loan payment can take rule 4 by
+        being its shadow.  The generic transfer's case below asks the same of
+        another parent.  The case goes with rule 5, at plan step
+        balance:X-bi-6-5.
         """
-        shadow, _rows = _loan_payment(seed_user, derive=True)
-        assert amount_rule(shadow) is AmountRule.TRANSFER
+        xfer = _loan_payment(seed_user, derive=True)
+        db.session.commit()
+        assert amount_rule(_twin_holding_its_parent(xfer)) is AmountRule.TRANSFER
+        assert_a_twin_is_refused(db.session, xfer, is_income=False)
 
     def test_a_loan_payment_TRANSFER_beats_the_series_rule(
         self, app, db, seed_user, seed_periods,
@@ -653,22 +724,37 @@ class TestWhichRulePricesARow:
         reachable: a transfer carrying its own figure takes rule 1 first,
         whatever its template says (**R-IO**).
         """
-        _shadow, rows = _loan_payment(seed_user, derive=True)
-        assert transfer_amount_rule(rows[0].transfer) is (
-            AmountRule.LOAN_PAYMENT
-        )
+        xfer = _loan_payment(seed_user, derive=True)
+        assert transfer_amount_rule(xfer) is AmountRule.LOAN_PAYMENT
 
-    def test_a_generic_transfer_shadow_is_priced_by_its_parent(
+    def test_a_generic_transfer_shadow_is_refused(
         self, app, db, seed_user, seed_periods,
     ):
-        """A shadow with no loan settings behind it takes the transfer rule."""
+        """A twin with no loan settings behind it takes the transfer rule, and cannot be stored.
+
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
+        ``test_a_generic_transfer_shadow_is_priced_by_its_parent``; ruling
+        **R-BAL167** class 4, with a refusal added).  It planted nothing: it
+        classified the expense shadow the ENGINE made, and no shadow is born
+        now.  Its subject -- rule 5's dispatch, the twin of a generic transfer
+        taking the transfer rule -- is asked of the same twin built UNSAVED
+        and holding its parent in memory (:func:`_twin_holding_its_parent`),
+        the one fixture change, and the database's refusal of that twin is
+        added
+        (``ck_transactions_names_no_transfer``, ruling **R-BAL258**).  What
+        the twin answered is asked of the transfer's legs in
+        :class:`TestWhatEachRuleAnswers`.  The case goes with rule 5, at plan
+        step balance:X-bi-6-5.
+        """
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
         xfer, _ = _generated_transfer(
             seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
         )
-        assert amount_rule(_shadow_of(xfer)) is AmountRule.TRANSFER
+        db.session.commit()
+        assert amount_rule(_twin_holding_its_parent(xfer)) is AmountRule.TRANSFER
+        assert_a_twin_is_refused(db.session, xfer, is_income=False)
 
     def test_a_row_that_took_its_figure_back_owns_it_again(
         self, app, db, seed_user, seed_periods,
@@ -686,10 +772,24 @@ class TestWhichRulePricesARow:
         assert amount_rule(txn) is AmountRule.OWN
         assert _resolve(seed_user, txn) == Decimal(_NOT_AN_ANSWER)
 
-    def test_a_shadow_that_took_its_figure_back_owns_it_again(
+    def test_a_shadow_that_took_its_figure_back_is_refused(
         self, app, db, seed_user, seed_periods,
     ):
-        """The same on the shadow side -- 12 such rows exist on the production clone."""
+        """A twin that owns a figure is refused: no shadow takes its figure back now.
+
+        It was the case above on the shadow side, a shape production held,
+        until plan step balance:X-bi-6-4d-2 deleted every twin.
+
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
+        ``test_a_shadow_that_took_its_figure_back_owns_it_again``; ruling
+        **R-BAL167** class 2).  The planted shape is a twin that OWNS
+        ``$77.77`` -- a figure and no source -- which passes
+        ``ck_transactions_amount_ownership``, so the CHECK that refuses it is
+        ``ck_transactions_names_no_transfer`` (ruling **R-BAL258**; run before
+        it was asserted).  A transfer that took its figure back is graded on
+        the transfer itself:
+        :meth:`TestTheTransferRule.test_a_generated_transfer_that_carries_a_figure_owns_it`.
+        """
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
@@ -697,11 +797,10 @@ class TestWhichRulePricesARow:
             seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
             owns=True,
         )
-        shadow = _shadow_of(xfer)
-        state_own_amount(shadow, Decimal("77.77"))
-        db.session.flush()
-        assert amount_rule(shadow) is AmountRule.OWN
-        assert _resolve(seed_user, shadow) == Decimal("77.77")
+        db.session.commit()
+        twin = a_twin_of(xfer, is_income=False)
+        state_own_amount(twin, Decimal("77.77"))
+        assert _refused_by(twin) == "ck_transactions_names_no_transfer"
 
     def test_soft_deleting_a_row_does_not_change_which_rule_prices_it(
         self, app, db, seed_user, seed_periods,
@@ -812,9 +911,10 @@ class TestTheDeclarationDecides:
         """A transfer has no parent transfer, so that relation names nothing.
 
         The totality of the transfer arm.  ``ref.amount_sources`` holds both
-        members and nothing at the storage tier scopes one of them to the
-        shadow table, so the refusal is the only thing that tells a writer which
-        of the two tables it confused.
+        members and nothing at the storage tier says which table may store
+        which -- the flush below stores ``PARENT_TRANSFER`` on a transfer -- so
+        the refusal is the only thing that tells a writer which of the two
+        tables it confused.
         """
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
@@ -994,10 +1094,10 @@ class TestWhatEachRuleAnswers:
             f"rule reading anything else would still answer {before}"
         )
 
-    def test_a_transfer_shadow_answers_its_parents_RULE_not_either_column(
+    def test_a_transfer_leg_answers_its_parents_RULE_not_its_column(
         self, app, db, seed_user, seed_periods,
     ):
-        """Transfer Invariant 3 becomes structural: the shadow reads the parent's rule.
+        """Transfer Invariant 3 becomes structural: the leg reads the parent's rule.
 
         Neither column can hold a rival figure any more -- the declaration empties
         both -- so the assertion discriminates between the definition's
@@ -1006,6 +1106,12 @@ class TestWhatEachRuleAnswers:
         difference plan step X-au-c2 makes: before it, the shadow's own column
         and its parent's were both populated and only the review's three-figure
         fixture told a column-reading resolver from a rule-resolving one.
+
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
+        ``test_a_transfer_shadow_answers_its_parents_RULE_not_either_column``;
+        ruling **R-BAL167** class 1).  No shadow is born, so the expense side
+        is its LEG, priced by ``leg_amounts_by_key``; the shadow's empty column
+        went with the shadow, and the parent's empty column stands.
         """
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
@@ -1013,12 +1119,13 @@ class TestWhatEachRuleAnswers:
         xfer, _ = _generated_transfer(
             seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
         )
-        shadow = _shadow_of(xfer)
-        assert shadow.estimated_amount is None
+        expense_leg, _income_leg = _legs_of(xfer)
         assert xfer.amount is None
-        assert _resolve(seed_user, shadow) == _OLD_PRICE
+        assert leg_amounts_by_key([expense_leg], _basis_for(seed_user)) == {
+            expense_leg.cell_key: _OLD_PRICE,
+        }
 
-    def test_both_shadows_of_one_transfer_answer_the_same_figure(
+    def test_both_legs_of_one_transfer_answer_the_same_figure(
         self, app, db, seed_user, seed_periods,
     ):
         """Invariant 3 for the PAIR: both legs answer their parent, not themselves.
@@ -1027,6 +1134,13 @@ class TestWhatEachRuleAnswers:
         each shadow's own column would answer two numbers where one is right.
         The declaration empties both columns instead, so such a resolver now
         answers ``None`` twice -- the same discrimination, made structural.
+
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
+        ``test_both_shadows_of_one_transfer_answer_the_same_figure``; ruling
+        **R-BAL167** class 1).  The two legs are read off one transfer and
+        priced by ``leg_amounts_by_key``, one ``resolve_transfer_amount`` on
+        that transfer each, so they cannot answer two figures: what is
+        asserted is that BOTH sides are priced, each at the parent's rule.
         """
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
@@ -1034,19 +1148,25 @@ class TestWhatEachRuleAnswers:
         xfer, _ = _generated_transfer(
             seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
         )
-        expense_leg, income_leg = _shadow_of(xfer), _shadow_of(xfer, income=True)
-        basis = _basis_for(seed_user)
-        assert resolve_transaction_amount(expense_leg, basis) == _OLD_PRICE
-        assert resolve_transaction_amount(income_leg, basis) == _OLD_PRICE
+        assert leg_amounts_by_key(_legs_of(xfer), _basis_for(seed_user)) == {
+            (xfer.id, seed_user["account"].id): _OLD_PRICE,
+            (xfer.id, savings.id): _OLD_PRICE,
+        }
 
-    def test_a_shadow_of_an_adhoc_transfer_answers_the_parents_own_figure(
+    def test_a_leg_of_an_adhoc_transfer_answers_the_parents_own_figure(
         self, app, db, seed_user, seed_periods,
     ):
-        """An ad-hoc parent owns its amount, and the shadow follows it there.
+        """An ad-hoc parent owns its amount, and the leg follows it there.
 
         Zero ad-hoc transfers exist on the production clone, so this shape is
         graded here and nowhere else -- and it is the arm that decides whether
         the transfer rule is total for a transfer nobody generated.
+
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
+        ``test_a_shadow_of_an_adhoc_transfer_answers_the_parents_own_figure``;
+        ruling **R-BAL167** class 1): the expense side is its leg, priced by
+        ``leg_amounts_by_key``, where the expense shadow was declared derived
+        and resolved.
         """
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
@@ -1055,11 +1175,11 @@ class TestWhatEachRuleAnswers:
             seed_user, db.session, seed_user["account"], savings,
             seed_periods[0], amount=Decimal("75.00"),
         )
-        shadow = _declare_derived(
-            _shadow_of(xfer), AmountSourceEnum.PARENT_TRANSFER,
-        )
+        expense_leg, _income_leg = _legs_of(xfer)
         assert xfer.amount_source_id is None
-        assert _resolve(seed_user, shadow) == Decimal("75.00")
+        assert leg_amounts_by_key([expense_leg], _basis_for(seed_user)) == {
+            expense_leg.cell_key: Decimal("75.00"),
+        }
 
 
 class TestTheTransferRule:
@@ -1225,11 +1345,31 @@ class TestEveryRefusalFires:
     def test_a_shadow_whose_parent_is_gone_is_refused(
         self, app, db, seed_user, seed_periods,
     ):
-        """An orphaned shadow has nothing for its amount to be equal to.
+        """An orphaned twin has nothing for its amount to be equal to.
 
-        Reached the way it is reachable -- the parent deleted in this session
-        while the shadow still carries its id -- rather than by assigning a
-        state the FK forbids.
+        It was reached on the ENGINE's shadow with its parent detached in
+        memory (``shadow.transfer = None``), never flushed, rather than by
+        storing a state the key forbids.
+
+        **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
+        class 4; its subject and its assertion unchanged).  No shadow is born,
+        so the orphan is the expense twin built UNSAVED
+        (:func:`~tests._test_helpers.a_twin_of`): it carries its transfer's
+        id, as the detached shadow did, and being unsaved it loads no parent
+        (measured), which is the state the shadow reached by having its
+        parent detached.  Rule 5's guard refuses it exactly as it refused
+        that shadow.  Checkpoint 2d-a also cleared the link, which let a guard
+        keyed on the COLUMN rather than on the loaded parent pass this case
+        (the review of 2d-a, measured); the link is kept since 2d-b.
+        The guard is live although the twin itself cannot be stored
+        (``ck_transactions_names_no_transfer``; with its link cleared it
+        names no link, which ``ck_transactions_one_pricing_link`` refuses,
+        pinned by ``tests/test_models/test_template_row_needs_due_date.py``'s
+        ``test_an_undated_row_that_names_no_link_at_all_is_refused``): a
+        definition's row declaring ``PARENT_TRANSFER`` passes every CHECK, is
+        stored, and reaches this guard (measured at this step).  No door
+        writes one.  The case goes with the guard, at plan step
+        balance:X-bi-6-5.
         """
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
@@ -1237,11 +1377,11 @@ class TestEveryRefusalFires:
         xfer, _ = _generated_transfer(
             seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
         )
-        shadow = _shadow_of(xfer)
+        db.session.commit()
+        orphan = a_twin_of(xfer, is_income=False)
         basis = _basis_for(seed_user)
-        shadow.transfer = None
         with pytest.raises(AmountUnresolvable, match="could not be loaded"):
-            resolve_transaction_amount(shadow, basis)
+            resolve_transaction_amount(orphan, basis)
 
     def test_a_generated_transfer_with_no_stated_price_is_refused(
         self, app, db, seed_user, seed_periods,
@@ -1319,7 +1459,7 @@ class TestEveryRefusalFires:
 class TestTheLoanPaymentRule:
     """The rule production cannot exercise: ``loan_payment_settings`` is empty there."""
 
-    def test_a_derive_mode_shadow_answers_the_loans_own_figure(
+    def test_a_derive_mode_payment_answers_the_loans_own_figure(
         self, app, db, seed_user, seed_periods,
     ):
         """P&I + the escrow in effect on the installment's due date.
@@ -1329,28 +1469,41 @@ class TestTheLoanPaymentRule:
             escrow = 3,600 / 12                  =   300.00
             PITI                                 = 1,499.10
 
-        The definition says ``$1,300.00``, the parent's column ``$1,250.00`` and
-        the shadow's ``$1,200.00`` -- three figures the loan's own answer is not.
+        The definition says ``$1,300.00`` -- a figure the loan's own answer is
+        not.
+
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
+        ``test_a_derive_mode_shadow_answers_the_loans_own_figure``; ruling
+        **R-BAL167** class 1): asked of the TRANSFER, whose rule the shadow
+        answered.  The sentence above named three figures -- the definition's,
+        the parent's ``$1,250.00`` and the shadow's ``$1,200.00`` -- and this
+        fixture stores neither of the other two: the payment is not taken for
+        an owner, and no shadow is born.
         """
-        shadow, _rows = _loan_payment(seed_user, derive=True)
+        xfer = _loan_payment(seed_user, derive=True)
         basis = _basis_for(seed_user)
-        assert resolve_transaction_amount(shadow, basis) == Decimal("1499.10")
+        assert resolve_transfer_amount(xfer, basis) == Decimal("1499.10")
 
     def test_a_manual_payment_with_no_extra_answers_its_stated_base(
         self, app, db, seed_user, seed_periods,
     ):
         """Manual mode's base is a STATED amount, so its DEFINITION holds it.
 
-        The definition states ``$1,300.00``; the parent's column says
-        ``$1,250.00`` and the shadow's ``$1,200.00``.  A review found the earlier
-        fixture setting all three equal, which made the test pass for every
+        The definition states ``$1,300.00``.  A review found the earlier
+        fixture setting every figure equal, which made the test pass for every
         candidate implementation -- and the loan's own P&I of ``$1,199.10`` must
         not appear either.
+
+        Asked of the TRANSFER since plan step balance:X-bi-6-4d-2, whose rule
+        the shadow answered (ruling **R-BAL167** class 1).  The sentence above
+        also named the parent's ``$1,250.00`` and the shadow's ``$1,200.00``,
+        and this fixture stores neither: the payment is not taken for an
+        owner, and no shadow is born.
         """
-        shadow, _rows = _loan_payment(seed_user, derive=False)
+        xfer = _loan_payment(seed_user, derive=False)
         basis = _basis_for(seed_user)
-        assert transfer_amount_rule(shadow.transfer) is AmountRule.LOAN_PAYMENT
-        assert resolve_transaction_amount(shadow, basis) == Decimal("1300.00")
+        assert transfer_amount_rule(xfer) is AmountRule.LOAN_PAYMENT
+        assert resolve_transfer_amount(xfer, basis) == Decimal("1300.00")
 
     def test_a_manual_payment_answers_the_same_base_with_and_without_an_extra(
         self, app, db, seed_user, seed_periods,
@@ -1374,23 +1527,35 @@ class TestTheLoanPaymentRule:
         ``$1,200.00 + $150.00`` -- asserted against the column while the shadow
         still holds one, and then contradicted by the resolver once the shadow
         is derived.  The discrimination is the same and one producer shorter.
+
+        **The rival base is the TRANSFER's stored ``$1,250.00`` since plan
+        step balance:X-bi-6-4d-2** -- ruling **R-BAL272**, the developer's
+        answer, picked verbatim: "Use $1,250.00 (Recommended)": "The stored
+        figure the test names becomes the transfer's own $1,250.00 (a wrong
+        answer would be $1,250.00 + $150.00 = $1,400.00). The test then makes
+        the payment follow its definition, checks the stored figure is gone,
+        and checks the price is still $1,450.00. Same check as before, on the
+        one row that can still hold a figure. Listed in the commit."  The
+        shadow's ``$1,200.00`` it
+        named before went with the shadow, which the database refuses (ruling
+        **R-BAL258**).
         """
-        shadow, _rows = _loan_payment(
+        xfer = _loan_payment(
             seed_user, derive=False, extra=Decimal("150.00"),
             owns=True,
         )
         basis = _basis_for(seed_user)
-        # The base the deleted producer read, still on the row: $1,200.00.
-        # Adding the extra to THIS is the answer the resolver must not give --
-        # $1,350.00 rather than the definition's $1,300.00 + $150.00.
-        assert shadow.estimated_amount == Decimal("1200.00")
-        _declare_loan_payment_derived(shadow.transfer)
+        # The stored base a wrong rule would add the extra to: the transfer's
+        # own $1,250.00, which would answer $1,250.00 + $150.00 = $1,400.00
+        # rather than the definition's $1,300.00 + $150.00.
+        assert xfer.amount == Decimal("1250.00")
+        _declare_loan_payment_derived(xfer)
         # Declaring it EMPTIES that column, so the rival base is not merely
         # unread -- it is unconstructible.  Asserting the absence says which of
-        # the two facts holds; a ``!= 1350`` beside the equality below would be
+        # the two facts holds; a ``!= 1400`` beside the equality below would be
         # entailed by it and could never fail on its own.
-        assert shadow.estimated_amount is None
-        assert resolve_transaction_amount(shadow, basis) == Decimal("1450.00")
+        assert xfer.amount is None
+        assert resolve_transfer_amount(xfer, basis) == Decimal("1450.00")
 
     def test_a_derive_mode_payment_whose_loan_will_not_resolve_is_refused(
         self, app, db, seed_user, seed_periods,
@@ -1406,12 +1571,14 @@ class TestTheLoanPaymentRule:
         savings = create_savings_account(
             seed_user, db.session, "Not A Loan", Decimal("5000.00"),
         )
-        shadow, _rows = _loan_payment(
+        xfer = _loan_payment(
             seed_user, derive=True, to_account=savings,
         )
         basis = _basis_for(seed_user)
+        # Asked of the TRANSFER, whose rule the shadow answered, since plan
+        # step balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
         with pytest.raises(AmountUnresolvable, match="would not resolve"):
-            resolve_transaction_amount(shadow, basis)
+            resolve_transfer_amount(xfer, basis)
 
 
 def _row_of(xfer) -> DefinitionRow:
@@ -1460,29 +1627,29 @@ class TestTheDefinitionPriceIsTheRowsOwnRule:
         self, app, db, seed_user, seed_periods,
     ):
         """Rule 4, derive arm: P&I $1,199.10 + escrow $300.00 = $1,499.10."""
-        shadow, _rows = _loan_payment(seed_user, derive=True)
+        xfer = _loan_payment(seed_user, derive=True)
         basis = _basis_for(seed_user)
-        row = _row_of(shadow.transfer)
+        row = _row_of(xfer)
 
         estimate = definition_cash(row, basis, subject="the estimate")
 
-        assert estimate == resolve_transfer_amount(shadow.transfer, basis)
+        assert estimate == resolve_transfer_amount(xfer, basis)
         assert estimate == Decimal("1499.10")
-        assert is_loan_payment_definition(shadow.transfer.template)
+        assert is_loan_payment_definition(xfer.template)
 
     def test_a_manual_loan_payment_with_an_extra_answers_the_rows_rule_4_figure(
         self, app, db, seed_user, seed_periods,
     ):
         """Rule 4, manual arm: the stated $1,300.00 plus the standing $150.00."""
-        shadow, _rows = _loan_payment(
+        xfer = _loan_payment(
             seed_user, derive=False, extra=Decimal("150.00"),
         )
         basis = _basis_for(seed_user)
-        row = _row_of(shadow.transfer)
+        row = _row_of(xfer)
 
         estimate = definition_cash(row, basis, subject="the estimate")
 
-        assert estimate == resolve_transfer_amount(shadow.transfer, basis)
+        assert estimate == resolve_transfer_amount(xfer, basis)
         assert estimate == Decimal("1450.00")
 
     def test_an_empty_series_refuses_and_names_the_subject(
@@ -1525,48 +1692,72 @@ class TestTheDefinitionPriceIsTheRowsOwnRule:
         savings = create_savings_account(
             seed_user, db.session, "Not A Loan", Decimal("5000.00"),
         )
-        shadow, _rows = _loan_payment(
+        xfer = _loan_payment(
             seed_user, derive=True, to_account=savings,
         )
         basis = _basis_for(seed_user)
 
         with pytest.raises(AmountUnresolvable, match="would not resolve"):
-            definition_cash(_row_of(shadow.transfer), basis, subject="the estimate")
+            definition_cash(_row_of(xfer), basis, subject="the estimate")
 
 
 class TestAShadowWithNoParentRefuses:
-    """Rule 5's orphan refusal, which every derived shadow now stands on."""
+    """Rule 5's orphan refusal, graded on an unsaved twin since no shadow is born."""
 
     def test_a_shadow_whose_parent_is_gone_refuses_rather_than_guessing(
         self, app, db, seed_user, seed_periods,
     ):
-        """A leg with no parent has nothing to be equal to, so it REFUSES.
+        """A twin with no parent has nothing to be equal to, so rule 5 REFUSES.
 
         Advertised in ``_transfer_answer``'s own ``Raises:`` and in
-        ``tests._test_helpers.shadow_amount``'s, and graded nowhere until an
-        adversarial review of plan step X-au-g-2c-2 counted it.  It matters more
-        after that step than before: EVERY transfer shadow is derived now, so
-        rule 5 is the terminal answer for every one of them, and a fallback here
-        would publish ``None`` into a money path for a pair that has broken
-        Transfer Invariant 2.
+        ``tests._test_helpers.shadow_amount``'s (a helper deleted at plan step
+        ``balance:X-bi-6-4d-2``, which deleted the shadows it priced), and
+        graded nowhere until an adversarial review of plan step X-au-g-2c-2
+        counted it.  It mattered
+        more after that step than before: every transfer shadow was derived
+        then, so rule 5 was the terminal answer for every one of them, and a
+        fallback here would have published ``None`` into a money path for a
+        pair that had broken Transfer Invariant 2.
 
-        The parent is detached in memory rather than deleted, because
-        ``transactions.transfer_id`` is ``ON DELETE CASCADE`` -- the database
-        cannot hold an orphan, which is what makes this a defensive refusal
-        rather than a reachable state, and is worth saying beside the case.
+        The parent was detached in memory rather than deleted, because
+        ``transactions.transfer_id`` was ``ON DELETE CASCADE`` -- the database
+        could not hold an orphan shadow, which made this a defensive refusal
+        rather than a reachable state.
+
+        **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
+        class 4: the fixture rebuilt, its two assertions unchanged).  No
+        shadow is born, so the row is the expense twin built UNSAVED and
+        holding its parent in memory (:func:`_twin_holding_its_parent`): it is
+        priced through rule 5 at the manual payment's ``$1,300.00`` -- the
+        same-row control, which grades rule 5's HAPPY path, so a guard that
+        refused every twin fails here -- and then its parent is detached in
+        memory with its link still carried, as the shadow's was, and the
+        guard refuses it.  Checkpoint 2d-a asked the precondition of the
+        transfer instead and cleared the link, which let both of those guard
+        mutations pass (the review of 2d-a, measured); both are restored
+        since 2d-b.  The guard is still reachable by a STORED row: a
+        definition's row declaring ``PARENT_TRANSFER`` passes every CHECK
+        (measured at this step; no door writes one), while the twin itself
+        cannot be stored (``ck_transactions_names_no_transfer``).
+        :meth:`TestEveryRefusalFires.test_a_shadow_whose_parent_is_gone_is_refused`
+        grades the same guard under a generic transfer.  Both go with the
+        guard, at plan step balance:X-bi-6-5.
         """
         savings = create_savings_account(
             seed_user, db.session, "Sinking", Decimal("500.00"),
         )
-        shadow, _rows = _loan_payment(
+        xfer = _loan_payment(
             seed_user, derive=False, to_account=savings,
         )
         basis = _basis_for(seed_user)
-        assert resolve_transaction_amount(shadow, basis) == Decimal("1300.00")
+        db.session.commit()
+        twin = _twin_holding_its_parent(xfer)
+        assert resolve_transaction_amount(twin, basis) == Decimal("1300.00")
 
-        shadow.transfer = None
+        # The parent detached in memory, the link still carried.
+        set_committed_value(twin, "transfer", None)
         with pytest.raises(AmountUnresolvable, match="could not be loaded"):
-            resolve_transaction_amount(shadow, basis)
+            resolve_transaction_amount(twin, basis)
 
 
 class TestTheBatchTier:
@@ -1580,12 +1771,20 @@ class TestTheBatchTier:
         Which rule prices a row is a fact about the row; merging the two first
         would make it a question about which map the id turned up in, which is
         the discriminator ruling R-FI refuted.
+
+        **The loan payment is asked as its TRANSFER since plan step
+        balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1), and one clause
+        is gone with no row to ask: ``salary_net_for(shadow, ...) is None``
+        asked the salary derivation about the loan payment's shadow, and the
+        payment is a transfer now, which that derivation (it takes INCOME
+        transaction rows) is never handed.  The claim is narrower by that
+        clause.
         """
         template, _profile = _salary_template(seed_user)
         paycheck = _template_row(
             seed_periods[0], template,
         )
-        shadow, _rows = _loan_payment(seed_user, derive=True)
+        xfer = _loan_payment(seed_user, derive=True)
         basis = _basis_for(seed_user)
 
         # WHICH RULE prices each row is decided by the row, and the two rows
@@ -1593,16 +1792,17 @@ class TestTheBatchTier:
         # until plan step X-au-g-2c-2 deleted that method; the dispatch is the
         # thing the assertion was always about, so it is asserted directly.
         # The loan payment's rule is asked of its PARENT since plan step
-        # X-au-f-2 (ruling R-BAL10) -- the shadow reads that answer.
+        # X-au-f-2 (ruling R-BAL10).
         assert amount_rule(paycheck) is AmountRule.SALARY
-        assert transfer_amount_rule(shadow.transfer) is AmountRule.LOAN_PAYMENT
-        # And neither derivation can answer the other's row, which is what
-        # "apart" means: not two empty maps, but two that cannot cross.
+        assert transfer_amount_rule(xfer) is AmountRule.LOAN_PAYMENT
+        # And each derivation answers its own row.  "Apart" also meant that
+        # the two do not CROSS -- the salary derivation answered nothing for
+        # the loan payment's shadow -- and that clause went with the shadow
+        # (the docstring), so this asserts each answers, not that they part.
         assert income_service.salary_net_for(
             paycheck, basis.salary,
         ) != Decimal(_NOT_AN_ANSWER)
-        assert income_service.salary_net_for(shadow, basis.salary) is None
-        assert resolve_transaction_amount(shadow, basis) == Decimal("1499.10")
+        assert resolve_transfer_amount(xfer, basis) == Decimal("1499.10")
 
     def test_a_basis_answers_for_a_row_it_was_not_built_over(
         self, app, db, seed_user, seed_periods,
@@ -1621,14 +1821,16 @@ class TestTheBatchTier:
         before the row existed at all.
         """
         stale = _basis_for(seed_user)
-        shadow, _rows = _loan_payment(
+        xfer = _loan_payment(
             seed_user, derive=False, extra=Decimal("150.00"),
         )
         # Built before this payment existed, and it prices it: the definition's
         # $1,300.00 plus the standing $150.00.  The review's failing figure was
         # $1,250.00 -- the parent's stored column with the extra dropped -- and
-        # it is named so the assertion cannot pass on a dropped term.
-        assert resolve_transaction_amount(shadow, stale) == Decimal("1450.00")
+        # it is named so the assertion cannot pass on a dropped term.  Asked
+        # of the TRANSFER, whose rule the shadow answered, since plan step
+        # balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
+        assert resolve_transfer_amount(xfer, stale) == Decimal("1450.00")
         other = add_txn(
             db.session, seed_user, seed_periods[0], "Fuel", "60.00",
         )
@@ -1653,6 +1855,18 @@ class TestTheBatchTier:
         by the loan, and a paycheck a HUMAN re-priced answered by its own
         column.  The third is what stops the first from passing on a resolver
         that answers rule 2 for every salary-linked row whatever its ownership.
+
+        **The map is the GRID's merged budgets map since plan step
+        balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1).  The loan
+        payment's two shadow rows sat in ``amounts_by_id`` beside the
+        paychecks; no shadow is born, and a screen holds a transfer's LEGS in
+        the same map by ``leg.cell_key`` (``leg_amounts_by_key``, since plan
+        step ``balance:X-bi-6-1``).  The case asks the GRID's merge,
+        ``build_amount_maps``, rather than restating it here.  It is not the
+        only spelling: the dashboard pulse builds the same rows-plus-legs map
+        inline (``dashboard_service/_pulse.py``), a second home for one
+        derived map (CLAUDE.md rule 14), reported at plan step
+        balance:X-bi-6-4d-2 rather than moved in this tests-only step.
         """
         template, _profile = _salary_template(seed_user)
         paycheck = _template_row(
@@ -1661,17 +1875,21 @@ class TestTheBatchTier:
         repriced = _template_row(
             seed_periods[1], template, owns=True,
         )
-        _shadow, loan_rows = _loan_payment(
+        xfer = _loan_payment(
             seed_user, derive=True,
         )
-        rows = [paycheck, repriced, *loan_rows]
+        legs = _legs_of(xfer)
         basis = _basis_for(seed_user)
 
-        shown = amounts_by_id(rows, basis)
+        shown = build_amount_maps(
+            PlanItems.of([paycheck, repriced], legs), basis,
+        ).budgets
 
-        assert set(shown) == {row.id for row in rows}
-        assert shown[loan_rows[0].id] == Decimal("1499.10")
-        assert shown[loan_rows[1].id] == Decimal("1499.10")
+        assert set(shown) == {
+            paycheck.id, repriced.id, *(leg.cell_key for leg in legs),
+        }
+        assert shown[legs[0].cell_key] == Decimal("1499.10")
+        assert shown[legs[1].cell_key] == Decimal("1499.10")
         assert shown[repriced.id] == Decimal(_NOT_AN_ANSWER)
         assert shown[paycheck.id] > Decimal("0")
         assert shown[paycheck.id] != Decimal(_NOT_AN_ANSWER), (
@@ -1741,33 +1959,43 @@ class TestTheRulesDoNotReadTheColumnTheyReplace:
             db.session.flush()
         db.session.rollback()
 
-    def test_a_shadows_answer_ignores_both_its_own_column_and_its_parents(
+    def test_a_legs_answer_ignores_its_parents_column(
         self, app, db, seed_user, seed_periods,
     ):
-        """Only the definition moves a generated transfer's shadow."""
+        """Only the definition moves a generated transfer's leg.
+
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
+        ``test_a_shadows_answer_ignores_both_its_own_column_and_its_parents``;
+        ruling **R-BAL167** class 1).  The expense side is its LEG, priced by
+        ``leg_amounts_by_key``; the parent's rival ``$2,424.24`` and the
+        re-price to ``$199.00`` stand, and the shadow's own rival
+        ``$4,242.42`` went with the shadow, which has no column to hold it.
+        """
         savings = create_savings_account(
             seed_user, db.session, "Money Market", Decimal("5000.00"),
         )
         xfer, template = _generated_transfer(
             seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
         )
-        shadow = _shadow_of(xfer)
+        expense_leg, _income_leg = _legs_of(xfer)
         basis = _basis_for(seed_user)
         with db.session.no_autoflush:
-            # Both rival figures are written past the mapping, for the reason
+            # The rival figure is written past the mapping, for the reason
             # ``test_a_template_rows_answer_ignores_its_own_column`` states:
-            # the acts would release each row's declaration and the test would
-            # grade two OWN rows.
-            write_past_the_amount_seam(shadow, Decimal("4242.42"))
+            # the act would release the declaration and the test would grade
+            # an OWN row.
             write_past_the_amount_seam(xfer, Decimal("2424.24"))
-            assert resolve_transaction_amount(shadow, basis) == _OLD_PRICE
-            write_past_the_amount_seam(shadow, None)
+            assert leg_amounts_by_key([expense_leg], basis) == {
+                expense_leg.cell_key: _OLD_PRICE,
+            }
             write_past_the_amount_seam(xfer, None)
         template_amount_service.set_amount(
             template, Decimal("199.00"), effective_on=_PRICE_ROSE_ON,
         )
         db.session.flush()
-        assert resolve_transaction_amount(shadow, basis) == Decimal("199.00")
+        assert leg_amounts_by_key([expense_leg], basis) == {
+            expense_leg.cell_key: Decimal("199.00"),
+        }
 
     def test_an_own_rows_answer_follows_its_own_column(
         self, app, db, seed_user, seed_periods,
@@ -1929,7 +2157,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
         # second ask must be the same live net, not merely cheap.
         assert _first[first.id] == _second[second.id] > Decimal("0")
 
-    def test_the_loan_resolve_runs_ONCE_however_many_shadows_ask(
+    def test_the_loan_resolve_runs_ONCE_however_many_legs_ask(
         self, app, db, seed_user, seed_periods,
     ):
         """Both legs of one payment, one basis, one loan resolve.
@@ -1944,22 +2172,34 @@ class TestTheBasisIsOneDerivationPerReadPass:
         **It asks the RESOLVER since plan step X-au-g-2c-2**, where it asked
         ``basis.loans.live_cash``.  That is a wider claim rather than a
         translation: the memo it grades is still ``LoanPricing._loan``, but the
-        path now runs through ``amount_rule`` and rule 4, so a second leg that
-        re-read its transfer or re-resolved its template would show up here too.
-        Both legs are ``_touch``-ed first, so the relationship loads are not
-        what the count measures.
+        path ran through ``amount_rule`` and rule 4, so a second shadow that
+        re-read its transfer or re-resolved its template showed up here too.
+        Both shadows were ``_touch``-ed first, so the relationship loads were
+        not what the count measured.
+
+        **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
+        ``test_the_loan_resolve_runs_ONCE_however_many_shadows_ask``; ruling
+        **R-BAL167** class 1).  The two asks are the payment's two LEGS, each
+        priced by ``leg_amounts_by_key``, where they were its two shadow rows
+        priced by the resolver.  Both legs hold ONE transfer, so the second
+        cannot re-read it.  What the empty second count can see is a
+        STATEMENT: a loan resolved again, or any explicit query.  The
+        definition and its settings are relationships the first ask loaded,
+        so reading them again issues none, and this count cannot say whether
+        the second ask re-read them.  The legs are built after the commit and
+        before either capture, which reads the transfer's columns back where
+        ``_touch`` read each row's.
         """
-        _shadow, rows = _loan_payment(seed_user, derive=True)
-        first, second = rows
+        xfer = _loan_payment(seed_user, derive=True)
         db.session.commit()
         basis = _basis_for(seed_user)
-        _touch(first, second)
+        first, second = _legs_of(xfer)
 
         _first, first_statements = capture_sql_statements(
-            lambda: resolve_transaction_amount(first, basis),
+            lambda: leg_amounts_by_key([first], basis)[first.cell_key],
         )
         _second, second_statements = capture_sql_statements(
-            lambda: resolve_transaction_amount(second, basis),
+            lambda: leg_amounts_by_key([second], basis)[second.cell_key],
         )
 
         assert first_statements, "the first ask must resolve the loan"
@@ -1989,16 +2229,25 @@ class TestTheBasisIsOneDerivationPerReadPass:
 
         The control is unchanged in kind and stronger in reach -- it now spans
         two packages rather than two callers of one method: what the screen
-        publishes (``amounts_by_id``) and what a tick would book
-        (``transfer_service.settle_amount``) must be the same figure.
+        publishes (``leg_amounts_by_key``) and what a tick would book
+        (``transfer_service.leg_settle_amount``) must be the same figure.
+        Both are asked of the checking-side LEG since plan step
+        ``balance:X-bi-6-4d-2``, which prices a leg off its transfer and its
+        side's record and deleted ``settle_amount(shadow)``; they were asked
+        of the checking-side twin row until then (``amounts_by_id``,
+        ``settle_amount``), and the figure is unchanged (ruling R-BAL167
+        class 1, plan step balance:X-bi-6-4d-2).
         """
-        shadow, rows = _loan_payment(seed_user, derive=True)
+        # The payment is the transfer, and the leg is its checking side, where
+        # it was the checking-side shadow's transfer and account until plan
+        # step balance:X-bi-6-4d-2 (ruling R-BAL167 class 4).
+        xfer = _loan_payment(seed_user, derive=True)
         db.session.commit()
         basis = _basis_for(seed_user)
-        _touch(*rows)
+        leg = transfer_legs.grid_transfer_leg(xfer, xfer.from_account_id)
 
-        displayed = amounts_by_id(rows, basis)[shadow.id]
-        booked = transfer_settle.settle_amount(shadow, basis)
+        displayed = leg_amounts_by_key([leg], basis)[leg.cell_key]
+        booked = transfer_settle.leg_settle_amount(leg, basis)
 
         assert booked == displayed == Decimal("1499.10")
 
@@ -2115,7 +2364,7 @@ class TestABudgetIsNotAContribution:
         **The two assertions guard DIFFERENT things, and an adversarial review
         corrected this paragraph's account of the first.**  It said the second
         alone would pass against a producer that had gone back to reading the
-        column; it would not -- ``_declare_derived`` EMPTIES the column, so such
+        column; it would not -- ``declare_derived`` EMPTIES the column, so such
         a producer refuses and the second assertion fails, which is exactly what
         a mutation of rule 3 measured.  What ``estimated_amount is None`` guards
         is the FIXTURE: a later change to ``_template_row`` or to the engine's
@@ -2313,18 +2562,29 @@ class TestPricingReadsNoSTATUS:
         (ruling E-21), while its CONTRIBUTION is ``$0.00``.  Both are asserted,
         because either alone would pass on a rule that had started reading
         status.
-        """
-        shadow, _rows = _loan_payment(seed_user, derive=True)
-        shadow.status_id = ref_cache.status_id(status_enum)
-        db.session.flush()
-        # The status RELATIONSHIP, not just the column: ``fixed_contribution``
-        # reads ``txn.status`` and the assignment above moves only the id, so
-        # an unexpired row would answer the contribution of the status it had.
-        db.session.refresh(shadow)
-        basis = _basis_for(seed_user)
 
-        assert resolve_transaction_amount(shadow, basis) == Decimal("1499.10")
-        assert contribution_of(shadow, basis) == Decimal("0")
+        **Asked of the TRANSFER and its checking-side LEG since plan step
+        balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1): the status is the
+        transfer's, its price is ``resolve_transfer_amount``'s and the leg's
+        contribution is ``leg_contribution_of``'s, where all three were the
+        checking-side shadow's.  No door moves a transfer to Credit -- the
+        state machine's transfer workflow has no Credit edge -- so, as on the
+        shadow, the status is written directly; the database holds it, since
+        no CHECK constrains a transfer's status.
+        """
+        xfer = _loan_payment(seed_user, derive=True)
+        xfer.status_id = ref_cache.status_id(status_enum)
+        db.session.flush()
+        # The status RELATIONSHIP, not just the column: the leg's contribution
+        # reads the transfer's ``status`` and the assignment above moves only
+        # the id, so an unexpired row would answer the contribution of the
+        # status it had.
+        db.session.refresh(xfer)
+        basis = _basis_for(seed_user)
+        expense_leg, _income_leg = _legs_of(xfer)
+
+        assert resolve_transfer_amount(xfer, basis) == Decimal("1499.10")
+        assert leg_contribution_of(expense_leg, basis) == Decimal("0")
 
 
 #: Every producer that answers "what day is it" without being told.  Matched by

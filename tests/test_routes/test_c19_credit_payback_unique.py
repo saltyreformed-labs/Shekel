@@ -650,7 +650,7 @@ class TestSyncEntryPaybackTOCTOUPrevention:
         ruling **R-CC96**) -- so it passes with the owner lock removed
         (measured 2026-09-29, 3 of 3 runs, while the Mark Credit race above
         failed 3 of 3).  The owner lock's order on the purchase route is
-        graded by ``tests/test_services/test_cc5_4a4_row_lock_races.py``'s
+        graded by ``tests/test_services/test_cc5_4a4_row_lock_races/test_the_database_locks.py``'s
         ``TestTheOwnersLockComesFirst::test_the_purchase_door``.  The
         database ends up with one payback whose amount equals the sum of
         both entries.

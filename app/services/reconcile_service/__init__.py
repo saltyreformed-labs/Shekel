@@ -111,7 +111,6 @@ from app.services.reconcile_service._assemble import (
     record_reconciliation,
 )
 from app.services.reconcile_service._offers import (
-    DamagedTransfer,
     OfferKind,
     OutstandingGroup,
     OutstandingPurchase,
@@ -131,7 +130,6 @@ from app.services.reconcile_service._purchases import record_settled_days
 from app.services.reconcile_service._rows import Statement
 
 __all__ = [
-    "DamagedTransfer",
     "NamedLines",
     "OfferKind",
     "OutstandingGroup",

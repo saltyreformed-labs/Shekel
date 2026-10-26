@@ -48,7 +48,8 @@ def _reject_transfer_out_of_loan(from_account: Account) -> None:
 
     A transfer OUT of a loan (the loan as ``from_account``) is not a modeled
     operation.  The amortization engine only projects payments INTO a loan, and
-    the loan's posting ledger assumes every loan shadow is a payment IN: the
+    the loan's posting ledger assumes every transfer leg on a loan is a
+    payment IN: the
     per-payment interest / escrow split, the genesis reader's income-only
     history walk, and the reconciliation oracle's superseding invariant
     (``linked == settled_income_cash - per_loan_corrections``) all rest on it.
@@ -205,7 +206,7 @@ def _reject_installment_move_before_loan(
     (see that guard for what "erased" costs).
 
     Runs BEFORE any field is applied, so a rejected edit leaves the transfer and
-    both shadows untouched -- the same discipline
+    its sides' records untouched -- the same discipline
     :func:`app.services.transfer_service._status.apply_status_to_all_three` follows
     for an illegal status transition.
 
@@ -291,7 +292,7 @@ def _pays_a_loan(xfer: Transfer) -> bool:
     (``_delete.delete_transfer``, which captures the answer BEFORE the row
     goes so it can re-sync the loan the payment left).  A loan reached as a
     transfer's SOURCE is not one: a loan's payment set is the transfers INTO
-    it (:func:`app.services.loan_loaders.income_shadows`), and a transfer
+    it (:func:`app.services.loan_loaders.income_legs`), and a transfer
     OUT of a loan is refused at the source anyway
     (:func:`_reject_transfer_out_of_loan`).
 
@@ -391,8 +392,8 @@ def _resync_vacated_loan(account_id: int, scenario_id: int) -> None:
 
     **Only the vacated DESTINATION is offered to it, and an adversarial review
     of plan step R10-b is why the source is not.**  A loan reached as a
-    transfer's SOURCE carries that transfer's EXPENSE shadow, and a loan's
-    payment set is :func:`app.services.loan_loaders.income_shadows` --
+    transfer's SOURCE carries that transfer's EXPENSE leg, and a loan's
+    payment set is :func:`app.services.loan_loaders.income_legs` --
     transfers INTO the loan only -- so such a transfer was never one of the
     loan's payments and losing it re-derives nothing.  A first version offered both
     endpoints and justified it by a legacy loan-source row "holding a payment it

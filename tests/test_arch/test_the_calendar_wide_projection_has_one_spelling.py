@@ -93,9 +93,11 @@ statement above is executable for both censuses rather than for one.
 
 The first two appear nowhere in ``app/`` today.  They are the shapes a
 reviewer must still catch by eye; this test is a floor, not a ceiling.  The census also
-reads only ``app/`` -- ``scripts/`` and ``tools/`` are clean, and
-``tests/test_services/test_paycheck_calculator.py`` holds two legitimate
-calls that are deliberately out of scope.
+reads only ``app/`` -- ``scripts/`` and ``tools/`` are clean, and the
+legitimate calls in ``tests/`` are deliberately out of scope: 24 in eight files
+(an AST census, 2026-10-22), 15 of them in the
+``tests/test_services/test_paycheck_calculator/`` package
+(``test_fica_and_the_year.py``, ``test_the_gross.py``).
 
 The negative case
 -----------------

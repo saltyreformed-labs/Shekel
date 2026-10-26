@@ -25,7 +25,7 @@ copies of the un-seeded replay -- onto :func:`payment_installments`: **101 at
 amount-free feed removes **56** modules like-for-like.
 
 **It is also where a loan's settled history stops having TWO producers.**
-:func:`app.services.loan_loaders.settled_income_shadows` calls itself the
+:func:`app.services.loan_loaders.settled_income_legs` calls itself the
 project's single "which payments are settled, and in what order" derivation;
 ``get_payment_history`` was not among its consumers and asked the question again
 as ``txn.status.is_settled``.  The two agreed -- ``settled_status_ids()`` is
@@ -57,7 +57,7 @@ counting the roots and excluding the ``app`` package itself (its ``__init__`` is
 the application factory and reaches everything).  A package root seeds every
 module inside it.  Measured 2026-09-09 on ``e74f7d6d``, on ``2625963a`` and on
 this tree, by the reconciliation oracle's own closure walker
-(``tests/test_integration/test_posting_ledger_loan_reconciliation.py``), which
+(``test_posting_ledger_loan_reconciliation/test_the_resolver_is_ledger_free.py``), which
 is the code the check reads -- not a second implementation of the metric.*
 
 Pure except for :func:`payment_installments`, which reaches the loan loaders for
@@ -69,7 +69,7 @@ from datetime import date
 
 from app.models.loan_params import LoanParams
 from app.services.amortization_engine import PaymentDates
-from app.services.loan_loaders import income_shadows, loan_payment_due_date
+from app.services.loan_loaders import income_legs, loan_payment_due_date
 from app.services.transfer_legs import TransferLeg
 
 from ._visible import payment_visible_on
@@ -147,7 +147,7 @@ def payment_installments(
     applies.
 
     **Settled-ness is read off the PARTITION, not derived here.**
-    :func:`app.services.loan_loaders.income_shadows` is the app's one answer to
+    :func:`app.services.loan_loaders.income_legs` is the app's one answer to
     "which of this loan's payments have happened", and this asks it: a row
     carries a cash day iff it arrived in that producer's ``settled`` half.  This
     module states no rule that could disagree with the fold's, because it states
@@ -194,7 +194,8 @@ def payment_installments(
             traverse on the SETTLED legs' parents, rooted at
             :class:`~app.models.transfer.Transfer`.  ``()`` for a caller that
             reads only the dates -- the schedule replay's reference -- and,
-            since the settled half is valued from its RECORD, ``()`` for
+            since a settled leg is worth the figure its TRANSFER stores, a
+            column of the parent the producer loads, ``()`` for
             ``get_payment_history`` too: nothing on that valuation's path
             walks a relationship.  THIS function's own reads need only the
             pay period, and the producer loads that itself.
@@ -214,14 +215,14 @@ def payment_installments(
             because dating a settled payment by a fallback would put real money
             on a day nothing recorded.
         ValueError: Propagated from
-            :func:`app.services.loan_loaders.income_shadows` for a transfer
+            :func:`app.services.loan_loaders.income_legs` for a transfer
             whose status it cannot place.  Named here because this function widened
             that refusal's reach: the partition is now also behind
             ``walk_loan_ledger``, ``confirmed_shadows_through``, the posting
             reader and the escrow forward-only guard, so a broken status seed
             is loud on every loan surface rather than on one.
     """
-    payments = income_shadows(
+    payments = income_legs(
         account_id, scenario_id, options=options, leg_options=leg_options,
     )
     # Each half arrives in its own order; the merge key is the PARENT's id,

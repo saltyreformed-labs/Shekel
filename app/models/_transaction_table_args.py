@@ -81,19 +81,24 @@ transaction_table_args = (
         "transfer_id",
         postgresql_where=db.text("transfer_id IS NOT NULL"),
     ),
-    # At most one *active* expense shadow and one *active* income
-    # shadow per transfer.  Database-level backstop for the
-    # service-layer invariant (CLAUDE.md "Transfer Invariants" #1)
-    # that every transfer has exactly two linked shadow
-    # transactions.  Without this index a defective caller -- or
-    # a hypothetical script that bypasses ``transfer_service`` --
-    # could insert a third shadow row and silently double-charge
-    # the user's projection.  ``is_deleted = FALSE`` keeps soft-
-    # deleted shadows out of the index so the soft-delete +
-    # restore round trip remains legal, mirroring the predicate
-    # on ``uq_transactions_credit_payback_unique``.  Audit
-    # reference: F-046 / commit C-21 of the 2026-04-15 security
-    # remediation plan.
+    # It allowed at most one *active* expense shadow and one *active*
+    # income shadow per transfer, the database-level backstop for
+    # the service-layer invariant (CLAUDE.md "Transfer Invariants"
+    # #1, as it then read) that every transfer had exactly two
+    # linked shadow transactions: without it a defective caller --
+    # or a script that bypassed ``transfer_service`` -- could have
+    # inserted a third shadow row and silently double-charged the
+    # user's projection.  ``is_deleted = FALSE`` kept soft-deleted
+    # shadows out of the index so the soft-delete + restore round
+    # trip stayed legal, mirroring the predicate on
+    # ``uq_transactions_credit_payback_unique``.  Audit reference:
+    # F-046 / commit C-21 of the 2026-04-15 security remediation
+    # plan.  **It guards no row now**: plan step
+    # ``balance:X-bi-6-4d-2`` deleted the shadows, and
+    # ``ck_transactions_names_no_transfer`` below refuses every row
+    # that carries ``transfer_id``, so no storable row meets this
+    # predicate.  Plan step ``balance:X-bi-6-5`` drops it with the
+    # column.
     db.Index(
         "uq_transactions_transfer_type_active",
         "transfer_id", "transaction_type_id",
@@ -237,10 +242,12 @@ transaction_table_args = (
     # production clone held NO link -- the bare one-off, its own name, price
     # and flags on the row.  The cutover minted each of those (34 by
     # 2026-09-18) a rule-less definition, so the zero-link half is no longer
-    # a shape the application writes, and the constraint says so; a transfer
-    # shadow names its transfer and a CC payback its source.  ``= 1`` is also
-    # why both ``SET NULL`` link keys became ``RESTRICT``: a key that nulled
-    # a link would manufacture the row this refuses.
+    # a shape the application writes, and the constraint says so; a CC
+    # payback names its source, and a transfer shadow named its transfer
+    # until plan step ``balance:X-bi-6-4d-2`` deleted the shadows
+    # (``ck_transactions_names_no_transfer`` below refuses one since).
+    # ``= 1`` is also why both ``SET NULL`` link keys became ``RESTRICT``: a
+    # key that nulled a link would manufacture the row this refuses.
     #
     # It is the amount model's own precondition rather than tidiness: a
     # derived row's source names a relation, and a row holding two links has
@@ -251,6 +258,19 @@ transaction_table_args = (
         "+ (transfer_id IS NOT NULL)::int "
         "+ (credit_payback_for_id IS NOT NULL)::int = 1",
         name="ck_transactions_one_pricing_link",
+    ),
+    # A TRANSACTION NEVER NAMES A TRANSFER (plan step ``balance:X-bi-6-4d-2``,
+    # ruling **R-BAL258**, "Database refuses").  Every transfer had two hidden
+    # twin rows here, one per account, which that step deleted (ruling
+    # **R-BAL166**): a transfer is one row, and each side's payment hangs off
+    # it by a side link on ``transaction_entries``.  So a row carrying
+    # ``transfer_id`` is a twin coming back, and the database refuses it at
+    # the write rather than leaving the create door's absence as the only
+    # guard.  The column, its keys and its term in the CHECK above go at plan
+    # step ``X-bi-6-5``, which drops this CHECK with them.
+    db.CheckConstraint(
+        "transfer_id IS NULL",
+        name="ck_transactions_names_no_transfer",
     ),
     # A ROW OF A DEFINITION IS DATED (plan step **X-bv-2**, rulings
     # **R-BAL6** and **R-BAL17**, finding **BAL-463**).  Amount rule 3

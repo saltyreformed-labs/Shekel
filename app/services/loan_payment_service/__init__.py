@@ -77,9 +77,12 @@ was true again from then until plan step balance:X-bi-6a, when it became false
 BY DESIGN and is restated as a MEASUREMENT.**  What is read here now:
 :func:`get_payment_history` takes a loan's payments from
 :func:`app.services.loan_ledger.payment_installments`, whose SETTLED half is
-the shadow rows in ``budget.transactions``
-(:func:`app.services.loan_loaders.settled_income_shadows`) and whose PROJECTED
-half is the parent rows in ``budget.transfers`` as derived legs
+the transfers into the loan whose payment has happened (ruling
+**R-BAL140**), as legs carrying their covering movement as their record
+(:func:`app.services.loan_loaders.settled_income_legs`, since plan step
+balance:X-bi-6-4b; it was the shadow rows in ``budget.transactions`` until
+then) and whose PROJECTED half is the parent rows in ``budget.transfers`` as
+derived legs
 (:func:`app.services.loan_loaders.projected_income_legs`; ruling **R-BAL13**,
 Transfer Invariant 5 as restated at that step), plus the loan's own params,
 rate history and escrow lines.  No amount is read off a transfer for a

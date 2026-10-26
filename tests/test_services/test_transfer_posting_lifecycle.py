@@ -49,7 +49,6 @@ from app import ref_cache
 from app.enums import PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
 from app.models.journal_entry import JournalEntry, Posting
-from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import posting_service, transfer_service
@@ -84,6 +83,30 @@ def _entries_for_transfer(transfer_id):
     return (
         _db.session.query(JournalEntry)
         .filter(transfer_family_journal_filter(transfer_id))
+        .order_by(JournalEntry.id)
+        .all()
+    )
+
+
+def _movement_sourced_entries(user_id):
+    """Return the owner's TRANSFER-MOVEMENT-sourced journal entries, oldest first.
+
+    Counted by SOURCE rather than through :func:`_entries_for_transfer`
+    because a soft delete takes both payment records off (ruling
+    **credit_card:R-CC75**, plan step ``balance:X-bi-6-4d-2``): the entries
+    a record posted survive as immutable history with their link SET NULL,
+    so the family filter, which follows the links, finds none of them.  Each
+    case here owns one transfer, so its movement-sourced entries are that
+    transfer's.
+    """
+    return (
+        _db.session.query(JournalEntry)
+        .filter(
+            JournalEntry.user_id == user_id,
+            JournalEntry.source_kind_id == ref_cache.posting_source_id(
+                PostingSourceEnum.TRANSFER_MOVEMENT,
+            ),
+        )
         .order_by(JournalEntry.id)
         .all()
     )
@@ -382,19 +405,27 @@ class TestCancelPostsNothing:
 
 
 class TestDeleteAndRestore:
-    """Deleting a settled transfer reverses it; restoring re-posts it."""
+    """Deleting a settled transfer reverses it; restoring brings back a plan."""
 
     def test_soft_delete_settled_reverses_then_restore_reposts(
         self, app, db, seed_user, savings,
     ):
-        """Soft-delete reverses a settled transfer; restore re-posts it.
+        """Soft-delete reverses a settled transfer; restore brings back a plan.
 
         Arithmetic: settle +100 (2 entries, one per side); soft-delete
         reverses -100 through the teardown door (4 entries, Savings back on
-        its 100.00 opening); restore re-posts +100 (6 entries, Savings
-        200.00) -- the un-deleted shadows are contributing parents of dated
-        movements again.  Append-only throughout -- every correction is a
-        new entry, none edited.
+        its 100.00 opening); restore re-posts NOTHING (still 4 entries,
+        Savings 100.00).  Append-only throughout -- every correction is a new
+        entry, none edited.
+
+        The restore re-posted +100 (6 entries, Savings 200.00) until plan
+        step ``balance:X-bi-6-4d-2``.  That step's soft delete takes both
+        payment records off (ruling **credit_card:R-CC75**), so the four
+        entries survive with their links nulled and are counted by source
+        (:func:`_movement_sourced_entries`), and it sets the transfer back to
+        Projected (ruling **R-BAL246**, "Back as a plan, now", developer
+        2026-10-09): what the restore brings back is a plan holding no
+        record, which posts nothing.  The name is kept as history.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -410,20 +441,26 @@ class TestDeleteAndRestore:
             # Soft-delete reverses the posted effect.
             transfer_service.delete_transfer(transfer.id, user_id, soft=True)
             _db.session.commit()
-            assert len(_entries_for_transfer(transfer.id)) == 4
+            assert len(_movement_sourced_entries(user_id)) == 4
+            assert _entries_for_transfer(transfer.id) == []
             assert posting_service.account_posting_total(
                 savings.id, scenario_id,
             ) == Decimal("100.00")
             # The reverted shadows are soft-deleted, so the effect is 0 too.
             _assert_reconciles(scenario_id, checking, savings)
 
-            # Restore re-posts the confirmed effect.
+            # Restore brings back a plan, which posts nothing.
             transfer_service.restore_transfer(transfer.id, user_id)
             _db.session.commit()
-            assert len(_entries_for_transfer(transfer.id)) == 6
+            assert transfer.status_id == ref_cache.status_id(StatusEnum.PROJECTED)
+            assert _db.session.query(TransactionEntry).filter(
+                (TransactionEntry.expense_transfer_id == transfer.id)
+                | (TransactionEntry.income_transfer_id == transfer.id),
+            ).count() == 0
+            assert len(_movement_sourced_entries(user_id)) == 4
             assert posting_service.account_posting_total(
                 savings.id, scenario_id,
-            ) == Decimal("200.00")
+            ) == Decimal("100.00")
             _assert_reconciles(scenario_id, checking, savings)
 
     def test_hard_delete_of_a_soft_deleted_pair_finds_the_ledger_at_zero(
@@ -439,6 +476,13 @@ class TestDeleteAndRestore:
         movement to an empty target.  Arithmetic: settle +100 (2 entries),
         soft-delete -100 (4 entries), hard-delete: 0 more, the transfer row
         gone, Savings on its 100.00 opening, transit at 0.00.
+
+        The soft delete's four entries are counted by source
+        (:func:`_movement_sourced_entries`) since plan step
+        ``balance:X-bi-6-4d-2``, whose soft delete takes both payment records
+        off (ruling **credit_card:R-CC75**) and so nulls the links the family
+        filter follows; the transfer then waits as a plan (ruling
+        **R-BAL246**).  The name is kept as history.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -454,23 +498,13 @@ class TestDeleteAndRestore:
 
             transfer_service.delete_transfer(transfer_id, user_id, soft=True)
             _db.session.commit()
-            assert len(_entries_for_transfer(transfer_id)) == 4
+            assert len(_movement_sourced_entries(user_id)) == 4
 
             transfer_service.delete_transfer(transfer_id, user_id, soft=False)
             _db.session.commit()
 
             assert _db.session.get(Transfer, transfer_id) is None
-            movement_sourced = (
-                _db.session.query(JournalEntry)
-                .filter(
-                    JournalEntry.user_id == user_id,
-                    JournalEntry.source_kind_id == ref_cache.posting_source_id(
-                        PostingSourceEnum.TRANSFER_MOVEMENT,
-                    ),
-                )
-                .all()
-            )
-            assert len(movement_sourced) == 4
+            assert len(_movement_sourced_entries(user_id)) == 4
             assert posting_service.account_posting_total(
                 savings.id, scenario_id,
             ) == Decimal("100.00")
@@ -603,6 +637,16 @@ class TestZeroCorrectionWithdrawsTheLegs:
         withdrawal, which is why they are read by source kind here); Savings
         back on its 100.00 opening, Checking on its 1000.00, transit 0.00,
         and the pair holds no covering movement.
+
+        That last is graded by two reads before any count of the side links,
+        and none is taken: the two counts this case took were reached by no
+        app mutant (measured at plan step ``balance:X-bi-6-4d-2``'s
+        vacuous-residue checkpoint, where they went).  The COMMIT is the
+        first: the status-band rule refuses a settled transfer whose sides
+        hold one dated record, so a correction that withdraws either side's
+        movement alone fails there.  The movement-sourced entry count is the
+        second: a correction that withdraws neither, which the band rule
+        admits, leaves two entries, not four.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -634,12 +678,6 @@ class TestZeroCorrectionWithdrawsTheLegs:
             assert len(movement_sourced) == 4
             assert {e.transaction_entry_id for e in movement_sourced} == {None}
             assert _entries_for_transfer(transfer.id) == []
-            assert (
-                _db.session.query(TransactionEntry)
-                .join(Transaction, TransactionEntry.transaction_id == Transaction.id)
-                .filter(Transaction.transfer_id == transfer.id)
-                .count() == 0
-            )
             assert posting_service.account_posting_total(
                 savings.id, scenario_id,
             ) == Decimal("100.00")

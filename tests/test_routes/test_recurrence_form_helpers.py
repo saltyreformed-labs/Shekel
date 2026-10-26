@@ -204,7 +204,7 @@ class TestBuildRecurrenceRuleFromForm:
         so the field belongs to the ONE job it still has, placing a
         non-repeating transfer, and its ownership probe sits in the route that
         reads it.  The refusal is asserted there:
-        ``test_transfers.py::TestOneTimeTransfer::test_recurring_transfer_idor_period``.
+        ``test_transfers.test_one_time.TestOneTimeTransfer.test_recurring_transfer_idor_period``.
 
         What this asserts is the property that makes the move safe rather than
         merely tidy: a kind-agnostic helper that cannot fail on a submission

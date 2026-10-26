@@ -1001,11 +1001,16 @@ class TestATransferShadowIsMatchedThroughItsService:
     """
 
     @staticmethod
-    def _a_transfer_shadow(db, seed_user, *, amount="75.00", settled=False):
-        """Return the EXPENSE leg of a transfer off the seeded checking account.
+    def _a_transfer(db, seed_user, *, amount="75.00", settled=False):
+        """Return a transfer off the seeded checking account into a new Savings.
 
         Built through ``transfer_service.create_transfer``, the sole creation
-        chokepoint, so the pair and its invariants are the real ones.
+        chokepoint, so the pair and its invariants are the real ones.  It
+        returned the transfer's Checking SHADOW until plan step
+        ``balance:X-bi-6-4d-2``, when each side's record moved off its shadow
+        onto the transfer (ruling **R-BAL88**): the class reads a side as its
+        record (:meth:`_record`) and ticks it as the transfer (ruling
+        **R-BAL167** classes 1 and 4).
 
         Args:
             db: The session fixture.
@@ -1015,10 +1020,9 @@ class TestATransferShadowIsMatchedThroughItsService:
                 day rather than settling one.
 
         Returns:
-            The shadow :class:`~app.models.transaction.Transaction` on checking.
+            The :class:`~app.models.transfer.Transfer`.
         """
         from app.models.account import Account  # local: this class only
-        from app.models.transaction import Transaction
         from app.services import account_service, transfer_service
         from tests._test_helpers import (
             create_transfer,
@@ -1058,42 +1062,53 @@ class TestATransferShadowIsMatchedThroughItsService:
             )
         db.session.flush()
         assert isinstance(destination, Account)
+        return transfer
+
+    @staticmethod
+    def _record(db, transfer, account_id):
+        """Return *transfer*'s side record on *account_id*, or ``None``.
+
+        Read by this class's own SQL over the side links (ruling **R-BAL167**
+        class 4: never through the producer under test).
+        """
+        from app.models.transaction_entry import TransactionEntry  # local
+
         return (
-            db.session.query(Transaction)
+            db.session.query(TransactionEntry)
             .filter(
-                Transaction.transfer_id == transfer.id,
-                Transaction.account_id == seed_user["account"].id,
+                (TransactionEntry.expense_transfer_id == transfer.id)
+                | (TransactionEntry.income_transfer_id == transfer.id),
+                TransactionEntry.account_id == account_id,
             )
-            .one()
+            .one_or_none()
         )
 
     def test_a_projected_shadow_settles_through_the_transfer_service(
         self, app, db, seed_user,
     ):
-        """Both legs and the parent move in one call, which is invariant 3."""
-        from app.models.transaction import Transaction  # local: this class only
+        """Both sides and the parent move in one call, which is invariant 3.
 
-        shadow = self._a_transfer_shadow(db, seed_user)
+        Each side is its RECORD since plan step ``balance:X-bi-6-4d-2`` (ruling
+        **R-BAL167** class 1): the transfer says Paid and each side's record
+        is dated, where each shadow said Paid until then.
+        """
+        transfer = self._a_transfer(db, seed_user)
         bank_day = seed_user["bootstrap_period"].start_date
         line = a_bank_line(
             seed_user, an_import(seed_user), amount="-75.00",
             posted_on=bank_day,
         )
 
-        accepted = _submit(seed_user, lines=[line], transfers=[shadow.transfer])
+        accepted = _submit(seed_user, lines=[line], transfers=[transfer])
 
         assert accepted.settled_count == 1
-        assert shadow.settled_on == bank_day
-        assert shadow.status.is_settled
-        sibling = (
-            db.session.query(Transaction)
-            .filter(
-                Transaction.transfer_id == shadow.transfer_id,
-                Transaction.id != shadow.id,
-            )
-            .one()
-        )
-        assert sibling.status.is_settled
+        assert self._record(
+            db, transfer, transfer.from_account_id,
+        ).settled_on == bank_day
+        assert transfer.status.is_settled
+        assert self._record(
+            db, transfer, transfer.to_account_id,
+        ).settled_on is not None
 
     def test_a_settled_shadows_day_is_CORRECTED(self, app, db, seed_user):
         """The majority case on real data, and the one a settle verb cannot do.
@@ -1104,33 +1119,20 @@ class TestATransferShadowIsMatchedThroughItsService:
         correct 9 of the developer's own 13 shadow matches.  The dispatch takes
         ``update_transfer`` here instead, and this is the control over it.
         """
-        shadow = self._a_transfer_shadow(db, seed_user, settled=True)
+        transfer = self._a_transfer(db, seed_user, settled=True)
+        record = self._record(db, transfer, transfer.from_account_id)
         bank_day = seed_user["bootstrap_period"].start_date
-        assert shadow.settled_on != bank_day
+        assert record.settled_on != bank_day
         line = a_bank_line(
             seed_user, an_import(seed_user), amount="-75.00",
             posted_on=bank_day,
         )
 
-        accepted = _submit(seed_user, lines=[line], transactions=[shadow])
+        accepted = _submit(seed_user, lines=[line], transfers=[transfer])
 
         assert accepted.corrected_count == 1
         assert accepted.settled_count == 0
-        assert shadow.settled_on == bank_day
-
-    @staticmethod
-    def _sibling(db, shadow):
-        """Return *shadow*'s other side, the one on the account no statement read."""
-        from app.models.transaction import Transaction  # local: this class only
-
-        return (
-            db.session.query(Transaction)
-            .filter(
-                Transaction.transfer_id == shadow.transfer_id,
-                Transaction.id != shadow.id,
-            )
-            .one()
-        )
+        assert record.settled_on == bank_day
 
     def test_a_match_states_ITS_side_and_the_far_side_borrows(
         self, app, db, seed_user,
@@ -1142,19 +1144,21 @@ class TestATransferShadowIsMatchedThroughItsService:
         for BOTH until then, which is how every far side of a matched transfer
         came to claim a bank line it never had.
         """
-        shadow = self._a_transfer_shadow(db, seed_user)
+        transfer = self._a_transfer(db, seed_user)
         bank_day = seed_user["bootstrap_period"].start_date
         line = a_bank_line(
             seed_user, an_import(seed_user), amount="-75.00",
             posted_on=bank_day,
         )
 
-        _submit(seed_user, lines=[line], transfers=[shadow.transfer])
+        _submit(seed_user, lines=[line], transfers=[transfer])
 
-        assert recorded_settle_day(shadow) == an_observed_day(bank_day)
-        assert recorded_settle_day(self._sibling(db, shadow)) == SettleDay(
-            day=bank_day, basis=SettledDayBasisEnum.BORROWED,
-        )
+        assert recorded_settle_day(
+            self._record(db, transfer, transfer.from_account_id),
+        ) == an_observed_day(bank_day)
+        assert recorded_settle_day(
+            self._record(db, transfer, transfer.to_account_id),
+        ) == SettleDay(day=bank_day, basis=SettledDayBasisEnum.BORROWED)
 
     def test_a_correction_moves_a_side_that_only_borrowed_its_day(
         self, app, db, seed_user,
@@ -1167,23 +1171,24 @@ class TestATransferShadowIsMatchedThroughItsService:
         """
         from app.services import transfer_service  # local: this class only
 
-        shadow = self._a_transfer_shadow(db, seed_user)
-        transfer_service.settle_transfer(shadow.transfer_id, seed_user["user"].id)
+        transfer = self._a_transfer(db, seed_user)
+        transfer_service.settle_transfer(transfer.id, seed_user["user"].id)
         db.session.flush()
+        record = self._record(db, transfer, transfer.from_account_id)
         bank_day = seed_user["bootstrap_period"].start_date
-        assert shadow.settled_on != bank_day
+        assert record.settled_on != bank_day
         line = a_bank_line(
             seed_user, an_import(seed_user), amount="-75.00",
             posted_on=bank_day,
         )
 
-        accepted = _submit(seed_user, lines=[line], transactions=[shadow])
+        accepted = _submit(seed_user, lines=[line], transfers=[transfer])
 
         assert accepted.corrected_count == 1
-        assert recorded_settle_day(shadow) == an_observed_day(bank_day)
-        assert recorded_settle_day(self._sibling(db, shadow)) == SettleDay(
-            day=bank_day, basis=SettledDayBasisEnum.BORROWED,
-        )
+        assert recorded_settle_day(record) == an_observed_day(bank_day)
+        assert recorded_settle_day(
+            self._record(db, transfer, transfer.to_account_id),
+        ) == SettleDay(day=bank_day, basis=SettledDayBasisEnum.BORROWED)
 
     def test_a_correction_leaves_a_far_side_with_its_own_day(
         self, app, db, seed_user,
@@ -1195,9 +1200,9 @@ class TestATransferShadowIsMatchedThroughItsService:
         follow (ruling **R-BAL142**).  The ``settled`` fixture states one day
         typed on both sides, the one-box popover's meaning (ruling R-BAL165).
         """
-        shadow = self._a_transfer_shadow(db, seed_user, settled=True)
-        sibling = self._sibling(db, shadow)
-        typed_day = recorded_settle_day(sibling)
+        transfer = self._a_transfer(db, seed_user, settled=True)
+        far_side = self._record(db, transfer, transfer.to_account_id)
+        typed_day = recorded_settle_day(far_side)
         assert typed_day.basis is SettledDayBasisEnum.ENTERED
         bank_day = seed_user["bootstrap_period"].start_date
         assert typed_day.day != bank_day
@@ -1206,10 +1211,12 @@ class TestATransferShadowIsMatchedThroughItsService:
             posted_on=bank_day,
         )
 
-        _submit(seed_user, lines=[line], transactions=[shadow])
+        _submit(seed_user, lines=[line], transfers=[transfer])
 
-        assert recorded_settle_day(shadow) == an_observed_day(bank_day)
-        assert recorded_settle_day(sibling) == typed_day
+        assert recorded_settle_day(
+            self._record(db, transfer, transfer.from_account_id),
+        ) == an_observed_day(bank_day)
+        assert recorded_settle_day(far_side) == typed_day
 
     def test_a_shadow_whose_PARENT_is_gone_is_not_matchable(
         self, app, db, seed_user,
@@ -1223,8 +1230,8 @@ class TestATransferShadowIsMatchedThroughItsService:
         """
         from app.models.transfer import Transfer  # local: this test only
 
-        shadow = self._a_transfer_shadow(db, seed_user)
-        parent = db.session.get(Transfer, shadow.transfer_id)
+        transfer = self._a_transfer(db, seed_user)
+        parent = db.session.get(Transfer, transfer.id)
         parent.is_deleted = True
         db.session.flush()
         line = a_bank_line(
@@ -1244,9 +1251,14 @@ class TestAnAcceptedMatchStopsAgreeingWhenItStopsHolding:
     purchase or destroying a pay period removes that member silently, and a
     day-only test then reports a group explaining less than it claims -- or,
     when every row goes, nothing at all -- as still agreeing with the bank.
-    A SOFT delete is worse, because it does not cascade at all: the row keeps
-    its ``settled_on`` and contributes zero to every balance, so only the SUM
-    can see it has gone.
+    A SOFT delete was worse, because it does not cascade at all: the row kept
+    its ``settled_on`` and contributed zero to every balance, so only the SUM
+    could see it had gone.  No item can be hidden holding its payment since
+    plan step ``balance:X-bi-6-4d-2`` (ruling **credit_card:R-CC75**, "Same
+    as a one-off", for transfers too: the delete takes the payments off and
+    withdraws the match it empties), so that case's test was retired
+    (developer, rule 5, 2026-10-09); the SUM still answers for a purchase
+    moved to a card (``TestAMatchStopsHoldingWhenAPURCHASELEAVESTHEACCOUNT``).
     """
 
     @staticmethod
@@ -1322,52 +1334,6 @@ class TestAnAcceptedMatchStopsAgreeingWhenItStopsHolding:
         db.session.flush()
 
         assert self._groups(seed_user)[0].agrees is False
-
-    def test_a_SOFT_DELETED_member_stops_it_agreeing(
-        self, app, db, seed_user,
-    ):
-        """The case no test over DAYS can see.
-
-        A soft-deleted row keeps its recorded day, so every ``agrees`` test
-        that compared days alone reported this group as still explaining the
-        bank's `$75.00` -- while the row contributes `$0.00` to any balance
-        and the two sides no longer sum.
-
-        **The member is a transfer's leg because no other row can be hidden
-        still holding its payment** (ruling **R-CC92**): a row's delete takes
-        the payment off and withdraws the match it empties (ruling **R-CC75**),
-        so its act no longer stands to be asked.  A transfer's soft delete
-        withdraws nothing and hides both legs holding their payments (finding
-        **balance:BAL-532**, closed by plan step ``balance:X-bi-6-4``).  This
-        hid a matched Salary with its payment inside and never committed.
-        Re-expressed under rule 5, developer-confirmed 2026-09-23.
-        """
-        # pylint: disable=import-outside-toplevel
-        from app.services import transfer_service
-
-        shadow = TestATransferShadowIsMatchedThroughItsService._a_transfer_shadow(
-            db, seed_user, settled=True,
-        )
-        line = a_bank_line(
-            seed_user, an_import(seed_user), amount="-75.00",
-            posted_on=shadow.settled_on,
-        )
-        _submit(seed_user, lines=[line], transactions=[shadow])
-        db.session.commit()
-        assert self._groups(seed_user)[0].agrees is True
-
-        transfer_service.delete_transfer(
-            shadow.transfer_id, seed_user["user"].id, soft=True,
-        )
-        db.session.commit()
-        assert shadow.is_deleted is True and shadow.entries
-
-        group = self._groups(seed_user)[0]
-
-        assert group.agrees is False
-        assert all(row.settled_on == group.posts_on for row in group.rows), (
-            "the days are untouched -- which is why a day-only test was blind"
-        )
 
 
 class TestAMatchStopsHoldingWhenAPURCHASELEAVESTHEACCOUNT:

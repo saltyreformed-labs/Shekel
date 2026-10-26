@@ -23,13 +23,14 @@ keeps that account's single-account view, exactly as before this step: the set
 is then that one account.
 
 **A transfer between two members shows ONCE, from the balance line's side**
-(developer ruling ``credit_card:R-CC23``, 2026-09-18).  Every transfer is two
-shadow rows, one per endpoint, and a single-account reader saw one of them by
-construction.  Widening to the set would load BOTH shadows of a checking ->
-card payment, and the card's INCOME shadow would render as a paycheck income
-row with its figure in Total Income -- the owner's own transfer counted as
-income.  So the far leg -- a shadow on a non-balance member whose transfer's
-OTHER endpoint is also a member -- is not a paycheck row.  A transfer with only
+(developer ruling ``credit_card:R-CC23``, 2026-09-18).  Every transfer is one
+row with a leg on each endpoint (two shadow rows, one per endpoint, until plan
+step ``balance:X-bi-6-4d-2``), and a single-account reader sees one of them by
+construction.  Widening to the set would draw BOTH legs of a checking -> card
+payment, and the card's INCOME leg would render as a paycheck income row with
+its figure in Total Income -- the owner's own transfer counted as income.  So
+the far leg -- a leg on a non-balance member whose transfer's OTHER endpoint
+is also a member -- is not a paycheck row.  A transfer with only
 one endpoint in the set (savings -> card) still shows from that endpoint, as a
 checking -> savings transfer always has.  Ruled against: showing both sides
 (Total Income carries the transfer); hiding EVERY transfer row on a non-balance
@@ -39,15 +40,18 @@ a ``$165`` checking -> card payment in the same paycheck: Total Income ``$0``,
 Total Expenses ``$710``, Net Cash Flow ``-$710``, "On other accounts" ``+$45``,
 checking's balance moves ``-$665``.
 
-The rule has ONE spelling of its subject -- :func:`_intra_set_transfers`, the
-transfers with both endpoints in the set -- and two readers of it: the LEGS
-every display reader draws (:func:`leg_accounts_shown`: a reader draws a
-transfer's legs from the parent rather than loading its shadow rows, and asks
-this module which of its two sides the set shows) and the balance seam's
-composed subtotal (:func:`far_legs_of`), so the cells a reader draws and the
-subtotal the seam sums cannot disagree about which rows are the paycheck's.
+The rule's subject -- the transfers with both endpoints in the set -- is
+spelled TWICE, over the same two endpoint columns under the same membership
+test: the query :func:`_intra_set_transfers`, which the balance seam's
+composed subtotal reads (:func:`far_legs_of`), and :func:`leg_accounts_shown`'s
+in-memory test of a transfer its caller already holds, which decides the LEGS
+every display reader draws (a reader draws a transfer's legs from the parent
+rather than loading its shadow rows, and asks this module which of its two
+sides the set shows).  While the two stay one test, the cells a reader draws
+and the subtotal the seam sums agree about which rows are the paycheck's.
 Every display reader's rows are the set's OWN (:func:`own_rows_clause`) --
-every member's plan rows less every shadow -- beside the LEGS of every
+every member's plan rows, less every shadow until plan step
+``balance:X-bi-6-4d-2`` deleted them -- beside the LEGS of every
 transfer the set touches (:func:`touched_transfers_clause`, then
 :func:`set_transfer_legs`), the two halves one :class:`PlanItems` carries:
 the grid since leaf ``X-bi-6-1``, the dashboard's bills, the calendar and the
@@ -243,19 +247,20 @@ def _intra_set_transfers(cash_flow: CashFlowSet):
 
 
 def own_rows_clause(cash_flow: CashFlowSet):
-    """Return the clause selecting the set's OWN plan rows: no transfer shadow.
+    """Return the clause selecting the set's OWN plan rows: every member's.
 
     ``Transaction.account_id IN members AND transfer_id IS NULL``: every
-    member's rows, less every shadow, for a reader that draws a transfer's
-    legs from the parent (leaf ``X-bi-6-1``, ruling **R-BAL87**) and so must
-    not load the shadow rows beside them -- every display reader since leaf
-    ``X-bi-6-1b``.  The clause it replaced (``paycheck_rows_clause``) dropped
-    only the FAR leg and kept the near one as a row; this drops both,
-    because the near leg is drawn as a
-    :class:`~app.services.transfer_legs.TransferLeg` by
-    :func:`leg_accounts_shown`'s rule.  The ``IS NULL`` term is the interval's:
-    ``X-bi-6``'s last leaf deletes the shadow rows, after which every member
-    row is an own row and the term has no object.
+    member's rows, for a reader that draws a transfer's legs from the parent
+    (leaf ``X-bi-6-1``, ruling **R-BAL87**) -- every display reader since leaf
+    ``X-bi-6-1b``.  Until plan step ``balance:X-bi-6-4d-2`` deleted the shadow
+    rows, the ``IS NULL`` term kept every shadow from loading beside the legs:
+    the clause it replaced (``paycheck_rows_clause``) dropped only the FAR leg
+    and kept the near one as a row, and this dropped both, because the near
+    leg is drawn as a :class:`~app.services.transfer_legs.TransferLeg` by
+    :func:`leg_accounts_shown`'s rule.  The term is inert now:
+    ``ck_transactions_names_no_transfer`` refuses every row that carries
+    ``transfer_id``, so every member row is an own row, and plan step
+    ``balance:X-bi-6-5`` drops the term with the column.
 
     Args:
         cash_flow: The set.
@@ -466,12 +471,12 @@ class FarLegs:
       it (leaf ``X-bi-6-4a``, ruling **R-BAL106**).  It was keyed by the
       SHADOW's ``transaction_id`` until then, read off the settled shadow
       rows by a second query; a fact that names its transfer needs neither,
-      and a leg's money excluded by its transfer is excluded whatever its
-      shadow's status says.
+      and a leg's money excluded by its transfer was excluded whatever its
+      shadow's status said.
 
     **No shadow row is read** (Transfer Invariant 5: "no balance reader reads
-    a projected shadow row"), so when ``X-bi-6`` deletes the shadows nothing
-    here moves.
+    a projected shadow row"), so nothing here moved when plan step
+    ``balance:X-bi-6-4d-2`` deleted the shadows.
 
     Attributes:
         transfer_ids: Every intra-set transfer's ``budget.transfers.id``.

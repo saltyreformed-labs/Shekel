@@ -12,7 +12,8 @@ one of two baselines for the same user when computing projections,
 producing different answers depending on which Scenario row the ORM
 returned first -- a load-bearing correctness bug.  The route layer
 already enforces idempotency (see ``app/routes/grid/page.py::create_baseline``
-and the ``test_grid.py::TestCreateBaseline.test_create_baseline_idempotent``
+and the
+``test_grid/test_create.py::TestCreateBaseline.test_create_baseline_idempotent``
 test), so the partial unique index is the database-tier backstop for a
 defective caller that bypasses the route.
 

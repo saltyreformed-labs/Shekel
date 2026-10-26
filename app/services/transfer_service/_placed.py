@@ -25,11 +25,20 @@ reused as they are:
 * **The transfer records its own due date as the occurrence it answers**
   (ruling **R-BAL94**, the twin of **R-BAL25**): ``occurs_on = due_date``,
   written at birth (``routes/transfers/_instances``) and by
-  :func:`~._update._apply_remaining_fields`' one due-date arm, so the two
-  columns cannot part.  A one-time transfer answered NO occurrence until this
-  leaf -- the shape finding **REC-516** names the one-time branch as the
-  last writer of -- which is what ``recurrence:R19-b`` waited on for this
-  table.
+  :func:`~._update._apply_remaining_fields`' one due-date arm whenever the
+  date MOVES, so a date moved since this leaf leaves the two columns equal.
+  A placed transfer can hold them apart until an edit next moves its date:
+  a cleared cadence's survivor answers the occurrence its cadence named and
+  keeps the due date its cadence last gave it, which need not be that day (a
+  Monthly First rule's occurrence is the 1st, and its row is dated from the
+  paycheck it defers onto); a cleared cadence's pre-R17 legacy row answers
+  none (R-BAL94); and a one-time transfer born before this leaf answers
+  none, even one whose date moved before it (that move wrote no
+  ``occurs_on``), until an edit moves its date or ``X-ci-3`` backfills it.
+  A one-time transfer answered NO occurrence until this leaf -- the
+  undated, definition-linked shape finding **REC-516** names, whose last
+  writer on this table the one-time branch was -- which is what
+  ``recurrence:R19-b`` waited on for this table.
 * **A typed figure RESTATES the definition's price in place, inside the
   door** (ruling **R-BAL92**; **R-BAL96** as amended 2026-09-21 after this
   leaf's adversarial review): the popover sends the figure a human typed as
@@ -37,7 +46,7 @@ reused as they are:
   so that value keeps its one meaning (**R-BAL11**) -- and
   :func:`restate_definition_price` corrects the version the transfer's FINAL
   due date reads (after the re-placing, the twin of ``one_off.restate_price``),
-  declares all three rows definition-priced and clears the flag (**R-BAL37**'s
+  declares the transfer definition-priced and clears the flag (**R-BAL37**'s
   heal), all BEFORE the settle dispatch.  As first built the popover restated
   after the door had run, and a figure typed beside Status = Paid booked the
   pre-restate price on both legs, `$50.00` wrong on each account in the
@@ -105,7 +114,7 @@ def re_place_and_grade_the_day(
       the one predicate under which the day is graded against the
       definition's siblings (:func:`reject_a_day_another_row_answers`) and,
       in the due-date arm, the occurrence follows the date (**R-BAL94**), so
-      the two cannot part.  A save that re-posts the day the transfer
+      a moved date leaves the two equal.  A save that re-posts the day the transfer
       already has (the form posts every control it renders) moves nothing
       and re-keys nothing -- the twin's guard, which this leaf's adversarial
       review found missing from a first cut.
@@ -151,9 +160,9 @@ def reject_a_day_another_row_answers(xfer: Transfer, day: date | None) -> None:
     occurs_on)`` over live rows, no status term, ``is_override`` not
     excluded.  Asked by :func:`re_place_and_grade_the_day` for a placed
     transfer whose due date this update CHANGES -- the one predicate under
-    which the occurrence also follows the date, decided there so the two
-    cannot part; a save that leaves the date alone collides with nothing and
-    is not asked.
+    which the occurrence also follows the date, decided there so a moved date
+    leaves the two equal; a save that leaves the date alone collides with
+    nothing and is not asked.
 
     Args:
         xfer: The placed transfer, before any write.
@@ -201,8 +210,8 @@ def restate_definition_price(
     figure (``template_amount_service.restate_in_effect``; the re-placing
     has already written that date into *updates* when the same save moves
     the transfer), the pair is declared priced by the definition (which
-    ``_amount.apply_amount_ownership`` lands on the parent and both legs,
-    re-attaching a transfer the pre-X-ci flip left OWN), and the flag comes
+    ``_amount.apply_amount_ownership`` lands on the transfer, whose legs read
+    it, re-attaching a transfer the pre-X-ci flip left OWN), and the flag comes
     off -- idempotent on a transfer never detached.  The ordering that makes
     this the door's act and not the popover's: it runs after every refusal
     and BEFORE the settle dispatch, so a figure typed beside Status = Paid is

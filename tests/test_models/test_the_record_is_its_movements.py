@@ -24,7 +24,12 @@ Three locks land here:
   never settled -- and the rebuilt columns are read by SQL, because the ORM
   no longer maps them: each row takes what the seam below would have
   written for it, every reader's answer is byte-identical across the round
-  trip, and the second upgrade prints the same count.
+  trip, and the second upgrade prints the same count.  The transfer pair is
+  settled through the door and then put back into the shape this revision
+  reads (``TestTheRoundTrip._stage``): ``82f7b7ed4332``'s downgrade builds its
+  twins, since plan step ``balance:X-bi-6-4d-2`` stores none, and its records
+  are re-parented under them by SQL, since plan step ``balance:X-bi-6-4d-2``
+  files a side's record under the TRANSFER.
 
 * **Every refusal is DRIVEN** (``docs/plans/verification.md`` standard 4):
   the three fail-closed predicates of the upgrade and the one of the
@@ -44,12 +49,13 @@ migrations' refusal, cover and restore ARMS are ungraded at head: they run only
 on an old-dump restore, and a template build replays the chain over an empty
 database.  The STATES they refused have homes -- a dateless settled row and an
 undated movement are ``integrity_check`` DC-11's two arms
-(``test_integrity_check.py``); a broken or missing shadow is the transfer
-invariants' (``test_transfer_legs.py``, ``test_transfer_service.py::
-TestRestoreTransfer``); a settled row recording nothing is the ``$0.00`` record
-(``test_settlement_record.py``); a movement disagreeing with its row is this
-module's second predicate; and the seam's own write per shape is
-``test_covering_movement.py`` -- and the ledger-net equality the resync case
+(``test_integrity_check/test_the_consistency_checks.py``); a shadow, broken or
+whole, is a row the database refuses since plan step ``balance:X-bi-6-4d-2``
+(``test_a_transfer_is_one_row/test_the_upgrade.py::TestTheUpgrade::
+test_the_database_refuses_a_twin``); a settled row recording nothing is the
+``$0.00`` record (``test_settlement_record.py``); a movement disagreeing with
+its row is this module's second predicate; and the seam's own write per shape is
+the ``test_covering_movement`` package -- and the ledger-net equality the resync case
 graded is the posting-ledger reconciliation oracles'
 (``test_posting_ledger_*_reconciliation.py``) and this step's clone rehearsal
 (the migration's docstring).  The per-class list is in the commit that
@@ -84,6 +90,18 @@ from tests._test_helpers import (
 )
 
 _M = load_migration_module("45f10b870c8b_the_record_is_its_movements.py")
+
+#: Plan step ``balance:X-bi-6-4d-2``'s revision, which deletes every transfer
+#: twin and refuses a new one; its downgrade builds a transfer's two, which the
+#: round trip's transfer pair needs.
+_TWINS_DELETED = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
+
+#: Plan step ``balance:X-bi-6-4d-2``'s head revision, which empties a side's
+#: record of the figure its transfer holds; its downgrade copies the figure
+#: back onto the records, the shape every revision below holds.
+_SIDE_RECORD_FIGURE = load_migration_module(
+    "b7d2e4f19a63_a_side_record_holds_no_figure.py",
+)
 
 _THE_CHECKS = (
     "ck_transactions_settled_amount",
@@ -232,7 +250,26 @@ class TestTheRoundTrip:
 
     @staticmethod
     def _stage(seed_user, seed_periods):
-        """Stage the seven shapes through the doors; return ``{name: id}``."""
+        """Stage the seven shapes through the doors; return ``{name: id}``.
+
+        **The transfer pair is put back into the pre-step shape** since plan
+        step ``balance:X-bi-6-4d-2``, which files each side's record under the
+        TRANSFER (``expense_transfer_id`` / ``income_transfer_id``), and plan
+        step ``balance:X-bi-6-4d-2`` (``82f7b7ed4332``), which deletes every
+        twin and refuses a new one -- so no door writes the shape this
+        revision reads any more (each twin settled, holding its covering
+        movement).  The pair is settled through the door, then
+        ``b7d2e4f19a63``'s downgrade copies its transfer's figure back onto
+        both records (at head a side's record holds none), then
+        ``82f7b7ed4332``'s downgrade builds its two twins, each with the
+        transfer's status and its side record's day and basis, and both
+        records are re-parented under their twins in one statement (the shape
+        the band rule admits as a ``$0.00`` close), which that downgrade does
+        not do: it leaves each record under the transfer.  The re-parent is
+        the setup the developer approved 2026-10-09 (rule 5, ruling R-BAL167);
+        the twins come from ``82f7b7ed4332``'s downgrade, the release's own way
+        down, which is no R-BAL167 class.  No assertion changed.
+        """
         period = seed_periods[0]
         resolved = _bill(seed_user, period, name="Resolved bill")
         _settle(resolved)
@@ -259,6 +296,18 @@ class TestTheRoundTrip:
         transfer = create_settled_transfer(
             seed_user, db.session, seed_user["account"], savings, period,
             amount=Decimal("200.00"),
+        )
+        db.session.commit()
+        _run(_SIDE_RECORD_FIGURE.downgrade, db.session)
+        _run(_TWINS_DELETED.downgrade, db.session)
+        _exec(
+            "UPDATE budget.transaction_entries e SET transaction_id = t.id, "
+            "expense_transfer_id = NULL, income_transfer_id = NULL "
+            "FROM budget.transactions t "
+            "WHERE t.transfer_id = :t "
+            "  AND (e.expense_transfer_id = :t OR e.income_transfer_id = :t) "
+            "  AND e.account_id = t.account_id",
+            t=transfer.id,
         )
         db.session.commit()
         legs = (

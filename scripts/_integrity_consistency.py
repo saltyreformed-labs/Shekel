@@ -6,11 +6,7 @@ along its ``--category`` values at plan step ``balance:X-bi-6-4c-4`` (ruling
 **R-BAL161**); ``scripts/_integrity_core.py`` says why.
 """
 
-from scripts._integrity_core import (
-    TRANSFER_LEG_RECORDS_JOIN,
-    CheckSpec,
-    run_check,
-)
+from scripts._integrity_core import CheckSpec, run_check
 
 
 # ── Category 4: Data Consistency ─────────────────────────────────
@@ -25,7 +21,7 @@ def check_data_consistency(session):
         session: SQLAlchemy session.
 
     Returns:
-        List of CheckResult for checks DC-02 through DC-12.
+        List of CheckResult for checks DC-02 through DC-11.
 
     Note:
         DC-01 ("done/received transactions without actual_amount") was
@@ -33,8 +29,13 @@ def check_data_consistency(session):
         designed, documented state (``MarkDoneSchema`` deliberately
         leaves the column untouched and ``Transaction.effective_amount``
         falls back to ``estimated_amount``), so the check flagged
-        routine legal data on every prod run.  The remaining IDs keep
-        their historical numbers so past run logs stay comparable.
+        routine legal data on every prod run.  DC-12 ("live transfers
+        whose live shadow rows number other than two", Transfer
+        Invariant 1) was removed at plan step ``balance:X-bi-6-4d-2``,
+        which deleted the twin rows it counted and made the database
+        refuse a new one (rulings **R-BAL166**, **R-BAL258**): a transfer
+        has no twins to count.  The remaining IDs keep their historical
+        numbers so past run logs stay comparable.
     """
     results = []
 
@@ -227,18 +228,27 @@ def check_data_consistency(session):
     # same family walk (``_doors._resync_after_entry_change`` ->
     # ``sync_transaction_postings``) and owes the same zero.  Net per ledger
     # account: a reversed leg appears with its reversal and nets to zero, so
-    # a fully-reversed movement does not report.
+    # a fully-reversed movement does not report.  A finding names the
+    # movement's PARENT, which is a row (``transaction_id``) or, since plan
+    # step ``balance:X-bi-6-4d-2``, a transfer whose side the movement is filed
+    # under (``transfer_id``, ruling **R-BAL88**) -- one of the two, never
+    # both (``ck_transaction_entries_one_parent``); a transfer side's record
+    # had named its shadow row until then, which the operator could not act on.
     results.append(run_check(session, CheckSpec(
         "DC-10", "consistency", "critical",
         "Un-dated movements (no settled_on) holding a live journal leg",
         """
-        SELECT e.id AS entry_id, e.transaction_id, e.covers_settlement,
+        SELECT e.id AS entry_id, e.transaction_id,
+               COALESCE(e.expense_transfer_id, e.income_transfer_id)
+                 AS transfer_id,
+               e.covers_settlement,
                p.ledger_account_id, SUM(p.amount) AS net
         FROM budget.transaction_entries e
         JOIN budget.journal_entries je ON je.transaction_entry_id = e.id
         JOIN budget.account_postings p ON p.journal_entry_id = je.id
         WHERE e.settled_on IS NULL
-        GROUP BY e.id, e.transaction_id, e.covers_settlement,
+        GROUP BY e.id, e.transaction_id, e.expense_transfer_id,
+                 e.income_transfer_id, e.covers_settlement,
                  p.ledger_account_id
         HAVING SUM(p.amount) <> 0
         ORDER BY e.id, p.ledger_account_id
@@ -266,19 +276,40 @@ def check_data_consistency(session):
     # migration ``45f10b870c8b``, which refused any row where the two
     # disagreed, and a settled row with no movement is the ``$0.00`` record
     # since, ruling **R-BAL82**.)
-    # A settled TRANSFER's money is graded as its LEGS since leaf ``X-bi-6-4a``
-    # (ruling **R-BAL106**; the UNION's second arm, one row per undated leg).
-    # Its leg join is ``_integrity_core.TRANSFER_LEG_RECORDS_JOIN`` since plan
-    # step ``balance:X-bi-6-4c-4``, which BA-06 reads too, so ``X-bi-6-4d``
-    # moves the sweep's one raw spelling of it in one place.  A SHADOW's
-    # own missing day stays on the row arm until 6-4d; since ``X-bi-6-4b`` the
-    # loan readers ask the leg's record instead (``loan_ledger._visible``).
+    # **A settled TRANSFER's money is not graded here since plan step
+    # ``balance:X-bi-6-4d-2``**, which deleted the LEG arm (one row per
+    # un-dated side record under a settled, live transfer, from leaf
+    # ``X-bi-6-4a``, ruling **R-BAL106**).  The database refuses that state at
+    # COMMIT since ``X-bi-6-4d-2``: the deferred side-band rule
+    # (``app.side_band_infrastructure``) rejects a settled transfer holding an
+    # un-dated side record, firing when a record is written or re-dated and
+    # when a transfer's status moves, so this sweep, which reads only what
+    # was committed, could not meet it.  What the rule cannot see is an
+    # owner's or superuser's edit beneath the application: a trigger bypass
+    # (``session_replication_role = 'replica'``) or a status flipped into the
+    # settled band in ``ref.statuses``, which no attachment watches and which
+    # every other band rule trusts too.
+    # **The row arm grades no SHADOW since plan step ``balance:X-bi-6-4d-2``**
+    # (``t.transfer_id IS NULL`` over the whole arm; it graded a shadow's own
+    # missing day until then).  From that step a shadow held no money -- its
+    # side's record hangs off the transfer, which the side-band rule holds to
+    # the transfer's status -- and no reader read a shadow's status or day:
+    # the status seam's Transfer arm wrote the transfer and each side's
+    # record and left the twins as they were.  So a shadow's day was no fact
+    # the fold could miss, and grading it would have been wrong as well as
+    # idle: a transfer CREATED settled built its twins in
+    # its settled status with no day (the create door stated none, and the arm
+    # dates the side records instead), which this arm read as CRITICAL money
+    # the fold cannot see.  The twins themselves went at ``X-bi-6-4d-2``
+    # (ruling **R-BAL166**), with DC-12, and the database refuses a new one
+    # (ruling **R-BAL258**), so the arm's ``t.transfer_id IS NULL`` excludes
+    # nothing until ``X-bi-6-5`` drops the column with it.
     results.append(run_check(session, CheckSpec(
         "DC-11", "consistency", "critical",
         "Settled rows the fold cannot see: no settle day, or a covering "
-        "movement with no day; settled transfers holding an undated leg",
-        f"""
-        SELECT t.id AS transaction_id, NULL::integer AS transfer_id,
+        "movement with no day",
+        """
+        SELECT t.id AS transaction_id,
                t.account_id, s.name AS status, t.settled_on,
                (SELECT COUNT(*) FROM budget.transaction_entries e
                  WHERE e.transaction_id = t.id AND e.covers_settlement)
@@ -289,59 +320,15 @@ def check_data_consistency(session):
                  AS undated_covering_movements
         FROM budget.transactions t
         JOIN ref.statuses s ON s.id = t.status_id
-        WHERE s.is_settled AND NOT t.is_deleted
+        WHERE s.is_settled AND NOT t.is_deleted AND t.transfer_id IS NULL
           AND (
             t.settled_on IS NULL
-            OR t.transfer_id IS NULL AND EXISTS (
+            OR EXISTS (
               SELECT 1 FROM budget.transaction_entries e
               WHERE e.transaction_id = t.id AND e.covers_settlement
                 AND e.settled_on IS NULL
             )
           )
-        UNION ALL
-        SELECT NULL::integer, x.id, e.account_id, s.name, NULL::date, 1, 1
-        FROM budget.transfers x
-        JOIN ref.statuses s ON s.id = x.status_id{TRANSFER_LEG_RECORDS_JOIN}
-        WHERE s.is_settled AND NOT x.is_deleted AND e.settled_on IS NULL
-        ORDER BY transaction_id NULLS LAST, transfer_id, account_id
-        """,
-    )))
-
-    # DC-12: A live transfer whose live shadows number other than two
-    # (critical).
-    #
-    # Transfer Invariant 1: every transfer has exactly two linked shadow
-    # rows, one expense and one income.  Through plan step ``balance:X-bi-6-3``
-    # the posting writer was the app's only DETECTOR of a broken pair: it
-    # read the INCOME shadow's record to book the pair as one entry and
-    # refused when that shadow was missing, and the deploy resync warned
-    # about such pairs.  Under ruling **R-BAL45**'s shape C each side's
-    # covering movement posts on its own against the owner's
-    # Transfers-in-transit account (ruling **R-BAL101**), so a pair with one
-    # side is the honest in-transit state to the writer -- money left one
-    # account and has not arrived -- and no door polices the count.  Which is
-    # right for the writer and wrong for the app as a whole: a transfer whose
-    # income shadow vanished would leave its cash sitting in transit with
-    # nothing to arrive, visible nowhere.  So the invariant lives here, where
-    # the states that are nobody's door to police already live (DC-10, DC-11),
-    # read by the operator's integrity run and never by the writer.  Developer
-    # ruling 2026-09-21 (the leaf's adversarial review, finding 2).  Counts
-    # LIVE shadows of LIVE transfers: a soft-deleted pair carries its flag on
-    # all three rows, and a hard-deleted transfer takes its shadows with it
-    # (CASCADE).  Dies with the shadow rows at ``X-bi-6-5``.
-    results.append(run_check(session, CheckSpec(
-        "DC-12", "consistency", "critical",
-        "Live transfers whose live shadow rows number other than two",
-        """
-        SELECT t.id AS transfer_id, t.user_id, t.from_account_id,
-               t.to_account_id,
-               (SELECT COUNT(*) FROM budget.transactions sh
-                 WHERE sh.transfer_id = t.id AND NOT sh.is_deleted)
-                 AS live_shadows
-        FROM budget.transfers t
-        WHERE NOT t.is_deleted
-          AND (SELECT COUNT(*) FROM budget.transactions sh
-                WHERE sh.transfer_id = t.id AND NOT sh.is_deleted) <> 2
         ORDER BY t.id
         """,
     )))

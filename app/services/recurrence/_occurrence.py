@@ -197,8 +197,8 @@ does not repeat, the row was generated with a date ``compute_due_date`` read
 off the paycheck's two ENDPOINT months rather than off the occurrence this
 module found, so it could be dated in the wrong month entirely -- plan ledger
 row **D18**, closed by recurrence plan step **R5-a**, which dates a row from
-the occurrence it answers.  Both are measured and pinned by
-``test_recurrence_engine.TestALegacyScheduleHole``.  Of the three shapes only
+the occurrence it answers.  Both are measured and pinned by ``TestALegacyScheduleHole``
+in ``test_recurrence_engine.test_legacy_schedule_hole``.  Of the three shapes only
 the HOLE ever had a detector -- ``scripts/integrity_check.py`` **BA-07**, a
 query over the stored column -- and it died with that column at plan step
 C4-c, by which point it had no subject either.

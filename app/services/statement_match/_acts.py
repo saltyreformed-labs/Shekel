@@ -47,8 +47,11 @@ _WHOLE_ACT = (
     # And what ``transfer_legs.movement_parent`` reads to resolve a payment
     # member's parent -- a transfer movement's transfer (leaf
     # ``balance:X-bi-6-4c-1``: the register values a transfer's payment
-    # through its LEG) -- published by ``transfer_legs`` because the chain
-    # walks the shadow, which is that package's to name.
+    # through its LEG, and :func:`named_rows` names it by that leg) --
+    # published by ``transfer_legs`` because the chain walks the movement's
+    # side links (plan step ``balance:X-bi-6-4d-2``; its shadow row until
+    # then), which are that package's to name.  For a side's record the
+    # transaction chain above loads nothing: it is filed under no row.
     selectinload(StatementMatch.members).selectinload(
         StatementMatchMember.entry,
     ).options(*transfer_legs.movement_parent_loads()),
@@ -99,8 +102,10 @@ NAMES_A_BANK_LINE = StatementMatch.members.any(
 
 
 
-def named_rows(match: StatementMatch) -> "tuple[set[int], set[int]]":
-    """Return the transaction ids and purchase ids this act NAMES.
+def named_rows(
+    match: StatementMatch,
+) -> "tuple[set[int | tuple[int, int]], set[int]]":
+    """Return the plan items and purchase ids this act NAMES.
 
     A creation in one of these sets is a SUBJECT -- what the act is about --
     and one in neither is a CONTAINER.  Derived from the members rather than
@@ -121,40 +126,45 @@ def named_rows(match: StatementMatch) -> "tuple[set[int], set[int]]":
     applies in SQL to an owner's claims.  Public because
     :mod:`._accepted_view` asks the same question of the same act.
 
-    **A transfer's payment member adds its movement's ``transaction_id`` too**
-    -- through the interval the id of the shadow row it hangs off, and
-    ``None`` once ``balance:X-bi-6-4d`` re-parents it onto the transfer.
-    Its two readers get the right answer from either value, for two
-    different reasons.  The undo (``_release.planned_removals``) probes the
-    set with a creation's row id, and no creation is a transfer's (a match
-    never creates one), so the value never matches.  The register
-    (``_accepted_view``) compares the WHOLE set with the act's creations
-    (``created_every_row``), and there the value's presence is what makes the
-    answer right: an act naming a transfer's payment did not create
-    everything it names.  That is moot today -- a group holding a transfer
-    refuses the residual that would be its only creation
-    (``test_residual``'s transfer-in-a-group case) -- and holds either way.
-    The register names and values a transfer member through its LEG
-    (``_accepted_view._accepted_row``), never through this set.
+    **A payment names its PARENT by** ``transfer_legs.cell_key`` (plan step
+    ``balance:X-bi-6-4d-2``, ruling **R-BAL87**'s one identity for a row and a
+    leg): a row's payment names the row's ``id``, and a transfer side's
+    record names its LEG, the ``(transfer id, account id)`` pair, resolved by
+    ``transfer_legs.movement_parent`` off the side links :data:`_WHOLE_ACT`
+    loads.  An ``int`` and a pair cannot collide, so its two readers need no
+    branch.  The undo (``_release.planned_removals``) probes the set with a
+    creation's row id, and no creation is a transfer's (a match never creates
+    one), so a leg never matches.  The register (``_accepted_view``) compares
+    the WHOLE set with the act's creations (``created_every_row``), and there
+    a leg is what makes the answer right: an act naming a transfer's payment
+    did not create everything it names.  **Until that step a transfer's
+    payment added its movement's ``transaction_id``** -- its shadow row's id,
+    and from the step ``None``, which both readers happened to answer right
+    with as a member of a set of row ids.  The register names and values a
+    transfer member through its LEG (``_accepted_view._accepted_row``), never
+    through this set.
 
     Args:
-        match: The act, with its members and their subjects loaded.
+        match: The act, with its members, their subjects and the members'
+            parents (:data:`_WHOLE_ACT`) loaded.
 
     Returns:
-        ``(transaction_ids, purchase_ids)``: the rows the act is about --
-        named directly or through their payment -- and the purchases it
-        names.
+        ``(items, purchase_ids)``: the plan items the act is about -- a row's
+        ``id`` or a transfer leg's ``(transfer id, account id)``, named
+        through their payment -- and the purchases it names.
     """
-    transactions = set()
+    items = set()
     purchases = set()
     for member in match.members:
         if member.transaction_entry_id is None:
             continue
         if member.entry.covers_settlement:
-            transactions.add(member.entry.transaction_id)
+            items.add(transfer_legs.cell_key(
+                transfer_legs.movement_parent(member.entry),
+            ))
         else:
             purchases.add(member.transaction_entry_id)
-    return transactions, purchases
+    return items, purchases
 
 
 

@@ -35,6 +35,7 @@ from app.services import (
     movement_removal,
     spending_analysis,
     status_seam,
+    template_amount_service,
     transfer_service,
 )
 from app.services.cash_flow_set import CashFlowSet
@@ -1475,31 +1476,39 @@ class TestTheReportReadsTheCashFlowSet:
         """Ruling R-CC23 on the report: the far leg is not spending.
 
         A settled $165.00 checking -> card payment is one settled expense,
-        checking's shadow (the card's is income-typed and the far leg).  A
-        settled $40.00 card -> checking transfer is NO spending here:
-        checking's shadow is income and the card's expense shadow is the far
-        leg.  spent_total = 165.00; without the far-leg arm the card's 40.00
-        shadow would count too, 205.00.
+        checking's expense leg (the card's is its income leg and the far
+        leg).  A settled $40.00 card -> checking transfer is NO spending here:
+        checking's leg is income and the card's expense leg is the far leg.
+        spent_total = 165.00; without the far-leg arm the card's 40.00 leg
+        would count too, 205.00.
 
         The transfer doors refuse a transfer OUT of a card (plan step CC-10),
         so the $40.00 card -> checking transfer is the representable-but-
         refused shape and its state is PLANTED, the way the legacy-source
         tests plant theirs: created Projected from a helper Savings account
-        INTO checking (allowed), its source and its expense shadow re-pointed
-        onto the card by assignment, and only THEN settled through
-        ``update_transfer`` -- the settle half of ``create_settled_transfer``,
-        split out because the order is load-bearing: the covering movement
-        a settle writes on each shadow's own account (plan step
-        balance:X-bi-3a) would FOLLOW a later re-point (the parent-account
-        key cascades ON UPDATE), but the posted ledger books the pair off
-        ``xfer.from_account_id`` at settle time and does not follow one, so
-        settle-then-re-point would leave a leg on the helper's ledger
-        account.  Neither reader here reads postings; the order is kept so
-        the planted state is whole.  The savings account is
-        not a member of the set and holds no transaction row once the shadow
-        has moved.  The plant carries its own tell, because an UN-planted
-        fixture (helper -> checking, never re-pointed) reads the same $165.00
-        with or without the far-leg arm and would grade nothing.
+        INTO checking (allowed), its source re-pointed onto the card by
+        assignment, and only THEN settled through ``update_transfer`` -- the
+        settle half of ``create_settled_transfer``, split out because the
+        order decides where the POSTINGS land.  A side's payment record
+        follows its endpoint whenever the endpoint moves
+        (``fk_transaction_entries_expense_side`` is ON UPDATE CASCADE, ruling
+        R-BAL168), but the settle books each record's postings on that
+        record's account as it stands at the settle
+        (``_posting_purchases``'s ``_ledger_account_for(entry.account_id)``),
+        and a re-point by assignment passes no door that books them again:
+        settled first, the card side's record follows the source onto the
+        card while its postings stay on the helper's ledger.  Measured 10-15
+        both ways; in this order the card side's record and its postings are
+        on the card, checking's on checking, and the helper holds none.
+        Neither reader here reads postings; the order is kept so the planted
+        state is whole.  The re-point moved the transfer's expense
+        shadow row too until plan step balance:X-bi-6-4d-2 made a transfer
+        one row (ruling R-BAL258); the transfer is the whole plant now
+        (ruling R-BAL167 class 1).  The savings account is not a member of
+        the set.  The plant carries its own tell, the transfer's endpoints,
+        because an UN-planted fixture (helper -> checking, never re-pointed)
+        reads the same $165.00 with or without the far-leg arm and would
+        grade nothing.
         """
         with app.app_context():
             card = self._card(seed_user, db.session)
@@ -1516,20 +1525,15 @@ class TestTheReportReadsTheCashFlowSet:
             )
             db.session.flush()
             out_of_card.from_account = card
-            next(
-                s for s in out_of_card.shadow_transactions
-                if s.account_id == helper.id
-            ).account = card
             db.session.flush()
             transfer_service.update_transfer(
                 out_of_card.id, seed_user["user"].id,
                 status_id=ref_cache.status_id(StatusEnum.DONE),
             )
             db.session.commit()
-            assert out_of_card.from_account_id == card.id
-            assert {s.account_id for s in out_of_card.shadow_transactions} == {
+            assert (out_of_card.from_account_id, out_of_card.to_account_id) == (
                 card.id, seed_user["account"].id,
-            }
+            )
 
             report = compute_spending_report(
                 seed_user["user"].id, _pp_window(seed_periods[0]),
@@ -1613,9 +1617,13 @@ class TestATransferIsALegOfItsParent:
                 seed_user["scenario"].id, cash_flow, seed_user["user"].id,
                 seed_periods[0].start_date, last_covered_day(seed_periods[0]),
             )
+            # "No shadow" is the database's since plan step
+            # balance:X-bi-6-4d-2: a row naming a transfer is refused at the
+            # write (ruling R-BAL258), so a per-row ``transfer_id is None``
+            # check here passed with ``own_rows_clause``'s ``IS NULL`` term
+            # deleted (measured 10-15) and is gone.
             for items in (by_period, by_span):
                 assert [row.name for row in items.rows] == ["Rent"]
-                assert all(row.transfer_id is None for row in items.rows)
                 assert [
                     (leg.transfer.id, leg.account_id, leg.is_expense)
                     for leg in items.legs
@@ -2282,17 +2290,75 @@ class TestTheActualHalfAsksTheAmountModel:
     held off only by a caller convention.  X-bu re-pointed it at the amount
     model (developer ruling 2026-09-05, superseding BAL-462's "is correct and
     stays" clause) and this class is the arm's first coverage.
+
+    **Its fixture is an engine-generated row since plan step
+    balance:X-bi-6-4d-2**, which made a transfer one row (ruling R-BAL258).
+    It was a projected transfer's expense shadow until then: the twin was the
+    class's FIXTURE for an unsettled derived row, replaced by another member
+    of that population (an engine-generated row), assertions unchanged (the
+    coordinator's ruling, 10-15; not an R-BAL167 class).  A transfer LEG
+    takes the fall-through's other arm --
+    :func:`~app.services.spending_analysis.planned_spend` prices it off its
+    parent -- and
+    :meth:`TestATransferIsALegOfItsParent.test_the_kernels_route_a_leg_to_its_producers`
+    grades that arm (an unsettled leg's actual is its plan, ``$75.00``).
     """
+
+    @staticmethod
+    def _unsettled_derived_row(db, seed_user, period):
+        """Generate a definition's row in *period*: unsettled, priced $321.00 on its own date.
+
+        The definition states TWO prices, so the cases grade which one the
+        fall-through reads: ``$321.00`` effective thirty days before the row,
+        the version the row's DATE selects, and ``$200.00`` on the owner's
+        today (:func:`make_expense_template`'s own statement), the NEWEST
+        price and so the one ``default_amount`` holds.  A fall-through that
+        answered the definition's newest price rather than its price on the
+        row's own due date would read ``$200.00``.  Both prices were
+        ``$321.00`` when plan step ``balance:X-bi-6-4d-2`` first built this
+        helper, and a fall-through reading ``default_amount`` passed both
+        cases (measured by that step's delta review).
+
+        The two facts hold on every clock later than the row's due date -- a
+        seeded January 2026 day, so every day this suite runs from now on --
+        and the guards below assert each, so a clock that broke one fails
+        its guard by name rather than the figure (the guard shape of
+        ``test_a_template_priced_row_reads_the_version_for_its_own_due_date``,
+        which names the clock trap).
+        """
+        template = make_expense_template(
+            db.session, seed_user, amount="200.00", name="Derived Bill",
+        )
+        db.session.flush()
+        state_template_price(
+            template, Decimal("321.00"),
+            effective_on=period.start_date - timedelta(days=30),
+        )
+        db.session.flush()
+        row = generate_row_of(template, period)
+        db.session.commit()
+        assert template.default_amount == Decimal("200.00"), (
+            "the newest price must differ from the one the row's date "
+            "selects, or a fall-through reading default_amount passes"
+        )
+        assert template_amount_service.amount_as_of(
+            template, row.due_date,
+        ) == Decimal("321.00"), (
+            "the row's due date must select the $321.00 stated before it, "
+            "which a today-version dated between the two would supersede"
+        )
+        return row
 
     def test_an_unsettled_derived_row_is_PRICED_not_refused(
         self, app, db, seed_user, seed_periods,
     ):
-        """A projected transfer shadow: no figure of its own, and a plan anyway.
+        """An unsettled row of a definition: no figure of its own, and a plan anyway.
 
-        The fixture is the production shape rather than a contrivance -- plan
-        step X-au-g-2c-2 declared EVERY transfer shadow derived, so a projected
-        transfer's expense leg stores no plan and is exactly what the old column
-        read could not answer.
+        The fixture is a production shape rather than a contrivance: a row
+        the recurrence engine generates from a recurring definition is
+        DERIVED -- it stores no plan, and its definition's price series
+        answers for it on its own due date -- which is exactly what the old
+        column read could not answer.
 
         It asserts the FIGURE, not the absence of an exception: a test that only
         proved this returns would pass against a fix that priced the row from
@@ -2300,30 +2366,12 @@ class TestTheActualHalfAsksTheAmountModel:
         never looks wrong on a page.
         """
         with app.app_context():
-            savings = create_savings_account(
-                seed_user, db.session, "Projected Savings", Decimal("1000.00"),
-            )
-            xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[0], amount=Decimal("321.00"),
-            )
-            db.session.commit()
-
-            expense_leg = (
-                db.session.query(Transaction)
-                .filter_by(
-                    transfer_id=xfer.id,
-                    transaction_type_id=ref_cache.txn_type_id(
-                        TxnTypeEnum.EXPENSE,
-                    ),
-                )
-                .one()
-            )
-            assert expense_leg.estimated_amount is None, (
-                "the precondition: a projected shadow stores no plan of its "
+            row = self._unsettled_derived_row(db, seed_user, seed_periods[0])
+            assert row.estimated_amount is None, (
+                "the precondition: a generated row stores no plan of its "
                 "own, so the column read this arm used to make cannot answer it"
             )
-            assert status_seam.recorded_settlement(expense_leg) is None, (
+            assert status_seam.recorded_settlement(row) is None, (
                 "and it has recorded nothing, so this row reaches the "
                 "fall-through rather than the settlement arm"
             )
@@ -2333,10 +2381,10 @@ class TestTheActualHalfAsksTheAmountModel:
             )
 
             assert spending_analysis.resolved_actual_amount(
-                expense_leg, basis,
+                row, basis,
             ) == Decimal("321.00"), (
                 "an unsettled row's actual is what the amount model says its "
-                "plan is -- the parent transfer's figure, resolved live"
+                "plan is -- its definition's price on its own due date"
             )
 
     def test_an_unsettled_rows_variance_is_zero_BY_CONSTRUCTION(
@@ -2351,32 +2399,25 @@ class TestTheActualHalfAsksTheAmountModel:
         the delta cannot be non-zero.  Before X-bu the two were different
         producers over different sources -- the column and the amount model --
         and on a derived row they did not merely differ, one of them RAISED.
+
+        The same two preconditions as the case above, so this cannot pass
+        through the settlement arm: a row that had recorded its plan would
+        also read a zero variance.
         """
         with app.app_context():
-            savings = create_savings_account(
-                seed_user, db.session, "Variance Savings", Decimal("1000.00"),
+            row = self._unsettled_derived_row(db, seed_user, seed_periods[0])
+            assert row.estimated_amount is None, (
+                "the precondition: a generated row stores no plan of its own"
             )
-            xfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[0], amount=Decimal("321.00"),
-            )
-            db.session.commit()
-
-            expense_leg = (
-                db.session.query(Transaction)
-                .filter_by(
-                    transfer_id=xfer.id,
-                    transaction_type_id=ref_cache.txn_type_id(
-                        TxnTypeEnum.EXPENSE,
-                    ),
-                )
-                .one()
+            assert status_seam.recorded_settlement(row) is None, (
+                "and it has recorded nothing, so both halves reach the "
+                "amount model rather than the settlement arm"
             )
             basis = derived_amount_basis(
                 seed_user["user"].id, seed_user["scenario"].id,
             )
 
-            surprises = _build_surprises([expense_leg], basis)
+            surprises = _build_surprises([row], basis)
 
             assert surprises.rows == [], (
                 "an unsettled row is not a surprise: its actual and its "
@@ -2414,6 +2455,20 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
         ``+$9.81`` on a paycheck -- exactly the size that never looks wrong on a
         page.  So the estimate is pinned to the parent's ``$321.00`` and the
         delta to the ``$79.00`` the settlement actually recorded.
+
+        The reducer is handed the transfer's expense LEG -- what
+        ``query_settled_expenses`` loads for a transfer -- where it was handed
+        the expense twin row, which records nothing since plan step
+        ``balance:X-bi-6-4d-2`` (the side's record hangs off the transfer and
+        the transfer's status is the one status; ruling R-BAL167 class 1).
+        Its precondition read that twin -- ``estimated_amount is None``, the
+        shadow storing no plan of its own -- and went with it at plan step
+        ``balance:X-bi-6-4d-2`` (ruling R-BAL258, class 1 with nothing
+        re-expressed): no such row can be stored now
+        (``test_a_transfer_is_one_row/test_the_upgrade.py::TestTheUpgrade::
+        test_the_database_refuses_a_twin``),
+        and a leg has no figure field at all, its plan being the parent's
+        through :func:`~app.services.spending_analysis.planned_spend`.
         """
         with app.app_context():
             savings = create_savings_account(
@@ -2427,20 +2482,7 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
             )
             db.session.commit()
 
-            expense_leg = (
-                db.session.query(Transaction)
-                .filter_by(
-                    transfer_id=xfer.id,
-                    transaction_type_id=ref_cache.txn_type_id(
-                        TxnTypeEnum.EXPENSE,
-                    ),
-                )
-                .one()
-            )
-            assert expense_leg.estimated_amount is None, (
-                "the precondition this regression needs: the shadow stores no "
-                "plan of its own, so a column read cannot answer it"
-            )
+            expense_leg = grid_transfer_leg(xfer, seed_user["account"].id)
 
             surprises = _build_surprises(
                 [expense_leg],

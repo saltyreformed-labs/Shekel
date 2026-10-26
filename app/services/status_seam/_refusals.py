@@ -45,8 +45,9 @@ from app.utils.hidden_row import HiddenRow
 
 
 #: The rows this seam accepts.  ``Transfer`` carries no ``settled_on`` column --
-#: a transfer's settle day lives on its two shadow ``Transaction`` rows --
-#: so the dating half of the mechanics is skipped for one of the two.  The
+#: each side's day lives on that side's payment record, the Transfer arm's
+#: (:mod:`._side`) -- so the dating half of the mechanics is skipped for one of
+#: the two.  The
 #: branch is on the MODEL, never on ``hasattr``: a probe would silently skip the
 #: maintenance for any future row that merely spelled the column differently,
 #: and this arc has already paid for a ``hasattr``-shaped test -- plan step
@@ -76,13 +77,17 @@ def reject_settle_day_without_settled_status(
     store -- it is a request to record a payment that has not happened.
 
     It is a module-level function rather than an inline check inside
-    :func:`apply_status_change` because ONE caller has to ask the question
-    BEFORE the seam can: ``transfer_service.create_transfer`` validates
-    ``spec.settled_on`` against ``spec.status_id`` before any row exists, and
-    for an unsettled create it never reaches the seam at all (its settle branch
-    is gated on the status being settled), so the day would be silently
-    dropped.  Two moments, one rule -- the alternative is the same sentence
-    written twice, which is this arc's own root cause 1.
+    :func:`apply_status_change` because a transfer's sides are written by the
+    seam's Transfer arm, not by :func:`apply_status_change`, so that arm and
+    the transfer service ask it too: ``transfer_service._status
+    .reject_stated_days_without_settle`` asks it of each side's stated day, in
+    the update before its first write and in the status writer before either
+    side is written, and the arm asks it again of each side's day it is
+    handed, before its first write.  (The
+    create asked it as well, of the days a transfer created settled stated,
+    until ruling **R-BAL379** deleted that arm of the create.)  Several
+    moments, one rule -- the alternative is the same sentence written at each,
+    which is this arc's own root cause 1.
 
     Args:
         status_id: The ``ref.statuses.id`` the row is (or would be) in.
@@ -96,16 +101,13 @@ def reject_settle_day_without_settled_status(
             not one of :func:`~app.utils.balance_predicates.settled_status_ids`.
 
             **A ``ValidationError`` (a 400) rather than a programming error,
-            and NO form can reach it yet.**  Measured: no schema declares a
-            settle day, no template renders one, and no ``app/`` caller passes
-            ``settled_on`` to ``transfer_service.update_transfer`` -- so today
-            the only way here is a service-layer mistake, for which a 400 is
-            generous.  Plan step **X-f1c** is what makes it a user mistake with
-            a correction: it puts the field on the full-edit door, and
-            submitting a day while moving the row back to Projected becomes an
-            ordinary form error.  The class is chosen for the door that is
-            coming rather than re-picked when it lands; saying so beats a
-            rationale in the present tense that is not yet true.
+            and NO form reaches it.**  The class was picked for plan step
+            **X-f1c**'s settle-day field on the full-edit doors, and both
+            doors read a submitted day through
+            :func:`~app.services.status_seam.settle_day_for_status`, which
+            drops a day beside a status that settles nothing (ruling
+            **R-EG**) -- so only a service caller reaches this, for which a
+            400 is generous.
     """
     if settle_day is None:
         return
@@ -305,19 +307,23 @@ def reject_settlement_on_a_deleted_row(
     A record of ``None`` writes nothing and passes: a revert of a deleted row,
     and a settle-day correction, move no money.
 
-    **A ``Transfer`` is asked too, and today it cannot arrive with a record: it
-    is the words plan step ``balance:X-bi-6-4`` owes its own arrival arm.**
-    The one caller that hands this seam a ``Transfer``
-    (``transfer_service._status``) hands it no record: a transfer's money is
-    recorded on its two shadows, each a ``Transaction`` that comes through
-    here on its own.  X-bi-6-4 re-parents a transfer's movements onto the
-    transfer itself, and :mod:`app.deleted_row_infrastructure` states what the
-    database must then refuse (a movement arriving under a deleted TRANSFER);
-    a transfer carrying its own record would meet this refusal, by its name.
-    A ``Transaction`` is told "was archived" where its recurring item is
-    archived and "was deleted" otherwise, whichever act hid it (ruling
-    **R-CC107**), and a ``Transfer``, which cannot arrive here with a record
-    today, is named as deleted.
+    **A ``Transfer`` is asked too: the words of the database's transfer
+    arm.**  Since plan step ``balance:X-bi-6-4d-2`` a transfer's money is
+    recorded on its two sides' records, hung off the transfer itself, and the
+    status seam's Transfer arm (``_side.sync_side_records``) asks this before
+    it writes one; :mod:`app.deleted_row_infrastructure`'s transfer arm
+    refuses the same arrival in the database.  Either row is told "was
+    archived" where its recurring item is archived and "was deleted"
+    otherwise, whichever act hid it (ruling **R-CC107**), by its name
+    (:meth:`~app.utils.hidden_row.HiddenRow.of`, which names a transfer by
+    its from-side's leg label, never the nullable ``Transfer.name``, finding
+    **BAL-547**).
+    The arm's door refuses a deleted transfer as "not found" first
+    (``transfer_service._validation._get_transfer_or_raise``), so only a
+    service caller that skipped it reaches this.  (A deleted SHADOW, which
+    this sentence named until then -- finding **BAL-550** -- no longer
+    reaches the seam at all: no transaction row names a transfer,
+    ``ck_transactions_names_no_transfer``.)
 
     Args:
         row: The row being written.
@@ -333,10 +339,7 @@ def reject_settlement_on_a_deleted_row(
     """
     if settlement is None or not row.is_deleted:
         return
-    raise ValidationError(deleted_row_payment_refusal(
-        HiddenRow.of(row) if isinstance(row, Transaction)
-        else HiddenRow(row.name),
-    ))
+    raise ValidationError(deleted_row_payment_refusal(HiddenRow.of(row)))
 
 
 def deleted_row_payment_refusal(gone: HiddenRow) -> str:

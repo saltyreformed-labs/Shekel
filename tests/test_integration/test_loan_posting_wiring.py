@@ -50,8 +50,8 @@ from tests._test_helpers import (
     freeze_today,
     ledger_net,
     loan_correction_entries,
-    loan_income_shadow,
     SPLIT_LOAN,
+    transfer_side_record,
 )
 
 # The shared synthetic split-loan fixture ($250,000 @ 6%, trued up to $100,000 --
@@ -123,8 +123,9 @@ class TestSettleWiringAutoPosts:
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
 
-            shadow = loan_income_shadow(db.session, xfer.id, loan.id)
-            assert len(loan_correction_entries(db.session, shadow)) == 1
+            assert len(
+                loan_correction_entries(db.session, xfer.id, loan.id),
+            ) == 1
             # Genesis: opening (-250000) + true-up (+150000) + principal (+500).
             assert posting_service.account_posting_total(
                 loan.id, scenario_id,
@@ -329,17 +330,30 @@ class TestRevertAndDeletePostFullCashReversal:
 
 
 class TestRestoreWiring:
-    """Restoring a soft-deleted, settled loan payment re-posts its correction."""
+    """Restoring a soft-deleted loan payment that was Paid brings back a plan."""
 
     def test_restore_reposts_correction(
         self, app, db, seed_user, seed_periods,
     ):
-        """Settle (-99500), soft-delete (baseline -100000), restore (-99500 again).
+        """Settle (-99500), soft-delete (baseline -100000), restore (-100000: a plan).
 
         The loan-linked ledger carries the opening (-250000) + true-up (+150000)
-        throughout; the payment correction (+500 principal) is reversed on delete
-        and re-posted on restore, so the linked total moves -99500 -> -100000 ->
-        -99500 (the -100000 baseline is the trued-up balance with no payment).
+        throughout; the payment correction (+500 principal) is reversed on
+        delete, and the restore brings the payment back as a PLAN, so the
+        linked total moves -99500 -> -100000 -> -100000 (the -100000 baseline
+        is the trued-up balance with no payment).
+
+        It re-posted the correction (-99500 after the restore) until plan step
+        ``balance:X-bi-6-4d-2``.  That step's delete takes both payment
+        records off (ruling **credit_card:R-CC75**), so nothing was left to
+        re-post, and as first built the restore brought back a Paid payment
+        holding nothing: a ``$0.00`` close, which the loan walk read as a
+        missed installment, its ``$500.00`` interest charged (-100500,
+        measured).  The developer ruled the delete sets the payment back to
+        Projected (ruling **R-BAL246**, "Back as a plan, now", 2026-10-09:
+        "the loan reads $100,000.00 owed and no missed installment is
+        charged"), so the restore returns a planned payment and the figure
+        stays at the no-payment baseline.  The name is kept as history.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -360,9 +374,15 @@ class TestRestoreWiring:
 
             transfer_service.restore_transfer(xfer.id, seed_user["user"].id)
             db.session.commit()
+            assert xfer.status_id == ref_cache.status_id(StatusEnum.PROJECTED)
+            assert xfer.is_deleted is False
+            for account_id in (xfer.from_account_id, xfer.to_account_id):
+                assert transfer_side_record(
+                    _db.session, xfer.id, account_id,
+                ) is None, "a restored plan holds no payment record"
             assert posting_service.account_posting_total(
                 loan.id, scenario_id,
-            ) == Decimal("-99500.00")
+            ) == Decimal("-100000.00")
 
 
 class TestTrueUpWiring:
@@ -507,6 +527,12 @@ class TestNonLoanTransferIgnored:
         classify_account(Savings) is not AMORTIZING, so the loan wiring
         short-circuits: no loan-payment-sourced journal entry is booked under
         the transfer's income shadow.
+
+        **Read at the savings side's key and over the owner's entries since
+        plan step ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 1):
+        it named the side by the income shadow, which no longer exists, and
+        counted the entries linking that shadow's row id, which no split has
+        carried since ruling **R-BAL102**.
         """
         with app.app_context():
             savings = create_account_of_type(
@@ -519,16 +545,17 @@ class TestNonLoanTransferIgnored:
             )
             db.session.commit()
 
-            shadow = loan_income_shadow(db.session, xfer.id, savings.id)
-            assert loan_correction_entries(db.session, shadow) == []
-            # And no loan_payment entry exists for this account at all.
+            assert loan_correction_entries(
+                db.session, xfer.id, savings.id,
+            ) == []
+            # And no loan_payment entry exists for this owner at all.
             loan_payment_source = ref_cache.posting_source_id(
                 PostingSourceEnum.LOAN_PAYMENT,
             )
             count = (
                 db.session.query(JournalEntry)
                 .filter_by(
-                    transaction_id=shadow.id,
+                    user_id=seed_user["user"].id,
                     source_kind_id=loan_payment_source,
                 )
                 .count()
@@ -678,9 +705,8 @@ class TestRouteChokepointWiring:
             db.session.commit()
             xfer = _settle(seed_user, loan, seed_periods[_P1])
             db.session.commit()
-            shadow = loan_income_shadow(db.session, xfer.id, loan.id)
             # Not resolvable yet -> no correction at settle.
-            assert loan_correction_entries(db.session, shadow) == []
+            assert loan_correction_entries(db.session, xfer.id, loan.id) == []
 
             resp = auth_client.post(
                 f"/accounts/{loan.id}/loan/setup",
@@ -703,7 +729,7 @@ class TestRouteChokepointWiring:
             assert resp.status_code == 302
 
             # Back-posted: the correction now exists with interest 500.00.
-            entries = loan_correction_entries(db.session, shadow)
+            entries = loan_correction_entries(db.session, xfer.id, loan.id)
             assert len(entries) == 1
             assert ledger_net(
                 db.session, _interest_ledger(loan).id, scenario_id,

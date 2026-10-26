@@ -38,11 +38,11 @@ class TestPaidOffFlag:
         """
         from app import ref_cache as rc  # pylint: disable=import-outside-toplevel
         from app.enums import StatusEnum  # pylint: disable=import-outside-toplevel
-        from app.services.transfer_service import TransferSpec, create_transfer  # pylint: disable=import-outside-toplevel
+        from app.services.transfer_service import TransferSpec, create_transfer, settle_transfer  # pylint: disable=import-outside-toplevel
 
         with app.app_context():
             acct = _create_small_loan(seed_user, db.session)
-            create_transfer(
+            payment = create_transfer(
                 TransferSpec(
                     user_id=seed_user["user"].id,
                     from_account_id=seed_user["account"].id,
@@ -50,10 +50,13 @@ class TestPaidOffFlag:
                     pay_period_id=seed_periods[7].id,
                     scenario_id=seed_user["scenario"].id,
                     amount_ownership=AmountOwnership.own(Decimal("1100.00")),
-                    status_id=rc.status_id(StatusEnum.DONE),
+                    status_id=rc.status_id(StatusEnum.PROJECTED),
                     category_id=seed_user["categories"]["Rent"].id,
                 ),
             )
+            # Created Projected, then settled: the create makes no
+            # settled transfer (ruling R-BAL379).
+            settle_transfer(payment.id, seed_user["user"].id)
             db.session.commit()
 
             # Under the contractual-schedule model a cash lump sum does
@@ -99,11 +102,11 @@ class TestPaidOffFlag:
         """
         from app import ref_cache as rc  # pylint: disable=import-outside-toplevel
         from app.enums import StatusEnum  # pylint: disable=import-outside-toplevel
-        from app.services.transfer_service import TransferSpec, create_transfer  # pylint: disable=import-outside-toplevel
+        from app.services.transfer_service import TransferSpec, create_transfer, settle_transfer  # pylint: disable=import-outside-toplevel
 
         with app.app_context():
             acct = _create_small_loan(seed_user, db.session)
-            create_transfer(
+            payment = create_transfer(
                 TransferSpec(
                     user_id=seed_user["user"].id,
                     from_account_id=seed_user["account"].id,
@@ -111,10 +114,13 @@ class TestPaidOffFlag:
                     pay_period_id=seed_periods[7].id,
                     scenario_id=seed_user["scenario"].id,
                     amount_ownership=AmountOwnership.own(Decimal("500.00")),
-                    status_id=rc.status_id(StatusEnum.DONE),
+                    status_id=rc.status_id(StatusEnum.PROJECTED),
                     category_id=seed_user["categories"]["Rent"].id,
                 ),
             )
+            # Created Projected, then settled: the create makes no
+            # settled transfer (ruling R-BAL379).
+            settle_transfer(payment.id, seed_user["user"].id)
             db.session.commit()
 
             result = savings_dashboard_service.compute_dashboard_data(

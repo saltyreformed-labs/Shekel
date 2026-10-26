@@ -314,15 +314,17 @@ def _carry_forward(source_period_id, target_period_id, scenario_id,
     # SQL for a transaction.  An ad-hoc transfer takes no flag either: no
     # pass will ever write over it.
     for transfer in ctx.transfers:
-        # The service moves the transfer AND both legs to the target period
-        # together, which self-heals any period mismatch between a transfer
-        # and its shadows (design doc section 10A.2).
+        # The service moves the transfer to the target period, and both of
+        # its legs read the transfer's period (``transfer_legs``), so no
+        # second row holds a period that could disagree with it.  It moved
+        # the two twin rows with it until plan step ``balance:X-bi-6-4d-2``
+        # deleted them.
         moved = {"pay_period_id": target_period_id}
         if transfer.recurs:
             moved["is_override"] = True
         # The batch's press, so the batch stays ONE save; a period move
         # reaches no settle and no match step today (``_update.
-        # _apply_remaining_fields`` writes the period on the three rows).
+        # _apply_remaining_fields`` writes the period on the transfer alone).
         transfer_service.update_transfer(
             transfer.id, user_id, press=press, **moved,
         )

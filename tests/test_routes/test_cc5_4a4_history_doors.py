@@ -49,6 +49,7 @@ from app.services import (
     pay_period_admin,
     pay_period_gates,
     transaction_service,
+    transfer_legs,
     transfer_service,
 )
 from app.services.cash_ledger import settled_cash_facts
@@ -259,23 +260,31 @@ def _settle_and_revert(seed_user, txn):
 
 
 class TestTheAccountDoor:
-    """A hidden row still holding a payment archives the account."""
+    """An account a hidden transfer named archives on its posting-ledger history.
 
-    def test_a_hidden_transfer_leg_holding_its_payment_archives_the_account(
+    The transfer's soft delete took both sides' payments off, so the hidden
+    transfer holds none; the settle's journal entries stay.
+    """
+
+    def test_a_hidden_transfer_whose_payments_went_archives_the_account_on_its_ledger(
         self, app, db, auth_client, seed_user,
     ):
         """Ruling R-CC65: the cleanup deleted the hidden row AND its money.
 
-        No live row, no Paid row -- so the history arms say nothing, and step
-        1's transfer delete would take the kept payment off the books.  **The
-        hidden row is a transfer's leg because no other can hold money**
+        No live row, no Paid row -- so the history arms say nothing.  **The
+        hidden row was a transfer's leg because no other could hold money**
         (ruling **R-CC92**): this was a one-off envelope on Savings,
         soft-deleted with its purchase inside, the state an archive left
-        before this step.  A transfer's soft delete still hides its legs
-        holding their payments (finding **balance:BAL-532**, closed by plan
-        step ``balance:X-bi-6-4``); an ad-hoc one, because a recurring
-        transfer's definition refuses the account first (guard 2).
-        Re-expressed under rule 5, developer-confirmed 2026-09-23.
+        before this step.  Re-expressed under rule 5, developer-confirmed
+        2026-09-23.  **Re-expressed again under rule 5, developer-confirmed
+        2026-10-09** ("Change it"): since plan step ``balance:X-bi-6-4d-2``
+        a transfer's soft delete takes both sides' payments off the books
+        too (ruling **credit_card:R-CC75**, "Same as a one-off"; finding
+        **balance:BAL-532** closed), so the hidden transfer holds 0 payments
+        where it held 2, and Savings still archives rather than deletes --
+        now on the history its ledger keeps, not on a hidden payment.  An
+        ad-hoc transfer, because a recurring transfer's definition refuses
+        the account first (guard 2).
         """
         with app.app_context():
             savings = create_account_of_type(
@@ -293,24 +302,20 @@ class TestTheAccountDoor:
                 xfer.id, seed_user["user"].id, soft=True,
             )
             db.session.commit()
-            leg_ids = [
-                leg.id for leg in db.session.query(Transaction).filter_by(
-                    transfer_id=xfer.id,
-                )
-            ]
 
             auth_client.post(f"/accounts/{savings.id}/hard-delete")
 
             assert _flashes(auth_client) == [
-                "'Savings' holds a recorded payment and cannot be permanently "
-                "deleted. It has been archived instead."
+                "'Savings' has posting-ledger history and cannot be "
+                "permanently deleted. It has been archived instead."
             ]
             db.session.expire_all()
             assert db.session.get(Account, savings.id) is not None
             assert db.session.get(Transfer, xfer.id).is_deleted is True
             assert db.session.query(TransactionEntry).filter(
-                TransactionEntry.transaction_id.in_(leg_ids),
-            ).count() == 2
+                (TransactionEntry.expense_transfer_id == xfer.id)
+                | (TransactionEntry.income_transfer_id == xfer.id),
+            ).count() == 0
 
 
 def _kept_transfer_payment(seed_user):
@@ -318,6 +323,12 @@ def _kept_transfer_payment(seed_user):
 
     The example ruling R-CC65 was asked with.  Returns the template, the
     transfer and the bank line its kept payment is matched to.
+
+    The line is posted on the Checking side's record's day and ticked as the
+    screen offers a paid side, its record; it read and ticked the side's
+    SHADOW row until leaf ``balance:X-bi-6-4d-2``, which hangs a side's
+    record off the transfer (ruling **R-BAL167**'s class 4, a shared helper
+    re-expressed).
     """
     savings = create_account_of_type(
         seed_user, db.session, "Savings", "Savings",
@@ -335,14 +346,14 @@ def _kept_transfer_payment(seed_user):
         status_id=ref_cache.status_id(StatusEnum.DONE),
     )
     db.session.commit()
-    rows = transfer_service.load_transfer_rows(xfer.id, seed_user["user"].id)
+    record = transfer_legs.transfer_side_leg(xfer, is_income=False).record
     line = a_bank_line(
         seed_user, an_import(seed_user), amount="-500.00",
-        posted_on=rows.expense.settled_on, description="TRANSFER OUT",
+        posted_on=record.settled_on, description="TRANSFER OUT",
     )
     db.session.commit()
     scope = a_scope(seed_user)
-    accept_match(a_submission(scope, lines=[line], transactions=[rows.expense]), scope)
+    accept_match(a_submission(scope, lines=[line], transfers=[xfer]), scope)
     db.session.commit()
     transfer_service.update_transfer(
         xfer.id, seed_user["user"].id,
@@ -602,8 +613,9 @@ class TestTheRowDoorsSoftArm:
         """A row the occurrence delete hides holds no money, so nothing refuses over it.
 
         What THIS door leaves (ruling R-CC75).  A row hidden before this
-        release still holding one refuses the migration (R-CC82); a transfer
-        leg the transfer's soft delete hides is BAL-532's.
+        release still holding one refuses the migration (R-CC82); a
+        transfer's soft delete takes both sides' payments off the same way
+        since plan step ``balance:X-bi-6-4d-2`` (finding BAL-532 closed).
         """
         with app.app_context():
             periods = seed_periods_today

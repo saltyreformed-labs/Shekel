@@ -20,11 +20,14 @@ Four things are graded, each against its control:
   through the ORM) or an ``UPDATE`` re-pointing one there is refused, and the
   same statement against a live row lands;
 * **a row cannot be HIDDEN holding one** -- refused at COMMIT, so the delete
-  door's own shape (the money off and the row hidden in one save) commits, an
-  empty row hides, and a transfer's leg is excepted;
-* **what is neither passes** -- a movement a hidden leg already holds (finding
-  **BAL-532**'s state) can still be written in place and taken off, so the
-  step that ends BAL-532 is not refused by this rule;
+  door's own shape (the money off and the row hidden in one save) commits and
+  an empty row hides; a transfer's twin was excepted until plan step
+  ``balance:X-bi-6-4d-2``, which retired the exception (design D7) and gave
+  the TRANSFER the same rule, so neither a twin nor a transfer can be hidden
+  holding a payment (finding **BAL-532**'s state, unstorable since);
+* **what is neither passes** -- a movement a hidden transfer holds can still
+  be written in place and taken off inside the save that hides it, so the
+  delete door's own order is not refused by this rule;
 * **both are installed at head**, where the suite's template carries them.
 """
 
@@ -42,6 +45,7 @@ from app.services import transaction_service
 from tests._test_helpers import (
     add_entry,
     create_account_of_type,
+    create_settled_cash_transaction,
     create_settled_transfer,
     generate_row_of,
     make_expense_template,
@@ -60,6 +64,9 @@ _ARRIVAL_REFUSED = "was deleted: a payment or purchase cannot be recorded under 
 
 #: The hiding arm's refusal, as the database words it.
 _HIDING_REFUSED = "was deleted while it still holds a recorded payment or purchase"
+
+#: The transfer hiding arm's refusal (plan step ``balance:X-bi-6-4d-2``).
+_TRANSFER_HIDING_REFUSED = "was deleted while it still holds a recorded payment: take it off"
 
 #: Every column of a movement but its key and its row, so a raw statement can
 #: copy one under another row the way a bulk writer would.
@@ -95,13 +102,8 @@ def _hide(row_id):
     )
 
 
-def _hidden_leg(seed_user):
-    """BAL-532's state: a settled $100.00 transfer soft-deleted, its legs holding their payments.
-
-    Hidden the way ``transfer_service.delete_transfer(..., soft=True)`` leaves
-    it -- the transfer and both shadows flagged, the payments in place.
-    Returns ``(leg_id, its payment's id)`` for the expense leg.
-    """
+def _paid_transfer(seed_user):
+    """A settled $100.00 transfer, committed; returns it."""
     savings = create_account_of_type(
         seed_user, _db.session, "Savings", "R-CC89 Savings",
     )
@@ -111,23 +113,42 @@ def _hidden_leg(seed_user):
         seed_user["bootstrap_period"], amount=Decimal("100.00"),
     )
     _db.session.commit()
-    _db.session.execute(
-        text("UPDATE budget.transactions SET is_deleted = TRUE "
-             "WHERE transfer_id = :t"),
-        {"t": transfer.id},
-    )
+    return transfer
+
+
+def _hiding_a_paid_transfer(seed_user):
+    """BAL-532's state, STAGED and not committed: a paid transfer hidden holding its payments.
+
+    Hidden the way ``transfer_service.delete_transfer(..., soft=True)`` left it
+    until plan step ``balance:X-bi-6-4d-2`` -- the transfer flagged, the
+    payments in place.  It flagged both twins too until plan step
+    ``balance:X-bi-6-4d-2``, where no twin is born: that statement reached 0
+    rows (measured) and is gone.  The hiding rule is checked at COMMIT, so
+    the state exists only inside this save (the delete door takes the payments
+    off in the same save since ``X-bi-6-4d-2``, ruling **credit_card:R-CC75**); the
+    caller commits, rolls back, or takes the payments off first.  Returns
+    ``(transfer id, its expense side's record id)``.
+    """
+    transfer = _paid_transfer(seed_user)
     _db.session.execute(
         text("UPDATE budget.transfers SET is_deleted = TRUE WHERE id = :t"),
         {"t": transfer.id},
     )
-    _db.session.commit()
-    leg_id, entry_id = _db.session.execute(
-        text("SELECT t.id, e.id FROM budget.transactions t "
-             "JOIN budget.transaction_entries e ON e.transaction_id = t.id "
-             "WHERE t.transfer_id = :t AND t.account_id = :a"),
-        {"t": transfer.id, "a": seed_user["account"].id},
-    ).one()
-    return leg_id, entry_id
+    record_id = _db.session.execute(
+        text("SELECT id FROM budget.transaction_entries "
+             "WHERE expense_transfer_id = :t"),
+        {"t": transfer.id},
+    ).scalar_one()
+    return transfer.id, record_id
+
+
+def _held_by_transfer(transfer_id):
+    """How many records transfer *transfer_id*'s sides hold, read from the database."""
+    return _db.session.execute(
+        text("SELECT count(*) FROM budget.transaction_entries "
+             "WHERE expense_transfer_id = :t OR income_transfer_id = :t"),
+        {"t": transfer_id},
+    ).scalar()
 
 
 def _copy_under(entry_id, row_id):
@@ -248,6 +269,31 @@ class TestARowCannotBeHiddenHoldingMoney:
             db.session.rollback()
             assert (_is_hidden(row.id), _held_by(row.id)) == (False, 1)
 
+    def test_hiding_a_row_holding_its_payment_record_is_refused_at_commit(
+        self, app, db, seed_user,
+    ):
+        """The PAYMENT half: a Paid $40.00 row's covering record, not a purchase.
+
+        The account door's archive arm for a hidden row holding a payment or
+        purchase went at plan step ``balance:X-bi-6-4d-2`` on this refusal, and
+        the case above holds a purchase only.
+        """
+        with app.app_context():
+            row = create_settled_cash_transaction(
+                seed_user, db.session, seed_user["bootstrap_period"],
+                Decimal("40.00"), settled_on=_day(seed_user),
+            )
+            db.session.commit()
+            assert db.session.query(TransactionEntry).filter_by(
+                transaction_id=row.id, covers_settlement=True,
+            ).count() == 1
+            _hide(row.id)
+            with refused_by_database_rule(_HIDING_REFUSED) as caught:
+                db.session.commit()
+            assert f"transaction {row.id} " in str(caught.value)
+            db.session.rollback()
+            assert (_is_hidden(row.id), _held_by(row.id)) == (False, 1)
+
     def test_an_empty_row_hides(self, app, db, seed_user):
         """The control: the same UPDATE on a row holding nothing commits."""
         with app.app_context():
@@ -312,46 +358,46 @@ class TestARowCannotBeHiddenHoldingMoney:
             assert (_is_hidden(row.id), _held_by(row.id)) == (True, 0)
 
     def test_a_transfer_leg_is_excepted(self, app, db, seed_user):
-        """BAL-532's state commits: the transfer's soft delete still makes it until X-bi-6-4."""
-        with app.app_context():
-            leg_id, _entry_id = _hidden_leg(seed_user)
-            assert (_is_hidden(leg_id), _held_by(leg_id)) == (True, 1)
+        """BAL-532's state is REFUSED at commit since plan step ``balance:X-bi-6-4d-2``.
 
-    def test_stripping_a_hidden_leg_of_its_transfer_is_refused(
-        self, app, db, seed_user,
-    ):
-        """``transfer_id`` is watched too, so the exception cannot be walked out of.
-
-        ``ck_transactions_one_pricing_link`` already refuses a bare ``NULL``,
-        so the leg is re-pointed at a definition on its own account in the
-        same statement, with the due day a definition's row carries -- a row
-        that is no transfer's half, hidden, holding the payment.
+        It committed until then (ruling **R-CC92**'s exception for a
+        transfer's half).  The payments hang off the transfer since that step,
+        and the TRANSFER arm refuses hiding one that holds a record (ruling
+        **R-BAL167** class 2: a plant the new database refuses).  The name is
+        the test's history; nothing is excepted.
         """
         with app.app_context():
-            template = make_expense_template(
-                db.session, seed_user, amount="100.00", name="Stray",
-                category_key="Groceries", is_envelope=False,
-            )
-            db.session.commit()
-            leg_id, _entry_id = _hidden_leg(seed_user)
-            db.session.execute(
-                text("UPDATE budget.transactions "
-                     "SET transfer_id = NULL, template_id = :template, "
-                     "due_date = :day WHERE id = :id"),
-                {"id": leg_id, "template": template.id,
-                 "day": _day(seed_user)},
-            )
-            with refused_by_database_rule(_HIDING_REFUSED):
+            transfer_id, _record_id = _hiding_a_paid_transfer(seed_user)
+            with refused_by_database_rule(_TRANSFER_HIDING_REFUSED) as caught:
                 db.session.commit()
+            assert f"transfer {transfer_id} " in str(caught.value)
             db.session.rollback()
+            assert _held_by_transfer(transfer_id) == 2
+
+    # ``test_stripping_a_hidden_leg_of_its_transfer_is_refused`` stood here
+    # until plan step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer
+    # 2026-10-15: "Delete all 27").  It re-parented both of a paid transfer's
+    # side records, each under its own side's TWIN, hid the expense twin, and
+    # asserted the row arm's refusal at commit: the arm excepts no twin since
+    # plan step balance:X-bi-6-4d-2 (design D7).  No twin can exist now (the
+    # database refuses one, ``ck_transactions_names_no_transfer``, ruling R-BAL258,
+    # pinned once by
+    # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
+    # and no app code builds one), so no row can carry the carve-out's
+    # ``transfer_id``; hiding a row that holds money is
+    # :meth:`test_hiding_a_row_holding_a_purchase_is_refused_at_commit`, and a
+    # hidden transfer holding one :meth:`test_a_transfer_leg_is_excepted`.
 
 
 class TestWhatIsNeitherPasses:
-    """A movement a hidden leg already holds can be written in place and taken off.
+    """A movement a hidden transfer holds can be written in place and taken off.
 
-    BAL-532's state, staged the way the transfer's soft delete leaves it.  The
-    step that ends BAL-532 must be able to take that payment off, and neither
-    arm may stand in its way.
+    BAL-532's state, staged the way the transfer's soft delete left it -- and
+    since plan step ``balance:X-bi-6-4d-2`` staged INSIDE the save that hides
+    it, the one place it can exist (the hiding rule is checked at commit;
+    ruling **R-BAL167** class 2).  The delete door takes the payments off in
+    that save, and neither arm may stand in its way.
     """
 
     def test_an_in_place_write_and_a_same_row_save_pass(
@@ -359,30 +405,45 @@ class TestWhatIsNeitherPasses:
     ):
         """Neither moves a movement anywhere, so neither is refused."""
         with app.app_context():
-            _leg_id, entry_id = _hidden_leg(seed_user)
+            _transfer_id, entry_id = _hiding_a_paid_transfer(seed_user)
             db.session.execute(
                 text("UPDATE budget.transaction_entries "
                      "SET description = 'renamed', "
-                     "transaction_id = transaction_id WHERE id = :entry"),
+                     "expense_transfer_id = expense_transfer_id "
+                     "WHERE id = :entry"),
                 {"entry": entry_id},
             )
-            db.session.commit()
             assert db.session.execute(
                 text("SELECT description FROM budget.transaction_entries "
                      "WHERE id = :entry"),
                 {"entry": entry_id},
             ).scalar() == "renamed"
+            # The save itself is the hiding rule's to refuse (the payments
+            # are still on); the arrival arm let the write through.
+            db.session.rollback()
 
     def test_taking_it_off_passes(self, app, db, seed_user):
         """A DELETE is a departure, never an arrival."""
         with app.app_context():
-            leg_id, entry_id = _hidden_leg(seed_user)
+            transfer_id, _entry_id = _hiding_a_paid_transfer(seed_user)
             db.session.execute(
-                text("DELETE FROM budget.transaction_entries WHERE id = :entry"),
-                {"entry": entry_id},
+                text("DELETE FROM budget.transaction_entries "
+                     "WHERE expense_transfer_id = :t "
+                     "OR income_transfer_id = :t"),
+                {"t": transfer_id},
+            )
+            # A settled transfer holding no record is a close of nothing,
+            # which states ``0.00`` and who typed it on the transfer (the
+            # band's figure arm, checked at the same commit).
+            db.session.execute(
+                text("UPDATE budget.transfers SET settled_figure = 0.00, "
+                     "settled_figure_source_id = (SELECT id FROM "
+                     "ref.movement_figure_sources WHERE name = 'typed') "
+                     "WHERE id = :t"),
+                {"t": transfer_id},
             )
             db.session.commit()
-            assert _held_by(leg_id) == 0
+            assert _held_by_transfer(transfer_id) == 0
 
 
 class TestTheRuleIsInstalledAtHead:

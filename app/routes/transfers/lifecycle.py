@@ -13,11 +13,11 @@ changed.
 
 The three are one concern: which of the template's ``budget.transfers`` rows
 still stand for it.  Archiving soft-deletes its projected rows that hold
-nothing (and their shadow pairs, through the transfer service), unarchiving
-restores them and fills forward, and hard-delete either destroys the
-unsettled rows with the template or -- where settled history stands, or a
-leg holds a payment (plan step ``credit_card:CC-5-4a-4``) -- falls back to
-the archive (:func:`_archive`, the one spelling both archive arms share).  What the
+nothing (through the transfer service), unarchiving restores them and fills
+forward, and hard-delete either destroys the unsettled rows with the
+template or -- where settled history stands, or a leg holds a payment (plan
+step ``credit_card:CC-5-4a-4``) -- falls back to the archive
+(:func:`_archive`, the one spelling both archive arms share).  What the
 template IS (its CRUD routes, its form payload, its recurrence rule) stays in
 ``templates.py``, and what happens to a NON-repeating template's single row on
 an edit is :mod:`app.routes.transfers._instances`.
@@ -105,9 +105,11 @@ def _archive(template, ctx):
        version-pinned ``UPDATE`` lands here, before the service's soft-deletes
        flush and before anything reads the active set.
     2. Every projected, non-deleted transfer of the template that HOLDS
-       NOTHING is soft-deleted THROUGH the transfer service, so its two
-       shadow transactions go with it (the three-level cascade: template
-       archival -> transfer soft-delete -> shadow soft-delete).  **A transfer
+       NOTHING is soft-deleted THROUGH the transfer service, which every
+       write of a transfer goes through (``CLAUDE.md``, Architecture).  Its
+       two shadow transactions went with it (a three-level cascade: template
+       archival -> transfer soft-delete -> shadow soft-delete) until plan
+       step ``balance:X-bi-6-4d-2`` deleted the shadows.  **A transfer
        either of whose legs holds a payment is kept** (plan step
        ``credit_card:CC-5-4a-4``, rulings **R-CC63**, **R-CC65**): a
        Projected leg holds one only as a reverted settle's kept payment, which
@@ -169,12 +171,10 @@ def _archive(template, ctx):
 def archive_transfer_template(template_id):
     """Archive a transfer template (stops future generation, keeps history).
 
-    Soft-deletes projected transfers and their shadow transactions via
-    the transfer service to maintain the three-level cascade:
-    template archival -> transfer soft-delete -> shadow soft-delete.
-    Where the template was a loan's standing payment, the next-oldest
-    transfer into that loan is promoted and its start re-derived
-    (:func:`_archive`, ruling **R-R85**).
+    Soft-deletes the template's projected transfers that hold nothing,
+    via the transfer service (:func:`_archive`).  Where the template was a
+    loan's standing payment, the next-oldest transfer into that loan is
+    promoted and its start re-derived (:func:`_archive`, ruling **R-R85**).
 
     Optimistic locking (commit C-18 / F-010): the template's
     ``version_id`` is enforced by SQLAlchemy on the
@@ -211,8 +211,8 @@ def archive_transfer_template(template_id):
 def unarchive_transfer_template(template_id):
     """Unarchive a transfer template.
 
-    Restores the transfers the archive hid, and their shadow transactions,
-    less any the books now drop (rulings **R-PC93**, **R-PC95** and **R-PC96**,
+    Restores the transfers the archive hid, less any the books now drop
+    (rulings **R-PC93**, **R-PC95** and **R-PC96**,
     :class:`~app.services.definition_unarchive.UnarchiveScope`): a transfer
     its owner deleted by hand is soft-deleted exactly as the archive hides
     one, and one the books have passed would come back inside the opening
@@ -272,7 +272,7 @@ def unarchive_transfer_template(template_id):
         db.session.query(Transfer).filter(*unarchive.restores()).all()
     )
 
-    # Restore transfers and shadows via the service so all mutations
+    # Restore transfers via the service so all mutations
     # flow through the single enforcement point (design doc section 4.1).
     for xfer in transfers_to_restore:
         transfer_service.restore_transfer(xfer.id, current_user.id)
@@ -316,18 +316,12 @@ def unarchive_transfer_template(template_id):
 def hard_delete_transfer_template(template_id):
     """Permanently delete a transfer template if it has no payment history.
 
-    Maintains all five transfer invariants from CLAUDE.md:
-      1. Two linked shadows per transfer -- CASCADE on Transaction.transfer_id
-         removes both shadows when the parent Transfer is hard-deleted via
-         transfer_service.delete_transfer(soft=False).
-      2. No orphaned shadows -- shadows are removed atomically with their
-         parent transfer through the service's CASCADE verification.
-      3. Amount/status/period parity -- not applicable; entire records are
-         removed, not mutated.
-      4. All mutations through the transfer service -- every transfer
-         deletion is routed through transfer_service.delete_transfer().
-      5. Balance calculator queries only budget.transactions -- after
-         deletion, shadow transactions no longer exist in the table.
+    Every transfer deletion is routed through
+    ``transfer_service.delete_transfer()``, which every write of a transfer
+    goes through (``CLAUDE.md``, Architecture).  Until plan step
+    ``balance:X-bi-6-4d-2`` deleted the transfer's two shadow transactions,
+    this docstring listed five transfer invariants the deletion kept; all but
+    the one above were about the shadows.
 
     Two-path logic:
       - History exists (Paid transfers, or a transfer whose leg holds a
@@ -336,8 +330,8 @@ def hard_delete_transfer_template(template_id):
         instead (if not already) and the user is warned, the sentence naming
         which (:func:`_archive_instead_of_delete`).
       - No history: linked transfers are hard-deleted through the
-        transfer service (which CASCADE-deletes shadows), then the
-        template itself is permanently removed (:func:`_destroy`).
+        transfer service, then the template itself is permanently
+        removed (:func:`_destroy`).
 
     Both paths can take a loan's standing payment out of the active set, so
     both re-derive that loan's standing payment afterwards (ruling
@@ -350,10 +344,9 @@ def hard_delete_transfer_template(template_id):
     mirroring the ``templates.py::hard_delete_template`` shape added
     after CRIT-05.  Even if the guard predicate above regresses, is
     bypassed, or races a concurrent mark-done that lands between the
-    guard check and the loop, settled transfers (Paid, Received,
-    Received) and their two-shadow pairs cannot be physically destroyed
-    by this route.  Survivors retain their ``transfer_template_id``;
-    the column's FK is ``ON DELETE SET NULL`` so they become detached
+    guard check and the loop, settled transfers (Paid, Received) cannot
+    be physically destroyed by this route.  Survivors retain their
+    ``transfer_template_id``; the column's FK is ``ON DELETE SET NULL`` so they become detached
     settled history when the parent template is removed.
     """
     template = get_or_404(TransferTemplate, template_id)
@@ -422,9 +415,11 @@ def _archive_instead_of_delete(template, template_id, refusal):
 def _destroy(template, template_id):
     """The no-history arm of :func:`hard_delete_transfer_template`: delete it.
 
-    Safe to permanently delete linked transfers through the transfer service
-    so that shadow transactions are CASCADE-deleted (invariants 1, 2, 4).
-    None of them holds a payment: the caller archived on that (plan step
+    Permanently deletes the linked transfers through the transfer service,
+    which every write of a transfer goes through (``CLAUDE.md``,
+    Architecture); the delete CASCADE-deleted their shadow transactions too
+    until plan step ``balance:X-bi-6-4d-2`` deleted the shadows.  None of them
+    holds a payment: the caller archived on that (plan step
     ``credit_card:CC-5-4a-4``), so the service's removal act takes nothing.
     ``transfer_service.delete_transfer`` flushes but does not commit, so all
     deletions are atomic within a single DB transaction.
@@ -435,8 +430,8 @@ def _destroy(template, template_id):
     ``templates.py::hard_delete_template`` applies after CRIT-05.  Even if
     ``transfer_template_has_paid_history`` regresses, is bypassed, or races
     a concurrent mark-done that lands between the guard check and the loop
-    below, settled transfers (Paid, Received) and their two-shadow pairs
-    cannot be physically destroyed by this route.  Survivors retain their
+    below, settled transfers (Paid, Received) cannot be physically
+    destroyed by this route.  Survivors retain their
     ``transfer_template_id``; the column's FK is ``ON DELETE SET NULL`` (see
     ``app/models/transfer.py``) so they become detached settled history when
     the parent template is removed below.

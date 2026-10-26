@@ -116,10 +116,11 @@ def apply_requested_status(
     and this decides what applying it means.  After plan step X-ap the only
     ``app/`` callers of the seam are this function, :func:`._settle.settle_transaction`,
     :func:`._settle.settle_from_entries`, ``credit_workflow`` (Credit and its revert,
-    neither of them settled statuses) and ``transfer_service._status`` (a transfer and
-    its two shadows, which settle through ``transfer_service`` by transfer
-    invariants 3 and 4) -- so a FOURTH transaction settle door cannot be opened
-    by reaching for the obvious primitive, which is how the third one was.
+    neither of them settled statuses) and ``transfer_service._status`` (a transfer,
+    one row, which settles through ``transfer_service`` because every write of a
+    transfer does: the transfer paragraph of ``CLAUDE.md``'s Architecture) -- so
+    a FOURTH transaction settle door cannot be opened by reaching for the obvious
+    primitive, which is how the third one was.
 
     **The ledger reconcile is here rather than at each door** for the reason
     :func:`._settle.settle_transaction` states for its own: every status change moves
@@ -141,9 +142,10 @@ def apply_requested_status(
 
     Args:
         txn: The transaction whose status the door is changing.  Must be a
-            REGULAR row: a transfer shadow's status is its parent's
-            (``transfer_service.update_transfer``), and the PATCH route branches
-            a shadow away before it reaches here.
+            REGULAR row: a transfer's status is the transfer's own
+            (``transfer_service.update_transfer``), and no stored row names a
+            transfer since plan step ``balance:X-bi-6-4d-2``
+            (``ck_transactions_names_no_transfer``).
         new_status_id: The ``ref.statuses.id`` the door asked for -- the
             SUBMITTED status when the form carried one, else the row's own (an
             edit that changes only the settle day is an identity transition).

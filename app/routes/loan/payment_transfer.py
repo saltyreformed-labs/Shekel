@@ -2,9 +2,9 @@
 Shekel Budget App -- Loan route package: recurring payment transfers.
 
 Creates a recurring monthly transfer (RecurrenceRule + TransferTemplate +
-generated Transfer records with shadow transactions) from a source account to
-the debt account.  The amount defaults to the resolver-derived monthly payment
-(P&I + escrow) with live derivation, or a user-supplied override.
+generated Transfer records) from a source account to the debt account.  The
+amount defaults to the resolver-derived monthly payment (P&I + escrow) with
+live derivation, or a user-supplied override.
 
 **The two settings doors are PER DEFINITION since plan step R7d-g-3** (ruling
 **R-R83**): a loan can have any number of recurring transfers paying into it,
@@ -149,8 +149,7 @@ def create_payment_transfer(account_id):
 
     Creates a RecurrenceRule (monthly pattern), a TransferTemplate
     (from the selected source account to the debt account), and
-    generates Transfer records (with shadow transactions) for
-    existing pay periods.
+    generates Transfer records for existing pay periods.
 
     The amount defaults to the computed monthly payment (P&I + escrow).
     The user may override with a custom amount.
@@ -256,7 +255,7 @@ def create_payment_transfer(account_id):
     # ``wanted == current`` check, a no-op by construction, and it was that
     # function's last application caller.  The CLOSING bound is not written
     # at all (plan step R7d-g): generation reads the loan's payoff through
-    # the composed door, so no shadow is generated past it, and the payments
+    # the composed door, so no payment is generated past it, and the payments
     # generated below move that payoff without any stored copy to lag behind
     # them.
 
@@ -349,7 +348,7 @@ def update_payment_settings(account_id, template_id):
     moves the projected payoff, which the recurring payment's closing bound
     is derived from on every read (plan step R7d-g), so nothing is re-synced.
     The extra is a LIVE parameter -- applied at display, settle, and
-    projection from this one value -- so no shadow regeneration is needed.
+    projection from this one value -- so no generated payment is rewritten.
 
     404s a cross-owner / non-loan account (``_require_configured_loan``) and
     a template that is not one of this loan's active recurring transfers
@@ -410,16 +409,26 @@ def track_payment(account_id, template_id):
     card offers it on every fixed-amount definition, short or not, and the
     definition it flips is the one the URL names -- never a picked one.
 
-    **No shadow is rewritten, and since plan step X-au-g-2c-2 that is
-    STRUCTURAL rather than a property of a read-time override.**  It used to
-    rest on ``LoanPricing.live_cash`` superseding each shadow's stored figure on
-    every read; a transfer shadow stores no figure now -- it declares
-    ``PARENT_TRANSFER`` from birth and is priced by amount rule 4, which reads
-    the mode off THIS settings row (ruling **R-FK**).  So the flip changes which
-    RULE prices rows that already exist, and the declaration it would otherwise
-    have had to write is already there.  A higher tracked payment moves the
-    projected payoff, which the recurring payment's closing bound is derived
-    from on every read (plan step R7d-g), so nothing is re-synced.
+    **No payment row is rewritten, and that is STRUCTURAL rather than a
+    property of a read-time override.**  It used to rest on
+    ``LoanPricing.live_cash`` superseding each shadow's stored figure on every
+    read; from plan step X-au-g-2c-2 a transfer shadow stored no figure (it
+    declared ``PARENT_TRANSFER`` from birth), and plan step
+    ``balance:X-bi-6-4d-2`` deleted the shadows.  A generated payment its
+    owner has not overridden stores no figure either: it declares its
+    definition (``TEMPLATE``, since plan step X-au-f), and which rule prices
+    it is read live off the definition (ruling **R-FK**,
+    ``cash_ledger._amount_rule._rule_within_transfer_definition``): amount
+    rule 4 once a settings row exists, in either mode, the mode picking the
+    arm; rule 3, the definition's series, for a legacy manual payment with no
+    settings row.  So the flip moves a legacy payment's rows from rule 3 to
+    rule 4 by creating the row, and otherwise changes only rule 4's arm;
+    either way the declaration it would otherwise have had to write is
+    already there.  A payment whose figure the owner typed owns it, and the
+    flip leaves it standing (the own arm is asked first, ruling **R-JM**).  A
+    higher tracked payment moves the projected payoff, which the recurring
+    payment's closing bound is derived from on every read (plan step R7d-g),
+    so nothing is re-synced.
 
     404s a cross-owner / non-loan account (``_require_configured_loan``) and
     a template that is not one of this loan's active recurring transfers
@@ -471,7 +480,7 @@ def track_payment(account_id, template_id):
     )
 
     # Flipping manual->derive MOVES the projected payoff whenever the two
-    # figures differ (the PLANNED tier folds each projected shadow's RESOLVED
+    # figures differ (the PLANNED tier folds each projected payment's RESOLVED
     # cash, amount rule 4), which is the drift C7 flagged to get the user
     # here.  Nothing stores that payoff since plan step R7d-g: the recurring
     # payment's closing bound is derived from it on every read.

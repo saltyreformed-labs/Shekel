@@ -31,14 +31,13 @@ from app.services.auth_service import hash_password
 from app.services.pay_calendar import PayCalendarError, calendar_for
 from tests._test_helpers import (
     capture_sql_statements,
-    create_savings_account,
-    create_transfer,
     figure_source_columns,
     generate_row_of,
     make_expense_template,
     moved_by_the_owner,
     one_off_row_of,
     open_owner_calendar,
+    payback_row_of,
     resolved_amount,
 )
 
@@ -218,32 +217,45 @@ class TestVisibilityFiltering:
     def test_a_row_with_no_definition_is_hidden(
         self, app, db, seed_user, seed_periods_today, seed_companion,
     ):
-        """A transfer's shadows are hidden: nothing states they may be shown.
+        """A card payback is hidden though its envelope is shown: nothing states it may be.
 
-        Ruling **R-BAL73**: a row that names no definition -- a transfer
-        shadow, a CC payback -- answers ``False`` to
-        ``visible_to_companion``.  Until the family's cutover (plan step
+        Ruling **R-BAL73**: a row that names no definition answers ``False``
+        to ``visible_to_companion``.  Until the family's cutover (plan step
         ``balance:X-bi-7d-2``) a legacy link-less one-off stated its own
         ``companion_visible`` in a cell of the row's and this service read
         it; the cutover minted every such row a definition (the placed case
-        below) and dropped the cell, so a shadow -- expense leg on the
-        owner's checking, income leg on the savings -- is shown by nothing.
+        below) and dropped the cell.  The link-less row left is a CC payback
+        (the transfer shadow was the other until plan step
+        ``balance:X-bi-6-4d-2``), and the card cutover (``credit_card:CC-7``,
+        rulings **R-CC17** / **R-CC20**) deletes it, so this case goes with
+        the arm.
+
+        The payback lands in the paycheck AFTER its envelope's, and the
+        envelope's definition is companion-visible: the envelope's own
+        paycheck shows it, which is the control that the service answers
+        this owner's rows at all, and the payback's paycheck shows nothing.
         """
-        savings = create_savings_account(
-            seed_user, db.session, "Savings", Decimal("500.00"),
+        template = _make_template(
+            seed_user, companion_visible=True, track=True, name="Groceries",
         )
-        xfer = create_transfer(
-            seed_user, db.session, seed_user["account"], savings,
-            seed_periods_today[0],
+        envelope = _make_txn(seed_periods_today[0], template)
+        payback = payback_row_of(
+            db.session, seed_user, envelope, Decimal("40.00"),
+            seed_periods_today[0].start_date,
         )
         db.session.commit()
-        assert len(xfer.shadow_transactions) == 2
+        assert payback.template_id is None
+        assert payback.pay_period_id == seed_periods_today[1].id
 
         companion = seed_companion["user"]
-        txns = companion_service.get_visible_transactions(
+        shown = companion_service.get_visible_transactions(
             companion.id, period_id=seed_periods_today[0].id,
         ).transactions
-        assert len(txns) == 0
+        assert [t.id for t in shown] == [envelope.id]
+        txns = companion_service.get_visible_transactions(
+            companion.id, period_id=payback.pay_period_id,
+        ).transactions
+        assert txns == []
 
     @pytest.mark.parametrize("shown", [True, False])
     def test_a_placed_one_offs_visibility_is_its_definitions(

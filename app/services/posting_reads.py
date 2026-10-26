@@ -104,13 +104,12 @@ class PostingError(ShekelError):
     """A posting-ledger invariant was violated and the write was refused.
 
     Raised for the should-never-happen data-integrity failures the posting
-    services guard (a real account with no paired ledger account; a settled
-    transfer with no active income shadow; a caller-supplied set of legs that
-    does not balance; a ``None`` scenario in a reconciliation helper).  These
-    are not user-input errors -- the chart-of-accounts pairing and the
-    two-shadow transfer invariant are guaranteed upstream -- so a violation
-    here means a broken invariant that must fail loudly rather than post a
-    wrong or unbalanced entry.
+    services guard (a real account with no paired ledger account; a
+    caller-supplied set of legs that does not balance; a ``None`` scenario in
+    a reconciliation helper).  These are not user-input errors -- the
+    chart-of-accounts pairing is guaranteed upstream -- so a violation here
+    means a broken invariant that must fail loudly rather than post a wrong
+    or unbalanced entry.
     """
 
 
@@ -197,8 +196,9 @@ def settled_transfer_effect(account_id: int, scenario_id: int) -> Decimal:
     The balance-side expectation the Commit-6 oracle reconciles the ledger
     against: over every DATED, debit covering movement ON the account (its
     own ``account_id``, ruling **R-BAL75**) that is a leg's record of a live,
-    balance-contributing transfer in *scenario_id*, ``+amount`` on the
-    to-side (money in) and ``-amount`` on the from-side (money out) --
+    balance-contributing transfer in *scenario_id*, its transfer's settled
+    figure (its one home since plan step ``balance:X-bi-6-4d-2``), ``+`` on
+    the to-side (money in) and ``-`` on the from-side (money out) --
     exactly the debit-positive net :func:`account_posting_total`
     accumulates.  A settled leg's money IS its dated movement (rulings
     **R-BAL79** / **R-BAL80**), so "settled" here is the leg's, not the
@@ -225,18 +225,25 @@ def settled_transfer_effect(account_id: int, scenario_id: int) -> Decimal:
     :func:`app.services.transfer_legs.transfer_movement_rows`, so gate,
     scope and direction are the transfer's.  Through ``X-bi-6-3`` this summed
     the settled SHADOW rows' records (``settled_figure_clause``) signed by the
-    shadow's type -- the same movements under Transfer Invariant 3, read
-    through the row ``X-bi-6-4d`` detaches them from.  The SIGN and the
-    narrowings are restated here rather than shared with the writer
-    (``cash_ledger.movement_cash_leg``, ``purchase_posts``): an oracle that
-    imported the rule it grades could not grade it.  What IS shared is the
-    base join and the transfer link: this reads a movement's record-ness
-    and side as the join's SQL (``transfer_legs._records._leg_is_record``,
-    ``_leg_is_income``), the writer as their Python twin over one loaded
-    movement (``transfer_legs.movement_parent``, the two pinned by a parity
-    test), so this is independent in its sign, its narrowings and the tier
-    that states record-ness and side; the integration suites keep a
-    raw-table restatement for the rest.
+    shadow's type.  The SIGN and the narrowings are restated here rather
+    than shared with the writer (``cash_ledger.movement_cash_leg``,
+    ``purchase_posts``): an oracle that imported the rule it grades could
+    not grade it.  What IS shared is the base join and the transfer link:
+    this reads a movement's side as the join's SQL
+    (``transfer_legs._records._leg_is_income``), the writer as its Python
+    twin over one loaded movement (``transfer_legs.movement_parent``, the two
+    pinned by a parity test); a side link IS a record since plan step
+    ``balance:X-bi-6-4d-2`` (``ck_transaction_entries_side_link_is_a_record``).
+
+    **The parent's live and contributing gate is not restated, because no
+    dated record can fail it** (finding **BAL-534**, deleted at plan step
+    ``balance:X-bi-6-4d-2`` rather than graded): a record cannot arrive under
+    a deleted transfer and a transfer holding one cannot be hidden
+    (``app.deleted_row_infrastructure``'s transfer arm), and a side's record
+    is dated exactly while its transfer is Paid or Received
+    (``app.side_band_infrastructure``), neither of which is Credit or
+    Cancelled.  The two Transfer-level filters this read handed the loader
+    selected nothing the dated narrowing did not, on any storable state.
 
     Args:
         account_id: The real account whose settled transfer legs to sum.
@@ -257,15 +264,13 @@ def settled_transfer_effect(account_id: int, scenario_id: int) -> Decimal:
     rows = transfer_movement_rows(
         TransactionEntry.account_id == account_id,
         Transfer.scenario_id == scenario_id,
-        Transfer.is_deleted.is_(False),
-        Transfer.status_id.notin_(balance_excluded_status_ids()),
         TransactionEntry.settled_on.isnot(None),
         TransactionEntry.is_credit.is_(False),
     ).all()
     return sum(
         (
-            movement.amount if is_income else -movement.amount
-            for movement, _transfer, is_income in rows
+            transfer.settled_figure if is_income else -transfer.settled_figure
+            for _movement, transfer, is_income in rows
         ),
         Decimal("0"),
     )

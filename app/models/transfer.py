@@ -2,7 +2,8 @@
 Shekel Budget App -- Transfer Model (budget schema)
 
 Tracks transfers between accounts (checking ↔ savings) within pay periods.
-Supports both template-generated recurring transfers and ad-hoc one-time transfers.
+Supports the transfers a recurring definition generates, the one-time transfer a
+definition with no rule places, and ad-hoc transfers that name no definition.
 """
 
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from app.extensions import db
 from app.models._derived_flag import DerivedFlag
 from app.models.amount_ownership import from_columns
+from app.models.settled_figure import settled_figure_from_columns
 from app.models.mixins import (
     OptimisticLockMixin,
     SoftDeleteOverridableMixin,
@@ -30,10 +32,11 @@ class Transfer(
     DELETE is narrowed to ``WHERE id = ? AND version_id = ?`` and
     the stored value is atomically incremented; concurrent
     mutations race for the bump and the loser raises
-    :class:`sqlalchemy.orm.exc.StaleDataError`.  The transfer
-    service propagates parent-transfer mutations to both shadow
-    transactions, so the parent's version pin protects the entire
-    three-row write set even though the shadow rows carry their
+    :class:`sqlalchemy.orm.exc.StaleDataError`.  Until plan step
+    ``balance:X-bi-6-4d-2`` deleted the transfer's two shadow
+    transactions, the transfer service propagated parent-transfer
+    mutations to both, so the parent's version pin protected the
+    three-row write set even though the shadow rows carried their
     own ``version_id`` columns.  See commit C-18 of the 2026-04-15
     security remediation plan.
     """
@@ -54,12 +57,13 @@ class Transfer(
         # covers (ruling **R-FI**, plan step X-au-c1).  Identical in form and in
         # purpose to ``ck_transactions_amount_ownership`` -- see that constraint
         # for why the pairing is written as two NULL tests rather than against a
-        # source value, and for the write-side teeth it buys.  On THIS table the
-        # writer it refuses is named: ``transfer_service`` copies the parent's
-        # figure onto both shadows and a drift corrector repairs the copies that
-        # got away, and plan step X-au-f deletes both by making a shadow READ its
-        # parent -- at which point Transfer Invariant 3 is structural rather than
-        # maintained.
+        # source value, and for the write-side teeth it buys.  On THIS table
+        # this comment named two writers: ``transfer_service`` copied the
+        # parent's figure onto both shadows, and a drift corrector repaired the
+        # copies that got away.  Plan step X-au-g-2c-2 deleted both by making a shadow READ
+        # its parent (``1f2b98a40``, ruling **R-IN**, which took in X-au-f's
+        # shadow half), and plan step ``balance:X-bi-6-4d-2`` deleted the
+        # shadows.
         #
         # ``ck_transfers_positive_amount`` (``amount > 0``) is UNCHANGED and
         # still admits the NULL (a comparison with NULL is UNKNOWN, which a CHECK
@@ -86,6 +90,25 @@ class Transfer(
         db.CheckConstraint(
             "amount_source_id IS NULL OR transfer_template_id IS NOT NULL",
             name="ck_transfers_adhoc_owns_amount",
+        ),
+        # THE SETTLED FIGURE'S TWO STORAGE RULES (plan step
+        # ``balance:X-bi-6-4d-2``, rulings **R-BAL365** and **R-BAL366**).
+        # The figure is a MAGNITUDE -- a settle verb takes one, and each
+        # side's direction is its own -- and ``$0.00`` is storable: a close
+        # of nothing stores ``0.00`` and who typed it until plan step
+        # ``balance:X-db`` refuses a new one at every door and tightens this
+        # to ``> 0``.  The pair is stored whole or not at all, written as an
+        # equality of two NULL tests (``ck_transfers_amount_ownership``'s
+        # form); :class:`~app.models.settled_figure.SettledFigure` makes the
+        # half pair unconstructible, and this is its backstop for a writer
+        # that is not this application.
+        db.CheckConstraint(
+            "settled_figure >= 0",
+            name="ck_transfers_settled_figure_non_negative",
+        ),
+        db.CheckConstraint(
+            "(settled_figure IS NULL) = (settled_figure_source_id IS NULL)",
+            name="ck_transfers_settled_figure_source_pairing",
         ),
         # A TRANSFER OF A DEFINITION IS DATED (plan step **X-bv-2**, ruling
         # **R-BAL17**, finding **BAL-463**): the twin of
@@ -135,7 +158,8 @@ class Transfer(
         # transfers / $20,500 at the unarchive door.
         #
         # **The two predicates DIVERGED at plan step X-au-h**, exactly as the
-        # transaction twin did -- see ``models/transaction.py`` for the full
+        # transaction twin did -- see ``models/_transaction_table_args.py`` and
+        # migration ``e7c3a1f9b482`` for the full
         # argument, the measurement, and why the UNDATED index below keeps the
         # exemption this one drops.  In one line: the exemption guarded a
         # PAYCHECK-keyed collision, R17 re-keyed this index onto ``occurs_on``,
@@ -164,14 +188,51 @@ class Transfer(
                 "AND is_override = FALSE"
             ),
         ),
+        # The SUPERKEYS a transfer side's payment names to prove its account is
+        # that side's endpoint (``fk_transaction_entries_expense_side`` /
+        # ``fk_transaction_entries_income_side``, plan step
+        # ``balance:X-bi-6-4d-2``, ruling **R-BAL88**).  They constrain nothing
+        # -- ``id`` is already the primary key -- and exist only because
+        # PostgreSQL requires a UNIQUE over exactly the referenced columns
+        # before a composite foreign key may target them: the construction
+        # ``uq_transactions_id_account`` uses one table over.
+        db.UniqueConstraint(
+            "id", "from_account_id", name="uq_transfers_id_from_account",
+        ),
+        db.UniqueConstraint(
+            "id", "to_account_id", name="uq_transfers_id_to_account",
+        ),
+        # **A TRANSFER'S ACCOUNTS ARE ITS OWNER'S** (plan step
+        # ``balance:X-bi-6-4d-2``, ruling **R-BAL107**): each endpoint keys,
+        # with ``user_id``, onto ``uq_accounts_id_user``, exactly as
+        # ``fk_transactions_owner_account`` does for a row.  A transfer naming
+        # another user's account is unstorable, and a side's payment, whose
+        # account the side keys hold to an endpoint, is the owner's by that
+        # chain.  ``ON DELETE RESTRICT`` matches the single-column endpoint keys
+        # beside them, which stay as the ``from_account`` / ``to_account``
+        # relationships' declared join paths.
+        db.ForeignKeyConstraint(
+            ["from_account_id", "user_id"],
+            ["budget.accounts.id", "budget.accounts.user_id"],
+            name="fk_transfers_owner_from_account",
+            ondelete="RESTRICT",
+        ),
+        db.ForeignKeyConstraint(
+            ["to_account_id", "user_id"],
+            ["budget.accounts.id", "budget.accounts.user_id"],
+            name="fk_transfers_owner_to_account",
+            ondelete="RESTRICT",
+        ),
         # Ad-hoc duplicate prevention (F-050 / C-22).  Without this index
         # a double-submit of the ad-hoc transfer form -- network retry,
         # double-click, browser back-and-resubmit -- creates two parent
-        # transfers in the same period.  Each duplicate transfer also
-        # produces two shadow transactions, so a single accidental
-        # double-click silently doubles the user's projected debit and
-        # credit by 4 rows total; balance projections drift by
-        # ``2 * amount`` until the user notices and manually reconciles.
+        # transfers in the same period.  Each duplicate transfer is a
+        # second debit and a second credit (with two more shadow
+        # transactions, until plan step ``balance:X-bi-6-4d-2`` deleted
+        # the shadows), so a single accidental double-click silently
+        # doubles the user's projected debit and credit; balance
+        # projections drift by ``2 * amount`` until the user notices and
+        # manually reconciles.
         # The composite key (user_id, from_account_id, to_account_id,
         # amount, pay_period_id, scenario_id) plus the
         # ``transfer_template_id IS NULL`` predicate scopes the
@@ -213,11 +274,12 @@ class Transfer(
     # DELETE in one pass, so a user-cascade that fans out into
     # ``pay_periods`` and ``transfers`` simultaneously would
     # previously have raised a RESTRICT error even though every
-    # row was destined for deletion.  CASCADE also keeps the
-    # transfer invariant intact: the transfer + its two shadow
-    # transactions + their pay period all disappear together
-    # rather than leaving the parent transfer orphaned after the
-    # shadows cascade away through ``transactions.pay_period_id``.
+    # row was destined for deletion.  Until plan step
+    # ``balance:X-bi-6-4d-2`` deleted the shadows, CASCADE also kept
+    # a transfer with its two shadow transactions: the three and
+    # their pay period disappeared together rather than leaving the
+    # parent transfer orphaned after the shadows cascaded away
+    # through ``transactions.pay_period_id``.
     # Name follows the SHEKEL_NAMING_CONVENTION (see
     # app/extensions.py).
     pay_period_id = db.Column(
@@ -232,10 +294,10 @@ class Transfer(
     # Pylint: ``duplicate-code`` -- Incidental scenario_id + status_id FK
     # pair, shared by structure (not by domain) with the transaction table
     # -- both are budget events living in a scenario with a status.  They
-    # are deliberately separate tables (the transfer owns the two-shadow
-    # invariant), so a shared base would couple them wrongly
-    # (coding-standards rule 13).  One-sided disable: the transaction block
-    # stays un-disabled.
+    # are deliberately separate tables (a transfer moves money between two
+    # accounts, a row is one account's), so a shared base would couple them
+    # wrongly (coding-standards rule 13).  One-sided disable: the transaction
+    # block stays un-disabled.
     # pylint: disable=duplicate-code
     scenario_id = db.Column(
         db.Integer,
@@ -255,8 +317,16 @@ class Transfer(
     # whose amount is DERIVED does not store one (ruling **R-FI**).  NULL means
     # "ask ``cash_ledger.resolve_transfer_amount``", which for a generated
     # transfer is its definition's effective-dated price series as of the
-    # transfer's own due date.  No production row is NULL as of this step; plan
-    # step X-au-f is what empties it for generated transfers.
+    # transfer's own due date, and for a loan payment (a definition carrying
+    # loan-payment settings) amount rule 4: the contract's cash in derive mode
+    # or the series in manual mode, each plus the standing extra principal.
+    # No production row was NULL at that step.  Plan step X-au-f emptied it
+    # for every transfer of a definition its owner had not overridden
+    # (migration ``b7e4c1f38a20``), and both creators of a transfer of a
+    # definition write it derived since
+    # (``transfer_recurrence._create_from_definition``, from
+    # ``DerivedTransferFields``, and the one-time branch of
+    # ``routes/transfers/_instances``); an ad-hoc transfer owns its figure.
     #
     # **PRIVATE since plan step X-au-k**, with the SQL name unchanged: read it
     # through :attr:`amount`, write it through :attr:`amount_ownership`.  The
@@ -294,21 +364,57 @@ class Transfer(
     # COLUMN does not, which is what let the write seam stop dispatching on the
     # model to find out which column a table stores a figure in.
     amount_ownership = db.composite(from_columns, __amount, __amount_source_id)
+    # WHAT THIS TRANSFER'S MONEY MOVED once it settled, and who wrote the
+    # figure (plan step ``balance:X-bi-6-4d-2``, rulings **R-BAL365**,
+    # **R-BAL366**): ONE figure for the transfer, where until this step each
+    # side's payment record carried a copy.  NULLABLE: NULL is "no figure
+    # stored" -- a transfer that has never settled, or whose revert of a
+    # ``$0.00`` close cleared it.  KEPT across a revert of a close that moved
+    # money, as the records are (ruling **R-BAL61**), so a re-settle honours
+    # a figure somebody stated; released when the delete takes the records
+    # off.  Written by the status seam's Transfer arm alone
+    # (:mod:`app.services.status_seam._side`).
+    #
+    # PRIVATE and double-underscored, for the seal ``__amount`` states: read
+    # through :attr:`settled_figure`, write through
+    # :attr:`settled_figure_pair`.
+    __settled_figure = db.Column("settled_figure", db.Numeric(12, 2))
+    # WHO WROTE the settled figure: the ``ref.movement_figure_sources`` row
+    # (``resolved`` / ``typed`` / ``observed``), RESTRICT for the reason
+    # ``transaction_entries.figure_source_id`` states -- a vanishing
+    # catalogue row would leave a figure with no source.  NULL exactly when
+    # the figure is (``ck_transfers_settled_figure_source_pairing``).
+    __settled_figure_source_id = db.Column(
+        "settled_figure_source_id",
+        db.Integer,
+        db.ForeignKey(
+            "ref.movement_figure_sources.id",
+            name="fk_transfers_settled_figure_source_id",
+            ondelete="RESTRICT",
+        ),
+    )
+    # THE PAIR ABOVE, AS ONE ATTRIBUTE (the X-au-k seal
+    # :attr:`amount_ownership` uses): a writer assigns a
+    # :class:`~app.models.settled_figure.SettledFigure` or ``None``, never one
+    # column.
+    settled_figure_pair = db.composite(
+        settled_figure_from_columns,
+        __settled_figure, __settled_figure_source_id,
+    )
     # is_override and is_deleted are provided by SoftDeleteOverridableMixin.
     category_id = db.Column(
         db.Integer, db.ForeignKey("budget.categories.id", ondelete="SET NULL"),
     )
     notes = db.Column(db.Text)
     # Calendar date the transfer is due.  Nullable, matching
-    # ``Transaction.due_date`` (ad-hoc transfers may omit it; recurrence
-    # places it from the rule's ``day_of_month``).  The parent is the
-    # canonical value: the transfer service mirrors it to both shadow
-    # transactions so the three stay equal (Transfer Invariant 3).
-    # Consumers of a due date (calendar, dashboard, year-end, spending-trend)
-    # read the shadow ``Transaction.due_date``; this column exists so the
-    # parent is a complete record and so edits/display have one source of truth.
+    # ``Transaction.due_date`` (ad-hoc transfers may omit it; a generated
+    # transfer's is ``recurrence.compute_due_date``'s answer).  Each side's leg reads
+    # it here (``TransferLeg.due_date``, :mod:`app.services.transfer_legs`).
+    # Until plan step ``balance:X-bi-6-4d-2`` deleted the shadows, the
+    # transfer service mirrored it to both shadow transactions, and the
+    # consumers of a due date read the shadow ``Transaction.due_date``.
     #
-    # On a LOAN PAYMENT the shadow's ``due_date`` is a POSTING INPUT, not
+    # On a LOAN PAYMENT the ``due_date`` is a POSTING INPUT, not
     # display metadata: it is the INSTALLMENT the payment satisfies (the loan
     # engine reads it via ``loan_loaders.loan_payment_due_date`` rather than
     # re-deriving it from the pay period, which is wrong for a payment settled
@@ -316,25 +422,30 @@ class Transfer(
     # strict ``anchor_date < due_date`` post-anchor boundary against it.  Moving
     # it therefore changes the POSTED balance, so ``due_date`` is in
     # ``transfer_service._POSTING_RELEVANT_FIELDS`` and any other writer of this
-    # column MUST follow it with a posting reconcile.  The three rows must be
-    # kept equal for the same reason: the full-edit form pre-fills its input from
-    # the PARENT, so a stale parent would be written back over a corrected shadow
-    # by a no-op save.
+    # column MUST follow it with a posting reconcile.
     due_date = db.Column(db.Date, nullable=True)
-    # WHICH OCCURRENCE this transfer is -- the date its template's cadence
-    # named when the transfer recurrence engine wrote it.  The parallel of
-    # ``Transaction.occurs_on``, which carries the full statement; both engines
-    # write it from the same ``PlannedOccurrence.occurrence`` and the shared
-    # skip predicate reads it identically, so a divergence here would be the
-    # drift ``_recurrence_common`` exists to prevent (plan step **R17**).
+    # WHICH OCCURRENCE this transfer is.  A GENERATED transfer's is the date
+    # its template's cadence named when the transfer recurrence engine wrote
+    # it: the parallel of ``Transaction.occurs_on``, which carries the full
+    # statement; both engines write it from the same
+    # ``PlannedOccurrence.occurrence`` and the shared skip predicate reads it
+    # identically, so a divergence here would be the drift
+    # ``_recurrence_common`` exists to prevent (plan step **R17**).  A transfer
+    # the one-time branch of ``routes/transfers/_instances`` PLACES answers its
+    # own due date: it writes the two equal at birth, and ``transfer_service``
+    # writes ``occurs_on`` beside a placed transfer's due date whenever that
+    # date moves (ruling **R-BAL94**).  Two placed shapes differ until their
+    # date first moves: a cleared cadence's survivor keeps the occurrence its
+    # cadence named (``transfer_service/_update.py``'s due-date arm), and the
+    # two one-time transfers born before plan step ``balance:X-ci-1`` answer
+    # none until ``X-ci-3``'s backfill.  An ad-hoc transfer answers no
+    # occurrence (NULL).
     #
-    # **It is NOT mirrored onto the two shadow transactions.**  Transfer
-    # Invariant 3 makes the shadows equal to their parent in amount, status and
-    # period, and a shadow is not the rule's own row: it is created by
-    # ``transfer_service`` from the parent, never by the recurrence engine from
-    # an occurrence, and no generate pass ever asks a shadow whether an
-    # occurrence has been written.  Mirroring it would put a second writer on a
-    # column whose whole purpose is that only the engine writes it.
+    # **It was never mirrored onto the two shadow transactions** plan step
+    # ``balance:X-bi-6-4d-2`` deleted: a shadow was not the rule's own row
+    # (``transfer_service`` created it from the parent, never the recurrence
+    # engine from an occurrence), and no generate pass asked a shadow whether
+    # an occurrence had been written.
     occurs_on = db.Column(db.Date, nullable=True)
     # version_id + its version_id_col mapper config: from OptimisticLockMixin.
 
@@ -350,6 +461,42 @@ class Transfer(
     pay_period = db.relationship("PayPeriod")
     scenario = db.relationship("Scenario")
     category = db.relationship("Category", lazy="joined")
+    # **EACH SIDE'S PAYMENT RECORD, and a delete never takes one** (plan step
+    # ``balance:X-bi-6-4d-2``, ruling **R-BAL88**; ``Transaction.entries``'
+    # shape, rulings **R-CC54** and **R-CC64**).  At most one per side
+    # (``uq_transaction_entries_one_expense_side_record`` /
+    # ``..._one_income_side_record``): where and when the from-side's money
+    # left and the to-side's arrived -- never how much, which the transfer
+    # stores once (:attr:`settled_figure`) -- dated while the transfer is
+    # settled and kept un-dated across a revert (ruling **R-BAL61**).  No
+    # ``delete`` cascade and ``passive_deletes="all"``: the side keys are
+    # ``NO ACTION``, so deleting a
+    # transfer still holding a record is REFUSED at flush, and the one act that
+    # takes a movement off the books (:mod:`app.services.movement_removal`)
+    # deletes each record itself and takes it out of THIS list
+    # (``transfer_legs.parent_entries``).  Written by the status seam's
+    # Transfer arm (:mod:`app.services.status_seam._side`); read through
+    # :mod:`app.services.transfer_legs`.
+    expense_movements = db.relationship(
+        "TransactionEntry",
+        primaryjoin="Transfer.id == TransactionEntry.expense_transfer_id",
+        foreign_keys="TransactionEntry.expense_transfer_id",
+        back_populates="expense_transfer",
+        lazy="select",
+        cascade="save-update, merge, refresh-expire, expunge",
+        passive_deletes="all",
+        order_by="TransactionEntry.id",
+    )
+    income_movements = db.relationship(
+        "TransactionEntry",
+        primaryjoin="Transfer.id == TransactionEntry.income_transfer_id",
+        foreign_keys="TransactionEntry.income_transfer_id",
+        back_populates="income_transfer",
+        lazy="select",
+        cascade="save-update, merge, refresh-expire, expunge",
+        passive_deletes="all",
+        order_by="TransactionEntry.id",
+    )
 
     @hybrid_property
     def amount(self):
@@ -380,6 +527,31 @@ class Transfer(
             its amount or has not stated its ownership yet.
         """
         return self.__amount_source_id
+
+    @hybrid_property
+    def settled_figure(self):
+        """Return what this transfer's money moved once it settled, or ``None``.
+
+        The read-only projection of :attr:`settled_figure_pair`, a hybrid for
+        the reason :attr:`amount` is one: a query selects it by the class
+        name (``pay_period_locks._movement_arms``).
+
+        Returns:
+            The stored figure (``0.00`` for a close of nothing, ruling
+            **R-BAL365**), or ``None`` when no figure is stored.
+        """
+        return self.__settled_figure
+
+    @hybrid_property
+    def settled_figure_source_id(self):
+        """Return the ``ref.movement_figure_sources`` id of who wrote the figure.
+
+        The read-only twin of :attr:`settled_figure`.
+
+        Returns:
+            The source id, or ``None`` exactly when no figure is stored.
+        """
+        return self.__settled_figure_source_id
 
     @DerivedFlag
     def recurs(self):

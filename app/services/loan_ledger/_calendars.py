@@ -48,7 +48,7 @@ def build_loan_calendar(params: LoanParams) -> LoanCalendar:
     (:func:`app.services.loan_loaders.load_escrow_lines`).  It reads the
     loan's TERMS and never its payment rows, so pricing a payment cannot read
     the payments it prices (``test_loan_payment_service
-    .TestALoansPriceDoesNotReadItsOwnPayments``).
+    .test_the_contractual_payment.TestALoansPriceDoesNotReadItsOwnPayments``).
 
     Args:
         params: The loan's :class:`~app.models.loan_params.LoanParams`.

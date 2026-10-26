@@ -17,8 +17,9 @@ elsewhere naming "``scripts/integrity_check.py``'s DC-11" names the tool's
 check by its id, which is how the report prints it.  The move itself changed
 no check and one name: the runner lost its leading underscore, because every
 family module now calls it.  What the same step then changed in the checks
-(FK-10, the transfer twins FK-14..16, OR-03, BA-06 and DC-11's join) is
-stated at each.
+(FK-10, the transfer twins FK-14..16, OR-03 and BA-06) is stated at each;
+its change to DC-11's join went with DC-11's leg arm at plan step
+``balance:X-bi-6-4d-2``.
 """
 
 from dataclasses import dataclass, field
@@ -75,24 +76,28 @@ class CheckSpec:
 
 
 #: A transfer's LEG RECORDS, in the raw SQL the sweep speaks: joined onto a
-#: query over ``budget.transfers x``, it yields one row per covering movement
-#: ``e`` that a LIVE shadow ``sh`` of ``x`` holds -- each side's money, on
-#: that side's account (``e.account_id``) and day (``e.settled_on``).
+#: query over ``budget.transfers x``, it yields one row per movement ``e``
+#: filed under one of ``x``'s two SIDES -- each side's money, on that side's
+#: account (``e.account_id``) and day (``e.settled_on``).
 #:
 #: It is ``app.services.transfer_legs``' one join from a transfer to its legs'
-#: records (``_records._covering_movements_query``: the shadow link, the
-#: ``covers_settlement`` mark, the live-shadow record test), spelled again
-#: because raw SQL cannot call an ORM expression -- the second spelling DC-11's
-#: leg arm introduced at leaf ``balance:X-bi-6-4a``.  **Stated ONCE for the
-#: sweep since plan step ``balance:X-bi-6-4c-4``**, when BA-06 began asking a
-#: transfer's legs too: DC-11 and BA-06 both read this constant, so
-#: ``X-bi-6-4d`` re-points it onto the movement's side links (ruling
-#: **R-BAL88**) here, in one place, rather than finding a copy per check.
+#: records (``_records._movement_link``: the from-side's key or the to-side's,
+#: ruling **R-BAL88**), spelled again because raw SQL cannot call an ORM
+#: expression -- the second spelling DC-11's leg arm introduced at leaf
+#: ``balance:X-bi-6-4a``.  **Stated ONCE for the sweep since plan step
+#: ``balance:X-bi-6-4c-4``**, when BA-06 began asking a transfer's legs too,
+#: so plan step ``balance:X-bi-6-4d-2`` re-pointed it off the shadow rows and
+#: onto the side links here, in one place.  BA-06 is its one reader since plan
+#: step ``balance:X-bi-6-4d-2`` deleted DC-11's leg arm, whose state the
+#: database refuses at commit (``app.side_band_infrastructure``).  **It asks
+#: no covering test and no live-row test,
+#: as the app's join asks none** (``_records._side_records``): a side link is
+#: a record by ``ck_transaction_entries_side_link_is_a_record``, and a record
+#: under a hidden transfer is unstorable by the deleted-row rule's transfer
+#: arm.  Each check asks the TRANSFER's own status and ``is_deleted``.
 TRANSFER_LEG_RECORDS_JOIN = """
-            JOIN budget.transactions sh
-              ON sh.transfer_id = x.id AND NOT sh.is_deleted
             JOIN budget.transaction_entries e
-              ON e.transaction_id = sh.id AND e.covers_settlement"""
+              ON e.expense_transfer_id = x.id OR e.income_transfer_id = x.id"""
 
 
 # ── Helper ───────────────────────────────────────────────────────

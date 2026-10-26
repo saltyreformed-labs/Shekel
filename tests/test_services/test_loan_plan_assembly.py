@@ -16,11 +16,10 @@ from types import SimpleNamespace
 import pytest
 
 from app import ref_cache
-from app.enums import AmountSourceEnum, StatusEnum
+from app.enums import StatusEnum
 from app.models.escrow_line import EscrowComponentVersion
 from app.models.loan_features import RateHistory
 from app.services import loan_loaders, transfer_service
-from app.services.row_valuation import settled_contribution
 from app.services.balance_at._plan import (
     _PAYOFF_EXTENSION_MONTHS,
     _extension_dates,
@@ -34,17 +33,16 @@ from app.services.balance_at._resolution import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.balance_at._memoize import _memoize_once
-from app.exceptions import AmountUnresolvable, ForeignAccountError
+from app.exceptions import ForeignAccountError
 from app.models.account import Account
 from tests._test_helpers import (
     add_escrow_line,
+    assert_a_twin_is_refused,
     create_loan_account,
     create_settled_transfer,
     freeze_today,
     last_covered_day,
-    loan_income_shadow,
 )
-from app.services.amount_ownership import declare_derived
 from app.models.amount_ownership import AmountOwnership
 from app.services.loan_ledger import LoanCalendar
 
@@ -178,12 +176,14 @@ def test_missed_installments_with_no_record_do_not_pay_the_loan_down(seed_user, 
 def _project_loan_payment(seed_user, db, loan, period, amount, due_date):
     """Create a PROJECTED loan-payment transfer with its due date, through the door.
 
-    The due date is stated on the ``TransferSpec`` so the parent carries it and
-    the door mirrors it onto both shadows (Transfer Invariant 3).  *It was
-    written onto the income SHADOW alone until plan step balance:X-bi-6a*, a
-    write past Invariant 4 that left the parent undated; the PLANNED tier reads
-    a projected payment off its PARENT now (ruling R-BAL13), so a date the
-    parent never carried is a date the plan never sees.
+    The due date is stated on the ``TransferSpec`` so the transfer carries it.
+    *It was written onto the income SHADOW alone until plan step
+    balance:X-bi-6a*, a write past Invariant 4 that left the parent undated; the
+    PLANNED tier reads a projected payment off its PARENT now (ruling R-BAL13),
+    so a date the parent never carried is a date the plan never sees.  It
+    returned the income shadow the door mirrored the date onto until plan step
+    balance:X-bi-6-4d-2 made a transfer one row; it returns the transfer
+    (ruling R-BAL167 class 4).
     """
     transfer = transfer_service.create_transfer(
         transfer_service.TransferSpec(
@@ -200,13 +200,13 @@ def _project_loan_payment(seed_user, db, loan, period, amount, due_date):
         ),
     )
     db.session.commit()
-    return loan_income_shadow(db.session, transfer.id, loan.id)
+    return transfer
 
 
-def test_a_derived_projected_shadow_is_priced_by_the_plan_tier(
+def test_a_projected_loan_payment_is_priced_and_its_derived_twin_refused(
     seed_user, db, seed_periods,
 ):
-    """A projected shadow with NO stored figure is priced, not refused.
+    """A projected loan payment is priced by the plan tier, and a derived twin of it is refused.
 
     **The PLAN tier's half of plan step balance:X-au-g-2c-1**, and the reason
     that step routed two readers rather than the one its finding named.
@@ -220,34 +220,34 @@ def test_a_derived_projected_shadow_is_priced_by_the_plan_tier(
     adversarial review censused the accessor and found TWO callers of an
     unsettled row, not one.
 
-    The paired refusal below is what makes this a measurement rather than a
-    happy path: the SAME declaration, in the same fixture, still breaks the
-    accessor the tier used to call.  *Its ``match`` is load-bearing since plan
-    step X-bx, which widened that accessor to refuse ANY unsettled row: a bare
-    ``pytest.raises`` would pass on the shadow's Projected STATUS alone, leaving
-    ``declare_derived`` -- the subject of the fixture -- ungraded by it.*
+    Until plan step ``balance:X-bi-6-4d-2`` a paired refusal made this a
+    measurement rather than a happy path: the SAME derived declaration, on the
+    payment's income shadow, still broke the accessor the tier used to call.
+    That step made a transfer one row (ruling **R-BAL258**), so there is no
+    shadow to declare or to ask that accessor of.  What the case grades now
+    (re-expressed under ruling **R-BAL167** class 2, the cp2a review's L-2):
+    that a twin built derived (``PARENT_TRANSFER``) is refused by
+    ``ck_transactions_names_no_transfer``, which the 82f7 migration's and the
+    transfer schema's tests also grade, and that the tier prices the projected
+    payment off its parent transfer (ruling **R-BAL13**), the same June
+    measurement as :func:`test_a_projected_record_makes_its_slot_planned_not_estimated`.
+    It is kept beside that case as the record of finding N-266(a)'s second
+    caller, not as a control the other lacks.
     """
     account = create_loan_account(
         seed_user, db.session,
         principal=_PRINCIPAL, rate=_RATE, term=_TERM,
         origination_date=_ORIGINATION, payment_day=1,
     )
-    shadow = _project_loan_payment(
+    transfer = _project_loan_payment(
         seed_user, db, account, seed_periods[9],
         amount=Decimal("2100.00"), due_date=date(2026, 6, 1),
     )
-    # Declare it DERIVED.  Since plan step X-au-k this is ONE write of one
-    # attribute; it was two, and the pairing between them was the thing
-    # ``ck_transactions_amount_ownership`` had to catch.  Its parent transfer
-    # keeps its own figure, so rule 5 answers.
-    declare_derived(shadow, AmountSourceEnum.PARENT_TRANSFER)
-    db.session.commit()
 
-    # The accessor the tier used to call still refuses this row...
-    with pytest.raises(AmountUnresolvable, match="has not settled"):
-        settled_contribution(shadow)
+    # A derived twin of the payment cannot be stored...
+    assert_a_twin_is_refused(db.session, transfer, is_income=True)
 
-    # ...and the tier prices it anyway, from the parent transfer.
+    # ...and the tier prices the payment, from the parent transfer.
     ctx = BalanceContext.build(seed_user["user"].id, _AS_OF)
     plan = loan_plan(account, ctx)
 
@@ -259,7 +259,7 @@ def test_a_derived_projected_shadow_is_priced_by_the_plan_tier(
 def test_a_projected_record_makes_its_slot_planned_not_estimated(
     seed_user, db, seed_periods,
 ):
-    """A projected shadow becomes PLANNED; its contractual slot is not also ESTIMATED."""
+    """A projected payment becomes PLANNED; its contractual slot is not also ESTIMATED."""
     account = create_loan_account(
         seed_user, db.session,
         principal=_PRINCIPAL, rate=_RATE, term=_TERM,
@@ -328,16 +328,18 @@ def test_a_planned_record_keys_its_rate_and_escrow_on_the_due_date(
         account_id=account.id, effective_date=date(2026, 5, 25),
         interest_rate=Decimal("0.12"),
     ))
-    shadow = _project_loan_payment(
+    transfer = _project_loan_payment(
         seed_user, db, account, seed_periods[9],
         amount=Decimal("2100.00"), due_date=date(2026, 6, 1),
     )
     # The versions really are inside the window: after the pay-period start,
-    # before the installment they govern.
+    # before the installment they govern (read off the transfer; off its
+    # income shadow until plan step balance:X-bi-6-4d-2, ruling R-BAL167
+    # class 1).
     assert (
-        shadow.pay_period.start_date
+        transfer.pay_period.start_date
         < date(2026, 5, 25)
-        < shadow.due_date
+        < transfer.due_date
     )
 
     ctx = BalanceContext.build(seed_user["user"].id, _AS_OF)
@@ -552,13 +554,15 @@ def test_an_early_settled_payment_is_not_re_synthesized_as_estimated(
         origination_date=_ORIGINATION, payment_day=1,
     )
     # A payment for the 2026-06-01 installment, SETTLED early on 2026-05-20.
-    transfer = create_settled_transfer(
+    # The installment is stated on the TRANSFER, where a payment's installment
+    # is read since plan step balance:X-bi-6-4b; it was written on the income
+    # shadow alone until plan step balance:X-bi-6-4d-2 made a transfer one row
+    # (ruling R-BAL167 class 1), a copy no reader asked after X-bi-6-4b.
+    create_settled_transfer(
         seed_user, db.session, seed_user["account"], account,
         seed_periods[9], amount=Decimal("2100.00"),
-        settled_on=date(2026, 5, 20),
+        settled_on=date(2026, 5, 20), due_date=date(2026, 6, 1),
     )
-    shadow = loan_income_shadow(db.session, transfer.id, account.id)
-    shadow.due_date = date(2026, 6, 1)
     db.session.commit()
 
     # Read after the settlement but before the installment's due date.

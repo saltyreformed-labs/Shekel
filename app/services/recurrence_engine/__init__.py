@@ -77,7 +77,11 @@ from app.services.recurrence_engine._amounts import (
     DerivedRowFields,
     unruled_row_fields,
 )
-from app.services.recurrence_engine._conflicts import resolve_conflicts
+from app.services.recurrence_engine._conflicts import (
+    ConflictReporting,
+    log_use_resolved,
+    resolve_conflicts,
+)
 from app.services.recurrence_engine._generate import (
     can_generate_in_period,
     generate_for_template,
@@ -105,6 +109,7 @@ from app.services.recurrence_engine._plan import (
 )
 
 __all__ = [
+    "ConflictReporting",
     "DerivedRowFields",
     "GenerationPlan",
     "MaintainActs",
@@ -116,6 +121,7 @@ __all__ = [
     "definition_recurs",
     "derived_by_occurrence",
     "generate_for_template",
+    "log_use_resolved",
     "occurrences_in_period",
     "preview_regeneration",
     "preview_regeneration_for_template",

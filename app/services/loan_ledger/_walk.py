@@ -313,9 +313,9 @@ def load_loan_stream(
     # step balance:X-bi-6-4b).  So it states no load: it traverses no pricing
     # relationship (plan step balance:X-bl-2a), and the shadow's ENTRIES it
     # loaded while the shadow was the payment are not read.  The name
-    # ``shadows`` is the producer's, kept until ``X-bi-6-4d``.
+    # ``shadows`` is the shadow era's.
     shadows = (
-        loan_loaders.settled_income_shadows(
+        loan_loaders.settled_income_legs(
             loan_account_id, scenario_id, options=(),
         )
         if visible_by is None
@@ -350,7 +350,7 @@ def walk_loan_ledger(
       instead unless a payment of its own clears it (ruling R-R117).
     * At a settled PAYMENT -- INCLUDING one whose pay period has not yet begun
       (settlement is the confirming event; see
-      :func:`~app.services.loan_loaders.settled_income_shadows`) -- allocate its
+      :func:`~app.services.loan_loaders.settled_income_legs`) -- allocate its
       ACTUAL cash against whatever stands, into interest / escrow / principal /
       excess, then advance the balance.
     * At an ANCHOR (opening or user-trueup): record a

@@ -46,7 +46,7 @@ from app.services.transaction_service import (
 )
 # Pylint: ``shekel-private-module-import`` -- the statement-match builders are
 # the one way a test stages a bank line, a scope and an accepted act as the
-# app does (the convention ``test_cc5_4a1_settlement_subject`` keeps).
+# app does (the convention ``test_cc5_4a4_row_keeps_its_movements`` keeps).
 # pylint: disable=shekel-private-module-import
 from app.services.statement_match import accept_match
 from tests._test_helpers import (

@@ -50,7 +50,6 @@ from app.services.transaction_service import (
 )
 from app.services.transfer_legs import (
     TransferLeg,
-    covering_movements_by_leg,
     grid_transfer_leg,
     leg_of,
 )
@@ -196,19 +195,24 @@ def transfer_budgets(xfer: Transfer) -> "dict[int, Decimal]":
     down: ``budgets`` is one context key over two id spaces that are not
     disjoint, so a transaction-keyed map handed to a transfer fragment answers
     a HIT rather than a ``KeyError``.  No path does that today -- the one route
-    that could, ``transactions/forms.get_full_edit``, returns from inside its
-    shadow branch before any transaction map is built -- and the guarantee is
-    that a MISSING map is loud, not that a mismatched one is.
+    that could, ``transactions/forms.get_full_edit``, has rendered no transfer
+    form since leaf ``X-bi-6-1`` gave a transfer's popover the transfer's own
+    door -- and the guarantee is that a MISSING map is loud, not that a
+    mismatched one is.
 
     **It is SEPARATE from :func:`transfer_settlement_amounts` rather than a
     third field on it, and the split is by what each surface renders.**  The
-    quick edit shows a PLAN and nothing else, while that producer loads the
-    shadow pair and reads two settlement records to answer -- so bundling them
-    would make the quick-edit swap pay for two figures it does not display.
+    quick edit shows a PLAN and nothing else, while that producer answers
+    the two settlement figures -- so bundling them would hand the quick-edit
+    swap two figures it does not display.  Until plan step
+    ``balance:X-bi-6-4d-2`` that producer also took the legs' records (its
+    caller's ``covering_movements_by_leg`` load), a load the quick edit would
+    have paid for too; both figures are the transfer's since, and it takes
+    none.
     The popover shows all three and calls both; so does the transfers page's
     CELL since leaf ``X-bi-6-1`` closed finding **N-303** (it showed the plan
     over a figure just corrected, because it was handed neither map).  *A
-    first draft of this paragraph cited finding N-296 for that cost and an
+    first draft of this paragraph cited finding N-296 for that load's cost and an
     adversarial review opened the row: N-296 is a per-DEFINITION eager load in
     BATCH callers, whose remedy is `pricing_load_options` and whose step is
     `X-bm`.  It says nothing about this.  The argument above needs no
@@ -232,19 +236,21 @@ def transfer_budgets(xfer: Transfer) -> "dict[int, Decimal]":
     an HTMX swap that loaded nothing else -- and a pass-shaped caller builds
     one basis for everything it loaded instead.  It is pinned off the
     transfer's OWN columns, which is what makes it right for the row being
-    priced whichever of the nine sites called.
+    priced whichever site called.
 
     Args:
         xfer: The transfer the fragment renders.  It states no ownership rule of
-            its own and needs none: it reads neither ``user_id`` nor
-            ``scenario_id`` and, on the OWN arm, issues no query at all, so
-            there is nothing here to scope.  Eight of the nine callers reach it
-            through an owner-scoped load; the ninth
-            (``routes/transactions/forms.get_full_edit``) establishes ownership
-            TRANSITIVELY, its shadow having passed ``_get_owned_transaction``
-            and :func:`transfer_settlement_amounts` refusing a foreign or
-            soft-deleted parent one line earlier.  Stated rather than claimed
-            uniform, because an adversarial review measured the difference.
+            its own and needs none: it reads ``user_id`` and ``scenario_id``
+            only to pin the basis to the transfer's own columns and, on the
+            OWN arm, issues no query at all, so there is nothing here to
+            scope.  Every caller is a transfers-blueprint render (the quick
+            edit, the full-edit popover, :func:`render_transfer_cell`) handed
+            a transfer its door loaded for the owner (``_get_owned_transfer``,
+            the ad-hoc create's own owner, or its dedupe query's
+            ``user_id``).  The one caller that established ownership
+            TRANSITIVELY, ``routes/transactions/forms.get_full_edit`` through
+            the transfer's shadow, rendered the transfer form until leaf
+            ``X-bi-6-1``; an adversarial review had measured that difference.
 
     Returns:
         ``{xfer.id: Decimal}``, holding exactly one entry.
@@ -267,24 +273,26 @@ class TransferSettlementAmounts:
 
     The transfer half of :class:`RenderAmounts`, and deliberately only two of
     its three: the PLAN is :func:`transfer_budgets`, a producer of its own
-    because the two fragments that show a plan and no record must not pay for
-    a record they do not render.  What the parent does NOT
-    carry is a settlement record -- a transfer's money moves on its two shadow
-    legs and each records its own -- so both maps below are read off a leg.
+    because the fragment that shows a plan and no record (the quick edit)
+    must not pay for a record it does not render.  What a settled transfer's
+    money moved is ONE figure on the transfer itself (plan step
+    ``balance:X-bi-6-4d-2``: :attr:`~app.models.transfer.Transfer.settled_figure`),
+    and both maps below read it through a leg, with the producers the grid
+    prices a leg's cell by (:func:`transfer_settlement_amounts`).
 
-    **Both are keyed by the TRANSFER's id, not the shadow's.**  The template's
-    subject is the transfer, and a map keyed by something the template does not
-    have would be a second lookup for it to get wrong.  The re-key is safe
-    because a pair carries ONE record (Transfer Invariant 3).
+    **Both are keyed by the TRANSFER's id, not the leg's ``cell_key``.**  The
+    template's subject is the transfer, and a map keyed by something the
+    template does not have would be a second lookup for it to get wrong.  The
+    re-key is safe because both legs read the transfer's one figure.
 
     **They are maps rather than scalars for the reason ``fragment_amounts``
     states**: a missing scalar renders ``value=""`` in silence while a missing
     map raises, and this form is a surface where an empty figure would be POSTED
-    BACK into the settlement record.
+    BACK as the transfer's settled figure.
 
     Attributes:
-        settled: ``{transfer_id: what the pair's money DID}``, ``None`` when the
-            transfer has not settled or its legs record nothing.
+        settled: ``{transfer_id: what the transfer's money DID}``, ``None``
+            when the transfer has not settled.
         retained: ``{transfer_id: what a re-settle WOULD re-book}``, ``None``
             when that is already on screen.
     """
@@ -294,56 +302,62 @@ class TransferSettlementAmounts:
 
 
 def transfer_settlement_amounts(
-    xfer: Transfer, user_id: int, records: dict,
+    xfer: Transfer, user_id: int,
 ) -> TransferSettlementAmounts:
     """Return the pair's recorded and retained figures, keyed by transfer id.
 
-    The transfer twin of :func:`fragment_amounts`, for the ONE surface that
-    needs it: the full-edit popover, which since plan step X-au-c3 carries an
-    Actual box (what the bank took, prefilled from the record) and the re-book
-    notice (what a re-settle would honour).  Both render sites call this rather
-    than assembling it, because the popover is reachable from two blueprints --
-    the transfers page and a grid SHADOW cell -- and a rule written at each is
-    how one click shows a different figure from another.
+    The transfer twin of :func:`fragment_amounts`, for the two surfaces that
+    need it: the full-edit popover, which since plan step X-au-c3 carries an
+    Actual box (what the bank took, prefilled from the transfer's settled
+    figure) and the re-book notice (what a re-settle would honour), and the
+    transfers page's cell (:func:`render_transfer_cell`).  Both call this
+    rather than assembling it -- the popover, opened from the transfers page
+    or from a grid leg's cell, and that page's cell -- because a rule
+    written at each is how one click shows a different figure from another.
 
     **It asks the LEG producers, the same two the grid prices a leg's cell
     by** (leaf ``X-bi-6-1``, ruling **R-BAL87**; rule 14):
     :func:`~app.services.cash_ledger.leg_settled_amounts_by_key` and
     :func:`~app.services.transaction_service.leg_retained_amounts_by_key` over
-    ONE leg read through :func:`~app.services.transfer_legs.grid_transfer_leg`,
-    so what this popover promises, what the cell beside it shows and what a
-    tick books are one walk.  Until that leaf it loaded the shadow pair and
-    read the expense SHADOW's entries through the row producers -- a second
-    walk over the same record that agreed with the cell's only while Transfer
-    Invariant 3 held, which an adversarial review named.  Both leg producers
-    are built from the seam's own reads (``movement_settlement``,
-    ``honoured_figure``), the leaves the row producers read through too.
+    ONE leg built by :func:`~app.services.transfer_legs.leg_of`, so what
+    this popover promises, what the cell beside it shows and what a tick
+    books are one walk.  Until that leaf it loaded
+    the shadow pair and read the expense SHADOW's entries through the row
+    producers -- a second walk over the same record that agreed with the
+    cell's only while Transfer Invariant 3 held, which an adversarial review
+    named.  The settled producer reads the transfer's figure
+    (``row_valuation.leg_settled_figure``) and the retained one the seam's
+    own reads (``recorded_leg_settlement``, ``honoured_figure``): since plan
+    step ``balance:X-bi-6-4d-2`` either leg reads the transfer's ONE settled
+    figure.
 
     **The EXPENSE leg answers**, which is the leg
     ``transfer_service._settle.settle`` resolves its figures from and the leg
-    the correction door writes first.  Either would answer the same (Transfer
-    Invariant 3 -- both legs carry the same record), and naming one means the
+    the correction door compares a typed figure against
+    (``transfer_service._update``).  Either would answer the same -- both
+    read the transfer's one figure -- and naming one means the
     choice is not made twice.  (A DAY is per side since plan step
     ``balance:X-bi-6-4c-3``; :func:`transfer_side_boxes` draws each.)
 
-    **The legs' records are the CALLER's one load** (ledger row **BAL-530**):
-    the popover reads its figures, both day boxes and its withdrawal caption
-    off one :func:`~app.services.transfer_legs.covering_movements_by_leg`,
-    where it loaded the records twice.
+    **It takes no records** (plan step ``balance:X-bi-6-4d-2``): neither
+    producer reads a leg's record -- both figures are the transfer's -- so
+    the leg built here carries none, and neither caller -- the popover nor
+    the transfers page's cell (:func:`render_transfer_cell`) -- loads the
+    records for it.  The popover's own ONE load of them (ledger row
+    **BAL-530**, ``routes/transfers/forms.render_full_edit``) is read by its
+    day boxes and its withdrawal caption alone.
 
     **It answers for a SOFT-DELETED transfer**, where the pair loader it used
     to call refused one: the transfers page's cell reaches here on the stale
-    response after a rival's delete won (``_stale_transfer_response``), and a
-    deleted transfer's leg simply carries no record.  The popover door refuses
-    a deleted transfer itself (``transfers.get_full_edit``).
+    response after a rival's delete won (``_stale_transfer_response``), and
+    nothing here refuses one.  The popover door refuses a deleted transfer
+    itself (``transfers.get_full_edit``).
 
     Args:
         xfer: The transfer the popover is rendering.
         user_id: The owner, a defense-in-depth ownership check the loader used
             to make and this keeps: a transfer that is not *user_id*'s is
             refused as not found.
-        records: ``covering_movements_by_leg([xfer.id])``, loaded once by the
-            caller.
 
     Returns:
         A :class:`TransferSettlementAmounts` whose two maps hold one entry each.
@@ -353,10 +367,7 @@ def transfer_settlement_amounts(
     """
     if xfer.user_id != user_id:
         raise NotFoundError(f"Transfer {xfer.id} not found.")
-    leg = leg_of(
-        xfer, xfer.from_account_id,
-        record=records.get((xfer.id, xfer.from_account_id)),
-    )
+    leg = leg_of(xfer, xfer.from_account_id)
     return TransferSettlementAmounts(
         settled={xfer.id: leg_settled_amounts_by_key([leg])[leg.cell_key]},
         retained={xfer.id: leg_retained_amounts_by_key([leg])[leg.cell_key]},
@@ -441,9 +452,10 @@ def transfer_side_boxes(
 ) -> "tuple[TransferSideBox, TransferSideBox]":
     """Return the popover's two date boxes, from-side then to-side.
 
-    Each side's day is read off its leg's RECORD -- its covering movement,
-    which the status seam keeps equal to its shadow -- in the caller's ONE
-    load (ledger row **BAL-530**).  The ONE producer both the popover's render
+    Each side's day is read off its leg's RECORD -- the payment record the
+    status seam's Transfer arm writes for that side (plan step
+    ``balance:X-bi-6-4d-2``) -- in the caller's ONE load (ledger row
+    **BAL-530**).  The ONE producer both the popover's render
     and the PATCH's grading read, so what a box was prefilled with and what
     its submission is graded against cannot part.
 
@@ -691,9 +703,7 @@ def render_transfer_cell(xfer: Transfer, **extra: Any) -> str:
             rule cannot answer.  Unreachable while every transfer owns its
             figure; the leaves after this one are what give it a population.
     """
-    amounts = transfer_settlement_amounts(
-        xfer, current_user.id, covering_movements_by_leg([xfer.id]),
-    )
+    amounts = transfer_settlement_amounts(xfer, current_user.id)
     return render_template(
         "transfers/_transfer_cell.html",
         xfer=xfer,

@@ -82,7 +82,7 @@ from tests._test_helpers import (
     make_recurring_raise,
     make_salary_profile,
 )
-from tests.test_services.test_paycheck_calculator import (
+from tests.test_services.test_paycheck_calculator._helpers import (
     FakeBracket,
     FakeBracketSet,
     FakeDeduction,

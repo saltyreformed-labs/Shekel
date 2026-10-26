@@ -62,7 +62,7 @@ its deferrability and the ``_DEFER_ANCHOR_FK_SQL`` the pay-period reset used are
 deleted with it (rulings R-EH and R-EO), so there is nothing left to assert: not
 a weakened rule, an absent one.  What the deferral existed to PROTECT -- a
 balance surviving a schedule rebuild -- is graded by
-``tests/test_services/test_pay_period_reset.py``'s
+``tests/test_services/test_pay_period_reset/test_the_reset.py``'s
 ``test_wipes_all_and_the_balance_survives`` and
 ``test_the_reset_preserves_every_balance_assertion``, and the migration's own
 restore of the FK is graded by

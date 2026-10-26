@@ -15,14 +15,15 @@ ruling **R-FA**'s own OF-WHICH figure to the cent.
 
 **53 DAYS, not 57**: the account carries 57 assertion ROWS over 53 distinct
 days, and X-f2-c's own text records that confusing the two is how a figure in
-this arc went wrong before.  At the LATEST assertion (2026-08-06) this arm
-offers NOTHING, because every projected shadow starts 2026-08-13 -- so the
-panel is unchanged on production today.
+this arc went wrong before.  At the then-LATEST assertion (2026-08-06) this arm
+offered NOTHING, because every projected shadow started 2026-08-13 -- so the
+panel was unchanged on production when plan step X-f2-c3 shipped.
 
 **It offers the LEG, off ``budget.transfers``, since leaf
 ``balance:X-bi-6-4c-2``** (the one-place rule leaves ``X-bi-6-4a`` / ``6-4b``
-follow: a reader reaches a shadow only through a leg-shaped call in
-``transfer_legs`` or ``transfer_service``): a
+followed: a reader reached a shadow only through a leg-shaped call in
+``transfer_legs`` or ``transfer_service``, until ``X-bi-6-4d-2`` deleted the
+shadows): a
 :class:`~app.services.transfer_legs.TransferLeg` from
 ``transfer_legs.offerable_transfer_legs``, keyed by
 ``transfer_legs.cell_key`` -- ``(transfer id, account id)``, ruling
@@ -31,26 +32,30 @@ follow: a reader reaches a shadow only through a leg-shaped call in
 under its own form fields (ruling **R-BAL145**, :class:`~._offers.TickForm`).
 Until then it offered the transfer's SHADOW row on this account, keyed by the
 shadow's id in one map with the transaction arm's rows, which only the
-table's partition on ``transfer_id`` kept from colliding.  So this arm reaches
-no shadow itself; the two doors do, through the interval, and plan step
-``X-bi-6-4d`` re-bodies them once.  **What can move on screen**, all of it
+table's partition on ``transfer_id`` kept from colliding.  So this arm reached
+no shadow itself; the two doors did, through the interval, until plan step
+``balance:X-bi-6-4d-2`` re-bodied them onto the transfer and its sides' records
+and ``X-bi-6-4d-2`` deleted the shadows.  **What can move on screen**, all of it
 declared: a transfer's block is headed by its leg's label, composed from the
 endpoints' CURRENT names, where it printed the shadow's stored copy (leaf
 ``X-bi-6-1``'s same change on the grid) -- 0 of 354 shadows disagreed on the
 2026-09-24 production dump; two same-day transfer blocks order by transfer id
 where they ordered by shadow id (``_assemble._block_order``); a transfer whose
-shadow pair is broken is warned about rather than offered (ruling
-**R-BAL148**); and a shadow drifted from its parent is offered by the
-parent's state (``transfer_legs.offerable_transfer_legs``).
+shadow pair is broken was warned about rather than offered (ruling
+**R-BAL148**) until plan step ``balance:X-bi-6-4d-2`` priced a leg off its
+transfer alone and ruling **R-BAL235** offered it like any other; and a
+shadow drifted from its parent was offered by the parent's state
+(``transfer_legs.offerable_transfer_legs``) until ``X-bi-6-4d-2`` deleted the
+shadows.
 
 **Its settle is ``transfer_service.settle_transfer``, and that is the whole
-reason it is a separate arm** (ruling **R-FA**).  A transfer is THREE rows -- a
-parent and two shadows -- and ``CLAUDE.md`` transfer invariants 3 and 4 say they
-move together, so ``transaction_service.settle_transaction`` REFUSES a shadow
-outright.  Ticking one here therefore settles the leg on the OTHER account too,
-which is a fact about the act rather than about any row and is why the panel
-prints it once under the section heading
-(:attr:`~app.services.reconcile_service.OfferKind.section_note`).
+reason it is a separate arm** (ruling **R-FA**).  A transfer is ONE row since
+plan step ``balance:X-bi-6-4d-2`` (ruling **R-BAL166**; it was a parent and two
+shadows until then), its status is the transfer's, and every write of it goes
+through ``transfer_service`` (``CLAUDE.md``, Architecture).  Ticking one here
+therefore settles the leg on the OTHER account too, which is a fact about the
+act rather than about any row and is why the panel prints it once under the
+section heading (:attr:`~app.services.reconcile_service.OfferKind.section_note`).
 
 **Nothing here decides what a tick BOOKS, which status the rows take, or
 whether a submitted figure is a CORRECTION.**  All three are the transfer
@@ -76,14 +81,12 @@ Architecture (``CLAUDE.md``):
 
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import ValidationError
 from app.models.transfer import Transfer
 from app.services import transfer_legs, transfer_service
-from app.services.cash_ledger import AmountBasis, resolve_transfer_amount
+from app.services.cash_ledger import AmountBasis
 from app.services.match_press import Press
 from app.services.reconcile_service import _rows
 from app.services.reconcile_service._offers import (
-    DamagedTransfer,
     OfferKind,
     OutstandingGroup,
     OutstandingTransaction,
@@ -103,14 +106,15 @@ def _settle_one(
     """Settle one leg's transfer through the service; say if a human's figure won.
 
     This arm's settle, named by :data:`ARM`.
-    **Both legs and the parent move in this one call**, which is transfer
-    invariants 3 and 4 held structurally rather than by this function
-    remembering them, and it is why a tick here settles the matching leg on the
+    **Both legs move in this one call**: a transfer is one row whose status
+    is the transfer's (plan step ``balance:X-bi-6-4d-2``, ruling
+    **R-BAL166**), so the structure holds that rather than this function
+    remembering it, and it is why a tick here settles the matching leg on the
     other account (the section note says so on the panel).
 
     The submitted figure and the statement's day are handed straight through:
     what a tick BOOKS, whether the figure is written at all, and which status
-    the three rows take are the transfer service's rules and are not restated
+    the transfer takes are the transfer service's rules and are not restated
     here.
 
     Args:
@@ -127,12 +131,16 @@ def _settle_one(
             ruling **R-CC135**), over the lines named under the ROWS ticked:
             the panel captions no leg (plan step ``credit_card:CC-5-4a-5``).
             A ``$0.00`` figure is the one
-            transfer settle that takes a kept payment out of its matches, its
-            shadows holding no purchase to settle from; ruling **R-CC125**
+            transfer settle that takes a kept payment out of its matches, a
+            transfer holding no purchase to settle from; ruling **R-CC125**
             refuses a typed one before this runs, and any other figure books
             each side's payment where it already is.  A leg whose own price
-            resolved to ``$0.00`` ticked with its box CLEARED would record
-            one unrefused -- a plain transfer's amount is positive
+            resolved to ``$0.00`` ticked with its box CLEARED is refused
+            too, since plan step ``balance:X-bi-6-4d-2``: the tick states the
+            statement's day for a settle that records no money, and ruling
+            **R-BAL230** refuses a day on a ``$0.00`` close
+            (``transfer_service._status.reject_stated_day_on_a_zero_close``)
+            -- a plain transfer's amount is positive
             (``ck_transfers_positive_amount``) and so is a recurring
             series' (``ck_template_amount_versions_transfer_positive_amount``);
             whether a derive-mode loan payment's price can reach ``$0.00`` is
@@ -158,12 +166,11 @@ def _settle_one(
         press=press,
     )
     # WHICH statement showed THIS LEG (ruling **R-FL**), through the transfer
-    # service because the leg's money still lands on a SHADOW row through the
-    # interval and ``CLAUDE.md``'s transfer invariant 4 admits no direct
-    # mutation of one.  Only this leg takes it, even though the settle above
-    # moved both: the other leg is on another account, whose own statement
-    # nobody read in this act.  ``transfer_service.record_clearing`` carries why
-    # that asymmetry is correct.
+    # service, the one door onto a side's payment record (``CLAUDE.md``'s
+    # transfer invariant 4).  Only this leg takes it, even though the settle
+    # above moved both: the other leg is on another account, whose own
+    # statement nobody read in this act.  ``status_seam.record_side_clearing``
+    # carries why that asymmetry is correct.
     transfer_service.record_leg_clearing(leg, statement.anchor.anchor_id)
     return corrected
 
@@ -237,8 +244,8 @@ ARM = _rows.Arm(
 
 def outstanding_transfers(
     statement: _rows.Statement, basis: "AmountBasis",
-) -> "tuple[list[OutstandingGroup], list[DamagedTransfer]]":
-    """Return this arm's offers, one childless block per leg, and the legs it cannot offer.
+) -> "list[OutstandingGroup]":
+    """Return this arm's offers, one childless block per leg.
 
     The transfers this account is still holding forward on the day the balance
     was asserted -- a savings sweep the statement shows leaving, a loan payment
@@ -291,50 +298,25 @@ def outstanding_transfers(
             derive-mode payment -- finding **N-269** reintroduced one tier up,
             exactly as N-295's impact column predicted.
 
-    **A leg whose transfer's shadow pair is BROKEN is not offered; it is
-    reported** (ruling **R-BAL148**, *"Show the rest, warn"*).  The leg price
-    asks the transfer service's verified pair and refuses a pair that is not
-    one live expense and one live income shadow (Transfer Invariant 1, which
-    no door breaks and integrity check DC-12 reports); that refusal is caught
-    HERE, for this one call, and the leg becomes a
-    :class:`~._offers.DamagedTransfer` the panel prints as a warning, while
-    every other offer is published as normal.  Letting it propagate was a
-    server error on the account's whole page, which builds this panel inline,
-    and on a true-up's response after its write had committed.  A stale or
-    forged tick naming such a transfer still reaches the settle, which refuses
-    it the same way; the route renders that refusal in the panel's error
-    alert, whose text is the pair loader's own message (it names the transfer
-    by id, a pre-existing wording of ``transfer_service._validation``).
-    **The catch is by TYPE**: every ``ValidationError`` the leg price can raise
-    today is the broken pair's (``_get_shadow_transactions``; its
-    ``_reject_unsettleable`` cannot fire on a pair loaded live), so one added
-    to that chain later would read as "damaged" too -- still a warning, never
-    a silent drop.
+    **Every leg is offered** (ruling **R-BAL235**, developer 2026-10-08,
+    "Offer and settle it", retiring **R-BAL148**'s warning): a leg is priced
+    off its transfer and its side's record (``transfer_service.
+    leg_settle_amount``), never its twin rows, so a transfer whose twin was
+    deleted behind the app's back is priced and ticked like any other.  The
+    warning the panel printed for one went with the refusal it caught (plan
+    step ``balance:X-bi-6-4d-2``).
 
     Returns:
-        ``(blocks, damaged)``: one :class:`~._offers.OutstandingGroup` per
-        offered leg, in landing-day order, each keyed by its leg's
-        ``(transfer id, account id)``, and one
-        :class:`~._offers.DamagedTransfer` per leg that could not be priced.
-        Both empty for an account holding no overdue transfer.
+        One :class:`~._offers.OutstandingGroup` per offered leg, in
+        landing-day order, each keyed by its leg's ``(transfer id, account
+        id)``; empty for an account holding no overdue transfer.
     """
     groups = []
-    damaged = []
     for leg in ARM.load(statement, None).values():
-        attributed_on = _rows.attributed_on(statement, leg.transfer)
-        try:
-            amount = transfer_service.leg_settle_amount(leg, basis)
-        except ValidationError:
-            damaged.append(DamagedTransfer(
-                label=leg.name,
-                amount=resolve_transfer_amount(leg.transfer, basis),
-                attributed_on=attributed_on,
-            ))
-            continue
         offer = OutstandingTransaction(
             key=leg.cell_key,
-            attributed_on=attributed_on,
-            amount=amount,
+            attributed_on=_rows.attributed_on(statement, leg.transfer),
+            amount=transfer_service.leg_settle_amount(leg, basis),
             # Always the whole figure: a leg can hold no PURCHASE (its one
             # possible entry is the seam's covering movement, written when it
             # settles and kept un-dated across a revert), so there is no card
@@ -359,4 +341,4 @@ def outstanding_transfers(
             # Resolved by the assembler once the order is known.
             section=None,
         ))
-    return groups, damaged
+    return groups

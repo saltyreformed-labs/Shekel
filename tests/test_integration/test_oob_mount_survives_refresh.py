@@ -46,9 +46,9 @@ its includes -- no one file contains it.
 * **Whether the toast is ever SHOWN.** The mount surviving is half the
   contract; ``.toast:not(.show){display:none}``, so the other half is
   ``data-toast-auto-show`` reaching ``app.js``'s handler.  That half is graded
-  in ``tests/test_routes/test_accounts.py`` -- an adversarial review deleted
-  the attribute and measured the ENTIRE suite still passing, which is how that
-  assertion came to exist.
+  in ``tests/test_routes/test_accounts/test_reconcile_prompt.py`` -- an
+  adversarial review deleted the attribute and measured the ENTIRE suite still
+  passing, which is how that assertion came to exist.
 """
 
 from html.parser import HTMLParser

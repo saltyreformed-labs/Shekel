@@ -158,8 +158,9 @@ class JournalEntry(UserScopedMixin, CreatedAtMixin, db.Model):
     # CASCADE-FK blocks are structurally identical to the transfer table's --
     # both a transfer and a journal entry are budget events attributed to a
     # scenario and a period -- but the tables are deliberately separate
-    # domains (a transfer owns the two-shadow invariant; a journal entry is
-    # an append-only ledger header), so a shared base would couple them
+    # domains (a transfer is a planned movement whose two sides' payments
+    # hang off it by side links on ``transaction_entries``; a journal entry
+    # is an append-only ledger header), so a shared base would couple them
     # wrongly (coding-standards rule 13).
     # Pylint: ``duplicate-code`` -- incidental structural FK-block similarity
     # with ``app/models/transfer.py``; one-sided disable so the transfer

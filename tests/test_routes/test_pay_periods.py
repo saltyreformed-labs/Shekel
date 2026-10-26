@@ -14,7 +14,7 @@ from app.enums import StatusEnum
 from app.extensions import db
 from app.models.pay_period import PayPeriod
 from app.models.transaction import Transaction
-from app.services import pay_period_write, pay_schedule_service
+from app.services import pay_schedule_service
 from app.services.pay_rhythm import FixedDays
 from tests._test_helpers import (
     record_paydays_across_a_hole,
@@ -205,8 +205,8 @@ class TestPayPeriodGenerate:
         read as a gap*: it asserted **R-PC1**'s forward-only floor and the 422
         that renders it.  This door cannot reach that refusal any more, because
         it no longer forwards a payday.  The rule itself is unmoved and is
-        covered at its own layer -- ``test_pay_period_write.py`` pins the
-        message in seven places, and the doors that still state a payday
+        covered at its own layer -- ``test_pay_period_write/`` pins the
+        message in eleven places, and the doors that still state a payday
         (regenerate, reset) still meet it.
         """
         with app.app_context():

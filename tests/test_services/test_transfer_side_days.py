@@ -23,7 +23,7 @@ from app.services.transfer_service._side_days import (
     PairDays,
     SideDay,
     borrowed_day,
-    repair_fallback,
+    pair_fallback_day,
     resolve_pair_days,
     stated_by_side,
 )
@@ -132,18 +132,27 @@ class TestBorrowedDay:
         assert borrowed_day(None, TODAY) == _day(TODAY, BORROWED)
 
 
-class TestRepairFallback:
+class TestPairFallbackDay:
     """The day a pair with no evidence shares: the first recorded, else today."""
 
-    def test_the_first_recorded_day_in_repair_order_wins(self):
-        """The caller orders the legs; the first one holding a day answers."""
-        assert repair_fallback(
+    def test_the_first_recorded_day_in_the_given_order_wins(self):
+        """The caller orders the legs; the first one holding a day answers.
+
+        Every caller hands the pair expense then income, so the expense
+        side's day answers even when it is the later one, and the income
+        side's answers when the expense side records none.
+        """
+        assert pair_fallback_day(
             (None, _day(LATE, BORROWED), _day(EARLY, BORROWED)), TODAY,
         ) == LATE
+        assert pair_fallback_day(
+            (_day(LATE, ENTERED), _day(EARLY, OBSERVED)), TODAY,
+        ) == LATE
+        assert pair_fallback_day((None, _day(EARLY, OBSERVED)), TODAY) == EARLY
 
     def test_with_nothing_recorded_it_is_today(self):
         """A Paid press on a pair that never held a day borrows the press day."""
-        assert repair_fallback((None, None), TODAY) == TODAY
+        assert pair_fallback_day((None, None), TODAY) == TODAY
 
 
 class TestResolvePairDays:
@@ -208,8 +217,8 @@ class TestResolvePairDays:
             TODAY,
         ) == PairDays(expense=_day(LATE, OBSERVED), income=_day(EARLY, ENTERED))
 
-    def test_a_side_out_of_the_band_is_repaired_from_its_sibling(self):
-        """A drifted side holds no current day; it borrows its sibling's evidence."""
+    def test_a_side_holding_no_day_borrows_its_siblings_evidence(self):
+        """A side holding no current day (a moved side) borrows its sibling's evidence."""
         assert resolve_pair_days(
             PairDays(expense=_day(EARLY, OBSERVED), income=None),
             NO_DAYS,

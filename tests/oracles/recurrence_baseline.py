@@ -39,7 +39,7 @@ label is written beside the cadence it names.
 unsaved :class:`~app.models.recurrence_rule.RecurrenceRule` and
 :func:`build_schedule` unsaved :class:`~app.models.pay_period.PayPeriod` rows,
 for the reason finding B-17 records and
-``tests/test_services/test_recurrence_engine.py::build_rule`` documents at
+``tests/test_services/test_recurrence_engine/_helpers.py::build_rule`` documents at
 length: a hand-rolled double that mirrors the model drifts from it silently.
 When ``start_date`` was added to the rule, the stub of the day kept satisfying
 every assertion.  An unsaved instance costs no session and no flush, and a

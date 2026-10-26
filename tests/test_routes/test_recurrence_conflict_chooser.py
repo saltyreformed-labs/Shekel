@@ -53,6 +53,11 @@ class TestParseConflictDecisions:
         assert parse_conflict_decisions(MultiDict({"conflict_apply": "1"})) == {}
 
 
+#: The read pass the dispatch hands through to the resolver, which the spy
+#: records without reading: a sentinel, since no case here builds a pass.
+_PASS = object()
+
+
 class TestApplyConflictDecisions:
     """The chooser's resolution dispatch (Loop B, P3)."""
 
@@ -72,10 +77,10 @@ class TestApplyConflictDecisions:
         definition -- and the field, its branch and the resolver's
         ``new_amount`` went together.
         """
-        def fake_resolve(ids, action, user_id, **kwargs):
+        def fake_resolve(ids, action, ctx, **kwargs):
             calls.append({
                 "ids": list(ids), "action": action,
-                "user_id": user_id, "kwargs": dict(kwargs),
+                "ctx": ctx, "kwargs": dict(kwargs),
             })
 
         return RecurrenceConflictKind(
@@ -104,7 +109,7 @@ class TestApplyConflictDecisions:
         decisions = {10: "keep", 20: "use", 999: "use"}  # 999 not in the set
 
         apply_conflict_decisions(
-            kind=kind, conflict=conflict, decisions=decisions, user_id=1,
+            kind=kind, conflict=conflict, decisions=decisions, ctx=_PASS,
         )
 
         update = next(c for c in calls if c["action"] == "update")
@@ -136,7 +141,7 @@ class TestApplyConflictDecisions:
 
         apply_conflict_decisions(
             kind=kind, conflict=conflict, decisions={10: "use", 20: "use"},
-            user_id=1,
+            ctx=_PASS,
         )
 
         update = next(c for c in calls if c["action"] == "update")

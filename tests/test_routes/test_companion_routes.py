@@ -1073,12 +1073,12 @@ class TestTheCompanionAddPurchaseFormReadsTheUsersClock:
 
     **It pins WHICH CLOCK the route reads rather than arranging for the two to
     disagree**, for the reason
-    ``test_grid.TestTheAddPurchaseFormReadsTheUsersClock`` states at length: the
-    C library's zone is process-global and survives ``monkeypatch``'s env
-    restore, so a ``TZ`` mutation leaks into every later test in the same xdist
-    worker.  Substituting ``display_today`` for a sentinel is exact and
-    side-effect free -- the rendered form carries it if and only if the route
-    reads that function, which IS the defect.
+    ``test_grid.test_create.TestTheAddPurchaseFormReadsTheUsersClock`` states at
+    length: the C library's zone is process-global and survives
+    ``monkeypatch``'s env restore, so a ``TZ`` mutation leaks into every later
+    test in the same xdist worker.  Substituting ``display_today`` for a
+    sentinel is exact and side-effect free -- the rendered form carries it if
+    and only if the route reads that function, which IS the defect.
     """
 
     #: A date no clock can produce on its own, so its appearance in the

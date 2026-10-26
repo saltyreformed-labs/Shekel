@@ -543,7 +543,7 @@ def planned_removals(match: StatementMatch) -> PlannedRemovals:
             rows=(), refusal=None, cash_amount=Decimal("0.00"),
             kept_containers=0,
         )
-    named_transactions, named_purchases = named_rows(match)
+    named_items, named_purchases = named_rows(match)
     subjects: "list[PlannedRemoval]" = []
     containers: "list[tuple[Transaction, StatementMatchCreation]]" = []
     refusal: "str | None" = None
@@ -554,7 +554,7 @@ def planned_removals(match: StatementMatch) -> PlannedRemovals:
         named = (
             creation.transaction_entry_id in named_purchases
             if creation.transaction_entry_id is not None
-            else creation.transaction_id in named_transactions
+            else creation.transaction_id in named_items
         )
         if not named:
             containers.append((subject, creation))

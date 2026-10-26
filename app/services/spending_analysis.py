@@ -178,25 +178,26 @@ def query_settled_expenses(
     stated reason was that a caller "attributes by period", which no caller
     does.
 
-    **THAT CENSUS IS NO LONGER TOTAL, and it is recorded here rather than
-    re-run because what changed is reachability, not this query.**  The
-    surprises list prices a row through
+    **THAT CENSUS STOPPED BEING TOTAL on 2026-09-05, and it is recorded here
+    rather than re-run because what changed was reachability, not this
+    query.**  The surprises list prices a row through
     ``cash_ledger.resolve_transaction_amount`` as of 2026-09-05 (the
     ``/analytics/spending`` fix), and rule 4's arm --
     ``LoanPricing.derive_cash`` -> ``loan_loaders.installment_for`` -- reads a
     ``pay_period`` on every call, because that producer takes the period start
-    eagerly.  **Since plan step balance:X-au-f-2 it is the PARENT TRANSFER's
+    eagerly.  **From plan step balance:X-au-f-2 it was the PARENT TRANSFER's
     period rather than the shadow's** (ruling R-BAL10 moved the answer to the
-    parent), so the chain this query would have to load is
-    ``Transaction.transfer -> pay_period``; the count is unchanged and the
-    relationship is not.  It is unreachable on production today, where
-    ``budget.loan_payment_settings`` is empty, and reachable in seeded data the
-    moment a payment is tracked in derive mode.  So the sentence above is true
-    of every arm but that one; the removal is not re-litigated here, and
-    whether this query should adopt
+    parent), so the chain this query would have had to load was
+    ``Transaction.transfer -> pay_period``; the count was unchanged and the
+    relationship was not.  A row reached that arm only as a transfer's
+    shadow, through rule 5, and no row names a transfer since plan step
+    ``balance:X-bi-6-4d-2`` (``ck_transactions_names_no_transfer``), so this
+    query's rows no longer reach it; whether the census is total again is
+    not re-measured here.  The removal is not re-litigated here, and whether
+    this query should adopt
     ``amount_relationships.pricing_load_options`` -- which would re-add the
     ``pay_period`` load C2-f3d removed -- is finding **N-296**'s, whose census
-    of unguarded batch pricing callers this reader now joins.
+    of unguarded batch pricing callers this reader joined.
 
     **What the removal actually costs, said conditionally because the two
     queries differ in whether they run.**  This one is reached only from the

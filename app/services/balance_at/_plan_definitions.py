@@ -57,18 +57,17 @@ def _answered_by_rows(
     nothing else** (ruling **R-R66**, developer 2026-09-11).  A generated
     row's identity is the occurrence it answers -- ``(transfer_template_id,
     scenario_id, occurs_on)``, the key both unique indexes carry since plan
-    step R17 -- and that column is deliberately NOT mirrored onto the shadow
-    transactions the balance fold reads money from.  So "has this occurrence
-    been answered" cannot be asked of ``budget.transactions`` at all, and
+    step R17 -- and that column was deliberately NOT mirrored onto the shadow
+    transactions the balance fold read the plan's money from until plan step
+    ``balance:X-bi-6a`` (plan step ``balance:X-bi-6-4d-2`` deleted the
+    shadows).  So "has this occurrence been
+    answered" could not be asked of ``budget.transactions`` at all, and
     asking it of the parent rows through the one claim rule generation applies
     (:class:`~app.services._recurrence_common.OccurrenceClaims`, over the same
     scoped fetch, :func:`~app.services._recurrence_common.rows_claiming`) is
     what makes the estimate and the generate pass agree by construction about
     which occurrences a row already holds.  No figure is read off any row
-    here; the fold's money still comes only from ``budget.transactions``,
-    which is the double-counting Transfer Invariant 5 exists to prevent, and
-    the invariant's text carries this clause since this step (``CLAUDE.md``,
-    Transfer Invariants).
+    here.
 
     **Every state counts** -- immutable, overridden, cancelled, soft-deleted
     -- exactly as the generate path has always counted them: a row the owner

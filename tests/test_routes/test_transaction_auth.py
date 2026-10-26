@@ -838,7 +838,7 @@ class TestWriteDoorsResolveOwnershipStructurally:
     fetched ``budget.pay_periods`` by primary key and compared ``row.user_id``
     against the requester, through
     ``transactions._helpers._resolve_owned_fks``.  The transfer family's three
-    are graded the same way in ``test_transfers``.
+    are graded the same way in ``test_transfers/test_negative_paths.py``.
 
     **Why the property is a hydration count and not a status code.**  The
     404s themselves are ``TestCreateOwnership``'s already, and they pass

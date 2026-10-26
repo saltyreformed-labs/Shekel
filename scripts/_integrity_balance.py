@@ -144,13 +144,14 @@ def check_balance_anomalies(session):
         #
         # **A settled TRANSFER is graded by its LEGS since plan step
         # ``balance:X-bi-6-4c-4``** (ruling **R-BAL160**), the shape DC-11's
-        # leg arm has had since ``X-bi-6-4a``: one row per leg naming the
+        # leg arm had from ``X-bi-6-4a`` until plan step
+        # ``balance:X-bi-6-4d-2`` deleted it: one row per leg naming the
         # transfer and that leg's account, its day the leg's own movement's
         # (ruling **R-BAL80**: the money is the movement), asked under the
-        # TRANSFER's status and ``is_deleted``.  The row arm drops the
+        # TRANSFER's status and ``is_deleted``.  The row arm dropped the
         # shadows (``transfer_id IS NULL``), which it used to count as rows
-        # by their own day -- ``X-bi-6-4d`` stops writing them for new
-        # transfers.  The leg arm grades a MOVEMENT's day, so a side closed
+        # by their own day; since plan step ``balance:X-bi-6-4d-2`` no row
+        # names a transfer.  The leg arm grades a MOVEMENT's day, so a side closed
         # at ``$0.00``, which holds no movement, has no day to grade and is
         # not listed -- where a ``$0.00``-closed ROW keeps the row day this
         # arm's twin reads.  On the 2026-09-30 00:11 production dump no

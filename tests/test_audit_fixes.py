@@ -18,7 +18,6 @@ from tests._test_helpers import cadence_payload, one_off_row_of
 from app.models.user import User, UserSettings
 from app.models.scenario import Scenario
 from app.models.category import Category
-from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.models.savings_goal import SavingsGoal
@@ -128,10 +127,16 @@ def _create_savings_account(user_id):
 
 
 class TestEffectiveAmountDecimal:
-    """Verify effective_amount returns Decimal for all status paths."""
+    """A row's settled contribution and a transfer's resolved amount are ``Decimal``.
+
+    Over a Credit and a Cancelled row and a Cancelled and a Projected transfer.
+    Named for the ``effective_amount`` properties, which are deleted: a row is
+    valued by ``row_valuation.settled_contribution`` and a transfer's amount is
+    resolved by ``cash_ledger.resolve_transfer_amount``.
+    """
 
     def test_transaction_credit_returns_decimal(self, app, db, seed_user, seed_periods):
-        """Cancelled/credit Transaction.effective_amount must be Decimal."""
+        """A Credit row's settled contribution is a ``Decimal`` zero."""
         credit_status = db.session.query(Status).filter_by(name="Credit").one()
         expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
         txn = one_off_row_of(
@@ -151,7 +156,7 @@ class TestEffectiveAmountDecimal:
         assert settled_contribution(txn) == Decimal("0")
 
     def test_transaction_cancelled_returns_decimal(self, app, db, seed_user, seed_periods):
-        """Cancelled Transaction.effective_amount must be Decimal."""
+        """A Cancelled row's settled contribution is a ``Decimal`` zero."""
         cancelled_status = db.session.query(Status).filter_by(name="Cancelled").one()
         expense_type = db.session.query(TransactionType).filter_by(name="Expense").one()
         txn = one_off_row_of(
@@ -490,17 +495,22 @@ class TestTemplateOwnership:
 
 
 class TestBalanceWithTransfers:
-    """Verify balance_calculator accounts for transfer shadows correctly."""
+    """A transfer moves the cash balance of the accounts it names, read off its one row.
+
+    The read is ``balance_at.cash_balance_map``: a Projected transfer takes its
+    amount out of its source and puts it into its destination, and a Cancelled
+    one leaves its source's balance where it was.
+    """
 
     def test_outgoing_transfer_reduces_balance(self, app, db, seed_user, seed_periods):
-        """A shadow expense from a transfer reduces the source account's balance."""
+        """A Projected transfer reduces its source account's balance by its amount."""
         from app.services import transfer_service
 
         projected = db.session.query(Status).filter_by(name="Projected").one()
         savings_acct = _create_savings_account(seed_user["user"].id)
         account = seed_user["account"]
 
-        xfer = transfer_service.create_transfer(
+        transfer_service.create_transfer(
             transfer_service.TransferSpec(
                 user_id=seed_user["user"].id,
                 from_account_id=account.id,
@@ -515,21 +525,13 @@ class TestBalanceWithTransfers:
         )
         db.session.commit()
 
-        # Load only the checking account's shadow (the expense shadow).
-        shadow_txns = (
-            db.session.query(Transaction)
-            .filter_by(transfer_id=xfer.id, account_id=account.id)
-            .all()
-        )
-
         # Read what the app RENDERS (plan step X-g4b re-pointed these off the
         # deleted anchor-forward walk).  The fold LOADS the account's rows
         # itself rather than being handed a hand-picked subset -- an argument a
         # caller can get wrong is a defect, not a contract -- and the account
-        # holds nothing but this transfer's shadow, so the figures are
-        # unchanged.  ``as_of`` is pinned inside period 0 because ruling R-G
-        # clamps a still-Projected row forward past a reader's own now.
-        assert shadow_txns
+        # holds nothing but this transfer, so the figures are unchanged.
+        # ``as_of`` is pinned inside period 0 because ruling R-G clamps a
+        # still-Projected row forward past a reader's own now.
         balances = balance_at.cash_balance_map(
             account,
             BalanceContext.build(
@@ -542,14 +544,14 @@ class TestBalanceWithTransfers:
         assert balances[seed_periods[1].id] == Decimal("800.00")
 
     def test_incoming_transfer_increases_balance(self, app, db, seed_user, seed_periods):
-        """A shadow income from a transfer increases the destination account's balance."""
+        """A Projected transfer increases its destination account's balance by its amount."""
         from app.services import transfer_service
 
         projected = db.session.query(Status).filter_by(name="Projected").one()
         savings_acct = _create_savings_account(seed_user["user"].id)
         account = seed_user["account"]
 
-        xfer = transfer_service.create_transfer(
+        transfer_service.create_transfer(
             transfer_service.TransferSpec(
                 user_id=seed_user["user"].id,
                 from_account_id=savings_acct.id,
@@ -564,21 +566,13 @@ class TestBalanceWithTransfers:
         )
         db.session.commit()
 
-        # Load only the checking account's shadow (the income shadow).
-        shadow_txns = (
-            db.session.query(Transaction)
-            .filter_by(transfer_id=xfer.id, account_id=account.id)
-            .all()
-        )
-
         # Read what the app RENDERS (plan step X-g4b re-pointed these off the
         # deleted anchor-forward walk).  The fold LOADS the account's rows
         # itself rather than being handed a hand-picked subset -- an argument a
         # caller can get wrong is a defect, not a contract -- and the account
-        # holds nothing but this transfer's shadow, so the figures are
-        # unchanged.  ``as_of`` is pinned inside period 0 because ruling R-G
-        # clamps a still-Projected row forward past a reader's own now.
-        assert shadow_txns
+        # holds nothing but this transfer, so the figures are unchanged.
+        # ``as_of`` is pinned inside period 0 because ruling R-G clamps a
+        # still-Projected row forward past a reader's own now.
         balances = balance_at.cash_balance_map(
             account,
             BalanceContext.build(
@@ -586,10 +580,12 @@ class TestBalanceWithTransfers:
             ),
         )
 
+        # Period 0 (anchor): 1000
+        # Period 1: 1000 + 300 = 1300
         assert balances[seed_periods[1].id] == Decimal("1300.00")
 
     def test_cancelled_transfer_no_effect(self, app, db, seed_user, seed_periods):
-        """A cancelled transfer's shadows should not affect the balance."""
+        """A Cancelled transfer does not move its source account's balance."""
         from app.services import transfer_service
 
         projected = db.session.query(Status).filter_by(name="Projected").one()
@@ -610,26 +606,30 @@ class TestBalanceWithTransfers:
                 name="Cancelled",
             ),
         )
-        # Cancel the transfer (updates both shadows to cancelled).
+        # Cancel the transfer through its own door; its status is one column.
         transfer_service.update_transfer(
             xfer.id, seed_user["user"].id, status_id=cancelled.id
         )
         db.session.commit()
 
-        shadow_txns = (
-            db.session.query(Transaction)
-            .filter_by(transfer_id=xfer.id, account_id=account.id)
-            .all()
-        )
+        # The case's premise, read back from the database: the transfer is
+        # still there, Cancelled, on Checking, in period 1.  The balance below
+        # is also the balance of NO transfer, so a cancel that also hid or
+        # moved the row would pass that read alone.
+        db.session.expire_all()
+        stored = db.session.get(Transfer, xfer.id)
+        assert (
+            stored.status_id, stored.is_deleted,
+            stored.from_account_id, stored.pay_period_id,
+        ) == (cancelled.id, False, account.id, seed_periods[1].id)
 
         # Read what the app RENDERS (plan step X-g4b re-pointed these off the
         # deleted anchor-forward walk).  The fold LOADS the account's rows
         # itself rather than being handed a hand-picked subset -- an argument a
         # caller can get wrong is a defect, not a contract -- and the account
-        # holds nothing but this transfer's shadow, so the figures are
-        # unchanged.  ``as_of`` is pinned inside period 0 because ruling R-G
-        # clamps a still-Projected row forward past a reader's own now.
-        assert shadow_txns
+        # holds nothing but this transfer, so the figures are unchanged.
+        # ``as_of`` is pinned inside period 0 because ruling R-G clamps a
+        # still-Projected row forward past a reader's own now.
         balances = balance_at.cash_balance_map(
             account,
             BalanceContext.build(
@@ -637,7 +637,7 @@ class TestBalanceWithTransfers:
             ),
         )
 
-        # Cancelled transfer shadows should not reduce balance.
+        # A Cancelled transfer does not reduce the balance: 1000 - 0 = 1000.
         assert balances[seed_periods[1].id] == Decimal("1000.00")
 
 

@@ -142,8 +142,8 @@ def settle_day_for_status(
             popovers prefill the control.  Defaulting to ``None`` treats every
             submission as a fresh assertion, which is the SAFE direction for a
             caller that genuinely has no stored pair -- a row settling for the
-            first time -- and the wrong one for a re-save, which is why all
-            three route doors pass it.
+            first time -- and the wrong one for a re-save, which is why both
+            route doors pass it.
 
     Returns:
         A :class:`~app.services.settle_day.SettleDay` on the ``entered`` basis
@@ -258,8 +258,9 @@ def figure_for_status(
         recorded: What the row RECORDS as having moved
             (:func:`app.services.row_valuation.settled_figure`), which is what
             the box was prefilled from -- so equality here is exactly "the user
-            did not touch the box".  For a transfer it is read off the leg,
-            because the parent carries no record.
+            did not touch the box".  For a transfer it is the figure the
+            transfer stores, read through its expense leg
+            (:func:`~app.services.row_valuation.leg_settled_figure`).
 
     Returns:
         *submitted* when the row is settling or staying settled; ``None`` when
@@ -337,10 +338,10 @@ def apply_status_change(
     The ONE place a ``Transaction.status_id`` or a ``Transfer.status_id`` may be
     assigned.  Every status-changing path -- the manual ``mark_done`` branch,
     the inline PATCH, ``cancel``, ``mark_as_credit`` / ``unmark_credit``, the
-    envelope ``transaction_service.settle_from_entries``, and
-    ``transfer_service.update_transfer``'s mirror onto a transfer and its two
-    shadows -- routes through here so the status mechanics are uniform and
-    impossible to skip.
+    envelope ``transaction_service.settle_from_entries``, and a transfer's one
+    status writer (``transfer_service._status.apply_status_to_all_three``) --
+    routes through here so the status mechanics are uniform and impossible to
+    skip.
 
     Does the status MECHANICS only, in order:
 
@@ -358,9 +359,11 @@ def apply_status_change(
          ``settled_day_basis_id``, the clearing link and the COVERING MOVEMENT
          that carries what moved -- as ONE act (see the *settle_day* and
          *settlement* args).  **Transactions only**, because
-         ``Transfer`` carries none of those columns: a transfer's money moves on
-         its two shadow rows, and the transfer service applies this seam to those
-         shadows, so a transfer settle still records what moved and when.
+         ``Transfer`` carries none of those columns: a transfer's figure is its
+         own and each side's day and link are that side's payment record's,
+         both written by the seam's Transfer arm (``_side.sync_side_records``)
+         before the transfer writer calls this, so a transfer settle still
+         records what moved and when.
       4. ``db.session.expire(row, ["status"])`` so a pre-commit reader (a cell
          render, a test assertion) sees the new ``Status`` row, not the stale
          ``lazy="joined"`` one -- the exact trap ``mark_as_credit`` documented
@@ -576,7 +579,8 @@ def apply_status_change(
         # mirrored as a second movement over the same money.  Refused here,
         # ahead of any mutation like the four above it, so every door that
         # hands over a record inherits it; only a ``Transaction`` can hold
-        # purchases (``entry_service.create_entry`` refuses a shadow).
+        # purchases (a transfer side holds its payment record alone:
+        # ``ck_transaction_entries_side_link_is_a_record``).
         reject_stated_figure_over_purchases(row, settlement)
 
     # Read BEFORE the assignment below, because it is a question about the
@@ -600,8 +604,8 @@ def apply_status_change(
         # A revert to Projected that the books hold is refused (rulings
         # **R-PC97** and **R-PC99**), ahead of any mutation like the refusals
         # above.  A TRANSFER is asked at its own one status door,
-        # ``transfer_service.apply_status_to_all_three``, before either of its
-        # shadows is written; asked here as well, one revert would walk its
+        # ``transfer_service.apply_status_to_all_three``, before either side's
+        # record is written; asked here as well, one revert would walk its
         # definition twice.
         reject_revert_below_the_books(row, new_status_id)
     # Read BEFORE the assignment, for the covering movement below: whether
@@ -617,7 +621,8 @@ def apply_status_change(
     # entry into it, and leave an existing day untouched on a re-settle (so
     # editing a Paid row -- which re-submits its unchanged status_id -- never
     # churns the day its money moved).  Skipped whole for a Transfer, which has
-    # neither column; its shadows carry them and get their own call.
+    # neither column; each side's payment record carries its own, written by
+    # the seam's Transfer arm (``_side``).
     #
     # The three arms are exhaustive and the invariant falls out of them: the
     # guard above has already refused an explicit day on a non-settled status,
@@ -719,9 +724,9 @@ def apply_status_change(
         # source -- is the row's final one for this act.  The rule and the
         # lifecycle are
         # :mod:`app.services.status_seam._covering`'s; it covers every kind
-        # of row, a transfer shadow included since plan step X-bi-3c (the
-        # kind gate went in three leaves: expense at 3a, income at 3b,
-        # transfer at 3c).
+        # of row (expense since 3a, income since 3b), and a transfer's sides
+        # are the Transfer arm's (``_side``) since plan step
+        # ``balance:X-bi-6-4d-2``.
         sync_covering_movement(
             row,
             was_settled=was_settled,

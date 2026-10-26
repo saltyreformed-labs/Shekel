@@ -57,7 +57,9 @@ out of every match, delete.
    ``NO ACTION``, so no row delete -- through the ORM or in bulk -- can take
    a movement with it.  DELETED, not merely removed: a child removed from a
    relationship with no ``delete-orphan`` and not deleted is NULLED at
-   flush, which ``transaction_id``'s ``NOT NULL`` refuses; deleted, the flush
+   flush, which ``ck_transaction_entries_one_parent`` refuses (a movement with
+   no parent; ``transaction_id``'s ``NOT NULL`` did until plan step
+   ``balance:X-bi-6-4d-2``); deleted, the flush
    emits the ``DELETE`` alone whichever of the two came first (measured on
    SQLAlchemy 2.0.54, delete-then-remove here and remove-then-delete by
    CC-5-4a-4's first review).  The collection itself is read before either,

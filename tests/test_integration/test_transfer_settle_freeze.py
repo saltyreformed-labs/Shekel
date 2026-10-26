@@ -54,7 +54,6 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import MovementFigureSourceEnum, StatusEnum
 from app.extensions import db
-from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services import (
     account_service,
@@ -72,13 +71,17 @@ from tests._test_helpers import (
     typed,
     amount_basis_for,
     an_entered_day,
+    create_account_of_type,
     create_transfer,
     open_books_before_the_first_assertion,
+    transfer_side_figure,
+    transfer_side_record,
 )
-from tests.test_integration.test_loan_transfer_live_amount import (
+from tests.test_integration.test_loan_transfer_live_amount._helpers import (
     _build_derived_loan_transfer,
+    _side_leg,
 )
-from app.services.row_valuation import settled_contribution, settled_figure
+from app.services.row_valuation import leg_settled_contribution
 from app.models.amount_ownership import AmountOwnership
 from tests._test_helpers import rendered_transfer_amount
 
@@ -89,12 +92,20 @@ _STALE = Decimal("1.00")
 
 
 def _derived_loan_transfer(seed_user, seed_periods):
-    """Return one projected loan-payment transfer and its expense shadow.
+    """Return one projected loan-payment transfer.
 
     Built on the derive-from-loan fixture the live-override integration test
     already owns, so the two grade the same loan with the same arithmetic: a
     $200k / 6% / 360mo mortgage with $3,600/yr escrow behind a recurring
     transfer whose stored amount is stale.
+
+    It returned the transfer AND its expense shadow until plan step
+    ``balance:X-bi-6-4d-2``, where a transfer became one row and the shadow
+    stopped being born (ruling **R-BAL167** class 4).  Four callers read the
+    shadow and every other discarded it: three read only its ``account_id``,
+    the transfer's from-account, where the expense twin sat; one read the
+    period it was filed in and its due date, both copied off the transfer.
+    Each reads the transfer's own column now.
     """
     loan, _escrow, scenario_id, template, _rule, _periods = (
         _build_derived_loan_transfer(seed_user, Decimal("3600.00"))
@@ -115,12 +126,7 @@ def _derived_loan_transfer(seed_user, seed_periods):
         .first()
     )
     assert xfer is not None, "expected a generated loan-payment transfer"
-    expense_shadow = (
-        db.session.query(Transaction)
-        .filter_by(transfer_id=xfer.id, account_id=xfer.from_account_id)
-        .one()
-    )
-    return xfer, expense_shadow
+    return xfer
 
 
 def _plain_transfer(
@@ -155,16 +161,29 @@ def _plain_transfer(
     )
 
 
-def _shadows(xfer_id):
-    """Return both legs of *xfer_id*, expense side first."""
-    rows = (
-        db.session.query(Transaction)
-        .filter_by(transfer_id=xfer_id)
-        .order_by(Transaction.id)
-        .all()
-    )
-    assert len(rows) == 2, "Transfer Invariant 1: exactly two shadows"
-    return rows
+def _sides(xfer_id):
+    """Return *xfer_id*'s two side accounts, the from (expense) side first.
+
+    What this file asks a settle about since plan step
+    ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 4): a side's payment
+    record hangs off the TRANSFER and nothing keeps a twin's status, day or
+    figure, so each side is read as the transfer and its record, never as its
+    twin row (the deleted ``_shadows``, which went with its last caller at plan
+    step ``balance:X-bi-6-4d-2``, where no twin is born).
+    """
+    xfer = db.session.get(Transfer, xfer_id)
+    return (xfer.from_account_id, xfer.to_account_id)
+
+
+def _side_settlement(xfer_id, account_id):
+    """Return the settlement *xfer_id*'s side on *account_id* records, or ``None``.
+
+    ``status_seam.recorded_leg_settlement`` over :func:`_side_leg`: the
+    record's figure and who wrote it, the side-shaped twin of the
+    ``recorded_settlement(shadow)`` this file read until plan step
+    ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 4).
+    """
+    return status_seam.recorded_leg_settlement(_side_leg(xfer_id, account_id))
 
 
 class TestTheSettleFreezeIsTheSERVICEs:
@@ -179,9 +198,16 @@ class TestTheSettleFreezeIsTheSERVICEs:
         is the creation-time escrow, and what actually leaves checking is the
         live P&I + escrow-as-of on the shadow's own DUE date -- the same figure
         the genesis split subtracts, so ``cash == split`` holds by construction.
+
+        Each side is read as the transfer and its side's record, where it was
+        read off its twin row (ruling R-BAL167 class 1, plan step
+        balance:X-bi-6-4d-2).  The PLAN column asserted empty below is the
+        transfer's, where it was each twin's AND the transfer's until plan
+        step balance:X-bi-6-4d-2 stopped the twins being born (ruling
+        R-BAL167 class 1).
         """
         with app.app_context():
-            xfer, _shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
 
             transfer_service.update_transfer(
                 xfer.id, seed_user["user"].id,
@@ -190,24 +216,26 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.commit()
 
             db.session.expire_all()
-            for shadow in _shadows(xfer.id):
+            for account_id in _sides(xfer.id):
                 # What it BOOKS -- the ledger figure, and the whole point.
-                assert settled_contribution(shadow) == _LIVE_PITI
-                # What it RECORDS -- the covering movement's figure.
-                assert settled_figure(shadow) == _LIVE_PITI
-                # The shadow's PLAN column is empty, and that is what keeps
-                # the freeze idempotent (plan step X-au-g-2c-2).  It held the
-                # stale ``$1.00`` and had to be left untouched, because the
-                # deleted ``_manual_shadow_amount`` read it as its base -- a
-                # settle that wrote it would have made a later settle derive
-                # from its own output.  A derived shadow has no such column,
-                # so the cycle has nowhere to close.  The stale figure it used
-                # to hold moved to the PARENT at X-au-g-2c-2 and is GONE at
-                # X-au-f, so there is no stored figure on either row for a
-                # settle to derive from -- which is the same claim with nothing
-                # left to violate it.
-                assert shadow.estimated_amount is None
-                assert shadow.transfer.amount is None
+                assert leg_settled_contribution(
+                    _side_leg(xfer.id, account_id),
+                ) == _LIVE_PITI
+                # What it RECORDS -- the side's record's figure.
+                assert transfer_side_figure(
+                    db.session, xfer.id, account_id,
+                ) == _LIVE_PITI
+            # The transfer's PLAN column is empty after the settle, and that
+            # is what keeps the freeze idempotent (plan step X-au-g-2c-2): a
+            # settle that wrote its booked figure there would hand a later
+            # settle its own output to derive from.  The stale ``$1.00`` once
+            # sat on each shadow, where the deleted ``_manual_shadow_amount``
+            # read it as its base; it moved to the PARENT at X-au-g-2c-2 and
+            # is GONE at X-au-f, and the shadows themselves are gone since
+            # plan step balance:X-bi-6-4d-2.  So the ONE row left stores no
+            # figure for a settle to derive from -- the same claim with
+            # nothing left to violate it.
+            assert db.session.get(Transfer, xfer.id).amount is None
 
     def test_a_typed_figure_BEATS_the_freeze(
         self, app, db, seed_user, seed_periods,
@@ -216,10 +244,12 @@ class TestTheSettleFreezeIsTheSERVICEs:
 
         The precedence half of the rule.  A figure somebody typed is a FACT
         about money that moved; the freeze is a derivation, and a derivation
-        never overwrites a fact.
+        never overwrites a fact.  Each side is read as the transfer and its
+        side's record, not its twin row (ruling R-BAL167 class 1, plan step
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
-            xfer, _shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
 
             transfer_service.update_transfer(
                 xfer.id, seed_user["user"].id,
@@ -229,9 +259,13 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.commit()
 
             db.session.expire_all()
-            for shadow in _shadows(xfer.id):
-                assert settled_figure(shadow) == Decimal("1512.44")
-                assert settled_contribution(shadow) == Decimal("1512.44")
+            for account_id in _sides(xfer.id):
+                assert transfer_side_figure(
+                    db.session, xfer.id, account_id,
+                ) == Decimal("1512.44")
+                assert leg_settled_contribution(
+                    _side_leg(xfer.id, account_id),
+                ) == Decimal("1512.44")
 
     def test_an_ECHOED_prefill_is_not_written(
         self, app, db, seed_user, seed_periods,
@@ -245,7 +279,9 @@ class TestTheSettleFreezeIsTheSERVICEs:
         human read one off a statement.
 
         Graded on a NON-loan transfer, where the row books its own estimate:
-        the echo is the estimate, and the column must stay NULL.
+        the echo is the estimate, and the column must stay NULL.  Each side is
+        read as the transfer and its side's record, not its twin row (ruling
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             xfer = _plain_transfer(seed_user, seed_periods)
@@ -259,18 +295,23 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.commit()
 
             db.session.expire_all()
-            for shadow in _shadows(xfer.id):
+            for account_id in _sides(xfer.id):
                 # An uncorrected settle RECORDS what it booked on the
                 # ``resolved`` source (plan step X-au-c3; the covering
-                # movement since X-bi-4b-2).  This asserted a NULL figure
-                # until that step, because a NULL was the only signal that no
-                # human had typed one; the source carries that now, so the
-                # record can state the figure AND stay distinguishable.
-                assert status_seam.recorded_settlement(shadow).source is (
+                # movement since X-bi-4b-2, the side's record since
+                # X-bi-6-4d-2).  This asserted a NULL figure until X-au-c3,
+                # because a NULL was the only signal that no human had typed
+                # one; the source carries that now, so the record can state
+                # the figure AND stay distinguishable.
+                assert _side_settlement(xfer.id, account_id).source is (
                     MovementFigureSourceEnum.RESOLVED
                 )
-                assert settled_figure(shadow) == Decimal("250.00")
-                assert settled_contribution(shadow) == Decimal("250.00")
+                assert transfer_side_figure(
+                    db.session, xfer.id, account_id,
+                ) == Decimal("250.00")
+                assert leg_settled_contribution(
+                    _side_leg(xfer.id, account_id),
+                ) == Decimal("250.00")
 
     # ``test_an_explicit_None_still_CLEARS_a_typed_actual`` lived here until
     # plan step X-au-c3, and BOTH halves of its premise are gone.  It wrote
@@ -283,7 +324,7 @@ class TestTheSettleFreezeIsTheSERVICEs:
     # ``_update._fields_the_settle_left`` and ``_apply_remaining_fields``
     # document the same removal on the app side.  The act that DOES release a
     # record is leaving the settled band, graded by
-    # ``test_transfer_service.TestUpdateTransfer.
+    # ``test_transfer_service.test_the_edit_door.TestUpdateTransfer.
     # test_a_REVERT_is_what_clears_a_settled_transfers_figure``.
 
     def test_is_override_in_the_SAME_call_suppresses_the_freeze(
@@ -297,10 +338,15 @@ class TestTheSettleFreezeIsTheSERVICEs:
         OPERATOR owns this amount, and reading its PRE-edit value would freeze
         a derived `$1,499.10` straight over the `$1,325.00` the user had just
         typed -- which is why the dispatch runs after the caller-stated facts
-        rather than before them.
+        rather than before them.  Each side's figure is read as the transfer
+        and its side's record, not its twin row (ruling R-BAL167 class 1, plan
+        step balance:X-bi-6-4d-2).  The stored `$1,325.00` is read off the
+        transfer, which owns it, where each twin's copy was read until plan
+        step balance:X-bi-6-4d-2 stopped the twins being born (ruling R-BAL167
+        class 1).
         """
         with app.app_context():
-            xfer, _shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
 
             transfer_service.update_transfer(
                 xfer.id, seed_user["user"].id,
@@ -319,15 +365,19 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.commit()
 
             db.session.expire_all()
-            for shadow in _shadows(xfer.id):
-                assert shadow.estimated_amount == Decimal("1325.00")
+            assert db.session.get(Transfer, xfer.id).amount == Decimal("1325.00")
+            for account_id in _sides(xfer.id):
                 # An uncorrected settle RECORDS what it booked on the
                 # ``derived`` basis (plan step X-au-c3).  This asserted a NULL
                 # figure until that step, because a NULL was the only signal
                 # that no human had typed one; the basis carries that now, so
                 # the record can state the figure AND stay distinguishable.
-                assert settled_figure(shadow) == Decimal("1325.00")
-                assert settled_contribution(shadow) == Decimal("1325.00")
+                assert transfer_side_figure(
+                    db.session, xfer.id, account_id,
+                ) == Decimal("1325.00")
+                assert leg_settled_contribution(
+                    _side_leg(xfer.id, account_id),
+                ) == Decimal("1325.00")
 
     def test_a_re_settle_does_not_rewrite_the_frozen_figure(
         self, app, db, seed_user, seed_periods,
@@ -339,10 +389,12 @@ class TestTheSettleFreezeIsTheSERVICEs:
         shadow still being Projected, and the dispatch runs BEFORE the status is
         applied so a genuine first settle still sees that -- but a re-settle
         resolves to nothing and the recorded cash stands, even after the loan's
-        escrow moves underneath it.
+        escrow moves underneath it.  Each side is read as the transfer and its
+        side's record, not its twin row (ruling R-BAL167 class 1, plan step
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
-            xfer, _shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
             done_id = ref_cache.status_id(StatusEnum.DONE)
 
             transfer_service.update_transfer(
@@ -350,7 +402,9 @@ class TestTheSettleFreezeIsTheSERVICEs:
             )
             db.session.commit()
             db.session.expire_all()
-            assert settled_figure(_shadows(xfer.id)[0]) == _LIVE_PITI
+            assert transfer_side_figure(
+                db.session, xfer.id, xfer.from_account_id,
+            ) == _LIVE_PITI
 
             transfer_service.update_transfer(
                 xfer.id, seed_user["user"].id, status_id=done_id,
@@ -358,24 +412,35 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.commit()
 
             db.session.expire_all()
-            for shadow in _shadows(xfer.id):
-                assert settled_figure(shadow) == _LIVE_PITI
-                assert settled_contribution(shadow) == _LIVE_PITI
+            for account_id in _sides(xfer.id):
+                assert transfer_side_figure(
+                    db.session, xfer.id, account_id,
+                ) == _LIVE_PITI
+                assert leg_settled_contribution(
+                    _side_leg(xfer.id, account_id),
+                ) == _LIVE_PITI
 
     def test_settle_amount_publishes_what_a_tick_WILL_book(
         self, app, db, seed_user, seed_periods,
     ):
         """The panel's figure and the booked figure come from one expression.
 
-        ``settle_amount`` is what the reconcile panel renders; the dispatch
+        ``leg_settle_amount`` is what the reconcile panel renders; the dispatch
         resolves its own figure through the same two functions.  A panel showing
         one number beside a verb that books another is this arc's own root cause
         1 applied to a screen.
+
+        It asked ``settle_amount`` of the expense TWIN until plan step
+        ``balance:X-bi-6-4d-2``, which prices a leg off its transfer and its
+        side's record instead; the offer is asked of the from-side LEG and the
+        booking read off that side's record (ruling R-BAL167 class 1, plan
+        step balance:X-bi-6-4d-2).
         """
         with app.app_context():
-            xfer, shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
+            leg = _side_leg(xfer.id, xfer.from_account_id)
 
-            offered = transfer_service.settle_amount(shadow, amount_basis_for(shadow))
+            offered = transfer_service.leg_settle_amount(leg, amount_basis_for(leg))
             assert offered == _LIVE_PITI
 
             transfer_service.update_transfer(
@@ -385,8 +450,12 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.commit()
 
             db.session.expire_all()
-            assert settled_contribution(_shadows(xfer.id)[0]) == offered
-            assert settled_figure(_shadows(xfer.id)[0]) == offered
+            assert leg_settled_contribution(
+                _side_leg(xfer.id, xfer.from_account_id),
+            ) == offered
+            assert transfer_side_figure(
+                db.session, xfer.id, xfer.from_account_id,
+            ) == offered
 
 
 class TestEveryDoorReachesTheSameFigure:
@@ -399,19 +468,25 @@ class TestEveryDoorReachesTheSameFigure:
 
         The door that made this a defect rather than a design: it sent
         ``status_id`` alone, so an auto-derived loan payment settled at its
-        creation-time escrow here and at the live figure from the grid.
+        creation-time escrow here and at the live figure from the grid.  Each
+        side is read as the transfer and its side's record, not its twin row
+        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
-            xfer, _shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
             xfer_id = xfer.id
 
         response = auth_client.post(f"/transfers/instance/{xfer_id}/mark-done")
         assert response.status_code == 200
 
         with app.app_context():
-            for shadow in _shadows(xfer_id):
-                assert settled_contribution(shadow) == _LIVE_PITI
-                assert settled_figure(shadow) == _LIVE_PITI
+            for account_id in _sides(xfer_id):
+                assert leg_settled_contribution(
+                    _side_leg(xfer_id, account_id),
+                ) == _LIVE_PITI
+                assert transfer_side_figure(
+                    db.session, xfer_id, account_id,
+                ) == _LIVE_PITI
 
     def test_the_grid_leg_mark_done_still_freezes(
         self, app, db, auth_client, seed_user, seed_periods,
@@ -422,11 +497,16 @@ class TestEveryDoorReachesTheSameFigure:
         was ``POST /transactions/<shadow>/mark-done``, deleted with the shadow
         branch; the grid's Mark Paid posts to the transfer's own door with
         ``leg_account_id`` now.  The control for the move: the rule left the
-        route for the service, so the figure it books must be unchanged.
+        route for the service, so the figure it books must be unchanged.  Each
+        side is read as the transfer and its side's record, not its twin row
+        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The leg
+        pressed is the transfer's from-side, where it was the expense twin's
+        account until plan step balance:X-bi-6-4d-2 stopped the twin being
+        born -- the same account (ruling R-BAL167 class 1).
         """
         with app.app_context():
-            xfer, shadow = _derived_loan_transfer(seed_user, seed_periods)
-            xfer_id, leg_account_id = xfer.id, shadow.account_id
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
+            xfer_id, leg_account_id = xfer.id, xfer.from_account_id
 
         response = auth_client.post(
             f"/transfers/instance/{xfer_id}/mark-done",
@@ -436,9 +516,13 @@ class TestEveryDoorReachesTheSameFigure:
         assert f'data-leg-account-id="{leg_account_id}"' in response.data.decode()
 
         with app.app_context():
-            for row in _shadows(xfer_id):
-                assert settled_contribution(row) == _LIVE_PITI
-                assert settled_figure(row) == _LIVE_PITI
+            for account_id in _sides(xfer_id):
+                assert leg_settled_contribution(
+                    _side_leg(xfer_id, account_id),
+                ) == _LIVE_PITI
+                assert transfer_side_figure(
+                    db.session, xfer_id, account_id,
+                ) == _LIVE_PITI
 
     def test_the_transfer_full_edit_status_dropdown_freezes(
         self, app, db, auth_client, seed_user, seed_periods,
@@ -467,10 +551,12 @@ class TestEveryDoorReachesTheSameFigure:
         rather than a retype -- and the door drops an unauthored figure rather
         than forwarding it, so the service never sees one.  The paragraph that
         described the old moved-against-the-stored-column test is gone with the
-        comparison it named.
+        comparison it named.  Each side is read as the transfer and its side's
+        record, not its twin row (ruling R-BAL167 class 1, plan step
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
-            xfer, _shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
             xfer_id = xfer.id
             version = xfer.version_id
             # Exactly what the rendered form carries back: the value already in
@@ -505,9 +591,13 @@ class TestEveryDoorReachesTheSameFigure:
         assert response.status_code == 200, response.data
 
         with app.app_context():
-            for row in _shadows(xfer_id):
-                assert settled_contribution(row) == _LIVE_PITI
-                assert settled_figure(row) == _LIVE_PITI
+            for account_id in _sides(xfer_id):
+                assert leg_settled_contribution(
+                    _side_leg(xfer_id, account_id),
+                ) == _LIVE_PITI
+                assert transfer_side_figure(
+                    db.session, xfer_id, account_id,
+                ) == _LIVE_PITI
 
     def test_a_transfer_PATCH_from_a_grid_leg_freezes(
         self, app, db, auth_client, seed_user, seed_periods,
@@ -523,10 +613,15 @@ class TestEveryDoorReachesTheSameFigure:
         transfer from the form), so a settling ``status_id`` arriving here is
         a settle that must freeze like any other.  Without this case the
         census is a claim in a docstring: three doors graded, one asserted.
+        Each side is read as the transfer and its side's record, not its twin
+        row (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The leg
+        asked from is the transfer's from-side, where it was the expense
+        twin's account until plan step balance:X-bi-6-4d-2 stopped the twin
+        being born -- the same account (ruling R-BAL167 class 1).
         """
         with app.app_context():
-            xfer, shadow = _derived_loan_transfer(seed_user, seed_periods)
-            xfer_id, leg_account_id = xfer.id, shadow.account_id
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
+            xfer_id, leg_account_id = xfer.id, xfer.from_account_id
             version = xfer.version_id
 
         response = auth_client.patch(
@@ -541,9 +636,13 @@ class TestEveryDoorReachesTheSameFigure:
         assert f'data-leg-account-id="{leg_account_id}"' in response.data.decode()
 
         with app.app_context():
-            for row in _shadows(xfer_id):
-                assert settled_contribution(row) == _LIVE_PITI
-                assert settled_figure(row) == _LIVE_PITI
+            for account_id in _sides(xfer_id):
+                assert leg_settled_contribution(
+                    _side_leg(xfer_id, account_id),
+                ) == _LIVE_PITI
+                assert transfer_side_figure(
+                    db.session, xfer_id, account_id,
+                ) == _LIVE_PITI
 
     def test_the_reconcile_panels_tick_freezes_and_dates_by_the_STATEMENT(
         self, app, db, auth_client, seed_user, seed_periods,
@@ -551,12 +650,18 @@ class TestEveryDoorReachesTheSameFigure:
         """The FIFTH door, which plan step X-f2-c3 opens.
 
         It is the only one that knows a day, so it grades the two rules
-        together: the freeze books the live figure, and both legs record the
-        money as having moved on the day the STATEMENT covers rather than the
-        day the operator got round to reconciling.
+        together: the freeze books the live figure, and both sides' records
+        date the money as having moved on the day the STATEMENT covers rather
+        than the day the operator got round to reconciling.  Each side is read
+        as the transfer and its side's record, not its twin row (ruling
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The landing day is
+        read off the TRANSFER's own period and due date, where it was read off
+        the expense twin's until plan step balance:X-bi-6-4d-2 stopped the twin
+        being born; the twin copied both from the transfer, so the day is the
+        same (ruling R-BAL167 class 1).
         """
         with app.app_context():
-            xfer, shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
             xfer_id = xfer.id
             account_id = xfer.from_account_id
             # The day the panel measures the offer against is the row's own
@@ -564,9 +669,9 @@ class TestEveryDoorReachesTheSameFigure:
             # due date, so the two differ and a statement asserted before the
             # landing day would (correctly) offer nothing.
             period = calendar_for(seed_user["user"].id).require_period(
-                FiledRow.for_row(shadow),
+                FiledRow.for_row(xfer),
             )
-            observed = period.attribution_day(shadow.due_date)
+            observed = period.attribution_day(xfer.due_date)
 
         response = auth_client.patch(
             f"/accounts/{account_id}/true-up",
@@ -584,10 +689,16 @@ class TestEveryDoorReachesTheSameFigure:
         assert response.status_code == 200, response.data
 
         with app.app_context():
-            for row in _shadows(xfer_id):
-                assert settled_contribution(row) == _LIVE_PITI
-                assert settled_figure(row) == _LIVE_PITI
-                assert row.settled_on == observed
+            for side_account_id in _sides(xfer_id):
+                assert leg_settled_contribution(
+                    _side_leg(xfer_id, side_account_id),
+                ) == _LIVE_PITI
+                assert transfer_side_figure(
+                    db.session, xfer_id, side_account_id,
+                ) == _LIVE_PITI
+                assert transfer_side_record(
+                    db.session, xfer_id, side_account_id,
+                ).settled_on == observed
 
 
 class TestTheNamedVerbItself:
@@ -607,7 +718,9 @@ class TestTheNamedVerbItself:
         Three shapes in one case, because the answer is a three-way decision
         and grading one arm would leave the other two free to invert: nobody
         typed a figure, somebody typed the panel's own prefill back, and
-        somebody typed a different one.
+        somebody typed a different one.  The record is read off each
+        transfer's from-side record, not its expense twin (ruling R-BAL167
+        class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             nothing_typed = _plain_transfer(
@@ -640,7 +753,7 @@ class TestTheNamedVerbItself:
             # uncorrected settles book what they resolved on the ``resolved``
             # source, the corrected one books the human's figure and says so.
             def _record(transfer):
-                return status_seam.recorded_settlement(_shadows(transfer.id)[0])
+                return _side_settlement(transfer.id, transfer.from_account_id)
             assert _record(nothing_typed).source is MovementFigureSourceEnum.RESOLVED
             assert _record(echoed) == status_seam.Settlement(
                 Decimal("120.00"), MovementFigureSourceEnum.RESOLVED,
@@ -664,7 +777,9 @@ class TestTheNamedVerbItself:
         write it had just made.
 
         Shown to FIRE: deleting the ``settle_only`` arm in
-        ``_apply_transfer_updates`` fails every assertion below.
+        ``_apply_transfer_updates`` fails every assertion below.  Each side's
+        record and day are read off the side's record, not its twin row
+        (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             xfer = _plain_transfer(seed_user, seed_periods)
@@ -681,7 +796,9 @@ class TestTheNamedVerbItself:
             )
             db.session.commit()
             db.session.expire_all()
-            assert _shadows(xfer.id)[0].settled_on == first_day
+            assert transfer_side_record(
+                db.session, xfer.id, xfer.from_account_id,
+            ).settled_on == first_day
 
             # A stale tab replays the settle, carrying a figure and a later day.
             assert transfer_service.settle_transfer(
@@ -695,17 +812,23 @@ class TestTheNamedVerbItself:
             db.session.commit()
 
             db.session.expire_all()
-            for shadow in _shadows(xfer.id):
+            for account_id in _sides(xfer.id):
                 # The echoed-past-the-rule write did not happen: the record
                 # still says ``resolved`` at what the FIRST settle booked, not
                 # ``typed`` at the replayed $999.99.
-                assert status_seam.recorded_settlement(shadow).source is (
+                assert _side_settlement(xfer.id, account_id).source is (
                     MovementFigureSourceEnum.RESOLVED
                 )
-                assert settled_figure(shadow) == Decimal("250.00")
-                assert settled_contribution(shadow) == Decimal("250.00")
+                assert transfer_side_figure(
+                    db.session, xfer.id, account_id,
+                ) == Decimal("250.00")
+                assert leg_settled_contribution(
+                    _side_leg(xfer.id, account_id),
+                ) == Decimal("250.00")
                 # ... and the day the money moved was not moved.
-                assert shadow.settled_on == first_day
+                assert transfer_side_record(
+                    db.session, xfer.id, account_id,
+                ).settled_on == first_day
 
     # ``test_a_derived_freeze_emits_its_own_event`` lived here until plan step
     # X-au-f, and it is DELETED with the event it graded (ruling **R-BAL12**).
@@ -748,7 +871,7 @@ class TestTheNamedVerbItself:
         against the transfer's own, which reproduces the old extension exactly.
         """
         with app.app_context():
-            xfer, _shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
             xfer.template.settings.derive_from_loan = False
             xfer.template.settings.extra_principal = Decimal("0.00")
             db.session.commit()
@@ -762,9 +885,13 @@ class TestTheNamedVerbItself:
             # with ``EVT_TRANSFER_AMOUNT_FROZEN`` at plan step X-au-f (ruling
             # **R-BAL12**); this half is the one that could ever fail, and the
             # case is kept for it -- a manual payment with no extra must book
-            # its series price and not the loan's contract.
-            for shadow in _shadows(xfer.id):
-                assert settled_figure(shadow) == _STALE
+            # its series price and not the loan's contract.  Read off each
+            # side's record, not its twin row (ruling R-BAL167 class 1, plan
+            # step balance:X-bi-6-4d-2).
+            for account_id in _sides(xfer.id):
+                assert transfer_side_figure(
+                    db.session, xfer.id, account_id,
+                ) == _STALE
 
     def test_a_re_settle_HONOURS_a_retained_correction(
         self, app, db, seed_user, seed_periods, caplog,
@@ -785,9 +912,11 @@ class TestTheNamedVerbItself:
         in a record whose whole purpose is to say which was booked.  The fix
         shipped with no test until this case; the ``frozen_amount`` assertion in
         its sibling above cannot see it, because that path never retains.
+        Each side's figure is read off its record, not its twin row (ruling
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
-            xfer, _shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
             user_id = seed_user["user"].id
             corrected = Decimal("1512.44")
 
@@ -806,8 +935,10 @@ class TestTheNamedVerbItself:
                 db.session.commit()
 
             db.session.expire_all()
-            for shadow in _shadows(xfer.id):
-                assert settled_figure(shadow) == corrected
+            for account_id in _sides(xfer.id):
+                assert transfer_side_figure(
+                    db.session, xfer.id, account_id,
+                ) == corrected
 
     def test_a_settle_carrying_a_CORRECTION_books_the_humans_figure(
         self, app, db, seed_user, seed_periods, caplog,
@@ -818,10 +949,12 @@ class TestTheNamedVerbItself:
 
         A human's correction beats the freeze, so the figure booked is theirs
         and no freeze happened.  Without this the event could be emitted on
-        every settle of a loan payment and still pass its sibling above.
+        every settle of a loan payment and still pass its sibling above.  Each
+        side's figure is read off its record, not its twin row (ruling
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
-            xfer, _shadow = _derived_loan_transfer(seed_user, seed_periods)
+            xfer = _derived_loan_transfer(seed_user, seed_periods)
             transfer_service.settle_transfer(
                 xfer.id, seed_user["user"].id,
                 submitted=typed(Decimal("1512.44")),
@@ -829,14 +962,16 @@ class TestTheNamedVerbItself:
             db.session.commit()
 
             db.session.expire_all()
-            for shadow in _shadows(xfer.id):
-                assert settled_figure(shadow) == Decimal("1512.44")
+            for account_id in _sides(xfer.id):
+                assert transfer_side_figure(
+                    db.session, xfer.id, account_id,
+                ) == Decimal("1512.44")
 
 
 class TestATransfersOfferIsWhatItsReSettleBOOKS:
     """The TRANSFER half of finding **C1**, which nothing graded.
 
-    ``transaction_service.settle_amount`` and ``transfer_service.settle_amount``
+    ``transaction_service.settle_amount`` and ``transfer_service.leg_settle_amount``
     both answer a retained ``corrected`` record before they price anything, so
     the reconcile panel's PREFILL equals what a tick BOOKS on either kind of
     row.  The transaction half is pinned by
@@ -856,8 +991,14 @@ class TestATransfersOfferIsWhatItsReSettleBOOKS:
     ):
         """A reverted transfer offers the figure it will re-book, not its plan.
 
-        Shown to FIRE: dropping ``settle_amount``'s ``honoured_correction`` arm
+        Shown to FIRE (against ``settle_amount``, before plan step
+        ``balance:X-bi-6-4d-2``): dropping its ``honoured_correction`` arm
         makes the offer ``$250.00`` while the settle still books ``$95.50``.
+
+        The retained record is read off the from-side's record and the offer
+        asked of that side's LEG (``leg_settle_amount``, whose retained arm is
+        ``honoured_figure``), where both were asked of the expense twin until
+        that step (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             xfer = _plain_transfer(seed_user, seed_periods, amount="250.00")
@@ -878,15 +1019,18 @@ class TestATransfersOfferIsWhatItsReSettleBOOKS:
             db.session.commit()
             db.session.expire_all()
 
-            expense = _shadows(xfer_id)[0]
+            checking = xfer.from_account_id
             # The record SURVIVES the revert and the assertion does not.
-            assert status_seam.recorded_settlement(expense) == status_seam.Settlement(
+            assert _side_settlement(xfer_id, checking) == status_seam.Settlement(
                 Decimal("95.50"), MovementFigureSourceEnum.TYPED,
             )
-            assert expense.settled_on is None
+            assert transfer_side_record(
+                db.session, xfer_id, checking,
+            ).settled_on is None
 
             # THE CLAIM: what the panel would offer is what a tick will book.
-            offered = transfer_service.settle_amount(expense, amount_basis_for(expense))
+            leg = _side_leg(xfer_id, checking)
+            offered = transfer_service.leg_settle_amount(leg, amount_basis_for(leg))
             assert offered == Decimal("95.50"), (
                 f"the panel would offer {offered} for a transfer whose "
                 "re-settle books its retained correction"
@@ -895,11 +1039,11 @@ class TestATransfersOfferIsWhatItsReSettleBOOKS:
             transfer_service.settle_transfer(xfer_id, owner)
             db.session.commit()
             db.session.expire_all()
-            assert settled_figure(_shadows(xfer_id)[0]) == offered
+            assert transfer_side_figure(db.session, xfer_id, checking) == offered
 
 
 class TestOneBrokenPairCannotStopTheDeployResync:
-    """``resync_all_cash_postings`` skips a drifted pair instead of aborting.
+    """``resync_all_cash_postings`` skips a transfer it cannot post, and goes on.
 
     **The refusal that made this necessary is correct, and its blast radius was
     not** (developer ruling, 2026-08-17).  The one-entry writer's figure read
@@ -915,16 +1059,74 @@ class TestOneBrokenPairCannotStopTheDeployResync:
     exists to repair -- made the app unbootable for every user, and the operator
     could not reach the screen that would name the row.  Before the predicate it
     would have posted a figure and carried on.
+
+    **That drift has no row to live on since plan step balance:X-bi-6-4d-2**: a
+    transfer is one row and ``ck_transactions_names_no_transfer`` refuses a
+    twin (ruling **R-BAL258**).  The batch's blast radius is still the subject,
+    so the case below breaks a transfer the way one still CAN be broken -- its
+    to-side's record carried onto an account whose ledger pairing is gone,
+    ``test_posting_service.py``'s recipe -- beside a healthy transfer the
+    resync genuinely has to re-post.
     """
 
-    def test_it_skips_the_broken_pair_and_still_posts_the_healthy_one(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """One drifted pair beside one sound pair: the sound one still syncs.
+    @staticmethod
+    def _movement_entry_count(xfer_id):
+        """Return how many journal entries *xfer_id*'s two side records hold.
 
-        Shown to FIRE: without the per-transfer isolation this raises
-        ``PostingError`` out of the batch and the healthy transfer is never
-        reached, which is the container-start failure.
+        A side's record hangs off the transfer by its side link since plan
+        step balance:X-bi-6-4d-2, and a settled side posts ONE entry against
+        transit (plan step ``balance:X-bi-6-3``), so a settled transfer at
+        target holds two.
+        """
+        return db.session.execute(db.text(
+            "SELECT count(*) FROM budget.journal_entries je"
+            "  JOIN budget.transaction_entries te"
+            "    ON te.id = je.transaction_entry_id"
+            " WHERE te.expense_transfer_id = :t OR te.income_transfer_id = :t"
+        ), {"t": xfer_id}).scalar()
+
+    def test_it_skips_the_broken_transfer_and_still_posts_the_healthy_one(
+        self, app, db, seed_user, seed_periods, caplog,
+    ):
+        """The resync refuses one transfer, re-posts the other, and returns.
+
+        **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
+        class 1, the substitution stated; it was
+        ``test_it_skips_the_broken_pair_and_still_posts_the_healthy_one``, and
+        at cp2c of that step briefly
+        ``test_the_drift_it_skipped_is_refused_and_the_batch_still_completes``).
+        Its drift was the INCOME twin's status moved out of the settled band
+        under a settled parent, a row no transfer has now.  The broken
+        transfer below is broken the way one still can be: its to-account
+        re-pointed by raw SQL onto an account whose ``budget.ledger_accounts``
+        pairing was deleted (the side's record follows on its key's ON UPDATE
+        CASCADE), so the pair's door refuses it naming that account.  And
+        where both transfers were already at target before -- so nothing told
+        a resync that reached them from one that reached neither -- the
+        healthy one's two entries are deleted, so the resync has a re-post to
+        make and reports it.
+
+        **The broken transfer is created FIRST**, and the resync walks
+        transfers in id order, so the refusal comes before the reach: a batch
+        that stopped at its first refusal would not reach the healthy one.
+
+        Arithmetic: two plain transfers settled go-forward, ``$60.00`` to
+        Savings (broken) and ``$45.00`` to Vacation (healthy), each holding
+        two movement entries.  The first resync reports ``(0, 1)`` -- no
+        transaction, one transfer re-posted -- logs exactly the broken one as
+        skipped, and leaves the healthy one holding two entries again and the
+        broken one the two it had.  A second resync reports ``(0, 0)``.
+
+        Shown to FIRE (``cp2c-a``): a resync walking no transfer, one with the
+        per-transfer ``except PostingError`` deleted, and one that stops at
+        its first refusal each fail it.  What it cannot see is a savepoint
+        rolling back only PART of a refused family's writes, because the
+        broken transfer here writes nothing before its refusal; that half is
+        ``test_posting_service.py``'s ``test_a_refused_transfer_holding_no_
+        legacy_net_is_still_skipped``, the sibling where a skip still returns.
+        ``test_a_refused_transfer_is_skipped_whole`` grades the same savepoint
+        on a family holding a LEGACY net, and the resync RAISES there since
+        ruling **R-BAL104**, so the batch does not complete in that case.
         """
         with app.app_context():
             broken = _plain_transfer(
@@ -938,30 +1140,60 @@ class TestOneBrokenPairCannotStopTheDeployResync:
             db.session.commit()
             owner = seed_user["user"].id
             broken_id, healthy_id = broken.id, healthy.id
+            # The premise of the ordering argument in the docstring.
+            assert broken_id < healthy_id
 
             transfer_service.settle_transfer(broken_id, owner)
             transfer_service.settle_transfer(healthy_id, owner)
             db.session.commit()
+            assert self._movement_entry_count(broken_id) == 2
+            assert self._movement_entry_count(healthy_id) == 2
 
-            # Drift the INCOME leg out of the settled band, behind the seam's
-            # back -- which is how the real corruption arises (a bulk UPDATE, a
-            # half-applied migration).  The PARENT stays settled, so the batch
-            # still selects it and still asks for its settled effect.
-            income = [
-                s for s in _shadows(broken_id) if not s.is_expense
-            ][0]
-            income.status_id = ref_cache.status_id(StatusEnum.PROJECTED)
-            db.session.commit()
-
-            # The batch completes rather than raising, which is the claim.
-            transactions_changed, transfers_changed = (
-                posting_service.resync_all_cash_postings()
+            # The healthy transfer needs a re-post: its two entries go.
+            db.session.execute(db.text(
+                "DELETE FROM budget.journal_entries WHERE id IN ("
+                "  SELECT je.id FROM budget.journal_entries je"
+                "  JOIN budget.transaction_entries te"
+                "    ON te.id = je.transaction_entry_id"
+                "  WHERE te.expense_transfer_id = :t"
+                "     OR te.income_transfer_id = :t)"
+            ), {"t": healthy_id})
+            # The broken transfer: an account created (which pairs it), its
+            # pairing removed, and the broken transfer's to-account re-pointed
+            # onto it, its side's record moving with it on the key's cascade.
+            unpaired = create_account_of_type(
+                seed_user, db.session, "Savings", "Unpaired Savings",
             )
             db.session.commit()
+            unpaired_id = unpaired.id
+            db.session.execute(db.text(
+                "DELETE FROM budget.ledger_accounts WHERE account_id = :a"
+            ), {"a": unpaired_id})
+            db.session.execute(db.text(
+                "UPDATE budget.transfers SET to_account_id = :u WHERE id = :t"
+            ), {"u": unpaired_id, "t": broken_id})
+            db.session.commit()
+            db.session.expire_all()
+            assert self._movement_entry_count(healthy_id) == 0
+            assert transfer_side_record(
+                db.session, broken_id, unpaired_id,
+            ) is not None
 
-            assert isinstance(transfers_changed, int)
-            assert isinstance(transactions_changed, int)
+            with caplog.at_level(
+                logging.WARNING, logger="app.services.posting_service",
+            ):
+                # The batch completes rather than raising, and it REACHED the
+                # healthy transfer past the refused one: that is the claim.
+                assert posting_service.resync_all_cash_postings() == (0, 1)
+            db.session.commit()
 
-            # And the sound pair was still reached: it is at target, so a
-            # further pass reports nothing to do for it.
-            assert posting_service.resync_all_cash_postings()[1] == 0
+            assert (
+                f"skipped 1 transfer(s) whose family could not be posted: "
+                f"[{broken_id}]."
+            ) in caplog.text
+            assert self._movement_entry_count(healthy_id) == 2
+            assert self._movement_entry_count(broken_id) == 2
+
+            # At target now, so a further pass re-posts nothing -- and still
+            # skips the broken transfer rather than raising.
+            assert posting_service.resync_all_cash_postings() == (0, 0)

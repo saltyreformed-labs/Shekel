@@ -13,14 +13,13 @@ import pytest
 from app.extensions import db
 from app.models.account import Account
 from app.models.category import Category
-from app.models.ref import AccountType, Status, TransactionType
+from app.models.ref import Status, TransactionType
 from app.models.transaction import Transaction
 from app.services.balance_at import BalanceContext
 from app.services import carry_forward_service, credit_workflow, pay_period_write
 from app.exceptions import NotFoundError, ValidationError
 from tests._test_helpers import (
     cover_bare_settled_row,
-    create_transfer,
     figure_source_columns,
     generate_row_of,
     make_expense_template,
@@ -762,10 +761,6 @@ class TestCarryForward:
                 )
 
 
-# Import at the bottom to avoid circular issues in the test helpers.
-from app.services import account_service
-
-
 class TestNegativePaths:
     """Negative-path and edge-case tests for credit workflow and carry forward.
 
@@ -1025,48 +1020,14 @@ class TestNegativePaths:
             db.session.refresh(txn)
             assert txn.status.name == "Cancelled"
 
-    def test_mark_credit_rejects_shadow_transaction(
-        self, app, db, seed_user, seed_periods
-    ):
-        """mark_as_credit raises ValidationError for shadow (transfer) transactions.
-
-        Defense-in-depth: the route layer already blocks this, but the
-        service must enforce its own invariants independently (M-03).
-        """
-        with app.app_context():
-            # Create a second account so we can build a real Transfer.
-            savings_type = (
-                db.session.query(AccountType).filter_by(name="Savings").one()
-            )
-            savings = account_service.create_account(
-                account_service.AccountSpec(
-                    user_id=seed_user["user"].id,
-                    account_type_id=savings_type.id,
-                    name="Test Savings",
-                    anchor_balance=Decimal("0"),
-                ),
-            )
-            db.session.add(savings)
-            db.session.flush()
-
-            # A REAL transfer's shadow, through the transfer service (plan step
-            # balance:X-bi-7c): a first build linked a one-off's row to a
-            # transfer by hand, which is a second pricing link the CHECK
-            # ``ck_transactions_one_pricing_link`` refuses once the row
-            # carries a definition -- and a shadow is the service's row.
-            transfer = create_transfer(
-                seed_user, db.session, seed_user["account"], savings,
-                seed_periods[0], Decimal("200.00"), name="Test Transfer",
-            )
-            db.session.flush()
-            txn = next(
-                shadow for shadow in transfer.shadow_transactions
-                if shadow.account_id == seed_user["account"].id
-            )
-
-            with pytest.raises(ValidationError, match="transfer"):
-                credit_workflow.mark_as_credit(txn.id, seed_user["user"].id)
-
-            # Status unchanged -- still projected.
-            db.session.refresh(txn)
-            assert txn.status.name == "Projected"
+    # ``test_mark_credit_rejects_shadow_transaction`` stood here until plan
+    # step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer 2026-10-15:
+    # "Delete all 27").  It handed ``mark_as_credit`` a transfer's expense
+    # SHADOW row and asserted the service's own refusal (M-03, the
+    # ``transfer_id`` guard in ``credit_workflow``).  No shadow can exist now
+    # (the database refuses one, ``ck_transactions_names_no_transfer``, ruling
+    # R-BAL258, pinned once by
+    # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
+    # and no app code builds one), so the guard is reachable by no row and
+    # goes with the column at plan step X-bi-6-5.

@@ -7,7 +7,7 @@ trial-balance tie-out) -- read against an independent second opinion re-derived
 from the posting ledger and the source tables, never against the readers that
 produced the numbers.  This is the FOURTH reconciliation oracle, the read-side
 sibling of the account-anchor write oracle
-(``test_posting_ledger_account_anchor_reconciliation.py``); together they pin the
+(the ``test_posting_ledger_account_anchor_reconciliation`` package); together they pin the
 Step-5 promise that the trial balance closes app-wide and ``A = L + E`` is
 checkable end to end.
 

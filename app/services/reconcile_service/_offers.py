@@ -6,9 +6,10 @@ one tickable purchase, the block it nests in, and the whole offer set.  They
 live together because they are ONE shape -- the panel's list -- and because
 every arm of the package contributes to them: the purchase arm fills
 :attr:`OutstandingGroup.purchases` today, and plan steps X-f2-c2 and X-f2-c3
-add the parent's own close tick, bills and transfer shadows to the same
-blocks.  A type per arm would put the panel's shape in three places and make
-the next arm's field a fourth.
+added the parent's own close tick, bills and transfer shadows (a transfer's
+LEG since leaf ``balance:X-bi-6-4c-2``) to the same blocks.  A type per arm
+would put the panel's shape in three places and make the next arm's field a
+fourth.
 
 Architecture (``CLAUDE.md``):
   - No Flask imports.  Frozen dataclasses, no behaviour beyond the two
@@ -43,8 +44,8 @@ class OfferKind(enum.Enum):
     under a heading reading "Bills" three lines below a summary counting it as a
     deposit: production's `$1,958.87` FSA reimbursement, captioned against
     itself on the one screen read beside a paper statement.  And a transfer
-    shadow is childless and correctable too, so it is INDISTINGUISHABLE from a
-    bill by those proxies -- meaning plan step X-f2-c3 would have had to rewrite
+    shadow was childless and correctable too, so it was INDISTINGUISHABLE from
+    a bill by those proxies -- meaning plan step X-f2-c3 would have had to rewrite
     the derivation inside a money commit, which is the exact rewrite R-FC and
     **R-EY** exist to prevent.  An arm knows what it produced; a renderer
     guessing from shape does not.
@@ -103,11 +104,13 @@ class OfferKind(enum.Enum):
         """Return the sentence printed UNDER this kind's section heading.
 
         Two kinds carry one, and each is a fact about the SECTION rather than
-        about any row.  Ticking a transfer settles the matching row on the
-        other account too, because a transfer's two legs and its parent always
-        move together (``CLAUDE.md`` transfer invariant 3); a user who reads the
-        panel as "this account's statement" would otherwise be surprised by a
-        second account moving.  And every row under "Paid from this account"
+        about any row.  Ticking a transfer settles its other side, on the
+        other account, too, because a transfer is one row and its settle moves
+        both of its sides together (the transfer paragraph at the end of
+        ``CLAUDE.md``'s Architecture;
+        ``transfer_service._status.apply_status_to_all_three``); a user who
+        reads the panel as "this account's statement" would otherwise be
+        surprised by a second account moving.  And every row under "Paid from this account"
         was recorded here and then reopened, and a tick records it here on the
         statement's day (ruling **R-CC111**'s note, plan step
         ``credit_card:CC-5-4b``).  Both are per SECTION and not per row because
@@ -487,10 +490,11 @@ class OutstandingGroup:
     Nothing in the purchase arm's scope asserts the parent is envelope-tracked
     -- the clauses ask for a projected, non-deleted parent on this account, and
     "it has purchases" is what makes it one in practice -- so the narrower name
-    would claim a classification no clause checks.  And plan step X-f2-c2 puts
-    BILLS and transfer shadows in this same set, neither of which is an
-    envelope, so the narrow name would have to be renamed inside a leaf that
-    moves money.
+    would claim a classification no clause checks.  And plan step X-f2-c2 put
+    BILLS and transfer shadows (a transfer's LEG since leaf
+    ``balance:X-bi-6-4c-2``) in this same set, neither of which is an
+    envelope, so the narrow name would have had to be renamed inside a leaf
+    that moves money.
 
     Attributes:
         key: The parent's identity, and the key the grouping is built on: a
@@ -662,49 +666,8 @@ class OutstandingGroup:
 
 
 @dataclass(frozen=True)
-class DamagedTransfer:
-    """A transfer on this account the panel cannot offer, because its pair is broken.
-
-    Ruling **R-BAL148** (developer, 2026-09-25, leaf
-    ``balance:X-bi-6-4c-2``), picked as *"Show the rest, warn"*: the panel
-    lists everything else as normal plus a warning naming the transfer, and
-    does not offer it for ticking, so it cannot be settled by a guess.  A leg
-    is priced through its transfer's verified shadow pair
-    (``transfer_service.leg_settle_amount``), and a pair that is not exactly
-    one live expense and one live income shadow is REFUSED there -- a state
-    no door writes (Transfer Invariant 1; integrity check DC-12 reports it)
-    and production held 0 of on 2026-09-24.  Refusing the whole panel would
-    have been a server error on the account's page, because the panel is
-    built inline there and in a true-up's response.  Plan step
-    ``X-bi-6-4d`` deletes the shadows, and with them this state and this
-    value.
-
-    Attributes:
-        label: The leg's label ("Transfer to Savings"), composed from the
-            endpoints' current names.
-        amount: The transfer's own planned figure
-            (``cash_ledger.resolve_transfer_amount``), printed to identify it.
-            It is NOT what a tick would book: nothing can be booked for a
-            broken pair, which is why it is not offered.
-        attributed_on: The day the projection lands it on, the same caption
-            day an offer carries.
-    """
-
-    label: str
-    amount: Decimal
-    attributed_on: date
-
-
-@dataclass(frozen=True)
-class OutstandingSet:  # pylint: disable=too-many-instance-attributes
+class OutstandingSet:
     """What a statement of one civil day could still settle, grouped.
-
-    Pylint: ``too-many-instance-attributes`` (8/7) -- the eighth is
-    :attr:`damaged` (ruling **R-BAL148**), and these eight ARE the panel's one
-    read: its blocks, three count/total pairs the copy pluralises on, and the
-    transfers it must warn about.  The panel renders them together from one
-    value; splitting the warnings into a second return would give the route two
-    producers' answers to keep in step for one render.
 
     **There are THREE tallies and deliberately no fourth that sums them**
     (ruling **R-FA**, extended by **R-FD**).  A single ``total`` double-counts
@@ -740,10 +703,6 @@ class OutstandingSet:  # pylint: disable=too-many-instance-attributes
         deposit_count: How many INCOME rows the set offers -- money the
             projection is still waiting to arrive (ruling **R-FD**).
         deposit_total: What those rows would book.
-        damaged: The transfers on this account the panel cannot offer
-            (:class:`DamagedTransfer`), each printed as a warning.  Counted in
-            none of the tallies above, and not in :attr:`is_empty`: nothing
-            about one can be ticked.
 
     Counting lives here and not in the template because these are the figures
     the panel's copy pluralises on, and money-adjacent counting belongs on the
@@ -757,7 +716,6 @@ class OutstandingSet:  # pylint: disable=too-many-instance-attributes
     payment_total: Decimal
     deposit_count: int
     deposit_total: Decimal
-    damaged: "tuple[DamagedTransfer, ...]"
 
     @classmethod
     def empty(cls) -> "OutstandingSet":
@@ -776,7 +734,6 @@ class OutstandingSet:  # pylint: disable=too-many-instance-attributes
             purchase_count=0, purchase_total=zero,
             payment_count=0, payment_total=zero,
             deposit_count=0, deposit_total=zero,
-            damaged=(),
         )
 
     @property
@@ -785,9 +742,7 @@ class OutstandingSet:  # pylint: disable=too-many-instance-attributes
 
         The steady state for a user who reconciles as they go, and the state
         the panel answers with its "nothing is being held back twice" copy
-        rather than an empty form -- unless :attr:`damaged` is not empty
-        (ruling **R-BAL148**), when the panel prints only the warnings: a
-        transfer it cannot offer is still outstanding.
+        rather than an empty form.
 
         **Read off the COUNTS, not off ``groups``**, and the difference is a
         wrong empty state rather than a style point.  This accessor was written

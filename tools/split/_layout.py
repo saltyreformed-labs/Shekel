@@ -13,12 +13,13 @@ plan does not place, a fixture a part names, a name placed twice; a module-level
 any scope but ``function`` (a package ``conftest.py`` would run it once per part); a
 module-level ``pytest_*`` hook, ``pytestmark``, ``pytest_plugins`` or dunder (a conftest
 widens a hook's reach, and a part would not carry the others); ``global``; a no-argument
-``vars()``; ``inspect`` called on a moved node, or a moved node's ``__module__``; a
-``request`` attribute naming the requesting module or file; a free name naming the module
-itself (``__file__``, ``__name__``, ...: a part sits one directory deeper); a node in one
-part reading a node placed in another; ``globals()`` unless every node reading each key it
-writes lands in the same output; and an import alias nothing reads that the plan does not
-place.
+``vars()``; an ``inspect`` read of a moved node (``getsource`` of a node that moves whole
+aside: it returns the node's own text, which a verbatim move keeps), or a moved node's
+``__module__``; a ``request`` attribute naming the requesting module or file; a free name
+naming the module itself (``__file__``, ``__name__``, ...: a part sits one directory
+deeper); a node in one part reading a node placed in another; ``globals()`` unless every
+node reading each key it writes lands in the same output; and an import alias nothing reads
+that the plan does not place.
 """
 from __future__ import annotations
 
@@ -53,6 +54,11 @@ _PYTEST_MODULE_NAMES = frozenset({"pytestmark", "pytest_plugins"})
 
 #: Attributes of a fixture's ``request`` that name the requesting module or its file.
 _REQUEST_LOCATION = frozenset({"module", "fspath", "path", "nodeid"})
+
+#: The one :mod:`inspect` read of a moved node that means the same in any part: the text of
+#: a node that moves whole, which a verbatim move keeps.  ``getsourcelines`` also returns the
+#: node's first line number, which a move changes, so it is refused with the rest.
+_INSPECT_TEXT = "getsource"
 
 #: The marker a split class's name is homed at: it is bound in several parts, so no other
 #: output may reach it by name.
@@ -265,17 +271,42 @@ def _root_name(node: ast.AST) -> str | None:
     return node.id if isinstance(node, ast.Name) else None
 
 
-def _inspect_names(source: SourceModule) -> set[str]:
-    """The names that call into :mod:`inspect`: the module itself, and any function the
-    import block binds from it."""
-    found = {"inspect"}
+def _inspect_names(source: SourceModule) -> dict[str, str | None]:
+    """The names that call into :mod:`inspect`, each with the function it names: the module
+    itself (None: the attribute called names it), and any function the import block binds
+    from it."""
+    found: dict[str, str | None] = {"inspect": None}
     for name, stmt in source.import_bindings().items():
         if isinstance(stmt.node, ast.ImportFrom) and stmt.node.module == "inspect":
-            found.add(name)
+            found[name] = next(alias.name for alias in stmt.node.names
+                               if (alias.asname or alias.name) == name)
     return found
 
 
-def _check_node(sub: ast.AST, source_names: set[str], inspect_names: set[str]) -> str | None:
+def _inspect_read(call: ast.Call, source_names: set[str], split_names: set[str],
+                  inspect_names: dict[str, str | None]) -> str | None:
+    """Why an :mod:`inspect` call on a moved node could change meaning once moved, or None.
+
+    ``getsource`` of a node that moves whole returns that node's own text, which a verbatim
+    move keeps, so it is accepted.  Every other read of a moved node is refused: its module
+    or file (``getfile``, ``getmodule``, ...), its line number (``getsourcelines``), or the
+    text of a split class, which each part holds only a slice of."""
+    func = call.func
+    callee = func.value if isinstance(func, ast.Attribute) else func
+    if not (isinstance(callee, ast.Name) and callee.id in inspect_names):
+        return None
+    read = {_root_name(a) for a in call.args} & source_names
+    if not read:
+        return None
+    if (func.attr if func is not callee else inspect_names[callee.id]) != _INSPECT_TEXT:
+        return "inspect reads a moved node's module or file"
+    if read & split_names:
+        return "inspect.getsource reads a split class, which each part holds a slice of"
+    return None
+
+
+def _check_node(sub: ast.AST, source_names: set[str], split_names: set[str],
+                inspect_names: dict[str, str | None]) -> str | None:
     """Why one AST node could change meaning once moved, or None."""
     if isinstance(sub, ast.Global):
         return f"global {', '.join(sub.names)}"
@@ -283,10 +314,7 @@ def _check_node(sub: ast.AST, source_names: set[str], inspect_names: set[str]) -
         func = sub.func
         if isinstance(func, ast.Name) and func.id == "vars" and not sub.args:
             return "vars() reads the module it runs in"
-        callee = func.value if isinstance(func, ast.Attribute) else func
-        if isinstance(callee, ast.Name) and callee.id in inspect_names and any(
-                _root_name(a) in source_names for a in sub.args):
-            return "inspect reads a moved node's module or file"
+        return _inspect_read(sub, source_names, split_names, inspect_names)
     if isinstance(sub, ast.Attribute):
         if sub.attr == "__module__" and _root_name(sub.value) in source_names:
             return f"{_root_name(sub.value)}.__module__ names its module"
@@ -295,13 +323,14 @@ def _check_node(sub: ast.AST, source_names: set[str], inspect_names: set[str]) -
     return None
 
 
-def _check_nodes(output: Output, source: SourceModule) -> None:
-    """Refuse a construct in ``output`` whose meaning depends on the module it runs in."""
+def _check_nodes(output: Output, source: SourceModule, split_names: set[str]) -> None:
+    """Refuse a construct in ``output`` whose meaning depends on the module it runs in;
+    ``split_names`` are the split classes."""
     source_names = {u.name for u in source.units}
     inspect_names = _inspect_names(source)
     for piece in output.pieces:
         for sub in (s for top in piece.nodes for s in ast.walk(top)):
-            why = _check_node(sub, source_names, inspect_names)
+            why = _check_node(sub, source_names, split_names, inspect_names)
             if why:
                 raise Refusal(f"{piece.binds} (to {output.module}): {why}")
 
@@ -440,7 +469,7 @@ def resolve(source: SourceModule, plan: Plan, rules: CollectRules) -> Layout:
             outputs[module] = Output(module, docstring, pieces[module])
     for output in outputs.values():
         output.pieces.sort(key=lambda p: p.position)
-        _check_nodes(output, source)
+        _check_nodes(output, source, set(shapes))
     _check_globals(outputs, source, rules)
     _resolve(outputs, source, home)
     _place_unused(outputs, source, plan)

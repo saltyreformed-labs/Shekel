@@ -60,15 +60,17 @@ The developer ruled to ship that so, money correct (**R-BAL156**), so the
 twelve cases stay deleted and no answer replaces theirs; plan step
 ``balance:X-dc`` makes each save one transaction.  That the second click
 waits on the owner's lock is graded by
-``tests/test_services/test_cc5_4a4_row_lock_races.py``.*
+``tests/test_services/test_cc5_4a4_row_lock_races/test_door_pairs.py``.*
 Finding **CC-376** -- a refused purchase removal was a 500 -- is
 :class:`TestARefusedRemovalIsTheListsBanner`.
 
 Review 6 found a row its recurring item's ARCHIVE hid told "was deleted"
 (L1), and a deleted transfer shadow named where a live one is not (L2).
 Rulings **R-CC107** ("Say archived") and **R-CC108** (the desktop cell's word
-"Archived") are :class:`TestAnArchivedItemsRowSaysArchived`; L2 is the deleted
-leg in :class:`TestNothingLeaksThroughTheName`.
+"Archived") are :class:`TestAnArchivedItemsRowSaysArchived`.  L2's case, the
+deleted leg in :class:`TestNothingLeaksThroughTheName`, was deleted at plan
+step ``balance:X-bi-6-4d-2`` (ruling **R-BAL300**), where no shadow can be
+stored; the note where it stood says why nothing grades its order now.
 
 Review 7 found the archive's read flushing a caller's staged state from the
 settle verbs' first refusal (M1, :class:`TestTheHiddenRowsWordsFlushNothing`)
@@ -100,7 +102,6 @@ from app.services import (
     match_press,
     pay_period_gates,
     transaction_service,
-    transfer_service,
 )
 from app.services.one_off import OneOffToPlace, place_one_off
 from app.services.pay_calendar import calendar_for
@@ -115,6 +116,7 @@ from app.utils.dates import display_today
 from app.utils.error_fragments import ROW_NO_LONGER_EXISTS_MSG
 from app.utils.hidden_row import HiddenRow
 from tests._test_helpers import (
+    a_deleted_occurrence,
     amount_basis_for,
     derived_span,
     generate_row_of,
@@ -125,10 +127,6 @@ from tests._test_helpers import (
 )
 from tests.test_routes._statement_forms import ReconcileFormReader
 from tests.test_routes.test_cc5_4a5_popover_presses import dialog_delete_values
-from tests.test_routes.test_transfer_leg_cells import (
-    _create_savings,
-    _create_transfer,
-)
 # Pylint: ``shekel-private-module-import`` -- the statement-match builders are
 # the one way a test stages an act that MINTS an envelope as the app does (the
 # convention ``test_cc5_4a3_captions`` keeps).
@@ -937,6 +935,9 @@ class TestNothingLeaksThroughTheName:
     -- naming a deleted row before the access check, naming a companion's
     hidden deleted row, and calling a live transfer shadow "deleted".  Each
     case below is the one row a reordering would name, at every surface.
+    The third's cases, and review 6's L2 beside them, were deleted at plan
+    step ``balance:X-bi-6-4d-2`` (ruling **R-BAL300**): no shadow can be
+    stored, so no request reaches that reordering.
     """
 
     @pytest.mark.parametrize("surface", _SURFACES)
@@ -945,16 +946,10 @@ class TestNothingLeaksThroughTheName:
     ):
         """Another user's made-up $81.00 Gym, deleted by them: its name never reaches you."""
         with app.app_context():
-            template = make_expense_template(
-                db.session, seed_second_user, amount="81.00", name="Gym",
-                category_key="Groceries",
+            theirs = a_deleted_occurrence(
+                db.session, seed_second_user, seed_second_user["bootstrap_period"],
+                amount="81.00", name="Gym", category_key="Groceries",
             )
-            theirs = generate_row_of(template, seed_second_user["bootstrap_period"])
-            db.session.commit()
-            transaction_service.delete_transaction(
-                theirs, seed_second_user["user"].id,
-            )
-            db.session.commit()
             theirs_id = theirs.id
             assert db.session.get(Transaction, theirs_id).is_deleted is True
 
@@ -972,68 +967,33 @@ class TestNothingLeaksThroughTheName:
         posts; the desktop cell and the Save are the owner's alone.
         """
         with app.app_context():
-            template = make_expense_template(
-                db.session, seed_user, amount="60.00", name="Spa",
-                category_key="Groceries", companion_visible=False,
+            row = a_deleted_occurrence(
+                db.session, seed_user, seed_periods_today[3],
+                amount="60.00", name="Spa", category_key="Groceries",
+                companion_visible=False,
             )
-            row = generate_row_of(template, seed_periods_today[3])
-            db.session.commit()
-            transaction_service.delete_transaction(row, seed_user["user"].id)
-            db.session.commit()
             row_id = row.id
 
             response = _press(companion_client, surface, row_id)
 
             _is_the_nameless_answer(response, surface, row_id, "Spa")
 
-    @pytest.mark.parametrize("surface", _SURFACES)
-    def test_a_live_transfer_leg_is_never_called_deleted(
-        self, app, db, auth_client, seed_user, seed_periods_today, surface,
-    ):
-        """A made-up transfer's live shadow, asked for by a crafted id: gone, but not "deleted"."""
-        with app.app_context():
-            savings = _create_savings(seed_user)
-            transfer = _create_transfer(seed_user, seed_periods_today[4], savings)
-            shadow = db.session.query(Transaction).filter_by(
-                transfer_id=transfer.id,
-            ).first()
-            shadow_id, shadow_name = shadow.id, shadow.name
-            assert shadow.is_deleted is False
-
-            response = _press(auth_client, surface, shadow_id)
-
-            assert "was deleted" not in response.get_data(as_text=True)
-            _is_the_nameless_answer(response, surface, shadow_id, shadow_name)
-
-    @pytest.mark.parametrize("surface", _SURFACES)
-    def test_a_deleted_transfer_leg_is_not_named(
-        self, app, db, auth_client, seed_user, seed_periods_today, surface,
-    ):
-        """Review 6's L2: a made-up transfer soft-deleted, then its shadow's id pressed.
-
-        Before: "Transfer to Savings was deleted: a payment cannot be recorded
-        under it." -- the wrong door's sentence for a transfer's leg, and a
-        name the live leg above is never told.  The door met the shadow fence
-        first, so the answer is the shadow's: the words that name no row.
-        """
-        with app.app_context():
-            savings = _create_savings(seed_user)
-            transfer = _create_transfer(seed_user, seed_periods_today[4], savings)
-            shadow = db.session.query(Transaction).filter_by(
-                transfer_id=transfer.id,
-            ).first()
-            shadow_id, shadow_name = shadow.id, shadow.name
-            transfer_service.delete_transfer(
-                transfer.id, seed_user["user"].id, soft=True,
-            )
-            db.session.commit()
-            db.session.expire_all()
-            assert db.session.get(Transaction, shadow_id).is_deleted is True
-
-            response = _press(auth_client, surface, shadow_id)
-
-            assert "was deleted" not in response.get_data(as_text=True)
-            _is_the_nameless_answer(response, surface, shadow_id, shadow_name)
+    # ``test_a_live_transfer_leg_is_never_called_deleted`` and
+    # ``test_a_deleted_transfer_leg_is_not_named`` stood here, five surfaces
+    # each, until plan step balance:X-bi-6-4d-2 (ruling **R-BAL300**,
+    # developer 2026-10-15: "Delete all 27").  They pressed each surface on a
+    # transfer SHADOW row's crafted id -- live, and after its transfer's soft
+    # delete (review 6's L2) -- and asserted the nameless answer: the shadow
+    # fence met before the deleted-row arm.  No shadow can exist now (the
+    # database refuses one, ``ck_transactions_names_no_transfer``, ruling
+    # R-BAL258, pinned once by
+    # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
+    # and no app code builds one), so no request reaches that order, which
+    # goes with the column at plan step X-bi-6-5.  The reordering the class
+    # exists for -- naming a row before the access check -- is still graded:
+    # :meth:`test_another_users_deleted_row_is_not_named` fails on it (the
+    # stranger is told "Gym was deleted", measured at that step).
 
 
 class TestAnArchivedItemsRowSaysArchived:

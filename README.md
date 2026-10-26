@@ -437,7 +437,7 @@ unix socket, and removes it afterwards. A bare `pytest` has no database to reach
 
 # Run specific test files (fast feedback during development)
 ./scripts/test.sh tests/test_services/test_cash_fold.py -v
-./scripts/test.sh tests/test_routes/test_grid.py -v
+./scripts/test.sh tests/test_routes/test_grid/test_view.py -v
 ```
 
 **Prerequisite: a rootless Docker daemon.** The wrapper refuses a non-rootless one rather than

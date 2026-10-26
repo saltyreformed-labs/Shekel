@@ -48,7 +48,7 @@ and the balance seam's ESTIMATED loan tier prices an occurrence no row answers
 yet through the same two, so a row and its estimate cannot part.
 
 **The LOAN PRICING pair is in this package, and plan step X-au-g-2a is what
-put it there.**  Amount rule 4 -- a loan payment's shadow is worth what the
+put it there.**  Amount rule 4 -- a loan payment's transfer is worth what the
 loan says that installment costs -- is a rule about a ROW'S AMOUNT, which is
 this package's question; its producer lived in ``loan_payment_service`` until
 that step, so :mod:`._amount_source` had to reach UP a tier to price a row and
@@ -88,24 +88,43 @@ derives them from the parent through
 :mod:`app.services.transfer_legs` and prices each by
 :func:`resolve_transfer_amount` -- the same figure amount rule 5 answered for
 the shadow row a leg replaces, with the shadow taken out of the walk.
-Transfer Invariant 5 is restated to say so (``CLAUDE.md``): the PLAN half of a
-transfer derives from ``budget.transfers``, the RECORD half reads
-``budget.transactions`` until ``X-bi-4`` moves it onto movements, and the fold
-still reads no AMOUNT off a transfer for any row that has settled.  **What the
-two halves can and cannot double count, measured rather than claimed.**  A
-PROJECTED shadow cannot be counted beside its leg: the plan excludes it by the
-same ``transfer_id`` test that identifies it.  A SETTLED shadow under a
+The split: the PLAN half of a transfer derives from ``budget.transfers``, and
+since plan step ``X-bi-4a`` a SETTLED side is its DATED covering movement
+(ruling **R-BAL80**) -- which hung off the side's shadow row in
+``budget.transactions`` until plan step ``balance:X-bi-6-4d-2`` and hangs off
+the transfer by its side link since.  The movement says where and when the
+money moved; how much is the figure the transfer stores once (rulings
+**R-BAL365**, **R-BAL366**: :attr:`~app.models.transfer.Transfer.settled_figure`,
+read by ``_cash_leg._moved_figure``; the transfer paragraph at the end of
+``CLAUDE.md``'s Architecture), so the fold reads no PLANNED amount for a side
+that has settled.
+**What the two halves could and could not double count, measured rather than
+claimed.**  A PROJECTED shadow could not be counted beside its leg: the plan
+excluded it by the same ``transfer_id`` test that identified it (the test still
+stands in :func:`planned_cash_rows` and excludes nothing now, since no shadow
+can be stored).  A SETTLED shadow under a
 still-Projected parent -- a STATUS drift, which Transfer Invariants 3 and 4
-forbid and no door writes (0 of 350 shadow rows on the 2026-09-15 snapshot) --
-IS counted by both halves, because the record half keys settled-ness on the
+forbade and no door wrote (0 of 350 shadow rows on the 2026-09-15 snapshot) --
+was counted by both halves while the record half keyed settled-ness on the
 shadow's status and the plan half on the parent's: ``$250.00`` checking ->
-savings with the checking shadow settled around the service folds checking at
-``-$500.00``, and the reverse drift (parent settled, shadows Projected) folds
-``$0.00`` on both sides.  Before X-bi-6a either drift counted ONCE, because
-only the shadow was read.  Pinned in
-``tests/test_services/test_transfer_legs.py`` with ``X-bi-4`` named as the
-step that moves it; the structural end is ``X-bi-4`` + ``X-bi-6``, after which
-a transfer's status lives in ONE row and the drift is not a state at all.
+savings with the checking shadow settled around the service folded checking
+at ``-$500.00``, and the reverse drift (parent settled, shadows Projected)
+folded ``$0.00`` on both sides.  Before X-bi-6a either drift counted ONCE,
+because only the shadow was read.  Plan step ``X-bi-4a`` let a side's DATED
+movement, not a status, decide which half counts its leg (ruling
+**R-BAL79**), and both drifts were pinned in
+``tests/test_services/test_transfer_legs/test_the_plan_half.py``.  **Drift A
+is structural now**: plan step ``balance:X-bi-6-4d-2`` made a transfer one
+row (ruling **R-BAL258**), so no shadow's status can part from its
+transfer's.  What pins that is the database's refusal of a shadow row
+(``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``'s
+``TestTheUpgrade::test_the_database_refuses_a_twin``), and drift A's cases
+went with the shadows (ruling **R-BAL313**).  Drift B without its shadows is
+a settled transfer whose sides hold no record, the zero close the
+status-band rule admits; it still folds ``$0.00`` on both sides and is still
+pinned there, on each
+(``TestAStatusDriftIsCountedOnce``'s
+``test_a_projected_shadow_under_a_settled_parent_is_counted_by_neither``).
 
 **The books row has no loan analog because a loan has no books to open.**  Its
 origination is ``LoanParams.original_principal``, synthesized rather than

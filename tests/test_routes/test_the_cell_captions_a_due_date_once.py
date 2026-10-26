@@ -278,6 +278,7 @@ class TestTheCaptionMapIsREQUIRED:
                     # ``None`` (no balance line) is a legitimate value that
                     # draws no chip, so the render reaches the map under test.
                     # Its own absence is graded by
-                    # ``test_grid.TestTheChipMarksARowOnAnotherAccount``.
+                    # ``test_grid.test_accounts_and_cards``'s
+                    # ``TestTheChipMarksARowOnAnotherAccount``.
                     account=None,
                 )

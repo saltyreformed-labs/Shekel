@@ -145,7 +145,7 @@ def populate_periods_from_active_templates(
 
     Returns:
         The number of template-linked records created (transactions plus
-        transfers; a transfer counts once, not its two shadow rows).
+        transfers; a transfer is one row and counts once).
     """
     window = frozenset(period_ids)
     if not window or ctx.scenario is None:

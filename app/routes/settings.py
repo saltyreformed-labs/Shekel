@@ -226,9 +226,10 @@ def _load_pay_periods_context(user_id):
     manage UI renders -- the lock-reason-to-badge mapping is resolved here
     so the template only displays, never computes.  ``pp_schedule`` is the
     persisted schedule (cadence) when one exists.  ``pp_can_reset`` gates
-    the full-reset control to users with no settled transactions (the same
-    bound the service enforces), so the destructive action is only offered
-    when it would be accepted.
+    the full-reset control to users with no settled, non-deleted row or
+    transfer and none holding a payment or purchase (the same bounds the
+    service enforces), so the destructive action is only offered when it
+    would be accepted.
 
     **The list is the DERIVATION since plan step C2-f3b**, where it was
     ``pay_period_service.get_all_periods`` -- ORM rows ordered by the stored

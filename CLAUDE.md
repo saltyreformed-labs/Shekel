@@ -160,17 +160,19 @@ root; never silence it with a bare disable.
   disable that suppresses nothing is itself a finding.
 - **The landing check** (`tools/quill/landing.py`, CI's `landing` job) holds the ONE write rule for
   the plan's records in git, judged on the merge that lands: a card's done file `plan/ships/N` is
-  added or changed only from its own branch `card/N`, and a task's file `plan/tasks/T` only from its
-  card's branch (R-BAL386), but for a line carried from the other integration branch (a release or a
-  resync) and, while it lives, the records-only door into `main` for a card never claimed
-  (R-BAL363); a change that writes no line of a done file may not change what `dev` and `main`
-  together say of that card (R-BAL385, R-BAL390); a pull request from `card/N` is refused while a
-  task under N that was not dropped lacks its file; and a change to what production runs must add,
-  delete or change a card's done file, from any branch, a release or a resync passing only with the
-  done files it carries (R-BAL362): the files the image holds, as Docker reads its ignore file
-  (`.dockerignore`, R-BAL364's one list of them), and the files outside the image that build or run
-  production, which `tools/quill/_production.py` lists, their one list (R-BAL400, R-BAL401). Its
-  module docstring states every rule.
+  added or changed only from its own branch `card/N`, a finding's also from its owner step's branch
+  (plan#1777), and a task's file `plan/tasks/T` only from its card's branch (R-BAL386), but for a
+  line carried from the other integration branch (a release or a resync) and, while it lives, the
+  records-only door into `main` for a card never claimed (R-BAL363); a change that writes no line of
+  a done file may not change what `dev` and `main` together say of that card (R-BAL385, R-BAL390); a
+  pull request from `card/N` is refused while a task under N that was not dropped lacks its file, or
+  while N or a step above it owns an open finding neither marked fixed nor handed on (plan#1777,
+  plan#1784), and a records-only change while a step it records owns one; and a change to what
+  production runs must add, delete or change a card's done file, from any branch, a release or a
+  resync passing only with the done files it carries (R-BAL362): the files the image holds, as
+  Docker reads its ignore file (`.dockerignore`, R-BAL364's one list of them), and the files outside
+  the image that build or run production, which `tools/quill/_production.py` lists, their one list
+  (R-BAL400, R-BAL401). Its module docstring states every rule.
 - **Archived documents** (`tools/ci/archive.py`): every document under an `archive/` or
   `historical/` directory opens with the `> **ARCHIVED.` banner, and CI refuses one that does not.
 - **Judgment the linters cannot mechanize** (float-on-money boundaries, IDOR, transfer invariants,
@@ -367,6 +369,13 @@ commit that finishes it (`quill task-file plan#T`). The task closes once the pus
 the file and reopens if a revert removes it; the card's pull request is refused while a task under
 it that was not dropped lacks its file. A piece that lands by a pull request of its own is a leaf
 step instead, with its own claim.
+
+**A finding fixed inside a step's pull request ships in it** (plan#1777): the step owns it, its one
+blocked-by link (R-BAL395), and writes its done file `plan/ships/F` in the commit that fixes it
+(`quill finding-file plan#F`), or hands it to the step that fixes it
+(`quill hand plan#F --to plan#S`); the step's pull request is refused while it owns an open finding
+it does neither for, and a revert of its merge reopens each finding it marked. A finding's owner is
+always a step a branch builds, never one split into smaller steps (plan#1784).
 
 **The resync rule for the files the tracker switch deleted** (the planning registries in
 `docs/plans/` and the tools that read or migrated them): `main` keeps them until the first release

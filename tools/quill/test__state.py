@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from tools.quill._state import (
     Placement,
     Unsplit,
+    can_own,
     drop_unlinks,
     dropped,
     dropped_above,
@@ -230,6 +231,26 @@ def test_sync_reports_an_open_finding_whose_owner_is_done():
         "finding plan#3's owner plan#1 is no longer live (done, or under a dropped step)",
         "finding plan#4's owner is missing",
     ]
+
+
+def test_sync_reports_an_open_finding_whose_owner_is_a_split_step():
+    """plan#1784 ("One owner, always a leaf"): a finding's owner is a step a branch builds, so
+    one blocked by a live step split into smaller steps (a person's link on the web) is
+    reported, with the hand-off that mends it; one blocked by the leaf is not, and a split
+    step dropped whole reads as no longer live."""
+    split, leaf = _card(1, children=(Child(2, "step", True),)), _card(2, parent=1)
+    cards = _cards(split, leaf, _card(3, "finding", blocked_by=(1,)),
+                   _card(4, "finding", blocked_by=(2,)))
+    assert [line for line in sync_plan(cards, set(), {}).reports if "'s owner" in line] == [
+        "finding plan#3's owner plan#1 is split into smaller steps, which no branch builds "
+        "(plan#1784; `quill hand plan#3 --to plan#S` hands it to one): give it one open step "
+        "as its owner, the one card it is blocked by (R-BAL395)"]
+    assert can_own(2, cards, set()) and not can_own(1, cards, set())
+    gone = {**cards, 2: _closed(2, reason="NOT_PLANNED", parent=1)}
+    assert not can_own(1, gone, set()) and not can_own(3, cards, set())
+    assert [line.split(":")[0] for line in sync_plan(gone, set(), {}).reports
+            if "plan#3's owner" in line] == [
+        "finding plan#3's owner plan#1 is no longer live (done, or under a dropped step)"]
 
 
 def test_a_ruling_or_question_is_resolved_once_closed_whoever_closed_it():

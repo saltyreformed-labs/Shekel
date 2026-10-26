@@ -445,6 +445,12 @@ def leaf_filing(tmp_path, title, parent="plan#1"):
             "--body-file", str(spec))
 
 
+def finding_filing(owner, title="Twice", text="The report counts a refund twice."):
+    """``quill file finding`` filing the finding ``title``, saying ``text``, for ``owner``."""
+    return ("file", "finding", "--arc", "balance", "--title", title, "--owner", owner,
+            "--text", text)
+
+
 def ruling_filing(tmp_path, owner):
     """``quill file ruling`` filing the ruling "Home" under ``owner``, its question and answer
     written to files."""

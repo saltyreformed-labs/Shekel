@@ -48,6 +48,8 @@ Security and data scoping:
   is an IDOR vulnerability. Both "not found" and "not yours" must return 404, not
   403 (no existence oracle).
 - Soft-deleted rows (`is_deleted`) are filtered unless explicitly needed.
+- ORM only, no raw SQL strings. N+1 is prevented with `joinedload` /
+  `selectinload`, on the grid route and the balance calculator especially.
 - State-changing routes validate through a Marshmallow schema before any DB work,
   and validate FK existence and ownership before commit.
 - No `|safe` on user data in templates; CSRF on every form; mutations use POST.
@@ -90,10 +92,26 @@ Design (DRY / SOLID / pythonic):
 Migrations and schema:
 - Numeric(12,2) for money; NOT NULL by default with a justified exception; CHECK
   constraints mirroring Marshmallow ranges; explicit `ondelete`; named
-  constraints. NOT NULL on a populated table uses the three-step add/backfill/
-  alter. Every migration has a working downgrade or a `NotImplementedError` that
-  explains the manual revert. A migration's commit carries its own change only: an
-  unrelated fix riding in it is unreviewable there and is its own commit.
+  constraints (`ck_<table>_<desc>`, `uq_<table>_<cols>`, `ix_<table>_<cols>`),
+  except a `ref` lookup table's single-column `PRIMARY KEY (id)` / `UNIQUE (name)`,
+  which take PostgreSQL's generated names (developer ruling 2026-08-14, finding
+  `recurrence:F-3`); frequent WHERE/JOIN/ORDER BY columns indexed. NOT NULL on a
+  populated table uses the three-step add/backfill/alter. A migration's commit
+  carries its own change only: an unrelated fix riding in it is unreviewable there
+  and is its own commit.
+- Alembic only; never `db.create_all()` outside tests. An auto-generated
+  migration holds its intended changes only: no phantom diffs, named constraints,
+  a correct downgrade.
+- Every migration has a working downgrade, or a `raise NotImplementedError` whose
+  message gives why it is unsafe and the literal SQL to revert by hand; a bare
+  `pass` is a FAIL.
+- A destructive migration (a drop, rename, type change or constraint removal,
+  drop-and-recreate included) needs the developer's approval AND a
+  `Review: <name>, <date>` line in its module docstring.
+- Every new table in `auth`, `budget` or `salary` is added to
+  `app/audit_infrastructure.py:AUDITED_TABLES` (`flask db upgrade` re-attaches the
+  trigger). Nothing writes `system.audit_log` directly: every row goes through
+  `system.audit_trigger_func`.
 
 Tests:
 - Assert behavior and computed values, not just status codes or truthiness. A

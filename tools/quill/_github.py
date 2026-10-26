@@ -429,8 +429,12 @@ def described(error: BaseException) -> str:
     """A failure as ONE line: its message, then what was being read when it ended (each
     note :func:`reading` added), each run of whitespace one space.  One line, because a
     scheduled run's failure is pushed with that run's last fifteen log lines
-    (``/opt/docker/scripts/notify-failure.sh``), and a 504's HTML page, which GitHub's
-    answer text carries, spread over thirty would push the failure itself out of them."""
+    (``/opt/docker/scripts/notify-failure.sh``), and GitHub's 504 page, which its answer
+    text carries, took twenty as quill printed it (its sync at 14:04 2026-10-26, the page
+    cut at 500 characters), pushing the failure itself out.  The line is a run's last only
+    if what it printed before reached the log first: off a terminal Python buffers stdout,
+    where a command's lines go, and not stderr, where this one goes, so the scheduled sync
+    runs with ``PYTHONUNBUFFERED=1`` (its unit, ``shekel-plan-sync.service``)."""
     return " ".join("; ".join([str(error), *getattr(error, "__notes__", ())]).split())
 
 

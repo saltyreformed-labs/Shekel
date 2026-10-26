@@ -30,6 +30,21 @@ def test_shipped_cards_still_open_are_counted_until_sync_closes_them(code, capsy
     assert not any(line.startswith("sync is behind") for line in _next(tracker, code, capsys))
 
 
+def test_a_card_sync_closed_that_the_listing_still_shows_open_is_not_counted(
+        code, capsys, monkeypatch):
+    """Review s56 L9: GitHub's open listing can lag a close, as ``sync``'s own reads say, so
+    a next run just after a sync read plan#2 and plan#3 as still open.  Each counted card is
+    read again by its number, which decides: nothing is said of sync."""
+    tracker = FakeTracker()
+    for number in (1, 2, 3):
+        tracker.add(number)
+    ship(code, 2, 3)
+    lagging = tracker.open_cards()
+    assert run(tracker, code, "sync") == 0
+    monkeypatch.setattr(tracker, "open_cards", lambda: lagging)
+    assert not any(line.startswith("sync is behind") for line in _next(tracker, code, capsys))
+
+
 def test_a_card_a_person_reopened_is_not_counted(code, capsys):
     """plan#2 shipped and a PERSON reopened it: sync reports it and never closes it, so next
     never counts it, however many syncs run."""

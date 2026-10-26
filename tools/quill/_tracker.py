@@ -91,7 +91,7 @@ BOARD_WAIT_SECONDS = 60
 POLL_SECONDS = 5
 #: How many cards one read by number asks for (:meth:`CardReader._lookup`), inside GitHub's
 #: limit of about ten seconds a request.  Measured 2026-10-26 15:27-15:33 on the tracker,
-#: three rounds: 50 cards a batch took 1.8-2.5 s, 25 took 1.4 s.
+#: the slowest batch in each of three rounds: of 50 cards, 1.8-2.5 s; of 25, 1.4 s.
 _LOOKUP_BATCH = 25
 #: The largest number a read by number can ask for: GraphQL's ``Int`` is a signed 32-bit
 #: integer (the GraphQL specification), so no issue is numbered past it.

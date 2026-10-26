@@ -108,6 +108,7 @@ from tools.quill._state import (
     STALE_CLAIM,
     SyncPlan,
     Unsplit,
+    above,
     drop_shows,
     drop_unlinks,
     filing_unfinished,
@@ -363,12 +364,15 @@ def cmd_comment(args, tracker: Tracker, _root: Path) -> int:
 
 # -- block, move, drop ----------------------------------------------------------
 
-def cmd_block(args, tracker: Tracker, _root: Path) -> int:
-    """Record (or with ``--remove``, delete) that one card is blocked by another."""
+def cmd_block(args, tracker: Tracker, root: Path) -> int:
+    """Record (or with ``--remove``, delete) that one card is blocked by another; for an open
+    finding, only as its one owner allows (:func:`_findings.refuse_block`, ruling plan#1784)."""
     if args.card == args.by:
         raise Refused("a card cannot block itself")
     blocker = _one(tracker, args.by)
     card = _one(tracker, args.card)
+    if card.kind == "finding":
+        _findings.refuse_block(tracker, root, card, blocker, args.remove)
     if args.remove:
         if blocker.number not in card.blocked_by:
             raise Refused(f"plan#{card.number} is not blocked by plan#{blocker.number}")
@@ -530,7 +534,10 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
 
     Work git says shipped is never dropped: undoing it is a revert of the change that
     shipped it, which deletes its marker; nor is a task whose file is on ``dev`` or ``main``,
-    undone the same way.  A card's drop drops each task under it still to do first
+    undone the same way; nor, until each is handed on, a step that owns an open finding, a
+    split step any leaf of which, or which itself, owns one, or a card below a step that owns
+    one, which a drop of its last leaf would leave dropped (ruling plan#1784,
+    :func:`_findings.refuse_orphaning`).  A card's drop drops each task under it still to do first
     (:func:`_drop`, R-BAL190's shape: the tool records the decision where the work is).
     A leaf dropped while its filing has not finished is first taken out of the
     split it began, which it was never part of (R-BAL205, :func:`_leave_split`):
@@ -566,6 +573,7 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
     cards = with_closure(tracker, {card.number: card})
     if not is_container(card, cards, shipped):
         _refuse_drop(card, cards, reads)
+        _findings.refuse_orphaning(tracker, [card, *above(card, cards)], shipped)
         if card.kind == "step" and card.parent is not None and filing_unfinished(card):
             _leave_split(tracker, card, cards, shipped)
         for undo in drop_unlinks(card, cards, shipped, set()):
@@ -580,6 +588,7 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
     if not below:
         raise Refused(f"{_label(card)} has no leaf below it that is still work; its own state "
                       "shows its leaves, which `quill sync` writes")
+    _findings.refuse_orphaning(tracker, [card, *below, *above(card, cards)], shipped)
     names = ", ".join(f"plan#{leaf.number}" for leaf in below)
     ending = {leaf.number for leaf in below if filing_unfinished(leaf)}
     bare = left_bare(card, cards, shipped, ending)

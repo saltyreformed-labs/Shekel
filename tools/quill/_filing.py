@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.quill import _git
+from tools.quill import _findings, _git
 from tools.quill._command import (
     ON_BOARD,
     Refused,
@@ -552,7 +552,10 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
     printed as it lands, then its mark removed, last (R-BAL202): the link, a ruling's
     close, a leaf's place and its split step's milestone cleared (after the leaf's create
     carried it, so a run cut short between them leaves it held, and the same command run
-    again clears it), a top-level step's or question's board place."""
+    again clears it), then each open finding the split step owns handed to the leaf, which a
+    split step never owns (ruling plan#1784, :func:`_findings.hand_on`: a run cut short
+    between a finding's two writes leaves it two owners, and the same command run again
+    finishes it), a top-level step's or question's board place."""
     kind, parent = filing.draft.kind, filing.parent
     _attach(tracker, card, kind, parent)
     if kind == "ruling" and card.is_open:
@@ -565,6 +568,8 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
         if (split := filing.milestone.leaf) is not None:
             tracker.set_milestone(parent.number, None)
             print(f"  plan#{parent.number} left milestone #{split}: a split step keeps none")
+        for finding in _findings.owned(tracker, parent.number, filing.shipped):
+            _findings.hand_on(tracker, finding, card, parent, prefix="  ")
     elif kind in ON_BOARD and card.board_item is None:
         tracker.board.add(card)
         print("  board: added at the bottom")

@@ -129,7 +129,7 @@ class HiddenRow:
         which would print "None was deleted".  The from-side's and not the
         to-side's because the arm refuses the transfer once, before either
         side is written, and the from-side comes first where
-        ``transfer_service._side_days.repair_fallback`` orders the two
+        ``transfer_service._side_days.pair_fallback_day`` orders the two
         sides for one answer.  The
         archive writes ``TransferTemplate.is_active`` and soft-deletes
         through ``transfer_service.delete_transfer``, which hands the status

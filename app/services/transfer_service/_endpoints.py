@@ -49,7 +49,7 @@ from app.services.transfer_legs import TransferLeg, transfer_side_leg
 from app.services.transfer_service._side_days import (
     NO_DAYS,
     PairDays,
-    repair_fallback,
+    pair_fallback_day,
     resolve_pair_days,
 )
 from app.services.transfer_service._ownership import _get_owned_account
@@ -336,7 +336,7 @@ def _moved_days(
     statement says nothing about the new one): a moved side borrows a staying
     side's evidence.  **When neither side holds evidence after the move --
     both sides moved, or the staying side's day was itself borrowed -- both
-    take ONE day, the EXPENSE side's recorded day** (``repair_fallback``'s
+    take ONE day, the EXPENSE side's recorded day** (``pair_fallback_day``'s
     order), so a to-side that recorded 01-08 beside a from-side's 01-06 lands
     on 01-06, two days earlier.  That is ruling **R-BAL142**'s rule that two
     borrowed sides share one day, and it is the only stable answer: two
@@ -366,7 +366,7 @@ def _moved_days(
         return NO_DAYS
     days = resolve_pair_days(
         PairDays(expense=kept[0], income=kept[1]), NO_DAYS,
-        repair_fallback(held, display_today()),
+        pair_fallback_day(held, display_today()),
     )
     return PairDays(
         expense=days.expense if held[0] is not None else None,

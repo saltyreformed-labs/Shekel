@@ -128,7 +128,7 @@ for a fence, the kind is this record's reading.
 | id | where | what it guards | why it stays |
 |---|---|---|---|
 | A-02 | `app/services/transfer_service/_validation.py:397` (`assert_restorable`, check 3) | restoring a transfer onto an archived account | a domain rule; its three shadow checks go at `X-bi-6-4d` |
-| A-05 | `app/services/transfer_service/_side_days.py:131` (`repair_fallback`) | a transfer side with no day of its own borrows one | a derivation, not a fence; only its name still says repair (`BAL-640`) |
+| A-05 | `app/services/transfer_service/_side_days.py:131` (`pair_fallback_day`) | a transfer side with no day of its own borrows one | a derivation, not a fence; renamed from `repair_fallback` at plan#1175 (`BAL-640`) |
 | A-64 | group: 164 of the 171 `ck_*` constraints in `app/models`, e.g. `ck_transfers_positive_amount`, `ck_transactions_cleared_needs_settle_day` | the domain rule itself | the constraint is the rule |
 | A-65 | group of 8 trigger families, e.g. `app/append_only_infrastructure.py:210`, `app/posting_infrastructure.py:97` | audit, append-only, deleted rows, levels, openings, pay stubs, sightings, a balanced journal | the trigger is the rule |
 | A-68 | group of 9: `app/models/mixins.py:532`, `app/models/_derived_flag.py:14` and seven append-only ORM guards (e.g. `app/models/journal_entry.py:413`) | a wrong type, a write to an immutable record | the ORM guard is the rule |

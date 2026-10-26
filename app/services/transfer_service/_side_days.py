@@ -118,7 +118,7 @@ def borrowed_day(lender: SettleDay | None, fallback: date) -> SettleDay:
     Args:
         lender: The other side's own day, or ``None`` when it has none.
         fallback: The day to borrow when there is no lender
-            (:func:`repair_fallback`).
+            (:func:`pair_fallback_day`).
 
     Returns:
         A ``borrowed`` :class:`SettleDay`.
@@ -129,20 +129,20 @@ def borrowed_day(lender: SettleDay | None, fallback: date) -> SettleDay:
     )
 
 
-def repair_fallback(
-    recorded_in_repair_order: Iterable[SettleDay | None], today: date,
+def pair_fallback_day(
+    recorded_expense_first: Iterable[SettleDay | None], today: date,
 ) -> date:
     """Return the day a pair with no evidence on either side shares.
 
-    The first day recorded in the repair order -- expense before income --
-    and otherwise *today*.  So a mark-paid borrows today, a re-derivation
+    The first day either side records, the expense side's before the income
+    side's, and otherwise *today*.  So a mark-paid borrows today, a re-derivation
     never invents a day when either side records one, and two borrowed sides
     share one day.  (The order put a twin still in the settled band before
     one that had drifted out of it until plan step ``balance:X-bi-6-4d-2``:
     a transfer has one status, so there is no drift left to order.)
 
     Args:
-        recorded_in_repair_order: Each side's recorded day, expense then
+        recorded_expense_first: Each side's recorded day, expense then
             income.
         today: The fallback when neither records one -- the writer's own
             (``_status._fallback_day``).
@@ -150,7 +150,7 @@ def repair_fallback(
     Returns:
         The day to share.
     """
-    for recorded in recorded_in_repair_order:
+    for recorded in recorded_expense_first:
         if recorded is not None:
             return recorded.day
     return today
@@ -229,7 +229,7 @@ def resolve_pair_days(
             evidence ``_endpoints._moved_days`` drops).
         stated: What the act states, already admitted by its verb.
         fallback: The day to share when neither side has evidence
-            (:func:`repair_fallback`).
+            (:func:`pair_fallback_day`).
 
     Returns:
         Both sides' days.

@@ -69,7 +69,7 @@ from app.services.transfer_legs import TransferLeg, transfer_side_leg
 from app.services.transfer_service._side_days import (
     NO_DAYS,
     PairDays,
-    repair_fallback,
+    pair_fallback_day,
     resolve_pair_days,
 )
 from app.services.transfer_service._validation import TransferRows
@@ -101,17 +101,19 @@ def _resolved_days(
     """Return each side's day once this act lands -- the one derivation.
 
     Reads each side's CURRENT day off its RECORD (plan step
-    ``balance:X-bi-6-4d-2``; the twin row's own day until then) and the
-    repair order's fallback, then hands both to
+    ``balance:X-bi-6-4d-2``; the twin row's own day until then) and the day
+    the pair shares when neither side has evidence
+    (:func:`~._side_days.pair_fallback_day`), then hands both to
     :func:`~._side_days.resolve_pair_days`.  The applier
     (:func:`apply_status_to_all_three`) calls it, and the endpoint move asks
     the same resolver itself (``_endpoints._moved_days``), so a borrowed day
     has one derivation in ``app/`` (the REC-552 study's seam S6).  A record is
     dated exactly while its transfer is settled, so a
     side's current day is the record's day; a side holding no record -- a
-    ``$0.00`` close, or a first settle -- has none.  The repair order is the
-    declared ``(expense, income)``: the twins' "a leg still in the band
-    first" had two statuses to order, and a transfer has one.
+    ``$0.00`` close, or a first settle -- has none.  That shared day reads the
+    sides in the declared ``(expense, income)`` order: the twins' "a leg
+    still in the band first" had two statuses to order, and a transfer has
+    one.
 
     Args:
         legs: The ``(expense, income)`` legs with their records
@@ -129,7 +131,7 @@ def _resolved_days(
     )
     current = PairDays(expense=held[0], income=held[1])
     return resolve_pair_days(
-        current, stated, repair_fallback(held, fallback_day),
+        current, stated, pair_fallback_day(held, fallback_day),
     )
 
 

@@ -12,6 +12,7 @@ from tools.quill import setup_tracker
 from tools.quill._github import GitHubError, app_credentials, app_jwt
 from tools.quill.setup_tracker import (
     APP_PERMISSIONS,
+    FILING,
     ISSUE_TYPES,
     LABELS,
     REPOSITORY,
@@ -20,6 +21,7 @@ from tools.quill.setup_tracker import (
     label_changes,
     permission_differences,
     repository_drift,
+    unmarked,
 )
 
 #: The labels GitHub gives a new repository (measured on the 09-24 demo repository).
@@ -77,6 +79,14 @@ def _label(name, color="ededed", description="", issues=0, pulls=0):
 def _labels_github(nodes):
     """A fake GitHub whose repository carries ``nodes``."""
     return _GitHub(graphql=lambda q, **v: {"repository": {"labels": {"nodes": nodes}}})
+
+
+def test_unmarked_is_a_cards_labels_with_the_filing_mark_taken_out():
+    """BAL-620: the one producer of a card's labels without :data:`FILING`, in their order;
+    labels that carry no mark come back as they are."""
+    assert unmarked(("balance", FILING, "moves-money")) == ("balance", "moves-money")
+    assert unmarked(("salary",)) == ("salary",)
+    assert not unmarked((FILING,))
 
 
 def test_every_label_on_a_new_repository_is_replaced():

@@ -250,17 +250,11 @@ def listing(github: GitHub, query: str) -> list[dict]:
 def saved_versions(github: GitHub, place: Place, number: int) -> tuple[list[dict], dict]:
     """Every saved version of card ``number``'s text as GitHub answers it
     (:func:`_queries.edits`), and the last answer read, which holds the card's text, who
-    filed it and when.
-
-    Raises:
-        TrackerError: When a page answers the card as null.
-    """
-    def saved(answer: dict) -> dict:
-        if answer["repository"]["issue"] is None:
-            raise TrackerError(f"plan#{number} does not exist")
-        return answer["repository"]["issue"]["userContentEdits"]
-
-    return paged(partial(github.graphql, _queries.edits(place), number=number), saved)
+    filed it and when.  A number nobody filed is GitHub's NOT_FOUND error, which
+    :meth:`_github.GitHub.graphql` raises: a command refuses one before it reads here
+    (``_command._one``)."""
+    return paged(partial(github.graphql, _queries.edits(place), number=number),
+                 lambda answer: answer["repository"]["issue"]["userContentEdits"])
 
 
 def comment_nodes(github: GitHub, place: Place, number: int,

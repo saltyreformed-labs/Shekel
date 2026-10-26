@@ -65,6 +65,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
@@ -183,6 +184,14 @@ _ARC_COLORS = ("0e8a16", "1d76db", "5319e7", "d93f0b", "006b75", "c5a100")
 #: The mark every card quill files carries from the call that creates it
 #: until its filing's last write removes it (ruling ``balance:R-BAL202``).
 FILING = "filing"
+
+
+def unmarked(labels: Iterable[str]) -> tuple[str, ...]:
+    """A card's ``labels`` with the :data:`FILING` mark taken out, in their order: the one
+    producer of them, for a decision that sets the mark aside and for the fake tracker's
+    removal of it (BAL-620)."""
+    return tuple(label for label in labels if label != FILING)
+
 
 #: The two labels a release reads: a step whose release moves money, and a parent
 #: whose leaves ``/release`` ships in one release.  ``quill file step --label`` takes its

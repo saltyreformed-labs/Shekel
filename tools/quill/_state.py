@@ -253,7 +253,7 @@ def dropped(number: int, cards: Mapping[int, BareCard], shipped: set[int]) -> bo
     return _closed_dropped(card) and not (is_work(card, cards, shipped) and number in shipped)
 
 
-def above(card: Card, cards: Mapping[int, Card]) -> Iterator[Card]:
+def above(card: BareCard, cards: Mapping[int, BareCard]) -> Iterator[BareCard]:
     """The steps above ``card``, nearest first: the step it splits, that step's, ..."""
     while card.parent is not None:
         card = cards[card.parent]

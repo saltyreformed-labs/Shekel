@@ -14,21 +14,24 @@ Every other door that sets or changes a finding's owner keeps the one-owner rule
 here: ``quill block`` (:func:`refuse_block`), ``quill drop`` (:func:`refuse_orphaning`) and
 the split, ``quill file step --parent``, which hands the split step's findings to its new leaf
 (:func:`hand_on`, from ``_filing``), each over the findings a step still owes
-(:func:`owned`).
+(:func:`owned`).  And CI's landing check holds every pull request to it (``landing``'s rules
+5 and 7): a claim writes another card's marker only as a finding its card owns
+(:func:`foreign`), and is refused while its card owes a finding (:func:`unfixed`) or a step
+above it does (:func:`unhanded`, the backstop for a hand edit on the web).
 
-Split out of the command module, which these would take past the 1,000 lines
-``too-many-lines`` allows.
+Split out of the command module and the landing check, which these would take past the
+1,000 lines ``too-many-lines`` allows.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
-from tools.quill._command import Refused, _label, _one, with_closure
-from tools.quill._state import can_own, dropped, holder, owner
+from tools.quill._command import Refused, _label, _one, with_cards, with_closure
+from tools.quill._state import above, can_own, dropped, holder, owner
 from tools.quill._tracker import BareCard, Card, CardReader, Tracker
 
 #: What a marker ``quill finding-file`` writes says: the instant it was written
@@ -36,7 +39,7 @@ from tools.quill._tracker import BareCard, Card, CardReader, Tracker
 FIXED = "fixed "
 
 
-def owed(card: BareCard, shipped: frozenset[int]) -> bool:
+def owed(card: BareCard, shipped: Collection[int]) -> bool:
     """Whether ``card`` is a finding still owed, the one spelling: not dropped
     (:func:`_state.dropped`) and not shipped by git's answer (``shipped``).  A finding the
     TOOL closed as completed whose marker a revert deleted is owed: it is not dropped."""
@@ -44,15 +47,23 @@ def owed(card: BareCard, shipped: frozenset[int]) -> bool:
             and not dropped(card.number, {card.number: card}, set(shipped)))
 
 
-def owned(reader: CardReader, step: int, shipped: frozenset[int]) -> list[BareCard]:
+def owned(reader: CardReader, step: int, shipped: Collection[int],
+          held: dict[int, BareCard] | None = None) -> list[BareCard]:
     """The findings step ``step`` blocks (``R-BAL395``'s link) that are still owed
     (:func:`owed`), in card order, each read by its number, of the type ``reader`` reads: a
     step's read of what it blocks lists each card's type and state, never who closed it or
-    why.  No card read when it blocks no finding."""
-    numbers = [child.number for child in reader.blocking(step) if child.kind == "finding"]
+    why.  ``held``: the cards already read, so each is read once (:func:`_command.with_cards`;
+    CI's landing check threads its own), which then holds those read here.  No card read when
+    it blocks no finding.
+
+    Raises:
+        TrackerError: when a finding it blocks does not exist.
+    """
+    numbers = sorted(child.number for child in reader.blocking(step) if child.kind == "finding")
     if not numbers:
         return []
-    return [card for _, card in sorted(reader.cards(numbers).items()) if owed(card, shipped)]
+    cards = with_cards(reader, {} if held is None else held, numbers)
+    return [cards[number] for number in numbers if owed(cards[number], shipped)]
 
 
 def _outside_blockers(card: BareCard) -> list[str]:
@@ -243,3 +254,70 @@ def refuse_orphaning(tracker: Tracker, steps: list[Card], shipped: frozenset[int
                       "each on first:\n  " + "\n  ".join(
                           f"`quill hand plan#{finding.number} --to plan#S`, owned by "
                           f"plan#{step.number}" for step, finding in held))
+
+
+# -- CI's landing check (``landing``'s rules 5 and 7) -----------------------------------------
+
+
+def foreign(card: BareCard, claim: BareCard | None) -> str | None:
+    """Whether a marker of ``card`` written on the branch of claim ``claim`` (None when the
+    change records no card of its claim, so none was read), which is no claim of ``card``'s
+    own, passes: None when ``card`` is a finding whose one owner (:func:`_state.owner`,
+    ``R-BAL395``) is ``claim``, a step, so the step's pull request ships its fix (ruling
+    plan#1777); else what the refusal adds to rule 5's own sentence -- for a finding, the
+    owner's branch that may record it beside its own claim, or why none may."""
+    if card.kind != "finding" or claim is None:
+        return ""
+    if (number := owner(card)) is None:
+        return f", and it names no one owner whose claim may (R-BAL395): {unowned(card)}"
+    if number != claim.number:
+        return (f", or its owner's, {_git.card_branch(number)} (a finding's marker is written "
+                f"on its owner's branch by `quill finding-file plan#{card.number}`, R-BAL395)")
+    if claim.kind != "step":
+        return f", and its one owner, plan#{number}, is no step: {_OWNER_RULE}"
+    return None
+
+
+def unfixed(reader: CardReader, claim: BareCard, shipped: Collection[int],
+            held: dict[int, BareCard]) -> list[str]:
+    """The owed-finding arm (ruling plan#1777): one sentence for each finding ``claim``, whose
+    card the change from its claim records, blocks that is still owed once the change and the
+    other integration branch meet (:func:`owed`, ``shipped`` git's answer there): its marker
+    is written in the commit that fixes it (:func:`cmd_finding_file`), or it is handed to the
+    step that fixes it (:func:`cmd_hand`).  One blocked by ``claim`` and by another card
+    names no one owner, so no pull request owes it: refused too (fail closed), with how to
+    mend it (:func:`unowned`).  ``held``: the cards already read (:func:`owned`)."""
+    reasons, head = [], _git.card_branch(claim.number)
+    for card in owned(reader, claim.number, shipped, held):
+        path, number = _git.marker(card.number), card.number
+        if owner(card) == claim.number:
+            reasons.append(
+                f"{path}: {head} records card {claim.number}, but holds no marker for finding "
+                f"plan#{number}, which it owns (R-BAL395) and which is neither shipped nor "
+                f"dropped: write it in the commit that fixes it (quill finding-file "
+                f"plan#{number}), or hand it to the step that does (quill hand plan#{number} "
+                "--to plan#S)")
+        else:
+            reasons.append(
+                f"{path}: {head} records card {claim.number}, but open finding plan#{number}, "
+                "which it blocks, has no one owner, so no pull request owes it (R-BAL395, "
+                f"plan#1784): {unowned(card)}")
+    return reasons
+
+
+def unhanded(reader: CardReader, claim: BareCard, cards: Mapping[int, BareCard],
+             shipped: Collection[int], held: dict[int, BareCard]) -> list[str]:
+    """The backstop for a hand edit on the web (ruling plan#1784): one sentence for each
+    finding a step above ``claim`` (:func:`_state.above`, over ``cards``, which hold them)
+    blocks that is still owed (:func:`owed`), each named with the hand-off down to
+    ``claim``, whose card the change from its claim records.  A step above a claim is split
+    into smaller steps, which no branch builds, so no quill door leaves it a finding; one a
+    person links there is held here, at the pull request of every leaf below it, not lost.
+    ``held``: the cards already read (:func:`owned`)."""
+    return [f"{_git.marker(card.number)}: {_git.card_branch(claim.number)} records card "
+            f"{claim.number}, but "
+            f"plan#{step.number}, a step above it split into smaller steps, which no branch "
+            f"builds, owns open finding plan#{card.number} (R-BAL395, plan#1784): hand it down "
+            f"first (quill hand plan#{card.number} --to plan#{claim.number}), or to the leaf "
+            "that fixes it"
+            for step in above(claim, cards) for card in owned(reader, step.number, shipped, held)]

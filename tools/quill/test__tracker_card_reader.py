@@ -14,7 +14,8 @@ import dataclasses
 
 import pytest
 
-from tools.quill._recorded import recording
+from tools.quill._github import GitHub
+from tools.quill._recorded import Replay, Scratch, recording
 from tools.quill._state import leaf_placement, unsplit
 from tools.quill._tracker import BareCard, Card, CardReader, Child, card_from
 from tools.quill.setup_tracker import FILING, PLAN, REHEARSAL
@@ -147,3 +148,16 @@ def test_a_board_decision_handed_a_card_read_without_the_board_raises():
         unsplit(bare, [6], {5: bare, 6: leaf}, (), board)
     with pytest.raises(AttributeError, match="board_item"):
         leaf_placement(board, bare, 7, {5: bare, 6: leaf}, ())
+
+
+def test_the_reader_reads_what_a_card_blocks_as_the_apps_tracker_does():
+    """plan#1772 moved the read of what a card blocks down to this reader, where CI's landing
+    check reads the findings a claim's card owns: over the recorded read of what step #220
+    blocks (``recorded/blocking.json``, which ``test__tracker.py`` reads through the App's
+    tracker), it sends the very request recorded and reads the same two cards, the newest
+    link first."""
+    replay = Replay("blocking")
+    place = Scratch.from_json(recording("blocking")["scratch"]).place
+    assert CardReader(GitHub("token", replay), place, APP).blocking(220) == (
+        Child(222, "ruling", False), Child(221, "finding", True))
+    assert [body["variables"] for _, _, body in replay.sent] == [{"number": 220}]

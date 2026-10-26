@@ -99,8 +99,10 @@ def edits(place: Place) -> str:
 def blocking(place: Place) -> str:
     """The read of the cards one card blocks, each with its state and type (ruling
     ``balance:R-BAL395``: a step's are the findings and rulings it owns, beside any card
-    waiting on it).  Its own read, never a field of every card's: only ``quill show`` and a
-    ruling's filing run again ask it."""
+    waiting on it).  Its own read, never a field of every card's: only ``quill show``, a
+    ruling's filing run again, and the doors that keep a finding's one owner
+    (``_findings.owned``: ``quill drop``, the split, and CI's landing check, which reads it
+    through the card-only reader) ask it."""
     return (
         """query($number: Int!) { repository(owner: "%s", name: "%s") {
   issue(number: $number) { number

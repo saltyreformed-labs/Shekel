@@ -116,7 +116,7 @@ def snapshot(tracker: Tracker, taken_at: datetime) -> dict:
             (:func:`_tracker.card_from`, :func:`_to_the_end`).
     """
     github, place = tracker.github, tracker.place
-    cards = listing(github, _queries.export_cards(place))
+    cards = listing(github, _queries.export_cards(place), "every card, for the backup")
     for card in cards:
         card_from(card, place, tracker.board_id, tracker.app_login)
     return {

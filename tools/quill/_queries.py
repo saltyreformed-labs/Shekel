@@ -42,15 +42,24 @@ _LAST_CLOSE_FIELDS = """\
 CARD_FIELDS = _ISSUE_FIELDS + _BOARD_ITEM_FIELDS + _LAST_CLOSE_FIELDS
 #: What :class:`_tracker.CardReader` reads of every card: the same, but its board items.
 BARE_CARD_FIELDS = _ISSUE_FIELDS + _LAST_CLOSE_FIELDS
+#: How many cards one page of a listing of cards holds (:func:`open_cards`,
+#: :func:`marked_cards`), inside GitHub's limit of about ten seconds a request.  Measured
+#: 2026-10-26 15:27-15:33 on the tracker, 684 open cards, three whole walks: 100 a page took
+#: up to 3.7-4.2 s, and at 14:17 was cut off at 10.6 and 11.1 s (finding plan#1806); 25 a
+#: page took at most 1.3-2.6 s, typically 1.0.  The marked listing reads the same fields, so
+#: a filing pass that marks dozens of cards costs per card what the open listing does.  The
+#: recordings' six listings were re-keyed to this text at plan#1809, their answers untouched:
+#: each holds at most 16 cards and no next page, as GitHub answers the same read at 25.
+_LISTING_PAGE = 25
 
 
 def open_cards(place: Place) -> str:
     """The listing of every open card of ``place``."""
     return (
         """query($after: String) { repository(owner: "%s", name: "%s") {
-  issues(first: 100, after: $after, states: [OPEN]) {
+  issues(first: %d, after: $after, states: [OPEN]) {
     pageInfo { hasNextPage endCursor } nodes { %s } } } }"""
-        % (place.owner, place.name, CARD_FIELDS)
+        % (place.owner, place.name, _LISTING_PAGE, CARD_FIELDS)
     )
 
 
@@ -60,9 +69,9 @@ def marked_cards(place: Place) -> str:
     mark, and a ruling closed as completed by anyone is still unfinished (R-BAL206)."""
     return (
         """query($after: String) { repository(owner: "%s", name: "%s") {
-  issues(first: 100, after: $after, labels: ["%s"], states: [OPEN, CLOSED]) {
+  issues(first: %d, after: $after, labels: ["%s"], states: [OPEN, CLOSED]) {
     pageInfo { hasNextPage endCursor } nodes { %s } } } }"""
-        % (place.owner, place.name, FILING, CARD_FIELDS)
+        % (place.owner, place.name, _LISTING_PAGE, FILING, CARD_FIELDS)
     )
 
 

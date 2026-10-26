@@ -69,6 +69,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
+import requests
+
 from tools.ci.arcs import ARCS
 from tools.quill._github import (
     APP_DIR,
@@ -78,6 +80,7 @@ from tools.quill._github import (
     app_credentials,
     app_installation,
     app_jwt,
+    described,
     installation_token,
     user_token,
 )
@@ -867,9 +870,9 @@ def main(argv: list[str] | None = None) -> int:
         check_issue_fields(github, report)
         check_board(github, repository, apply, report)
         check_app(report)
-    except GitHubError as error:
+    except (GitHubError, requests.RequestException) as error:
         print("\n".join(report.lines))
-        print(f"GitHub refused: {error}", file=sys.stderr)
+        print(f"failed: {described(error)}", file=sys.stderr)
         return 2
     print("\n".join(report.lines))
     print(f"{report.differences} difference(s)")

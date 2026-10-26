@@ -147,8 +147,8 @@ def _listed(tracker: Tracker, card: Card, read: dict[int, Card],
     """Each card ``card`` lists as a child, a blocker or one of ``owned``
     (:func:`_owned`), whose title ``show`` prints, and, for a task, whose state: from
     ``read`` (the steps :func:`_steps_below` read already), and the rest read by number in
-    one more read (:meth:`_tracker.Tracker.cards`: one request per 50 cards), made only
-    when one is left."""
+    one more read (:meth:`_tracker.Tracker.cards`: one request per
+    :data:`_tracker._LOOKUP_BATCH` cards), made only when one is left."""
     numbers = {child.number for child in card.children} | set(card.blocked_by) | owned
     cards = {**read, **_linked(tracker, numbers - set(read), card)}
     return {number: cards[number] for number in numbers}

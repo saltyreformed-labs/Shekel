@@ -35,6 +35,10 @@ A LEAF (``file step --parent``) is filed in its split step's milestone while the
 step holds one, which the filing then clears; else in none, the milestones its leaves
 hold named for a person to set one on the web (``_filing._leaf_milestone``).  A leaf
 dropped before its filing finished gives it back (``_unsplit``).
+``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
+``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
+that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
+says when sync is behind.
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -104,7 +108,7 @@ from tools.quill._command import (
 )
 from tools.quill._export import cmd_export
 from tools.quill._filing import cmd_file
-from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._github import CredentialsError, GitHubError, described
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -158,7 +162,15 @@ CONNECT = partial(Tracker.connect, PLAN)
 
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The first open step in the board's order that is unclaimed, unshipped and unblocked;
-    then what it cannot offer that a person must act on."""
+    then how far ``sync`` is behind, and what it cannot offer that a person must act on.
+
+    **Sync is behind** (ruling plan#1815) while git says work shipped or a task is done that
+    the tracker still shows open: the cards ``sync`` would close over what this reads, by
+    its one producer (:func:`_state.sync_plan`), so the count clears at the next ``sync``, a
+    schedule that stopped is seen, and a card a PERSON reopened, which ``sync`` reports
+    and never closes, is never counted.  Each card so counted is read again by its number
+    and decided again, as ``sync`` decides (:func:`_sync_reads`): the open listing can
+    still show a card ``sync`` has just closed."""
     reads = _git.read(root)
     shipped = reads.shipped.cards
     cards = with_closure(tracker, {**tracker.open_cards(), **_unfinished(tracker)})
@@ -166,6 +178,11 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
     answer = next_step(order, cards, shipped, reads.claims, args.arc)
     scope = f" in {args.arc}" if args.arc else ""
     print(f"next{scope}: {_label(answer.card)}" if answer.card else f"next{scope}: nothing")
+    closes = partial(sync_plan, shipped=shipped, claims=reads.claims, tasks=reads.shipped.tasks)
+    if behind := closes(cards).close:
+        behind = closes({**cards, **tracker.cards(behind)}).close
+    if behind:
+        print(f"sync is behind: {len(behind)} shipped cards still open")
     for card in answer.unplaced:
         print(f"NOT ON THE BOARD, so in no order: {_label(card)} -- "
               + ("`quill sync` puts it back on the board, unlinking the steps closed while "
@@ -886,7 +903,7 @@ def main(argv: list[str] | None = None, connect: Callable[[], Tracker] = CONNECT
         return 1
     except (GitHubError, TrackerError, GitError, requests.RequestException,
             OSError, CredentialsError) as error:
-        print(f"failed: {error}", file=sys.stderr)
+        print(f"failed: {described(error)}", file=sys.stderr)
         return 2
 
 

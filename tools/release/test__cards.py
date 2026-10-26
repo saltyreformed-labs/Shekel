@@ -441,6 +441,25 @@ def test_plan_exits_2_when_the_tracker_cannot_be_read(repo, capsys):
     assert captured.err.startswith("release plan: nothing was judged: ")
 
 
+def test_plan_prints_a_failed_read_as_one_line_naming_the_read(repo, capsys):
+    """plan#1809: the failure is printed as every quill printer prints one
+    (``_github.described``): GitHub's page held on one line, then the read it cut short."""
+    base, cutover = after_cutover(repo)
+    cut = pull_request(repo, cutover, ship(40))
+
+    def cut_off():
+        error = GitHubError(504, "POST https://api.github.com/graphql -> 504 after 3 re-sends: "
+                                 "<html>\n</html>")
+        error.add_note("while reading the open cards, page 1")
+        raise error
+
+    assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
+                        connect=cut_off) == 2
+    assert capsys.readouterr().err == (
+        "release plan: nothing was judged: POST https://api.github.com/graphql -> 504 after 3 "
+        "re-sends: <html> </html>; while reading the open cards, page 1\n")
+
+
 def test_plan_exits_2_when_the_apps_key_cannot_be_used(repo, capsys, monkeypatch):
     """L9d: a corrupt app.pem, read by the command line's own connection, escaped ``main``
     as a traceback with exit 1, which reads as refused; it judges nothing."""

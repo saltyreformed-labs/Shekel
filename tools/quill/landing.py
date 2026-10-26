@@ -207,7 +207,7 @@ from tools.ci.arcs import REPO
 from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, tracking
 from tools.quill import _findings, _git, _production
 from tools.quill._command import with_cards, with_closure
-from tools.quill._github import GitHub, GitHubError
+from tools.quill._github import GitHub, GitHubError, described, reading
 from tools.quill._state import dropped, filing_ended, filing_unfinished, names_no_task, no_work
 from tools.quill._tracker import BareCard, CardReader, TrackerError
 from tools.quill.setup_tracker import PLAN
@@ -455,7 +455,8 @@ def pull_from_environment(number: int) -> PullRequest:
     """
     token = _variable(PULL_TOKEN_VARIABLE, "the pull request cannot be read")
     repository = _variable(REPOSITORY_VARIABLE, "the pull request cannot be read")
-    answer = GitHub(token).rest("GET", f"/repos/{repository}/pulls/{number}")
+    with reading(f"pull request #{number} of {repository}"):
+        answer = GitHub(token).rest("GET", f"/repos/{repository}/pulls/{number}")
     return pull_request(number, answer, repository)
 
 
@@ -948,8 +949,8 @@ def _verdict(root: Path, merge: str, pull: PullRequest,
               f"{error}", file=sys.stderr)
         return 2
     except (NotSet, GitHubError, requests.RequestException) as error:
-        print(f"landing check: the tracker could not be read, so nothing was checked: {error}",
-              file=sys.stderr)
+        print("landing check: the tracker could not be read, so nothing was checked: "
+              f"{described(error)}", file=sys.stderr)
         return 2
     except TrackerError as error:
         print("landing check: what the tracker answered cannot be judged, so nothing was "
@@ -983,7 +984,7 @@ def main(argv: list[str] | None = None,
         pull = pulls(number)
     except (NotSet, CannotJudge, GitHubError, requests.RequestException) as error:
         print(f"landing check: pull request #{number} could not be read, so nothing was "
-              f"checked: {error}", file=sys.stderr)
+              f"checked: {described(error)}", file=sys.stderr)
         return 2
     if pull.base not in BRANCHES:
         print(f"landing check: pull request #{number} merges into {pull.base}, neither dev nor "

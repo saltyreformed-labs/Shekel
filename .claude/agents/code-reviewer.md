@@ -18,8 +18,10 @@ Start from the actual diff, not assumptions:
   changed files, not just the hunks, when context matters.
 - Run the deterministic gates and treat their output as evidence, not as the
   whole review: `pylint app/` (the custom checkers and design-smell thresholds
-  ride along via .pylintrc), and the targeted tests for the changed modules
-  through `./scripts/test.sh <path>`, never bare `pytest` (see Tests below).
+  ride along via .pylintrc), and the targeted tests for the changed modules:
+  the app's suite through `./scripts/test.sh <path>`, never bare `pytest` (see
+  Tests below); a tools package as CI's tools job runs it,
+  `pytest tools/<package> -c /dev/null -q` (`.github/workflows/ci.yml`).
 
 The linters already catch the mechanical rules. Your job is the judgment the
 linters cannot make. Spend your attention there.
@@ -151,15 +153,25 @@ Scripts (`scripts/`):
   pylint-clean.
 
 Migrations and schema:
-- Numeric(12,2) for money; NOT NULL by default with a justified exception; CHECK
-  constraints mirroring Marshmallow ranges; explicit `ondelete`; named
-  constraints (`ck_<table>_<desc>`, `uq_<table>_<cols>`, `ix_<table>_<cols>`),
-  except a `ref` lookup table's single-column `PRIMARY KEY (id)` / `UNIQUE (name)`,
-  which take PostgreSQL's generated names (developer ruling 2026-08-14, finding
-  `recurrence:F-3`); frequent WHERE/JOIN/ORDER BY columns indexed. NOT NULL on a
-  populated table uses the three-step add/backfill/alter. A migration's commit
-  carries its own change only: an unrelated fix riding in it is unreviewable there
-  and is its own commit.
+- NOT NULL by default; a nullable column justifies its nullability in a comment.
+  `Numeric(12,2)` for all money, never Float, Integer or bare Numeric.
+- CHECK constraints on every financial column (amounts, rates, counts,
+  durations), not only where a schema states a range; where Marshmallow says
+  `min=0`, the column has `CHECK(col >= 0)`.
+- Explicit `ondelete` on every FK: `CASCADE` for user_id, `RESTRICT` for ref
+  tables, `CASCADE`/`SET NULL` inter-domain (a `CASCADE` on a ref FK deletes
+  user rows with a ref row). Named constraints (`ck_<table>_<desc>`,
+  `uq_<table>_<cols>`, `ix_<table>_<cols>`), except a `ref` lookup table's
+  single-column `PRIMARY KEY (id)` / `UNIQUE (name)`, which take PostgreSQL's
+  generated names (developer ruling 2026-08-14, finding `recurrence:F-3`);
+  frequent WHERE/JOIN/ORDER BY columns indexed.
+- NOT NULL on a populated table takes three steps: add the column nullable,
+  `UPDATE` backfill with a documented derivation, then `alter_column` to NOT
+  NULL after verifying zero NULLs (raise `RuntimeError` with the diagnostic
+  SELECT if any survive). `server_default` only if a static default fits every
+  existing row.
+- A migration's commit carries its own change only: an unrelated fix riding in
+  it is unreviewable there and is its own commit.
 - Alembic only; never `db.create_all()` outside tests. An auto-generated
   migration holds its intended changes only: no phantom diffs, named constraints,
   a correct downgrade.
@@ -175,8 +187,10 @@ Migrations and schema:
   `system.audit_trigger_func`.
 
 Tests, running them:
-- Run tests through `./scripts/test.sh`, never bare `pytest` (one test:
-  `./scripts/test.sh tests/path/test_file.py::test_name -v`). Each run gets a
+- Run the app's suite (`tests/`) through `./scripts/test.sh`, never bare
+  `pytest` (one test: `./scripts/test.sh tests/path/test_file.py::test_name -v`;
+  a tools package runs as `pytest tools/<package> -c /dev/null -q`, as CI's
+  tools job does). Each run gets a
   postgres cluster of its own, so there is no suite slot to take: concurrent
   runs share only the cores, and the wrapper prints any peer pytest and
   proceeds. A migration needs no manual template rebuild (the wrapper

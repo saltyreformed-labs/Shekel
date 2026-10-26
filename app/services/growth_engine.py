@@ -188,14 +188,14 @@ def calculate_employer_contribution(
             - match_percentage: Decimal (for match type)
             - match_cap_percentage: Decimal (for match type)
             - gross_biweekly: Decimal (gross pay per period).  **No builder
-              emits this key since plan step salary:R14-b** (ledger row
-              **N-538**): ``investment_projection
+              emits this key since plan step salary:R14-b** (finding
+              **N-538**, plan#1787): ``investment_projection
               .employer_contribution_params`` is its only producer and that
               step removed it, so the
             fallback below reads a MISSING key and answers ``$0``.  Every
             production caller supplies ``gross_override`` (or ``salary_basis``,
             which becomes it); a caller that forgets gets silence rather than
-            an error, which is why the row exists.
+            an error, which is why the finding exists.
         employee_contribution: Decimal amount the employee contributed.
         gross_override: The per-period gross a percentage is taken OF
             (P1b / finding D3 / fork F3).  **Effectively required since plan
@@ -205,7 +205,7 @@ def calculate_employer_contribution(
             means a basis of ``$0`` and therefore no employer money at all.
             Every production caller passes one, directly or through
             ``project_balance``'s ``salary_basis``.  Making that structural
-            rather than documented is ledger row **N-538**.
+            rather than documented is finding **N-538** (plan#1787).
 
     Returns:
         Decimal employer contribution amount.
@@ -510,7 +510,7 @@ def _project_one_period(
     # than freezing at one.  It REPLACED a constant
     # ``employer_params["gross_biweekly"]`` that no builder emits since plan
     # step salary:R14-b, so a caller that omits the basis now gets a $0
-    # basis rather than a constant one -- ledger row N-538.
+    # basis rather than a constant one -- finding N-538 (plan#1787).
     gross_override = (
         inputs.salary_basis(period)
         if inputs.salary_basis is not None
@@ -602,7 +602,8 @@ def project_balance(  # pylint: disable=too-many-arguments,too-many-positional-a
                                   contribution tracks the paycheck.  It replaced a constant
                                   ``employer_params["gross_biweekly"]`` that no builder emits
                                   since plan step salary:R14-b, so None no longer means a
-                                  constant base -- it means a $0 basis (ledger row N-538).
+                                  constant base -- it means a $0 basis (finding N-538,
+                                  plan#1787).
                                   Every consumer configuring an employer contribution passes
                                   one.
 

@@ -158,7 +158,13 @@ CONNECT = partial(Tracker.connect, PLAN)
 
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The first open step in the board's order that is unclaimed, unshipped and unblocked;
-    then what it cannot offer that a person must act on."""
+    then how far ``sync`` is behind, and what it cannot offer that a person must act on.
+
+    **Sync is behind** (ruling plan#1815) while git says work shipped or a task is done that
+    the tracker still shows open: the cards ``sync`` would close over what this reads, by
+    its one producer (:func:`_state.sync_plan`), so the count clears at the next ``sync``, a
+    schedule that stopped is seen, and a card a PERSON reopened, which ``sync`` reports
+    and never closes, is never counted."""
     reads = _git.read(root)
     shipped = reads.shipped.cards
     cards = with_closure(tracker, {**tracker.open_cards(), **_unfinished(tracker)})
@@ -166,6 +172,8 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
     answer = next_step(order, cards, shipped, reads.claims, args.arc)
     scope = f" in {args.arc}" if args.arc else ""
     print(f"next{scope}: {_label(answer.card)}" if answer.card else f"next{scope}: nothing")
+    if behind := len(sync_plan(cards, shipped, reads.claims, reads.shipped.tasks).close):
+        print(f"sync is behind: {behind} shipped cards still open")
     for card in answer.unplaced:
         print(f"NOT ON THE BOARD, so in no order: {_label(card)} -- "
               + ("`quill sync` puts it back on the board, unlinking the steps closed while "

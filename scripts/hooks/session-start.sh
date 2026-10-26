@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SessionStart: print the multi-session context every Shekel session needs
-# before its first action -- where it stands, who coordinates merges, and where
-# the next step comes from.
+# before its first action -- where it stands, where the rules for sharing the
+# repository live, and where the next step comes from.
 #
 # It used to report the shared suite slot too.  ``balance:X-br-4`` deleted the
 # slot: ``scripts/test.sh`` gives every run a private cluster, so there is no
@@ -40,7 +40,7 @@ toplevel="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" || toplevel="$
 
 echo "Shekel session context (SessionStart hook):"
 echo "- checkout: ${toplevel}, branch: ${branch}"
-echo "- coordination doctrine: CLAUDE.md, Multi-session operation (stated once there, not here)"
+echo "- multi-session doctrine: CLAUDE.md, Multi-session operation (stated once there, not here)"
 
 # DERIVED: is the SHARED MAIN checkout pinned to a release branch?  Read from
 # `git worktree list`, which answers for every worktree from inside any one of

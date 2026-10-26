@@ -26,17 +26,17 @@ not.
 Commit what is clean. A task this session finished (a piece inside its card's one pull request,
 R-BAL386) has its file `plan/tasks/T` in the commit that finished it:
 `python -m tools.quill.quill task-file plan#T` writes it on `card/<its card>`, and the file goes in
-with the piece. Then read whether a pull request from the branch is open; a push would join
-it, so an open one means do NOT push, and s.0 says so:
+with the piece. Then read whether a pull request from the branch is open:
 
 ```bash
 b=$(git symbolic-ref --short HEAD) || exit 1
 gh pr list --head "$b" --state open; echo "exit=$?"
 ```
 
-Nothing listed: push the branch by an explicit refspec (a pushed branch is a backup, not a request
-to merge: CLAUDE.md, Multi-session operation). The block refuses a detached HEAD and `dev` or
-`main`, which only the merge flow pushes:
+Push the branch by an explicit refspec. With nothing listed, the push is a backup, not a request to
+merge (CLAUDE.md, Multi-session operation). A listed pull request is the lane's own and the push
+joins it: when the push took it out of the merge queue, queue it again, and s.0 says whether it is
+queued. The block refuses a detached HEAD and `dev` or `main`, which only the merge flow pushes:
 
 ```bash
 b=$(git symbolic-ref --short HEAD) && case "$b" in dev|main) echo "not a lane branch: $b"; exit 1;; esac \
@@ -66,7 +66,7 @@ history. s.0 holds:
    print item 1's worktree, `git rev-parse --abbrev-ref HEAD` and `git rev-parse HEAD` print its
    branch and sha, and `git status --porcelain` prints only item 2's paths; any difference is a STOP
    to report. Then the next leaf and the first command it runs.
-6. What the next session must not do (push while a pull request is open, say), and the traps
+6. What the next session must not do (edit a file a peer's open card changes, say), and the traps
    learned or review findings that recurred.
 
 The checker grades items 1, 2, 3 and 5 against git, and every commit and task file item 4 cites;
@@ -109,6 +109,5 @@ The line to paste, with HEAD's short sha and the session's name (`ListAgents` pr
 - Send it with PushNotification, then put the same line FIRST, in bold, in the session's last
   output, followed by why it is not pushed and the failed check's items, if any: the tool skips
   the push while Josh's terminal is active, and the output line reaches him either way.
-- With a coordinator session active, SendMessage it `handoff written` and the sha.
 
 Then stop.

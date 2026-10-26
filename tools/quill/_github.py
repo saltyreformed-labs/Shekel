@@ -307,9 +307,10 @@ class GitHub:
             if waited + wait > WAIT_BUDGET_SECONDS:
                 raise GitHubError(
                     response.status_code,
-                    f"{method} {url} -> {response.status_code}, and GitHub asks a wait of "
-                    f"{wait:.0f} s after {waited:.0f} s waited, past the {WAIT_BUDGET_SECONDS} s "
-                    "one request may wait; stopped rather than re-sent early")
+                    f"{method} {url} -> {response.status_code}, and the next re-send needs a "
+                    f"wait of {wait:.0f} s after {waited:.0f} s waited, past the "
+                    f"{WAIT_BUDGET_SECONDS} s one request may wait; stopped rather than re-sent "
+                    "early")
             self._sleep(wait)
             waited += wait
         if response.status_code >= 300:

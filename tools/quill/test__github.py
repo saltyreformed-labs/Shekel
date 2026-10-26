@@ -548,8 +548,8 @@ def test_a_rate_limit_and_a_cut_off_share_one_budget():
                        _Response(504, {"message": "cut off"}),
                        _Response(200, {"ok": 1}))
     slept = []
-    with pytest.raises(GitHubError, match="-> 504, and GitHub asks a wait of 4 s after 3597 s "
-                                          "waited, past the 3600 s"):
+    with pytest.raises(GitHubError, match="-> 504, and the next re-send needs a wait of 4 s "
+                                          "after 3597 s waited, past the 3600 s"):
         _client(session, slept).rest("GET", "/repos/o/r")
     assert (slept, len(session.sent)) == ([3595.0, 2.0], 3)
 

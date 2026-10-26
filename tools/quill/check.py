@@ -51,7 +51,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 
 from tools.ci.arcs import ARCS
-from tools.quill._state import SHIPPABLE
+from tools.quill._state import SHIPPABLE, may_own
 from tools.quill.setup_tracker import CARD_TYPES, TASK
 
 #: A NEW finding's text: one sentence of at most this many characters (R-BAL136).
@@ -220,7 +220,8 @@ def _owner_problems(draft: Draft) -> list[str]:
     owner = draft.owner
     parent = _parent_named(owner)
     is_step = owner is not None and owner.kind == "step"
-    if draft.kind == "finding" and not (is_step and owner.live and not owner.split):
+    if draft.kind == "finding" and not (owner is not None
+                                        and may_own(owner.kind, owner.live, owner.split)):
         problem = (f"a finding is blocked by a LIVE step, its owner (R-BAL395), one a branch "
                    f"builds and never one split into smaller steps (plan#1784); its owner is "
                    f"{parent}")

@@ -14,8 +14,8 @@ Every other door that sets or changes a finding's owner keeps the one-owner rule
 here: ``quill block`` (:func:`refuse_block`), ``quill drop`` (:func:`refuse_orphaning`) and
 the split, ``quill file step --parent``, which hands the split step's findings to its new leaf
 (:func:`hand_on`, from ``_filing``), each over the findings a step still owes
-(:func:`owned`).  And CI's landing check holds every pull request to it (``landing``'s rules
-5 and 7): a claim writes another card's marker only as a finding its card owns
+(:func:`owned`).  And CI's landing check holds every claim's pull request to it (``landing``'s
+rules 5 and 7): a claim writes another card's marker only as a finding its card owns
 (:func:`foreign`), and is refused while its card owes a finding (:func:`unfixed`) or a step
 above it does (:func:`unhanded`, the backstop for a hand edit on the web).
 
@@ -31,7 +31,7 @@ from pathlib import Path
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
 from tools.quill._command import Refused, _label, _one, with_cards, with_closure
-from tools.quill._state import above, can_own, dropped, holder, owner
+from tools.quill._state import above, can_own, dropped, holder, outside_blockers, owner
 from tools.quill._tracker import BareCard, Card, CardReader, Tracker
 
 #: What a marker ``quill finding-file`` writes says: the instant it was written
@@ -66,18 +66,13 @@ def owned(reader: CardReader, step: int, shipped: Collection[int],
     return [cards[number] for number in numbers if owed(cards[number], shipped)]
 
 
-def _outside_blockers(card: BareCard) -> list[str]:
-    """The issues outside the tracker that ``card`` is blocked by (``R-BAL188``)."""
-    return [link.issue for link in card.outside if link.what == "blocker"]
-
-
 def unowned(card: BareCard) -> str:
     """Why ``card``, a finding :func:`_state.owner` names no owner for, has none, and how a
     person gives it its one owner: a link to an issue outside the tracker removed on the web
     (``R-BAL188``); with no blocker, ``quill block``; blocked by two cards, ``quill hand`` to
     the one that owns it; by more, ``quill block --remove`` of each other."""
     number = card.number
-    if outside := _outside_blockers(card):
+    if outside := outside_blockers(card):
         return (f"it is blocked by {', '.join(outside)}, outside the tracker, which no branch "
                 "of this repository builds: remove that link on the web first (R-BAL188)")
     if not card.blocked_by:
@@ -134,9 +129,9 @@ def cmd_finding_file(args, tracker: Tracker, root: Path,
     (``R-BAL395``), the step whose pull request fixes it (ruling plan#1777).  It writes no
     tracker state: ``sync`` closes the finding once git says it shipped.  Refused, with nothing
     written, for a card that is no finding, one shipped in git or dropped, one claimed as work
-    of its own (``card/F``, whose own marker records it), one whose owner is no step a branch
-    builds (:func:`_state.can_own`, ruling plan#1784), and any other branch checked out, or
-    none."""
+    of its own (``card/F``, whose own marker records it), one that names no one owner
+    (:func:`unowned`), one whose owner is no step a branch builds (:func:`_state.can_own`,
+    ruling plan#1784), and any other branch checked out, or none."""
     card = _finding(tracker, args.finding)
     reads = _git.read(root)
     shipped = reads.shipped.cards
@@ -187,7 +182,7 @@ def cmd_hand(args, tracker: Tracker, root: Path) -> int:
     _refuse_closed(card, cards, shipped)
     _refuse_owner(to, card, cards, shipped)
     others = [number for number in card.blocked_by if number != to.number]
-    if _outside_blockers(card):
+    if outside_blockers(card):
         raise Refused(f"{_label(card)} is not handed on: {unowned(card)}")
     if to.number in card.blocked_by and not others:
         raise Refused(f"plan#{to.number} owns {_label(card)} already: nothing to hand on")
@@ -219,20 +214,32 @@ def refuse_block(tracker: Tracker, root: Path, card: Card, blocker: Card, remove
     link's delete) when it would break the one-owner rule (ruling plan#1784) for a finding
     still owed (:func:`owed`): a new link while it has any blocker, in the tracker or outside
     it (re-homing is ``quill hand``, :func:`cmd_hand`), or to a ``blocker`` that may not own it
-    (:func:`_state.can_own`); a delete of the one link it has, which would leave it with no
-    owner.  A finding shipped or dropped is linked as asked: it is owed by no one."""
+    (:func:`_state.can_own`); a delete of its last link in the tracker, which would leave it
+    with no owner there, or of one of two that leaves the other, which may not own it.  A
+    finding shipped or dropped is linked as asked: it is owed by no one."""
     shipped = _git.read(root).shipped.cards
     cards = with_closure(tracker, {card.number: card, blocker.number: blocker})
     if not owed(card, shipped):
         return
     if remove:
-        if card.blocked_by == (blocker.number,) and not _outside_blockers(card):
+        left = [number for number in card.blocked_by if number != blocker.number]
+        if blocker.number in card.blocked_by and not left:
             raise Refused(f"plan#{blocker.number} is the one owner of {_label(card)}: removing "
                           "its link would leave an open finding with no owner (plan#1784); "
                           f"`quill hand plan#{card.number} --to plan#S` hands it to another "
                           f"step, or `quill drop plan#{card.number}` drops it")
+        if blocker.number in card.blocked_by and len(left) == 1 and not can_own(
+                left[0], cards, shipped):
+            to = blocker.number if can_own(blocker.number, cards, shipped) else "S"
+            raise Refused(f"removing plan#{blocker.number}'s link would leave {_label(card)} "
+                          f"owned by plan#{left[0]}, which may not own an open finding: a step "
+                          "a branch builds, live work and never split into smaller steps "
+                          f"(plan#1784); `quill hand plan#{card.number} --to plan#{to}` hands "
+                          "it to one")
         return
-    if card.blocked_by or _outside_blockers(card):
+    if blocker.number in card.blocked_by:
+        raise Refused(f"plan#{blocker.number} blocks {_label(card)} already: nothing to link")
+    if card.blocked_by or outside_blockers(card):
         how = (f"`quill hand plan#{card.number} --to plan#{blocker.number}` hands it on"
                if owner(card) is not None else unowned(card))
         raise Refused(f"{_label(card)} has an owner already, and an open finding has one "
@@ -243,10 +250,13 @@ def refuse_block(tracker: Tracker, root: Path, card: Card, blocker: Card, remove
 def refuse_orphaning(tracker: Tracker, steps: list[Card], shipped: frozenset[int]) -> None:
     """Refuse a drop that would leave an open finding with no owner (ruling plan#1784): while
     any of ``steps`` -- the card dropped, the leaves a split step's drop drops, and every step
-    above the card, which a drop of its last leaf leaves dropped (R-BAL187), and which owns
-    no finding but by a hand edit on the web -- owns a finding still owed (:func:`owned`),
-    each named with the hand-off that frees it.  A step above is held whether or not this is
-    its last leaf, as CI's landing check holds a claim under it: fail closed."""
+    above a dropped step whose filing has finished, which a drop of its last leaf leaves
+    dropped (R-BAL187), and which owns no finding but by a hand edit on the web or a split's
+    filing cut short -- owns a finding still owed (:func:`owned`), each named with the
+    hand-off that frees it.  A step above is held whether or not this is its last leaf, as
+    CI's landing check holds a claim under it: fail closed.  A task's drop, or a leaf's whose
+    filing has not finished (R-BAL205, taken out of the split), leaves the steps above as they
+    were, so the caller passes none."""
     held = [(step, finding) for step in steps if step.kind == "step"
             for finding in owned(tracker, step.number, shipped)]
     if held:
@@ -311,8 +321,9 @@ def unhanded(reader: CardReader, claim: BareCard, cards: Mapping[int, BareCard],
     finding a step above ``claim`` (:func:`_state.above`, over ``cards``, which hold them)
     blocks that is still owed (:func:`owed`), each named with the hand-off down to
     ``claim``, whose card the change from its claim records.  A step above a claim is split
-    into smaller steps, which no branch builds, so no quill door leaves it a finding; one a
-    person links there is held here, at the pull request of every leaf below it, not lost.
+    into smaller steps, which no branch builds, so no quill door leaves it a finding but a
+    split's filing cut short, which the same command run again hands down; one a person
+    links there is held here, at the pull request of every leaf below it, not lost.
     ``held``: the cards already read (:func:`owned`)."""
     return [f"{_git.marker(card.number)}: {_git.card_branch(claim.number)} records card "
             f"{claim.number}, but "

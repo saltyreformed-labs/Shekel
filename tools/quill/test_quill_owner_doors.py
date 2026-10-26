@@ -104,6 +104,50 @@ def test_block_remove_refuses_the_last_owner_of_an_open_finding(code, capsys):
     assert tracker.writes == [("unblock", 4, 3)]
 
 
+def test_block_remove_refuses_leaving_no_owner_in_the_tracker_or_one_no_branch_builds(
+        code, capsys):
+    """Removing the one tracker link of a finding also linked outside the tracker would leave
+    it no owner (an outside issue owns nothing, R-BAL188); removing one of two links that
+    leaves the other, a step that shipped, would leave it an owner no pull request owes from,
+    named with the hand-off to the step removed when it may own it, else to any; nothing
+    written."""
+    tracker = FakeTracker()
+    for number in (1, 3, 8):
+        tracker.add(number)
+    ship(code, 3)
+    ship(code, 8)
+    tracker.add(2, "finding", blocked_by=(1,),
+                outside=(OutsideLink("blocker", "saltyreformed-labs/Shekel#6"),))
+    tracker.add(4, "finding", blocked_by=(1, 3))
+    tracker.add(7, "finding", blocked_by=(3, 8))
+    expected = {(2, 1): "plan#1 is the one owner of plan#2 [finding, balance] card 2: removing "
+                        "its link would leave an open finding with no owner (plan#1784)",
+                (4, 1): "removing plan#1's link would leave plan#4 [finding, balance] card 4 "
+                        "owned by plan#3, which may not own an open finding: a step a branch "
+                        "builds, live work and never split into smaller steps (plan#1784); "
+                        "`quill hand plan#4 --to plan#1` hands it to one",
+                (7, 3): "owned by plan#8, which may not own an open finding: a step a branch "
+                        "builds, live work and never split into smaller steps (plan#1784); "
+                        "`quill hand plan#7 --to plan#S` hands it to one"}
+    for (finding, by), sentence in expected.items():
+        assert run(tracker, code, "block", f"plan#{finding}", "--by", f"plan#{by}",
+                   "--remove") == 1
+        assert sentence in capsys.readouterr().err
+    assert not tracker.writes
+
+
+def test_block_by_the_owner_a_finding_has_is_refused_as_linked_already(code, capsys):
+    """Blocking an open finding by the step that owns it already links nothing: refused,
+    saying so, never naming a hand-off to the owner it has."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(2, "finding", blocked_by=(1,))
+    assert run(tracker, code, "block", "plan#2", "--by", "plan#1") == 1
+    assert ("plan#1 blocks plan#2 [finding, balance] card 2 already: nothing to link"
+            in capsys.readouterr().err)
+    assert not tracker.writes
+
+
 def test_block_links_a_finding_shipped_or_dropped_and_any_other_card_as_asked(code):
     """The one-owner rule holds an open finding: one shipped or dropped is owed by no one, and
     a step, a ruling or a question is linked as before."""
@@ -149,6 +193,46 @@ def test_a_drop_that_would_leave_an_open_finding_ownerless_is_refused_unwritten(
     ship(code, 6)
     assert run(tracker, code, "drop", "plan#2", "--why", "moot") == 0
     assert ("close", 2, "not_planned") in tracker.writes
+
+
+def test_a_tasks_drop_holds_no_step_above_it(code):
+    """A task's drop never drops its step, so the open finding its step owns does not hold it."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(2, "finding", blocked_by=(1,))
+    tracker.add_task(3, 1)
+    assert run(tracker, code, "drop", "plan#3", "--why", "folded into the step") == 0
+    assert ("close", 3, "not_planned") in tracker.writes
+
+
+def test_a_leaf_still_being_filed_is_dropped_though_its_split_step_owns_a_finding(code,
+                                                                                tmp_path):
+    """A filing cut short before its hand-down leaves the step it splits owning the finding;
+    dropping the leaf takes it out of the split (R-BAL205), which leaves that step a plain step
+    that may own it, so the finding does not hold the drop."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(3, "finding", blocked_by=(1,))
+    FailOnce(tracker, "block")
+    assert run(tracker, code, *leaf_filing(tmp_path, "Leaf")) == 2
+    leaf = max(tracker.cards_by_number)
+    assert tracker.cards_by_number[3].blocked_by == (1,)
+    assert run(tracker, code, "drop", f"plan#{leaf}", "--why", "filed in error") == 0
+    assert ("close", leaf, "not_planned") in tracker.writes
+
+
+def test_a_split_steps_drop_is_held_by_a_finding_the_step_above_it_owns(code, capsys):
+    """A split step's drop drops its leaves, and, its parent's last leaf, would leave that
+    parent dropped: a finding the parent owns (a hand edit) holds it, nothing written."""
+    tracker = FakeTracker()
+    tracker.add(1, children=(Child(2, "step", True),), on_board=False)
+    tracker.add(2, parent=1, children=(Child(3, "step", True),), on_board=False)
+    tracker.add(3, parent=2)
+    tracker.add(4, "finding", blocked_by=(1,))
+    assert run(tracker, code, "drop", "plan#2", "--why", "moot") == 1
+    assert ("`quill hand plan#4 --to plan#S`, owned by plan#1"
+            in capsys.readouterr().err)
+    assert not tracker.writes
 
 
 # -- the split -------------------------------------------------------------------------------

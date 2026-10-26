@@ -225,6 +225,20 @@ def test_hand_refuses_a_finding_its_new_owner_owns_or_with_no_one_owner(code, ca
 
 # -- the filing's re-homing refusal ------------------------------------------------------------
 
+def test_the_filing_names_no_hand_off_for_a_finding_blocked_only_outside(code, capsys):
+    """``quill hand`` refuses a finding linked outside the tracker (R-BAL188), so a filing that
+    finds one blocked only by an outside issue names the hand edit, never the command."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(2, "finding", body="The grid shows a stale balance.", title="Stale",
+                outside=(OutsideLink("blocker", "saltyreformed-labs/Shekel#6"),))
+    assert run(tracker, code, *finding_filing("plan#1", "Stale",
+                                              "The grid shows a stale balance.")) == 1
+    assert ("is blocked by saltyreformed-labs/Shekel#6, outside the tracker, not only by plan#1, "
+            "the owner this filing names (R-BAL395): re-homing a card is done by hand"
+            in capsys.readouterr().err)
+
+
 def test_the_filing_names_hand_for_a_finding_blocked_by_one_other_card(code, tmp_path,
                                                                        capsys):
     """A finding a filing finds blocked by one other card is re-homed with ``quill hand``, and

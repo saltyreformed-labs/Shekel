@@ -537,9 +537,10 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
     Work git says shipped is never dropped: undoing it is a revert of the change that
     shipped it, which deletes its marker; nor is a task whose file is on ``dev`` or ``main``,
     undone the same way; nor, until each is handed on, a step that owns an open finding, a
-    split step any leaf of which, or which itself, owns one, or a card below a step that owns
+    split step any leaf of which, or which itself, owns one, or a step below one that owns
     one, which a drop of its last leaf would leave dropped (ruling plan#1784,
-    :func:`_findings.refuse_orphaning`).  A card's drop drops each task under it still to do first
+    :func:`_findings.refuse_orphaning`): a task's drop, or a leaf's still being filed, leaves
+    the steps above as they were.  A card's drop drops each task under it still to do first
     (:func:`_drop`, R-BAL190's shape: the tool records the decision where the work is).
     A leaf dropped while its filing has not finished is first taken out of the
     split it began, which it was never part of (R-BAL205, :func:`_leave_split`):
@@ -575,7 +576,9 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
     cards = with_closure(tracker, {card.number: card})
     if not is_container(card, cards, shipped):
         _refuse_drop(card, cards, reads)
-        _findings.refuse_orphaning(tracker, [card, *above(card, cards)], shipped)
+        leaf = card.kind == "step" and not filing_unfinished(card)
+        _findings.refuse_orphaning(tracker, [card, *(above(card, cards) if leaf else ())],
+                                   shipped)
         if card.kind == "step" and card.parent is not None and filing_unfinished(card):
             _leave_split(tracker, card, cards, shipped)
         for undo in drop_unlinks(card, cards, shipped, set()):

@@ -59,10 +59,10 @@ it leaves as it was (rule 8):**
 5. **Any other line only from ``card/N``**, card N's own claim (:func:`_git.claimed_card`), a
    branch of this repository: one of another repository is no claim.  And a change from
    ``card/N`` must add or change ``plan/ships/N``: a branch pushed again after its merge
-   records nothing (the report's 5c).  Of another card's markers a claim writes only a
-   finding's whose one owner (``R-BAL395``) is N, a step, written with the fix by ``quill
-   finding-file`` (ruling plan#1777), which rule 7 reads the tracker for: any other is
-   refused, naming the finding's owner's branch beside its own claim.
+   records nothing (the report's 5c).  Of another card's markers a claim writes, but by rule
+   6's door, only a finding's whose one owner (``R-BAL395``) is N, a step, written with the
+   fix by ``quill finding-file`` (ruling plan#1777), which rule 7 reads the tracker for: any
+   other is refused, naming the finding's owner's branch beside its own claim.
 6. **The records-only door** (``R-BAL363``): a change into ``main`` whose every entry, at
    any path, ADDS a card's marker may add one from any branch, for a card no commit of
    ``dev`` or ``main`` ever marked (:func:`_git.ever_marked`) and no claim was ever made for
@@ -81,7 +81,7 @@ it leaves as it was (rule 8):**
    not dropped, and not shipped once M and the other branch meet (``_findings.owed``, the
    one spelling), each named with ``quill finding-file`` or ``quill hand`` (rulings plan#1777
    and plan#1784).  A step above N is split into smaller steps, which no branch builds, so
-   only a hand edit on the web leaves it a finding: held here, at every leaf's pull request.
+   only a hand edit on the web, or a split's filing cut short, leaves it a finding: held here.
    One blocked by N and another names no one owner, and is refused too (fail closed).  A
    ruling or a step a card blocks is passed over.
 8. **No marker the change leaves as M's first parent holds it may change what ``dev`` and

@@ -729,6 +729,7 @@ def _diff(before: str, after: str, label: str) -> str:
 
 def cmd_spec_history(args, tracker: Tracker, root: Path) -> int:
     """Every saved change to a card's body in a window, for the review R-BAL174 requires."""
+    _one(tracker, args.card)
     _, versions = tracker.edits(args.card)
     since = _since(root, args.since) if args.since else None
     shown = 0
@@ -755,6 +756,7 @@ def cmd_spec_revert(args, tracker: Tracker, _root: Path) -> int:
     change made.  (GitHub offers no conditional issue write, so a change in the
     instant between that read and the write is not seen.)
     """
+    _one(tracker, args.card)
     body, versions = tracker.edits(args.card)
     chosen = [version for version in versions if version.edit_id == args.to]
     if not chosen:

@@ -27,7 +27,7 @@ LABELS_ONLY = frozenset()
 def _finding(body=SENTENCE, **changes):
     """A finding that passes every rule, with ``changes`` applied."""
     fields = {"kind": "finding", "title": "Refund counted twice", "body": body,
-              "labels": ("balance",), "owner": Owner("step", True)}
+              "labels": ("balance",), "owner": Owner("step", True, False)}
     return Draft(**{**fields, **changes})
 
 
@@ -35,7 +35,7 @@ def _ruling(body=None, **changes):
     """A ruling that passes every rule, with ``changes`` applied."""
     fields = {"kind": "ruling", "title": "Where the plan lives",
               "body": body if body is not None else ruling_body("Where?", 'Picked "Here".'),
-              "labels": ("balance",), "owner": Owner("step", False)}
+              "labels": ("balance",), "owner": Owner("step", False, False)}
     return Draft(**{**fields, **changes})
 
 
@@ -44,7 +44,7 @@ def _ruling(body=None, **changes):
     _ruling(),
     Draft("question", "Which day?", "Which day should a transfer show?", ("recurrence",)),
     Draft("step", "Split the walk", "Any spec at all.", ("balance", "moves-money")),
-    Draft("step", "A leaf", "", ("salary",), Owner("step", True)),
+    Draft("step", "A leaf", "", ("salary",), Owner("step", True, False)),
 ])
 def test_a_new_card_of_each_kind_that_keeps_the_rules_passes(draft):
     """Each kind's own rules, and no more: a step and a question have no text cap."""
@@ -80,8 +80,8 @@ def test_a_title_written_is_a_short_name_of_at_most_100_characters():
 
 @pytest.mark.parametrize(("owner", "said"), [
     (None, "its owner is none"),
-    (Owner("finding", True), "its owner is finding"),
-    (Owner("step", False), "its owner is a step that is done"),
+    (Owner("finding", True, False), "its owner is finding"),
+    (Owner("step", False, False), "its owner is a step that is done"),
 ])
 def test_a_finding_set_under_an_owner_needs_a_live_step(owner, said):
     """R-BAL395: the owner is the step it is blocked by, never its parent; a finding names a
@@ -90,9 +90,23 @@ def test_a_finding_set_under_an_owner_needs_a_live_step(owner, said):
     assert problem.endswith(said) and "blocked by a LIVE step, its owner (R-BAL395)" in problem
 
 
+def test_a_finding_set_under_a_split_step_is_refused_and_a_ruling_and_a_leaf_are_not():
+    """plan#1784 ("One owner, always a leaf"): a finding's owner is a step a branch builds, so
+    a live step split into smaller steps is refused as one, named so; a ruling's owner and a
+    leaf's parent may be a split step, as before."""
+    split = Owner("step", True, True)
+    assert violations(_finding(owner=split), {OWNER}) == [
+        "a finding is blocked by a LIVE step, its owner (R-BAL395), one a branch builds and "
+        "never one split into smaller steps (plan#1784); its owner is a step split into "
+        "smaller steps"]
+    assert not violations(_finding(owner=Owner("step", True, False)), {OWNER})
+    assert not violations(_ruling(owner=split), {OWNER})
+    assert not violations(Draft("step", "A leaf", "", ("balance",), split))
+
+
 def test_a_ruling_set_under_an_owner_needs_a_step_done_or_not():
     """A ruling outlives the step that asked it, so its owner may be done."""
-    assert not violations(_ruling(owner=Owner("step", False)), {OWNER})
+    assert not violations(_ruling(owner=Owner("step", False, False)), {OWNER})
     (problem,) = violations(_ruling(owner=None), {OWNER})
     assert problem == "a ruling is blocked by a step, its owner (R-BAL395); its owner is none"
 
@@ -101,12 +115,12 @@ def test_the_owner_is_graded_only_when_the_change_sets_it():
     """A migrated ruling naming no owner, or a finding whose owner has since shipped, is not
     refused when only its labels change (the review of 2026-10-04, finding H1)."""
     assert not violations(_ruling(owner=None), LABELS_ONLY)
-    assert not violations(_finding(owner=Owner("step", False)), {TITLE, BODY})
+    assert not violations(_finding(owner=Owner("step", False, False)), {TITLE, BODY})
 
 
 def test_a_step_splits_only_a_step_and_a_question_needs_no_owner():
     """A leaf's parent is the step it splits (R-BAL179); a question's owner is the developer."""
-    leaf = Draft("step", "leaf", "", ("balance",), Owner("finding", True))
+    leaf = Draft("step", "leaf", "", ("balance",), Owner("finding", True, False))
     assert violations(leaf) == ["a step's parent is the step it splits, not a finding"]
     assert not violations(Draft("question", "q", "Why?", ("balance",)))
 
@@ -145,7 +159,7 @@ def test_a_body_stored_with_crlf_or_as_null_is_read_as_its_text():
     crlf = ruling_body("Where?", "Here.").replace("\n", "\r\n")
     assert not violations(_ruling(crlf), {BODY})
     assert "complete sentence" in violations(_finding(None), {BODY})[0]
-    empty = Draft("ruling", "t", None, ("balance",), Owner("step", False))
+    empty = Draft("ruling", "t", None, ("balance",), Owner("step", False, False))
     assert "question and his answer" in violations(empty, {BODY})[0]
 
 
@@ -211,7 +225,7 @@ def test_an_initialism_is_not_a_sentence_end(body):
 
 def test_a_leaf_splits_only_a_live_step():
     """Review H2: a step already done with has no work left to split."""
-    leaf = Draft("step", "leaf", "", ("balance",), Owner("step", False))
+    leaf = Draft("step", "leaf", "", ("balance",), Owner("step", False, False))
     assert violations(leaf) == [
         "a step's parent is the LIVE step it splits; its parent is a step that is done"]
 
@@ -242,7 +256,7 @@ def test_ruling_question_reads_back_only_what_this_answer_wrote_whatever_marks_i
 def test_a_card_under_a_parent_with_no_type_is_refused_never_read_as_having_none():
     """Review cp3 M-4: an untyped parent passed as "no parent", so a leaf was filed under a
     card that is no step."""
-    untyped = Owner(None, True)
+    untyped = Owner(None, True, False)
     assert violations(Draft("step", "leaf", "", ("balance",), untyped)) == [
         "a step's parent is the step it splits; its parent is a card with no type"]
     for draft in (_finding(owner=untyped), _ruling(owner=untyped)):
@@ -261,11 +275,11 @@ def test_in_ruling_shape_needs_both_marks():
 def _task(**changes):
     """A task that passes every rule (R-BAL386), with ``changes`` applied."""
     fields = {"kind": "task", "title": "4d-4a: the links' migration", "body": "The migration.",
-              "labels": (), "owner": Owner("step", True)}
+              "labels": (), "owner": Owner("step", True, False)}
     return Draft(**{**fields, **changes})
 
 
-@pytest.mark.parametrize("owner", [Owner("step", True), Owner("finding", True)])
+@pytest.mark.parametrize("owner", [Owner("step", True, False), Owner("finding", True, False)])
 def test_a_task_under_a_live_piece_of_work_carrying_no_arc_passes(owner):
     """R-BAL386: a task is a piece of one step or finding, still work, and carries no arc
     label, its arc being its card's (rule 14); the filing mark and a release label are no
@@ -282,12 +296,12 @@ def test_a_task_carrying_an_arc_label_is_refused_whatever_the_change():
 
 @pytest.mark.parametrize(("owner", "said"), [
     (None, "none"),
-    (Owner(None, True), "a card with no type"),
-    (Owner("step", False), "a step that is done"),
-    (Owner("finding", False), "a finding that is done"),
-    (Owner("ruling", False), "ruling"),
-    (Owner("question", True), "question"),
-    (Owner("task", True), "task"),
+    (Owner(None, True, False), "a card with no type"),
+    (Owner("step", False, False), "a step that is done"),
+    (Owner("finding", False, False), "a finding that is done"),
+    (Owner("ruling", False, False), "ruling"),
+    (Owner("question", True, False), "question"),
+    (Owner("task", True, False), "task"),
 ])
 def test_a_task_set_under_a_parent_needs_a_live_step_or_finding(owner, said):
     """A task under no card, a card of no type, work that is done, or a card that is no work

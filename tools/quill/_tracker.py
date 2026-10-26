@@ -455,13 +455,15 @@ class CardReader:
     the tracker's issues and nothing else reads (built for CI's landing check, X-cx L9d),
     each a :class:`BareCard`.  :class:`Tracker` is one that reads each card's board item too.
 
-    ``github`` is any object with :class:`_github.GitHub`'s ``graphql_lookup``, and
-    ``place`` the tracker's :class:`setup_tracker.Place`.  ``app_login``, by which a close is
-    the tool's or a person's (:func:`card_from`), is :data:`setup_tracker.APP_LOGIN` unless
-    given: a token that is no App's cannot ask GitHub which App is quill's, so this reader
-    takes the declared login, which every :meth:`Tracker.connect` checks against GitHub.
-    Whether such a token can read every field it asks for is unmeasured until X-cx L9d a3
-    reads the tracker with one.
+    ``github`` is any object with :class:`_github.GitHub`'s ``graphql_lookup`` and
+    ``graphql``, and ``place`` the tracker's :class:`setup_tracker.Place`.  ``app_login``, by
+    which a close is the tool's or a person's (:func:`card_from`), is
+    :data:`setup_tracker.APP_LOGIN` unless given: a token that is no App's cannot ask GitHub
+    which App is quill's, so this reader takes the declared login, which every
+    :meth:`Tracker.connect` checks against GitHub.  Whether such a token can read every field
+    it asks for is unmeasured until X-cx L9d a3 reads the tracker with one, and its read of
+    what a card blocks (:meth:`blocking`) until plan#1772's own pull request runs the landing
+    check.
     """
 
     def __init__(self, github: GitHub, place: Place, app_login: str = APP_LOGIN) -> None:
@@ -478,6 +480,24 @@ class CardReader:
         """The cards numbered ``numbers``, open or closed; one that does not exist is
         absent from the answer (a trailer can name a number nobody filed)."""
         return self._lookup(numbers, _queries.BARE_CARD_FIELDS, self._card)
+
+    def blocking(self, number: int) -> tuple[Child, ...]:
+        """The cards of this tracker that card ``number`` blocks, each with its type and state
+        as they stand (:func:`_queries.blocking`): a step's are the findings and rulings it
+        owns (ruling ``balance:R-BAL395``), beside any card waiting on it.  An issue outside
+        the tracker is no card, and is passed over.
+
+        Raises:
+            TrackerError: When GitHub answers the card as null, or cut the list short.
+        """
+        issue = self.github.graphql(_queries.blocking(self.place),
+                                    number=number)["repository"]["issue"]
+        if issue is None:
+            raise TrackerError(f"plan#{number} could not be read: GitHub answered it as null")
+        return tuple(
+            Child(node["number"], (node["issueType"] or {}).get("name"), node["state"] == "OPEN")
+            for node in _counted(issue["blocking"], "cards it blocks", number)
+            if _is_tracker_issue(node, self.place))
 
     def _lookup[T](self, numbers: Iterable[int], card_fields: str,
                    card: Callable[[dict], T]) -> dict[int, T]:
@@ -508,7 +528,8 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     """A tracker as the App sees it: its cards, each with its board item, and its
     :class:`Board`.
 
-    Pylint: ``too-many-public-methods`` (23/20, measured at X-cx's S3b) --
+    Pylint: ``too-many-public-methods`` (22/20, measured at plan#1772, which moved the read
+    of what a card blocks down to :class:`CardReader`, where CI's landing check reads it) --
     ``connect``, then **one method per read or write quill makes of the tracker**
     (most one request; this module is the one place it speaks to GitHub), the
     board's own writes already apart in :class:`Board`: among them the filing
@@ -592,24 +613,6 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     def body(self, number: int) -> str:
         """A card's body as it stands."""
         return self.github.rest("GET", f"{self.place.path}/issues/{number}")["body"] or ""
-
-    def blocking(self, number: int) -> tuple[Child, ...]:
-        """The cards of this tracker that card ``number`` blocks, each with its type and state
-        as they stand (:func:`_queries.blocking`): a step's are the findings and rulings it
-        owns (ruling ``balance:R-BAL395``), beside any card waiting on it.  An issue outside
-        the tracker is no card, and is passed over.
-
-        Raises:
-            TrackerError: When GitHub answers the card as null, or cut the list short.
-        """
-        issue = self.github.graphql(_queries.blocking(self.place),
-                                    number=number)["repository"]["issue"]
-        if issue is None:
-            raise TrackerError(f"plan#{number} could not be read: GitHub answered it as null")
-        return tuple(
-            Child(node["number"], (node["issueType"] or {}).get("name"), node["state"] == "OPEN")
-            for node in _counted(issue["blocking"], "cards it blocks", number)
-            if _is_tracker_issue(node, self.place))
 
     def edits(self, number: int) -> tuple[str, list[Edit]]:
         """A card's body as it stands and every saved version of it, oldest first.

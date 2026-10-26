@@ -69,8 +69,11 @@ does every leaf under it.
 
 **A finding or a ruling names its owner step by GitHub's "blocked by" link to it**
 (ruling ``balance:R-BAL395``, :data:`OWNED`), never as its sub-issue, so a step's
-progress counts only its pieces: its one blocker is its owner, and an open finding whose
-owner is not one live step is reported (:func:`_owner_lost`).
+progress counts only its pieces: its one blocker is its owner.  A finding's owner is a step
+a branch builds (:func:`can_own`; plan#1784, "One owner, always a leaf"), never one split
+into smaller steps, so some claim's pull request owes it (CI's landing check refuses that
+pull request while it does, ``landing``'s rule 7), and an open finding whose owner is not
+one such step is reported (:func:`_owner_lost`).
 
 **A task is a piece of one step or finding** (ruling ``balance:R-BAL386``): a sub-issue
 of type ``task`` under that card, a commit inside its one pull request, never offered,
@@ -251,7 +254,7 @@ def dropped(number: int, cards: Mapping[int, BareCard], shipped: set[int]) -> bo
     return _closed_dropped(card) and not (is_work(card, cards, shipped) and number in shipped)
 
 
-def above(card: Card, cards: Mapping[int, Card]) -> Iterator[Card]:
+def above(card: BareCard, cards: Mapping[int, BareCard]) -> Iterator[BareCard]:
     """The steps above ``card``, nearest first: the step it splits, that step's, ..."""
     while card.parent is not None:
         card = cards[card.parent]
@@ -301,6 +304,24 @@ def is_live(number: int, cards: Mapping[int, Card], shipped: Iterable[int]) -> b
     """
     return (not resolved(number, cards, shipped)
             and dropped_above(cards[number], cards, shipped) is None)
+
+
+def may_own(kind: str | None, live: bool, split: bool) -> bool:
+    """Whether a card may own an open finding (ruling plan#1784, "One owner, always a leaf"),
+    from its type, whether it is live (:func:`is_live`) and whether it is split into smaller
+    steps (:func:`is_container`): a step a branch builds, live work and never split, done or
+    dropped, so some pull request always owes the finding.  The one spelling: :func:`can_own`
+    asks it over the cards, and ``check``'s filing rule over the answers its caller read."""
+    return kind == "step" and live and not split
+
+
+def can_own(number: int, cards: Mapping[int, Card], shipped: Iterable[int]) -> bool:
+    """Whether card ``number`` may own an open finding (:func:`may_own`), read over
+    ``cards``: what every door that sets or changes a finding's owner asks, and ``sync`` names
+    an owner that is not one (:func:`_owner_lost`)."""
+    card = cards[number]
+    return may_own(card.kind, is_live(number, cards, shipped),
+                   is_container(card, cards, shipped))
 
 
 def leaves_below(card: Card, cards: Mapping[int, Card], shipped: Iterable[int]) -> list[Card]:
@@ -921,20 +942,26 @@ def owner(card: BareCard) -> int | None:
     tracker or outside it.  None for a card of another kind, and for one blocked by no card
     of the tracker, by an issue outside it, or by more than one, which names no one owner.
     Whether that card is a step, and live, is the reader's to ask (:func:`_owner_lost`)."""
-    if card.kind not in OWNED or len(card.blocked_by) != 1 or any(
-            link.what == "blocker" for link in card.outside):
+    if card.kind not in OWNED or len(card.blocked_by) != 1 or outside_blockers(card):
         return None
     return card.blocked_by[0]
 
 
+def outside_blockers(card: BareCard) -> list[str]:
+    """The issues outside the tracker that ``card`` is blocked by (``R-BAL188``)."""
+    return [link.issue for link in card.outside if link.what == "blocker"]
+
+
 def _owner_lost(card: Card, cards: Mapping[int, Card], shipped: set[int]) -> str | None:
     """How an open finding lost its live owner (:func:`owner`), the one step it is blocked
-    by (R-BAL395); None while it has one -- or an owner outside the tracker, which the
-    outside link's own report names (R-BAL188).  Blocked by two cards or more, it names no
-    one owner."""
+    by (R-BAL395), a step a branch builds (:func:`can_own`, plan#1784); None while it has one
+    -- or an owner outside the tracker, which the outside link's own report names
+    (R-BAL188).  Blocked by two cards or more, it names no one owner; owned by a step split
+    into smaller steps (linked by hand on the web, or left by a split's filing cut short,
+    which the same command run again hands down), by no step a branch builds."""
     number = owner(card)
     if number is None:
-        outside = [link.issue for link in card.outside if link.what == "blocker"]
+        outside = outside_blockers(card)
         if len(card.blocked_by) + len(outside) > 1:
             named = ", ".join([f"plan#{held}" for held in card.blocked_by] + outside)
             return f"is not one step: it is blocked by {named}"
@@ -942,5 +969,9 @@ def _owner_lost(card: Card, cards: Mapping[int, Card], shipped: set[int]) -> str
     held = cards[number]
     if held.kind != "step":
         return f"plan#{held.number} is {_kind_named(held)}, no step"
-    return (None if is_live(held.number, cards, shipped) else
-            f"plan#{held.number} is no longer live (done, or under a dropped step)")
+    if can_own(held.number, cards, shipped):
+        return None
+    if is_container(held, cards, shipped) and is_live(held.number, cards, shipped):
+        return (f"plan#{held.number} is split into smaller steps, which no branch builds "
+                f"(plan#1784; `quill hand plan#{card.number} --to plan#S` hands it to one)")
+    return f"plan#{held.number} is no longer live (done, or under a dropped step)"

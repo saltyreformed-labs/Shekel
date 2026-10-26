@@ -59,7 +59,10 @@ it leaves as it was (rule 8):**
 5. **Any other line only from ``card/N``**, card N's own claim (:func:`_git.claimed_card`), a
    branch of this repository: one of another repository is no claim.  And a change from
    ``card/N`` must add or change ``plan/ships/N``: a branch pushed again after its merge
-   records nothing (the report's 5c).
+   records nothing (the report's 5c).  Of another card's markers a claim writes, but by rule
+   6's door, only a finding's whose one owner (``R-BAL395``) is N, a step, written with the
+   fix by ``quill finding-file`` (ruling plan#1777), which rule 7 reads the tracker for: any
+   other is refused, naming the finding's owner's branch beside its own claim.
 6. **The records-only door** (``R-BAL363``): a change into ``main`` whose every entry, at
    any path, ADDS a card's marker may add one from any branch, for a card no commit of
    ``dev`` or ``main`` ever marked (:func:`_git.ever_marked`) and no claim was ever made for
@@ -73,7 +76,15 @@ it leaves as it was (rule 8):**
    (:func:`_state.filing_ended`; ``R-BAL202``), on which the release tool's card reader
    rests (``tools/release/_cards.py``).  Whether a step is split reads which of its leaves
    git says shipped once M and the other branch meet (the merge of the two, AFTER below),
-   as ``quill sync`` reads it once they have.
+   as ``quill sync`` reads it once they have.  And **a change from ``card/N`` recording card
+   N is refused while a finding N blocks, or one a step above N blocks, is still owed**:
+   not dropped, and not shipped once M and the other branch meet (``_findings.owed``, the
+   one spelling), each named with ``quill finding-file`` or ``quill hand`` (rulings plan#1777
+   and plan#1784).  A step above N is split into smaller steps, which no branch builds, so
+   only a hand edit on the web, or a split's filing cut short, leaves it a finding: held here.
+   One blocked by N and another names no one owner, and is refused too (fail closed).  A
+   ruling or a step a card blocks is passed over.  A step rule 6's door records is held to
+   the findings it owes the same way (``_findings.unrecorded``, plan#1784).
 8. **No marker the change leaves as M's first parent holds it may change what ``dev`` and
    ``main`` together say of its card** (``R-BAL385``, widened by ``R-BAL390``), which rules
    1-7, reading what a change writes, never see.  A resync built by hand writes nothing on
@@ -161,7 +172,7 @@ reaches this module, but it is in the runner's memory for the whole job, so the 
 narrows what a leak from this job yields and does not close it.  A run that is handed no
 key mints no token (GitHub documents that a Dependabot run and a fork's pull request get no
 Actions secrets), so there a change that needs a card read refuses to judge, and one that
-needs none is judged without a read.
+needs none is judged without a read: neither is a claim, so rule 7's findings read nothing.
 
 **What cannot be read refuses to judge** (exit 2): a command line naming no pull request;
 the pull request, when no token or repository is set, GitHub answers an error or cannot be
@@ -194,7 +205,7 @@ import requests
 
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, tracking
-from tools.quill import _git, _production
+from tools.quill import _findings, _git, _production
 from tools.quill._command import with_cards, with_closure
 from tools.quill._github import GitHub, GitHubError
 from tools.quill._state import dropped, filing_ended, filing_unfinished, names_no_task, no_work
@@ -361,6 +372,12 @@ class Landing:
                                                            directories=_DIRECTORIES)
                          if change.entry.blob is None and change.was is not None)
 
+    @cached_property
+    def facts(self) -> _Facts:
+        """What rule 6 reads of git for the change (:func:`_facts`), read once: rules 5 and 7
+        each ask it."""
+        return _facts(self)
+
     def of(self, kind: _Kind, entry: _git.Entry) -> int | None:
         """The card or task whose record of ``kind`` ``entry``, an entry M changes, is, as
         M's tree reads it (:attr:`lines`), so rule 1 gives every reader of the records'
@@ -505,8 +522,9 @@ def _carried(landing: Landing, took: Iterable[_git.Took]) -> bool:
                for each in took)
 
 
-def _unclaimed(landing: Landing, facts: _Facts, entry: _git.Entry, number: int) -> str:
+def _unclaimed(landing: Landing, entry: _git.Entry, number: int) -> str:
     """Why ``entry``, a written marker of card ``number`` that no rule passes, is refused."""
+    facts = landing.facts
     if facts.records_only:
         before = (f"a claim was made for card {number}" if number in facts.claimed
                   else f"card {number} was marked on {DEV} or {MAIN} before")
@@ -540,23 +558,22 @@ def _unfiled(landing: Landing, entry: _git.Entry, number: int) -> str:
             "it there)")
 
 
-def _claimed(landing: Landing, facts: _Facts, kind: _Kind, entry: _git.Entry,
+def _claimed(landing: Landing, kind: _Kind, entry: _git.Entry,
              number: int) -> tuple[str | None, int | None]:
     """Rules 5 and 6 over ``entry``, card or task ``number``'s file of ``kind``, which no
     earlier rule settled: why it is refused, or None; and the card or task the tracker must
-    be read for, or None.  A marker passes from its card's own claim, or through the
-    records-only door; a task's done file from a claim, whose card the tracker must then
-    say the task is under (:func:`refusals`)."""
-    if kind is _TASKS:
-        return (None, number) if landing.claim is not None else (
-            _unfiled(landing, entry, number), None)
-    if number in (landing.claim, *facts.door):
+    be read for, or None.  A marker passes through the records-only door, and from a claim
+    when it is the claim's own card's, or a finding the claim's card owns, which the tracker
+    must then say (:func:`refusals`); a task's done file from a claim, whose card the tracker
+    must then say the task is under."""
+    if landing.claim is not None or (kind is _CARDS and number in landing.facts.door):
         return None, number
-    return _unclaimed(landing, facts, entry, number), None
+    if kind is _TASKS:
+        return _unfiled(landing, entry, number), None
+    return _unclaimed(landing, entry, number), None
 
 
-def _written(landing: Landing, facts: _Facts, kind: _Kind,
-             entry: _git.Entry) -> tuple[str | None, int | None]:
+def _written(landing: Landing, kind: _Kind, entry: _git.Entry) -> tuple[str | None, int | None]:
     """Rules 1 and 3-6 over ``entry``, a path the change adds or changes under ``kind``'s
     directory: why it is refused, or None; and the card or task the tracker must be read
     for, or None."""
@@ -578,7 +595,7 @@ def _written(landing: Landing, facts: _Facts, kind: _Kind,
                 f"{said.again.format(s='', it='it')} with no change to its record: the line "
                 f"comes from {other} only through the merge that took it in, and "
                 f"{said.redo.format(n=number)}"), None
-    return _claimed(landing, facts, kind, entry, number)
+    return _claimed(landing, kind, entry, number)
 
 
 def _judged(landing: Landing) -> tuple[list[str], dict[str, set[int]]]:
@@ -596,14 +613,12 @@ def _judged(landing: Landing) -> tuple[list[str], dict[str, set[int]]]:
                        f"card {claim} (pushed again after its merge? later work is a card of "
                        "its own)")
     read: dict[str, set[int]] = {directory: set() for directory in _DIRECTORIES}
-    if written:
-        facts = _facts(landing)
-        for kind, entry in written:
-            why, number = _written(landing, facts, kind, entry)
-            if why:
-                reasons.append(why)
-            if number is not None:
-                read[kind.directory].add(number)
+    for kind, entry in written:
+        why, number = _written(landing, kind, entry)
+        if why:
+            reasons.append(why)
+        if number is not None:
+            read[kind.directory].add(number)
     return reasons, read
 
 
@@ -827,18 +842,37 @@ def _owed(landing: Landing, card: BareCard, held: dict[int, BareCard],
     return reasons
 
 
+def _others(landing: Landing, numbers: set[int], held: Mapping[int, BareCard],
+            recorded: BareCard | None) -> dict[int, str]:
+    """Rule 5's arm that rule 7 judges: for each marker of another card than its claim's that
+    a claim writes (``numbers``, the cards the change records, each the tracker holds in
+    ``held``), and that is no finding the claim's card ``recorded`` owns (None when the change
+    records no card of its claim), rule 5's own sentence and what rule 7 adds to it
+    (:func:`_findings.foreign`), by card, in the order rule 5 names them.  A card the tracker
+    lacks is :func:`_wrong`'s to refuse."""
+    tails = {number: tail for number in numbers - {landing.claim} - landing.facts.door
+             if number in held and (tail := _findings.foreign(held[number], recorded)) is not None}
+    return {number: _unclaimed(landing, entry, number) + tails[number]
+            for entry in landing.entries if (number := landing.of(_CARDS, entry)) in tails}
+
+
 def refusals(landing: Landing, read: Mapping[str, set[int]], shipped: Iterable[int],
              connect: Callable[[], CardReader]) -> list[str]:
     """Rule 7 over ``landing``: one sentence for each card a change records that the tracker
-    refuses, by card, then for each task whose done file it writes that the tracker says
-    the file marks nothing done on the claim's branch (:func:`_state.names_no_task`: no
-    task, or one under another card, ``R-BAL386``), by task, then for each task the claim's
-    card owes (:func:`_owed`); ``read`` holds the cards (under :data:`_git.MARKERS`) and the
-    tasks (under :data:`_git.TASKS`), and ``shipped`` is git's answer once the change and
+    refuses, by card, and for each marker of another card a claim writes that is no finding
+    its card owns (:func:`_findings.foreign`, rule 5's sentence and why), then for each task
+    whose done file it writes that the tracker says the file marks nothing done on the
+    claim's branch (:func:`_state.names_no_task`: no task, or one under another card,
+    ``R-BAL386``), by task, then for each task the claim's card owes (:func:`_owed`), each
+    finding it owes (:func:`_findings.unfixed`) and each a step above it owes
+    (:func:`_findings.unhanded`), and each a step rule 6's door records owes
+    (:func:`_findings.unrecorded`); ``read`` holds the cards (under :data:`_git.MARKERS`) and
+    the tasks (under :data:`_git.TASKS`), and ``shipped`` is git's answer once the change and
     the other integration branch meet.  The tracker is read through the reader ``connect``
     makes: the cards and the tasks the change writes in one read, then each card a decision
     over those cards reads (:func:`_command.with_closure`), then each task under the claim's
-    card not read yet (:func:`_owed`).
+    card not read yet (:func:`_owed`), then what the claim's card and each step above it
+    block, and each finding among those not read yet (:func:`_findings.owned`).
 
     Raises:
         NotSet: when ``connect`` has no token to read with.
@@ -851,16 +885,22 @@ def refusals(landing: Landing, read: Mapping[str, set[int]], shipped: Iterable[i
     numbers, tasks = read[_git.MARKERS], read[_git.TASKS]
     held = reader.cards(numbers | tasks)
     cards = with_closure(reader, {number: held[number] for number in numbers if number in held})
-    shipped = set(shipped)
+    shipped, head = set(shipped), landing.pull.head
+    recorded = held.get(landing.claim) if landing.claim in numbers else None
+    others = _others(landing, numbers, held, recorded)
     reasons = [f"{_git.marker(number)}: {wrong}" for number in sorted(numbers)
-               if (wrong := _wrong(number, held.get(number), cards, shipped))]
-    head = landing.pull.head
+               if number not in others and (wrong := _wrong(number, held.get(number), cards,
+                                                            shipped))]
+    reasons += others.values()
     reasons += [f"{_git.task_file(number)}: {head} writes it, but {why}, so it marks nothing "
                 f"done (a task is done on its own card's branch only): take it off {head}"
                 for number in sorted(tasks) if (why := names_no_task(number, held,
                                                                      landing.claim))]
-    if landing.claim in numbers and landing.claim in held:
-        reasons += _owed(landing, held[landing.claim], held, reader)
+    if recorded is not None:
+        reasons += _owed(landing, recorded, held, reader)
+        reasons += _findings.unfixed(reader, recorded, shipped, held)
+        reasons += _findings.unhanded(reader, recorded, cards, shipped, held)
+    reasons += _findings.unrecorded(reader, landing.facts.door, head, shipped, held)
     return reasons
 
 

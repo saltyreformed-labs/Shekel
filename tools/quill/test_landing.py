@@ -29,6 +29,7 @@ from tools.quill._histories import Lookup as _Lookup
 from tools.quill._histories import card_node as _card
 from tools.quill._histories import claim as _claim
 from tools.quill._histories import closed as _closed
+from tools.quill._histories import key_paths as _paths
 from tools.quill._histories import landed as _landed
 from tools.quill._histories import merge as _merge
 from tools.quill._histories import never as _never
@@ -43,16 +44,6 @@ from tools.quill._tracker import CardReader, Tracker
 from tools.quill.landing import (TOKEN_VARIABLE, CannotJudge, PullRequest, main, named,
                                  pull_from_environment, pull_request, reader_from_environment)
 from tools.quill.setup_tracker import APP_LOGIN, DEPLOY_TOGETHER_LABEL, FILING, PLAN
-
-
-def _paths(value, prefix=""):
-    """Every key path in ``value``: a dict's keys, joined by dots, a list's items as ``[]``."""
-    if isinstance(value, dict):
-        return set().union(*({prefix + key} | _paths(item, f"{prefix}{key}.")
-                             for key, item in value.items()))
-    if isinstance(value, list):
-        return set().union(set(), *(_paths(item, prefix.rstrip(".") + "[].") for item in value))
-    return set()
 
 
 @pytest.fixture(name="code")
@@ -285,7 +276,9 @@ def test_a_card_branch_records_its_card_read_as_work(check, code):
 
 def test_a_card_branch_may_undo_another_card_but_record_only_its_own(check, code):
     """card/7 also deletes card 5's marker (an undo passes from any branch) and adds card 8's
-    fresh one, which only card/8 may: card 8 is refused, card 7 alone is read."""
+    fresh one, which only card/8 may: card 8 is refused.  Card 8 is read with card 7, in the
+    one read, to learn whether it is a finding card 7 owns, whose marker card/7 may write
+    (ruling plan#1777): it is a step, so it is not."""
     root, base = code
     point_dev(root, dev := _landed(root, base, 5))
     tip = commit_files(root, _claim(root, dev, 7)[1], "more",
@@ -296,7 +289,7 @@ def test_a_card_branch_may_undo_another_card_but_record_only_its_own(check, code
     assert out.splitlines() == [
         "REFUSED -- plan/ships/8: card/7 adds it, but only card 8's own claim, card/8, may "
         "record it", _verdict("card/7", 3, 1)]
-    assert github.asked == [[7]]
+    assert github.asked == [[7, 8]]
 
 
 def test_a_delete_passes_from_any_branch_and_reads_nothing(check, code):

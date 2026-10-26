@@ -20,8 +20,10 @@ What it holds a card to (rulings ``balance:R-BAL136``, ``R-BAL138``,
 - a title the change writes is a short name: present, and at most
   :data:`TITLE_CAP` characters;
 - an owner the change sets is the one its kind needs: a finding is blocked by a
-  LIVE step (a finding names a live owner) and a ruling by a step, each never its
-  sub-issue, which the step's progress would count (``R-BAL395``); a step's
+  LIVE step a branch builds, never one split into smaller steps (a finding names a live
+  owner, and some pull request always owes it: plan#1784, "One owner, always a leaf") and
+  a ruling by a step, each never its sub-issue, which the step's progress would count
+  (``R-BAL395``); a step's
   parent, if it has one, is the LIVE step it splits (a step already done with has
   no work left to split); an owner with no type is no step, whatever the kind;
 - a body the change writes is capped: a finding's is one sentence of at most
@@ -87,11 +89,14 @@ _BREAK = re.compile(r"(?<![A-Za-z]\.[A-Za-z])" + _END + r"\s+[A-Z`*_\"'(\[]")
 class Owner:
     """A card's owner, as the check reads it -- the card a finding or ruling is blocked
     by (``R-BAL395``), a step's or task's parent: its issue type (None when it has
-    none), and the caller's answer to whether it is still work -- quill
-    asks git and the card, the Action the card."""
+    none), and the caller's answers to whether it is still work (``live``) and whether it is
+    a step split into smaller steps (``split``, which no branch builds) -- quill asks git
+    and the cards, the Action the cards.  ``split`` has no default, so no caller holds a
+    finding to its owner rule without answering it (plan#1784)."""
 
     kind: str | None
     live: bool
+    split: bool
 
 
 @dataclass(frozen=True)
@@ -198,13 +203,15 @@ def _ruling_problems(text: str) -> list[str]:
 
 def _parent_named(owner: Owner | None) -> str:
     """A card's owner (:class:`Owner`) as a problem names it: none, a card with no type, a
-    step or finding that is done, or its kind."""
+    step or finding that is done, a step split into smaller steps, or its kind."""
     if owner is None:
         return "none"
     if owner.kind is None:
         return "a card with no type"
     if owner.kind in SHIPPABLE and not owner.live:
         return f"a {owner.kind} that is done"
+    if owner.kind == "step" and owner.split:
+        return "a step split into smaller steps"
     return owner.kind
 
 
@@ -213,9 +220,10 @@ def _owner_problems(draft: Draft) -> list[str]:
     owner = draft.owner
     parent = _parent_named(owner)
     is_step = owner is not None and owner.kind == "step"
-    if draft.kind == "finding" and not (is_step and owner.live):
-        problem = (f"a finding is blocked by a LIVE step, its owner (R-BAL395); "
-                   f"its owner is {parent}")
+    if draft.kind == "finding" and not (is_step and owner.live and not owner.split):
+        problem = (f"a finding is blocked by a LIVE step, its owner (R-BAL395), one a branch "
+                   f"builds and never one split into smaller steps (plan#1784); its owner is "
+                   f"{parent}")
     elif draft.kind == "ruling" and not is_step:
         problem = (f"a ruling is blocked by a step, its owner (R-BAL395); "
                    f"its owner is {parent}")

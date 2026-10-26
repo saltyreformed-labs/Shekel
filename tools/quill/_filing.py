@@ -185,7 +185,8 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
     if parent is not None:
         reads = _git.read(root)
         cards = with_closure(tracker, {parent.number: parent})
-        owner = Owner(parent.kind, is_live(parent.number, cards, reads.shipped.cards))
+        owner = Owner(parent.kind, is_live(parent.number, cards, reads.shipped.cards),
+                      is_container(parent, cards, reads.shipped.cards))
     if args.kind == TASK and is_container(parent, cards, reads.shipped.cards):
         raise Refused(f"{_label(parent)} is split into smaller steps (R-BAL177): a task is a "
                       "piece of one of them, so file it under that one")

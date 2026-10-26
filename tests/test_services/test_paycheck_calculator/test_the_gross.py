@@ -326,8 +326,8 @@ class TestTheGrossContractIsDocumented:
 
     The fourth arm that lived here -- the ids these docstrings cite have a
     row in the registry they name -- left this suite on 2026-09-11 and went
-    with the planning registries at the tracker switch: each id now titles a
-    card in the tracker, which no test reads.
+    with the planning registries at the tracker switch; no test reads the
+    tracker that replaced them.
     """
 
     def test_module_docstring_names_the_rate_contract(self):

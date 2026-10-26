@@ -364,10 +364,10 @@ class TestTheArmRefusesEitherSideBeforeItWritesOne:
 class TestAHiddenTransferIsToldByItsName:
     """Finding BAL-547: the arm's refusal of a hidden transfer names its from-side's leg label.
 
-    The plan of record's wording (``docs/audits/balance_architecture/README.md``,
-    ``X-bi-6-4d``: "a hidden transfer named by its leg label, never the nullable
-    ``Transfer.name``"); cp2b named it by ``Transfer.name`` with a "Transfer"
-    fallback until cp2c (the cp2b-1 review's L-3).
+    The plan of record's wording (card plan#1174, step ``X-bi-6-4d``: "a hidden
+    transfer named by its leg label, never the nullable ``Transfer.name``");
+    cp2b named it by ``Transfer.name`` with a "Transfer" fallback until cp2c
+    (the cp2b-1 review's L-3).
     """
 
     @staticmethod

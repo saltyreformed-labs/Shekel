@@ -44,10 +44,12 @@ and a wait that would carry one request's waits past :data:`WAIT_BUDGET_SECONDS`
 Shortening the wait would be the early retry GitHub warns can ban the integration;
 a stop costs a re-run, and every quill command finishes what a stopped run left.
 
-**An answer is read whole or refused**: a body that is not JSON, an empty body to a GET,
-and a GraphQL answer holding no ``data`` object are each a :class:`GitHubError` naming the
-request, never a value a caller takes a field from (two runs on 2026-10-26 ended in an
-``AttributeError`` instead of quill's ``failed:`` line, plan#1812).
+**An answer is read whole or refused**: a body that is not JSON, an empty body to a REST
+request but a DELETE, and a GraphQL answer holding no ``data`` object are each a
+:class:`GitHubError` naming the request, never a value a caller takes a field from (two runs
+on 2026-10-26 ended in an ``AttributeError`` instead of quill's ``failed:`` line,
+plan#1812).  Refused to a WRITE, it says GitHub answered the write, so the tracker is read
+back before the command runs again.
 
 **A failure names the read it cut short** (plan#1809 item 3): each read of the tracker runs
 inside :func:`reading`, which notes what it was reading, the page or the batch, on the error
@@ -113,6 +115,9 @@ CUT_OFF_BACKOFF_SECONDS = 2
 #: How GraphQL writes a query operation: its keyword, or the shorthand that opens with a
 #: brace (the GraphQL specification, "Operations"); a mutation opens with ``mutation``.
 _QUERY = re.compile(r"\s*(?:query\b|\{)")
+#: What a failed WRITE tells the person to do, as GitHub may have done it (the module
+#: docstring): quill never re-sends one.
+_READ_BACK = "read the tracker back before running the command again"
 
 #: Where the App's two credentials live: OUTSIDE every repository, readable by
 #: the developer's account only.  ``app.json`` holds the App's client ID (an
@@ -303,33 +308,38 @@ class GitHub:
         return response
 
     def rest(self, method: str, path: str, body: dict | None = None):
-        """One REST call; the decoded JSON body, or None for an empty one, which only a write
-        may answer: every GET quill sends reads a JSON body.
+        """One REST call; the decoded JSON body, or None for an empty one to a DELETE
+        (GitHub's 204 No Content) or to GraphQL, whose answer :func:`_data` refuses for
+        holding no data object.  Every other request quill sends, a GET, POST or PATCH, is
+        answered a JSON body, and its caller reads it (plan#1812: a create answered empty
+        reached ``.get`` as None).
 
         Raises:
             GitHubError: Beside :meth:`_send`'s, for a body that is not JSON, and an empty
-                body to a GET (the module docstring).
+                body to any of those others (the module docstring).
         """
         url = API + path
         response = self._send(method, url, body)
         if not response.content:
-            if method == "GET":
+            if method != "DELETE" and url != _GRAPHQL:
                 raise GitHubError(response.status_code,
-                                  f"GET {url} -> {response.status_code} with an empty body")
+                                  f"{method} {url} -> {response.status_code} with an empty "
+                                  f"body{_write_advice(method, url, body)}")
             return None
         try:
             return response.json()
         except requests.JSONDecodeError as error:
             raise GitHubError(response.status_code,
                               f"{method} {url} -> {response.status_code} with a body that is "
-                              f"not JSON: {response.text[:200]!r}") from error
+                              f"not JSON: {response.text[:200]!r}"
+                              f"{_write_advice(method, url, body)}") from error
 
     def graphql(self, query: str, **variables) -> dict:
         """One GraphQL call; its ``data``.  GraphQL reports errors in a 200."""
         payload = self.rest("POST", "/graphql", {"query": query, "variables": variables})
         if isinstance(payload, dict) and payload.get("errors"):
             raise GitHubError(200, f"graphql: {json.dumps(payload['errors'])[:500]}")
-        return _data(payload)
+        return _data(payload, query)
 
     def graphql_lookup(self, query: str, **variables) -> dict:
         """One GraphQL call whose unresolvable fields BELOW the top-level object are
@@ -350,22 +360,32 @@ class GitHub:
                   or e["path"][0] != "repository"]
         if others:
             raise GitHubError(200, f"graphql: {json.dumps(errors)[:500]}")
-        return _data(payload)
+        return _data(payload, query)
 
 
-def _data(payload) -> dict:
-    """A GraphQL answer's ``data`` object.
+def _data(payload, query: str) -> dict:
+    """A GraphQL answer's ``data`` object, the answer to ``query``.
 
     Raises:
         GitHubError: For an answer that holds none -- an empty body, ``data`` null or
             absent, anything but a JSON object -- which no read can take a field from
-            (the module docstring).
+            (the module docstring); for a mutation, saying GitHub answered the write.
     """
     data = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(data, dict):
         raise GitHubError(200, "graphql: an answer with no data object: "
-                               f"{json.dumps(payload)[:500]}")
+                               f"{json.dumps(payload)[:500]}"
+                               f"{_write_advice('POST', _GRAPHQL, {'query': query})}")
     return data
+
+
+def _write_advice(method: str, url: str, body: dict | None) -> str:
+    """What the error of an answer quill cannot read adds for a WRITE (:func:`_is_read`):
+    GitHub answered it, so it may stand, and quill never sends it again unread; nothing for
+    a read."""
+    if _is_read(method, url, body):
+        return ""
+    return f"; GitHub answered the write, which quill never re-sends: {_READ_BACK}"
 
 
 def _refusal(method: str, url: str, response, cut_off: int, read: bool) -> str:
@@ -374,11 +394,11 @@ def _refusal(method: str, url: str, response, cut_off: int, read: bool) -> str:
     WRITE that GitHub answered 5xx, that it was not re-sent and why (the module
     docstring)."""
     status = response.status_code
-    sent = f" after {cut_off} re-sends" if cut_off else ""
+    sent = f" after {cut_off} re-send{'s' if cut_off > 1 else ''}" if cut_off else ""
     message = f"{method} {url} -> {status}{sent}: {response.text[:500]}"
     if status >= 500 and not read:
         message += ("; a write is never re-sent, as GitHub may have done it before it cut the "
-                    "answer off: read the tracker back before running the command again")
+                    f"answer off: {_READ_BACK}")
     return message
 
 

@@ -17,7 +17,13 @@ import requests
 from tools.quill import quill
 from tools.quill._queries import marked_cards, open_cards
 from tools.quill._export import snapshot
-from tools.quill._github import CUT_OFF_RETRIES, GitHub, GitHubError, described
+from tools.quill._github import (
+    CUT_OFF_RETRIES,
+    GitHub,
+    GitHubError,
+    described,
+    installation_token,
+)
 from tools.quill._recorded import recording
 from tools.quill._tracker import (
     Board,
@@ -27,7 +33,7 @@ from tools.quill._tracker import (
     comment_versions,
     milestone_nodes,
 )
-from tools.quill.setup_tracker import APP_LOGIN, PLAN
+from tools.quill.setup_tracker import APP_LOGIN, PLAN, Report, check_repository
 
 #: GitHub's page for a request it cut off, as it answered quill's sync at 14:04 2026-10-26,
 #: shortened: HTML over several lines, which the failure line must hold as one.
@@ -180,6 +186,44 @@ def test_a_write_github_cut_off_is_sent_once_and_its_line_says_to_read_it_back(
     assert err.endswith("; a write is never re-sent, as GitHub may have done it before it cut "
                         "the answer off: read the tracker back before running the command "
                         "again\n")
+
+
+def _tracker(github: GitHub) -> Tracker:
+    """A real tracker over ``github``."""
+    return Tracker(github, Board(github, PLAN, "PVT_x"), APP_LOGIN)
+
+
+#: Every door that reads what GitHub answered a WRITE (plan#1812's class: the answer reaching
+#: ``.get`` as None), sending through a session, each with the answers before its write's:
+#: filing a card, moving it to a milestone, changing its kind, minting the App's token, and
+#: the tracker repository's creation and its settings' correction.
+_WRITES_READ = {
+    "create": (lambda session: _tracker(_github(session)).create("step", "t", "b",
+                                                                 ["balance"]), []),
+    "set_milestone": (lambda session: _tracker(_github(session)).set_milestone(5, 2), []),
+    "retype": (lambda session: _tracker(_github(session)).retype(5, "finding"), []),
+    "installation_token": (lambda session: installation_token(
+        7, "jwt", repository=PLAN.name, session=session), []),
+    "repository created": (lambda session: check_repository(_github(session), True, Report()),
+                           [_Answer(404, '{"message": "Not Found"}')]),
+    "repository settings": (lambda session: check_repository(_github(session), True, Report()),
+                            [_Answer(200, "{}")]),
+}
+
+
+@pytest.mark.parametrize("write, before", _WRITES_READ.values(), ids=_WRITES_READ.keys())
+def test_a_write_answered_with_an_empty_body_is_refused_not_a_traceback(write, before):
+    """plan#1812: a 2xx write answered with no body reached its caller as None, and the
+    caller's ``.get`` raised AttributeError, a traceback that hid that GitHub had done the
+    write.  The one door refuses it, naming the write and saying to read the tracker back;
+    the write is sent once."""
+    session = _Script(*before, _Answer(201, ""))
+    with pytest.raises(GitHubError) as refused:
+        write(session)
+    assert re.fullmatch(r"(POST|PATCH) \S+ -> 201 with an empty body; GitHub answered the "
+                        r"write, which quill never re-sends: read the tracker back before "
+                        r"running the command again", str(refused.value))
+    assert (len(session.sent), session.answers) == (len(before) + 1, [])
 
 
 def test_the_board_s_two_reads_name_themselves():

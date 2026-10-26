@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
 from tools.quill._github import (
     API,
+    CUT_OFF,
     CUT_OFF_RETRIES,
     RATE_LIMIT_RETRIES,
     WAIT_BUDGET_SECONDS,
@@ -501,16 +502,19 @@ def test_a_read_cut_off_a_fourth_time_stops_quill_naming_its_re_sends():
     ("POST", "/graphql", {"query": "# a comment first\nquery { x }", "variables": {}}),
     ("POST", "/graphql", {"variables": {}}),
 ], ids=["filing", "edit", "unmark", "mutation", "unreadable-query", "no-query"])
-def test_a_write_github_cut_off_is_sent_once_and_says_to_read_it_back(method, path, body):
+@pytest.mark.parametrize("status", sorted(CUT_OFF))
+def test_a_write_github_cut_off_is_sent_once_and_says_to_read_it_back(method, path, body,
+                                                                      status):
     """GitHub may have done a write before it cut the answer off, and a filing sent twice
-    makes two cards (plan#1816): a write's 5xx is raised at once, and says so.  A GraphQL
-    body whose text is not known to be a query is a write too: never re-sent."""
-    session = _Session(_Response(504, {"message": "cut off"}), _Response(200, {"ok": 1}))
+    makes two cards (plan#1816): a write's 5xx is raised at once, and says so, for each
+    answer a READ is re-sent after.  A GraphQL body whose text is not known to be a query is
+    a write too: never re-sent."""
+    session = _Session(_Response(status, {"message": "cut off"}), _Response(200, {"ok": 1}))
     slept = []
-    with pytest.raises(GitHubError, match="-> 504: .*a write is never re-sent, as GitHub may "
-                                          "have done it.*read the tracker back") as raised:
+    with pytest.raises(GitHubError, match=f"-> {status}: .*a write is never re-sent, as GitHub "
+                                          "may have done it.*read the tracker back") as raised:
         _client(session, slept).rest(method, path, body)
-    assert (raised.value.status, slept, len(session.sent)) == (504, [], 1)
+    assert (raised.value.status, slept, len(session.sent)) == (status, [], 1)
 
 
 def test_a_500_to_a_read_is_no_cut_off_and_is_raised_at_once():
@@ -579,3 +583,47 @@ def test_a_graphql_answer_with_no_data_object_is_an_error_not_a_traceback(answer
     read = github.graphql_lookup if lookup else github.graphql
     with pytest.raises(GitHubError, match="graphql: an answer with no data object"):
         read("query { x }")
+
+
+@pytest.mark.parametrize(("call", "answer"), [
+    (lambda github: github.graphql("mutation { x }"), _Response(200, {"data": None})),
+    (lambda github: github.rest("PATCH", "/repos/o/r/issues/5", {"title": "t"}), _NotJson()),
+    (lambda github: github.rest("POST", "/repos/o/r/issues", {"title": "t"}), _Response(201)),
+], ids=["mutation-no-data", "patch-not-json", "post-empty"])
+def test_an_answer_quill_cannot_read_to_a_write_says_github_answered_it(call, answer):
+    """GitHub answered the write, so it may stand: the error says so and to read the tracker
+    back, as a write's 5xx does, and the write is sent once (plan#1812's class)."""
+    session = _Session(answer, _Response(200, {"ok": 1}))
+    with pytest.raises(GitHubError, match="; GitHub answered the write, which quill never "
+                                          "re-sends: read the tracker back before running "
+                                          "the command again$"):
+        call(GitHub("t", session))
+    assert len(session.sent) == 1
+
+
+@pytest.mark.parametrize("call", [
+    lambda github: github.graphql("query { x }"),
+    lambda github: github.rest("GET", "/repos/o/r"),
+], ids=["query", "get"])
+def test_an_answer_quill_cannot_read_to_a_read_says_nothing_of_a_write(call):
+    """A read's unreadable answer names the request and no write."""
+    with pytest.raises(GitHubError) as raised:
+        call(GitHub("t", _Session(_NotJson())))
+    assert "write" not in str(raised.value)
+
+
+def test_only_a_delete_may_be_answered_with_an_empty_body():
+    """GitHub answers 204 No Content to a DELETE; every other REST request quill sends is
+    answered a JSON body its caller reads, so an empty one is refused (plan#1812).  GraphQL's
+    is refused for holding no data object (the test above)."""
+    assert GitHub("t", _Session(_Response(204))).rest("DELETE", "/repos/o/r/x") is None
+    for method in ("GET", "POST", "PATCH"):
+        with pytest.raises(GitHubError, match=f"{method} .* -> 200 with an empty body"):
+            GitHub("t", _Session(_Response(200))).rest(method, "/repos/o/r/x", None)
+
+
+def test_a_read_re_sent_once_then_refused_says_one_re_send():
+    """The count of re-sends is read as English: one re-send, not "1 re-sends"."""
+    session = _Session(_Response(504, {"message": "cut off"}), _Response(404, {"message": "no"}))
+    with pytest.raises(GitHubError, match=r"-> 404 after 1 re-send: "):
+        _client(session, []).rest("GET", "/repos/o/r")

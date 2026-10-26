@@ -8,7 +8,7 @@ transfer side's record holds no amount and no figure source while every other
 movement holds both, by database CHECKs; destructive: two columns emptied on
 every side record and their NOT NULL dropped)
 
-Plan step **balance:X-bi-6-4d-2** of ``docs/audits/balance_architecture/README.md``
+Plan step **balance:X-bi-6-4d-2**, card plan#1175
 (its 4d-4 half, second commit).  Revision ``993eae6ade80`` gave a settled
 transfer's figure and who wrote it a home on the transfer
 (``budget.transfers.settled_figure`` / ``settled_figure_source_id``) and every

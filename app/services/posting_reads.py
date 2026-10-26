@@ -104,13 +104,12 @@ class PostingError(ShekelError):
     """A posting-ledger invariant was violated and the write was refused.
 
     Raised for the should-never-happen data-integrity failures the posting
-    services guard (a real account with no paired ledger account; a settled
-    transfer with no active income shadow; a caller-supplied set of legs that
-    does not balance; a ``None`` scenario in a reconciliation helper).  These
-    are not user-input errors -- the chart-of-accounts pairing and the
-    two-shadow transfer invariant are guaranteed upstream -- so a violation
-    here means a broken invariant that must fail loudly rather than post a
-    wrong or unbalanced entry.
+    services guard (a real account with no paired ledger account; a
+    caller-supplied set of legs that does not balance; a ``None`` scenario in
+    a reconciliation helper).  These are not user-input errors -- the
+    chart-of-accounts pairing is guaranteed upstream -- so a violation here
+    means a broken invariant that must fail loudly rather than post a wrong
+    or unbalanced entry.
     """
 
 

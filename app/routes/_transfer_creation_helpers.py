@@ -33,10 +33,11 @@ service because every helper consumes Flask globals (``request``,
 ``flash``, ``redirect``, ``url_for``, ``current_user`` -- the redirect /
 url_for pair via :class:`~app.routes._redirect_target.RedirectTarget`);
 ``CLAUDE.md::Architecture`` keeps services isolated from Flask.  None of
-these helpers create or mutate transfer shadow transactions directly --
-shadow atomicity stays inside ``transfer_recurrence.generate_for_template``
-and ``transfer_service`` -- so the transfer invariants are unaffected by
-routing a call through this module.
+these helpers create or mutate a transfer directly -- every write stays
+inside ``transfer_recurrence.generate_for_template`` and
+``transfer_service`` -- so routing a call through this module keeps the
+rule that every write of a transfer goes through ``transfer_service``
+(the transfer paragraph of ``CLAUDE.md``'s Architecture).
 """
 import logging
 from decimal import Decimal

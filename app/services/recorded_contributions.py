@@ -134,10 +134,11 @@ def load_shadow_income_contributions_for_accounts(
         alone flipped ``retirement_projection``'s ``none_linked`` for an
         account whose contributions were all Cancelled, telling the owner to
         link a contribution that already exists.  It is read off the PARENT
-        transfers since plan step balance:X-bi-6a -- every transfer has its
-        income shadow and every income shadow its transfer (Transfer
-        Invariants 1 and 2), so the two readings are one set, and the parent
-        is the one that survives ``X-bi-6``.
+        transfers since plan step balance:X-bi-6a -- every transfer had its
+        income shadow and every income shadow its transfer then (Transfer
+        Invariants 1 and 2), so the two readings were one set, and the parent
+        is the one that survived ``balance:X-bi-6-4d-2``'s delete of the
+        shadows.
 
     Raises:
         AmountUnresolvable: From the amount model, for a contribution whose

@@ -577,8 +577,9 @@ def settled_items(periods: "list[int] | Query") -> "tuple[Query, Query]":
 
     "Settled" is the canonical ``balance_predicates.settled_status_ids``
     (Paid or Received), asked of a row's status and of a transfer's OWN
-    status (plan step ``balance:X-bi-6-4a-3``): a transfer's legs carry its
-    status (Transfer Invariant 3), and ``X-bi-6``'s end is status in one
+    status (plan step ``balance:X-bi-6-4a-3``): a transfer is one row, so its
+    own status is the only one it has (the transfer paragraph of
+    ``CLAUDE.md``'s Architecture), which is ``X-bi-6``'s end: status in one
     row.  The lock classifier's ``SETTLED_TXN`` and the reset gate's first
     count (``pay_period_gates.settled_transaction_count``) both read this,
     so a row that does not lock a period cannot block a reset.

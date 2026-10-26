@@ -124,7 +124,7 @@ def pricing_load_options() -> tuple:
       than only on its no-``due_date`` fallback, so the relationship is read on
       every call.  **It was the SHADOW's own period until plan step X-au-f-2**,
       where ruling R-BAL10 moved the answer to the parent; the parent's period
-      is the same value (Transfer Invariant 3) read from the row that now
+      was the same value (Transfer Invariant 3), read from the row that now
       carries the rule.
     * ``Transaction.pay_period`` -- **no amount RULE reads this since plan step
       X-au-f-2**, and it is kept rather than dropped because the drop is a

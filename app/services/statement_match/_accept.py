@@ -123,10 +123,10 @@ what an unstated deliberate asymmetry looks like.
 **The settle verbs are the app's own, never restated -- and the dispatch that
 chooses between them is** :mod:`._moving` **'s now**, not this module's.  An
 ordinary row goes through ``transaction_service.apply_requested_status``, the
-route layer's one status entry point; a transfer SHADOW through
-``transfer_service``, because ``CLAUDE.md`` transfer invariant 4 admits no
-direct mutation of one and ``settle_transaction`` refuses it outright; a
-purchase through ``entry_service.update_entry``.  A matcher that stamped
+route layer's one status entry point; one side of a TRANSFER (a LEG or a
+leg's payment) through ``transfer_service`` on the TRANSFER, because every
+write of a transfer goes through it (the transfer paragraph of ``CLAUDE.md``'s
+Architecture); a purchase through ``entry_service.update_entry``.  A matcher that stamped
 ``settled_on`` itself would be a fourth settle door, which is exactly what
 ruling **R-FA** exists to prevent.  It is restated here rather than deleted
 because :func:`record_match` still owns the ORDER those doors run in and the

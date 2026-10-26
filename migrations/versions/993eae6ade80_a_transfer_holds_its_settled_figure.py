@@ -7,7 +7,7 @@ Review: developer, 2026-10-22 (ruling R-BAL365: a settled transfer stores its
 figure and who wrote it, 0.00 for a close of nothing; ruling R-BAL366: the
 figure lives on the transfer and a side's record holds none)
 
-Plan step **balance:X-bi-6-4d-2** of ``docs/audits/balance_architecture/README.md``
+Plan step **balance:X-bi-6-4d-2**, card plan#1175
 (its 4d-4 half, first commit).  **A settled transfer's figure had two homes**:
 each side's payment record carried ``amount`` and ``figure_source_id``, and the
 one writer (the status seam's Transfer arm) wrote the same pair onto both.  The

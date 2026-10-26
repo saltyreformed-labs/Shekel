@@ -482,9 +482,10 @@ class CandidateRow:  # pylint: disable=too-many-instance-attributes
 
         The two facts it reads are the row's own, and each is stated once:
 
-        * one side of a TRANSFER cannot be corrected alone -- ``CLAUDE.md``
-          transfer invariant 3 holds both sides equal to the parent, so the
-          correction is to the TRANSFER.  :attr:`transfer_id` is that fact,
+        * one side of a TRANSFER cannot be corrected alone -- a transfer is
+          one row, whose one figure both of its sides carry (the transfer
+          paragraph of ``CLAUDE.md``'s Architecture), so the correction is
+          to the TRANSFER.  :attr:`transfer_id` is that fact,
           for a LEG and a leg's payment alike;
         * a row whose figure is not its own to state cannot be corrected at
           all, because the next sibling write reverts it (finding **N-252**).

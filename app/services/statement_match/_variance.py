@@ -268,9 +268,11 @@ def _reject_uncorrectable_row(
       the sentence below is written for the payback -- through ``X-bi-4a``'s
       first cut it named the envelope's purchases, and an owner reading it
       beside a payback was told to fix a purchase the row does not hold;
-    * a transfer SHADOW.  ``CLAUDE.md`` transfer invariant 3 holds a shadow's
-      amount equal to its parent's, so correcting one means correcting the
-      TRANSFER, which is not this door.
+    * one side of a TRANSFER (:attr:`~._subjects.CandidateRow.transfer_id`,
+      a LEG or a leg's payment).  A transfer is one row, whose one figure
+      both of its sides carry (the transfer paragraph of ``CLAUDE.md``'s
+      Architecture), so correcting one side means correcting the TRANSFER,
+      which is not this door.
 
     **BOTH are asked of every member of a GROUP too** (plan step X-f6d-4), and
     that is a correction rather than a widening.  A first version of this step

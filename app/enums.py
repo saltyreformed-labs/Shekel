@@ -669,9 +669,10 @@ class AmountSourceEnum(enum.Enum):
                            ``budget.transaction_templates``, or
                            ``Transfer.transfer_template_id`` ->
                            ``budget.transfer_templates``.
-        parent_transfer -- this row is a transfer SHADOW and is worth exactly
-                           what its parent transfer is (``transfer_id``), which
-                           is Transfer Invariant 3 read rather than maintained.
+        parent_transfer -- this row was a transfer SHADOW, worth exactly what
+                           its parent was (``transfer_id``): Transfer Invariant
+                           3 read, not maintained.  No row has a parent since
+                           plan step ``balance:X-bi-6-4d-2`` deleted the shadows.
 
     **These name the RELATION that prices the row, not the RULE that computes
     the figure, and the difference is a developer ruling (2026-08-12) amending

@@ -146,8 +146,8 @@ def leg_candidate(
     nor a payback worth another row's spend, so the bank is taken to show it
     alone (:attr:`~._subjects.CandidateRow.not_shown_alone`).  Whether the
     bank's figure may be WRITTEN to it is a different question, answered
-    ``no`` by its ``transfer_id`` (transfer invariant 3:
-    :attr:`~._subjects.CandidateRow.figure_is_correctable`).
+    ``no`` by its ``transfer_id`` (one side of a transfer cannot be corrected
+    alone: :attr:`~._subjects.CandidateRow.figure_is_correctable`).
 
     Args:
         leg: The still-planned leg (its transfer Projected, this side holding

@@ -9,7 +9,7 @@ CHECK, and the two side keys; R-BAL107: the transfer owner keys; R-BAL168: the
 side keys ON UPDATE CASCADE; R-CC89 / R-CC92 carried to a transfer: the
 deleted-row triggers re-created with their transfer arm)
 
-Plan step **balance:X-bi-6-4d-2** of ``docs/audits/balance_architecture/README.md``
+Plan step **balance:X-bi-6-4d-2**, card plan#1175
 (design ``X-bi-6-4d`` D1).  **A transfer side's payment record is filed under
 the TRANSFER, not under the hidden twin row the transfer service keeps for that
 side.**  Until now each side's record hung off its twin

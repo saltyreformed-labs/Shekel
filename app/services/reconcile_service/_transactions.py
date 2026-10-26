@@ -291,11 +291,14 @@ def _own_clauses(statement: _rows.Statement) -> tuple:
     plan step ``credit_card:CC-5-4b``, which made it each scope's; its
     complement is :func:`_settlement_clauses`' first.
 
-    ``transfer_id IS NULL`` -- a transfer settles through
-    ``transfer_service.settle_transfer`` so both legs and the parent move
-    together (``CLAUDE.md`` transfer invariant 3), and
-    ``transaction_service.settle_transaction`` REFUSES a shadow, so admitting
-    one here would turn a design boundary into a 400.  A transfer is the
+    ``transfer_id IS NULL`` -- a transfer is one row and settles through
+    ``transfer_service.settle_transfer`` (the transfer paragraph of
+    ``CLAUDE.md``'s Architecture), and
+    ``transaction_service.settle_transaction`` REFUSES a row naming one, so
+    admitting one here would turn a design boundary into a 400.  No row
+    names a transfer since plan step ``balance:X-bi-6-4d-2``
+    (``ck_transactions_names_no_transfer``), so the clause excludes no
+    stored row.  A transfer is the
     transfer arm's (:mod:`._transfers`), which offers its LEG off
     ``budget.transfers`` since leaf ``balance:X-bi-6-4c-2``; until then its
     clause was this one's complement over this table.

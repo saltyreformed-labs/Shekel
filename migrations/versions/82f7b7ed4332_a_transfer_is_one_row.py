@@ -8,7 +8,7 @@ release that stops their upkeep) and 2026-10-09 (ruling R-BAL258: the database
 refuses a new twin; ruling R-BAL260: the downgrade restores each twin from a
 kept copy)
 
-Plan step **balance:X-bi-6-4d-2** of ``docs/audits/balance_architecture/README.md``
+Plan step **balance:X-bi-6-4d-2**, card plan#1175
 (design ``X-bi-6-4d`` D6).  **Every transfer had two hidden twin
 ``budget.transactions`` rows**, one on each account, which the transfer service
 created with it and kept equal to it.  Since ``e616adf7fe22`` (the revision

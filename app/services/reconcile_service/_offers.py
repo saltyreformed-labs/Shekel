@@ -104,10 +104,12 @@ class OfferKind(enum.Enum):
 
         Two kinds carry one, and each is a fact about the SECTION rather than
         about any row.  Ticking a transfer settles the matching row on the
-        other account too, because a transfer's two legs and its parent always
-        move together (``CLAUDE.md`` transfer invariant 3); a user who reads the
-        panel as "this account's statement" would otherwise be surprised by a
-        second account moving.  And every row under "Paid from this account"
+        other account too, because a transfer is one row and its settle moves
+        both of its sides together (the transfer paragraph at the end of
+        ``CLAUDE.md``'s Architecture;
+        ``transfer_service._status.apply_status_to_all_three``); a user who
+        reads the panel as "this account's statement" would otherwise be
+        surprised by a second account moving.  And every row under "Paid from this account"
         was recorded here and then reopened, and a tick records it here on the
         statement's day (ruling **R-CC111**'s note, plan step
         ``credit_card:CC-5-4b``).  Both are per SECTION and not per row because

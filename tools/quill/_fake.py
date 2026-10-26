@@ -36,7 +36,7 @@ from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Card, Child, Comment, Edit
-from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN
+from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, unmarked
 
 
 class FakeBoard:
@@ -271,7 +271,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
             raise GitHubError(404, f'DELETE .../issues/{number}/labels/{FILING} -> 404: '
                                    '{"message":"Label does not exist"}')
         self.writes.append(("unmark", number))
-        self._set(number, labels=tuple(label for label in labels if label != FILING))
+        self._set(number, labels=unmarked(labels))
 
     def add_child(self, parent, child):
         """Make ``child`` a sub-issue of ``parent``; the tool never re-parents a card, in the

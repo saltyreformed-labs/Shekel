@@ -51,7 +51,7 @@ from tools.quill.check import (
     ruling_question,
     violations,
 )
-from tools.quill.setup_tracker import FILING, TASK
+from tools.quill.setup_tracker import FILING, TASK, unmarked
 
 
 @dataclass(frozen=True)
@@ -276,7 +276,7 @@ def _same_filing(tracker: Tracker, draft: Draft, parent: Card | None) -> Card | 
 def _refuse_relabel(card: Card, draft: Draft) -> None:
     """Refuse a card with ``draft``'s kind, title and text whose labels, the filing mark
     aside, are not ``draft``'s: relabelling is a person's call."""
-    labels = sorted(label for label in card.labels if label != FILING)
+    labels = sorted(unmarked(card.labels))
     if labels != sorted(draft.labels):
         raise Refused(f"{_label(card)} has this kind, title and text but the labels "
                       f"{labels}, not {sorted(draft.labels)}: relabel it by hand")

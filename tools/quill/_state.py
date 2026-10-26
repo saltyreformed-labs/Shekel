@@ -71,8 +71,9 @@ does every leaf under it.
 (ruling ``balance:R-BAL395``, :data:`OWNED`), never as its sub-issue, so a step's
 progress counts only its pieces: its one blocker is its owner.  A finding's owner is a step
 a branch builds (:func:`can_own`; plan#1784, "One owner, always a leaf"), never one split
-into smaller steps, so some pull request always owes it, and an open finding whose owner is
-not one such step is reported (:func:`_owner_lost`).
+into smaller steps, so some pull request always owes it (CI's landing check refuses that
+pull request while it does, ``landing``'s rule 7), and an open finding whose owner is not
+one such step is reported (:func:`_owner_lost`).
 
 **A task is a piece of one step or finding** (ruling ``balance:R-BAL386``): a sub-issue
 of type ``task`` under that card, a commit inside its one pull request, never offered,

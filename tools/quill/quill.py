@@ -28,7 +28,9 @@ the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
 A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
 ``finding-file`` writes its ship marker on its owner's branch, for the commit that fixes it,
 and ``hand`` hands an open finding from its one owner to another step, a step a branch
-builds (ruling plan#1784, :mod:`_findings`).
+builds (ruling plan#1784, :mod:`_findings`); ``block``, ``drop`` and the split keep that one
+owner, and CI's landing check refuses the owner's pull request while it owes one neither
+marked nor handed on, and a leaf's while a step above it owns one (``landing``, rule 7).
 A LEAF (``file step --parent``) is filed in its split step's milestone while the split
 step holds one, which the filing then clears; else in none, the milestones its leaves
 hold named for a person to set one on the web (``_filing._leaf_milestone``).  A leaf

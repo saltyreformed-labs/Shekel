@@ -576,11 +576,9 @@ def _unwindowed_contributing_rows(
         # What a CONTRIBUTION pass reads, stated by the valuation rather than
         # copied here (plan step X-au-g-2c-2): the pricing set a still-Projected
         # row is resolved through, plus its entries for the unspent-budget
-        # reservation.  The Projected arm carries no transfer shadow since plan
-        # step X-bi-6a, so the transfer chain inside this set serves nothing
-        # here; it is the valuation's own statement of what a contribution
-        # pass MAY read, and narrowing it per caller is the copied-clause
-        # shape this loader exists to avoid.
+        # reservation.  It is the valuation's own statement of what a
+        # contribution pass MAY read, and narrowing it per caller is the
+        # copied-clause shape this loader exists to avoid.
         .options(*valuation_load_options())
         .filter(
             Transaction.account_id == account_id,

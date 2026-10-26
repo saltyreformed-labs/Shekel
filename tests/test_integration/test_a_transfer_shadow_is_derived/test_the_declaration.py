@@ -131,13 +131,15 @@ class TestTheAmountModelsOwnEagerLoad:
     loads -- the cash fold's plan-half loader -- with and without
     :func:`~app.utils.amount_relationships.transfer_pricing_load_options`,
     priced by :func:`~app.services.cash_ledger.leg_amounts_by_key`, the batch
-    the grid publishes.  ``pricing_load_options`` composes that same tuple
-    under ``Transaction.transfer``, so the parent's pricing graph is the one
-    being graded in both shapes.
+    the grid publishes.  ``pricing_load_options`` composed that same tuple
+    under ``Transaction.transfer`` until the same step deleted that entry,
+    which loaded nothing once no row named a transfer, so
+    ``transfer_pricing_load_options`` is the one statement of a transfer's
+    pricing graph and the one this class grades.
 
     **The tuple's zero-statement claim was pinned before this step too**: the
     shadow-row pair priced rows loaded with ``pricing_load_options``, which
-    composes this same tuple, and
+    composed this same tuple then, and
     ``test_loan_installments.test_the_priced_feed_reads_every_pricing_table``
     pins it by a statement count.  What is new here is narrower: the old
     warm-up priced one leg, which loaded the one definition's ``settings``

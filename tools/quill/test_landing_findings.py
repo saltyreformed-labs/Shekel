@@ -325,3 +325,24 @@ def test_the_records_door_passes_another_cards_marker_from_a_claim_as_from_any_b
     github = Lookup(tracker(card_node(2), card_node(7)))
     assert check(base, records, "card/7", base="main", github=github)[:2] == (
         0, verdict("card/7", 2, 0, "main") + "\n")
+
+
+def test_a_step_the_records_door_records_is_refused_while_it_owns_an_open_finding(check, code):
+    """A change into main through the records-only door (R-BAL363) adds the marker of step 2,
+    which owns open finding 5: refused as a claim's card would be (plan#1784, every door keeps
+    the rule), naming the marker the same change may add and the hand-off.  The same change
+    adding finding 5's marker too, through the same door, lands."""
+    root, base = code
+    github = Lookup(tracker(card_node(2), card_node(5, "finding", blocked_by=(2,))))
+    records = commit_files(root, base, "records", {marker(2): "landed before records\n"})
+    status, out, _ = check(base, records, "records", base="main", github=github)
+    assert (status, out.splitlines()) == (1, [
+        "REFUSED -- plan/ships/5: records records card 2, but holds no marker for finding "
+        "plan#5, which it owns (R-BAL395) and which is neither shipped nor dropped: write its "
+        "marker in this change too, through the same door (R-BAL363), if the work it records "
+        "fixed it, or hand it to the step that does (quill hand plan#5 --to plan#S)",
+        verdict("records", 1, 1, "main")])
+    both = commit_files(root, base, "both", {marker(2): "landed before records\n",
+                                             marker(5): "landed before records\n"})
+    assert check(base, both, "records", base="main", github=github)[:2] == (
+        0, verdict("records", 2, 0, "main") + "\n")

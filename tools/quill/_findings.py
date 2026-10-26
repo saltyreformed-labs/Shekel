@@ -289,30 +289,45 @@ def foreign(card: BareCard, claim: BareCard | None) -> str | None:
 
 
 def unfixed(reader: CardReader, claim: BareCard, shipped: Collection[int],
-            held: dict[int, BareCard]) -> list[str]:
+            held: dict[int, BareCard], door: str | None = None) -> list[str]:
     """The owed-finding arm (ruling plan#1777): one sentence for each finding ``claim``, whose
     card the change from its claim records, blocks that is still owed once the change and the
     other integration branch meet (:func:`owed`, ``shipped`` git's answer there): its marker
     is written in the commit that fixes it (:func:`cmd_finding_file`), or it is handed to the
     step that fixes it (:func:`cmd_hand`).  One blocked by ``claim`` and by another card
     names no one owner, so no pull request owes it: refused too (fail closed), with how to
-    mend it (:func:`unowned`).  ``held``: the cards already read (:func:`owned`)."""
-    reasons, head = [], _git.card_branch(claim.number)
+    mend it (:func:`unowned`).  ``held``: the cards already read (:func:`owned`).  ``door``: the
+    change's branch when ``claim`` is a step the records-only door records (:func:`unrecorded`),
+    whose marker a claim's ``quill finding-file`` cannot write, so it rides the same change."""
+    reasons, head = [], door or _git.card_branch(claim.number)
+    write = ("write its marker in this change too, through the same door (R-BAL363), if the "
+             "work it records fixed it" if door else "write it in the commit that fixes it "
+             "(quill finding-file plan#{number})")
     for card in owned(reader, claim.number, shipped, held):
         path, number = _git.marker(card.number), card.number
         if owner(card) == claim.number:
             reasons.append(
                 f"{path}: {head} records card {claim.number}, but holds no marker for finding "
                 f"plan#{number}, which it owns (R-BAL395) and which is neither shipped nor "
-                f"dropped: write it in the commit that fixes it (quill finding-file "
-                f"plan#{number}), or hand it to the step that does (quill hand plan#{number} "
-                "--to plan#S)")
+                f"dropped: {write.format(number=number)}, or hand it to the step that does "
+                f"(quill hand plan#{number} --to plan#S)")
         else:
             reasons.append(
                 f"{path}: {head} records card {claim.number}, but open finding plan#{number}, "
                 "which it blocks, has no one owner, so no pull request owes it (R-BAL395, "
                 f"plan#1784): {unowned(card)}")
     return reasons
+
+
+def unrecorded(reader: CardReader, door: Collection[int], head: str, shipped: Collection[int],
+               held: dict[int, BareCard]) -> list[str]:
+    """Every door keeps the one-owner rule (ruling plan#1784; plan#1772's review note 9): a
+    step whose marker comes through the records-only door (``landing``'s rule 6, ``door``
+    the cards it passes, ``head`` the change's branch) is refused while it owes a finding, as
+    a claim's card is (:func:`unfixed`), so no step lands done owning one.  ``held``: the cards
+    already read, the door's among them (:func:`owned`)."""
+    return [reason for number in sorted(door) if number in held and held[number].kind == "step"
+            for reason in unfixed(reader, held[number], shipped, held, head)]
 
 
 def unhanded(reader: CardReader, claim: BareCard, cards: Mapping[int, BareCard],

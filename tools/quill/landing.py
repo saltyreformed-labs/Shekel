@@ -83,7 +83,8 @@ it leaves as it was (rule 8):**
    and plan#1784).  A step above N is split into smaller steps, which no branch builds, so
    only a hand edit on the web, or a split's filing cut short, leaves it a finding: held here.
    One blocked by N and another names no one owner, and is refused too (fail closed).  A
-   ruling or a step a card blocks is passed over.
+   ruling or a step a card blocks is passed over.  A step rule 6's door records is held to
+   the findings it owes the same way (``_findings.unrecorded``, plan#1784).
 8. **No marker the change leaves as M's first parent holds it may change what ``dev`` and
    ``main`` together say of its card** (``R-BAL385``, widened by ``R-BAL390``), which rules
    1-7, reading what a change writes, never see.  A resync built by hand writes nothing on
@@ -864,7 +865,8 @@ def refusals(landing: Landing, read: Mapping[str, set[int]], shipped: Iterable[i
     claim's branch (:func:`_state.names_no_task`: no task, or one under another card,
     ``R-BAL386``), by task, then for each task the claim's card owes (:func:`_owed`), each
     finding it owes (:func:`_findings.unfixed`) and each a step above it owes
-    (:func:`_findings.unhanded`); ``read`` holds the cards (under :data:`_git.MARKERS`) and
+    (:func:`_findings.unhanded`), and each a step rule 6's door records owes
+    (:func:`_findings.unrecorded`); ``read`` holds the cards (under :data:`_git.MARKERS`) and
     the tasks (under :data:`_git.TASKS`), and ``shipped`` is git's answer once the change and
     the other integration branch meet.  The tracker is read through the reader ``connect``
     makes: the cards and the tasks the change writes in one read, then each card a decision
@@ -898,6 +900,7 @@ def refusals(landing: Landing, read: Mapping[str, set[int]], shipped: Iterable[i
         reasons += _owed(landing, recorded, held, reader)
         reasons += _findings.unfixed(reader, recorded, shipped, held)
         reasons += _findings.unhanded(reader, recorded, cards, shipped, held)
+    reasons += _findings.unrecorded(reader, landing.facts.door, head, shipped, held)
     return reasons
 
 

@@ -167,12 +167,12 @@ root; never silence it with a bare disable.
   a done file may not change what `dev` and `main` together say of that card (R-BAL385, R-BAL390); a
   pull request from `card/N` is refused while a task under N that was not dropped lacks its file, or
   while N or a step above it owns an open finding neither marked fixed nor handed on (plan#1777,
-  plan#1784); and a change to what production runs must add, delete or change a card's done file,
-  from any branch, a release or a resync passing only with the done files it carries (R-BAL362): the
-  files the image holds, as Docker reads its ignore file (`.dockerignore`, R-BAL364's one list of
-  them), and the files outside the image that build or run production, which
-  `tools/quill/_production.py` lists, their one list (R-BAL400, R-BAL401). Its module docstring
-  states every rule.
+  plan#1784), and a records-only change while a step it records owns one; and a change to what
+  production runs must add, delete or change a card's done file, from any branch, a release or a
+  resync passing only with the done files it carries (R-BAL362): the files the image holds, as
+  Docker reads its ignore file (`.dockerignore`, R-BAL364's one list of them), and the files outside
+  the image that build or run production, which `tools/quill/_production.py` lists, their one list
+  (R-BAL400, R-BAL401). Its module docstring states every rule.
 - **Archived documents** (`tools/ci/archive.py`): every document under an `archive/` or
   `historical/` directory opens with the `> **ARCHIVED.` banner, and CI refuses one that does not.
 - **Judgment the linters cannot mechanize** (float-on-money boundaries, IDOR, transfer invariants,

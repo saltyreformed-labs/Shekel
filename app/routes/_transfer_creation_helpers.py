@@ -232,7 +232,8 @@ def flush_template_or_namedup_redirect(
 
 
 #: The transfer-template kind for the shared regenerate-or-chooser flow.
-#: Mutations route through transfer_recurrence (shadow-safe resolve).  It
+#: Mutations route through transfer_recurrence, which writes through
+#: transfer_service.  It
 #: lived in ``transfers/templates.py`` beside the update door until plan step
 #: R7d-g-2, when the entry helper that brings a moved standing payment's rows
 #: along (``_standing_payment.sync_loan_payment_start_or_refuse``, ruling
@@ -263,9 +264,9 @@ def generate_transfers_for_all_periods(template: TransferTemplate) -> None:
 
     The shared ``resolve baseline scenario -> load the owner's schedule ->
     transfer_recurrence.generate_for_template`` idiom used by the
-    investment / loan / transfers create paths.  Shadow-transaction
-    atomicity is owned by ``generate_for_template``; this helper only
-    orchestrates its inputs.  Its ``effective_from`` went at plan step
+    investment / loan / transfers create paths.  Every write of a transfer
+    is ``generate_for_template``'s, through ``transfer_service``; this
+    helper only orchestrates its inputs.  Its ``effective_from`` went at plan step
     R7d-g-2 with its one caller, the unarchive door's fill-forward.
 
     **It REQUIRES the baseline scenario (ruling R-BW), and the silent no-op it

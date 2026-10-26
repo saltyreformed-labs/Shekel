@@ -33,14 +33,17 @@ and likewise its only per-row un-delete outside archiving and unarchiving the
 whole template.
 
 *The qualifier is load-bearing and a first draft omitted it.*  An AST census of
-every writer of the two flags finds nine that clear one, not six: besides the
+every writer of the two flags found nine that clear one, not six: besides the
 create paths, ``transfer_service._update`` and ``._restore``
-clear ``is_override`` on a shadow through a VARIABLE
+cleared ``is_override`` on a shadow through a VARIABLE
 (``shadow.is_override = flag``), which a grep for the literal cannot see, and
-``._restore`` un-deletes both legs.
-Those doors reach SHADOWS only, and ``ck_transactions_one_pricing_link`` makes
-``transfer_id`` exclusive with ``template_id`` -- so the conclusion holds by the
-schema rather than by the count, which is the stronger ground anyway.
+``._restore`` un-deleted both legs.
+Those doors reached SHADOWS only, and ``ck_transactions_one_pricing_link`` made
+``transfer_id`` exclusive with ``template_id`` -- so the conclusion held by the
+schema rather than by the count, which is the stronger ground anyway.  Since
+plan step ``balance:X-bi-6-4d-2`` no transaction row names a transfer
+(``ck_transactions_names_no_transfer``), and those two doors write the flags
+on the transfer itself, so they reach no transaction row at all.
 
 Deleting the decision would have stranded every
 overridden row permanently OWN, 40 of them on the 2026-09-03 production clone,
@@ -184,8 +187,9 @@ def resolve_conflicts(
         ``None`` when none is -- always ``None`` for "keep".
 
     Raises:
-        ValidationError: A transfer shadow's id was handed in; nothing is
-            changed.
+        ValidationError: The id of a row naming a transfer was handed in;
+            nothing is changed.  No stored row names one since plan step
+            ``balance:X-bi-6-4d-2``.
     """
     if action == "keep":
         # Nothing to do -- the user wants to keep their overrides.
@@ -224,15 +228,16 @@ def resolve_conflicts(
                 skipped_count += 1
                 continue
 
-            # Transfer shadow guard (CLAUDE.md Transfer invariant 4 / F-007).
-            # Shadow rows (transfer_id IS NOT NULL) are owned by the transfer
-            # service.  resolve_conflicts is reachable only from the
-            # transaction-template regeneration flow, which never produces
-            # shadow IDs in its conflict set; a shadow ID arriving here is
-            # therefore an internal logic error or an attacker probe.
-            # Mutating a shadow directly would desynchronise the parent
-            # transfer's amount/status/period from its sibling shadow and
-            # silently corrupt the user's balance projections.  Refuse.
+            # Transfer guard (F-007): every write of a transfer goes through
+            # transfer_service (the transfer paragraph at the end of
+            # CLAUDE.md's Architecture).  No stored row names a transfer
+            # since plan step balance:X-bi-6-4d-2
+            # (ck_transactions_names_no_transfer), and resolve_conflicts is
+            # reachable only from the transaction-template regeneration
+            # flow, so a row naming one arriving here is an internal logic
+            # error or an attacker probe.  Refuse.  The guard, its event
+            # and its message go with the column at plan step
+            # balance:X-bi-6-5.
             if txn.transfer_id is not None:
                 log_event(
                     logger, logging.WARNING,

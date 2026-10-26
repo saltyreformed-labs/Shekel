@@ -142,9 +142,10 @@ def apply_requested_status(
 
     Args:
         txn: The transaction whose status the door is changing.  Must be a
-            REGULAR row: a transfer shadow's status is its parent's
-            (``transfer_service.update_transfer``), and the PATCH route branches
-            a shadow away before it reaches here.
+            REGULAR row: a transfer's status is the transfer's own
+            (``transfer_service.update_transfer``), and no stored row names a
+            transfer since plan step ``balance:X-bi-6-4d-2``
+            (``ck_transactions_names_no_transfer``).
         new_status_id: The ``ref.statuses.id`` the door asked for -- the
             SUBMITTED status when the form carried one, else the row's own (an
             edit that changes only the settle day is an identity transition).

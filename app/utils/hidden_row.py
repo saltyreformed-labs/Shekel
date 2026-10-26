@@ -83,7 +83,7 @@ class HiddenRow:
         **The ONE producer of** :attr:`archived`: the row's recurring item is
         inactive.  A row whose item is archived says so, however it was hidden
         (ruling **R-CC107**'s last sentence).  A row with no item -- a CC
-        payback, a transfer shadow -- is never archived.
+        payback -- is never archived.
 
         **Read off the row's own definition** (``row.template``), as the
         request's owner lock left it.  Until plan step ``balance:X-bn`` it was
@@ -129,8 +129,9 @@ class HiddenRow:
         which would print "None was deleted".  The from-side's and not the
         to-side's because the arm refuses the transfer once, before either
         side is written, and the from-side comes first where
-        ``transfer_service._side_days.pair_fallback_day`` orders the two
-        sides for one answer.  The
+        ``transfer_service._side_days.pair_fallback_day`` reads the two
+        sides, expense then income as its callers hand them, for one
+        answer.  The
         archive writes ``TransferTemplate.is_active`` and soft-deletes
         through ``transfer_service.delete_transfer``, which hands the status
         seam no record, so no caller of this sees an archive it staged

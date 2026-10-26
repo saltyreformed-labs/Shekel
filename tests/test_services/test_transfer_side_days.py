@@ -136,10 +136,19 @@ class TestPairFallbackDay:
     """The day a pair with no evidence shares: the first recorded, else today."""
 
     def test_the_first_recorded_day_in_the_given_order_wins(self):
-        """The caller orders the legs; the first one holding a day answers."""
+        """The caller orders the legs; the first one holding a day answers.
+
+        Every caller hands the pair expense then income, so the expense
+        side's day answers even when it is the later one, and the income
+        side's answers when the expense side records none.
+        """
         assert pair_fallback_day(
             (None, _day(LATE, BORROWED), _day(EARLY, BORROWED)), TODAY,
         ) == LATE
+        assert pair_fallback_day(
+            (_day(LATE, ENTERED), _day(EARLY, OBSERVED)), TODAY,
+        ) == LATE
+        assert pair_fallback_day((None, _day(EARLY, OBSERVED)), TODAY) == EARLY
 
     def test_with_nothing_recorded_it_is_today(self):
         """A Paid press on a pair that never held a day borrows the press day."""

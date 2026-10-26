@@ -451,9 +451,11 @@ def _as_recorded(row: CandidateRow, scope: ReviewScope) -> CandidateRow:
     Plan step ``credit_card:CC-5-4a-1``, ruling **R-CC43**.  A PURCHASE and
     a SETTLEMENT are movements already and pass through.  A LEG is read back
     the same way through its TRANSFER, whose door settled both sides: this
-    side's covering movement, reached as the leg's record and never through
-    the shadow it hangs off (:func:`~._valuation.recorded_leg_payment`, leaf
-    ``balance:X-bi-6-4c-1``).  A TRANSACTION was
+    side's covering movement, reached as the leg's record
+    (:func:`~._valuation.recorded_leg_payment`, leaf
+    ``balance:X-bi-6-4c-1``); it hangs off the transfer by its side link since
+    plan step ``balance:X-bi-6-4d-2``, and off a shadow row until then.  A
+    TRANSACTION was
     a Projected row when the screen offered it and
     :func:`~._moving.move_members` has since settled it through its own
     door, so it now holds exactly one covering movement carrying what the

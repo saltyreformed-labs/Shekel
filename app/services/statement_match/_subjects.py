@@ -59,7 +59,8 @@ class RowKind(enum.Enum):
     this account (``transfer_service.leg_settle_amount``), its clock is the
     transfer's paycheck, and its door is the transfer's
     (``settle_transfer``).  It is keyed by the TRANSFER's id, not by the
-    hidden shadow row the transfer service still writes on this account:
+    hidden shadow row the transfer service wrote on this account until plan
+    step ``balance:X-bi-6-4d-2``:
     R-BAL87 makes a leg's identity ``(transfer, account)``, and on ONE
     account's screen the account is the scope's, so the transfer names the
     leg and the kind says it is one (R-BAL159) -- no identity test is asked
@@ -415,9 +416,10 @@ class CandidateRow:  # pylint: disable=too-many-instance-attributes
         for and the day the balance was asserted.
 
         **PURCHASES only, and that is a measured scope rather than a
-        half-finished one** (developer decision 2026-08-22).  The panel stamps
-        bills and transfer shadows identically, so the argument for widening
-        them is the same -- but the EVIDENCE is not, and neither is the risk.
+        half-finished one** (developer decision 2026-08-22).  The panel then
+        stamped bills and transfer shadows identically, so the argument for
+        widening them was the same -- but the EVIDENCE was not, and neither
+        was the risk.
         ``budget.transactions`` carries **zero** reconciled rows today, so that
         arm would ship on argument alone; and a purchase's floor is a database
         fact (``ck_transaction_entries_settled_not_before_purchase``) while a

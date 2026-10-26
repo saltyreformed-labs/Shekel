@@ -48,7 +48,7 @@ and the balance seam's ESTIMATED loan tier prices an occurrence no row answers
 yet through the same two, so a row and its estimate cannot part.
 
 **The LOAN PRICING pair is in this package, and plan step X-au-g-2a is what
-put it there.**  Amount rule 4 -- a loan payment's shadow is worth what the
+put it there.**  Amount rule 4 -- a loan payment's transfer is worth what the
 loan says that installment costs -- is a rule about a ROW'S AMOUNT, which is
 this package's question; its producer lived in ``loan_payment_service`` until
 that step, so :mod:`._amount_source` had to reach UP a tier to price a row and
@@ -88,12 +88,16 @@ derives them from the parent through
 :mod:`app.services.transfer_legs` and prices each by
 :func:`resolve_transfer_amount` -- the same figure amount rule 5 answered for
 the shadow row a leg replaces, with the shadow taken out of the walk.
-Transfer Invariant 5 (``CLAUDE.md``) states the split: the PLAN half of a
-transfer derives from ``budget.transfers``, and since plan step ``X-bi-4a`` a
-SETTLED side is its DATED covering movement (ruling **R-BAL80**) -- which hung
-off the side's shadow row in ``budget.transactions`` until plan step
-``balance:X-bi-6-4d-2`` and hangs off the transfer by its side link since --
-so the fold reads no AMOUNT off a transfer for a side that has settled.
+The split: the PLAN half of a transfer derives from ``budget.transfers``, and
+since plan step ``X-bi-4a`` a SETTLED side is its DATED covering movement
+(ruling **R-BAL80**) -- which hung off the side's shadow row in
+``budget.transactions`` until plan step ``balance:X-bi-6-4d-2`` and hangs off
+the transfer by its side link since.  The movement says where and when the
+money moved; how much is the figure the transfer stores once (rulings
+**R-BAL365**, **R-BAL366**: :attr:`~app.models.transfer.Transfer.settled_figure`,
+read by ``_cash_leg._moved_figure``; the transfer paragraph at the end of
+``CLAUDE.md``'s Architecture), so the fold reads no PLANNED amount for a side
+that has settled.
 **What the two halves could and could not double count, measured rather than
 claimed.**  A PROJECTED shadow could not be counted beside its leg: the plan
 excluded it by the same ``transfer_id`` test that identified it (the test still

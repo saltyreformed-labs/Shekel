@@ -336,9 +336,10 @@ def _moved_days(
     statement says nothing about the new one): a moved side borrows a staying
     side's evidence.  **When neither side holds evidence after the move --
     both sides moved, or the staying side's day was itself borrowed -- both
-    take ONE day, the EXPENSE side's recorded day** (``pair_fallback_day``'s
-    order), so a to-side that recorded 01-08 beside a from-side's 01-06 lands
-    on 01-06, two days earlier.  That is ruling **R-BAL142**'s rule that two
+    take ONE day, the first recorded day in expense-then-income order**
+    (``pair_fallback_day``: the EXPENSE side's when it records one, else the
+    income side's), so a to-side that recorded 01-08 beside a from-side's
+    01-06 lands on 01-06, two days earlier.  That is ruling **R-BAL142**'s rule that two
     borrowed sides share one day, and it is the only stable answer: two
     borrowed sides kept on different days would be pulled onto one by the
     next save that re-derives them.  Decided under ruling **R-BAL207** (the

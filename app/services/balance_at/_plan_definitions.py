@@ -58,8 +58,9 @@ def _answered_by_rows(
     row's identity is the occurrence it answers -- ``(transfer_template_id,
     scenario_id, occurs_on)``, the key both unique indexes carry since plan
     step R17 -- and that column was deliberately NOT mirrored onto the shadow
-    transactions the balance fold read money from until plan step
-    ``balance:X-bi-6-4d-2`` deleted them.  So "has this occurrence been
+    transactions the balance fold read the plan's money from until plan step
+    ``balance:X-bi-6a`` (plan step ``balance:X-bi-6-4d-2`` deleted the
+    shadows).  So "has this occurrence been
     answered" could not be asked of ``budget.transactions`` at all, and
     asking it of the parent rows through the one claim rule generation applies
     (:class:`~app.services._recurrence_common.OccurrenceClaims`, over the same

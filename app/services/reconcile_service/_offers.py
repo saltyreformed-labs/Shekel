@@ -6,9 +6,10 @@ one tickable purchase, the block it nests in, and the whole offer set.  They
 live together because they are ONE shape -- the panel's list -- and because
 every arm of the package contributes to them: the purchase arm fills
 :attr:`OutstandingGroup.purchases` today, and plan steps X-f2-c2 and X-f2-c3
-add the parent's own close tick, bills and transfer shadows to the same
-blocks.  A type per arm would put the panel's shape in three places and make
-the next arm's field a fourth.
+added the parent's own close tick, bills and transfer shadows (a transfer's
+LEG since leaf ``balance:X-bi-6-4c-2``) to the same blocks.  A type per arm
+would put the panel's shape in three places and make the next arm's field a
+fourth.
 
 Architecture (``CLAUDE.md``):
   - No Flask imports.  Frozen dataclasses, no behaviour beyond the two
@@ -43,8 +44,8 @@ class OfferKind(enum.Enum):
     under a heading reading "Bills" three lines below a summary counting it as a
     deposit: production's `$1,958.87` FSA reimbursement, captioned against
     itself on the one screen read beside a paper statement.  And a transfer
-    shadow is childless and correctable too, so it is INDISTINGUISHABLE from a
-    bill by those proxies -- meaning plan step X-f2-c3 would have had to rewrite
+    shadow was childless and correctable too, so it was INDISTINGUISHABLE from
+    a bill by those proxies -- meaning plan step X-f2-c3 would have had to rewrite
     the derivation inside a money commit, which is the exact rewrite R-FC and
     **R-EY** exist to prevent.  An arm knows what it produced; a renderer
     guessing from shape does not.
@@ -103,8 +104,8 @@ class OfferKind(enum.Enum):
         """Return the sentence printed UNDER this kind's section heading.
 
         Two kinds carry one, and each is a fact about the SECTION rather than
-        about any row.  Ticking a transfer settles the matching row on the
-        other account too, because a transfer is one row and its settle moves
+        about any row.  Ticking a transfer settles its other side, on the
+        other account, too, because a transfer is one row and its settle moves
         both of its sides together (the transfer paragraph at the end of
         ``CLAUDE.md``'s Architecture;
         ``transfer_service._status.apply_status_to_all_three``); a user who
@@ -489,10 +490,11 @@ class OutstandingGroup:
     Nothing in the purchase arm's scope asserts the parent is envelope-tracked
     -- the clauses ask for a projected, non-deleted parent on this account, and
     "it has purchases" is what makes it one in practice -- so the narrower name
-    would claim a classification no clause checks.  And plan step X-f2-c2 puts
-    BILLS and transfer shadows in this same set, neither of which is an
-    envelope, so the narrow name would have to be renamed inside a leaf that
-    moves money.
+    would claim a classification no clause checks.  And plan step X-f2-c2 put
+    BILLS and transfer shadows (a transfer's LEG since leaf
+    ``balance:X-bi-6-4c-2``) in this same set, neither of which is an
+    envelope, so the narrow name would have had to be renamed inside a leaf
+    that moves money.
 
     Attributes:
         key: The parent's identity, and the key the grouping is built on: a

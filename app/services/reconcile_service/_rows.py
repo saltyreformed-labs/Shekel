@@ -366,8 +366,10 @@ def outstanding_scope(statement: Statement, scope_clauses: tuple) -> list:
     **It is the TRANSACTION arm's scope since leaf ``balance:X-bi-6-4c-2``**,
     where the transfer arm stopped reading this table (the module docstring).
     Each of that arm's two scopes passes ``transfer_id IS NULL`` among its
-    *scope_clauses*, which keeps a transfer shadow out because a transfer is
-    offered as its LEG.
+    *scope_clauses*, which kept a transfer's shadow out while one was stored,
+    because a transfer is offered as its LEG.  No row names a transfer since
+    plan step ``balance:X-bi-6-4d-2`` (``ck_transactions_names_no_transfer``),
+    so the clause excludes no stored row.
 
     Three clauses, each load-bearing, plus the scope's own:
 
@@ -824,12 +826,12 @@ def record_settled(
     **CC-384**'s remedy.
 
     **Recording WHICH statement showed the item is the ARM's** (ruling
-    **R-FL**), and that is not a preference: for the transfer arm the money
-    still lands on a SHADOW row through the interval, and ``CLAUDE.md``'s
-    transfer invariant 4 says no code path mutates one directly.  A write here
-    would be the first exception to a rule the project treats as critical, so
-    the transfer arm goes through ``transfer_service.record_leg_clearing`` and
-    the transaction arm writes its own row through the status seam.
+    **R-FL**), and that is not a preference: for the transfer arm the item is
+    a transfer, and every write of a transfer goes through
+    ``transfer_service`` (the transfer paragraph at the end of ``CLAUDE.md``'s
+    Architecture).  A write here would be the first exception to that rule,
+    so the transfer arm goes through ``transfer_service.record_leg_clearing``
+    and the transaction arm writes its own row through the status seam.
 
     **It is one function because the two writers HAD BECOME one**, and the gate
     is what said so rather than a preference.  X-f2-c2 left the loop per-arm on

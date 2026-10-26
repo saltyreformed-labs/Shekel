@@ -38,8 +38,11 @@ Projected parent) or not at all (a Projected shadow under a settled parent).
 A LEAF: models, the ref cache, the shared balance predicates and
 :mod:`app.services.transfer_legs`, whose one join attaches each settled leg's
 covering movement as its record.  Flask-isolated, reads only, no commits.  No
-amount is read off a transfer for a payment that has settled: a settled leg is
-worth what its record moved (Transfer Invariant 5).
+amount is read off a side's record for a payment that has settled: a record
+holds no figure since plan step balance:X-bi-6-4d-2, and a settled leg is
+worth the figure its transfer stores
+(:func:`app.services.row_valuation.leg_settled_figure`; the transfer
+paragraph at the end of ``CLAUDE.md``'s Architecture).
 """
 
 from dataclasses import dataclass
@@ -93,7 +96,7 @@ class IncomeLegs:
             still-projected transfer INTO the account whose to-side money has
             not moved, ascending by ``(pay_period.start_date, transfer id)``.
             The exact complement of ``settled``: a payment is in one half
-            and never both, whatever a shadow row still says.
+            and never both.
     """
 
     settled: list[TransferLeg]
@@ -366,8 +369,8 @@ def projected_income_legs(
     ``projected_income_shadows``, the shadow-income query narrowed to the
     PROJECTED status, until plan step **balance:X-bi-6a**; the payment
     RECORDS a loan's forward projection folds (plan step C6, the PLANNED
-    tier) are the parents now, and the shadow rows have no projected reader
-    left.
+    tier) are the parents now, and from then on the shadow rows had no
+    projected reader left.
 
     **Complementary with the settled set, so no payment is counted twice or
     dropped** (ruling **R-BAL140**), which is what lets the C6c settled-slot
@@ -379,7 +382,8 @@ def projected_income_legs(
     **The income side is the TO-side.**  The leaf loader returns every leg the
     account is on; a payment INTO the account is the leg whose parent names
     it as ``to_account_id``, which is the same rule the transfer service
-    writes as the income shadow's TYPE.  A transfer OUT of a loan account is
+    wrote as the income shadow's TYPE until plan step balance:X-bi-6-4d-2
+    deleted the shadows.  A transfer OUT of a loan account is
     not a payment and is not returned.
 
     Carries no period bound and NO cash: the plan builder resolves each leg's

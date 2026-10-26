@@ -21,7 +21,7 @@ module imports this one, never the reverse.
 **No function here reaches a transfer through its shadow row**: a leg arrives
 as a ``transfer_legs.TransferLeg`` from ``transfer_legs``' loaders, and its
 figure is asked of the leg (``transfer_service.leg_settle_amount``, which
-prices it off its transfer and its side's record since plan step
+prices it off its transfer alone since plan step
 ``balance:X-bi-6-4d-2``; through the leg's shadow until then).
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): reads only, plain
@@ -60,8 +60,8 @@ def leg_price(
     counted in the screen's "could not be priced" note.  A ``ValidationError``
     was a second, a DAMAGED transfer whose twin pair the leg price refused
     (ruling **R-BAL158**, "Skip it and say so"), until plan step
-    ``balance:X-bi-6-4d-2`` priced a leg off its transfer and its side's
-    record and the developer ruled such a transfer is offered and settled
+    ``balance:X-bi-6-4d-2`` priced a leg off its transfer alone and the
+    developer ruled such a transfer is offered and settled
     like any other (**R-BAL235**).  The leg price's one remaining refusal,
     a soft-deleted transfer, cannot reach it: the loaders offer live
     transfers only, so one arriving here is a defect to surface, not a row
@@ -138,8 +138,8 @@ def leg_candidate(
     counter -- the row a leg's period, status and figure are edited on.
     Until this leaf the candidate was the transfer's SHADOW row on this
     account, a TRANSACTION keyed by the shadow's id and revised by the
-    shadow's counter; the shadow is written by the same doors in the same
-    edits, so every figure, day and window reads the same.
+    shadow's counter; the shadow was written by the same doors in the same
+    edits, so every figure, day and window read the same.
 
     A leg states its own figure in the sense this package asks
     (``states_own_figure``): it is neither an envelope worth its purchases

@@ -410,12 +410,12 @@ def _settlement_clauses(statement: _rows.Statement) -> tuple:
       in at most one (ruling **R-CC116**).  The row's own account's list
       leaves it out (ruling **R-CC126**, :func:`_own_clauses`), so it is
       offered here alone.
-    * ``transfer_id IS NULL`` -- a transfer settles through the transfer
-      service and ``settle_transaction`` refuses a shadow.  A shadow's
-      covering movements are kept on the shadow's own account
-      (``transfer_service._endpoints._apply_endpoint_move`` re-points them
-      with the endpoint), so the next clause admits none today; this one
-      keeps the scope inside the verb's domain rather than relying on that.
+    * ``transfer_id IS NULL`` -- a transfer is one row and settles through
+      ``transfer_service.settle_transfer``, and ``settle_transaction``
+      REFUSES a row naming one.  No row names a transfer since plan step
+      ``balance:X-bi-6-4d-2`` (``ck_transactions_names_no_transfer``), so the
+      clause excludes no stored row; it keeps the scope inside the verb's
+      domain rather than relying on that.
     * it holds an UN-DATED covering movement ON THIS ACCOUNT -- the payment
       the statement may show.  Un-dated, because that is the payment R-CC44
       lists: a dated one already posts and folds on its own day, so it is in

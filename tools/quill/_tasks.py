@@ -3,7 +3,9 @@ inside its card's one pull request, done when its file ``plan/tasks/N`` is in gi
 (``_state.done_tasks``).
 
 ``quill file task`` files one (``_filing``), on the board under a step the board holds
-(:func:`_command.on_board`, the one rule).  Here are ``quill task-file``, which writes a
+(:func:`_command.on_board`, the one rule).  Here are ``quill start``, which begins a piece
+with a commit naming it (:func:`cmd_start`, ruling plan#1872), and which tasks are in
+progress (:func:`in_progress`); ``quill task-file``, which writes a
 task's file into the working tree for the session to commit with the piece it finishes
 (:func:`cmd_task_file`), the read a card's drop makes of the tasks under it
 (:func:`taken_by_drop`), and ``quill sync``'s put-on of each task that rule says belongs on
@@ -22,13 +24,82 @@ from pathlib import Path
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
 from tools.quill._command import Refused, _label, _one, on_board
-from tools.quill._state import drop_takes, dropped
-from tools.quill._tracker import Card, Tracker
+from tools.quill._state import drop_takes, dropped, names_no_task
+from tools.quill._tracker import BareCard, Card, Tracker
 from tools.quill.setup_tracker import TASK
 
 #: What a task's file says: the instant it was written (:func:`_git.instant`), so each write
 #: is a new line, as each claim's marker is.
 DONE = "done "
+
+
+def _on_its_branch(tracker: Tracker, number: int, root: Path, what: str,
+                   would: str) -> tuple[Card, str]:
+    """Task ``plan#<number>`` and its card's branch ``card/<its card>``, checked out in
+    ``root``: the one branch on which a task is begun and done, which ``start`` and
+    ``task-file`` each write on.  ``what`` names what the command writes and ``would`` what
+    it would do to a dropped piece, in its refusals.  Refused for a card that is no task, a
+    task under no card of the tracker, a task dropped, and any other branch checked out, or
+    none."""
+    task = _one(tracker, number)
+    if task.kind != TASK:
+        raise Refused(f"{_label(task)} is no task: {what} is written for a task, which "
+                      "`quill file task` files")
+    if task.parent is None:
+        raise Refused(f"{_label(task)} is under no card of the tracker: link it under the step "
+                      "or finding it is a piece of first")
+    if dropped(task.number, {task.number: task}, frozenset()):
+        raise Refused(f"{_label(task)} was dropped (closed as {task.state_reason}): {what} "
+                      f"would {would}; reopen it on the web first if it is work after all")
+    branch = _git.card_branch(task.parent)
+    here = _git.checked_out(root)
+    if here != branch:
+        raise Refused(f"{_label(task)} is a piece of plan#{task.parent}, so {what} is written "
+                      f"on {branch}, and {here or 'no branch'} is checked out: switch to "
+                      f"{branch} (`quill claim plan#{task.parent}` makes it)")
+    return task, branch
+
+
+def in_progress(cards: Mapping[int, BareCard],
+                claims: Mapping[int, _git.Claim]) -> frozenset[int]:
+    """Each task among ``cards`` in progress (ruling plan#1872): the live claim (``claims``) of
+    the card the tracker says it is under has begun it and not finished it
+    (:attr:`_git.Claim.in_progress`).  One a claim names that is under another card, or is no
+    task, is in progress nowhere (:func:`_state.names_no_task`), as its file there would mark
+    nothing done (:func:`_state.done_tasks`).  ``show`` reads it."""
+    return frozenset(number for claim in claims.values() for number in claim.in_progress
+                     if names_no_task(number, cards, claim.card) is None)
+
+
+def cmd_start(args, tracker: Tracker, root: Path) -> int:
+    """Begin task ``plan#T`` (ruling plan#1872): an empty commit naming it on its card's
+    branch, pushed (:func:`_git.start`), so it is in progress (:func:`_git.in_progress`) and
+    each commit until the one that writes its file is a commit of its piece.  Begun on the
+    branch checked out, ``card/<its card>``, while no other task of that card is in progress
+    there, and while ``origin`` holds that branch, the card's claim, which the push moves
+    forward and never makes.  Refused, with nothing written, for what ``task-file`` refuses
+    (:func:`_on_its_branch`), a task whose file the branch holds (it is done), another task
+    of the card in progress, and a claim ``origin`` no longer holds.  Run again for a task
+    begun already, it pushes the branch: a start whose push failed is finished so."""
+    task, branch = _on_its_branch(tracker, args.task, root, "its start", "begin a dropped piece")
+    if _git.blob_at(root, "HEAD", _git.task_file(task.number)) is not None:
+        raise Refused(f"{_label(task)} is done: {branch} holds {_git.task_file(task.number)}")
+    begun = _git.in_progress(root, "HEAD")
+    if others := sorted(begun - {task.number}):
+        raise Refused(f"plan#{others[0]} is in progress on {branch}: finish it first, its file "
+                      f"(`quill task-file plan#{others[0]}`) in the commit that ends it, then "
+                      f"start plan#{task.number}")
+    if task.parent not in _git.on_origin(root):
+        raise Refused(f"origin holds no {branch}, so plan#{task.parent} is claimed by no one: "
+                      f"`quill claim plan#{task.parent}` claims it")
+    if task.number in begun:
+        _git.push(root, task.parent)
+        print(f"{_label(task)} is begun on {branch} already: pushed {branch}")
+        return 0
+    sha = _git.start(root, task.parent, task.number, task.title)
+    print(f"started {_label(task)}: {sha[:12]} on {branch}, pushed; each commit until the one "
+          f"writing its file (`quill task-file plan#{task.number}`) is a commit of this piece")
+    return 0
 
 
 def cmd_task_file(args, tracker: Tracker, root: Path,
@@ -39,24 +110,10 @@ def cmd_task_file(args, tracker: Tracker, root: Path,
     one branch on which the file marks it done.  It writes no tracker state: ``sync`` closes
     the task once ``origin``'s branch holds the file.  Refused, with nothing written, for a
     card that is no task, a task under no card of the tracker, a task dropped (its file would
-    mark a dropped piece done), and any other branch checked out, or none."""
-    task = _one(tracker, args.task)
-    if task.kind != TASK:
-        raise Refused(f"{_label(task)} is no task: a task's file is written for a task, which "
-                      "`quill file task` files")
-    if task.parent is None:
-        raise Refused(f"{_label(task)} is under no card of the tracker: link it under the step "
-                      "or finding it is a piece of first")
-    if dropped(task.number, {task.number: task}, frozenset()):
-        raise Refused(f"{_label(task)} was dropped (closed as {task.state_reason}): its file "
-                      "would mark a dropped piece done; reopen it on the web first if it is "
-                      "work after all")
-    branch = _git.card_branch(task.parent)
-    here = _git.checked_out(root)
-    if here != branch:
-        raise Refused(f"{_label(task)} is a piece of plan#{task.parent}, so its file is written "
-                      f"on {branch}, and {here or 'no branch'} is checked out: switch to "
-                      f"{branch} (`quill claim plan#{task.parent}` makes it)")
+    mark a dropped piece done), and any other branch checked out, or none
+    (:func:`_on_its_branch`)."""
+    task, branch = _on_its_branch(tracker, args.task, root, "its file",
+                                  "mark a dropped piece done")
     path = root / _git.task_file(task.number)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"{DONE}{_git.instant(clock())}\n", encoding="utf-8")

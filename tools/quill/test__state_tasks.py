@@ -43,9 +43,9 @@ def _with(parent, *tasks):
 
 def _claim(number, *tasks):
     """The live claim ``card/<number>``, its own commits having written the file of each of
-    ``tasks``."""
+    ``tasks``, and none in progress."""
     return Claim(number, f"sha{number}", "2026-10-24T08:00:00+00:00", "2026-10-24T07:00:00Z",
-                 frozenset(tasks))
+                 frozenset(tasks), frozenset())
 
 
 def test_a_task_is_done_by_its_file_on_dev_and_main_or_on_its_own_cards_claim():

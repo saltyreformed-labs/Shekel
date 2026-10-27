@@ -20,8 +20,9 @@ Nothing here calls GitHub.
 
 What git says -- a card shipped, a card claimed, a task done -- is never faked:
 :func:`ship`, :func:`unship` and :func:`claim` write the ship markers and claims (ruling
-``balance:R-BAL359``), and :func:`finish`, :func:`unfinish`, :func:`piece` and
-:func:`unpiece` the task files (ruling ``balance:R-BAL386``), to the ``code`` fixture's bare
+``balance:R-BAL359``), :func:`finish`, :func:`unfinish`, :func:`piece` and
+:func:`unpiece` the task files (ruling ``balance:R-BAL386``), and :func:`named` a commit naming
+its task (ruling plan#1872), to the ``code`` fixture's bare
 ``origin`` (``conftest.py``), which every command then reads as it reads the real one.
 """
 from __future__ import annotations
@@ -449,6 +450,13 @@ def piece(root, card, *numbers):
     finishing each piece writes it; its sha."""
     return _onto_claim(root, card, "piece", {
         _git.task_file(number): f"done {_git.instant(CLAIMED)}\n" for number in numbers})
+
+
+def named(root, card, task):
+    """Push onto ``card/<card>`` a commit naming ``task`` by its trailer ``Task: plan#<task>``
+    (ruling plan#1872), as a commit of its piece names it, writing no task file; its sha."""
+    return _onto_claim(root, card, f"work\n\n{_git.TASK_TRAILER}: plan#{task}",
+                       {f"work-{task}.txt": "work\n"})
 
 
 def unpiece(root, card, *numbers):

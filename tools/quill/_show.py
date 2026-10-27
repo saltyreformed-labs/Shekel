@@ -16,6 +16,7 @@ from tools.quill import _git
 from tools.quill._command import Refused, _label, _one, _outside_parent, card_number
 from tools.quill._comments import byline
 from tools.quill._state import OWNED, done_tasks, filing_unfinished, holder, never_split, owner
+from tools.quill._tasks import in_progress
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import alias_mark
 from tools.quill.setup_tracker import FILING, IN_ORDER, TASK
@@ -51,14 +52,17 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
     holds every step linked below it (:func:`_steps_below`), and ``listed`` each card it
     lists as a child, a blocker or a card it owns (:func:`_listed`), whose lines are
     :func:`_link_lines`'.  A task says whether git says it is done
-    (:func:`_state.done_tasks`), in place of whether it shipped.  A card on the board that the
+    (:func:`_state.done_tasks`), in place of whether it shipped, and whether it is in progress
+    (:func:`_tasks.in_progress`, ruling plan#1872).  A card on the board that the
     order read does not list is in no order when it is a task; a step or question is in the
     order, so the read lags a write (``_tracker``'s doctrine), and it says so."""
     claim = reads.claims.get(card.number)
     done = done_tasks({**listed, card.number: card}, reads.shipped.tasks, reads.claims)
+    begun = in_progress({**listed, card.number: card}, reads.claims)
     order = [n for n, _ in tracker.board.order()]
     state = "open" if card.is_open else f"closed ({card.state_reason})"
-    ship = (f"done (git): {_YES[card.number in done]}" if card.kind == TASK else
+    ship = (f"done (git): {_YES[card.number in done]}\n"
+            f"  in progress (git): {_YES[card.number in begun]}" if card.kind == TASK else
             f"shipped (git): {_YES[card.number in reads.shipped.cards]}")
     place = (f"#{order.index(card.number) + 1}" if card.number in order else
              "not on it" if card.board_item is None else
@@ -75,7 +79,7 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
          f"  parent: {outside} (outside the tracker)" if (outside := _outside_parent(card))
          else "  parent: none"),
     ]
-    lines += _link_lines(card, cards, reads, listed, done)
+    lines += _link_lines(card, cards, reads, listed, (done, begun))
     if filing_unfinished(card):
         lines.append("  filing: not finished (R-BAL202) -- never offered until its `quill file` "
                      "command runs again; with that command lost, make its missing writes on "
@@ -86,19 +90,23 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
 
 
 def _link_lines(card: Card, cards: dict[int, Card], reads: _git.Reads, listed: dict[int, Card],
-                done: frozenset[int]) -> list[str]:
-    """A line for each card ``card`` links to, with its title from ``listed``: each child --
+                tasks: tuple[frozenset[int], frozenset[int]]) -> list[str]:
+    """A line for each card ``card`` links to, with its title from ``listed``: each child, in
+    the card's order, its sub-issues' (the build order of its tasks, ruling plan#1868) --
     a step linked under it that is no leaf of it saying so (:func:`_state.never_split`, as
-    ``next`` reads it, over ``cards``), a task whether git says it is done (``done``) --
+    ``next`` reads it, over ``cards``), a task whether git says it is done and, the one in
+    progress, that it is (``tasks``: those done, those in progress) --
     then each blocker, a finding's or a ruling's owner named so (its one blocker,
     :func:`_state.owner`, R-BAL395, as ``sync``'s report reads it), then each finding and
     ruling ``listed`` holds whose owner is ``card``, which it owns."""
     stale = set(never_split(card, cards, reads.shipped.cards))
+    done, begun = tasks
     lines = [f"  child: plan#{child.number} ({child.kind}, "
              f"{'open' if child.is_open else 'closed'}"
              + ("; no leaf: closed while still being filed, so never part of the split, "
                 "R-BAL205" if child.number in stale else "")
              + (f"; done (git): {_YES[child.number in done]}" if child.kind == TASK else "")
+             + ("; in progress (git): yes" if child.number in begun else "")
              + f") {listed[child.number].title}"
              for child in card.children]
     held_by = owner(card)

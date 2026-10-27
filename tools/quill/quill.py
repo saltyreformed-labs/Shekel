@@ -26,8 +26,9 @@ A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-is
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,
 ``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842),
-``task-file`` writes its file for the commit that finishes
-the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
+``start`` begins it with a commit naming it (ruling plan#1872), ``task-file`` writes its file
+for the commit that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show``
+read it.
 A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
 ``finding-file`` writes its ship marker on its owner's branch, for the commit that fixes it,
 and ``hand`` hands an open finding from its one owner to another step, a step a branch
@@ -56,6 +57,7 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
                                 (--question-file Q | --from-question plan#Q) --answer-file A
     python -m tools.quill.quill file question --arc ARC --title NAME --body-file QUESTION
     python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE
+    python -m tools.quill.quill start plan#T
     python -m tools.quill.quill task-file plan#T
     python -m tools.quill.quill finding-file plan#F
     python -m tools.quill.quill hand plan#F --to plan#S
@@ -893,6 +895,8 @@ def parser() -> argparse.ArgumentParser:
     drop = commands.add_parser("drop", help="retire a card with no code")
     drop.add_argument("card", type=card_number)
     drop.add_argument("--why", required=True)
+    commands.add_parser("start", help="begin a task: a commit naming it on its card's "
+                                      "branch, pushed").add_argument("task", type=card_number)
     commands.add_parser("task-file", help="write a task's file plan/tasks/T, to commit with "
                                           "its piece on its card's branch").add_argument(
         "task", type=card_number)
@@ -919,7 +923,8 @@ COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
     "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment,
     "answer": _comments.cmd_answer, "block": cmd_block,
-    "move": cmd_move, "drop": cmd_drop, "task-file": _tasks.cmd_task_file,
+    "move": cmd_move, "drop": cmd_drop, "start": _tasks.cmd_start,
+    "task-file": _tasks.cmd_task_file,
     "finding-file": _findings.cmd_finding_file, "hand": _findings.cmd_hand,
     "sync": cmd_sync, "spec-history": cmd_spec_history, "spec-revert": cmd_spec_revert,
     "export": cmd_export,

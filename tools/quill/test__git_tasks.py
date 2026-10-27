@@ -163,3 +163,37 @@ def test_a_claim_names_no_task_file_it_took_in_from_dev_or_main(code):
     run(root, "update-ref", f"refs/remotes/origin/{_git.card_branch(8)}", tip)
     assert _git.tasks_in(root, tip)[0] == {49, 50, 51, 52}
     assert _git.claims(root, [8])[8].tasks == {50, 52}
+
+
+def test_a_claims_own_commits_name_their_tasks_by_their_trailer(code):
+    """Ruling plan#1872: a commit names the task it builds by ``Task: plan#T``, its key read in
+    any case; a value that names no card (``plan#<number>``) names nothing, and a commit dev or
+    main holds is no commit of the claim, so a task it names is not the claim's."""
+    root, base = code
+    landed = commit_files(root, base, "card 3's piece\n\nTask: plan#40", {"a.py": "a\n"})
+    point_dev(root, landed)
+    claimed = commit_files(root, landed, "claim plan#8",
+                           {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
+    one = commit_files(root, claimed, "piece one\n\nTask: plan#41", {"b.py": "b\n"})
+    two = commit_files(root, one, "piece two\n\ntask: plan#42", {"c.py": "c\n"})
+    tip = commit_files(root, two, "loose\n\nTask: 43\nTask: plan#044", {"d.py": "d\n"})
+    assert _git.named_tasks(root, tip) == {41, 42}
+
+
+def test_a_task_is_in_progress_until_the_claims_tip_holds_its_file(code):
+    """Ruling plan#1872: a task a commit of the claim names is in progress until the tip holds
+    its file, written in the commit that ends its piece; the claim reads it so, and a task
+    named by no commit of the claim is in progress nowhere, its file or none."""
+    root, base = code
+    claimed = commit_files(root, base, "claim plan#8",
+                           {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
+    begun = commit_files(root, claimed, "start plan#41\n\nTask: plan#41", {})
+    ended = commit_files(root, begun, "piece one, its file\n\nTask: plan#41",
+                         {"b.py": "b\n", **_done(41)})
+    assert _git.in_progress(root, begun) == {41}
+    assert _git.in_progress(root, ended) == frozenset()
+    tip = commit_files(root, ended, "start plan#42\n\nTask: plan#42", _done(43))
+    run(root, "update-ref", f"refs/remotes/origin/{_git.card_branch(8)}", tip)
+    held = _git.claims(root, [8])[8]
+    assert held.in_progress == {42}
+    assert held.tasks == {41, 43}

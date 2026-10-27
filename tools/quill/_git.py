@@ -26,6 +26,11 @@ task file only for a task under that claim's card.  A task file is read as a mar
 longer done.  Which change may write one is the markers' write rule, judged in the same walk
 (``tools/quill/landing.py``).
 
+**A task is IN PROGRESS while a commit of its card's claim names it and the claim's tip holds
+no file for it** (ruling plan#1872; :func:`in_progress`).  A commit names the task it builds
+by the trailer ``Task: plan#T`` (:data:`TASK_TRAILER`); ``quill start`` begins a piece with an
+empty commit carrying it (:func:`start`), and the commit that writes the task's file ends it.
+
 **A claim is the branch ``card/N`` on ``origin``** (:func:`card_branch`) whose tip neither
 ``dev`` nor ``main`` holds (:func:`claims`).  ``quill claim`` makes it (:func:`claim`): a
 commit adding the card's marker, pushed CREATE-ONLY with a lease on the branch's absence, so
@@ -42,8 +47,8 @@ of ``dev``, ``main`` and each of them, each by its name into its tracking ref
 
 Every call starts git through :mod:`tools.ci.gitcmd`, so ``root`` alone decides which
 repository is read or written.  Nothing here writes the repository but :func:`fetch`'s
-tracking refs, :func:`claim`'s objects, push and local branch, and :func:`release`'s two
-pushes.
+tracking refs, :func:`claim`'s objects, push and local branch, :func:`start`'s commit, the
+branch it moves and its push, and :func:`release`'s two pushes.
 """
 from __future__ import annotations
 
@@ -67,6 +72,10 @@ RELEASED = "released/"
 _NUMBER = re.compile(r"[1-9][0-9]*")
 #: What a marker's line says, and what :func:`claims` reads back from it.
 _CLAIMED = "claimed "
+#: The trailer by which a commit names the task it builds, ``Task: plan#T`` (ruling plan#1872).
+TASK_TRAILER = "Task"
+#: A task as :data:`TASK_TRAILER`'s value names it.
+_TASK_NAMED = re.compile(r"plan#([1-9][0-9]*)")
 
 
 @dataclass(frozen=True)
@@ -74,14 +83,16 @@ class Claim:
     """A card a session is building: ``sha``, the tip of the branch ``card/<card>`` on
     ``origin``; ``committed``, when that tip was committed (ISO 8601, with its offset); and
     ``claimed``, the instant the card's marker at that tip says it was claimed, None when the
-    tip holds no marker for it; and ``tasks``, each task whose done file the claim's own
-    commits wrote (:func:`own_tasks`), whatever card the tracker says it is under."""
+    tip holds no marker for it; ``tasks``, each task whose done file the claim's own
+    commits wrote (:func:`own_tasks`), whatever card the tracker says it is under; and
+    ``in_progress``, each task it has begun and not finished (:func:`in_progress`), likewise."""
 
     card: int
     sha: str
     committed: str
     claimed: str | None
     tasks: frozenset[int]
+    in_progress: frozenset[int]
 
     @property
     def branch(self) -> str:
@@ -472,6 +483,35 @@ def own_tasks(root: Path, tip: str) -> frozenset[int]:
                      if all(held.get(number) != blob for held in grew_from))
 
 
+def named_tasks(root: Path, tip: str) -> frozenset[int]:
+    """Each task a commit of the claim at ``tip`` names by its trailer ``Task: plan#T``
+    (:data:`TASK_TRAILER`, git matching the key in any case): its own commits, those neither
+    ``dev`` nor ``main`` holds, as :func:`own_tasks` reads them.  A value naming no card
+    (``plan#<number>``) names nothing.
+
+    Raises:
+        GitError: When git cannot read ``tip``.
+    """
+    out = git(root, "log", f"--format=%(trailers:key={TASK_TRAILER},valueonly)", tip, "--not",
+              *TIPS)
+    return frozenset(int(found.group(1)) for line in out.splitlines()
+                     if (found := _TASK_NAMED.fullmatch(line.strip())))
+
+
+def in_progress(root: Path, tip: str) -> frozenset[int]:
+    """Each task the claim at ``tip`` has begun and not finished (ruling plan#1872): one a
+    commit of its own names (:func:`named_tasks`) whose done file ``tip`` does not hold
+    (:func:`lines_in`).  The ONE reading of which piece is in progress, from git alone, local
+    refs and no network: ``quill start`` asks it of the branch checked out before it begins a
+    piece, and :func:`claims` of every claim, which ``show`` reads.
+
+    Raises:
+        GitError: When git cannot read ``tip``.
+    """
+    held = lines_in(root, tip, TASKS)[0]
+    return frozenset(number for number in named_tasks(root, tip) if number not in held)
+
+
 def claims(root: Path, cards: Iterable[int]) -> dict[int, Claim]:
     """The claims among the ``card/N`` branches :func:`fetch` just brought for ``cards``: each
     whose tip neither ``dev`` nor ``main`` holds.  One whose tip they hold is merged work
@@ -483,7 +523,7 @@ def claims(root: Path, cards: Iterable[int]) -> dict[int, Claim]:
             continue
         committed = git(root, "log", "-1", "--format=%cI", tip).strip()
         found[number] = Claim(number, tip, committed, _claimed_at(root, tip, number),
-                              own_tasks(root, tip))
+                              own_tasks(root, tip), in_progress(root, tip))
     return found
 
 
@@ -723,6 +763,43 @@ def check_out(root: Path, number: int, sha: str) -> str | None:
     git(root, "branch", "--no-track", branch, sha)
     done = run(root, "switch", "--quiet", branch)
     return None if done.returncode == 0 else done.stderr.strip()
+
+
+def push(root: Path, number: int) -> None:
+    """Push the local branch ``card/<number>`` to ``origin``'s branch of that name, never
+    forced: made, moved forward or already there.
+
+    Raises:
+        GitError: When the push is refused (``origin``'s branch holds work this one does not)
+            or fails.
+    """
+    ref = f"refs/heads/{card_branch(number)}"
+    flag, summary = _pushed(root, "origin", f"{ref}:{ref}")
+    if flag not in (" ", "*", "="):
+        raise GitError(f"the push of {card_branch(number)} answered {flag} {summary}: the "
+                       f"commits stand on the local branch; bring in what origin's holds, then "
+                       f"push it")
+
+
+def start(root: Path, number: int, task: int, title: str) -> str:
+    """Begin task ``task`` on card ``number``'s local branch ``card/<number>``: an empty commit
+    on its tip, ``start plan#<task>: <title>`` carrying the trailer ``Task: plan#<task>``
+    (:data:`TASK_TRAILER`), made from objects alone -- no index, no working tree, no hook (the
+    commit hook refuses a commit while no piece is begun, which this one begins) -- the branch
+    moved to it only from the tip it was made on, then pushed (:func:`push`); its sha.  The
+    working tree and the index are left as they were, the commit's tree being the tip's.
+
+    Raises:
+        GitError: When the branch moved while the commit was made, or the push is refused or
+            fails, the commit then standing on the local branch.
+    """
+    ref = f"refs/heads/{card_branch(number)}"
+    tip = git(root, "rev-parse", "--verify", ref).strip()
+    sha = git(root, "commit-tree", f"{tip}^{{tree}}", "-p", tip, "-m",
+              f"start plan#{task}: {title}", "-m", f"{TASK_TRAILER}: plan#{task}").strip()
+    git(root, "update-ref", "-m", f"quill start plan#{task}", ref, sha, tip)
+    push(root, number)
+    return sha
 
 
 def release(root: Path, number: int, tip: str, when: datetime) -> str:

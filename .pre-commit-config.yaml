@@ -1,4 +1,6 @@
-# Local pre-commit hooks for Shekel. Install once with `pre-commit install`.
+# Local pre-commit hooks for Shekel. Install once with `pre-commit install`,
+# which installs each hook type default_install_hook_types names into the
+# repository's shared hooks directory, so every worktree of it runs them.
 #
 # These mirror the CI gate so a regression is caught before the commit lands,
 # not at PR time. The Claude Code per-edit and Stop hooks are the in-session
@@ -7,6 +9,12 @@
 # NOTE: in the Claude Code web/remote flow the container performs the commit, so
 # pre-commit only fires there if a SessionStart hook runs `pre-commit install`.
 # Its primary value is local developer commits; CI remains the enforced gate.
+#
+# The two message stages run quill's commit hook alone (quill-task below).
+# Every other hook names no stage and so takes default_stages: without it,
+# pre-commit would run each at every installed stage, three times a commit.
+default_install_hook_types: [pre-commit, prepare-commit-msg, commit-msg]
+default_stages: [pre-commit]
 repos:
   - repo: local
     hooks:
@@ -148,6 +156,18 @@ repos:
         files: ^tools/(quill|ci)/.*\.py$
         pass_filenames: false
         args: [tools/quill, -c, /dev/null, -q]
+      # A commit on card/N names the task in progress there, stamped, and none
+      # is made while no task is (ruling plan#1872; tools/quill/commit_hook.py,
+      # its module docstring the rule).  prepare-commit-msg is the stage
+      # `git commit --no-verify` does not skip, and commit-msg judges what the
+      # editor leaves.  pre-commit passes the message file; always_run makes a
+      # file it did not pass a failure (exit 2), never a skip.
+      - id: quill-task
+        name: a commit on card/N names its task in progress (quill start)
+        entry: python -m tools.quill.commit_hook
+        language: system
+        stages: [prepare-commit-msg, commit-msg]
+        always_run: true
       # tools/ci: the verdict ci.yml runs, the archive banner, and the arc list
       # quill imports (step X-cx's L4).  The same 10.00/10 floor and the same
       # tests ci.yml step 4b runs.

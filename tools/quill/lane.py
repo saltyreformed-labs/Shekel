@@ -38,7 +38,7 @@ from pathlib import Path
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import DEV, GitError, git, tracking
 from tools.quill import _git
-from tools.quill._command import Refused, card_number
+from tools.quill._command import Refused, card_number, exit_status
 
 #: What every lane's worktree directory is named with, before the lane's name.
 PREFIX = "shekel-"
@@ -128,25 +128,32 @@ def parser() -> argparse.ArgumentParser:
     return line
 
 
-def main(argv: list[str] | None = None, root: Path | None = None,
-         launch: Callable[[Path, list[str], Path], None] = start) -> int:
-    """Start one lane; its exit status, should ``launch`` return."""
-    args = parser().parse_args(argv)
+def _open(root: Path, name: str, card: int | None,
+          launch: Callable[[Path, list[str], Path], None]) -> int:
+    """Make lane ``name``'s worktree (:func:`make`) and ``launch`` its session, its first
+    prompt claiming ``card``; 0 should ``launch`` return, 2 when it fails, said.
+
+    Raises:
+        Refused: As :func:`make` does.
+        GitError: As :func:`make` does.
+        OSError: When :func:`make` cannot link the venv.
+    """
+    worktree, venv = make(root, name)
     try:
-        worktree, venv = make(root or REPO, args.name)
-    except Refused as refused:
-        print(f"refused: {refused}", file=sys.stderr)
-        return 1
-    except (GitError, OSError) as error:
-        print(f"failed: {error}", file=sys.stderr)
-        return 2
-    try:
-        launch(worktree, ["claude", first_prompt(args.card)], venv)
+        launch(worktree, ["claude", first_prompt(card)], venv)
     except OSError as error:
         print(f"failed: claude did not start ({error}); the worktree stands: start its "
               f"session with `cd {worktree} && claude`", file=sys.stderr)
         return 2
     return 0
+
+
+def main(argv: list[str] | None = None, root: Path | None = None,
+         launch: Callable[[Path, list[str], Path], None] = start) -> int:
+    """Start one lane; its exit status, should ``launch`` return (:func:`_command.exit_status`)."""
+    args = parser().parse_args(argv)
+    return exit_status(lambda: _open(root or REPO, args.name, args.card, launch),
+                       (GitError, OSError))
 
 
 if __name__ == "__main__":

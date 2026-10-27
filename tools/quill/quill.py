@@ -27,9 +27,9 @@ of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,
 ``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842), ``claim`` files a
 card's two finishing tasks (ruling plan#1875, ``_filing.finishing_filings``),
-``start`` begins it with a commit naming it (ruling plan#1872), ``task-file`` writes its file
-for the commit that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show``
-read it.
+``start`` begins it with a commit naming it (ruling plan#1872), the commit hook stamps each
+commit of the piece with it (:mod:`commit_hook`), ``task-file`` writes its file for the commit
+that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
 A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
 ``finding-file`` writes its ship marker on its owner's branch, for the commit that fixes it,
 and ``hand`` hands an open finding from its one owner to another step, a step a branch
@@ -112,11 +112,12 @@ from tools.quill._command import (
     _read,
     _unfinished,
     card_number,
+    exit_status,
     with_closure,
 )
 from tools.quill._export import cmd_export
 from tools.quill._filing import cmd_file
-from tools.quill._github import CredentialsError, GitHubError, described
+from tools.quill._github import CredentialsError, GitHubError
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -963,15 +964,9 @@ def main(argv: list[str] | None = None, connect: Callable[[], Tracker] = CONNECT
          root: Path | None = None) -> int:
     """Run one command; its exit status."""
     args = parser().parse_args(argv)
-    try:
-        return COMMANDS[args.command](args, connect(), root or REPO)
-    except Refused as refused:
-        print(f"refused: {refused}", file=sys.stderr)
-        return 1
-    except (GitHubError, TrackerError, GitError, requests.RequestException,
-            OSError, CredentialsError) as error:
-        print(f"failed: {described(error)}", file=sys.stderr)
-        return 2
+    return exit_status(lambda: COMMANDS[args.command](args, connect(), root or REPO),
+                       (GitHubError, TrackerError, GitError, requests.RequestException, OSError,
+                        CredentialsError))
 
 
 if __name__ == "__main__":

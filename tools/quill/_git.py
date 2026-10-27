@@ -28,8 +28,9 @@ longer done.  Which change may write one is the markers' write rule, judged in t
 
 **A task is IN PROGRESS while a commit of its card's claim names it and the claim's tip holds
 no file for it** (ruling plan#1872; :func:`in_progress`).  A commit names the task it builds
-by the trailer ``Task: plan#T`` (:data:`TASK_TRAILER`); ``quill start`` begins a piece with an
-empty commit carrying it (:func:`start`), and the commit that writes the task's file ends it.
+by the trailer ``Task: plan#T`` (:func:`task_trailer`); ``quill start`` begins a piece with an
+empty commit carrying it (:func:`start`), the commit hook stamps it on each commit of the piece
+(``tools/quill/commit_hook.py``), and the commit that writes the task's file ends it.
 
 **A claim is the branch ``card/N`` on ``origin``** (:func:`card_branch`) whose tip neither
 ``dev`` nor ``main`` holds (:func:`claims`).  ``quill claim`` makes it (:func:`claim`): a
@@ -208,6 +209,22 @@ def task_of(path: str) -> int | None:
     """The task whose done file the path ``path`` names (``plan/tasks/<number>``,
     :func:`task_file`); None for any other path (:func:`_numbered`)."""
     return _numbered(path, TASKS)
+
+
+def task_named(value: str) -> int | None:
+    """The task a :data:`TASK_TRAILER` trailer's value names, ``plan#<number>`` (the space
+    around it aside); None for a value naming none.  The ONE reading of that value:
+    :func:`named_tasks` reads a claim's commits by it, and the commit hook a message
+    (``tools/quill/commit_hook.py``)."""
+    found = _TASK_NAMED.fullmatch(value.strip())
+    return int(found.group(1)) if found else None
+
+
+def task_trailer(task: int) -> str:
+    """The trailer by which a commit names task ``task``, ``Task: plan#<task>`` (ruling
+    plan#1872): :func:`start`'s commit carries it, and the commit hook stamps it on each
+    commit of the piece (``tools/quill/commit_hook.py``)."""
+    return f"{TASK_TRAILER}: plan#{task}"
 
 
 def claimed_card(branch: str) -> int | None:
@@ -494,8 +511,8 @@ def named_tasks(root: Path, tip: str) -> frozenset[int]:
     """
     out = git(root, "log", f"--format=%(trailers:key={TASK_TRAILER},valueonly)", tip, "--not",
               *TIPS)
-    return frozenset(int(found.group(1)) for line in out.splitlines()
-                     if (found := _TASK_NAMED.fullmatch(line.strip())))
+    return frozenset(number for line in out.splitlines()
+                     if (number := task_named(line)) is not None)
 
 
 def in_progress(root: Path, tip: str) -> frozenset[int]:
@@ -784,7 +801,7 @@ def push(root: Path, number: int) -> None:
 def start(root: Path, number: int, task: int, title: str) -> str:
     """Begin task ``task`` on card ``number``'s local branch ``card/<number>``: an empty commit
     on its tip, ``start plan#<task>: <title>`` carrying the trailer ``Task: plan#<task>``
-    (:data:`TASK_TRAILER`), made from objects alone -- no index, no working tree, no hook (the
+    (:func:`task_trailer`), made from objects alone -- no index, no working tree, no hook (the
     commit hook refuses a commit while no piece is begun, which this one begins) -- the branch
     moved to it only from the tip it was made on, then pushed (:func:`push`); its sha.  The
     working tree and the index are left as they were, the commit's tree being the tip's.
@@ -796,7 +813,7 @@ def start(root: Path, number: int, task: int, title: str) -> str:
     ref = f"refs/heads/{card_branch(number)}"
     tip = git(root, "rev-parse", "--verify", ref).strip()
     sha = git(root, "commit-tree", f"{tip}^{{tree}}", "-p", tip, "-m",
-              f"start plan#{task}: {title}", "-m", f"{TASK_TRAILER}: plan#{task}").strip()
+              f"start plan#{task}: {title}", "-m", task_trailer(task)).strip()
     git(root, "update-ref", "-m", f"quill start plan#{task}", ref, sha, tip)
     push(root, number)
     return sha

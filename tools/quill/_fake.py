@@ -466,7 +466,7 @@ def piece(root, card, *numbers):
 def named(root, card, task):
     """Push onto ``card/<card>`` a commit naming ``task`` by its trailer ``Task: plan#<task>``
     (ruling plan#1872), as a commit of its piece names it, writing no task file; its sha."""
-    return _onto_claim(root, card, f"work\n\n{_git.TASK_TRAILER}: plan#{task}",
+    return _onto_claim(root, card, f"work\n\n{_git.task_trailer(task)}",
                        {f"work-{task}.txt": "work\n"})
 
 

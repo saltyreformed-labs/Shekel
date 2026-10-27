@@ -89,8 +89,8 @@ class TestADeletedTransferItsBooksHoldStaysDeleted:
             resp = _apply_use(auth_client, f"/transfers/{template_id}", edit, first_id)
 
             # Left exactly as found: the transfer's every column (deleted,
-            # status, owner flag, amount and its source among them), both
-            # twins, and the owner's journal.
+            # status, owner flag, amount and its source among them) and the
+            # owner's journal.
             assert _transfer_as_stored(seed_user, first_id) == as_found
             assert as_found[0]["is_deleted"]
             assert {row.id for row in _transfers(template_id, deleted=False)} == others
@@ -256,24 +256,22 @@ def _priced_before_its_first_paycheck(column, template_id, seed_periods):
 
 
 def _transfer_as_stored(seed_user, transfer_id):
-    """The transfer's row, its two twins and the owner's journal-entry count, by SQL.
+    """The transfer's row and the owner's journal-entry count, by SQL.
 
     Every stored column, read after the session is expired, so a write the
-    resolver made to any of them -- or to a twin, or to the ledger -- shows.
+    resolver made to any of them -- or to the ledger -- shows.  It read the
+    transfer's two twins too, until plan step ``balance:X-bi-6-4d-2`` deleted
+    them and ``balance:X-bi-6-5`` the column they named it by.
     """
     _db.session.expire_all()
     transfer = dict(_db.session.execute(
         text("SELECT * FROM budget.transfers WHERE id = :id"), {"id": transfer_id},
     ).mappings().one())
-    twins = [dict(row) for row in _db.session.execute(
-        text("SELECT * FROM budget.transactions WHERE transfer_id = :id ORDER BY id"),
-        {"id": transfer_id},
-    ).mappings()]
     journal = _db.session.execute(
         text("SELECT count(*) FROM budget.journal_entries WHERE user_id = :user"),
         {"user": seed_user["user"].id},
     ).scalar_one()
-    return transfer, twins, journal
+    return transfer, journal
 
 
 class _Forms(HTMLParser):

@@ -41,8 +41,8 @@ cleared ``is_override`` on a shadow through a VARIABLE
 Those doors reached SHADOWS only, and ``ck_transactions_one_pricing_link`` made
 ``transfer_id`` exclusive with ``template_id`` -- so the conclusion held by the
 schema rather than by the count, which is the stronger ground anyway.  Since
-plan step ``balance:X-bi-6-4d-2`` no transaction row names a transfer
-(``ck_transactions_names_no_transfer``), and those two doors write the flags
+plan step ``balance:X-bi-6-4d-2`` no transaction row names a transfer (plan
+step ``balance:X-bi-6-5`` dropped the column), and those two doors write the flags
 on the transfer itself, so they reach no transaction row at all.
 
 Deleting the decision would have stranded every

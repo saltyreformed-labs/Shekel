@@ -4,7 +4,7 @@
 
 from decimal import Decimal
 
-from sqlalchemy import insert
+from sqlalchemy import insert, text
 
 from app import ref_cache
 from app.enums import StatusEnum, TxnTypeEnum
@@ -343,11 +343,18 @@ def _legs_of(xfer):
 
     No transfer has one since plan step balance:X-bi-6-4d-2, so a caller
     first runs ``82f7b7ed4332``'s downgrade, which builds two for every
-    transfer; on a transfer holding none this raises ``KeyError``.
+    transfer; on a transfer holding none this raises ``KeyError``.  Their ids
+    are found by SQL: the model has had no ``transfer_id`` since
+    ``c956c1d83108``, below which the caller runs.
     """
+    twin_ids = db.session.execute(text(
+        "SELECT id FROM budget.transactions WHERE transfer_id = :t"
+    ), {"t": xfer.id}).scalars().all()
     legs = {
         leg.transaction_type_id: leg
-        for leg in db.session.query(Transaction).filter_by(transfer_id=xfer.id)
+        for leg in db.session.query(Transaction).filter(
+            Transaction.id.in_(twin_ids),
+        )
     }
     return (
         legs[ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)],

@@ -86,14 +86,14 @@ class TestTheDifferenceBecomesARowTheOwnerAccepts:
         # It is a ONE-OFF since plan step balance:X-bi-7b (R-BAL20 / R-BAL24):
         # a rule-less DEFINITION carrying the name, type and figure plus this
         # placed row, priced by it -- where it used to OWN its figure as a
-        # link-less row.  Still no transfer and no card spend.
+        # link-less row.  Still no card spend (no row can name a transfer
+        # since plan step balance:X-bi-6-5 dropped the column).
         assert row.template_id is not None
         assert row.recurs is False
         assert row.amount_source_id == ref_cache.amount_source_id(
             AmountSourceEnum.TEMPLATE,
         )
         assert row.template.category_id is None
-        assert row.transfer_id is None
         assert row.credit_payback_for_id is None
         assert row.account_id == seed_user["account"].id
 

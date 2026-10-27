@@ -154,7 +154,12 @@ class TestEveryOwnedTableMapsThePairAsOneAttribute:
 
 
 class TestTheTwoActs:
-    """Each act writes BOTH columns, so neither state can be half-written."""
+    """Each act writes BOTH columns, so neither state can be half-written.
+
+    A case also re-declared a row under a DIFFERENT relation, until plan step
+    ``balance:X-bi-6-5`` deleted ``PARENT_TRANSFER`` and left one relation to
+    declare (ruling plan#1850).
+    """
 
     def test_declaring_a_transaction_empties_its_figure(
         self, app, db, seed_user, seed_periods,
@@ -266,26 +271,3 @@ class TestTheTwoActs:
             db.session.flush()
             assert txn.estimated_amount == Decimal("42.50")
             assert txn.amount_source_id is None
-
-    def test_a_declaration_can_be_switched_between_relations(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Re-declaring under a DIFFERENT relation replaces the first.
-
-        The state a mode change would need if a relation ever moved.  It is
-        asserted because ``declare_derived`` writes the source unconditionally
-        rather than only when it is absent, and a reader would be entitled to
-        assume the opposite from the idempotence above.
-        """
-        with app.app_context():
-            txn = _an_own_row(seed_user, seed_periods)
-            db.session.flush()
-
-            declare_derived(txn, AmountSourceEnum.TEMPLATE)
-            db.session.flush()
-            declare_derived(txn, AmountSourceEnum.PARENT_TRANSFER)
-            db.session.flush()
-
-            assert txn.amount_source_id == ref_cache.amount_source_id(
-                AmountSourceEnum.PARENT_TRANSFER,
-            )

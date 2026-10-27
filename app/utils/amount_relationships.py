@@ -3,7 +3,7 @@ Shekel Budget App -- WHICH RELATIONSHIPS pricing a row walks.
 
 Six functions, and they exist so that the eager load the amount model needs
 is stated ONCE rather than copied into every loader that feeds it.
-:mod:`app.services.cash_ledger._amount_source` owns the five rules; this owns
+:mod:`app.services.cash_ledger._amount_source` owns the four rules; this owns
 the relationship graph those rules traverse, so a rule that starts reading a new
 relationship adds it here in the same edit and every routed loader gets it.
 
@@ -119,15 +119,17 @@ def pricing_load_options() -> tuple:
     rule 4's refinement asks after, the definition's price series rule 5 and
     rule 4's MANUAL arm priced through, and the period rule 4's DERIVE arm
     dated its installment from.  That step deleted the shadows, and no stored
-    row names a transfer (``ck_transactions_names_no_transfer``), so a
+    row named a transfer (``ck_transactions_names_no_transfer`` refused one
+    until plan step ``balance:X-bi-6-5`` dropped the column), so a
     selectin load over the relationship meets only NULL foreign keys and
     issues no ``SELECT`` -- measured, not argued, by that step's review and
     again by the lane: a scenario holding one transaction row and one
     transfer, its rows loaded under this set, issues the same statements with
     and without the entry, and none touches ``budget.transfers``.  Rule 5
-    (``_amount_source._transfer_answer``) still reads ``txn.transfer``,
-    lazily, which on a NULL foreign key issues no SQL either, so its refusal
-    is unchanged.  A transfer's own pricing graph is
+    (``_amount_source._transfer_answer``) read ``txn.transfer`` lazily, which
+    on a NULL foreign key issued no SQL either, until plan step
+    ``balance:X-bi-6-5`` deleted the rule with the relationship.  A
+    transfer's own pricing graph is
     :func:`transfer_pricing_load_options`, taken by the loaders that select
     ``budget.transfers``.
 
@@ -268,9 +270,8 @@ def valuation_load_options() -> tuple:
     """Return the loads a CONTRIBUTION pass needs: pricing, plus the entries.
 
     :func:`pricing_load_options` covers what the amount RULES read off a
-    transaction row -- what a row's amount IS -- but rule 5's
-    ``Transaction.transfer``, which loads nothing (that function says why).
-    A pass that asks what a row is WORTH reads one more
+    transaction row -- what a row's amount IS.  A pass that asks what a row
+    is WORTH reads one more
     relationship on top: ``Transaction.entries``, for the envelope reservation
     (``cash_ledger._amounts._entry_aware_amount``) and for every settled row's
     record (``row_valuation.settled_figure``, which sums them since plan step

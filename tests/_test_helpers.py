@@ -2913,6 +2913,36 @@ def load_migration_module(filename):
     return module
 
 
+def step_down_through_the_transfer_column_drop(db_session):
+    """Run revision ``c956c1d83108``'s downgrade: the transaction's transfer column comes back.
+
+    **The ONE statement of what a migration case below plan step
+    ``balance:X-bi-6-5``'s column drop does first** (card plan#1844).  The
+    suite's database is built at head, where ``budget.transactions`` has no
+    ``transfer_id``, so a lower revision whose upgrade or downgrade names the
+    column -- ``82f7b7ed4332``'s twins, ``c4a4e7d1b9f2``'s row-only deleted-row
+    rule, ``596408fab6f1``'s pricing CHECK -- fails on it.  This puts back the
+    column (EMPTY: no row names a transfer), its key, its two indexes, its two
+    CHECKs and the ``parent_transfer`` source, and the case then walks its own
+    revisions exactly as it did before the drop.  The twin copy that revision
+    dropped is not re-created (ruling plan#1851), and ``82f7b7ed4332``'s
+    downgrade reads a missing copy as an empty one.
+
+    **It does not come back up**, deliberately: each case's database is its
+    own and is dropped after it, and the upgrade would drop a twin copy a
+    revision below had kept for the case to read.
+
+    Args:
+        db_session: The test ``db.session``.
+    """
+    run_migration_callable(
+        load_migration_module(
+            "c956c1d83108_a_transaction_names_no_transfer.py",
+        ).downgrade,
+        db_session,
+    )
+
+
 def load_init_database_module():
     """Load ``scripts/init_database.py`` by path (it is not a package member).
 
@@ -4860,94 +4890,6 @@ def transfer_side_journal_filter(transfer_id, account_id):
         TransactionEntry.account_id == account_id,
     )
     return JournalEntry.transaction_entry_id.in_(movement_ids)
-
-
-def assert_a_twin_is_refused(db_session, xfer, is_income):
-    """Stage the twin one side of *xfer* used to have, and assert it is refused.
-
-    A ruling **R-BAL167** class 2 re-expression of a test whose subject was a
-    transfer's shadow row: a transfer is one row since plan step
-    ``balance:X-bi-6-4d-2``, and ``ck_transactions_names_no_transfer`` (ruling
-    **R-BAL258**) refuses any ``budget.transactions`` row naming one, so the
-    row such a test drove a door on, priced or read can no longer be stored.
-    The refusal is spelled other ways too (the transfer schema's
-    ``_make_shadow`` cases, ``test_amount_ownership``, the 82f7 migration's
-    own); this is the one a class-2 re-expression calls.  The row is
-    :func:`a_twin_of`'s, which says what it carries and why that CHECK is the
-    one reported.
-
-    **The session is rolled back after the refusal**, which discards anything
-    the caller had not committed; commit first, and re-read what the session
-    held after.
-
-    Args:
-        db_session: The test ``db.session``.
-        xfer: The flushed :class:`~app.models.transfer.Transfer`.
-        is_income: ``True`` for the to-side's (income) twin, ``False`` for
-            the from-side's (expense) twin.
-    """
-    db_session.add(a_twin_of(xfer, is_income))
-    with pytest.raises(sa_exc.IntegrityError) as excinfo:
-        db_session.flush()
-    db_session.rollback()
-    assert constraint_name_from(excinfo.value) == (
-        "ck_transactions_names_no_transfer"
-    ), f"the twin was refused by another rule: {excinfo.value}"
-
-
-def a_twin_of(xfer, is_income):
-    """Return, unsaved, the twin row one side of *xfer* used to have.
-
-    The ONE construction of a twin for a test that plants one (plan step
-    ``balance:X-bi-6-4d-2``): :func:`assert_a_twin_is_refused` adds it as it
-    is, and a test whose planted shape is a twin with something MORE on it --
-    a figure written past the amount seam -- takes it from here and adds that,
-    so the two cannot come to disagree about what the rest of the row is.
-
-    The row carries what ``transfer_service._create._build_shadow`` copied
-    onto a twin at ``5f46d6973`` (the leaf below, where the create door still
-    made two): the transfer's owner, period, scenario, category and due date,
-    the side's endpoint and type, and a figure derived from its parent
-    (``PARENT_TRANSFER``).  It is NOT that builder's row column for column:
-    its ``name`` is this helper's own (the builder wrote "Transfer to / from
-    <account>"), and its status is Projected, the status every transfer door
-    created a transfer in, where the builder wrote the transfer's own (the
-    service's born-settled branch built settled twins).  Neither column bears
-    on ``ck_transactions_names_no_transfer``, and as built the row satisfies
-    every other rule, so that CHECK is the only one it violates.
-
-    Args:
-        xfer: The flushed :class:`~app.models.transfer.Transfer`.
-        is_income: ``True`` for the to-side's (income) twin, ``False`` for
-            the from-side's (expense) twin.
-
-    Returns:
-        The unsaved :class:`~app.models.transaction.Transaction`.
-    """
-    # Pylint: import-outside-toplevel -- same lazy-app-import convention
-    # every helper in this module follows.
-    # pylint: disable=import-outside-toplevel
-    from app import ref_cache
-    from app.enums import AmountSourceEnum, StatusEnum, TxnTypeEnum
-    from app.models.transaction import Transaction
-    from app.services.amount_ownership import declare_derived
-
-    twin = Transaction(
-        user_id=xfer.user_id,
-        account_id=xfer.to_account_id if is_income else xfer.from_account_id,
-        transfer_id=xfer.id,
-        pay_period_id=xfer.pay_period_id,
-        scenario_id=xfer.scenario_id,
-        status_id=ref_cache.status_id(StatusEnum.PROJECTED),
-        name=f"Twin of transfer {xfer.id}",
-        category_id=xfer.category_id,
-        transaction_type_id=ref_cache.txn_type_id(
-            TxnTypeEnum.INCOME if is_income else TxnTypeEnum.EXPENSE,
-        ),
-        due_date=xfer.due_date,
-    )
-    declare_derived(twin, AmountSourceEnum.PARENT_TRANSFER)
-    return twin
 
 
 def transfer_side_record(db_session, transfer_id, account_id):

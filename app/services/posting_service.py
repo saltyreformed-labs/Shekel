@@ -415,8 +415,8 @@ def sync_transaction_postings(txn: Transaction) -> list[JournalEntry]:
     the row's OWN target, and a row has none.
 
     **No transfer shadow reaches here since plan step ``balance:X-bi-6-4d-2``
-    deleted them** (ruling **R-BAL166**; ``ck_transactions_names_no_transfer``
-    refuses a row naming a transfer).  A transfer side's payment record hangs
+    deleted them** (ruling **R-BAL166**; plan step ``balance:X-bi-6-5``
+    dropped the column a row named one by).  A transfer side's payment record hangs
     off the TRANSFER by its side link since plan step ``balance:X-bi-6-4d-2``
     (ruling **R-BAL88**), and the pair's own door, :func:`sync_transfer_postings`,
     reaches both sides' records from the parent and books each under its
@@ -843,8 +843,8 @@ def resync_all_cash_postings() -> tuple[int, int]:
             # walk hydrates ONE ``PayPeriod``, without it ZERO -- so nothing
             # lazy-loads in its place and no autoflush moves into the loop.
             # The whole walk is enumerable here because no row can name a
-            # transfer (``ck_transactions_names_no_transfer``, since plan step
-            # ``balance:X-bi-6-4d-2``), so the transfer arm that made
+            # transfer (the table has no column for one since plan step
+            # ``balance:X-bi-6-5``), so the transfer arm that made
             # ``reconcile_service._rows``' twin undecidable does not apply.
         )
         .filter(

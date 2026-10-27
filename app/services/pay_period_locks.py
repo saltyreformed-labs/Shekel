@@ -590,9 +590,10 @@ def settled_items(periods: "list[int] | Query") -> "tuple[Query, Query]":
     row query excluded every twin (``transfer_id IS NULL``) and the transfer
     query asks the transfer, so the drift ruling **R-JM** settled here (a
     parent over a shadow whose status differed) was stored and never read.
-    No row names a transfer now (``ck_transactions_names_no_transfer``).  A
-    movement either side holds still holds its period, whatever the
-    status, through :func:`items_holding_a_movement`.
+    No row names a transfer now: the table has had no column for one since
+    plan step ``balance:X-bi-6-5``.  A movement either side holds still
+    holds its period, whatever the status, through
+    :func:`items_holding_a_movement`.
 
     Args:
         periods: As :func:`items_holding_a_movement`.
@@ -643,9 +644,10 @@ def _items(
     transfer query did not ask.  On the PERIOD drift no door wrote -- a
     shadow filed in period B while its transfer was in period A -- each read
     missed one of the two (0 of 358 shadows on the 2026-09-30 00:11
-    production dump).  That step deleted the shadows, and
-    ``ck_transactions_names_no_transfer`` refuses a new one: no transaction
-    row names a transfer, so none can sit in a period its transfer is not in.
+    production dump).  That step deleted the shadows, and plan step
+    ``balance:X-bi-6-5`` the column a shadow named its transfer by: no
+    transaction row names a transfer, so none can sit in a period its
+    transfer is not in.
 
     Args:
         periods: The pay-period ids to look in -- a list or a query of ids.

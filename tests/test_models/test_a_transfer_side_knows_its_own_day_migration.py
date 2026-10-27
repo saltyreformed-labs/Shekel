@@ -29,8 +29,9 @@ day a case checks changed.  Until that step the service wrote these states.
 **And no transfer has a twin at head** since plan step
 ``balance:X-bi-6-4d-2``, whose revision (:data:`_TWINS_DELETED`) deletes
 them and refuses a new one.  So each case runs that revision's downgrade
-ONCE, after head's own (:data:`_SIDE_RECORD_FIGURE`), once its transfers
-exist and before any plant (:func:`_twins_built`):
+ONCE, after the two above it (``c956c1d83108``'s, which puts back the
+transfer column a twin names, then :data:`_SIDE_RECORD_FIGURE`'s), once its
+transfers exist and before any plant (:func:`_twins_built`):
 it builds each transfer's two twins, saying its transfer's status and, its
 sides holding no record, no day -- the Projected, undated pair the create
 door below that step wrote, which the plants then settle -- on the schema
@@ -67,6 +68,7 @@ from tests._test_helpers import (
     load_migration_module,
     open_books_before_the_first_assertion,
     run_migration_callable,
+    step_down_through_the_transfer_column_drop,
 )
 
 _MIGRATION = load_migration_module(
@@ -115,19 +117,31 @@ def _transfer(seed_user, period, name):
 def _twins_built():
     """Run :data:`_TWINS_DELETED`'s downgrade: two twins for every transfer (the module docstring).
 
-    Head's revision's downgrade (:data:`_SIDE_RECORD_FIGURE`) runs first,
-    as the way down does: it withdraws the band's figure arm, which no
-    revision below holds.  Once per case, after its transfers exist: a
+    The two revisions above it go down first, as the way down does:
+    ``c956c1d83108``'s puts back the transfer column the twins are built
+    into (:func:`tests._test_helpers.step_down_through_the_transfer_column_drop`),
+    and :data:`_SIDE_RECORD_FIGURE`'s withdraws the band's figure arm, which
+    no revision below holds.  Once per case, after its transfers exist: a
     transfer made after it gets no twin, and a second run fails, since the
     refusal it drops is gone.  Committed, as every migration call is.
     """
+    step_down_through_the_transfer_column_drop(db.session)
     run_migration_callable(_SIDE_RECORD_FIGURE.downgrade, db.session)
     run_migration_callable(_TWINS_DELETED.downgrade, db.session)
 
 
 def _shadows(xfer):
-    """Return ``(expense, income)`` shadows of *xfer*."""
-    rows = db.session.query(Transaction).filter_by(transfer_id=xfer.id).all()
+    """Return ``(expense, income)`` shadows of *xfer*.
+
+    Their ids by raw SQL, the rows then by the ORM: the model has had no
+    ``transfer_id`` since ``c956c1d83108``, and the twins exist only below it.
+    """
+    twin_ids = db.session.execute(text(
+        "SELECT id FROM budget.transactions WHERE transfer_id = :t"
+    ), {"t": xfer.id}).scalars().all()
+    rows = (
+        db.session.query(Transaction).filter(Transaction.id.in_(twin_ids)).all()
+    )
     return (
         next(r for r in rows if r.account_id == xfer.from_account_id),
         next(r for r in rows if r.account_id == xfer.to_account_id),

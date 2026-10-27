@@ -729,11 +729,12 @@ class AmountSource(db.Model):
     is a CHECK on each table, so a stale derived figure is unrepresentable
     rather than merely unlikely.
 
-    Two values: ``template`` (the recurring definition that generated the row
-    states its price) and ``parent_transfer`` (a shadow is worth exactly what
-    its parent transfer is).  Later steps INSERT additional relations -- plan
-    step X-au-i's CC payback would add the row it repays -- and new values are
-    data, never schema.
+    One value: ``template`` (the recurring definition that generated the row
+    states its price).  ``parent_transfer`` (a shadow was worth exactly what
+    its parent transfer was) went with the shadows' link at plan step
+    ``balance:X-bi-6-5`` (migration ``c956c1d83108``).  Later steps INSERT
+    additional relations -- plan step X-au-i's CC payback would add the row
+    it repays -- and new values are data, never schema.
 
     **They name the RELATION, not the RULE**, which is a developer ruling of
     2026-08-12 amending R-FI's own five-value enumeration; the evidence (two

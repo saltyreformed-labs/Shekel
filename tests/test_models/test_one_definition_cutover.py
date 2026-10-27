@@ -14,7 +14,10 @@ to ``= 1`` and moves both link keys to ``RESTRICT``.
 so the cases that need one run the migration's own ``downgrade()`` over the
 test's private clone first, plant the pre-cutover shape by raw SQL -- the
 only writer that can still spell it -- and run ``upgrade()`` or its
-module-level callables against the test connection.  Every refusal is a
+module-level callables against the test connection.  Each such case first
+steps down through ``c956c1d83108`` (the ``below_the_transfer_column_drop``
+fixture): this revision's CHECK and its bare-row predicate name
+``transfer_id``, which head's table no longer has.  Every refusal is a
 control SHOWN TO FIRE (``docs/plans/verification.md`` standard 4), and every
 figure the cutover moves off a row is read back through the app's one
 resolver to the cent.
@@ -195,6 +198,7 @@ def _one_off(seed_user, period, *, name="Kayla's Kindle", amount="162.25",
     return row
 
 
+@pytest.mark.usefixtures("below_the_transfer_column_drop")
 class TestTheCutoverMintsADefinitionPerBareRow:
     """Steps 2 to 4 of the migration, driven over planted pre-cutover rows."""
 
@@ -395,6 +399,7 @@ class TestTheCutoverMintsADefinitionPerBareRow:
 class TestTheRefusals:
     """Every control the migration carries, SHOWN TO FIRE."""
 
+    @pytest.mark.usefixtures("below_the_transfer_column_drop")
     def test_an_unmintable_bare_row_refuses_the_cutover_before_any_write(
         self, app, db, seed_user, seed_periods,
     ):
@@ -434,6 +439,7 @@ class TestTheRefusals:
             assert db.session.query(TransactionTemplate).count() == definitions_before
             assert db.session.get(Transaction, ancient).template_id is None
 
+    @pytest.mark.usefixtures("below_the_transfer_column_drop")
     def test_a_bare_survivor_makes_the_one_link_check_refuse_the_ddl(
         self, app, db, seed_user, seed_periods,
     ):
@@ -582,6 +588,7 @@ class TestTheResidueRowsAreReattached:
             assert resolved_amount(db.session.get(Transaction, first.id)) == Decimal("0.00")
 
 
+@pytest.mark.usefixtures("below_the_transfer_column_drop")
 class TestTheDowngradeIsSchemaOnly:
     """Ruling R-BAL67: the schema returns and no row moves."""
 

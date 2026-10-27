@@ -249,9 +249,7 @@ def settle_amount(txn: Transaction, basis: AmountBasis) -> Decimal:
         ValidationError: On a row no door may settle
             (:func:`reject_unsettleable`).  A deleted row's value is nothing,
             and answering for one here would publish a figure
-            :func:`settle_transaction` refuses to book.  The other refusal,
-            a row naming a transfer, answers a row the database refuses to
-            store (``ck_transactions_names_no_transfer``).
+            :func:`settle_transaction` refuses to book.
 
     **The MANUAL branch was two figures until plan step X-au-d**, resolved
     together by a ``_manual_branch_figures`` helper: what the settle books, and

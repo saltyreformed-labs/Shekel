@@ -19,15 +19,21 @@ twins for every transfer by its one build rule, each saying its transfer's
 status and its side's record's day, basis and link.  This revision's
 downgrade then files every record under its side's twin, which is the
 pre-step shape its upgrade meets.  Between the two the ORM's models name
-columns the table does not have, so that window is raw SQL only.  A case whose
-downgrade of this revision re-files a record under its twin, or that plants a
-record as the revisions below hold it, first runs head's revision's downgrade
-(:data:`_SIDE_RECORD_FIGURE`): at head a side's record holds no figure, its
-transfer does, and that downgrade copies the transfer's figure back onto its
-records, the shape every revision below holds.  Every case whose last act is
-an upgrade runs one for each revision it downgraded and so ends at head; a
-case that ends in a refusal ends where the refusal left it, on a database the
-``db`` fixture clones for that case alone.
+columns the table does not have, so that window is raw SQL only.
+
+Every such case first steps down through ``c956c1d83108``
+(:data:`_COLUMN_DROP`, by the ``below_the_transfer_column_drop`` fixture on
+its class), which puts back the transfer column a twin names.  The model has
+had no such column since, so a twin is found and copied by raw SQL that spells
+it (:data:`_TWIN_COLUMNS`).  A case whose downgrade of this revision re-files
+a record under its twin, or that plants a record as the revisions below hold
+it, then runs ``b7d2e4f19a63``'s downgrade (:data:`_SIDE_RECORD_FIGURE`): above
+it a side's record holds no figure, its transfer does, and that downgrade
+copies the transfer's figure back onto its records, the shape every revision
+below holds.  Every case whose last act is an upgrade runs one for each
+revision it or its fixture downgraded, :data:`_COLUMN_DROP`'s last, and so
+ends at head; a case that ends in a refusal ends where the refusal left it, on
+a database the ``db`` fixture clones for that case alone.
 
 **A case whose premise is a settle or a ``$0.00`` close the app made AT this
 revision builds the twins first and then drives that act through the app's
@@ -69,21 +75,31 @@ _MIGRATION = load_migration_module(
 #: builds the twins this revision's downgrade re-attaches records under.
 _STEP_ABOVE = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
 
-#: Plan step ``balance:X-bi-6-4d-2``'s head revision, which empties every side
-#: record's figure and source onto its transfer's.  Its downgrade, run FIRST
-#: where the module docstring says, copies each transfer's figure back onto its
-#: records, the shape every revision below it holds; its upgrade runs LAST on
-#: the way back.
+#: Plan step ``balance:X-bi-6-4d-2``'s last revision, which empties every side
+#: record's figure and source onto its transfer's.  Its downgrade, run where the
+#: module docstring says, after :data:`_COLUMN_DROP`'s, copies each transfer's
+#: figure back onto its records, the shape every revision below it holds; its
+#: upgrade runs on the way back, before :data:`_COLUMN_DROP`'s.
 _SIDE_RECORD_FIGURE = load_migration_module(
     "b7d2e4f19a63_a_side_record_holds_no_figure.py",
 )
 
-#: A twin row's columns less its key and its soft-delete flag, so a raw
-#: statement can copy one the way a writer nobody enumerated would.
-_TWIN_COLUMNS = ", ".join(
-    column.name for column in Transaction.__table__.columns
-    if column.name not in ("id", "is_deleted")
+#: Plan step ``balance:X-bi-6-5``'s revision, which drops the transfer column a
+#: twin names.  Its downgrade is the case's fixture (the module docstring); its
+#: upgrade runs LAST on the way back.
+_COLUMN_DROP = load_migration_module(
+    "c956c1d83108_a_transaction_names_no_transfer.py",
 )
+
+#: A twin row's columns less its key and its soft-delete flag, so a raw
+#: statement can copy one the way a writer nobody enumerated would.  The
+#: model's columns and ``transfer_id``, which every twin holds and the model
+#: lost at :data:`_COLUMN_DROP`: without it a copy would name no transfer.
+_TWIN_COLUMNS = ", ".join([
+    *(column.name for column in Transaction.__table__.columns
+      if column.name not in ("id", "is_deleted")),
+    "transfer_id",
+])
 
 #: A record's columns in the PRE-STEP table: less its key, its row and the two
 #: side links this revision adds.
@@ -219,9 +235,10 @@ def _twins_built():
 def _below_this_revision(seed_user):
     """A settled pair at the revision below this one, every record under its twin.
 
-    At head no twin exists, so head's revision first copies each transfer's
-    figure back onto its records (:data:`_SIDE_RECORD_FIGURE`), the step
-    above's downgrade builds the twins (:func:`_twins_built`), and this
+    No twin exists above the step above, so (the case's fixture having put
+    back the transfer column) ``b7d2e4f19a63``'s downgrade copies each
+    transfer's figure back onto its records (:data:`_SIDE_RECORD_FIGURE`), the
+    step above's downgrade builds the twins (:func:`_twins_built`), and this
     revision's downgrade then files each record back under its side's twin:
     the shape this revision's upgrade meets on production.  Committed;
     returns the pair.
@@ -235,11 +252,12 @@ def _below_this_revision(seed_user):
 
 
 def _up_to_head():
-    """Run this revision's upgrade, the step above's, then head's: head again."""
+    """Run this revision's upgrade, the step above's, then the two above it: head again."""
     run_migration_callable(_MIGRATION.upgrade, _db.session)
     assert _has_side_links()
     run_migration_callable(_STEP_ABOVE.upgrade, _db.session)
     run_migration_callable(_SIDE_RECORD_FIGURE.upgrade, _db.session)
+    run_migration_callable(_COLUMN_DROP.upgrade, _db.session)
 
 
 class TestTheRevision:
@@ -358,6 +376,7 @@ class TestTheTables:
         assert modelled == migrated
 
 
+@pytest.mark.usefixtures("below_the_transfer_column_drop")
 class TestTheRoundTrip:
     """Down files every record under its twin, up under its transfer; nothing else moves."""
 
@@ -437,6 +456,7 @@ class TestTheRoundTrip:
             "ck_movement_row_not_deleted",
         ]
         run_migration_callable(_STEP_ABOVE.upgrade, _db.session)
+        run_migration_callable(_COLUMN_DROP.upgrade, _db.session)
 
 
 def _downgraded_with(seed_user, plant_sql, params_of):
@@ -464,6 +484,7 @@ def _back_to_head():
     _up_to_head()
 
 
+@pytest.mark.usefixtures("below_the_transfer_column_drop")
 class TestTheUpgradeRefuses:
     """Every stored row that could not take its link is named; nothing is written."""
 
@@ -600,6 +621,7 @@ _PRE_STEP_DRIFTS = (
 )
 
 
+@pytest.mark.usefixtures("below_the_transfer_column_drop")
 class TestTheUpgradeRefusesADriftedTwin:
     """A twin that is not what its transfer and record say refuses the UPGRADE.
 
@@ -662,8 +684,10 @@ class TestTheUpgradeRefusesADriftedTwin:
         assert _rule_triggers() == sorted(_RULE_TRIGGERS)
         run_migration_callable(_STEP_ABOVE.upgrade, _db.session)
         run_migration_callable(_SIDE_RECORD_FIGURE.upgrade, _db.session)
+        run_migration_callable(_COLUMN_DROP.upgrade, _db.session)
 
 
+@pytest.mark.usefixtures("below_the_transfer_column_drop")
 class TestTheDowngradeRefuses:
     """A record whose side has no LIVE twin cannot go back under one."""
 
@@ -731,6 +755,7 @@ def _from_side_twin(xfer):
     ), {"t": xfer.id, "a": xfer.from_account_id}).scalar_one()
 
 
+@pytest.mark.usefixtures("below_the_transfer_column_drop")
 class TestTheDowngradeRefusesADriftedTwin:
     """A twin that no longer says what its transfer and record say: named, nothing written.
 

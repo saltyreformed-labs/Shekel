@@ -28,14 +28,16 @@ on a seeded mortgage.
 
 **There are no shadows to ask since plan step balance:X-bi-6-4d-2.**  A
 transfer is one row, its two legs are read off it (**R-BAL13**: each worth
-``resolve_transfer_amount`` on the parent), and
-``ck_transactions_names_no_transfer`` refuses a row naming a transfer (ruling
-**R-BAL258**).  So the step's end state is the one this module argued for, with
-the copy deleted rather than derived: a claim this package's cases asked of
-each shadow is asked of the transfer, or of its legs through the producers that
-price them, with its figures unchanged (ruling **R-BAL167** class 1), and the
-one case that planted a shadow -- a figure on it -- asserts the database
-refuses it (class 2).  Three claims were not re-asked, and each case says so:
+``resolve_transfer_amount`` on the parent), and no row can name a transfer:
+``ck_transactions_names_no_transfer`` refused one (ruling **R-BAL258**) until
+plan step balance:X-bi-6-5 dropped the column itself.  So the step's end state
+is the one this module argued for, with the copy deleted rather than derived: a
+claim this package's cases asked of each shadow is asked of the transfer, or of
+its legs through the producers that price them, with its figures unchanged
+(ruling **R-BAL167** class 1).  The one case that planted a shadow -- a figure
+on it -- asserted the database refused it (class 2) until that step deleted it
+with the column (ruling plan#1850).  Three claims were not re-asked, and each
+case says so:
 the two AD-HOC cases' ownership reads -- the retype case's and the
 owner-stated amount case's -- which the transfer's own CHECK makes infallible
 on an ad-hoc row, a refusal replacing the first; the two FORM cases' per-leg

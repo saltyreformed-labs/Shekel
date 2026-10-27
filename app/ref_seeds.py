@@ -260,15 +260,16 @@ _REF_TABLE_SEEDS = (
     # The amount model's discriminator (balance arc, plan step X-au-c1; ruling
     # **R-FI**).  WHICH RELATION states a row's amount when the row does not
     # state it itself: ``template`` is the recurring definition that generated
-    # it, ``parent_transfer`` is the transfer a shadow belongs to.  A row that
-    # OWNS its amount carries ``amount_source_id IS NULL``, so there is
-    # deliberately no ``own`` row here -- see
+    # it.  A row that OWNS its amount carries ``amount_source_id IS NULL``, so
+    # there is deliberately no ``own`` row here -- see
     # :class:`app.enums.AmountSourceEnum` for why the OWN state is an absence.
-    # The migration ``b3f7c2a9d514`` inline-seeds the identical rows so a
-    # freshly upgraded DB resolves the enum before this idempotent reseed runs
-    # -- the same dual-seed pattern the posting and recurrence refs use.  Names
-    # match the enum ``.value`` strings in ``app/enums.py`` exactly.
-    ("AmountSource", ["template", "parent_transfer"]),
+    # The migration ``b3f7c2a9d514`` inline-seeds this row so a freshly
+    # upgraded DB resolves the enum before this idempotent reseed runs -- the
+    # same dual-seed pattern the posting and recurrence refs use -- with
+    # ``parent_transfer``, the transfer a shadow belonged to, which migration
+    # ``c956c1d83108`` deletes (plan step ``balance:X-bi-6-5``).  Names match
+    # the enum ``.value`` strings in ``app/enums.py`` exactly.
+    ("AmountSource", ["template"]),
     # WHERE a recorded statement line came from (bank-import arc, plan step
     # X-f6a-1; ruling **R-FP**).  One row per source ADAPTER -- a FORMAT at an
     # institution, because one bank publishes one statement several ways and

@@ -664,15 +664,16 @@ class AmountSourceEnum(enum.Enum):
     ``ck_transactions_amount_ownership`` / ``ck_transfers_amount_ownership``, so
     a stale derived figure is unrepresentable rather than merely unlikely.
 
-        template        -- the recurring DEFINITION that generated this row
-                           states its price: ``Transaction.template_id`` ->
-                           ``budget.transaction_templates``, or
-                           ``Transfer.transfer_template_id`` ->
-                           ``budget.transfer_templates``.
-        parent_transfer -- a row declaring it was a transfer SHADOW, worth
-                           exactly what its parent was (``transfer_id``).  No
-                           row has a parent since ``balance:X-bi-6-4d-2``, and
-                           amount rule 5 refuses a stored row declaring it.
+        template -- the recurring DEFINITION that generated this row states
+                    its price: ``Transaction.template_id`` ->
+                    ``budget.transaction_templates``, or
+                    ``Transfer.transfer_template_id`` ->
+                    ``budget.transfer_templates``.
+
+    ``parent_transfer`` named a transfer SHADOW's parent, the shadow worth
+    what its transfer was (amount rule 5); plan step ``balance:X-bi-6-4d-2``
+    deleted the shadows, and ``balance:X-bi-6-5`` the member, its reference
+    row and the rule (migration ``c956c1d83108``).
 
     **These name the RELATION that prices the row, not the RULE that computes
     the figure, and the difference is a developer ruling (2026-08-12) amending
@@ -723,7 +724,6 @@ class AmountSourceEnum(enum.Enum):
     """
 
     TEMPLATE = "template"
-    PARENT_TRANSFER = "parent_transfer"
 
 
 class StatementSourceEnum(enum.Enum):

@@ -365,11 +365,11 @@ def outstanding_scope(statement: Statement, scope_clauses: tuple) -> list:
 
     **It is the TRANSACTION arm's scope since leaf ``balance:X-bi-6-4c-2``**,
     where the transfer arm stopped reading this table (the module docstring).
-    Each of that arm's two scopes passes ``transfer_id IS NULL`` among its
+    Each of that arm's two scopes passed ``transfer_id IS NULL`` among its
     *scope_clauses*, which kept a transfer's shadow out while one was stored,
-    because a transfer is offered as its LEG.  No row names a transfer since
-    plan step ``balance:X-bi-6-4d-2`` (``ck_transactions_names_no_transfer``),
-    so the clause excludes no stored row.
+    because a transfer is offered as its LEG; the clause went with the column
+    at plan step ``balance:X-bi-6-5``, since no transaction row names a
+    transfer after ``balance:X-bi-6-4d-2``.
 
     Three clauses, each load-bearing, plus the scope's own:
 

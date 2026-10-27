@@ -313,7 +313,7 @@ class TestTheParentDecidesADrift:
             )
 
             assert locks[period.id] is PeriodLockReason.SETTLED_TXN
-            assert pay_period_gates.settled_transaction_count(user_id) == 1
+            assert pay_period_gates.settled_item_count(user_id) == 1
 
 
 class TestTheResetCounts:
@@ -347,7 +347,7 @@ class TestTheResetCounts:
             _paid_500(seed_user, seed_periods_today)
             user_id = seed_user["user"].id
 
-            assert pay_period_gates.settled_transaction_count(user_id) == 2
+            assert pay_period_gates.settled_item_count(user_id) == 2
             refusal = self._refusal(seed_user, seed_periods_today)
             assert (refusal.settled_count, refusal.holding_count) == (2, 0)
             assert str(refusal).startswith(
@@ -365,8 +365,8 @@ class TestTheResetCounts:
             _reverted_500(seed_user, seed_periods_today)
             user_id = seed_user["user"].id
 
-            assert pay_period_gates.settled_transaction_count(user_id) == 0
-            assert pay_period_gates.movement_holding_row_count(user_id) == 1
+            assert pay_period_gates.settled_item_count(user_id) == 0
+            assert pay_period_gates.movement_holding_item_count(user_id) == 1
             refusal = self._refusal(seed_user, seed_periods_today)
             assert (refusal.settled_count, refusal.holding_count) == (0, 1)
             assert str(refusal).startswith(

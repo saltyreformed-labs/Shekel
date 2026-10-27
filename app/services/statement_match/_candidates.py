@@ -69,19 +69,18 @@ leg's covering movement** (leaf ``balance:X-bi-6-4c-1``, rulings **R-BAL87**,
 transfer's side on this account from ``transfer_legs.offerable_transfer_legs``
 (keyed by the transfer on this screen), and :func:`_leg_settlement_candidates`
 each paid side's movement from ``transfer_legs.recorded_transfer_legs`` -- the
-owner, live, status and period clauses read off the TRANSFER in both.  The two
-row arms still carry ``transfer_id IS NULL``, which excludes nothing now that
-no row can name a transfer (``ck_transactions_names_no_transfer``): through
-leaf ``X-bi-6-4c-2`` a transfer was offered as its SHADOW row on this
-account, a TRANSACTION, and its paid side as the shadow's movement joined to
-the shadow, which ``X-bi-6-4d`` -- deleting the shadows -- would have left
-offering nothing.  The two leg arms partition by the movement (ruling **R-BAL79**): a
-side is a LEG while its transfer is Projected and its money has not moved,
-and its DATED movement is the subject once it has (ruling **R-BAL80**).  Where
-the row arms offer an un-dated kept movement (a row reverted after a
-card-tendered settle, ruling **R-CC42**), the leg arms offer none: under a
-Paid or Received transfer that record is a state no door writes, and an
-Apply of it would date it on the wrong day
+owner, live, status and period clauses read off the TRANSFER in both.  Through
+leaf ``X-bi-6-4c-2`` a transfer was offered as its SHADOW row on this account,
+a TRANSACTION, and its paid side as the shadow's movement joined to the shadow,
+which ``X-bi-6-4d`` -- deleting the shadows -- would have left offering
+nothing; the two row arms' ``transfer_id IS NULL`` went with the column at plan
+step ``balance:X-bi-6-5``.  The two leg arms partition by the movement (ruling
+**R-BAL79**): a side is a LEG while its transfer is Projected and its money has
+not moved, and its DATED movement is the subject once it has (ruling
+**R-BAL80**).  Where the row arms offer an un-dated kept movement (a row
+reverted after a card-tendered settle, ruling **R-CC42**), the leg arms offer
+none: under a Paid or Received transfer that record is a state no door writes,
+and an Apply of it would date it on the wrong day
 (:func:`~._valuation.leg_settlement_candidate`).
 
 **What one candidate is WORTH is** :mod:`._valuation` **'s, in its own module
@@ -395,16 +394,16 @@ def _transaction_candidates(
       because the clause is ALSO the OWNERSHIP scope this bullet opens with:
       it is what keeps another owner's rows out of the answer, which holds for
       every request kind and for every CLI caller;
-    * it is not a transfer's SHADOW (``transfer_id IS NULL``, leaf
-      ``balance:X-bi-6-4c-1``): a still-planned transfer is offered as its
-      LEG by :func:`_leg_candidates`, keyed by the transfer, whose owner,
+    * a still-planned transfer is not one of these rows: it is offered as
+      its LEG by :func:`_leg_candidates`, keyed by the transfer, whose owner,
       live, status and period clauses read off the TRANSFER
-      (``transfer_legs.offerable_transfer_legs``).  Until that leaf the
-      shadow was offered here, behind a clause admitting it only while its
-      parent transfer stood (``_parent_transfer_stands``, the parent clause
-      ``offerable_transfer_legs`` now carries); the exclusion survives
-      ``X-bi-6-4d``, which deletes the shadows, as a clause that is true of
-      every row;
+      (``transfer_legs.offerable_transfer_legs``).  Until leaf
+      ``balance:X-bi-6-4c-1`` its shadow was offered here, behind a clause
+      admitting it only while its parent transfer stood
+      (``_parent_transfer_stands``, the parent clause
+      ``offerable_transfer_legs`` now carries), and a ``transfer_id IS NULL``
+      clause kept it out from then until the column went at plan step
+      ``balance:X-bi-6-5``;
     * its payment is NOT recorded on another account (plan step
       ``credit_card:CC-5-4a-5``, leaf 5c-2a, ruling **R-CC137**, developer
       2026-10-04: *"Checking's statement screen does not offer Hotel while
@@ -476,7 +475,6 @@ def _transaction_candidates(
             is_projected_clause(Transaction),
             balance_contributing_clause(),
             Transaction.pay_period_id.in_(period_ids),
-            Transaction.transfer_id.is_(None),
         )
         .order_by(Transaction.id)
         .all()
@@ -541,11 +539,11 @@ def _settlement_candidates(
     * its row CONTRIBUTES and is not soft-deleted and sits in one of the
       OWNER's saved periods -- the row arm's clauses, applied to the parent
       for the same reasons;
-    * its row is not a transfer's SHADOW: a paid transfer's side is offered
-      by :func:`_leg_settlement_candidates` as its LEG's record (leaf
-      ``balance:X-bi-6-4c-1``), the transfer's clauses read off the
-      transfer, where this arm joined the movement to its shadow row until
-      that leaf.
+    * its parent is a ROW, by the join on ``transaction_id``: a paid
+      transfer's side is offered by :func:`_leg_settlement_candidates` as its
+      LEG's record (leaf ``balance:X-bi-6-4c-1``), the transfer's clauses
+      read off the transfer, where this arm joined the movement to its shadow
+      row until that leaf.
 
     **What is ALREADY MATCHED is NOT a clause here**; see
     :func:`_transaction_candidates` for why it moved to :func:`unmatched_rows`.
@@ -585,7 +583,6 @@ def _settlement_candidates(
             ),
             balance_contributing_clause(),
             Transaction.pay_period_id.in_(period_ids),
-            Transaction.transfer_id.is_(None),
         )
         .all()
     )

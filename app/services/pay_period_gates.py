@@ -388,11 +388,8 @@ def _reject_held_rows(head: "list[DerivedPeriod]") -> None:
     # Keyed per paycheck by what the owner sees -- a row, or a transfer once
     # for both its legs -- so an item held for two reasons is named once.
     held: "dict[int, dict[tuple[str, int], str]]" = {}
-    for model, scope in (
-        (Transaction, (Transaction.transfer_id.is_(None),)),
-        (Transfer, ()),
-    ):
-        for row in _live_rows_of(model, model.template, period_ids, *scope):
+    for model in (Transaction, Transfer):
+        for row in _live_rows_of(model, model.template, period_ids):
             if not _regenerable(row):
                 item, name = pay_period_locks.item_of(model, row.id, row.name)
                 held.setdefault(row.pay_period_id, {})[item] = name
@@ -575,7 +572,6 @@ def _settled_transaction(user_id, low, high):
         db.session.query(Transaction.settled_on, Transaction.name)
         .filter(
             Transaction.user_id == user_id,
-            Transaction.transfer_id.is_(None),
             Transaction.is_deleted.is_(False),
             Transaction.settled_on >= low,
             Transaction.settled_on < high,
@@ -726,8 +722,8 @@ def can_reset_pay_periods(user_id: int) -> bool:
         transfers and zero holding a movement, else ``False``.
     """
     return (
-        settled_transaction_count(user_id) == 0
-        and movement_holding_row_count(user_id) == 0
+        settled_item_count(user_id) == 0
+        and movement_holding_item_count(user_id) == 0
     )
 
 
@@ -803,16 +799,18 @@ def regenerate_keep_through_period(
 
 
 
-def _live_rows_of(model, definition, period_ids, *scope):
+def _live_rows_of(model, definition, period_ids):
     """Load *model*'s live rows in *period_ids*, each with its definition.
 
-    The ONE query shape both arms of :func:`count_discardable_items` load
-    through, so the two cannot come to scope a period differently: the
-    period set, the live filter and the eager load of the definition are
-    stated here, and each arm adds only what is its own (the transaction
-    arm's ``transfer_id IS NULL``, which excludes nothing since plan step
-    ``balance:X-bi-6-4d-2`` deleted the transfer twins and goes with the
-    column at ``X-bi-6-5``).  ``selectinload`` fetches every row's
+    The ONE query shape both arms of :func:`count_discardable_items` (and of
+    :func:`_reject_held_rows`) load through, so the two cannot come to scope a
+    period differently: the period set, the live filter and the eager load of
+    the definition are stated here.  The transaction arm also passed
+    ``transfer_id IS NULL`` until plan step ``balance:X-bi-6-5`` dropped that
+    column (finding **BAL-571**: an item was a row that is no transfer twin,
+    or a transfer once, spelled again in ``pay_period_locks._items``); no row
+    is a transfer's twin since ``balance:X-bi-6-4d-2``, so every live row of
+    either table is one item.  ``selectinload`` fetches every row's
     definition in one query rather than one per row, since this runs over
     every period a truncate would drop.
 
@@ -821,7 +819,6 @@ def _live_rows_of(model, definition, period_ids, *scope):
         definition: The relationship to the row's definition
             (``Transaction.template`` / ``Transfer.template``).
         period_ids: The pay-period ids being deleted.
-        *scope: Any further filter clauses the arm needs.
 
     Returns:
         The rows, definitions loaded.
@@ -832,7 +829,6 @@ def _live_rows_of(model, definition, period_ids, *scope):
         .filter(
             model.pay_period_id.in_(period_ids),
             model.is_deleted.is_(False),
-            *scope,
         )
         .all()
     )
@@ -876,10 +872,7 @@ def count_discardable_items(period_ids):
         The number of unrecoverable rows (transactions plus transfers; a
         transfer counts once).
     """
-    transactions = _live_rows_of(
-        Transaction, Transaction.template, period_ids,
-        Transaction.transfer_id.is_(None),
-    )
+    transactions = _live_rows_of(Transaction, Transaction.template, period_ids)
     transfers = _live_rows_of(Transfer, Transfer.template, period_ids)
     return (
         sum(1 for row in transactions if not _regenerable(row))
@@ -915,7 +908,7 @@ def _regenerable(row) -> bool:
 
 
 
-def settled_transaction_count(user_id: int) -> int:
+def settled_item_count(user_id: int) -> int:
     """Count the user's non-deleted settled items (the reset gate).
 
     The lock classifier's own items
@@ -939,7 +932,7 @@ def settled_transaction_count(user_id: int) -> int:
     return _count(pay_period_locks.settled_items(_owner_periods(user_id)))
 
 
-def movement_holding_row_count(user_id: int) -> int:
+def movement_holding_item_count(user_id: int) -> int:
     """Count the user's items holding a payment or purchase (the reset's second gate).
 
     Plan step ``credit_card:CC-5-4a-4``, ruling **R-CC65** ("Reset refuses

@@ -849,7 +849,6 @@ def resync_all_cash_postings() -> tuple[int, int]:
         )
         .filter(
             Transaction.is_deleted.is_(False),
-            Transaction.transfer_id.is_(None),
             # SETTLED, or carrying a purchase that has posted a leg of its own
             # (ruling **R-FM**, plan step X-f3b).  The second arm is what makes
             # this hook TOTAL over the family the ledger now holds: a purchase

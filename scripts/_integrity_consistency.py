@@ -301,9 +301,9 @@ def check_data_consistency(session):
     # its settled status with no day (the create door stated none, and the arm
     # dates the side records instead), which this arm read as CRITICAL money
     # the fold cannot see.  The twins themselves went at ``X-bi-6-4d-2``
-    # (ruling **R-BAL166**), with DC-12, and the database refuses a new one
-    # (ruling **R-BAL258**), so the arm's ``t.transfer_id IS NULL`` excludes
-    # nothing until ``X-bi-6-5`` drops the column with it.
+    # (ruling **R-BAL166**), with DC-12, and the arm's
+    # ``t.transfer_id IS NULL`` went with the column at plan step
+    # ``balance:X-bi-6-5``.
     results.append(run_check(session, CheckSpec(
         "DC-11", "consistency", "critical",
         "Settled rows the fold cannot see: no settle day, or a covering "
@@ -320,7 +320,7 @@ def check_data_consistency(session):
                  AS undated_covering_movements
         FROM budget.transactions t
         JOIN ref.statuses s ON s.id = t.status_id
-        WHERE s.is_settled AND NOT t.is_deleted AND t.transfer_id IS NULL
+        WHERE s.is_settled AND NOT t.is_deleted
           AND (
             t.settled_on IS NULL
             OR EXISTS (

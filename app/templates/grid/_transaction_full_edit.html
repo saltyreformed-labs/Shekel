@@ -169,7 +169,7 @@
     </button>
     {% endif %}
 
-    {% if not txn.transfer_id and txn.is_expense and txn.status_id == STATUS_PROJECTED
+    {% if txn.is_expense and txn.status_id == STATUS_PROJECTED
        and not txn.tracks_purchases %}
     <button type="button" class="btn btn-xs btn-warning flex-grow-1"
             hx-post="{{ url_for('transactions.mark_credit', txn_id=txn.id) }}"
@@ -178,7 +178,7 @@
             aria-label="Mark as credit card">
       <i class="bi bi-credit-card"></i> Credit
     </button>
-    {% elif not txn.transfer_id and txn.status_id == STATUS_CREDIT %}
+    {% elif txn.status_id == STATUS_CREDIT %}
     <button type="button" class="btn btn-xs btn-outline-warning flex-grow-1"
             hx-delete="{{ url_for('transactions.unmark_credit', txn_id=txn.id) }}"
             hx-target="#txn-cell-{{ txn.id }}" hx-swap="innerHTML"

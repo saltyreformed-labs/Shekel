@@ -280,7 +280,7 @@ def items_holding_a_movement(periods: "list[int] | Query") -> "tuple[Query, Quer
 
     The pay-period doors' one reading of it: the lock classifier's
     ``HOLDS_MOVEMENT`` (per period), the reset gate's second count
-    (``pay_period_gates.movement_holding_row_count``), and -- through
+    (``pay_period_gates.movement_holding_item_count``), and -- through
     :func:`movements_held_in`, these queries with the movements joined on --
     truncate and regenerate's refusal naming each movement (plan step
     ``pay_calendar:C22``, ruling **R-PC116**) and "Remove earlier
@@ -581,7 +581,7 @@ def settled_items(periods: "list[int] | Query") -> "tuple[Query, Query]":
     own status is the only one it has (the transfer paragraph of
     ``CLAUDE.md``'s Architecture), which is ``X-bi-6``'s end: status in one
     row.  The lock classifier's ``SETTLED_TXN`` and the reset gate's first
-    count (``pay_period_gates.settled_transaction_count``) both read this,
+    count (``pay_period_gates.settled_item_count``) both read this,
     so a row that does not lock a period cannot block a reset.
 
     **The parent decides, and since plan step ``balance:X-bi-6-4d-2`` it is
@@ -626,8 +626,9 @@ def _items(
     TRANSFER once for its two legs, which the transfer query asks.  The row
     query's ``transfer_id IS NULL`` (the discard gate's idiom) kept a
     transfer's shadow rows out until plan step ``balance:X-bi-6-4d-2``
-    deleted them; it excludes nothing since, and goes with the column at
-    plan step ``balance:X-bi-6-5``.
+    deleted them, and went with the column at plan step ``balance:X-bi-6-5``
+    (finding **BAL-571**: the same item spelled again in
+    ``pay_period_gates._live_rows_of``' callers), so every row is one item.
     Each query yields one ``(pay_period_id,)`` per item, so a caller reads
     the set of periods (:func:`_period_ids_of`) or counts the items
     (``Query.count``); one that needs more of each item swaps the columns
@@ -657,7 +658,6 @@ def _items(
     return (
         db.session.query(Transaction.pay_period_id).filter(
             Transaction.pay_period_id.in_(periods),
-            Transaction.transfer_id.is_(None),
             *rows,
         ),
         db.session.query(Transfer.pay_period_id).filter(

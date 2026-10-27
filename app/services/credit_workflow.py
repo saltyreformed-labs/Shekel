@@ -352,8 +352,8 @@ def mark_as_credit(transaction_id, user_id):
         NotFoundError:  If the transaction doesn't exist, doesn't
             belong to *user_id*, or was deleted (ruling **R-CC99** (b)).
         ValidationError: If the transaction is income (can't credit income),
-            is a transfer shadow, uses entry tracking, has a status
-            other than projected, or has no following pay period.
+            uses entry tracking, has a status other than projected, or has
+            no following pay period.
     """
     txn = load_owned_transaction(transaction_id, user_id)
     # **A deleted row is "not found"** (plan step ``credit_card:CC-5-4a-4``,
@@ -371,8 +371,6 @@ def mark_as_credit(transaction_id, user_id):
         raise NotFoundError(f"Transaction {transaction_id} not found.")
     if txn.is_income:
         raise ValidationError("Cannot mark income as credit.")
-    if txn.transfer_id is not None:
-        raise ValidationError("Cannot mark transfer transactions as credit.")
 
     # Block legacy credit on entry-capable transactions.
     if txn.tracks_purchases:

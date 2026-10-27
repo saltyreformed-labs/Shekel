@@ -150,8 +150,9 @@ def check_balance_anomalies(session):
         # (ruling **R-BAL80**: the money is the movement), asked under the
         # TRANSFER's status and ``is_deleted``.  The row arm dropped the
         # shadows (``transfer_id IS NULL``), which it used to count as rows
-        # by their own day; since plan step ``balance:X-bi-6-4d-2`` no row
-        # names a transfer.  The leg arm grades a MOVEMENT's day, so a side closed
+        # by their own day, until plan step ``balance:X-bi-6-5`` dropped the
+        # column; no row names a transfer since ``balance:X-bi-6-4d-2``.  The
+        # leg arm grades a MOVEMENT's day, so a side closed
         # at ``$0.00``, which holds no movement, has no day to grade and is
         # not listed -- where a ``$0.00``-closed ROW keeps the row day this
         # arm's twin reads.  On the 2026-09-30 00:11 production dump no
@@ -182,7 +183,6 @@ def check_balance_anomalies(session):
             JOIN ref.statuses s ON s.id = t.status_id
             JOIN sched ON sched.user_id = p.user_id
             WHERE t.is_deleted = FALSE
-              AND t.transfer_id IS NULL
               AND s.is_settled = TRUE
               AND t.settled_on IS NOT NULL
               AND (t.settled_on < sched.first_day

@@ -93,8 +93,8 @@ class FakeBoard:
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (26/20, measured at plan#1811) -- it
-    stands in for :class:`_tracker.Tracker`, so it has each of that class's 24
+    Pylint: ``too-many-public-methods`` (27/20, measured at plan#1811) -- it
+    stands in for :class:`_tracker.Tracker`, so it has each of that class's 25
     reads and writes but ``connect`` (its own disable says why there are so many),
     and ``add`` and ``add_task``, which put a card or a task in.
     ``too-many-instance-attributes`` (8/7) -- **one per kind
@@ -298,6 +298,11 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
                                    '{"message":"Label does not exist"}')
         self.writes.append(("unmark", number))
         self._set(number, labels=unmarked(labels))
+
+    def set_arc(self, number, arc):
+        """Set a card's Arc, its other facts kept."""
+        self.writes.append(("set_arc", number, arc))
+        self._set(number, arc=arc)
 
     def relabel(self, number, add, remove):
         """Add the labels ``add`` to a card and remove ``remove``, its other labels kept.  A

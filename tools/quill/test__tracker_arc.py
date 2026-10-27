@@ -138,6 +138,52 @@ def test_the_issue_fields_are_read_on_the_trackers_own_repository():
     assert github.calls[1][1] == f"{REHEARSAL.path}/issues"
 
 
+class _Setter:
+    """A GitHub that answers the issue fields' read with :data:`FIELDS` and the write of a
+    value with ``answer``, keeping every call."""
+
+    def __init__(self, answer):
+        """Hold the answer; keep each call."""
+        self.answer, self.calls = answer, []
+
+    def graphql(self, query, **variables):
+        """The issue fields' read."""
+        self.calls.append(("graphql", query, variables))
+        return copy.deepcopy(FIELDS)
+
+    def rest(self, method, path, body=None):
+        """The write of the value."""
+        self.calls.append((method, path, body))
+        return copy.deepcopy(self.answer)
+
+
+def test_set_arc_adds_the_one_value_and_reads_it_back():
+    """Ruling plan#1856's fill: the Arc's id read, then REST's add of the one value (never its
+    set, PUT, which would replace Priority and Effort too), the answer the card's values after
+    it, in the shape measured on plan#1811."""
+    github = _Setter([_value("High", "Effort", 47847924), _value("salary")])
+    _tracker(github).set_arc(7, "salary")
+    assert github.calls == [
+        ("graphql", _queries.issue_fields(PLAN), {}),
+        ("POST", f"{PLAN.path}/issues/7/issue-field-values",
+         {"issue_field_values": [{"field_id": ARC_ID, "value": "salary"}]})]
+
+
+@pytest.mark.parametrize(("answer", "said"), [
+    ([_value("balance")], r"plan#7 holds the Arc 'balance', not 'salary', after it was set"),
+    ([], r"plan#7 holds the Arc None, not 'salary', after it was set"),
+    ({"message": "Not Found"}, r"plan#7's Arc was answered \{'message': 'Not Found'\}, not a "
+                               r"list of its field values"),
+    ([{"issue_field_name": "Arc", "single_select_option": None}],
+     r"plan#7's Arc was answered .*, not a list of its field values"),
+])
+def test_set_arc_refuses_an_answer_not_showing_the_arc_set(answer, said):
+    """An answer that does not show the Arc set, another or none, or that is not the list of
+    the card's values, is refused, never trusted."""
+    with pytest.raises(TrackerError, match=said):
+        _tracker(_Setter(answer)).set_arc(7, "salary")
+
+
 def test_only_the_arc_field_s_value_is_the_arc_github_answered():
     """Another single select's value beside it is passed over, and none is no arc."""
     assert arc_answered([_value("High", "Effort", 47847924), _value("recurrence")]) == "recurrence"

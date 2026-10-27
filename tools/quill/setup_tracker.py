@@ -703,17 +703,22 @@ def check_card_arcs(github: GitHub, report: Report) -> None:
     """Check every card's arc labels against its Arc (ruling ``balance:R-BAL354``, views_spec
     s.6) over the read and by the rule ``quill sync``'s label pass makes
     (:func:`_arcs.card_arcs`, :func:`_arcs.arc_verdict`): each card it finds anything for is
-    a difference, named as sync names it: what a person must fix in its Arc, which sync
-    reports, or the arc labels sync puts back."""
+    a difference, named as sync names it: the Arc sync sets from its one arc label (ruling
+    plan#1856), what a person must fix in its Arc, which sync reports, or the arc labels sync
+    puts back."""
     cards = card_arcs(github, ORG, REPO)
     differ = 0
     for card in cards:
-        fault, add, remove = arc_verdict(card, card.kind == TASK)
-        if fault:
-            report.differs(f"card {REPO}#{card.number} {fault}")
-        elif add or remove:
+        verdict = arc_verdict(card, card.kind == TASK)
+        if verdict.fill:
+            report.differs(f"card {REPO}#{card.number} holds no Arc: sync sets it to "
+                           f"{verdict.fill!r}, the one arc label it carries (ruling plan#1856)")
+        elif verdict.fault:
+            report.differs(f"card {REPO}#{card.number} {verdict.fault}")
+        elif verdict.add or verdict.remove:
             report.differs(f"card {REPO}#{card.number}'s arc labels do not display its Arc "
-                           f"{card.arc!r}: it lacks {list(add)} and holds {list(remove)}")
+                           f"{card.arc!r}: it lacks {list(verdict.add)} and holds "
+                           f"{list(verdict.remove)}")
         else:
             continue
         differ += 1

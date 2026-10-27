@@ -7,9 +7,10 @@ the field), its reads (:mod:`_queries`), its cards and the create that files one
 (:mod:`_tracker`): every read of a card reads its labels and Arc by one text
 (:data:`LABELS_AND_ARC`) and one parse (:func:`labels_and_arc`).  And the one read of EVERY
 card's labels and Arc (:func:`card_arcs`), with the one rule of what a card's arc labels and
-Arc call for (:func:`arc_verdict`): what a person must fix in its Arc, which no label can,
-else what puts its arc labels back to display it (:func:`label_corrections`, their one
-producer).  ``quill sync``'s label pass writes and reports by it (:mod:`_relabel`), and
+Arc call for (:func:`arc_verdict`): the Arc its one arc label sets while old code may still
+file a card without one (ruling plan#1856), else what a person must fix in its Arc, which no
+label can, else what puts its arc labels back to display it (:func:`label_corrections`, their
+one producer).  ``quill sync``'s label pass writes and reports by it (:mod:`_relabel`), and
 :mod:`setup_tracker` reports each card it finds anything for (views_spec s.3, s.6).
 
 A leaf but for :mod:`_github`, itself a leaf: it imports no other module of quill's, so
@@ -111,10 +112,36 @@ class ArcCard:
     arc: str | None
 
 
+@dataclass(frozen=True)
+class ArcVerdict:
+    """What the one rule (:func:`arc_verdict`) says a card's arc labels and Arc call for, at
+    most one of three: ``fill``, the Arc to set from its one arc label (ruling plan#1856);
+    ``fault``, what a person must fix in its Arc, worded to follow its name; or the arc labels
+    to ``add`` and to ``remove`` that put them back to display it.  None of them when its arc
+    labels display its Arc."""
+
+    fill: str | None = None
+    fault: str | None = None
+    add: tuple[str, ...] = ()
+    remove: tuple[str, ...] = ()
+
+
+def _fill(card: ArcCard, is_task: bool) -> str | None:
+    """The Arc ``card`` is given from its one arc label, the one-time pass's rule (plan#1811
+    spec item 6) kept by ruling plan#1856 until every lane runs quill that files a card
+    holding its Arc, as older quill files one with the label alone: a card but a task
+    (``is_task``) holding no Arc and exactly one arc label.  None for every other card,
+    no label then saying what its Arc should be."""
+    held = [label for label in card.labels if label in ARCS]
+    if is_task or card.arc is not None or len(held) != 1:
+        return None
+    return held[0]
+
+
 def _arc_fault(card: ArcCard, is_task: bool) -> str | None:
     """What a person must fix in ``card``'s Arc, which no label can, worded to follow its
-    name; None when nothing.  A card but a task holding none, from which no label can be
-    derived (views_spec s.3): its labels are named, as they say what its Arc should be.  One
+    name; None when nothing.  A card but a task holding none whose arc labels, none or
+    several, cannot give it one (views_spec s.3, :func:`_fill`): its labels are named.  One
     holding an Arc that is none of :data:`tools.ci.arcs.ARCS`: no arc label displays it, so
     no put-back would ever settle.  And a task (``is_task``) holding one: its arc is its
     card's (ruling ``balance:R-BAL386``), so a value of its own would be a second home of it
@@ -133,18 +160,21 @@ def _arc_fault(card: ArcCard, is_task: bool) -> str | None:
     return None
 
 
-def arc_verdict(card: ArcCard, is_task: bool) -> tuple[str | None, tuple[str, ...],
-                                                         tuple[str, ...]]:
-    """The one rule of what ``card``'s arc labels and Arc call for (ruling ``R-BAL354``,
-    views_spec s.3 and s.6), ``is_task`` saying it is a task: what a person must fix in its
-    Arc, which no label can (:func:`_arc_fault`), with nothing to write, its labels kept as
-    they may be the only record of what its Arc should be; else no fault, and the arc labels
-    to add and to remove that put them back to display its Arc (:func:`label_corrections`),
-    none when they do.  ``quill sync``'s label pass reports and writes by it
-    (:mod:`_relabel`), and :mod:`setup_tracker` reports each card it finds anything for."""
+def arc_verdict(card: ArcCard, is_task: bool) -> ArcVerdict:
+    """The one rule of what ``card``'s arc labels and Arc call for (rulings ``R-BAL354``,
+    plan#1856; views_spec s.3 and s.6), ``is_task`` saying it is a task: the Arc its one arc
+    label gives it (:func:`_fill`), its labels then displaying it; else what a person must fix
+    in its Arc, which no label can (:func:`_arc_fault`), nothing written and its labels kept,
+    as they may be the only record of what its Arc should be; else the arc labels to add and
+    to remove that put them back to display its Arc (:func:`label_corrections`), none when
+    they do.  ``quill sync``'s label pass writes and reports by it (:mod:`_relabel`), and
+    :mod:`setup_tracker` reports each card it finds anything for."""
+    if fill := _fill(card, is_task):
+        return ArcVerdict(fill=fill)
     if fault := _arc_fault(card, is_task):
-        return fault, (), ()
-    return (None, *label_corrections(card.labels, card.arc))
+        return ArcVerdict(fault=fault)
+    add, remove = label_corrections(card.labels, card.arc)
+    return ArcVerdict(add=add, remove=remove)
 
 
 #: How many cards one page of :func:`listing` holds.  Measured 2026-10-27 on the tracker,

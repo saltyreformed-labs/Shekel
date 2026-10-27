@@ -49,25 +49,52 @@ def test_sync_puts_each_cards_arc_labels_back_to_display_its_arc(code, capsys):
 
 
 def test_a_card_whose_arc_no_label_can_fix_is_reported_and_left_as_it_is(code, capsys):
-    """A card but a task holding no Arc (views_spec s.3: no label can be derived from
-    nothing), and a task holding one (R-BAL386: its arc is its card's), are each a REPORT,
-    which makes sync exit 1, and neither card is written: the first keeps the labels that say
-    what its Arc should be."""
+    """A card but a task holding no Arc and no or several arc labels (views_spec s.3: no one
+    label says what it should be; ruling plan#1856 fills only from one), and a task holding
+    one (R-BAL386: its arc is its card's), are each a REPORT, which makes sync exit 1, and no
+    card is written: each keeps the labels a person reads to set its Arc."""
     tracker = FakeTracker()
-    tracker.add(1, labels=("recurrence",), arc=None)
+    tracker.add(1, labels=("recurrence", "salary"), arc=None)
     tracker.add(2, "ruling", labels=(), arc=None, on_board=False, is_open=False,
                 state_reason="COMPLETED", closed_by_tool=True)
     tracker.add_task(3, 1, arc="balance")
     assert run(tracker, code, "sync") == 1
     assert capsys.readouterr().out == (
         "REPORT: plan#1 [step, no arc] card 1 holds no Arc, its arc's one home (R-BAL349), so "
-        "no arc label can display it: set its Arc on the web (its labels: ['recurrence'])\n"
+        "no arc label can display it: set its Arc on the web (its labels: ['recurrence', "
+        "'salary'])\n"
         "REPORT: plan#2 [ruling, no arc] card 2 holds no Arc, its arc's one home (R-BAL349), so "
         "no arc label can display it: set its Arc on the web (its labels: [])\n"
         "REPORT: plan#3 [task, balance] card 3 is a task, whose arc is its card's (R-BAL386), "
         "and holds the Arc 'balance': clear it on the web\n")
     assert not tracker.writes
     assert run(tracker, code, "sync", "--dry-run") == 1
+
+
+def test_a_card_older_quill_filed_with_its_arc_label_alone_is_given_that_arc(code, capsys):
+    """Ruling plan#1856: a card but a task holding no Arc and exactly one arc label, as quill
+    older than plan#1811 files one, open or closed, is given the Arc that label names, its
+    labels kept, and the line says so; no REPORT, so sync exits 0.  A dry run prints it and
+    writes nothing; the next run writes nothing more."""
+    tracker = FakeTracker()
+    tracker.add(1, labels=("recurrence", "moves-money"), arc=None)
+    tracker.add(2, "ruling", labels=("salary",), arc=None, on_board=False, is_open=False,
+                state_reason="COMPLETED", closed_by_tool=True)
+    lines = ("set plan#1 [step, no arc] card 1's Arc to 'recurrence', the one arc label it "
+             "carries (ruling plan#1856)\n"
+             "set plan#2 [ruling, no arc] card 2's Arc to 'salary', the one arc label it "
+             "carries (ruling plan#1856)\n")
+    assert run(tracker, code, "sync", "--dry-run") == 0
+    assert capsys.readouterr().out == lines.replace("set plan#", "would set plan#")
+    assert not tracker.writes
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == lines
+    assert tracker.writes == [("set_arc", 1, "recurrence"), ("set_arc", 2, "salary")]
+    assert [(card.arc, card.labels) for card in tracker.card_arcs()] == [
+        ("recurrence", ("recurrence", "moves-money")), ("salary", ("salary",))]
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == ""
+    assert len(tracker.writes) == 2
 
 
 def test_a_card_holding_an_arc_none_of_quills_is_reported_and_never_relabelled(code, capsys):

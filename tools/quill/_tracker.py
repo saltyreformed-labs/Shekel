@@ -538,8 +538,9 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     """A tracker as the App sees it: its cards, each with its board item, and its
     :class:`Board`.
 
-    Pylint: ``too-many-public-methods`` (24/20, measured at plan#1811, whose arc-label pass
-    reads every card's labels and Arc and puts its arc labels back; 22 at plan#1772, which
+    Pylint: ``too-many-public-methods`` (25/20, measured at plan#1811, whose arc-label pass
+    reads every card's labels and Arc, puts its arc labels back and sets a missing Arc from
+    its one arc label (ruling plan#1856); 22 at plan#1772, which
     moved the read of what a card blocks down to :class:`CardReader`, where CI's landing
     check reads it) --
     ``connect``, then **one method per read or write quill makes of the tracker**
@@ -759,6 +760,31 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
                 f"in a read of {len(fields['nodes'])} of its {fields['totalCount']}: run "
                 "python -m tools.quill.setup_tracker")
         return int(found[0])
+
+    def set_arc(self, number: int, arc: str) -> None:
+        """Set a card's Arc, its issue field :data:`_arcs.ARC_FIELD`, to ``arc``, its other
+        field values left as they are: REST's add of the one value (measured 2026-10-27 on
+        plan#1811, ``build_1811/first_write.out``; never its "set" (PUT), which replaces every
+        value, Priority and Effort too), read back from GitHub's answer, the card's values
+        after it.  ``quill sync``'s fill of a card filed by older quill with its arc label
+        alone (ruling plan#1856, :mod:`_relabel`); the Arc's id is read first
+        (:meth:`_arc_field_id`).
+
+        Raises:
+            TrackerError: When that answer does not show ``arc`` as the card's Arc, or is not
+                a list of its values.
+        """
+        answer = self.github.rest(
+            "POST", f"{self.place.path}/issues/{number}/issue-field-values",
+            {"issue_field_values": [{"field_id": self._arc_field_id(), "value": arc}]})
+        try:
+            held = arc_answered(answer)
+        except (TypeError, KeyError, AttributeError) as error:
+            raise TrackerError(f"plan#{number}'s Arc was answered {answer!r:.300}, not a list "
+                               "of its field values: read it back by hand") from error
+        if held != arc:
+            raise TrackerError(f"plan#{number} holds the Arc {held!r}, not {arc!r}, after it "
+                               "was set: fix it by hand")
 
     def set_milestone(self, number: int, milestone: int | None) -> None:
         """Put a card in the milestone numbered ``milestone``, or with None take it out of its

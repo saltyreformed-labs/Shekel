@@ -445,3 +445,29 @@ def test_a_task_first_on_the_board_is_in_no_order_next_move_or_show_reads(code, 
             in capsys.readouterr().out)
     assert run(tracker, code, "show", "plan#1") == 0
     assert "\n  board: #1\n" in capsys.readouterr().out
+
+
+def test_a_step_the_order_read_does_not_list_is_named_so_by_move_and_show(code, capsys):
+    """plan#1810's review, L2 and N7: a step is in the order, so one the order read does not
+    list is off the board, or on it and missed by a read that lags a write (``_tracker``'s
+    doctrine; simulated here by a read that leaves it out): ``move --after`` it says which, with
+    nothing written, and ``show`` of one on the board says the read lags, never that it is in no
+    order."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(2, on_board=False)
+    tracker.add(3)
+    assert run(tracker, code, "move", "plan#1", "--after", "plan#2") == 1
+    assert capsys.readouterr().err == (
+        "refused: plan#2 [step, balance] card 2 is not on the board, so nothing is placed after "
+        "it: put it on first (`quill move plan#2 --top`, `--bottom` or `--after`)\n")
+    held = tracker.board.held
+    tracker.board.held = lambda: [entry for entry in held() if entry[0] != 3]
+    assert run(tracker, code, "move", "plan#1", "--after", "plan#3") == 1
+    assert capsys.readouterr().err == (
+        "refused: plan#3 [step, balance] card 3 is on the board, but the board's order read "
+        "does not list it yet: the board lags a write; run this again\n")
+    assert not tracker.writes
+    assert run(tracker, code, "show", "plan#3") == 0
+    assert ("\n  board: on it, but the board's order read does not list it yet: the board lags a "
+            "write; show it again\n" in capsys.readouterr().out)

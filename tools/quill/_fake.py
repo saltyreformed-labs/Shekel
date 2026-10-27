@@ -36,8 +36,8 @@ from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
 from tools.quill._command import on_board as goes_on_board
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Card, Child, Comment, Edit
-from tools.quill.setup_tracker import APP_LOGIN, FILING, IN_ORDER, PLAN, unmarked
+from tools.quill._tracker import Card, Child, Comment, Edit, in_order
+from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, unmarked
 
 
 class FakeBoard:
@@ -57,8 +57,9 @@ class FakeBoard:
         return [(n, f"PVTI_{n}", self.cards[n].kind) for n in self.items]
 
     def order(self):
-        """The board's order, its steps and questions alone: ``(card number, item id)``."""
-        return [(n, item) for n, item, kind in self.held() if kind in IN_ORDER]
+        """The board's order, by the one projection :class:`_tracker.Board` reads
+        (:func:`_tracker.in_order`): ``(card number, item id)``."""
+        return in_order(self.held())
 
     def add(self, card):
         """Add a card at the bottom; one already on the board keeps its item, as GitHub

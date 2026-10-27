@@ -43,10 +43,13 @@ the board holds the steps and questions in the developer's order, and each step'
 nested under it in no order (ruling plan#1814), and quill places each one itself, a new
 leaf where the step it splits sat, a task at the bottom, where the order does not read
 it: filed under a step on the board, or put on by ``quill sync`` once its step is (ruling
-plan#1842).  "Auto-add sub-issues to project" would put every sub-issue -- a task under its card
-(``R-BAL386``), a leaf under the step it splits -- at the bottom of the ordered list (measured
-2026-10-04, when findings and rulings were their owner's sub-issues: within ten
-seconds; since ``R-BAL395`` each is blocked by its owner instead).  **Nor may one hide
+plan#1842).  "Auto-add sub-issues to project" would add each sub-issue of a card on the
+board at the bottom (measured 2026-10-04, when findings and rulings were their owner's
+sub-issues: within ten seconds; since ``R-BAL395`` each is blocked by its owner instead).  A
+task under a step on the board quill now puts there itself; the automation's harm is the
+rest: a leaf at the bottom of the order, not where the step it splits sat (R-BAL179), until
+quill moves it, and any card a person links under one on the board, entering the order
+unplaced.  **Nor may one hide
 a card**: "Auto-archive items" archives closed cards, and an archived card is in no
 view, so the shipped work kept as closed cards (ruling ``balance:R-BAL352``) would
 vanish from the view that shows it.  So every automation is off, and any archived

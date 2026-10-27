@@ -396,6 +396,13 @@ def read_until[T](read: Callable[[], list[T]], holds: Callable[[list[T]], bool],
         waited += POLL_SECONDS
 
 
+def in_order(held: Iterable[tuple[int, str, str | None]]) -> list[tuple[int, str]]:
+    """The developer's drag order (R-BAL177) of what a board holds (:meth:`Board.held`), its
+    steps and questions alone (:data:`setup_tracker.IN_ORDER`): ``(card number, board item
+    id)``.  The one projection, which :meth:`Board.order` and the tests' board both read."""
+    return [(number, item) for number, item, kind in held if kind in IN_ORDER]
+
+
 class Board:
     """``place``'s board: the steps and questions in the developer's drag order (R-BAL177),
     and each step's tasks, which nest under it in the Plan view and are in no order (ruling
@@ -431,8 +438,8 @@ class Board:
 
     def order(self) -> list[tuple[int, str]]:
         """The board's cards in the developer's drag order, its steps and questions alone
-        (:data:`setup_tracker.IN_ORDER`): ``(card number, board item id)``."""
-        return [(number, item) for number, item, kind in self.held() if kind in IN_ORDER]
+        (:func:`in_order`): ``(card number, board item id)``."""
+        return in_order(self.held())
 
     def add(self, card: Card) -> str:
         """Put a card on the board (GitHub adds it at the bottom); its board item id."""

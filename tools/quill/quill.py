@@ -406,6 +406,20 @@ def cmd_block(args, tracker: Tracker, root: Path) -> int:
     return 0
 
 
+def _not_in_order(card: Card) -> str:
+    """Why nothing is moved after ``card``, which the board's order read does not list: a step
+    or question off the board, or on it but not yet listed by a read that lags a write
+    (``_tracker``'s doctrine); any other kind, a task among them, is in no order."""
+    if card.kind not in IN_ORDER:
+        return (f"plan#{card.number} is not in the board's order, its steps and questions "
+                "(R-BAL177)")
+    if card.board_item is None:
+        return (f"{_label(card)} is not on the board, so nothing is placed after it: put it "
+                f"on first (`quill move plan#{card.number} --top`, `--bottom` or `--after`)")
+    return (f"{_label(card)} is on the board, but the board's order read does not list it yet: "
+            "the board lags a write; run this again")
+
+
 def cmd_move(args, tracker: Tracker, root: Path) -> int:
     """Put a step or question at a place in the board's order."""
     card = _one(tracker, args.card)
@@ -423,8 +437,7 @@ def cmd_move(args, tracker: Tracker, root: Path) -> int:
     items = dict(order)
     if args.after is not None:
         if args.after not in items:
-            raise Refused(f"plan#{args.after} is not in the board's order, its steps and "
-                          "questions (R-BAL177)")
+            raise Refused(_not_in_order(_one(tracker, args.after)))
         after = items[args.after]
     elif args.bottom:
         rest = [item for number, item in order if number != card.number]

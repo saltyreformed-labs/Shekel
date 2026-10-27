@@ -1,20 +1,24 @@
 """Start a lane: a worktree of its own made from ``origin/dev``, and a session in it whose
 first act claims its step (step plan#1824, ruling plan#1835).
 
-The developer runs it in a new terminal, from any checkout of the code repository, naming
-the lane and, until the board can hand out what he wants first (plan#1820), its step::
+The developer runs it in a new terminal, from the root of any checkout of the code
+repository, naming the lane and, until the board can hand out what he wants first
+(plan#1820), its step::
 
-    python -m tools.quill.lane NAME [plan#N]
+    .venv/bin/python -m tools.quill.lane NAME [plan#N]
 
-It makes the worktree ``shekel-NAME`` beside the main checkout (``~/projects/shekel-NAME``),
-DETACHED at the ``origin/dev`` its one fetch has just brought, so it makes no branch and
-writes no upstream into the configuration every worktree shares (``git worktree add -b``
-from a remote-tracking branch writes one); links the worktree's ``.venv`` to the main
-checkout's, as every lane's is (a session's hooks put its own worktree's ``.venv/bin`` first
-on ``PATH``, ``scripts/hooks/_hooklib.sh``); and starts ``claude`` there in place of this
-process, with a first prompt that claims the step named, or the one ``quill next`` hands
-out.  ``quill claim`` then makes the card's branch and checks it out in the lane's
-worktree.  A path that is already there is refused before anything is fetched or made.
+The checkout's own venv runs it, so no environment need be active in that terminal (the
+system ``python`` lacks quill's packages).  It makes the worktree ``shekel-NAME`` beside the
+main checkout (``~/projects/shekel-NAME``), DETACHED at the ``origin/dev`` its one fetch has
+just brought, so it makes no branch and writes no upstream into the configuration every
+worktree shares (``git worktree add -b`` from a remote-tracking branch writes one); links
+the worktree's ``.venv`` to the main checkout's, as every lane's is (a session's hooks put
+its own worktree's ``.venv/bin`` first on ``PATH``, ``scripts/hooks/_hooklib.sh``); and
+starts ``claude`` there in place of this process, with that venv active (:func:`start`), so
+the session's ``python`` and its commits' pre-commit hooks run the pinned packages, and with
+a first prompt that claims the step named, or the one ``quill next`` hands out.  ``quill
+claim`` then makes the card's branch and checks it out in the lane's worktree.  A path that
+is already there is refused before anything is fetched or made.
 
 Exit status: 0 the session started (only a test's own launch returns); 1 refused, with
 nothing made; 2 git failed, or a file could not be made or ``claude`` could not start
@@ -71,43 +75,50 @@ def first_prompt(card: int | None) -> str:
             "Then run /charter for that step.")
 
 
-def make(root: Path, name: str) -> Path:
+def make(root: Path, name: str) -> tuple[Path, Path]:
     """Make lane ``name``'s worktree beside ``root``'s main checkout, detached at the
     ``origin/dev`` a fetch has just brought, its ``.venv`` linked to the main checkout's;
-    its path.
+    its path, and the venv it links.
 
     Raises:
         Refused: When the path is there already (a dangling link too), before the fetch.
-        GitError: When the worktree list, the fetch or the worktree's making fails.
+        GitError: When the worktree list, the fetch, the read of ``dev`` or the worktree's
+            making fails.
         OSError: When the link cannot be made; the worktree stands.
     """
     checkout = main_checkout(root)
     worktree = checkout.parent / f"{PREFIX}{name}"
     if worktree.exists(follow_symlinks=False):
-        raise Refused(f"{worktree} is there already: name another lane, or start a session "
-                      f"in that one with `cd {worktree} && claude`")
+        raise Refused(f"{worktree} is there already: name another lane")
     _git.fetch(root)
     sha = git(root, "rev-parse", "--verify", f"{tracking(DEV)}^{{commit}}").strip()
     git(root, "worktree", "add", "--quiet", "--detach", str(worktree), sha)
     print(f"made {worktree}, detached at {DEV} {sha[:12]}")
-    (worktree / ".venv").symlink_to(checkout / ".venv", target_is_directory=True)
-    print(f"  its .venv links {checkout / '.venv'}")
-    return worktree
+    venv = checkout / ".venv"
+    (worktree / ".venv").symlink_to(venv, target_is_directory=True)
+    print(f"  its .venv links {venv}")
+    return worktree, venv
 
 
-def start(worktree: Path, argv: list[str]) -> None:
-    """Run ``argv`` in ``worktree`` in place of this process; it returns only by raising.
+def start(worktree: Path, argv: list[str], venv: Path) -> None:
+    """Run ``argv`` in ``worktree`` in place of this process, with ``venv``'s ``bin`` first
+    on ``PATH`` and ``VIRTUAL_ENV`` naming it, so the ``python`` it runs is the venv's, and
+    ``PWD`` the worktree; it returns only by raising.  What this process printed is flushed
+    first: the program replaces its buffers.
 
     Raises:
         OSError: When the program cannot be run.
     """
+    environment = {**os.environ, "VIRTUAL_ENV": str(venv), "PWD": str(worktree),
+                   "PATH": os.pathsep.join([str(venv / "bin"), *os.get_exec_path()])}
+    sys.stdout.flush()
     os.chdir(worktree)
-    os.execvp(argv[0], argv)
+    os.execvpe(argv[0], argv, environment)
 
 
 def parser() -> argparse.ArgumentParser:
     """The command line: the lane's name, then the step it claims, if named."""
-    line = argparse.ArgumentParser(prog="python -m tools.quill.lane", description=(
+    line = argparse.ArgumentParser(prog=".venv/bin/python -m tools.quill.lane", description=(
         "Start a lane: a worktree beside the main checkout at origin/dev, and a session in "
         "it whose first act claims its step."))
     line.add_argument("name", type=lane_name, help="the lane's name: its worktree is shekel-NAME")
@@ -117,11 +128,11 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None, root: Path | None = None,
-         launch: Callable[[Path, list[str]], None] = start) -> int:
+         launch: Callable[[Path, list[str], Path], None] = start) -> int:
     """Start one lane; its exit status, should ``launch`` return."""
     args = parser().parse_args(argv)
     try:
-        worktree = make(root or REPO, args.name)
+        worktree, venv = make(root or REPO, args.name)
     except Refused as refused:
         print(f"refused: {refused}", file=sys.stderr)
         return 1
@@ -129,7 +140,7 @@ def main(argv: list[str] | None = None, root: Path | None = None,
         print(f"failed: {error}", file=sys.stderr)
         return 2
     try:
-        launch(worktree, ["claude", first_prompt(args.card)])
+        launch(worktree, ["claude", first_prompt(args.card)], venv)
     except OSError as error:
         print(f"failed: claude did not start ({error}); the worktree stands: start its "
               f"session with `cd {worktree} && claude`", file=sys.stderr)

@@ -37,8 +37,8 @@ def _checkout(tmp_path):
 
 @pytest.fixture(name="launched")
 def _launched():
-    """What a lane start ran, and where, each as ``(worktree, argv)``, in place of
-    :func:`lane.start`."""
+    """What a lane start ran, where, and with which venv, each as ``(worktree, argv,
+    venv)``, in place of :func:`lane.start`."""
     return []
 
 
@@ -46,7 +46,7 @@ def _start(root, launched, *argv):
     """``python -m tools.quill.lane`` with ``argv``, run from ``root``, its launch recorded
     in ``launched``; its exit status."""
     return lane.main(list(argv), root=root,
-                     launch=lambda worktree, run: launched.append((worktree, run)))
+                     launch=lambda worktree, run, venv: launched.append((worktree, run, venv)))
 
 
 def _config(main):
@@ -61,7 +61,7 @@ def test_a_lane_is_a_worktree_detached_at_the_dev_a_fetch_just_brought(checkout,
     """``shekel-NAME`` beside the main checkout, detached at the ``origin/dev`` the start's
     own fetch brought (the checkout's tracking ref still named the commit before), its tree
     that commit's, its ``.venv`` a link to the main checkout's, and ``claude`` started there
-    with the first prompt."""
+    with the first prompt and that venv."""
     main, moved = checkout
     assert _run(main, "rev-parse", tracking(DEV)) != moved
 
@@ -72,7 +72,7 @@ def test_a_lane_is_a_worktree_detached_at_the_dev_a_fetch_just_brought(checkout,
     assert _run(worktree, "rev-parse", "--abbrev-ref", "HEAD") == "HEAD"
     assert (worktree / "README").read_text(encoding="utf-8") == "moved\n"
     assert (worktree / ".venv").readlink() == main / ".venv"
-    assert launched == [(worktree, ["claude", lane.first_prompt(None)])]
+    assert launched == [(worktree, ["claude", lane.first_prompt(None)], main / ".venv")]
     assert f"made {worktree}, detached at {DEV} {moved[:12]}" in capsys.readouterr().out
 
 
@@ -104,13 +104,12 @@ def test_the_control_a_branch_made_from_origin_dev_writes_its_upstream(checkout)
     assert b'[branch "lane"]' in _config(main)
 
 
-def test_from_a_linked_worktree_the_lane_sits_beside_the_main_checkout(checkout, launched,
-                                                                       tmp_path):
-    """Run from a worktree that is not the main checkout, and deeper (as a reviewer's under
-    ``.claude/worktrees`` is), the lane is still made beside the MAIN checkout, its
+def test_from_a_linked_worktree_the_lane_sits_beside_the_main_checkout(checkout, launched):
+    """Run from a worktree that is not the main checkout but inside it, as a reviewer's
+    under ``.claude/worktrees`` is, the lane is still made beside the MAIN checkout, its
     ``.venv`` linked to the main checkout's, not to that worktree's."""
     main, moved = checkout
-    linked = tmp_path / "deep" / "agent"
+    linked = main / ".claude" / "worktrees" / "agent"
     _run(main, "worktree", "add", "--quiet", "--detach", str(linked), "HEAD")
 
     assert _start(linked, launched, "retire") == 0
@@ -118,7 +117,7 @@ def test_from_a_linked_worktree_the_lane_sits_beside_the_main_checkout(checkout,
     worktree = main.parent / "shekel-retire"
     assert _run(worktree, "rev-parse", "HEAD") == moved
     assert (worktree / ".venv").readlink() == main / ".venv"
-    assert [where for where, _ in launched] == [worktree]
+    assert [(where, venv) for where, _, venv in launched] == [(worktree, main / ".venv")]
     assert not (linked.parent / "shekel-retire").exists()
 
 
@@ -141,7 +140,7 @@ def test_a_path_already_there_is_refused_before_anything_is_fetched_or_made(
 
     assert _start(main, launched, "retire") == 1
 
-    assert f"refused: {path} is there already" in capsys.readouterr().err
+    assert capsys.readouterr().err == f"refused: {path} is there already: name another lane\n"
     assert _run(main, "worktree", "list", "--porcelain") == worktrees
     assert _run(main, "rev-parse", tracking(DEV)) == dev
     assert launched == []
@@ -149,8 +148,8 @@ def test_a_path_already_there_is_refused_before_anything_is_fetched_or_made(
 
 @pytest.mark.parametrize("name", ["", "Retire", "../retire", "re/tire", "-retire", "retire-",
                                   "re--tire", "re tire", ".retire", "retire\n"])
-def test_a_name_that_is_not_one_plain_path_component_is_refused(name, checkout, launched,
-                                                                capsys):
+def test_a_name_that_is_not_lowercase_words_joined_by_hyphens_is_refused(name, checkout,
+                                                                        launched, capsys):
     """A lane's name is lowercase letters and digits, words joined by single hyphens; any
     other is refused by the command line, exit 2, with nothing made.  (``--`` ends the
     options, so ``-retire`` reaches the name's check rather than the option parser.)"""
@@ -189,10 +188,10 @@ def test_a_step_named_is_the_one_the_session_claims_first(card, checkout, launch
 
     assert _start(main, launched, "xbi6-4d-c", card) == 0
 
-    [(worktree, (program, prompt))] = launched
+    [(worktree, (program, prompt), _)] = launched
     assert (worktree, program) == (main.parent / "shekel-xbi6-4d-c", "claude")
     assert "Claim plan#1823: `python -m tools.quill.quill claim plan#1823`." in prompt
-    assert "quill next" not in prompt and "quill.quill next" not in prompt
+    assert "quill next" not in prompt
     assert prompt.endswith("Then run /charter for that step.")
 
 
@@ -203,7 +202,7 @@ def test_with_no_step_named_the_session_claims_the_one_next_hands_out(checkout, 
 
     assert _start(main, launched, "retire") == 0
 
-    [(_, (_, prompt))] = launched
+    [(_, (_, prompt), _)] = launched
     assert ("Run `python -m tools.quill.quill next` and claim the step it names: "
             "`python -m tools.quill.quill claim plan#N`.") in prompt
     assert prompt.endswith("Then run /charter for that step.")
@@ -215,7 +214,7 @@ def test_a_claude_that_cannot_start_leaves_the_worktree_and_says_how_to_start_it
     worktree, which stands, and the line that starts its session."""
     main, _ = checkout
 
-    def missing(_worktree, argv):
+    def missing(_worktree, argv, _venv):
         raise FileNotFoundError(2, "No such file or directory", argv[0])
 
     assert lane.main(["retire"], root=main, launch=missing) == 2
@@ -227,29 +226,59 @@ def test_a_claude_that_cannot_start_leaves_the_worktree_and_says_how_to_start_it
     assert (worktree / "README").read_text(encoding="utf-8") == "moved\n"
 
 
-def test_start_runs_claude_in_the_worktree_in_place_of_this_process(tmp_path):
+def test_start_runs_claude_in_the_worktree_in_place_of_this_process_with_the_venv(tmp_path):
     """:func:`lane.start` itself, the one piece the tests above replace: in a child Python
-    it becomes the program named, in the worktree named, with each argument whole -- a
-    stand-in ``claude`` first on ``PATH`` writes where it ran and what it was given."""
-    stand_in, record = tmp_path / "bin", tmp_path / "record"
-    stand_in.mkdir()
-    (stand_in / "claude").write_text(
-        f"#!/bin/sh\npwd -P > '{record}'\nprintf '%s\\n' \"$@\" >> '{record}'\n",
-        encoding="utf-8")
-    (stand_in / "claude").chmod(0o755)
+    it BECOMES the program named (the child exits 3 should ``start`` return), in the worktree
+    named, ``PWD`` that worktree, the venv's ``python`` first on ``PATH`` and
+    ``VIRTUAL_ENV`` naming it, each argument whole, and what the child printed before it
+    flushed down the pipe the program inherits -- a stand-in ``claude`` first on the child's
+    ``PATH``, a Python script so no shell corrects ``PWD`` for it, writes what it was
+    given."""
+    stand_in, record, venv = tmp_path / "bin", tmp_path / "record", tmp_path / "venv"
     worktree = tmp_path / "shekel-retire"
-    worktree.mkdir()
+    for directory in (stand_in, venv / "bin", worktree):
+        directory.mkdir(parents=True)
+    (venv / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    (stand_in / "claude").write_text(
+        f"#!{sys.executable}\nimport os, shutil, sys\n"
+        f"open({str(record)!r}, 'w', encoding='utf-8').write('\\n'.join([os.getcwd(), "
+        "os.environ['PWD'], shutil.which('python'), os.environ['VIRTUAL_ENV'], *sys.argv[1:]]))\n",
+        encoding="utf-8")
+    for program in (stand_in / "claude", venv / "bin" / "python"):
+        program.chmod(0o755)
     child = ("import sys; from pathlib import Path; from tools.quill.lane import start; "
-             "start(Path(sys.argv[1]), ['claude', 'the first prompt, in one argument'])")
+             "print('printed before the start'); start(Path(sys.argv[1]), "
+             "['claude', 'the first prompt, in one argument'], Path(sys.argv[2])); "
+             "raise SystemExit(3)")
 
     done = subprocess.run(
-        [sys.executable, "-c", child, str(worktree)], cwd=REPO, capture_output=True,
+        [sys.executable, "-c", child, str(worktree), str(venv)], cwd=REPO, capture_output=True,
         text=True, check=False,
         env={**os.environ, "PATH": f"{stand_in}{os.pathsep}{os.environ['PATH']}"})
 
     assert done.returncode == 0, done.stderr
+    assert done.stdout == "printed before the start\n"
     assert record.read_text(encoding="utf-8").splitlines() == [
-        str(worktree.resolve()), "the first prompt, in one argument"]
+        str(worktree), str(worktree), str(venv / "bin" / "python"), str(venv),
+        "the first prompt, in one argument"]
+
+
+def test_the_repository_ignores_the_link_so_no_commit_can_carry_it(tmp_path, launched):
+    """The ``.venv`` LINK a lane is made with is ignored by the repository's own
+    ``.gitignore``, read here from this checkout, not only by a clone's untracked
+    ``info/exclude`` or a developer's own excludes file: the lane's ``git status`` is empty,
+    so ``git add --all`` cannot commit it (``.venv/`` matches only a directory)."""
+    main = scratch.repository(tmp_path, "Shekel")
+    ignored = (REPO / ".gitignore").read_text(encoding="utf-8")
+    scratch.with_origin(main, commit_files(main, commit(main, "root"), "base",
+                                           {".gitignore": ignored}))
+    (main / ".venv").mkdir()
+
+    assert _start(main, launched, "retire") == 0
+
+    worktree = tmp_path / "shekel-retire"
+    assert (worktree / ".venv").is_symlink()
+    assert _run(worktree, "-c", "core.excludesFile=/dev/null", "status", "--porcelain") == ""
 
 
 # -- an environment bound to another repository reaches nothing but the checkout named --------

@@ -19,10 +19,8 @@ from typing import Protocol
 from tools.ci.arcs import ARCS
 from tools.quill._state import filing_unfinished, missing
 from tools.quill._tracker import BareCard, Card, Tracker, TrackerError
+from tools.quill.setup_tracker import IN_ORDER, TASK
 
-
-#: The kinds of card the board holds, in the developer's order (R-BAL177).
-ON_BOARD = ("step", "question")
 _CARD_REF = re.compile(r"(?:plan#|#)?([1-9][0-9]*)")
 
 
@@ -72,6 +70,18 @@ def with_closure[CardT: BareCard](tracker: _ReadsCards[CardT],
     while wanted := missing(cards):
         with_cards(tracker, cards, wanted)
     return cards
+
+
+def on_board(kind: str | None, parent: Card | None) -> bool:
+    """Whether a card of ``kind`` under ``parent`` (None: at the top level) belongs on the
+    board: a step or question, in the developer's order (:data:`setup_tracker.IN_ORDER`), and a
+    task under a step the board holds, which nests under it in the Plan view and is in no order
+    (rulings plan#1814, plan#1842).  The ONE rule, which the filing (``_filing._finish``) and
+    ``quill sync`` (:func:`_tasks.put_on_board`) both read.  A task under a finding, or under a
+    step off the board, stays off: it would stand alone among the steps as a row of its own
+    (plan#1810's call D5, its review's N6), and goes on once its step does."""
+    return kind in IN_ORDER or (kind == TASK and parent is not None and parent.kind == "step"
+                                and parent.board_item is not None)
 
 
 def _one(tracker: Tracker, number: int) -> Card:

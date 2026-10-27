@@ -76,6 +76,7 @@ from tools.quill._github import (
 from tools.quill.setup_tracker import (
     APP_LOGIN,
     FILING,
+    IN_ORDER,
     TASK,
     Place,
     another_app,
@@ -379,10 +380,9 @@ def board_of(github: GitHub, place: Place) -> str:
     return board_id
 
 
-def read_until(read: Callable[[], list[tuple[int, str]]],
-               holds: Callable[[list[tuple[int, str]]], bool],
-               sleep: Callable[[float], None]) -> tuple[list[tuple[int, str]], bool]:
-    """Read the board (``read``, :meth:`Board.order`) every :data:`POLL_SECONDS` until a read
+def read_until[T](read: Callable[[], list[T]], holds: Callable[[list[T]], bool],
+                  sleep: Callable[[float], None]) -> tuple[list[T], bool]:
+    """Read the board (``read``, :meth:`Board.held`) every :data:`POLL_SECONDS` until a read
     of it ``holds``, for at most :data:`BOARD_WAIT_SECONDS`: the board's lag waited out in
     one place.  The last read, and whether it holds."""
     waited = 0
@@ -396,8 +396,18 @@ def read_until(read: Callable[[], list[tuple[int, str]]],
         waited += POLL_SECONDS
 
 
+def in_order(held: Iterable[tuple[int, str, str | None]]) -> list[tuple[int, str]]:
+    """The developer's drag order (R-BAL177) of what a board holds (:meth:`Board.held`), its
+    steps and questions alone (:data:`setup_tracker.IN_ORDER`): ``(card number, board item
+    id)``.  The one projection, which :meth:`Board.order` and the tests' board both read."""
+    return [(number, item) for number, item, kind in held if kind in IN_ORDER]
+
+
 class Board:
-    """``place``'s board: the steps and questions in the developer's drag order (R-BAL177).
+    """``place``'s board: the steps and questions in the developer's drag order (R-BAL177),
+    and each step's tasks, which nest under it in the Plan view and are in no order (ruling
+    plan#1814).  :meth:`order` is that order, read by each item's issue type, so no reader
+    of it meets a task.
 
     ``sleep`` waits out the board's lag; tests pass one that does not wait.
     """
@@ -416,12 +426,20 @@ class Board:
         fence every board write passes through."""
         return self.github.graphql(mutation, p=self.board_id, **variables)
 
-    def order(self) -> list[tuple[int, str]]:
-        """The board's cards in their drag order: ``(card number, board item id)``."""
+    def held(self) -> list[tuple[int, str, str | None]]:
+        """Every card the board holds, in its positions: ``(card number, board item id, issue
+        type)``.  An item that is no issue of the tracker (a draft, a deleted issue, another
+        repository's) is no card, and is passed over."""
         items, _ = paged(partial(self.github.graphql, _queries.BOARD_ORDER, id=self.board_id),
                          lambda answer: answer["node"]["items"], "the board's order")
-        return [(item["content"]["number"], item["id"]) for item in items
+        return [(item["content"]["number"], item["id"],
+                 (item["content"]["issueType"] or {}).get("name")) for item in items
                 if _is_tracker_issue(item["content"] or {}, self.location)]
+
+    def order(self) -> list[tuple[int, str]]:
+        """The board's cards in the developer's drag order, its steps and questions alone
+        (:func:`in_order`): ``(card number, board item id)``."""
+        return in_order(self.held())
 
     def add(self, card: Card) -> str:
         """Put a card on the board (GitHub adds it at the bottom); its board item id."""
@@ -442,14 +460,16 @@ class Board:
 
     def shows(self, item: str, after: str | None) -> bool:
         """Read the board until ``item`` sits right after ``after`` (first when None),
-        for at most :data:`BOARD_WAIT_SECONDS` (:func:`read_until`)."""
-        def placed(order: list[tuple[int, str]]) -> bool:
-            items = [item_id for _, item_id in order]
+        for at most :data:`BOARD_WAIT_SECONDS` (:func:`read_until`).  It reads every item's
+        position (:meth:`held`), not the order: a move is a write of positions, which it
+        makes whatever the item's type."""
+        def placed(positions: list[tuple[int, str, str | None]]) -> bool:
+            items = [item_id for _, item_id, _ in positions]
             if item not in items:
                 return False
             index = items.index(item)
             return (after is None and index == 0) or bool(index and items[index - 1] == after)
-        return read_until(self.order, placed, self._sleep)[1]
+        return read_until(self.held, placed, self._sleep)[1]
 
 
 class CardReader:

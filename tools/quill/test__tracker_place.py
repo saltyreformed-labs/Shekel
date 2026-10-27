@@ -154,8 +154,8 @@ def test_every_board_write_names_the_board_it_was_resolved_for_and_no_other():
             return {}
         return {"node": {"items": {"pageInfo": {"hasNextPage": False, "endCursor": None},
                                    "nodes": [{"id": "PVTI_9", "content": {
-                                       "number": 9, "repository": {
-                                           "nameWithOwner": REHEARSAL.full_name}}}]}}}
+                                       "number": 9, "issueType": {"name": "step"},
+                                       "repository": {"nameWithOwner": REHEARSAL.full_name}}}]}}}
 
     github = _Scripted(graphql=answer)
     board = Board(github, REHEARSAL, "PVT_r", sleep=lambda _seconds: None)

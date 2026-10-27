@@ -17,8 +17,10 @@ idea of a card stands between the backup and the tracker; the board as quill rea
   each kept as ``{"nodes": [...]}``, every node, read to the end
   (:func:`_github.paged`).
 - ``milestones``: every milestone, open and closed, whole (:func:`_queries.milestones`).
-- ``board``: the tracker's cards on the board, in the developer's drag order (R-BAL177),
-  which no card holds (:meth:`_tracker.Board.order`).
+- ``board``: the tracker's cards on the board, in their positions, which no card holds
+  (:meth:`_tracker.Board.held`): the steps and questions in the developer's drag order
+  (R-BAL177), and each task the board holds at a position of its own, which is in no order
+  (ruling plan#1814).  Which step a task nests under is its parent, which ``cards`` holds.
 - ``tracker`` and ``taken_at``: whose cards, and when the export began.
 
 **What it does not hold:** a card's timeline -- its title's renames, its labels and its
@@ -107,8 +109,8 @@ def _whole(github: GitHub, place: Place, card: dict) -> dict:
 
 
 def snapshot(tracker: Tracker, taken_at: datetime) -> dict:
-    """Every card of ``tracker`` whole, its milestones and its board's order, as one file
-    holds them (the module docstring), the export having begun at
+    """Every card of ``tracker`` whole, its milestones and the cards its board holds, in
+    their positions, as one file holds them (the module docstring), the export having begun at
     ``taken_at``.
 
     Raises:
@@ -126,7 +128,7 @@ def snapshot(tracker: Tracker, taken_at: datetime) -> dict:
                         key=lambda card: card["number"]),
         "milestones": sorted(milestone_nodes(github, place),
                              key=lambda milestone: milestone["number"]),
-        "board": [number for number, _ in tracker.board.order()],
+        "board": [number for number, _, _ in tracker.board.held()],
     }
 
 

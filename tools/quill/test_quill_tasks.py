@@ -34,19 +34,20 @@ def _task_filing(tmp_path, parent="plan#1", title="4d-4a"):
 
 # -- file task ----------------------------------------------------------------------------
 
-def test_file_task_files_a_sub_issue_of_its_card_with_no_arc_and_off_the_board(code, tmp_path,
-                                                                                capsys):
-    """R-BAL386: created marked, linked under its card, unmarked last (R-BAL202); no arc label
-    (its card's), no board write; and the same command run again files nothing over it."""
+def test_file_task_files_a_sub_issue_of_its_card_with_no_arc_and_on_the_board(code, tmp_path,
+                                                                               capsys):
+    """R-BAL386: created marked, linked under its card, put on the board under its step (ruling
+    plan#1814), unmarked last (R-BAL202); no arc label (its card's); and the same command run
+    again files nothing over it."""
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, *_task_filing(tmp_path)) == 0
     assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",)), ("add_child", 1, 2),
-                              ("unmark", 2)]
-    assert tracker.board.items == [1]
+                              ("board_add", 2), ("unmark", 2)]
+    assert tracker.board.items == [1, 2]
     capsys.readouterr()
     assert run(tracker, code, *_task_filing(tmp_path)) == 0
-    assert len(tracker.writes) == 3
+    assert len(tracker.writes) == 4
     assert "plan#2 [task, no arc] 4d-4a is filed already" in capsys.readouterr().out
 
 
@@ -59,7 +60,54 @@ def test_a_task_filing_cut_short_is_finished_by_the_same_command(code, tmp_path,
     assert run(tracker, code, *_task_filing(tmp_path)) == 0
     assert "finishing plan#2 [task, no arc] 4d-4a" in capsys.readouterr().out
     assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",)), ("add_child", 1, 2),
+                              ("board_add", 2), ("unmark", 2)]
+
+
+def test_a_task_filing_cut_short_at_its_board_add_is_finished_by_the_same_command(code, tmp_path,
+                                                                                  capsys):
+    """R-BAL202: the board add is a write of the filing, before the mark comes off, so a run cut
+    short there leaves the task marked, and the same command adds it; a run whose add landed
+    and was cut short after it adds no second one."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    FailOnce(tracker.board, "add")
+    assert run(tracker, code, *_task_filing(tmp_path)) == 2
+    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",)), ("add_child", 1, 2)]
+    assert run(tracker, code, *_task_filing(tmp_path)) == 0
+    assert "finishing plan#2" in capsys.readouterr().out
+    assert tracker.writes[2:] == [("board_add", 2), ("unmark", 2)]
+    again = FakeTracker()
+    again.add(1)
+    FailOnce(again, "unmark")
+    assert run(again, code, *_task_filing(tmp_path, title="4d-4b")) == 2
+    assert run(again, code, *_task_filing(tmp_path, title="4d-4b")) == 0
+    assert "  board: already on it\n" in capsys.readouterr().out
+    assert again.writes == [("create", 2, "task", "4d-4b", ("filing",)), ("add_child", 1, 2),
+                            ("board_add", 2), ("unmark", 2)]
+
+
+def test_a_task_under_a_finding_stays_off_the_board(code, tmp_path):
+    """A finding is never on the board, so a task under it would stand alone among the steps:
+    only a step's tasks go on it (plan#1810's call D5)."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(3, "finding", blocked_by=(1,), on_board=False)
+    assert run(tracker, code, *_task_filing(tmp_path, parent="plan#3")) == 0
+    assert tracker.writes == [("create", 4, "task", "4d-4a", ("filing",)), ("add_child", 3, 4),
+                              ("unmark", 4)]
+    assert tracker.board.items == [1]
+
+
+def test_a_task_under_a_step_off_the_board_stays_off_it(code, tmp_path):
+    """Ruling plan#1842's one rule: a task belongs on the board only under a step the board
+    holds, or it would stand alone among the steps as a row of its own (plan#1810's review,
+    N6); it goes on once its step does (``sync``)."""
+    tracker = FakeTracker()
+    tracker.add(1, on_board=False)
+    assert run(tracker, code, *_task_filing(tmp_path)) == 0
+    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",)), ("add_child", 1, 2),
                               ("unmark", 2)]
+    assert not tracker.board.items
 
 
 def test_file_task_refuses_a_parent_that_is_no_live_piece_of_work(code, tmp_path, capsys):
@@ -274,6 +322,60 @@ def test_sync_leaves_a_task_the_tool_dropped(code):
     assert run(tracker, code, "sync") == 0
     assert tracker.writes == writes
 
+
+def test_sync_puts_on_the_board_each_task_whose_step_is_on_it(code, capsys):
+    """Ruling plan#1842: a task off the board (filed by a session's older code, or linked by
+    hand on the web), open or closed, under a step the board holds goes on it, each write
+    printed; one under a step off the board, or under a finding, stays off until its step is
+    on; a dry run writes nothing, and a re-run adds none."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(5, on_board=False)
+    tracker.add(7, "finding", blocked_by=(1,), on_board=False)
+    tracker.add_task(2, 1, on_board=False)
+    tracker.add_task(3, 1, is_open=False, state_reason="COMPLETED", closed_by_tool=True)
+    tracker.add_task(4, 1)
+    tracker.add_task(6, 5)
+    tracker.add_task(8, 7)
+    finish(code, 3)
+    assert tracker.board.items == [1, 4]
+    assert run(tracker, code, "sync", "--dry-run") == 0
+    assert capsys.readouterr().out == (
+        "would put on the board, nested under its step plan#1 (ruling plan#1842): plan#2 [task, "
+        "no arc] card 2\n"
+        "would put on the board, nested under its step plan#1 (ruling plan#1842): plan#3 [task, "
+        "no arc] card 3\n")
+    assert not tracker.writes
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == (
+        "put on the board, nested under its step plan#1 (ruling plan#1842): plan#2 [task, no "
+        "arc] card 2\n"
+        "put on the board, nested under its step plan#1 (ruling plan#1842): plan#3 [task, no "
+        "arc] card 3\n")
+    assert tracker.writes == [("board_add", 2), ("board_add", 3)]
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == ""
+    assert run(tracker, code, "move", "plan#5", "--bottom") == 0
+    assert run(tracker, code, "sync") == 0
+    assert tracker.writes[2:] == [("board_add", 5), ("board_place", 5, "PVTI_1"),
+                                  ("board_add", 6)]
+    assert tracker.board.items == [1, 5, 4, 2, 3, 6]
+
+
+def test_a_sync_put_on_cut_short_costs_no_state_write_and_the_next_run_finishes_it(code):
+    """The put-on is sync's last write: an add GitHub cut off fails the run after its state
+    writes landed, and is never re-sent within it (ruling plan#1816); the next run adds it."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(9)
+    tracker.add_task(2, 1, on_board=False)
+    ship(code, 9)
+    FailOnce(tracker.board, "add")
+    assert run(tracker, code, "sync") == 2
+    assert tracker.writes == [("close", 9, "completed")]
+    assert run(tracker, code, "sync") == 0
+    assert tracker.writes[1:] == [("board_add", 2)]
+
 # -- show, next, claim, edit ----------------------------------------------------------------
 
 def test_show_names_each_task_and_whether_git_says_it_is_done(code, capsys):
@@ -297,7 +399,8 @@ def test_show_names_each_task_and_whether_git_says_it_is_done(code, capsys):
 
 
 def test_a_task_is_never_offered_claimed_or_moved(code, capsys):
-    """``next`` offers steps alone, and a task is no work a branch ships, nor on the board."""
+    """``next`` offers steps alone, and a task is no work a branch ships, nor in the board's
+    order."""
     tracker = FakeTracker()
     tracker.add(1, is_open=False, state_reason="NOT_PLANNED", closed_by_tool=True)
     tracker.add_task(2, 1)
@@ -320,3 +423,51 @@ def test_edit_rewrites_a_task_held_to_a_tasks_rules(code, capsys):
     assert run(tracker, code, "edit", "plan#2", "--title", "t" * 101) == 1
     assert capsys.readouterr().err == ("refused: not edited:\n  its title is a short name of at "
                                        "most 100 characters; it is 101\n")
+
+
+def test_a_task_first_on_the_board_is_in_no_order_next_move_or_show_reads(code, capsys):
+    """Ruling plan#1814: a task on the board, even first on it, is in no order: ``next`` offers
+    the step below it, ``move --after`` the task is refused with nothing written, and ``show``
+    says the task is on the board and the step first in the order."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add_task(2, 1)
+    tracker.add(3)
+    tracker.board.items = [2, 1, 3]
+    assert run(tracker, code, "next") == 0
+    assert capsys.readouterr().out.startswith("next: plan#1 ")
+    assert run(tracker, code, "move", "plan#3", "--after", "plan#2") == 1
+    assert ("plan#2 is not in the board's order, its steps and questions (R-BAL177)"
+            in capsys.readouterr().err)
+    assert not tracker.writes
+    assert run(tracker, code, "show", "plan#2") == 0
+    assert ("\n  board: on it, in no order: the order is its steps and questions (R-BAL177)\n"
+            in capsys.readouterr().out)
+    assert run(tracker, code, "show", "plan#1") == 0
+    assert "\n  board: #1\n" in capsys.readouterr().out
+
+
+def test_a_step_the_order_read_does_not_list_is_named_so_by_move_and_show(code, capsys):
+    """plan#1810's review, L2 and N7: a step is in the order, so one the order read does not
+    list is off the board, or on it and missed by a read that lags a write (``_tracker``'s
+    doctrine; simulated here by a read that leaves it out): ``move --after`` it says which, with
+    nothing written, and ``show`` of one on the board says the read lags, never that it is in no
+    order."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(2, on_board=False)
+    tracker.add(3)
+    assert run(tracker, code, "move", "plan#1", "--after", "plan#2") == 1
+    assert capsys.readouterr().err == (
+        "refused: plan#2 [step, balance] card 2 is not on the board, so nothing is placed after "
+        "it: put it on first (`quill move plan#2 --top`, `--bottom` or `--after`)\n")
+    held = tracker.board.held
+    tracker.board.held = lambda: [entry for entry in held() if entry[0] != 3]
+    assert run(tracker, code, "move", "plan#1", "--after", "plan#3") == 1
+    assert capsys.readouterr().err == (
+        "refused: plan#3 [step, balance] card 3 is on the board, but the board's order read "
+        "does not list it yet: the board lags a write; run this again\n")
+    assert not tracker.writes
+    assert run(tracker, code, "show", "plan#3") == 0
+    assert ("\n  board: on it, but the board's order read does not list it yet: the board lags a "
+            "write; show it again\n" in capsys.readouterr().out)

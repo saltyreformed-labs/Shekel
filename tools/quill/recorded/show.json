@@ -321,7 +321,7 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {\n  items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {\n    pageInfo { hasNextPage endCursor }\n    nodes { id content { ... on Issue { number repository { nameWithOwner } } } } } } } }",
+    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {\n  items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {\n    pageInfo { hasNextPage endCursor }\n    nodes { id content { ... on Issue {\n      number issueType { name } repository { nameWithOwner } } } } } } } }",
     "variables": {
      "id": "PVT_kwDOFB5GWc4BoEsZ",
      "after": null
@@ -341,6 +341,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4vM",
          "content": {
           "number": 36,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -350,6 +353,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa31M",
          "content": {
           "number": 20,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -359,6 +365,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa35M",
          "content": {
           "number": 21,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -368,6 +377,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa390",
          "content": {
           "number": 22,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -377,6 +389,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4AQ",
          "content": {
           "number": 23,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -386,6 +401,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4GA",
          "content": {
           "number": 24,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -395,6 +413,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4K0",
          "content": {
           "number": 25,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -404,6 +425,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4Oc",
          "content": {
           "number": 26,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -413,6 +437,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4RM",
          "content": {
           "number": 27,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -422,6 +449,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4UU",
          "content": {
           "number": 28,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -431,6 +461,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4XM",
          "content": {
           "number": 29,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -440,6 +473,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4ak",
          "content": {
           "number": 30,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -449,6 +485,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4e4",
          "content": {
           "number": 31,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -458,6 +497,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4hQ",
          "content": {
           "number": 32,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -467,6 +509,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4kU",
          "content": {
           "number": 33,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -476,6 +521,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4n8",
          "content": {
           "number": 34,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -485,6 +533,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4rQ",
          "content": {
           "number": 35,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -494,6 +545,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4yM",
          "content": {
           "number": 37,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -503,6 +557,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa41o",
          "content": {
           "number": 38,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -512,6 +569,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa45c",
          "content": {
           "number": 39,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -521,6 +581,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa474",
          "content": {
           "number": 40,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -530,6 +593,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4-8",
          "content": {
           "number": 41,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -539,6 +605,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Bo",
          "content": {
           "number": 42,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -548,6 +617,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Fg",
          "content": {
           "number": 43,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -557,6 +629,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Ik",
          "content": {
           "number": 44,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -566,6 +641,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5L4",
          "content": {
           "number": 45,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -575,6 +653,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Rw",
          "content": {
           "number": 46,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -584,6 +665,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5UY",
          "content": {
           "number": 47,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -593,6 +677,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Y8",
          "content": {
           "number": 48,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -602,6 +689,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5ck",
          "content": {
           "number": 49,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -611,6 +701,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5gE",
          "content": {
           "number": 50,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -620,6 +713,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5j4",
          "content": {
           "number": 51,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -629,6 +725,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5oQ",
          "content": {
           "number": 52,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -638,6 +737,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5qM",
          "content": {
           "number": 53,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -647,6 +749,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5tU",
          "content": {
           "number": 54,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -656,6 +761,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5w0",
          "content": {
           "number": 55,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -665,6 +773,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5ys",
          "content": {
           "number": 56,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -674,6 +785,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa50g",
          "content": {
           "number": 57,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -683,6 +797,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa53w",
          "content": {
           "number": 58,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -692,6 +809,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa568",
          "content": {
           "number": 59,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -701,6 +821,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5_A",
          "content": {
           "number": 60,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -710,6 +833,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6B4",
          "content": {
           "number": 61,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -719,6 +845,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6EY",
          "content": {
           "number": 62,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -728,6 +857,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Jc",
          "content": {
           "number": 63,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -737,6 +869,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Mc",
          "content": {
           "number": 64,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -746,6 +881,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Pg",
          "content": {
           "number": 65,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -755,6 +893,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6TI",
          "content": {
           "number": 66,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -764,6 +905,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6X8",
          "content": {
           "number": 67,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1023,7 +1167,7 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {\n  items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {\n    pageInfo { hasNextPage endCursor }\n    nodes { id content { ... on Issue { number repository { nameWithOwner } } } } } } } }",
+    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {\n  items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {\n    pageInfo { hasNextPage endCursor }\n    nodes { id content { ... on Issue {\n      number issueType { name } repository { nameWithOwner } } } } } } } }",
     "variables": {
      "id": "PVT_kwDOFB5GWc4BoEsZ",
      "after": null
@@ -1043,6 +1187,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4vM",
          "content": {
           "number": 36,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1052,6 +1199,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa31M",
          "content": {
           "number": 20,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1061,6 +1211,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa35M",
          "content": {
           "number": 21,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1070,6 +1223,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa390",
          "content": {
           "number": 22,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1079,6 +1235,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4AQ",
          "content": {
           "number": 23,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1088,6 +1247,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4GA",
          "content": {
           "number": 24,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1097,6 +1259,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4K0",
          "content": {
           "number": 25,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1106,6 +1271,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4Oc",
          "content": {
           "number": 26,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1115,6 +1283,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4RM",
          "content": {
           "number": 27,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1124,6 +1295,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4UU",
          "content": {
           "number": 28,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1133,6 +1307,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4XM",
          "content": {
           "number": 29,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1142,6 +1319,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4ak",
          "content": {
           "number": 30,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1151,6 +1331,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4e4",
          "content": {
           "number": 31,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1160,6 +1343,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4hQ",
          "content": {
           "number": 32,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1169,6 +1355,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4kU",
          "content": {
           "number": 33,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1178,6 +1367,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4n8",
          "content": {
           "number": 34,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1187,6 +1379,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4rQ",
          "content": {
           "number": 35,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1196,6 +1391,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4yM",
          "content": {
           "number": 37,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1205,6 +1403,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa41o",
          "content": {
           "number": 38,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1214,6 +1415,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa45c",
          "content": {
           "number": 39,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1223,6 +1427,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa474",
          "content": {
           "number": 40,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1232,6 +1439,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa4-8",
          "content": {
           "number": 41,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1241,6 +1451,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Bo",
          "content": {
           "number": 42,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1250,6 +1463,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Fg",
          "content": {
           "number": 43,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1259,6 +1475,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Ik",
          "content": {
           "number": 44,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1268,6 +1487,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5L4",
          "content": {
           "number": 45,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1277,6 +1499,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Rw",
          "content": {
           "number": 46,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1286,6 +1511,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5UY",
          "content": {
           "number": 47,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1295,6 +1523,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5Y8",
          "content": {
           "number": 48,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1304,6 +1535,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5ck",
          "content": {
           "number": 49,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1313,6 +1547,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5gE",
          "content": {
           "number": 50,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1322,6 +1559,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5j4",
          "content": {
           "number": 51,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1331,6 +1571,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5oQ",
          "content": {
           "number": 52,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1340,6 +1583,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5qM",
          "content": {
           "number": 53,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1349,6 +1595,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5tU",
          "content": {
           "number": 54,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1358,6 +1607,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5w0",
          "content": {
           "number": 55,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1367,6 +1619,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5ys",
          "content": {
           "number": 56,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1376,6 +1631,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa50g",
          "content": {
           "number": 57,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1385,6 +1643,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa53w",
          "content": {
           "number": 58,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1394,6 +1655,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa568",
          "content": {
           "number": 59,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1403,6 +1667,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa5_A",
          "content": {
           "number": 60,
+          "issueType": {
+           "name": "question"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1412,6 +1679,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6B4",
          "content": {
           "number": 61,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1421,6 +1691,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6EY",
          "content": {
           "number": 62,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1430,6 +1703,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Jc",
          "content": {
           "number": 63,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1439,6 +1715,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Mc",
          "content": {
           "number": 64,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1448,6 +1727,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6Pg",
          "content": {
           "number": 65,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1457,6 +1739,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6TI",
          "content": {
           "number": 66,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1466,6 +1751,9 @@
          "id": "PVTI_lADOFB5GWc4BoEsZzhCa6X8",
          "content": {
           "number": 67,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }

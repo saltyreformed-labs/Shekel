@@ -272,7 +272,8 @@ def test_the_app_may_hold_exactly_its_declared_permissions():
 
 def _view(index, name, view_filter, sorts):
     """An ungrouped table view as the board query answers it, showing Title and Status."""
-    return {"id": f"V{index}", "name": name, "filter": view_filter, "layout": "TABLE_LAYOUT",
+    return {"id": f"V{index}", "number": index, "name": name, "filter": view_filter,
+            "layout": "TABLE_LAYOUT",
             "sortByFields": {"totalCount": sorts}, "groupByFields": {"totalCount": 0},
             "verticalGroupByFields": {"totalCount": 0},
             "fields": {"nodes": _visible("F1", "F2")}}
@@ -309,12 +310,18 @@ _FIELDS = {
     "F2": {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT"},
     "F3": {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE"},
     "F4": {"id": "F4", "name": "Rank", "dataType": "NUMBER"},
+    "F6": {"id": "F6", "name": "Labels", "dataType": "LABELS"},
 }
 
 
 def _visible(*ids):
     """A view's visible columns, by field id."""
     return [dict(_FIELDS[ident]) for ident in ids]
+
+
+#: The columns of a Plan view as declared, by field id: Title, and the Parent issue, where a
+#: leaf names the step it splits (ruling plan#1814); no stored field.
+_DECLARED = ("F1", "F3")
 
 
 def _status_item(number, value, kind="ISSUE", archived=False):
@@ -406,7 +413,8 @@ def test_apply_on_an_empty_board_deletes_rank_hides_status_and_no_automation():
 
     GitHub refuses to delete its built-in Status and ignores emptying its choices
     (measured 2026-10-03), so it is left in place and hidden from the plan view;
-    any other stored field is deleted.
+    any other stored field is deleted.  The same write shows the Parent issue column
+    (ruling plan#1814).
     """
     github = _Board(_project(cards=0))
     report = Report()
@@ -415,7 +423,7 @@ def test_apply_on_an_empty_board_deletes_rank_hides_status_and_no_automation():
     assert [ident for name, ident in sent if name == "deleteProjectV2Field"] == ["F4"]
     assert not [name for name, _ in sent if name in ("deleteProjectV2Workflow",
                                                      "updateProjectV2Field")]
-    assert ("updateProjectV2View", {"id": "V1", "fields": ["F1"]}) in github.mutations
+    assert ("updateProjectV2View", {"id": "V1", "fields": ["F1", "F3"]}) in github.mutations
     assert report.differences == 2
     assert any("'Item closed' is on" in line for line in report.lines)
     assert not any("'Auto-close issue'" in line for line in report.lines)
@@ -429,7 +437,7 @@ def test_an_automation_that_adds_cards_is_a_difference():
     it, so it is a difference too."""
     project = _project(views=(("Plan", "is:open", 0),))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     project["workflows"]["nodes"] = [
         {"name": "Auto-add sub-issues to project", "enabled": True},
         {"name": "Auto-add to project", "enabled": True},
@@ -458,10 +466,11 @@ def test_github_status_is_tolerated_only_hidden_and_a_custom_select_is_not():
     project = _project(views=(("Plan", "is:open", 0),))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["workflows"]["nodes"] = []
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED, "F2")
     assert setup_tracker.board_differences(project) == [
         "the 'Plan' view shows stored fields ['Status']"
     ]
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     assert not setup_tracker.board_differences(project)
     project["fields"]["nodes"].append({"id": "F5", "name": "Tier", "dataType": "SINGLE_SELECT"})
     assert setup_tracker.board_differences(project) == ["the board stores a field, 'Tier'"]
@@ -492,7 +501,7 @@ def test_a_renamed_status_is_a_difference():
     project = _project(views=(("Plan", "is:open", 0),))
     project["fields"]["nodes"] = [_FIELDS["F1"]]
     project["workflows"]["nodes"] = []
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     assert len(setup_tracker.board_differences(project)) == 1
     assert "renamed" in setup_tracker.board_differences(project)[0]
 
@@ -503,7 +512,7 @@ def test_a_plan_view_laid_out_as_a_board_or_grouped_is_a_difference():
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["workflows"]["nodes"] = []
     view = project["views"]["nodes"][0]
-    view["fields"]["nodes"] = _visible("F1")
+    view["fields"]["nodes"] = _visible(*_DECLARED)
     view["layout"] = "BOARD_LAYOUT"
     view["groupByFields"]["totalCount"] = 1
     differences = setup_tracker.board_differences(project)
@@ -512,9 +521,9 @@ def test_a_plan_view_laid_out_as_a_board_or_grouped_is_a_difference():
 
 
 def test_apply_sends_no_view_update_when_the_plan_view_shows_no_stored_field():
-    """Hiding is only sent when there is something to hide."""
+    """A view's columns are only sent when there is one to hide or to show."""
     project = _project(cards=1, views=(("Plan", "is:open", 0),))
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     github = _Board(project)
     setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=Report())
     assert not [m for m in github.mutations if m[0] == "updateProjectV2View"]
@@ -585,7 +594,7 @@ def test_check_mode_reports_a_plan_view_with_another_filter():
     project = _project(views=(("Plan", "", 0),))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["workflows"]["nodes"] = []
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     assert setup_tracker.board_differences(project) == ["the 'Plan' view's filter is ''"]
 
 
@@ -594,7 +603,7 @@ def test_a_sorted_view_is_a_difference():
     project = _project(views=(("Plan", "is:open", 1),))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
     project["workflows"]["nodes"] = []
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     differences = setup_tracker.board_differences(project)
     assert len(differences) == 1
     assert "sorted" in differences[0]
@@ -759,7 +768,7 @@ def test_auto_archive_on_is_a_difference_and_off_or_unlisted_is_not(workflows, d
     it), it is no difference."""
     project = _project(views=(("Plan", "is:open", 0),))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     project["workflows"]["nodes"] = workflows
     report = Report()
     setup_tracker.check_board(_Board(project), {"node_id": "R"}, apply=False, report=report)
@@ -897,7 +906,7 @@ def test_a_board_link_is_proven_by_a_read_that_names_it_and_unread_when_a_short_
     links only a board known to be unlinked."""
     project = _project(views=(("Plan", "is:open", 0),))
     project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1")
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     project["workflows"]["nodes"] = []
     assert not setup_tracker.board_differences(project)
     project["repositories"]["totalCount"] = 101
@@ -912,3 +921,65 @@ def test_a_board_link_is_proven_by_a_read_that_names_it_and_unread_when_a_short_
     project["repositories"]["totalCount"] = 1
     assert setup_tracker.board_differences(project) == [
         "the board is not linked to saltyreformed-labs/shekel-plan"]
+
+
+# -- the Plan view's Parent issue column and its hierarchy (ruling plan#1814) ---------------
+
+def _as_declared():
+    """A board as declared, its Plan view showing :data:`_DECLARED`."""
+    project = _project(views=(("Plan", "is:open", 0),))
+    project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"], _FIELDS["F3"]]
+    project["workflows"]["nodes"] = []
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
+    return project
+
+
+def test_a_plan_view_without_the_parent_issue_column_is_a_difference():
+    """A split step is no row of the Plan view, so each leaf names it in the Parent issue
+    column (plan#1814's picked text): a view without that column differs."""
+    project = _as_declared()
+    assert not setup_tracker.board_differences(project)
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1", "F6")
+    assert setup_tracker.board_differences(project) == [
+        "the 'Plan' view does not show the Parent issue column, where a leaf names the step it "
+        "splits"]
+
+
+def test_apply_shows_the_parent_issue_column_keeping_every_other_column():
+    """``visibleFieldIds`` is the view's whole list of columns, so the Parent issue joins those
+    shown, on a board holding cards too, and the re-read view is no difference; check mode
+    sends nothing."""
+    project = _as_declared()
+    project["items"]["totalCount"] = 4
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1", "F6")
+    github = _Board(copy.deepcopy(project))
+    report = Report()
+    setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=report)
+    assert github.mutations == [("updateProjectV2View",
+                                 {"id": "V1", "fields": ["F1", "F6", "F3"]})]
+    assert "made    showed the Parent issue column in the 'Plan' view" in report.lines
+    assert report.differences == 0
+    github = _Board(project)
+    setup_tracker.check_board(github, {"node_id": "R"}, apply=False, report=Report())
+    assert not github.writes()
+
+
+def test_show_hierarchy_is_an_unread_line_naming_the_view_and_never_a_difference(
+        monkeypatch, capsys):
+    """No API reads a view's "Show hierarchy" (introspected 2026-10-26), so the check names the
+    Plan view's own page in an UNREAD line, which counts as no difference: a board otherwise as
+    declared exits 0."""
+    project = _as_declared()
+    project["views"]["nodes"][0]["number"] = 4
+    report = Report()
+    setup_tracker.check_board(_Board(project), {"node_id": "R"}, apply=False, report=report)
+    assert report.differences == 0
+    assert report.lines[-1] == (
+        "UNREAD  the 'Plan' view's \"Show hierarchy\", which must be on so each step's tasks "
+        "nest under it: no API reads it, so look at https://github.com/orgs/o/projects/1/views/4")
+    monkeypatch.setattr(setup_tracker, "user_token", lambda: "t")
+    monkeypatch.setattr(setup_tracker, "GitHub", lambda token: _Board(project))
+    for name in ("check_repository", "check_issue_types", "check_issue_fields", "check_app"):
+        monkeypatch.setattr(setup_tracker, name, lambda *_: None)
+    assert setup_tracker.main([]) == 0
+    assert capsys.readouterr().out.endswith("/views/4\n0 difference(s)\n")

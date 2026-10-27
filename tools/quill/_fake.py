@@ -34,23 +34,32 @@ from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
+from tools.quill._command import on_board as goes_on_board
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Card, Child, Comment, Edit
+from tools.quill._tracker import Card, Child, Comment, Edit, in_order
 from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, unmarked
 
 
 class FakeBoard:
-    """The board in memory: card numbers in drag order; its writes go to the tracker's log."""
+    """The board in memory: card numbers in their positions, each card's kind read from the
+    tracker's ``cards``; its writes go to the tracker's log."""
 
-    def __init__(self, writes):
-        """An empty board logging into ``writes``; it shows each placement at once."""
+    def __init__(self, writes, cards):
+        """An empty board logging into ``writes``, reading kinds from ``cards``; it shows each
+        placement at once."""
         self.items: list[int] = []
         self.writes = writes
+        self.cards = cards
         self.lagging = False
 
+    def held(self):
+        """Every card on the board, in its positions: ``(card number, item id, kind)``."""
+        return [(n, f"PVTI_{n}", self.cards[n].kind) for n in self.items]
+
     def order(self):
-        """The board's order: ``(card number, item id)``."""
-        return [(n, f"PVTI_{n}") for n in self.items]
+        """The board's order, by the one projection :class:`_tracker.Board` reads
+        (:func:`_tracker.in_order`): ``(card number, item id)``."""
+        return in_order(self.held())
 
     def add(self, card):
         """Add a card at the bottom; one already on the board keeps its item, as GitHub
@@ -108,10 +117,11 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.milestones: set[int] = set()
         self.milestone_of: dict[int, int] = {}
         self.writes: list[tuple] = []
-        self.board = FakeBoard(self.writes)
+        self.board = FakeBoard(self.writes, self.cards_by_number)
 
     def add(self, number, kind="step", body="", on_board=True, **fields):
-        """Put a card in the tracker (open, unclaimed, by default on the board's bottom)."""
+        """Put a card in the tracker (open, unclaimed, and by default on the board's bottom when
+        quill would put it there, :func:`_command.on_board`)."""
         values = {"number": number, "id": 1000 + number, "node_id": f"I_{number}",
                   "title": f"card {number}", "kind": kind, "labels": ("balance",),
                   "is_open": True, "state_reason": None, "parent": None, "children": (),
@@ -119,14 +129,17 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
                   "touched_by_hand": False, "outside": (), **fields}
         self.cards_by_number[number] = Card(**values)
         self.bodies[number] = body
-        if on_board and values["is_open"] and kind in quill.ON_BOARD:
+        parent = values["parent"]
+        if (on_board and values["is_open"] and goes_on_board(
+                kind, self._view(parent) if parent in self.cards_by_number else None)):
             self.board.items.append(number)
         return self.cards_by_number[number]
 
     def add_task(self, number, parent, **fields):
         """Put a task in the tracker (R-BAL386): a sub-issue of type ``task`` under the card
         ``parent``, which lists it, as GitHub links one; open and carrying no label by
-        default, and never on the board."""
+        default, and on the board under a step the board holds (:func:`_command.on_board`)
+        unless ``on_board=False`` says it was filed off the board."""
         task = self.add(number, "task", labels=(), parent=parent, **fields)
         held = self.cards_by_number[parent]
         self._set(parent, children=(*held.children, Child(number, "task", task.is_open)))

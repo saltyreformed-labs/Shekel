@@ -79,11 +79,14 @@ def marked_cards(place: Place) -> str:
 COMMENT_FIELDS = "author { login } createdAt body"
 
 
-#: The board's cards in their drag order, a page at a time (:meth:`_tracker.Board.order`).
+#: The board's cards in their positions, each with its issue type, a page at a time
+#: (:meth:`_tracker.Board.held`): the type is what keeps a task, which the board holds
+#: nested under its step (ruling plan#1814), out of the drag order (:meth:`_tracker.Board.order`).
 BOARD_ORDER = """query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {
   items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {
     pageInfo { hasNextPage endCursor }
-    nodes { id content { ... on Issue { number repository { nameWithOwner } } } } } } } }"""
+    nodes { id content { ... on Issue {
+      number issueType { name } repository { nameWithOwner } } } } } } } }"""
 
 
 #: What quill reads of one saved version of a card's text or a comment's.  GitHub keeps

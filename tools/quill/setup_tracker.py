@@ -9,14 +9,16 @@ X-cx's migration was rehearsed on) and of its CONFIGURATION: the repository and
 its settings, the labels, the board, and the things only the web can set (the
 organization's issue types and issue fields, which need a scope the shared token
 does not carry; the board's automations and its view's sort, which the API cannot
-change; and quill's GitHub App).  The cards
-themselves are content, and their home is the tracker; nothing here names one.
+change, and its view's "Show hierarchy", which the API cannot even read; and
+quill's GitHub App).  The cards themselves are content, and their home is the
+tracker; nothing here names one.
 
 Run with no flag it changes nothing: it reads GitHub, prints one line per
-thing it checked, and exits 1 if anything differs.  ``--apply`` makes what is
-missing and corrects what drifted, then reports what it could not fix (an
-issue type, an issue field, a board automation or a view's sort with the page to
-fix it on).
+thing it checked, and exits 1 if anything differs.  A setting no API reads is an
+``UNREAD`` line naming the page to look at, never a difference, since no run could
+ever pass it.  ``--apply`` makes what is missing and corrects what drifted, then
+reports what it could not fix (an issue type, an issue field, a board automation
+or a view's sort with the page to fix it on).
 It DELETES only what nothing depends on: a label no issue or pull request
 carries, and a custom board field that stores a value per card while the
 board holds no card, archived ones counted.  Every other difference is
@@ -37,12 +39,17 @@ value reported as a difference.  Those automations matter twice over: one of
 them, "Auto-close issue", would close a card when someone set its Status to
 Done -- a third way to close a card, beside git and the developer's own hand.
 **Nor may an automation put a card on the board** (ruling ``balance:R-BAL177``):
-the board holds steps and questions only, and quill places each one
-itself, a new leaf where the step it splits sat.  "Auto-add sub-issues to
-project" would put every sub-issue -- a task under its card (``R-BAL386``), a
-leaf under the step it splits -- at the bottom of the ordered list (measured
-2026-10-04, when findings and rulings were their owner's sub-issues: within ten
-seconds; since ``R-BAL395`` each is blocked by its owner instead).  **Nor may one hide
+the board holds the steps and questions in the developer's order, and each step's tasks
+nested under it in no order (ruling plan#1814), and quill places each one itself, a new
+leaf where the step it splits sat, a task at the bottom, where the order does not read
+it: filed under a step on the board, or put on by ``quill sync`` once its step is (ruling
+plan#1842).  "Auto-add sub-issues to project" would add each sub-issue of a card on the
+board at the bottom (measured 2026-10-04, when findings and rulings were their owner's
+sub-issues: within ten seconds; since ``R-BAL395`` each is blocked by its owner instead).  A
+task under a step on the board quill now puts there itself; the automation's harm is the
+rest: a leaf at the bottom of the order, not where the step it splits sat (R-BAL179), until
+quill moves it, and any card a person links under one on the board, entering the order
+unplaced.  **Nor may one hide
 a card**: "Auto-archive items" archives closed cards, and an archived card is in no
 view, so the shipped work kept as closed cards (ruling ``balance:R-BAL352``) would
 vanish from the view that shows it.  So every automation is off, and any archived
@@ -128,9 +135,14 @@ ORG, REPO, PROJECT_TITLE = PLAN.owner, PLAN.name, PLAN.board_title
 #: each to its kind's rules.
 CARD_TYPES = ("step", "finding", "ruling", "question")
 #: A piece of one step or finding, a commit inside its card's one pull request (ruling
-#: ``balance:R-BAL386``): a sub-issue of that card, never on the board, which carries no arc
-#: label (its arc is its card's), and is done when its file ``plan/tasks/N`` is in git.
+#: ``balance:R-BAL386``): a sub-issue of that card, which carries no arc label (its arc is its
+#: card's), and is done when its file ``plan/tasks/N`` is in git.  A task under a step the board
+#: holds is on it too, nested under that step in the Plan view and in no order (rulings
+#: plan#1814, plan#1842).
 TASK = "task"
+#: The kinds of card in the developer's drag order (R-BAL177), the order every reader of the
+#: board reads (``_tracker.Board.order``): a task on the board is in none.
+IN_ORDER = ("step", "question")
 #: Every issue type the plan reads: the four kinds of card, and a task.  The organization's
 #: issue types are managed only with the ``admin:org`` scope, which the token every session
 #: shares does not carry, so the developer sets them on the web and this module checks them.
@@ -257,6 +269,12 @@ GITHUB_STATUS_FIELD = "Status"
 #: The board's view: the open cards, unsorted, so it shows the drag order.
 VIEW_NAME = "Plan"
 VIEW_FILTER = "is:open"
+#: The column the view shows beside its cards, by the type GitHub gives the field: the Parent
+#: issue, where a leaf names the step it splits, since a split step is no row (ruling
+#: plan#1814).  Its "Show hierarchy", which nests each step's tasks under it, must be on too,
+#: but no API reads it (``ProjectV2View`` and ``updateProjectV2View`` hold no such setting,
+#: introspected 2026-10-26), so the check prints it as ``UNREAD``.
+VIEW_PARENT_COLUMN = "PARENT_ISSUE"
 #: The name GitHub gives a new board's one view (measured on the 09-24 demo board).
 GITHUB_DEFAULT_VIEW = "View 1"
 
@@ -266,7 +284,7 @@ _PROJECT_FIELDS = """
   fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType } } }
   workflows(first: 50) { nodes { name enabled } }
   views(first: 20) { nodes {
-    id name filter layout sortByFields(first: 1) { totalCount }
+    id number name filter layout sortByFields(first: 1) { totalCount }
     groupByFields(first: 1) { totalCount } verticalGroupByFields(first: 1) { totalCount }
     fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType } } }
   } }
@@ -344,6 +362,12 @@ class Report:
         """Record a difference this run did not fix."""
         self.differences += 1
         self.lines.append(f"DIFFERS {what}")
+
+    def unread(self, what: str) -> None:
+        """Record a setting no API reads, for a person to look at.  It is never a difference:
+        a read GitHub cuts short is one, as the next run may read it whole, but this one no
+        run can read, so counting it would fail every run."""
+        self.lines.append(f"UNREAD  {what}")
 
 
 @dataclass
@@ -447,6 +471,17 @@ def is_github_status(board_field: dict) -> bool:
     return (board_field["name"], board_field["dataType"]) == (GITHUB_STATUS_FIELD, "SINGLE_SELECT")
 
 
+def _parent_column(fields: list[dict]) -> dict | None:
+    """The Parent issue field (:data:`VIEW_PARENT_COLUMN`) among a board's or a view's
+    ``fields``, or None."""
+    return next((f for f in fields if f and f["dataType"] == VIEW_PARENT_COLUMN), None)
+
+
+def _plan_views(project: dict) -> list[dict]:
+    """The board's views named :data:`VIEW_NAME`: one, on a board as declared."""
+    return [view for view in project["views"]["nodes"] if view["name"] == VIEW_NAME]
+
+
 def _item_name(item: dict) -> str:
     """A board item as a person finds it: ``repository#number``, or its kind and id.
 
@@ -509,12 +544,15 @@ def board_differences(project: dict) -> list[str]:
         for workflow in project["workflows"]["nodes"]
         if workflow["enabled"]
     ]
-    views = [view for view in project["views"]["nodes"] if view["name"] == VIEW_NAME]
+    views = _plan_views(project)
     if not views:
         differences.append(f"the board has no view named {VIEW_NAME!r}")
     for view in views:
         if view["filter"] != VIEW_FILTER:
             differences.append(f"the {VIEW_NAME!r} view's filter is {view['filter']!r}")
+        if _parent_column(view["fields"]["nodes"]) is None:
+            differences.append(f"the {VIEW_NAME!r} view does not show the Parent issue column, "
+                               "where a leaf names the step it splits")
         if view["sortByFields"]["totalCount"]:
             differences.append(
                 f"the {VIEW_NAME!r} view is sorted, which hides the drag order: remove its "
@@ -683,7 +721,7 @@ def _apply_to_view(github: GitHub, project: dict, report: Report) -> None:
     any other board gets a new one.
     """
     views = project["views"]["nodes"]
-    named = [view for view in views if view["name"] == VIEW_NAME]
+    named = _plan_views(project)
     if named:
         view = named[0]
     elif len(views) == 1 and views[0]["name"] == GITHUB_DEFAULT_VIEW:
@@ -709,20 +747,26 @@ def _apply_to_view(github: GitHub, project: dict, report: Report) -> None:
         report.made(f"board view {view['name']!r} -> {VIEW_NAME!r} ({VIEW_FILTER})")
 
 
-def _hide_stored_fields(github: GitHub, project: dict, report: Report) -> None:
-    """Hide every stored field from the plan view, keeping its other columns."""
-    for view in project["views"]["nodes"]:
-        visible = view["fields"]["nodes"]
-        if view["name"] != VIEW_NAME or not any(map(stores_values, visible)):
+def _set_view_columns(github: GitHub, project: dict, report: Report) -> None:
+    """Give the plan view its columns in one write: every stored field hidden, its other
+    columns kept, and the board's Parent issue field shown (:data:`VIEW_PARENT_COLUMN`)."""
+    parent = _parent_column(project["fields"]["nodes"])
+    for view in _plan_views(project):
+        visible = [f for f in view["fields"]["nodes"] if f]
+        hide = [f["name"] for f in visible if stores_values(f)]
+        show = [] if parent is None or _parent_column(visible) else [parent]
+        if not (hide or show):
             continue
         github.graphql(
             "mutation($id: ID!, $fields: [ID!]!) { updateProjectV2View(input: {viewId: $id, "
             "configuration: {visibleFieldIds: $fields}}) { clientMutationId } }",
             id=view["id"],
-            fields=[f["id"] for f in visible if f and not stores_values(f)],
+            fields=[f["id"] for f in [*visible, *show] if not stores_values(f)],
         )
-        report.made(f"hid {[f['name'] for f in visible if stores_values(f)]} from the "
-                    f"{VIEW_NAME!r} view")
+        if hide:
+            report.made(f"hid {hide} from the {VIEW_NAME!r} view")
+        if show:
+            report.made(f"showed the Parent issue column in the {VIEW_NAME!r} view")
 
 
 def _apply_to_board(github: GitHub, project: dict, repository: dict, report: Report) -> None:
@@ -793,7 +837,7 @@ def check_board(github: GitHub, repository: dict | None, apply: bool, report: Re
     if apply and repository is not None:
         _apply_to_board(github, project, repository, report)
         project = _project(github, project["id"])
-        _hide_stored_fields(github, project, report)
+        _set_view_columns(github, project, report)
         project = _project(github, project["id"])
     differences = board_differences(project) + _item_differences(github, project["id"])
     for difference in differences:
@@ -802,8 +846,13 @@ def check_board(github: GitHub, repository: dict | None, apply: bool, report: Re
         report.ok(
             f"board {PROJECT_TITLE!r} ({project['url']}): no stored field but GitHub's unused "
             f"{GITHUB_STATUS_FIELD}, no automation on, no archived item, an unsorted "
-            f"{VIEW_NAME!r} table of open cards, ungrouped, showing no stored field"
+            f"{VIEW_NAME!r} table of open cards, ungrouped, showing no stored field and the "
+            "Parent issue column"
         )
+    for view in _plan_views(project):
+        report.unread(f"the {VIEW_NAME!r} view's \"Show hierarchy\", which must be on so each "
+                      "step's tasks nest under it: no API reads it, so look at "
+                      f"{project['url']}/views/{view['number']}")
 
 
 def another_app(slug: str) -> str | None:

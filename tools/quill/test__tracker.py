@@ -434,8 +434,8 @@ class _ReadBoard:
             return {}
         return {"node": {"items": {"pageInfo": {"hasNextPage": False, "endCursor": None},
                                    "nodes": [{"id": item, "content": {
-                                       "number": number, "repository": {
-                                           "nameWithOwner": PLAN.full_name}}}
+                                       "number": number, "issueType": {"name": "step"},
+                                       "repository": {"nameWithOwner": PLAN.full_name}}}
                                              for number, item in enumerate(self.items, 2)]}}}
 
 
@@ -516,6 +516,22 @@ def test_a_board_item_that_is_not_an_issue_of_the_tracker_is_not_in_the_order():
     nodes[:2] = [{**nodes[0], "content": {}}, {**nodes[1], "content": None}]
     order = Board(_GraphQLAnswer(data), PLAN, "B").order()
     assert [number for number, _ in order] == [4, 5, 6, 9, 7, 8, 10]
+
+
+def test_the_order_is_the_steps_and_questions_and_held_is_every_card_on_the_board():
+    """Ruling plan#1814: a task nests under its step on the board and is in no order, nor is a
+    card with no type; the board's positions hold both.  From the recorded board read, its
+    second item made a task, its third typeless and its fourth a question."""
+    data = _recorded_query("orderBy: {field: POSITION")
+    nodes = data["node"]["items"]["nodes"]
+    nodes[1]["content"]["issueType"] = {"name": "task"}
+    nodes[2]["content"]["issueType"] = None
+    nodes[3]["content"]["issueType"] = {"name": "question"}
+    board = Board(_GraphQLAnswer(data), PLAN, "B")
+    assert [number for number, _ in board.order()] == [2, 5, 6, 9, 7, 8, 10]
+    assert [(number, kind) for number, _, kind in board.held()] == [
+        (2, "step"), (3, "task"), (4, None), (5, "question"), (6, "step"), (9, "step"),
+        (7, "step"), (8, "step"), (10, "step")]
 
 
 def test_a_pull_request_a_title_search_finds_is_not_a_card():

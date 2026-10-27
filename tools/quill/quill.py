@@ -3,7 +3,8 @@
 The plan lives in the private repository ``saltyreformed-labs/shekel-plan``
 (ruling ``balance:R-BAL170``): each step, finding, ruling and question is one
 issue, a "card", and one board holds the steps and questions in the order the
-developer drags them (``R-BAL177``).  Every write goes through quill's
+developer drags them (``R-BAL177``), each step's tasks nested under it in no order
+(ruling plan#1814).  Every write goes through quill's
 GitHub App, and every card a session files passes :mod:`check` first.
 
 Whether a card SHIPPED is git's answer, never the card's state: its ship
@@ -23,7 +24,9 @@ this checkout's ``origin/dev``, ``origin/main`` and ``origin/card/N``.
 its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
 A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-issue
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
-``file task`` files one, ``task-file`` writes its file for the commit that finishes
+``file task`` files one, on the board under a step the board holds (ruling plan#1814,
+``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842),
+``task-file`` writes its file for the commit that finishes
 the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
 A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
 ``finding-file`` writes its ship marker on its owner's branch, for the commit that fixes it,
@@ -97,7 +100,6 @@ from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
 from tools.quill import _findings, _git, _tasks
 from tools.quill._command import (
-    ON_BOARD,
     Refused,
     _label,
     _one,
@@ -148,6 +150,7 @@ from tools.quill.check import (
 from tools.quill.setup_tracker import (
     DEPLOY_TOGETHER_LABEL,
     FILING,
+    IN_ORDER,
     MOVES_MONEY_LABEL,
     PLAN,
     TASK,
@@ -403,13 +406,28 @@ def cmd_block(args, tracker: Tracker, root: Path) -> int:
     return 0
 
 
+def _not_in_order(card: Card) -> str:
+    """Why nothing is moved after ``card``, which the board's order read does not list: a step
+    or question off the board, or on it but not yet listed by a read that lags a write
+    (``_tracker``'s doctrine); any other kind, a task among them, is in no order."""
+    if card.kind not in IN_ORDER:
+        return (f"plan#{card.number} is not in the board's order, its steps and questions "
+                "(R-BAL177)")
+    if card.board_item is None:
+        return (f"{_label(card)} is not on the board, so nothing is placed after it: put it "
+                f"on first (`quill move plan#{card.number} --top`, `--bottom` or `--after`)")
+    return (f"{_label(card)} is on the board, but the board's order read does not list it yet: "
+            "the board lags a write; run this again")
+
+
 def cmd_move(args, tracker: Tracker, root: Path) -> int:
     """Put a step or question at a place in the board's order."""
     card = _one(tracker, args.card)
     shipped = _git.read(root).shipped.cards
     cards = with_closure(tracker, {card.number: card})
-    if card.kind not in ON_BOARD or not card.is_open or is_container(card, cards, shipped):
-        raise Refused(f"the board holds open steps and questions only, and no step split into "
+    if card.kind not in IN_ORDER or not card.is_open or is_container(card, cards, shipped):
+        raise Refused(f"the board's order holds open steps and questions only (a task nests "
+                      f"under its step in no order, ruling plan#1814), and no step split into "
                       f"leaves (R-BAL177, R-BAL179): {_label(card)}")
     if filing_unfinished(card) and card.kind == "step":
         raise Refused(f"{_label(card)}'s filing has not finished (R-BAL202): finish it first.  "
@@ -419,7 +437,7 @@ def cmd_move(args, tracker: Tracker, root: Path) -> int:
     items = dict(order)
     if args.after is not None:
         if args.after not in items:
-            raise Refused(f"plan#{args.after} is not on the board")
+            raise Refused(_not_in_order(_one(tracker, args.after)))
         after = items[args.after]
     elif args.bottom:
         rest = [item for number, item in order if number != card.number]
@@ -688,8 +706,11 @@ def _sync_reads(tracker: Tracker, reads: _git.Reads,
 def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     """Write each step's, finding's and task's open or closed state from git (display only), then
     undo each split a leaf closed while still being filed is linked under (R-BAL205,
-    :func:`_undo_splits`): last, after every state write and every REPORT and HISTORY
-    line, so a failed undo costs none of them; run again, it finishes the undo.
+    :func:`_undo_splits`): after every state write and every REPORT and HISTORY line, so a
+    failed undo costs none of them; run again, it finishes the undo.  Last, put on the board
+    each task whose step is on it and that is not (ruling plan#1842,
+    :func:`_tasks.put_on_board`), display of the plan, so a failed add costs nothing above it;
+    run again, it adds the tasks still off.
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold
@@ -721,6 +742,7 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     for line in history:
         print(f"HISTORY: {line}")
     _undo_splits(tracker, cards, shipped, changes, args.dry_run)
+    _tasks.put_on_board(tracker, cards, args.dry_run)
     return 1 if changes.reports else 0
 
 

@@ -17,7 +17,7 @@ from tools.quill._command import Refused, _label, _one, _outside_parent, card_nu
 from tools.quill._state import OWNED, done_tasks, filing_unfinished, holder, never_split, owner
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import alias_mark
-from tools.quill.setup_tracker import FILING, TASK
+from tools.quill.setup_tracker import FILING, IN_ORDER, TASK
 
 #: What a commit did to a ship marker, by its status in :func:`_git.history`.
 _MARKER_CHANGES = {"A": "added", "M": "changed", "D": "deleted", "T": "changed the type of"}
@@ -50,14 +50,20 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
     holds every step linked below it (:func:`_steps_below`), and ``listed`` each card it
     lists as a child, a blocker or a card it owns (:func:`_listed`), whose lines are
     :func:`_link_lines`'.  A task says whether git says it is done
-    (:func:`_state.done_tasks`), in place of whether it shipped."""
+    (:func:`_state.done_tasks`), in place of whether it shipped.  A card on the board that the
+    order read does not list is in no order when it is a task; a step or question is in the
+    order, so the read lags a write (``_tracker``'s doctrine), and it says so."""
     claim = reads.claims.get(card.number)
     done = done_tasks({**listed, card.number: card}, reads.shipped.tasks, reads.claims)
     order = [n for n, _ in tracker.board.order()]
     state = "open" if card.is_open else f"closed ({card.state_reason})"
     ship = (f"done (git): {_YES[card.number in done]}" if card.kind == TASK else
             f"shipped (git): {_YES[card.number in reads.shipped.cards]}")
-    place = f"#{order.index(card.number) + 1}" if card.number in order else "not on it"
+    place = (f"#{order.index(card.number) + 1}" if card.number in order else
+             "not on it" if card.board_item is None else
+             "on it, but the board's order read does not list it yet: the board lags a write; "
+             "show it again" if card.kind in IN_ORDER else
+             "on it, in no order: the order is its steps and questions (R-BAL177)")
     lines = [
         _label(card),
         f"  state: {state}",

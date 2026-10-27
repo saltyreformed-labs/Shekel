@@ -220,6 +220,11 @@ python -m tools.quill.quill file task --parent plan#N ...    # a task: a piece i
 python -m tools.quill.quill task-file plan#T          # write task T's file on its card's branch
 python -m tools.quill.quill sync                      # write every card's state from git
 python -m tools.quill.quill release plan#N            # free a claim, keeping its work
+
+# A new lane, run in a new terminal from a checkout's root (no venv need be active): a worktree
+# ~/projects/shekel-NAME detached at origin/dev, and a session in it, the venv active, whose
+# first act claims plan#N (or `next`'s step)
+.venv/bin/python -m tools.quill.lane NAME [plan#N]
 ```
 
 ## Architecture

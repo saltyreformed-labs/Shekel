@@ -675,7 +675,9 @@ def test_sync_prints_the_undo_it_would_make_then_makes_it(code, tmp_path, capsys
         "  board: plan#1 would be added back at the bottom, a plain step again\n"
         "  board: plan#1 would be moved into plan#2's place\n"
         "  plan#2 would be unlinked from plan#1: its filing never finished, so it was never "
-        "part of that split (R-BAL205)\n")
+        "part of that split (R-BAL205)\n"
+        "would show plan#2 [step, balance] Half as Dropped in the board's Status (it showed "
+        "none)\n")
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == (
         "undo the split of plan#1 [step, balance] card 1 by plan#2, closed while still being "
@@ -683,7 +685,9 @@ def test_sync_prints_the_undo_it_would_make_then_makes_it(code, tmp_path, capsys
         "  board: plan#1 added back at the bottom, a plain step again\n"
         "  board: plan#1 moved into plan#2's place\n"
         "  plan#2 unlinked from plan#1: its filing never finished, so it was never part of "
-        "that split (R-BAL205)\n")
+        "that split (R-BAL205)\n"
+        "show plan#1 [step, balance] card 1 as Todo in the board's Status (it showed none)\n"
+        "show plan#2 [step, balance] Half as Dropped in the board's Status (it showed none)\n")
 
 
 def test_a_sync_whose_unlink_failed_is_finished_by_the_next_with_no_second_board_add(

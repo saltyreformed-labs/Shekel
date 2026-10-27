@@ -28,10 +28,10 @@ tracker it reads is private: real production figures are allowed there
   REST write takes one of the routes in :data:`_ROUTES` on the tracker, with
   exactly the body keys quill sends (their values are not checked but
   for the cards they name) and every card it names -- in its path, or by its
-  REST id -- a scratch card; a GraphQL write is one of the
-  board's four, word for word, on the plan board, moving a scratch card's
-  board item.  A body sent other than as JSON is refused too.  Anything else is
-  refused, unsent.
+  REST id -- a scratch card; a GraphQL write is one of the board's six (its
+  four moves and its two Status writes), word for word, on the plan board, moving
+  or writing a scratch card's board item.  A body sent other than as JSON is
+  refused too.  Anything else is refused, unsent.
 - **Every string an answer holds is redacted** (:data:`REDACTED`) unless its
   key is one of :data:`_KEPT` -- ids, states, names of labels, types and
   repositories, dates, error messages -- or it belongs to a scratch card, or it
@@ -72,7 +72,14 @@ from pathlib import Path
 import requests
 
 from tools.quill._github import API
-from tools.quill._tracker import BOARD_ADD, BOARD_AFTER, BOARD_REMOVE, BOARD_TOP
+from tools.quill._tracker import (
+    BOARD_ADD,
+    BOARD_AFTER,
+    BOARD_REMOVE,
+    BOARD_STATUS_CLEAR,
+    BOARD_STATUS_SET,
+    BOARD_TOP,
+)
 from tools.quill.setup_tracker import FILING, PLAN, Place
 
 #: Where the recordings the tests replay are kept.
@@ -95,9 +102,10 @@ _OWN_CONTENT = frozenset({"userContentEdits", "comments"})
 #: GitHub's node-id prefix for a board (a ProjectV2).
 _BOARD_NODE = "PVT_"
 _GRAPHQL_URL = f"{API}/graphql"
-#: Each GraphQL write a recording may send, and the variable naming what it moves: the
-#: card's node id for an add, its board item for the rest.
-_BOARD_WRITES = {BOARD_ADD: "c", BOARD_REMOVE: "i", BOARD_TOP: "i", BOARD_AFTER: "i"}
+#: Each GraphQL write a recording may send, and the variable naming what it moves or writes:
+#: the card's node id for an add, its board item for the rest.
+_BOARD_WRITES = {BOARD_ADD: "c", BOARD_REMOVE: "i", BOARD_TOP: "i", BOARD_AFTER: "i",
+                 BOARD_STATUS_SET: "i", BOARD_STATUS_CLEAR: "i"}
 _MUTATION = re.compile(r"\bmutation\b")
 _REPOSITORY_ARGUMENTS = re.compile(r"\brepository\s*\(([^)]*)\)")
 _REPOSITORY_ALIAS = re.compile(r"\brepository\s*:")

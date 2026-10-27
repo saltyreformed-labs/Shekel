@@ -37,21 +37,29 @@ from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
 from tools.quill._command import on_board as goes_on_board
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Card, Child, Comment, Edit, in_order
-from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, unmarked
+from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, in_order
+from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, STATUS_OPTIONS, unmarked
 
 
 class FakeBoard:
     """The board in memory: card numbers in their positions, each card's kind read from the
-    tracker's ``cards``; its writes go to the tracker's log."""
+    tracker's ``cards``, and each card's Status; its moves go to the tracker's log, and its
+    Status writes to :attr:`status_writes`, apart, as ``sync`` writes every card's Status
+    (``_status``), so the tracker's log stays what each test of a card's writes reads."""
 
     def __init__(self, writes, cards):
         """An empty board logging into ``writes``, reading kinds from ``cards``; it shows each
-        placement at once."""
+        placement at once.  Its Status field holds every option quill writes
+        (:data:`setup_tracker.STATUS_OPTIONS`), each id ``OPT_<name>``: a test sets
+        :attr:`status_field` to a field lacking one, or to none."""
         self.items: list[int] = []
         self.writes = writes
         self.cards = cards
         self.lagging = False
+        self.status: dict[int, str] = {}
+        self.status_field: tuple[str | None, dict[str, str]] = (
+            "PVTSSF_status", {name: f"OPT_{name}" for name in STATUS_OPTIONS})
+        self.status_writes: list[tuple[int, str | None]] = []
 
     def held(self):
         """Every card on the board, in its positions: ``(card number, item id, kind)``."""
@@ -77,6 +85,7 @@ class FakeBoard:
         number = int(item.removeprefix("PVTI_"))
         self.writes.append(("board_remove", number))
         self.items.remove(number)
+        self.status.pop(number, None)
 
     def place(self, item, after):
         """Move an item to just after ``after`` (the top when None); whether the board
@@ -88,6 +97,25 @@ class FakeBoard:
         self.items.insert(index, number)
         return not self.lagging
 
+    def statuses(self):
+        """The Status field and every card on the board with the Status it holds."""
+        field, options = self.status_field
+        return Statuses(field, dict(options),
+                        {number: (f"PVTI_{number}", self.status.get(number))
+                         for number in self.items})
+
+    def set_status(self, item, field, option):
+        """Set a card's Status to the option whose id is ``option``, or with None clear it; a
+        field or an option the board does not hold is a write the tool must never send."""
+        held, options = self.status_field
+        assert field == held, f"no Status field {field!r} to write"
+        number = int(item.removeprefix("PVTI_"))
+        name = None if option is None else {i: n for n, i in options.items()}[option]
+        self.status_writes.append((number, name))
+        if name is None:
+            self.status.pop(number, None)
+        else:
+            self.status[number] = name
 
 
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes

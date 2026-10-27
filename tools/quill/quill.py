@@ -29,7 +29,8 @@ of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 card's two finishing tasks (ruling plan#1875, ``_filing.finishing_filings``),
 ``start`` begins it with a commit naming it (ruling plan#1872), the commit hook stamps each
 commit of the piece with it (:mod:`commit_hook`), ``task-file`` writes its file for the commit
-that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
+that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it; ``sync``
+writes the board's Status of each card from git (:mod:`_status`).
 A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
 ``finding-file`` writes its ship marker on its owner's branch, for the commit that fixes it,
 and ``hand`` hands an open finding from its one owner to another step, a step a branch
@@ -104,7 +105,7 @@ import requests
 
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
-from tools.quill import _comments, _filing, _findings, _git, _tasks
+from tools.quill import _comments, _filing, _findings, _git, _status, _tasks
 from tools.quill._command import (
     Refused,
     _label,
@@ -753,10 +754,11 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     """Write each step's, finding's and task's open or closed state from git (display only), then
     undo each split a leaf closed while still being filed is linked under (R-BAL205,
     :func:`_undo_splits`): after every state write and every REPORT and HISTORY line, so a
-    failed undo costs none of them; run again, it finishes the undo.  Last, put on the board
+    failed undo costs none of them; run again, it finishes the undo.  Then put on the board
     each task whose step is on it and that is not (ruling plan#1842,
-    :func:`_tasks.put_on_board`), display of the plan, so a failed add costs nothing above it;
-    run again, it adds the tasks still off.
+    :func:`_tasks.put_on_board`), and last write the board's Status of every card it holds
+    from git (rulings plan#1873, plan#1905, :func:`_status.sync_statuses`): display of the
+    plan, so a failed write costs nothing above it; run again, it makes the writes still owed.
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold
@@ -789,7 +791,9 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
         print(f"HISTORY: {line}")
     _undo_splits(tracker, cards, shipped, changes, args.dry_run)
     _tasks.put_on_board(tracker, cards, args.dry_run)
-    return 1 if changes.reports else 0
+    for line in (shown := _status.sync_statuses(tracker, cards, reads, args.dry_run)):
+        print(f"REPORT: {line}")
+    return 1 if changes.reports or shown else 0
 
 
 # -- spec-history, spec-revert ------------------------------------------------------

@@ -45,7 +45,7 @@ command.  A write cannot reach another tracker's cards or board:
 link cross repositories in one organization (Shekel itself joins it at X-cx's
 L5); read by number alone, such a link would name the tracker's card of that
 number instead.  So every link and every board item is asked which repository
-it names (:func:`_is_tracker_issue`, the one test), and a card keeps its
+it names (:func:`setup_tracker.is_tracker_issue`, the one test), and a card keeps its
 outside links apart (:attr:`Card.outside`) for the plan to report.
 
 **A card can be read without the board** (:class:`CardReader`), by a token that may read
@@ -57,7 +57,7 @@ reader that reads each card with its board item, a :class:`Card`.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import overload
@@ -81,6 +81,7 @@ from tools.quill.setup_tracker import (
     Place,
     another_app,
     find_board,
+    is_tracker_issue,
     linked,
 )
 
@@ -113,6 +114,13 @@ BOARD_TOP = ("mutation($p: ID!, $i: ID!) { updateProjectV2ItemPosition(input: "
              "{projectId: $p, itemId: $i}) { clientMutationId } }")
 BOARD_AFTER = ("mutation($p: ID!, $i: ID!, $a: ID!) { updateProjectV2ItemPosition(input: "
                "{projectId: $p, itemId: $i, afterId: $a}) { clientMutationId } }")
+#: The Status writes (rulings plan#1873, plan#1905): ``$f`` is the board's Status field,
+#: ``$o`` the option an item is set to; the clear leaves the item holding none.
+BOARD_STATUS_SET = ("mutation($p: ID!, $i: ID!, $f: ID!, $o: String!) { "
+                    "updateProjectV2ItemFieldValue(input: {projectId: $p, itemId: $i, "
+                    "fieldId: $f, value: {singleSelectOptionId: $o}}) { clientMutationId } }")
+BOARD_STATUS_CLEAR = ("mutation($p: ID!, $i: ID!, $f: ID!) { clearProjectV2ItemFieldValue("
+                      "input: {projectId: $p, itemId: $i, fieldId: $f}) { clientMutationId } }")
 
 
 class TrackerError(RuntimeError):
@@ -195,6 +203,19 @@ class Card(BareCard):
     board does not hold it."""
 
     board_item: str | None
+
+
+@dataclass(frozen=True)
+class Statuses:
+    """The board's Status column as one read holds it (:meth:`Board.statuses`): ``field``, the
+    node id of its single-select field named Status, None when it has none (GitHub's was
+    renamed); ``options``, each of that field's option ids by its name; and ``held``, each
+    card the board holds, by number, with its board item and the Status it holds (None for
+    none)."""
+
+    field: str | None
+    options: Mapping[str, str]
+    held: Mapping[int, tuple[str, str | None]]
 
 
 @dataclass(frozen=True)
@@ -286,13 +307,6 @@ def milestone_nodes(github: GitHub, place: Place) -> list[dict]:
                  lambda answer: answer["repository"]["milestones"], "the milestones")[0]
 
 
-def _is_tracker_issue(node: dict, place: Place) -> bool:
-    """Whether a link or a board item's content names an issue of ``place``'s tracker: the
-    one test, for a parent, a sub-issue, a blocker and the board alike, on the whole
-    ``owner/name`` token."""
-    return (node.get("repository") or {}).get("nameWithOwner") == place.full_name
-
-
 def _comment(node: dict) -> Comment:
     """A :class:`Comment` from one GraphQL comment node (:data:`_queries.COMMENT_FIELDS`)."""
     return Comment((node["author"] or {}).get("login"), node["createdAt"], node["body"])
@@ -321,7 +335,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
     links += [(child, "sub-issue") for child in _counted(node["subIssues"], "sub-issues", number)]
     links += [(blocker, "blocker")
               for blocker in _counted(node["blockedBy"], "blockers", number)]
-    inside = [(link, what) for link, what in links if _is_tracker_issue(link, place)]
+    inside = [(link, what) for link, what in links if is_tracker_issue(link, place)]
     facts = {
         "number": number,
         "id": int(node["fullDatabaseId"]),
@@ -340,7 +354,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
         "closed_by_tool": not is_open and last_actor == app_login,
         "touched_by_hand": bool(events) and last_actor != app_login,
         "outside": tuple(_outside(link, what) for link, what in links
-                         if not _is_tracker_issue(link, place)),
+                         if not is_tracker_issue(link, place)),
     }
     if board_id is None:
         return BareCard(**facts)
@@ -435,12 +449,33 @@ class Board:
                          lambda answer: answer["node"]["items"], "the board's order")
         return [(item["content"]["number"], item["id"],
                  (item["content"]["issueType"] or {}).get("name")) for item in items
-                if _is_tracker_issue(item["content"] or {}, self.location)]
+                if is_tracker_issue(item["content"] or {}, self.location)]
 
     def order(self) -> list[tuple[int, str]]:
         """The board's cards in the developer's drag order, its steps and questions alone
         (:func:`in_order`): ``(card number, board item id)``."""
         return in_order(self.held())
+
+    def statuses(self) -> Statuses:
+        """The board's Status field and every card it holds with the Status it holds, read a
+        page at a time (:data:`_queries.BOARD_STATUS`).  An item that is no issue of the
+        tracker is no card, and is passed over, as :meth:`held` passes it over."""
+        items, last = paged(partial(self.github.graphql, _queries.BOARD_STATUS, id=self.board_id),
+                            lambda answer: answer["node"]["items"], "the board's Status")
+        field = last["node"]["field"] or {}
+        return Statuses(
+            field.get("id"), {option["name"]: option["id"] for option in field.get("options", ())},
+            {item["content"]["number"]: (item["id"], (item["fieldValueByName"] or {}).get("name"))
+             for item in items if is_tracker_issue(item["content"] or {}, self.location)})
+
+    def set_status(self, item: str, field: str, option: str | None) -> None:
+        """Set board item ``item``'s Status, the field ``field``, to the option whose id is
+        ``option``, or with None clear it: the one write of it, quill's display of git
+        (``_status``)."""
+        if option is None:
+            self._write(BOARD_STATUS_CLEAR, i=item, f=field)
+        else:
+            self._write(BOARD_STATUS_SET, i=item, f=field, o=option)
 
     def add(self, card: Card) -> str:
         """Put a card on the board (GitHub adds it at the bottom); its board item id."""
@@ -521,7 +556,7 @@ class CardReader:
         return tuple(
             Child(node["number"], (node["issueType"] or {}).get("name"), node["state"] == "OPEN")
             for node in _counted(issue["blocking"], "cards it blocks", number)
-            if _is_tracker_issue(node, self.place))
+            if is_tracker_issue(node, self.place))
 
     def _lookup[T](self, numbers: Iterable[int], card_fields: str,
                    card: Callable[[dict], T]) -> dict[int, T]:

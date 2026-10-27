@@ -23,7 +23,14 @@ from tools.quill._recorded import (
     redacted,
     refusal,
 )
-from tools.quill._tracker import BOARD_ADD, BOARD_AFTER, BOARD_REMOVE, BOARD_TOP
+from tools.quill._tracker import (
+    BOARD_ADD,
+    BOARD_AFTER,
+    BOARD_REMOVE,
+    BOARD_STATUS_CLEAR,
+    BOARD_STATUS_SET,
+    BOARD_TOP,
+)
 from tools.quill.setup_tracker import FILING, PLAN, REHEARSAL
 
 #: The real tracker's ``owner/name``, as every recording here names it.
@@ -218,6 +225,12 @@ _REFS = f"https://api.github.com/repos/{TRACKER}/git/refs"
     ("POST", "https://api.github.com/graphql",
      {"query": BOARD_ADD, "variables": {"p": "PVT_another_project", "c": "S_11"}}),
     ("POST", "https://api.github.com/graphql",
+     {"query": BOARD_STATUS_SET, "variables": {"p": "PVT_1", "i": "PVTI_of_a_real_card",
+                                               "f": "PVTSSF_1", "o": "f75ad846"}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": BOARD_STATUS_CLEAR, "variables": {"p": "PVT_another_project", "i": "SI_11",
+                                                 "f": "PVTSSF_1"}}),
+    ("POST", "https://api.github.com/graphql",
      {"query": BOARD_ADD + ' b: updateIssue(input: {id: "I_2", body: "x"}) { issue { id } }',
       "variables": {"p": "PVT_1", "c": "S_11"}}),
     ("POST", f"{_ISSUES}/11/sub_issues", {"sub_issue_id": 911, "replace_parent": True}),
@@ -289,6 +302,11 @@ def test_a_write_that_is_not_a_known_write_to_a_scratch_card_is_refused(method, 
      {"query": BOARD_ADD, "variables": {"p": "PVT_1", "c": "S_11"}}),
     ("POST", "https://api.github.com/graphql",
      {"query": BOARD_AFTER, "variables": {"p": "PVT_1", "i": "SI_11", "a": "PVTI_real"}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": BOARD_STATUS_SET, "variables": {"p": "PVT_1", "i": "SI_11", "f": "PVTSSF_1",
+                                               "o": "f75ad846"}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": BOARD_STATUS_CLEAR, "variables": {"p": "PVT_1", "i": "SI_11", "f": "PVTSSF_1"}}),
     ("GET", f"{_ISSUES}/2", None),
 ])
 def test_a_known_write_to_a_scratch_card_or_any_read_is_sent(method, url, body):
@@ -342,13 +360,14 @@ def test_a_create_github_refused_counts_nothing_as_scratch():
 
 #: Every recording in ``recorded/``, and whether it read the real cards (it must then hold a
 #: redacted title on a card node): ``tracker.json`` and ``export.json`` read them;
-#: ``label_missing.json`` read only its scratch card, and ``blocking.json`` and ``show.json``
-#: only their scratch cards on the throwaway ``plan-views-demo`` (R-BAL395; ``show.json``'s
-#: board read holds item numbers, no title).  A recording added or removed must be named
-#: here (the next test).
+#: ``label_missing.json`` read only its scratch card, and ``blocking.json``, ``show.json`` and
+#: ``status.json`` only their scratch cards on the throwaway ``plan-views-demo`` (R-BAL395;
+#: ``show.json``'s and ``status.json``'s board reads hold item numbers, no title).  A
+#: recording added or removed must be named here (the next test).
 RECORDINGS_READ_REAL_CARDS = {"blocking": False, "comments": False, "export": True,
                               "label_missing": False, "priority": False, "show": False,
-                              "tracker": True, "twice": False, "unlink": False}
+                              "status": False, "tracker": True, "twice": False,
+                              "unlink": False}
 
 
 def test_every_recording_is_in_the_census():

@@ -8,7 +8,8 @@ redacts every other card's text); ``recorded/label_missing.json`` was kept the
 same evening, before the mark's label existed; ``recorded/comments.json`` was kept
 2026-10-06 20:23 EDT, after the App's rename, on scratch cards #28-#30;
 ``recorded/blocking.json`` and ``recorded/show.json`` were kept 2026-10-24 on the
-throwaway ``plan-views-demo`` (R-BAL395), on scratch cards #220-#222 and #223-#228.
+throwaway ``plan-views-demo`` (R-BAL395), on scratch cards #220-#222 and #223-#228, and
+``recorded/status.json`` 2026-10-27 there, on its board, on scratch card #243.
 These tests replay them (``_recorded.Replay``), which answers only a request
 it recorded, in the order recorded.  Nothing here calls GitHub.  A query whose
 text changes no longer matches its recording: re-record it, never edit an
@@ -45,6 +46,7 @@ from tools.quill._tracker import (
     Tracker,
     TrackerError,
     card_from,
+    read_until,
 )
 from tools.quill.setup_tracker import FILING, PLAN, find_board
 
@@ -661,6 +663,81 @@ def test_a_sub_issue_is_placed_above_another_in_its_parents_order():
     assert order() == [second, first]
     assert not any(card.is_open for card in tracker.cards(numbers).values())
     assert replay.unused() == 0
+
+
+def _status_round(tracker, sleep):
+    """Every call ``recorded/status.json`` holds, in its order: the recording session ran this
+    once against GitHub (``sleep`` waiting out the board), and the test replays it.  A scratch
+    step filed and put on the board; the board's Status read until it shows the card holding
+    none (the board lags a write, :func:`_tracker.read_until`); its Status set to In Progress,
+    then to Done, then cleared, each read back the same way; the card taken off the board and
+    closed.  The card, its item, and the read that showed each state, by that state."""
+    number = tracker.create("step", f"{SCRATCH}: a card whose Status quill writes",
+                            "Scratch for plan#1881's recording; closed when it ends.", [])
+    tracker.unmark(number)
+    item = tracker.board.add(tracker.cards([number])[number])
+
+    def shows(status):
+        (read,), held = read_until(lambda: [tracker.board.statuses()],
+                                   lambda reads: reads[0].held.get(number) == (item, status),
+                                   sleep)
+        assert held, f"the board never showed plan#{number} holding {status}"
+        return read
+
+    reads = {"added": shows(None)}
+    field, options = reads["added"].field, reads["added"].options
+    for status in ("In Progress", "Done"):
+        tracker.board.set_status(item, field, options[status])
+        reads[status] = shows(status)
+    tracker.board.set_status(item, field, None)
+    reads["cleared"] = shows(None)
+    tracker.board.remove(item)
+    tracker.close(number, "not_planned")
+    return number, item, reads
+
+
+def test_the_boards_status_is_read_set_and_cleared_on_a_card_it_holds():
+    """Recorded 2026-10-27 19:03 EDT on scratch #243 of the throwaway plan-views-demo, its board
+    "Plan views demo" (``recorded/status.json``, rulings plan#1873, plan#1905), with the
+    developer's own token, as ``show.json`` was: ``statuses`` reads the board's Status field by
+    name, with its options' ids, and every card it holds with the Status it holds, the demo's
+    own 48 among them.  The first read after the add did not yet hold the card and the next one
+    did; each write showed at the first read after it.  An option is set by its id and a clear
+    leaves the item holding none."""
+    replay = Replay("status")
+    scratch = Scratch.from_json(recording("status")["scratch"])
+    github = GitHub("token", replay)
+    tracker = Tracker(github, Board(github, scratch.place, scratch.board), APP)
+    number, item, reads = _status_round(tracker, lambda _seconds: None)
+    added = reads["added"]
+    assert added.field.startswith("PVTSSF_")
+    assert dict(added.options) == {"Todo": "f75ad846", "In Progress": "47fc9ee4",
+                                   "Done": "98236657"}
+    assert number == 243 and len(added.held) == 49
+    assert sorted(status or "none" for held, (_, status) in added.held.items()
+                  if held != number) == ["Done"] * 7 + ["In Progress"] * 2 + ["Todo"] * 38 + [
+                      "none"]
+    assert [read.held[number] for read in reads.values()] == [
+        (item, None), (item, "In Progress"), (item, "Done"), (item, None)]
+    assert replay.unused() == 0
+
+
+def test_the_boards_status_passes_over_an_item_that_is_no_card():
+    """The status recording's first read, its board holding only the demo's cards, with one
+    item changed the one way no scratch card can give: an issue of another repository, then a
+    draft (no content fields), each passed over as no card, as the order's read passes them
+    over (``Board.held``)."""
+    (page,) = [exchange["answer"] for exchange in recording("status")["exchanges"]
+               if "fieldValueByName" in str((exchange["body"] or {}).get("query"))][:1]
+    scratch = Scratch.from_json(recording("status")["scratch"])
+    first = page["data"]["node"]["items"]["nodes"][0]
+    for content in ({**first["content"], "repository": {"nameWithOwner": TRACKER}}, {}):
+        answer = copy.deepcopy(page)
+        answer["data"]["node"]["items"]["nodes"][0]["content"] = content
+        github = GitHub("token", Sent(200, answer))
+        held = Board(github, scratch.place, scratch.board).statuses().held
+        assert first["content"]["number"] not in held
+        assert len(held) == len(page["data"]["node"]["items"]["nodes"]) - 1 == 47
 
 
 #: The App's login as the comments recording holds it: kept after the App's rename (R-BAL227).

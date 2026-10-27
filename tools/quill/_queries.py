@@ -14,7 +14,7 @@ are sent through.
 """
 from __future__ import annotations
 
-from tools.quill.setup_tracker import FILING, LINKED_REPOSITORIES, Place
+from tools.quill.setup_tracker import FILING, GITHUB_STATUS_FIELD, LINKED_REPOSITORIES, Place
 
 #: What a card says of itself and its links, read first.
 _ISSUE_FIELDS = """
@@ -87,6 +87,18 @@ BOARD_ORDER = """query($id: ID!, $after: String) { node(id: $id) { ... on Projec
     pageInfo { hasNextPage endCursor }
     nodes { id content { ... on Issue {
       number issueType { name } repository { nameWithOwner } } } } } } } }"""
+
+
+#: The board's Status field, with its id and its options' ids, and each item with the Status
+#: it holds, a page at a time (:meth:`_tracker.Board.statuses`, rulings plan#1873, plan#1905):
+#: its own read, so no recording of :data:`BOARD_ORDER` changes.
+BOARD_STATUS = """query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {
+  field(name: "%s") { ... on ProjectV2SingleSelectField { id options { id name } } }
+  items(first: 100, after: $after) {
+    pageInfo { hasNextPage endCursor }
+    nodes { id content { ... on Issue { number repository { nameWithOwner } } }
+      fieldValueByName(name: "%s") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
+  } } }""" % (GITHUB_STATUS_FIELD, GITHUB_STATUS_FIELD)
 
 
 #: What quill reads of one saved version of a card's text or a comment's.  GitHub keeps

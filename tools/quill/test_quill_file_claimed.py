@@ -205,7 +205,11 @@ def test_sync_reports_a_claim_on_a_split_step_until_it_is_released(code, tmp_pat
     out = capsys.readouterr().out
     assert out == (f"REPORT: plan#1 is split into smaller steps, but {holder} still claims it: "
                    "a split step is never shipped itself, its smaller steps are the work "
-                   "(R-BAL177), so release the claim with `quill release plan#1`\n")
+                   "(R-BAL177), so release the claim with `quill release plan#1`\n"
+                   "show plan#3 [step, balance] card 3 as In Progress in the board's Status (it "
+                   "showed none)\n"
+                   "show plan#4 [step, balance] Half as Todo in the board's Status (it showed "
+                   "none)\n")
     assert tracker.writes == writes
     assert run(tracker, code, "release", "plan#1") == 0
     capsys.readouterr()

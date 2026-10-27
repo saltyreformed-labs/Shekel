@@ -26,7 +26,7 @@ under a Projected parent) where the one partition counts it once.
 
 Boundary discipline (``CLAUDE.md``: "services are isolated from Flask"): no
 Flask symbol; plain data in, the
-:class:`~app.services.investment_projection.ShadowContributions` DTO out.  It
+:class:`~app.services.investment_projection.TransferContributions` DTO out.  It
 is here and not in :mod:`app.services.investment_projection` because that
 module promises no database access, and this one is a session read.
 """
@@ -40,17 +40,17 @@ from app.services.cash_ledger import (
 )
 from app.services.investment_projection import (
     PricedContribution,
-    ShadowContributions,
+    TransferContributions,
 )
 from app.services.loan_loaders import income_legs
 from app.services.row_valuation import leg_settled_contribution
 
 
-def load_shadow_income_contributions_for_accounts(
+def load_transfer_contributions_for_accounts(
     basis: AmountBasis,
     account_ids: list[int], period_ids: list[int],
-) -> ShadowContributions:
-    """Return PRICED shadow-income contributions across many accounts.
+) -> TransferContributions:
+    """Return PRICED transfer contributions across many accounts.
 
     Batch variant used by services that classify many accounts in one
     pass.  Returned records carry their original ``account_id`` so callers
@@ -125,7 +125,7 @@ def load_shadow_income_contributions_for_accounts(
             against.
 
     Returns:
-        A :class:`~app.services.investment_projection.ShadowContributions` --
+        A :class:`~app.services.investment_projection.TransferContributions` --
         the priced ``records`` (callers partition by ``account_id``
         themselves, typically a comprehension inside a per-account loop) and
         the ``linked_account_ids`` of every account that has a transfer INTO
@@ -147,7 +147,7 @@ def load_shadow_income_contributions_for_accounts(
             a transfer whose status the partition cannot place.
     """
     if not account_ids or not period_ids:
-        return ShadowContributions(records=[], linked_account_ids=frozenset())
+        return TransferContributions(records=[], linked_account_ids=frozenset())
     window = set(period_ids)
     records: list[PricedContribution] = []
     # One account at a time through the ONE partition: the same producer the
@@ -194,17 +194,17 @@ def load_shadow_income_contributions_for_accounts(
         .distinct()
         .all()
     )
-    return ShadowContributions(
+    return TransferContributions(
         records=records,
         linked_account_ids=frozenset(row[0] for row in linked),
     )
 
 
-def load_shadow_income_contributions_for_account(
+def load_transfer_contributions_for_account(
     basis: AmountBasis,
     account_id: int, period_ids: list[int],
-) -> ShadowContributions:
-    """Return PRICED shadow-income contributions into a single account.
+) -> TransferContributions:
+    """Return PRICED transfer contributions into a single account.
 
     Used by the investment-detail dashboard.  Filters to the contributions
     into the account -- the to-side legs of transfers into it -- in the
@@ -220,10 +220,10 @@ def load_shadow_income_contributions_for_account(
             against.
 
     Returns:
-        The :class:`~app.services.investment_projection.ShadowContributions`
+        The :class:`~app.services.investment_projection.TransferContributions`
         for the account (see the batch variant for what pricing at this
         boundary buys).
     """
-    return load_shadow_income_contributions_for_accounts(
+    return load_transfer_contributions_for_accounts(
         basis, [account_id], period_ids,
     )

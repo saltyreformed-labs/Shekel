@@ -87,7 +87,7 @@ def _cards_context(*, limit, ytd, paydays, current_index, as_of, cadence=14,
             ytd_contributions=ytd,
             ytd_contributions_seed=ytd,
         ),
-        shadow_contributions=[],
+        transfer_contributions=[],
         feed=AccountPayrollFeed.absent(),
         deductions=[],
         salary_profiles=[],
@@ -332,9 +332,9 @@ def _make_projected_shadow_income(
 ):
     """Seed a PROJECTED transfer into the investment account in *period*.
 
-    The shape the double count needed: a projected shadow income is counted
-    in the balance the projection seeds from AND is the kind of row the
-    growth-engine timeline re-applies.  It stays the fixture because it is
+    The shape the double count needed: a projected transfer contribution is
+    counted in the balance the projection seeds from AND is the kind of record
+    the growth-engine timeline re-applies.  It stays the fixture because it is
     still the discriminating shape -- under rulings R-AB / R-AF the seed's
     date and the window are disjoint, so the row is counted once, and this
     is where that would fail if either moved.

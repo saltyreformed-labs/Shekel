@@ -89,11 +89,11 @@ def _make_transfer_template_with_status(app, db_, seed_user, period, status_name
     """Create a transfer template plus its engine-generated transfer at a status.
 
     The transfer is the definition's own, written by the transfer engine
-    with its two shadow legs (:func:`generate_transfer_of`, plan step
-    balance:X-ch), and the status under test is then laid on it through
-    ``transfer_service.update_transfer`` -- the one door that keeps the three
-    rows equal (Transfer Invariant 3), and for a settled status the settle
-    itself, which records the definition's figure on the ``derived`` basis.
+    (:func:`generate_transfer_of`, plan step balance:X-ch), and the status
+    under test is then laid on it through ``transfer_service.update_transfer``
+    (the transfer service writes every transfer), and for a settled status the
+    settle itself, which records the definition's figure on the ``derived``
+    basis.
     Resolves Status by name (test scaffolding only -- production code uses
     cached IDs per CLAUDE.md rule 4 / E-15).
     """

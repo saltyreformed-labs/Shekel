@@ -55,9 +55,10 @@ class LoanAnchorEvent(AccountScopedMixin, CreatedAtMixin, db.Model):
 
     Read by the loan resolver (Commit 13) which selects the most
     recent event per account, treats ``(anchor_date, anchor_balance)``
-    as the snap-to point, and replays confirmed shadow-income
-    transactions forward from that anchor to produce a current
-    balance, monthly payment, and full amortisation schedule.
+    as the snap-to point, and replays confirmed payments -- the settled
+    to-side legs of transfers into the loan -- forward from that anchor
+    to produce a current balance, monthly payment, and full amortisation
+    schedule.
 
     The ``source_id`` FK is RESTRICT-on-delete because the seed rows
     in ``ref.loan_anchor_sources`` are non-removable application

@@ -491,18 +491,22 @@ class TestMovingATransferBetweenAccounts:
         payment window still count a payment it no longer has.  Both are
         re-derived explicitly, after the cash reconcile has moved the legs.
 
-        **The ORDER is pinned, but not by this case** -- an adversarial review
-        of R10-b measured which tests fail when the vacated walk is hoisted
-        above the cash reconcile, and this is not one of them.  The three that
-        are: ``test_a_vacated_ACCOUNT_s_anchor_corrections_are_re_derived``,
+        **The ORDER was pinned at R10-b, but not by this case** -- an
+        adversarial review of R10-b measured which tests failed when the
+        vacated walk was hoisted above the cash reconcile, and this was not one
+        of them.  The three that were:
+        ``test_a_vacated_ACCOUNT_s_anchor_corrections_are_re_derived``,
         ``test_moving_a_settled_payment_ONTO_a_loan_reconciles_that_loan`` and
         ``test_a_settled_transfer_s_cash_legs_follow_the_move``.  Run first, the
-        vacated walk reads a ledger still holding a net for a transfer with no
-        shadow on that account and ``walk_account_ledger`` raises
+        vacated walk read a ledger still holding a net for a transfer with no
+        shadow on that account and ``walk_account_ledger`` raised
         ``PostingError: Ledger account N holds a nonzero net for transfer ids
         [...] but no active shadow on account M resolves them; Transfer
         Invariant 1 is broken`` -- measured on a production clone before the
-        order was fixed.  What THIS case pins is the vacated loan's re-sync
+        order was fixed.  That measurement is of the tree before plan step
+        ``balance:X-bi-6-3`` deleted the transfer loader that raised it (ruling
+        R-BAL102) and ``balance:X-bi-6-4d-2`` the shadows, and it has not been
+        re-run since.  What THIS case pins is the vacated loan's re-sync
         AFTER the move (``_loan_posting._resync_vacated_loan``): remove it and
         the loan keeps a correction for a payment it no longer has.  Through
         plan step ``balance:X-bi-6-1b`` it pinned a split reversal BEFORE the

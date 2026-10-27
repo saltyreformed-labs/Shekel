@@ -17,7 +17,7 @@ from app.models.transfer import Transfer
 from app.services.balance_at._asset_contributions import _recorded_contributions
 from app.services.balance_at._cash_fold import assembled_fold
 from app.services.cash_ledger import planned_cash_rows, planned_leg_contribution, sum_projected
-from app.services.recorded_contributions import load_shadow_income_contributions_for_account
+from app.services.recorded_contributions import load_transfer_contributions_for_account
 from app.services.transfer_legs import (
     TransferLeg,
     leg_of,
@@ -326,7 +326,7 @@ class TestTheContributionFeedsReadTheParent:
             db.session.commit()
             basis = basis_for(account, seed_user["scenario"])
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis, account.id, [period.id],
             )
             recorded = _recorded_contributions(basis, account.id)
@@ -351,7 +351,7 @@ class TestTheContributionFeedsReadTheParent:
             db.session.commit()
             basis = basis_for(account, seed_user["scenario"])
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis, account.id, [period.id],
             )
 
@@ -379,7 +379,7 @@ class TestTheContributionFeedsReadTheParent:
             db.session.commit()
             basis = basis_for(account, seed_user["scenario"])
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis, account.id, [period.id],
             )
 

@@ -914,7 +914,7 @@ class TestWhatEachRuleAnswers:
     def test_a_transfer_leg_answers_its_parents_RULE_not_its_column(
         self, app, db, seed_user, seed_periods,
     ):
-        """Transfer Invariant 3 becomes structural: the leg reads the parent's rule.
+        """A leg answers its transfer's RULE: one row holds what both sides read.
 
         Neither column can hold a rival figure any more -- the declaration empties
         both -- so the assertion discriminates between the definition's
@@ -945,7 +945,7 @@ class TestWhatEachRuleAnswers:
     def test_both_legs_of_one_transfer_answer_the_same_figure(
         self, app, db, seed_user, seed_periods,
     ):
-        """Invariant 3 for the PAIR: both legs answer their parent, not themselves.
+        """Both legs of one transfer answer their parent, not themselves.
 
         The two legs used to be stored at DIFFERENT figures so a resolver reading
         each shadow's own column would answer two numbers where one is right.
@@ -1924,10 +1924,10 @@ class TestTheBasisIsOneDerivationPerReadPass:
             "the second leg must answer from the loan already resolved; got "
             f"{[text for text, _params in second_statements]}"
         )
-        # The FIGURE, and on this shape it is Transfer Invariant 3: both legs
-        # of one payment must be worth the same, so a memo that answered
-        # ``None`` the second time would show two figures for one transfer
-        # while passing every query-count assertion.
+        # The FIGURE: both legs of one payment are priced off its one
+        # transfer, so a memo that answered ``None`` the second time would
+        # show two figures for one transfer while passing every query-count
+        # assertion.
         assert _first == _second == Decimal("1499.10")
 
     def test_the_settle_freeze_and_the_display_ask_ONE_rule(

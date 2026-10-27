@@ -38,7 +38,7 @@ from app.services.projection_inputs import (
     load_payroll_feeds,
 )
 from app.services.recorded_contributions import (
-    load_shadow_income_contributions_for_account,
+    load_transfer_contributions_for_account,
 )
 
 @dataclass(frozen=True)
@@ -103,7 +103,7 @@ class _ProjectionContext:  # pylint: disable=too-many-instance-attributes
         inputs: The :class:`InvestmentInputs` the growth engine needs
             (periodic contribution, employer params, annual contribution
             limit, YTD contributions).
-        shadow_contributions: The account's priced, dated shadow-income
+        transfer_contributions: The account's priced, dated transfer
             contributions -- the RECORDED half of the feed.  **It was the
             assembled per-period timeline until plan step salary:R14-b**, and
             it could not stay one: a timeline's domain is the axis it will be
@@ -157,7 +157,7 @@ class _ProjectionContext:  # pylint: disable=too-many-instance-attributes
     projection_ytd: Decimal
     projection_seed: Decimal
     inputs: InvestmentInputs
-    shadow_contributions: list[PricedContribution]
+    transfer_contributions: list[PricedContribution]
     feed: AccountPayrollFeed
     deductions: list[PaycheckLine]
     salary_profiles: list[SalaryProfile]
@@ -482,7 +482,7 @@ def _load_projection_context(
 
     Centralises the projection feed both surfaces need: the canonical
     current balance, the salary-profile-derived projection inputs, the
-    deductions targeting this account, the shadow-income contribution
+    deductions targeting this account, the transfer contribution
     stream, and the per-period contribution timeline.  Both the
     entries-aware balance resolution and the timeline build previously
     sat near-verbatim in ``compute_dashboard_data`` and
@@ -538,7 +538,7 @@ def _load_projection_context(
         balance_ctx.paychecks(), [account.id],
         {account.id: params} if params is not None else {},
     ).get(account.id, AccountPayrollFeed.absent())
-    acct_contributions = load_shadow_income_contributions_for_account(
+    acct_contributions = load_transfer_contributions_for_account(
         balance_ctx.amounts(),
         account.id, [period.period_id for period in periods],
     ).records
@@ -567,7 +567,7 @@ def _load_projection_context(
         projection_ytd=_projection_ytd(inputs),
         projection_seed=projection_seed,
         inputs=inputs,
-        shadow_contributions=acct_contributions,
+        transfer_contributions=acct_contributions,
         feed=feed,
         deductions=deductions,
         salary_profiles=salary_profiles,

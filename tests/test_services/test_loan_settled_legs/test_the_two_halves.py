@@ -15,7 +15,7 @@ from app.services import loan_loaders, transfer_service
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.loan_posting_service._linked_ledger import _movement_nets_by_date
 from app.services.posting_service import _ledger_account_for
-from app.services.recorded_contributions import load_shadow_income_contributions_for_account
+from app.services.recorded_contributions import load_transfer_contributions_for_account
 from tests._test_helpers import (
     basis_for,
     create_savings_account,
@@ -422,7 +422,7 @@ class TestTheContributionFeedCountsADriftOnce:
             )
             db.session.commit()
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis_for(savings, seed_user["scenario"]), savings.id,
                 [period.id for period in seed_periods],
             )

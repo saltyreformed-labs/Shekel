@@ -79,7 +79,7 @@ class TestTheRowsRefusalsApplyToItsPayment:
     def test_a_settled_shadow_legs_payment_refuses_a_correction(
         self, app, seed_user,
     ):
-        """Transfer invariant 3: the correction is to the TRANSFER, not this door.
+        """A transfer's figure is one: the correction is to the TRANSFER, not here.
 
         The Checking side's payment is ticked as the transfer's side RECORD
         (``a_submission``'s ``transfers``), which hangs off the transfer since

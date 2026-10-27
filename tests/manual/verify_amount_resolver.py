@@ -193,8 +193,9 @@ together.  Traced, the four misclassifications split three to one:
 * the LOAN_PAYMENT rule prices **0 rows** here, so it is graded by
   ``test_amount_source`` and by nothing in this file;
 * ``budget.transfers.amount`` -- the second column ruling R-FI's CHECK covers --
-  is reached only THROUGH a shadow.  A transfer carrying no shadows (Transfer
-  Invariant 2 broken) is never priced or graded here at all.
+  is never priced or graded here at all: this harness walks transaction rows,
+  and it reached a transfer only THROUGH its shadows, which plan step
+  balance:X-bi-6-4d-2 deleted.
 
 **Measured 2026-09-09** on a clone of production at ``a1c7e5d20f43``: 1,028
 rows and 0 refusals.  The rule census was 525

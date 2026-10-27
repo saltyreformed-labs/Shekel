@@ -923,12 +923,12 @@ class TestPulseStillDue:
     def test_transfer_out_shadow_included(
         self, app, seed_user, seed_periods, db,
     ):
-        """A projected transfer-out shadow IS counted in still-due (B4b).
+        """A projected transfer out of checking IS counted in still-due (B4b).
 
-        Build a REAL projected transfer (so the expense/income shadow pair
-        is genuine) from checking to savings for $400.00 in the current
-        period.  The expense shadow lands on checking as a projected
-        expense and contributes its $400.00 to still-due.
+        Build a REAL projected transfer (through the transfer service) from
+        checking to savings for $400.00 in the current period.  Its from-side
+        leg lands on checking as a projected outflow and contributes its
+        $400.00 to still-due.
         """
         with app.app_context():
             savings_type = (

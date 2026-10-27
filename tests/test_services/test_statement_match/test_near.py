@@ -387,7 +387,7 @@ class TestItOffersNothingTheDoorWouldREFUSE:
         assert set(undecided) == set()
 
     def test_a_TRANSFER_SHADOW_is_not_offered(self):
-        """``CLAUDE.md`` transfer invariant 3 holds the two halves equal.
+        """A transfer's two halves move its ONE figure, so neither is corrected alone.
 
         Correcting one means correcting the TRANSFER, which is not this door,
         so the pairing is never put in front of the owner as an accept.
@@ -453,7 +453,7 @@ class TestTheCorrectableAccessorItself:
         ).figure_is_correctable is False
 
     def test_a_TRANSFER_SHADOW_is_not(self):
-        """Transfer invariant 3 holds the two halves equal."""
+        """A transfer's two halves move its ONE figure, so neither is correctable."""
         assert _row(
             1, "-25.00", transfer_id=77, kind=RowKind.LEG,
         ).figure_is_correctable is False

@@ -76,7 +76,7 @@ class TestTheFigureCorrectionDoorOnAPair:
     def test_a_correction_records_once_on_a_paid_transfer_keeping_it_paid_and_both_sides_days(
         self, app, db, transfer_data,
     ):
-        """Transfer Invariant 3 for the settlement record.
+        """The settlement record is ONE figure, on the transfer.
 
         A transfer's money moves on its two sides, and the figure it moved is
         ONE: the TRANSFER stores it and who wrote it, its one home since plan

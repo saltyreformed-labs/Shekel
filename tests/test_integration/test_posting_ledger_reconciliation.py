@@ -59,7 +59,7 @@ independent ways that must all agree:
     onto) must match the hand-computed literals too.
 
 Two adversarial cases prove the oracle is not vacuous: tampering a settled
-shadow makes the per-account reconciliation FAIL -- driven through the real
+transfer's figure makes the per-account reconciliation FAIL -- driven through the real
 ``_assert_full_reconciliation`` sweep helper under ``pytest.raises``, so a
 regression in the helper itself is caught, not only in an inline re-derivation
 (so a real ledger drift would be caught) -- and injecting one extra leg makes the
@@ -68,8 +68,8 @@ per-entry trigger makes unconditionally true).
 
 All money is ``Decimal`` from strings, with the arithmetic shown per the
 testing standard.  Transfers are built through ``transfer_service`` (the sole
-writer), so every shadow obeys the transfer invariants exactly as production
-produces them; Commit 5 wiring auto-posts each settle.
+writer), so every transfer is written exactly as production writes one; Commit
+5 wiring auto-posts each settle.
 """
 from __future__ import annotations
 
@@ -459,7 +459,7 @@ class TestPerAccountReconciliation:
 
         Arithmetic: settle +100 (Savings), then revert.  The transfer nets to
         zero (+100 settle, -100 reversal -- append-only), and the reverted
-        income shadow is no longer ``is_settled`` so it drops from the
+        transfer's side records are un-dated, so it drops from the
         settled-shadow effect too.  Each ledger lands back on its opening
         (Checking 1000.00, Savings 100.00) with a zero effect, and two
         transfer entries survive (the original is never edited).  This is

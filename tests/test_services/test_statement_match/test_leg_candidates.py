@@ -200,7 +200,7 @@ class TestAStillPlannedTransferIsOfferedAsItsLeg:
             assert leg.settled_on is None and not leg.is_settled
             assert leg.version_id == transfer.version_id
             assert leg.period.period_id == transfer.pay_period_id
-            # One side of a transfer is never corrected alone (invariant 3).
+            # A side's figure is its transfer's, so it is never corrected alone.
             assert leg.figure_is_correctable is False
         # Moved here at plan step balance:X-bi-6-4d-2 from the deleted
         # test_a_broken_shadow_pair_is_offered_at_its_price_and_counted_nowhere

@@ -68,7 +68,9 @@ class TestTransferServiceLogging:
         # alone (read above): each side's payment records name it through
         # their side link.  The two reads below pin only that the shadow-id
         # fields the event carried until then are not put back; no shadow can
-        # be stored to name (``ck_transactions_names_no_transfer``).
+        # be stored to name (no transaction has a transfer column since plan
+        # step balance:X-bi-6-5; ``ck_transactions_names_no_transfer`` refused
+        # one until then).
         assert not hasattr(record, "expense_shadow_id")
         assert not hasattr(record, "income_shadow_id")
 

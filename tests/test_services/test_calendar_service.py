@@ -1805,7 +1805,8 @@ class TestATransferIsALegOfItsParent:
         checking; savings' answers no row and one INCOME leg on savings.
         Until plan step ``balance:X-bi-6-4d-2`` the case also read that no row
         checking's load answered named a transfer (a shadow); no row can since
-        (``ck_transactions_names_no_transfer``).  Renamed from
+        (``ck_transactions_names_no_transfer`` refused one until plan step
+        balance:X-bi-6-5 dropped the column).  Renamed from
         ``test_the_loader_answers_own_rows_and_both_sides_legs_and_no_shadow``.
         """
         with app.app_context():

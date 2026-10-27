@@ -486,8 +486,9 @@ class TestATransferAnswersForItsOwnCategoryAndAccounts:
     through its shadow rows in ``budget.transactions`` -- the category a shadow
     carries, the account a shadow sits on -- and a recurring transfer
     DEFINITION not at all.  ``X-bi-6-4d`` deleted every shadow (ruling
-    **R-BAL166**) and the database refuses a new one
-    (``ck_transactions_names_no_transfer``), so each predicate asks
+    **R-BAL166**) and no row can name a transfer since
+    (``ck_transactions_names_no_transfer`` refused one until plan step
+    balance:X-bi-6-5 dropped the column), so each predicate asks
     ``budget.transfers`` (and ``budget.transfer_templates``) itself.  The
     shadows-away cases below were written to PLANT the state 6-4d produces --
     a live transfer no shadow row speaks for -- by moving or hiding the

@@ -146,8 +146,9 @@ class TestTheFigureCorrectionDoorOnAPair:
 
         It also asked each of the transfer's shadow rows for a recorded
         settlement until that checkpoint.  From that step's create door on no
-        row can name a transfer (``ck_transactions_names_no_transfer``), so
-        the loop ran over none (a vacuous read: such rows counted 0 before
+        row can name a transfer (``ck_transactions_names_no_transfer``, until
+        plan step balance:X-bi-6-5 dropped the column), so the loop ran over
+        none (a vacuous read: such rows counted 0 before
         the update and after it, measured at that checkpoint), and it is
         dropped, not moved onto each side's record: with this gate deleted,
         the status seam refuses the figure itself, in other words, before

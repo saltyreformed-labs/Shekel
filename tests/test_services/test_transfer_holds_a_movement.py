@@ -219,8 +219,9 @@ class TestThePeriodLock:
         a drift to tell them apart; from that step a settle left the twins
         Projected under the Paid transfer, until the next deleted them.  The
         plant's count also left the shadows out
-        (``transfer_id IS NULL``), a term no row can fail since
-        (``ck_transactions_names_no_transfer``), dropped at that step's
+        (``transfer_id IS NULL``), a term no row could fail since
+        (``ck_transactions_names_no_transfer``, until plan step
+        balance:X-bi-6-5 dropped the column), dropped at that step's
         vacuous-residue checkpoint: the count was 0 with it and without it
         (measured).
         """

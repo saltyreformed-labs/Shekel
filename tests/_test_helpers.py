@@ -6692,9 +6692,10 @@ def assert_pay_period_invariants(db_session, user_id):
     # 2. Every transfer is in one of the user's own (surviving) periods.  It
     #    also counted two shadows per transfer, each in the transfer's period,
     #    until plan step balance:X-bi-6-4d-2 (ruling R-BAL167 class 4): a
-    #    transfer is one row there and ck_transactions_names_no_transfer
-    #    refuses a row naming one, so its legs are drawn off the transfer
-    #    itself and have no period of their own to disagree with.
+    #    transfer is one row there (ck_transactions_names_no_transfer refused
+    #    a row naming one until plan step balance:X-bi-6-5 dropped the
+    #    column), so its legs are drawn off the transfer itself and have no
+    #    period of their own to disagree with.
     for transfer in db_session.query(Transfer).filter_by(user_id=user_id):
         assert transfer.pay_period_id in period_ids, (
             f"user {user_id}: transfer {transfer.id} is in period "

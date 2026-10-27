@@ -18,7 +18,7 @@ from tools.ci.gitcmd import run as _git_run
 from tools.ci.scratch import run as _run
 from tools.quill import _git, commit_hook
 from tools.quill._command import Refused
-from tools.quill._fake import FakeTracker, run
+from tools.quill._fake import run, two_tasks
 from tools.quill.commit_hook import judge
 
 #: Card 1's branch, as ``quill claim plan#1`` checks it out.
@@ -36,10 +36,7 @@ VERBOSE = ("\n# Please enter the commit message for your changes. Lines starting
 def _claimed_with_tasks(code):
     """A tracker holding step 1 and its tasks 2 then 3, step 1 claimed in ``code`` (its
     branch checked out); the tracker."""
-    tracker = FakeTracker()
-    tracker.add(1)
-    tracker.add_task(2, 1, title="piece a")
-    tracker.add_task(3, 1, title="piece b")
+    tracker = two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
     return tracker
 

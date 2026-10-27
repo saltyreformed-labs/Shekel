@@ -6,7 +6,8 @@ inside its card's one pull request, done when its file ``plan/tasks/N`` is in gi
 (:func:`_command.on_board`, the one rule), and ``quill claim`` files a card's two finishing
 tasks (:data:`FINISHING`, ruling plan#1875).  Here are ``quill start``, which begins a piece
 with a commit naming it (:func:`cmd_start`, ruling plan#1872), and which tasks are in
-progress (:func:`in_progress`); ``quill task-file``, which writes a
+progress (:func:`in_progress`); ``quill drop``'s record in git of a task begun
+(:func:`record_drop`, ruling plan#1900); ``quill task-file``, which writes a
 task's file into the working tree for the session to commit with the piece it finishes
 (:func:`cmd_task_file`), the read a card's drop makes of the tasks under it
 (:func:`taken_by_drop`), and ``quill sync``'s put-on of each task that rule says belongs on
@@ -159,7 +160,8 @@ def cmd_start(args, tracker: Tracker, root: Path) -> int:
     if others := sorted(begun - {task.number}):
         raise Refused(f"plan#{others[0]} is in progress on {branch}: finish it first, its file "
                       f"(`quill task-file plan#{others[0]}`) in the commit that ends it, then "
-                      f"start plan#{task.number}")
+                      f"start plan#{task.number}; or drop it (`quill drop plan#{others[0]} --why "
+                      f"REASON`), which records its drop on {branch}")
     if task.parent not in _git.on_origin(root):
         raise Refused(f"origin holds no {branch}, so plan#{task.parent} is claimed by no one: "
                       f"`quill claim plan#{task.parent}` claims it")
@@ -171,6 +173,35 @@ def cmd_start(args, tracker: Tracker, root: Path) -> int:
     print(f"started {_label(task)}: {sha[:12]} on {branch}, pushed; each commit until the one "
           f"writing its file (`quill task-file plan#{task.number}`) is a commit of this piece")
     return 0
+
+
+def record_drop(tracker: Tracker, task: Card, root: Path, why: str, reads: _git.Reads) -> None:
+    """Record in git the drop of ``task`` while its card's claim has begun it and not finished
+    it (ruling plan#1900): ``quill drop``'s first write, before the tracker's, so the piece is
+    in progress no longer for ``quill start``, ``show`` and the commit hook, which read git
+    alone (:func:`_git.in_progress`).  Begun is read where the drop is recorded: on
+    ``origin``'s claim (``reads``) and, with its card's branch checked out, at ``HEAD``, which
+    may hold a start not yet pushed.  Recorded on that branch checked out, and refused, with
+    nothing written, anywhere else (:func:`_on_its_branch`): an empty commit naming the task
+    dropped, saying ``why``, pushed (:func:`_git.drop`); or, its drop recorded at ``HEAD`` and
+    not yet on ``origin`` (a push a failure cut short), the branch pushed.  A task never begun,
+    or done, or under no card, writes nothing to git."""
+    if task.parent is None:
+        return
+    claim = reads.claims.get(task.parent)
+    branch = _git.card_branch(task.parent)
+    at_head = (_git.checked_out(root) == branch
+               and task.number in _git.in_progress(root, "HEAD"))
+    if not at_head and (claim is None or task.number not in claim.in_progress):
+        return
+    _on_its_branch(tracker, task.number, root, "its drop", "drop a dropped piece")
+    if at_head:
+        sha = _git.drop(root, task.parent, task.number, task.title, why)
+        print(f"  recorded its drop on {branch}: {sha[:12]}, pushed; it is in progress no "
+              "longer (ruling plan#1900)")
+    else:
+        _git.push(root, task.parent)
+        print(f"  its drop is recorded on {branch} already: pushed {branch}")
 
 
 def cmd_task_file(args, tracker: Tracker, root: Path,

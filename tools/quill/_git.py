@@ -26,11 +26,14 @@ task file only for a task under that claim's card.  A task file is read as a mar
 longer done.  Which change may write one is the markers' write rule, judged in the same walk
 (``tools/quill/landing.py``).
 
-**A task is IN PROGRESS while a commit of its card's claim names it and the claim's tip holds
-no file for it** (ruling plan#1872; :func:`in_progress`).  A commit names the task it builds
-by the trailer ``Task: plan#T`` (:func:`task_trailer`); ``quill start`` begins a piece with an
-empty commit carrying it (:func:`start`), the commit hook stamps it on each commit of the piece
-(``tools/quill/commit_hook.py``), and the commit that writes the task's file ends it.
+**A task is IN PROGRESS while a commit of its card's claim names it, no commit since records
+its drop, and the claim's tip holds no file for it** (rulings plan#1872, plan#1900;
+:func:`in_progress`).  A commit names the task it builds by the trailer ``Task: plan#T``
+(:func:`task_trailer`); ``quill start`` begins a piece with an empty commit carrying it
+(:func:`start`), the commit hook stamps it on each commit of the piece
+(``tools/quill/commit_hook.py``), and the commit that writes the task's file ends it, done.
+``quill drop`` of a task begun ends it dropped instead, with an empty commit carrying
+``Dropped: plan#T`` too (:func:`dropped_trailer`, :func:`drop`).
 
 **A claim is the branch ``card/N`` on ``origin``** (:func:`card_branch`) whose tip neither
 ``dev`` nor ``main`` holds (:func:`claims`).  ``quill claim`` makes it (:func:`claim`): a
@@ -48,8 +51,8 @@ of ``dev``, ``main`` and each of them, each by its name into its tracking ref
 
 Every call starts git through :mod:`tools.ci.gitcmd`, so ``root`` alone decides which
 repository is read or written.  Nothing here writes the repository but :func:`fetch`'s
-tracking refs, :func:`claim`'s objects, push and local branch, :func:`start`'s commit, the
-branch it moves and its push, and :func:`release`'s two pushes.
+tracking refs, :func:`claim`'s objects, push and local branch, :func:`start`'s and
+:func:`drop`'s commit, the branch each moves and its push, and :func:`release`'s two pushes.
 """
 from __future__ import annotations
 
@@ -75,6 +78,9 @@ _NUMBER = re.compile(r"[1-9][0-9]*")
 _CLAIMED = "claimed "
 #: The trailer by which a commit names the task it builds, ``Task: plan#T`` (ruling plan#1872).
 TASK_TRAILER = "Task"
+#: The trailer by which a commit records the drop of a task begun, ``Dropped: plan#T`` (ruling
+#: plan#1900).
+DROPPED_TRAILER = "Dropped"
 #: A task as :data:`TASK_TRAILER`'s value names it.
 _TASK_NAMED = re.compile(r"plan#([1-9][0-9]*)")
 
@@ -225,6 +231,12 @@ def task_trailer(task: int) -> str:
     plan#1872): :func:`start`'s commit carries it, and the commit hook stamps it on each
     commit of the piece (``tools/quill/commit_hook.py``)."""
     return f"{TASK_TRAILER}: plan#{task}"
+
+
+def dropped_trailer(task: int) -> str:
+    """The trailer by which a commit records the drop of task ``task``, begun on its branch,
+    ``Dropped: plan#<task>`` (ruling plan#1900): :func:`drop`'s commit carries it."""
+    return f"{DROPPED_TRAILER}: plan#{task}"
 
 
 def claimed_card(branch: str) -> int | None:
@@ -500,33 +512,45 @@ def own_tasks(root: Path, tip: str) -> frozenset[int]:
                      if all(held.get(number) != blob for held in grew_from))
 
 
-def named_tasks(root: Path, tip: str) -> frozenset[int]:
-    """Each task a commit of the claim at ``tip`` names by its trailer ``Task: plan#T``
-    (:data:`TASK_TRAILER`, git matching the key in any case): its own commits, those neither
-    ``dev`` nor ``main`` holds, as :func:`own_tasks` reads them.  A value naming no card
-    (``plan#<number>``) names nothing.
+def begun_tasks(root: Path, tip: str) -> frozenset[int]:
+    """Each task the claim at ``tip`` has begun and not dropped since (rulings plan#1872,
+    plan#1900): one a commit of its own names by its trailer ``Task: plan#T``
+    (:func:`task_trailer`), unless the newest of those commits, or one after it, records its
+    drop (``Dropped: plan#T``, :func:`dropped_trailer`).  Its own commits are those neither
+    ``dev`` nor ``main`` holds, as :func:`own_tasks` reads them, walked newest first (git's
+    ``--topo-order``: a commit before each it grew from), so each task's newest record
+    decides, a drop beside the name in one commit winning.  Git matches each key in any case,
+    and a value naming no card (``plan#<number>``) names nothing (:func:`task_named`).
 
     Raises:
         GitError: When git cannot read ``tip``.
     """
-    out = git(root, "log", f"--format=%(trailers:key={TASK_TRAILER},valueonly)", tip, "--not",
-              *TIPS)
-    return frozenset(number for line in out.splitlines()
-                     if (number := task_named(line)) is not None)
+    out = git(root, "log", "--topo-order",
+              f"--format=%x01%(trailers:key={TASK_TRAILER},valueonly)%x02"
+              f"%(trailers:key={DROPPED_TRAILER},valueonly)", tip, "--not", *TIPS)
+    newest: dict[int, bool] = {}
+    for record in out.split("\x01")[1:]:
+        named, _, dropped = record.partition("\x02")
+        for values, begun in ((dropped, False), (named, True)):
+            for line in values.splitlines():
+                if (number := task_named(line)) is not None:
+                    newest.setdefault(number, begun)
+    return frozenset(number for number, begun in newest.items() if begun)
 
 
 def in_progress(root: Path, tip: str) -> frozenset[int]:
-    """Each task the claim at ``tip`` has begun and not finished (ruling plan#1872): one a
-    commit of its own names (:func:`named_tasks`) whose done file ``tip`` does not hold
+    """Each task the claim at ``tip`` has begun and neither dropped nor finished (rulings
+    plan#1872, plan#1900): one :func:`begun_tasks` names whose done file ``tip`` does not hold
     (:func:`lines_in`).  The ONE reading of which piece is in progress, from git alone, local
     refs and no network: ``quill start`` asks it of the branch checked out before it begins a
-    piece, and :func:`claims` of every claim, which ``show`` reads.
+    piece, ``quill drop`` before it drops a task, the commit hook of every commit on a card's
+    branch, and :func:`claims` of every claim, which ``show`` reads.
 
     Raises:
         GitError: When git cannot read ``tip``.
     """
     held = lines_in(root, tip, TASKS)[0]
-    return frozenset(number for number in named_tasks(root, tip) if number not in held)
+    return frozenset(number for number in begun_tasks(root, tip) if number not in held)
 
 
 def claims(root: Path, cards: Iterable[int]) -> dict[int, Claim]:
@@ -798,13 +822,12 @@ def push(root: Path, number: int) -> None:
                        f"push it")
 
 
-def start(root: Path, number: int, task: int, title: str) -> str:
-    """Begin task ``task`` on card ``number``'s local branch ``card/<number>``: an empty commit
-    on its tip, ``start plan#<task>: <title>`` carrying the trailer ``Task: plan#<task>``
-    (:func:`task_trailer`), made from objects alone -- no index, no working tree, no hook (the
-    commit hook refuses a commit while no piece is begun, which this one begins) -- the branch
-    moved to it only from the tip it was made on, then pushed (:func:`push`); its sha.  The
-    working tree and the index are left as they were, the commit's tree being the tip's.
+def _mark(root: Path, number: int, paragraphs: list[str], what: str) -> str:
+    """An empty commit on card ``number``'s local branch ``card/<number>``, its message
+    ``paragraphs``, made from objects alone -- no index, no working tree, no hook -- the branch
+    moved to it only from the tip it was made on (its reflog saying ``what``), then pushed
+    (:func:`push`); its sha.  The working tree and the index are left as they were, the
+    commit's tree being the tip's.  The one way :func:`start` and :func:`drop` write.
 
     Raises:
         GitError: When the branch moved while the commit was made, or the push is refused or
@@ -812,11 +835,40 @@ def start(root: Path, number: int, task: int, title: str) -> str:
     """
     ref = f"refs/heads/{card_branch(number)}"
     tip = git(root, "rev-parse", "--verify", ref).strip()
-    sha = git(root, "commit-tree", f"{tip}^{{tree}}", "-p", tip, "-m",
-              f"start plan#{task}: {title}", "-m", task_trailer(task)).strip()
-    git(root, "update-ref", "-m", f"quill start plan#{task}", ref, sha, tip)
+    sha = git(root, "commit-tree", f"{tip}^{{tree}}", "-p", tip,
+              *(arg for paragraph in paragraphs for arg in ("-m", paragraph))).strip()
+    git(root, "update-ref", "-m", what, ref, sha, tip)
     push(root, number)
     return sha
+
+
+def start(root: Path, number: int, task: int, title: str) -> str:
+    """Begin task ``task`` on card ``number``'s local branch ``card/<number>``: an empty commit
+    on its tip, ``start plan#<task>: <title>`` carrying the trailer ``Task: plan#<task>``
+    (:func:`task_trailer`), made and pushed by :func:`_mark` (no hook: the commit hook refuses
+    a commit while no piece is begun, which this one begins); its sha.
+
+    Raises:
+        GitError: As :func:`_mark` does.
+    """
+    return _mark(root, number, [f"start plan#{task}: {title}", task_trailer(task)],
+                 f"quill start plan#{task}")
+
+
+def drop(root: Path, number: int, task: int, title: str, why: str) -> str:
+    """Record the drop of task ``task``, begun on card ``number``'s local branch
+    ``card/<number>`` (ruling plan#1900): an empty commit on its tip, ``drop plan#<task>:
+    <title>``, saying ``why``, carrying the trailers ``Task: plan#<task>`` (it is the commit
+    that ends the piece) and ``Dropped: plan#<task>`` (:func:`dropped_trailer`), made and
+    pushed by :func:`_mark`; its sha.  Thereafter the task is in progress no longer
+    (:func:`in_progress`) until a commit names it again.
+
+    Raises:
+        GitError: As :func:`_mark` does.
+    """
+    return _mark(root, number, [f"drop plan#{task}: {title}", why,
+                                f"{task_trailer(task)}\n{dropped_trailer(task)}"],
+                 f"quill drop plan#{task}")
 
 
 def release(root: Path, number: int, tip: str, when: datetime) -> str:

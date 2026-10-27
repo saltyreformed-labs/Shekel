@@ -486,6 +486,17 @@ def claim(root, number, when=CLAIMED):
 
 
 
+def two_tasks():
+    """A tracker holding step 1 and its two tasks, 2 ("piece a") then 3 ("piece b"): the card
+    whose pieces the tests of ``quill start``, a drop of a task begun and the commit hook
+    begin, end and drop."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add_task(2, 1, title="piece a")
+    tracker.add_task(3, 1, title="piece b")
+    return tracker
+
+
 def leaf_filing(tmp_path, title, parent="plan#1"):
     """``quill file step`` filing a leaf named ``title`` under ``parent``, its spec written to
     a file."""

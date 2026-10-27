@@ -177,7 +177,7 @@ def test_a_claims_own_commits_name_their_tasks_by_their_trailer(code):
     one = commit_files(root, claimed, "piece one\n\nTask: plan#41", {"b.py": "b\n"})
     two = commit_files(root, one, "piece two\n\ntask: plan#42", {"c.py": "c\n"})
     tip = commit_files(root, two, "loose\n\nTask: 43\nTask: plan#044", {"d.py": "d\n"})
-    assert _git.named_tasks(root, tip) == {41, 42}
+    assert _git.begun_tasks(root, tip) == {41, 42}
 
 
 def test_a_task_is_in_progress_until_the_claims_tip_holds_its_file(code):
@@ -197,3 +197,44 @@ def test_a_task_is_in_progress_until_the_claims_tip_holds_its_file(code):
     held = _git.claims(root, [8])[8]
     assert held.in_progress == {42}
     assert held.tasks == {41, 43}
+
+
+def test_a_drop_ends_a_task_begun_until_a_commit_names_it_again(code):
+    """Ruling plan#1900: a commit recording a task's drop (``Dropped: plan#T``) ends it as its
+    file would, without marking it done: beside its name in one commit (as ``quill drop``
+    writes it) or in a commit of its own, the drop wins; a commit naming it after the drop
+    begins it again; and another task's drop leaves it as it was."""
+    root, base = code
+    claimed = commit_files(root, base, "claim plan#8",
+                           {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
+    begun = commit_files(root, claimed, "start plan#41\n\nTask: plan#41", {})
+    dropped = commit_files(root, begun,
+                           "drop plan#41: one\n\nsplit\n\nTask: plan#41\nDropped: plan#41", {})
+    assert _git.in_progress(root, begun) == {41}
+    assert _git.in_progress(root, dropped) == frozenset()
+    assert _git.tasks_in(root, dropped)[0] == frozenset()
+    again = commit_files(root, dropped, "start plan#41\n\nTask: plan#41", {})
+    assert _git.in_progress(root, again) == {41}
+    other = commit_files(root, again, "drop plan#42\n\ndropped: plan#42", {})
+    assert _git.in_progress(root, other) == {41}
+    alone = commit_files(root, other, "dropped by hand\n\nDropped: plan#41", {})
+    assert _git.begun_tasks(root, alone) == frozenset()
+
+
+def test_a_drop_is_read_before_the_start_it_ends_whatever_the_clocks_say(code, monkeypatch):
+    """Each task's newest record decides by the history, never by commit dates: a drop whose
+    clock ran behind, on one line of a merge, is read before the start it grew from, though
+    the other line, dated later, also holds that start (git's ``--topo-order``)."""
+    root, base = code
+    claimed = commit_files(root, base, "claim plan#8",
+                           {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-24T10:00:00Z")
+    begun = commit_files(root, claimed, "start plan#41\n\nTask: plan#41", {})
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-24T12:00:00Z")
+    other = commit_files(root, begun, "other work", {"o.py": "o\n"})
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-24T09:00:00Z")
+    dropped = commit_files(root, begun, "drop plan#41\n\nTask: plan#41\nDropped: plan#41", {})
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-24T13:00:00Z")
+    tip = run(root, "commit-tree", run(root, "merge-tree", "--write-tree", other, dropped),
+              "-p", other, "-p", dropped, "-m", "merge")
+    assert _git.in_progress(root, tip) == frozenset()

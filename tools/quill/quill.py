@@ -589,8 +589,15 @@ def _leave_split(tracker: Tracker, leaf: Card, cards: dict[int, Card],
 def _refuse_drop(card: Card, cards: dict[int, Card], reads: _git.Reads) -> None:
     """Refuse to drop ``card``, no step split into smaller steps, when it is closed already, or
     is work git says shipped, or a task whose file is on ``dev`` or ``main``: each is undone
-    by a revert."""
+    by a revert.  A task closed on the web while its claim has begun it is still in progress
+    in git, so the refusal says how its drop is recorded there (ruling plan#1900)."""
     if not card.is_open:
+        claim = reads.claims.get(card.parent) if card.kind == TASK else None
+        if claim is not None and card.number in claim.in_progress:
+            raise Refused(f"{_label(card)} is already closed, and git still says it is in "
+                          f"progress on {claim.branch}: reopen it on the web, then drop it "
+                          f"here with {claim.branch} checked out, which records its drop in git "
+                          "(ruling plan#1900)")
         raise Refused(f"{_label(card)} is already closed")
     if is_work(card, cards, reads.shipped.cards) and card.number in reads.shipped.cards:
         raise Refused(f"{_label(card)} shipped in git: undo it by reverting the change that "
@@ -612,6 +619,8 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
     :func:`_findings.refuse_orphaning`): a task's drop, or a leaf's still being filed, leaves
     the steps above as they were.  A card's drop drops each task under it still to do first
     (:func:`_drop`, R-BAL190's shape: the tool records the decision where the work is).
+    A task its card's claim has begun is dropped in git first, on its card's branch checked
+    out, so it is in progress no longer (:func:`_tasks.record_drop`, ruling plan#1900).
     A leaf dropped while its filing has not finished is first taken out of the
     split it began, which it was never part of (R-BAL205, :func:`_leave_split`):
     unlinked, and its split step, if it was the only leaf and will be open, a
@@ -653,6 +662,8 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
             _leave_split(tracker, card, cards, shipped)
         for undo in drop_unlinks(card, cards, shipped, set()):
             _unsplit(tracker, undo, cards)
+        if card.kind == TASK:
+            _tasks.record_drop(tracker, card, root, args.why, reads)
         _drop(tracker, card, args.why, reads)
         return 0
     below = leaves_below(card, cards, shipped)

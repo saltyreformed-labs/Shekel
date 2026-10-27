@@ -7,19 +7,10 @@ from __future__ import annotations
 
 from tools.ci.scratch import run as _run
 from tools.quill import _git
-from tools.quill._fake import FakeTracker, claim, named, piece, run
+from tools.quill._fake import claim, named, piece, run, two_tasks
 
 #: Card 1's branch, as ``quill claim plan#1`` checks it out.
 BRANCH = "card/1"
-
-
-def _card_with_two_tasks():
-    """A tracker holding step 1 and its two tasks, 2 ("piece a") then 3 ("piece b")."""
-    tracker = FakeTracker()
-    tracker.add(1)
-    tracker.add_task(2, 1, title="piece a")
-    tracker.add_task(3, 1, title="piece b")
-    return tracker
 
 
 def _tip(code, ref=f"refs/heads/{BRANCH}"):
@@ -45,7 +36,7 @@ def test_start_begins_a_piece_with_one_empty_commit_naming_it_and_pushes_it(code
     holding the tip's own tree; the branch pushed; the index and working tree left as they
     were; nothing written to the tracker (the claim filed plan#1's finishing tasks, ruling
     plan#1875); and the task in progress."""
-    tracker = _card_with_two_tasks()
+    tracker = two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
     writes = list(tracker.writes)
     claimed = _tip(code)
@@ -70,7 +61,7 @@ def test_start_begins_a_piece_with_one_empty_commit_naming_it_and_pushes_it(code
 def test_start_run_again_for_a_task_begun_pushes_and_commits_nothing(code, capsys):
     """A start whose push failed is finished by the same command: the branch, a work commit on
     it unpushed, is pushed, and no second start is made."""
-    tracker = _card_with_two_tasks()
+    tracker = two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
     assert run(tracker, code, "start", "plan#2") == 0
     _run(code, "commit", "--quiet", "--allow-empty", "-m", "work\n\nTask: plan#2")
@@ -87,7 +78,7 @@ def test_start_refuses_a_second_task_until_the_first_ends_and_a_task_done(code, 
     commit writing the first's file ends it, the second begins, and the first, done, is
     refused.  A refusal writes nothing (the claim filed plan#1's finishing tasks, ruling
     plan#1875)."""
-    tracker = _card_with_two_tasks()
+    tracker = two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
     writes = list(tracker.writes)
     assert run(tracker, code, "start", "plan#2") == 0
@@ -113,7 +104,7 @@ def test_start_refuses_a_second_task_until_the_first_ends_and_a_task_done(code, 
 def test_start_refuses_what_task_file_refuses(code, capsys):
     """A card that is no task, a task dropped, and any branch but its card's checked out: the
     refusals ``task-file`` makes, each in start's words."""
-    tracker = _card_with_two_tasks()
+    tracker = two_tasks()
     tracker.add_task(4, 1, is_open=False, state_reason="NOT_PLANNED", closed_by_tool=True)
     assert run(tracker, code, "start", "plan#2") == 1
     assert ("plan#2 [task, no arc] piece a is a piece of plan#1, so its start is written on "
@@ -130,7 +121,7 @@ def test_start_refuses_what_task_file_refuses(code, capsys):
 def test_start_refuses_a_claim_origin_no_longer_holds(code, capsys):
     """A start moves the claim forward and never makes it: with ``origin``'s ``card/1`` gone
     (released elsewhere), nothing is committed or pushed."""
-    tracker = _card_with_two_tasks()
+    tracker = two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
     claimed = _tip(code)
     _run(code, "push", "--quiet", "origin", f":refs/heads/{BRANCH}")
@@ -144,7 +135,7 @@ def test_start_refuses_a_claim_origin_no_longer_holds(code, capsys):
 def test_a_start_whose_push_is_refused_stands_on_the_local_branch(code, capsys):
     """``origin``'s branch holding work this one does not, the push is refused, never forced:
     the start commit stands on the local branch, and the failure says so."""
-    tracker = _card_with_two_tasks()
+    tracker = two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
     elsewhere_tip = piece(code, 1, 9)
     assert run(tracker, code, "start", "plan#2") == 2
@@ -159,7 +150,7 @@ def test_a_start_whose_push_is_refused_stands_on_the_local_branch(code, capsys):
 def test_show_names_the_task_in_progress(code, capsys):
     """A card lists its tasks in its order and says which is in progress; the task says so of
     itself.  A task a commit on another card's branch names is in progress nowhere."""
-    tracker = _card_with_two_tasks()
+    tracker = two_tasks()
     tracker.add(5)
     claim(code, 5)
     named(code, 5, 3)

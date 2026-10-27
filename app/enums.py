@@ -519,8 +519,6 @@ class PostingKindEnum(enum.Enum):
 class PostingSourceEnum(enum.Enum):
     """Journal-entry source-event values for ``budget.journal_entries``.
 
-    ``transfer`` is a settled transfer (Build-Order Step 2); ``transaction``
-    is an ordinary settled cash transaction (Build-Order Step 3);
     ``loan_payment`` is the real-split correction appended to a confirmed
     loan-payment transfer (Build-Order Step 4).  ``loan_opening`` /
     ``loan_trueup`` are the source events the loan read switch adds
@@ -532,27 +530,28 @@ class PostingSourceEnum(enum.Enum):
     account's earliest anchor assertion, and ``account_trueup`` tags the
     balanced correction appended for each later anchor true-up -- together
     they make every non-loan linked ledger sum to an ABSOLUTE balance, closing
-    the app-wide trial balance.  None of the four links a transfer or a
-    transaction (both source FKs are nullable); the source kind is what
-    disambiguates them.  ``purchase`` is a single PURCHASE recorded against an
-    envelope whose bank posting day the owner has recorded (plan step X-f3b,
-    ruling **R-FM**): it links ``transaction_entry_id`` and carries NULL in the
-    other two source FKs, and it books its own cash leg on its own day so its
-    envelope's close books only the remainder.  ``transfer_movement`` is ONE
-    side of a settled transfer -- a side's covering movement, booked on its
-    own bank day against the owner's Transfers-in-transit clearing account
-    (plan step ``balance:X-bi-6-3``, rulings **R-BAL45** and **R-BAL101**):
-    it links ``transaction_entry_id`` exactly as ``purchase`` does and carries
-    NULL in the other two.  The ``transfer`` kind is LEGACY since that step --
-    the one-entry-per-transfer shape the deploy resync reversed once -- and
-    survives only on those reversed pairs until ``X-bi-6-5`` drops
-    ``journal_entries.transfer_id``.  Later steps add ``paycheck`` and
-    ``credit_payback`` via data migrations.  Values match
+    the app-wide trial balance.  None of the five corrections links a row (the
+    source FK is nullable); the source kind is what disambiguates them.
+    ``purchase`` is a single PURCHASE recorded against an envelope whose bank
+    posting day the owner has recorded (plan step X-f3b, ruling **R-FM**): it
+    links ``transaction_entry_id``, and it books its own cash leg on its own
+    day so its envelope's close books only the remainder.
+    ``transfer_movement`` is ONE side of a settled transfer -- a side's
+    covering movement, booked on its own bank day against the owner's
+    Transfers-in-transit clearing account (plan step ``balance:X-bi-6-3``,
+    rulings **R-BAL45** and **R-BAL101**): it links ``transaction_entry_id``
+    exactly as ``purchase`` does.  Two older values are gone: ``transfer``,
+    the one-entry-per-transfer shape (Build-Order Step 2), and
+    ``transaction``, a settled row's own cash leg (Step 3).  After plan steps
+    ``balance:X-bi-6-3`` and ``balance:X-bi-4a`` each was written only to
+    reverse what it had posted, the deploy resync bringing every entry of
+    both to zero, and plan step
+    ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted the reversed
+    pairs, both kinds and both links (ruling **plan#1867**).  Later steps add
+    ``paycheck`` and ``credit_payback`` via data migrations.  Values match
     ``ref.posting_sources.name``.
     """
 
-    TRANSFER = "transfer"
-    TRANSACTION = "transaction"
     PURCHASE = "purchase"
     TRANSFER_MOVEMENT = "transfer_movement"
     LOAN_PAYMENT = "loan_payment"

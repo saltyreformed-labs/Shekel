@@ -153,8 +153,9 @@ oracle).  An orphan still holds the immutable postings made while its
 category was live, but the transactions that produced them now read
 ``category_id IS NULL`` (``transactions.category_id`` is itself SET NULL on
 category delete).  So the counter-leg reconciliation must follow the
-postings' ``transaction_id`` linkage on the journal entries (which row
-posted to which ledger account), NOT a ``category_id`` match (the category
+postings' movement linkage on the journal entries (``transaction_entry_id``,
+whose movement names the row that posted to which ledger account), NOT a
+``category_id`` match (the category
 is gone): that formulation reconciles an orphan against exactly the
 transactions whose legs landed on it, and the fallback against the
 still-uncategorized remainder.
@@ -205,8 +206,9 @@ kinds, so it sees a counter row's postings whether or not the linked row has
 any.  The premise is corrected rather than deleted because it is what
 authorises a DESTRUCTIVE FK action.)  That guard -- not the shadow-transaction
 RESTRICT FKs -- is what makes the impossibility hold, because a settled
-transfer's postings OUTLIVE the transfer: a transfer hard-delete SET-NULLs
-``journal_entries.transfer_id`` but keeps the immutable legs, so once the
+transfer's postings OUTLIVE the transfer: a transfer delete removes its
+movements, SET-NULLing their entries' ``journal_entries.transaction_entry_id``,
+but keeps the immutable legs, so once the
 shadows are gone the RESTRICT FKs on ``transactions.account_id`` /
 ``transfers.from|to_account_id`` (``transaction.py`` / ``transfer.py``) no
 longer cover the case on their own.  With Guard 5 in front, only a

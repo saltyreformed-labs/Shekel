@@ -71,8 +71,9 @@ which closed the calendar door finding N-38 measured open (the Van Loan
 rendered at ``$531.94`` against ``$15,663.59`` owed).  So this walk stays total
 and kind-blind, the writer keeps
 the guard it needs, and no screen reaches a cash-basis loan balance through
-either.  (3) It sees no RESIDUE.  The posting walk reads a third source bucket --
-entries whose ``transaction_id`` / ``transfer_id`` were SET-NULLed by a hard
+either.  (3) It sees no RESIDUE.  The posting walk reads a second source bucket
+beside the movement-linked one -- entries whose movement link
+(``transaction_entry_id``) was SET-NULLed by a hard
 delete -- precisely so its running total "stays equal to the live linked total
 even if the reverse-before-delete discipline is ever violated".  A source-row
 walk cannot see a posting whose source row is gone, by construction, so X-d must

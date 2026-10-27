@@ -363,14 +363,14 @@ def resync_all_cash_postings_after_migration():
     itself: its re-posts commit with the migrations and the other two hooks in
     the deploy's ONE transaction (plan step balance:X-cv), where the deferred
     balanced-journal trigger validates every entry, so an unbalanced re-post
-    aborts the deploy loud.  Until plan step ``X-bi-6-5`` the resync itself
-    also refuses while any transfer still holds a nonzero legacy one-entry
-    posting -- one whose family it had to skip (ruling **R-BAL104**).  Since
-    X-cv that refusal rolls the migrations back with it, so the stamp stays
-    where the previous image can resolve it and ``deploy/shekel-deploy.sh``
-    re-pins that image on its own -- the manual dump restore ruling
-    **R-BAL105** accepted until then is gone.  The release rehearsal on a
-    same-day dump still meets it first.
+    aborts the deploy loud.  From plan step ``X-bi-6-3`` until
+    ``X-bi-6-5``'s second leaf (card plan#1845) the resync itself also
+    refused while any transfer still held a nonzero legacy one-entry posting
+    (ruling **R-BAL104**); that leaf's migration deleted every such entry, and
+    the refusal went with them (ruling plan#1867).  Any refusal here rolls the
+    migrations back with it since X-cv, so the stamp stays where the previous
+    image can resolve it and ``deploy/shekel-deploy.sh`` re-pins that image on
+    its own.
 
     Returns:
         str: The line the deploy log prints once the one commit has landed --

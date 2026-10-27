@@ -8,15 +8,14 @@ from decimal import Decimal
 
 import pytest
 
-from app.enums import PostingSourceEnum, StatusEnum
+from app.enums import StatusEnum
 from app.extensions import db as _db
 from app.models.journal_entry import JournalEntry
 from app.services import posting_service
-from app.services._posting_write import _emit_balanced_entry, _PostingLeg, emit_typed_source_deltas
+from app.services._posting_write import _emit_balanced_entry, _PostingLeg
 from app.services.posting_service import PostingError
 from tests._test_helpers import (
     add_txn,
-    create_settled_cash_transaction,
     create_settled_transfer,
     refused_by_database_rule,
 )
@@ -31,36 +30,6 @@ from ._helpers import _ledger_id, _transit_ledger_id, _legs_by_ledger, _scenario
 
 class TestFailLoud:
     """Broken invariants raise PostingError rather than posting silently."""
-
-    @pytest.mark.parametrize(
-        "linkage",
-        [
-            {},
-            {"transaction_id": 1, "transaction_entry_id": 2},
-            {"transfer_id": 1},
-        ],
-        ids=["no link", "two links", "a transfer link"],
-    )
-    def test_a_typed_source_names_exactly_one_typed_link(
-        self, app, db, seed_user, linkage,
-    ):
-        """``emit_typed_source_deltas`` refuses any link set but one typed FK.
-
-        Plan step X-bi-3b: a header carrying two links lands in NONE of the
-        ledger report's buckets, and a ``transfer_id`` header carries the
-        ``transfer`` kind and never a transaction's -- so the refusal fires
-        before a target is read, whatever *linkage* the caller spelled.
-        """
-        with app.app_context():
-            txn = create_settled_cash_transaction(
-                seed_user, _db.session, seed_user["bootstrap_period"],
-                Decimal("10.00"),
-            )
-            with pytest.raises(ValueError, match="exactly one of"):
-                emit_typed_source_deltas(
-                    txn, targets={}, source=PostingSourceEnum.TRANSACTION,
-                    description="x", log_label="x", **linkage,
-                )
 
     def test_account_posting_total_none_scenario_fails_loud(
         self, app, db, seed_user,
@@ -153,7 +122,6 @@ class TestFailLoud:
             )
             _db.session.commit()
             checking_ledger = _ledger_id(checking)
-            savings_ledger = _ledger_id(savings)
             transit_ledger = _transit_ledger_id(seed_user)
             posting_service.reverse_transfer_postings_before_delete(transfer)
             _db.session.commit()

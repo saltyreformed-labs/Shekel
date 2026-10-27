@@ -6,16 +6,10 @@ plan step salary:X-av-3a.
 """
 
 from app.extensions import db
-from app.models.mixins import (
-    OptimisticLockMixin,
-    SalaryProfileScopedMixin,
-    TimestampMixin,
-)
+from app.models.mixins import OptimisticLockMixin, TimestampMixin
 
 
-class SalaryPayEntry(
-    SalaryProfileScopedMixin, OptimisticLockMixin, TimestampMixin, db.Model,
-):
+class SalaryPayEntry(OptimisticLockMixin, TimestampMixin, db.Model):
     """One entry of a salary profile's pay list: from *payday* on, *amount* a paycheck.
 
     **The salary's one stored fact** (plan step salary:X-av-3a, rulings
@@ -72,6 +66,20 @@ class SalaryPayEntry(
     id = db.Column(db.Integer, primary_key=True)
     payday = db.Column(db.Date, nullable=False)
     amount = db.Column(db.Numeric(12, 2), nullable=False)
+    # Declared here rather than taken from SalaryProfileScopedMixin, whose
+    # key takes PostgreSQL's default name: migration 70680a4a7405 named this
+    # one, and production holds that name (plan#1858).  Last of the class's
+    # own columns, where the mixin's rendered, so the models emit the table's
+    # columns in the order they did.
+    salary_profile_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "salary.salary_profiles.id",
+            name="fk_pay_entries_salary_profile_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
 
     salary_profile = db.relationship(
         "SalaryProfile", back_populates="pay_entries",

@@ -62,7 +62,7 @@ def _insert_entry(session, seed_user, period_id):
         "s": seed_user["scenario"].id,
         "p": period_id,
         "d": date(2026, 1, 15),
-        "src": ref_cache.posting_source_id(PostingSourceEnum.TRANSFER),
+        "src": ref_cache.posting_source_id(PostingSourceEnum.TRANSFER_MOVEMENT),
     }).scalar()
 
 

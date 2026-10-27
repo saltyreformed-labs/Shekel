@@ -64,6 +64,14 @@ each installment exactly:
     txn 2162  2026-04-09 (payment_day 22) -> 2026-04-22
     txn 2164  2026-05-21 (payment_day 22) -> 2026-05-22
 
+**A missing snapshot is read as an empty one** (finding BAL-627, card
+plan#1778): the downgrade restores nothing and finishes.  A database built at
+head by ``scripts/init_database.py`` (``create_all``, then a stamp) never ran
+this upgrade and holds no snapshot table, and the downgrade died there with
+``UndefinedTable`` -- the shape ``82f7b7ed4332``'s downgrade already reads this
+way.  It cannot tell that database from one that ran the upgrade and lost the
+table since, so its line says only that no snapshot table was found.
+
 Review: developer, 2026-07-12.  Data-only (no business-table schema change); the
 prior value of every row it rewrites -- transfer and both shadows -- is
 snapshotted into ``system.loan_due_date_backfill`` so ``downgrade`` restores the
@@ -129,6 +137,12 @@ _UPDATE_TRANSFER = sa.text(
 _UPDATE_SHADOWS = sa.text(
     "UPDATE budget.transactions SET due_date = :due_date "
     "WHERE transfer_id = :transfer_id"
+)
+
+# Whether the snapshot is missing: a database built at head by
+# ``scripts/init_database.py`` never ran the upgrade that creates it.
+_SNAPSHOT_ABSENT = sa.text(
+    "SELECT to_regclass('system.loan_due_date_backfill') IS NULL"
 )
 
 
@@ -200,8 +214,16 @@ def downgrade():
     afterwards, exactly as the upgrade path does: the restored (legacy) due dates
     change the genesis walk's anchor boundary, so the posted ledger must be
     re-derived from them.
+
+    With no snapshot table there is nothing to restore and nothing to drop
+    (the module docstring).
     """
     bind = op.get_bind()
+    if bind.execute(_SNAPSHOT_ABSENT).scalar_one():
+        print(
+            "Loan payment due dates restored: 0 (no snapshot table was found)"
+        )
+        return
     snapshot = bind.execute(sa.text("""
         SELECT kind, row_id, old_due_date FROM system.loan_due_date_backfill
     """)).mappings().all()

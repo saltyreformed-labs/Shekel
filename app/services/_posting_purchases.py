@@ -58,7 +58,6 @@ from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services import ledger_account_service
 from app.services._posting_write import (
-    _MAX_DESCRIPTION_LENGTH,
     emit_typed_source_deltas,
     is_transfer_leg,
     ledger_class_of,
@@ -263,8 +262,10 @@ def emit_purchase_deltas(
 ) -> "list[JournalEntry]":
     """Emit the delta entries for ONE purchase's own cash leg -- ruling **R-FM**.
 
-    The purchase analog of :func:`_emit_transaction_deltas`, and deliberately
-    the SAME shape: reconcile-to-target over the ``(pay period, entry date)``
+    The purchase analog of the row's own-leg reconcile
+    (``posting_service._emit_transaction_deltas``, which plan#1845 deleted with
+    the source), and deliberately the SAME shape: reconcile-to-target over the
+    ``(pay period, entry date)``
     keys the purchase has already posted to, unioned with the one it should
     hold.  That is what makes every lifecycle act on a purchase one call -- a
     posting day recorded, corrected, or cleared; a parent cancelled or
@@ -309,9 +310,8 @@ def emit_purchase_deltas(
     )
     return emit_typed_source_deltas(
         parent,
+        entry,
         targets=targets,
         source=source,
-        description=entry.description[:_MAX_DESCRIPTION_LENGTH],
         log_label=f"{source.value} {entry.id} (posted={posted})",
-        transaction_entry_id=entry.id,
     )

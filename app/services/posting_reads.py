@@ -295,8 +295,10 @@ def posted_purchase_effect(account_id: int, scenario_id: int) -> Decimal:
     because a settled parent's own leg (``settled_transaction_effect``, the
     term deleted with this step) summed ``effective - credit`` over the whole
     row and already contained its posted purchases.  That leg is gone, and
-    so is the narrowing: the transaction SOURCE's posted net is expected to
-    be zero on every account, and this term is what the family holds.
+    so is the narrowing: the transaction SOURCE that booked it netted zero on
+    every account from that step until plan step ``balance:X-bi-6-5``'s
+    second leaf (card plan#1845) deleted it with its entries, and this term
+    is what the family holds.
 
     For a real account A, ``account_posting_total(A) ==
     settled_transfer_effect(A) + posted_purchase_effect(A)`` once the ledger

@@ -145,8 +145,8 @@ class TestCacheKeyCoversEveryTemplateInput:
         with pytest.raises(_MODULE.BuildError, match="does not exist"):
             _MODULE.cache_key()
 
-    def test_the_builder_s_app_imports_are_all_in_the_key(self) -> None:
-        """Every ``app`` module the builder imports contributes to the key.
+    def test_the_builder_s_repo_imports_are_all_in_the_key(self) -> None:
+        """Every ``app`` and ``scripts`` module the builder imports contributes to the key.
 
         This is the assertion whose ABSENCE let the first version of the key
         miss ``app/append_only_infrastructure.py``: the parametrize list was
@@ -159,7 +159,11 @@ class TestCacheKeyCoversEveryTemplateInput:
         ).read_text(encoding="utf-8")
         covered = _MODULE.key_inputs()
 
-        for dotted in set(_MODULE.APP_IMPORT.findall(builder)):
+        imported = set(_MODULE.REPO_IMPORT.findall(builder))
+        # The derivation must SEE the comparison module, or this loop would
+        # pass vacuously over a key that never covered it (plan#1858).
+        assert "scripts.schema_parity" in imported
+        for dotted in imported:
             relative = dotted.replace(".", "/")
             candidates = (relative, f"{relative}.py")
             assert any(

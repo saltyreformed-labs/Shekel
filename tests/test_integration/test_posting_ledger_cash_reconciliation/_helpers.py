@@ -373,11 +373,12 @@ def _assert_linked_accounts_reconcile(scenario_id: int) -> None:
 
 
 def _assert_counter_accounts_reconcile(scenario_id: int) -> None:
-    """Assert every COUNTER ledger account reconciles by transaction_id linkage.
+    """Assert every COUNTER ledger account reconciles by its movements' parent linkage.
 
     For each non-linked (category / fallback / orphan) ledger account CA, sum its
-    posting legs in *scenario_id* (the LHS), then -- via the
-    ``journal_entries.transaction_id`` linkage, NOT a ``category_id`` match --
+    posting legs in *scenario_id* (the LHS), then -- via each leg's movement
+    (``journal_entries.transaction_entry_id``) resolved to the movement's parent
+    row, NOT a ``category_id`` match --
     group those legs by transaction and check each transaction's net on CA equals
     the negation of its independently-computed signed cash effect.  A transaction
     whose net on CA is zero (reversed, or recategorized away) is excluded by the
@@ -395,17 +396,22 @@ def _assert_counter_accounts_reconcile(scenario_id: int) -> None:
     was deleted and the row never re-synced) -- precisely why the orphan is
     reconciled by the linkage, not by re-resolving ``category_id``.
 
-    **A MOVEMENT's leg is resolved to its PARENT before grouping** (plan step
-    X-f3b, ruling **R-FM**): it links by ``transaction_entry_id`` and carries no
-    ``transaction_id``, so grouping on that column alone would drop every one
-    into the hard-deleted bucket and fail with the wrong cause.  Resolved, the
-    per-transaction expectation stays whole -- a row's counter net is its dated
-    movements' (the covering movement's and its purchases'), whatever its
-    status, since plan step ``balance:X-bi-4a`` (ruling **R-BAL80**).
+    **Every row's leg is a MOVEMENT's, resolved to its PARENT before grouping**
+    (plan step X-f3b, ruling **R-FM**): it links by ``transaction_entry_id``,
+    and the per-transaction expectation stays whole -- a row's counter net is
+    its dated movements' (the covering movement's and its purchases'), whatever
+    its status, since plan step ``balance:X-bi-4a`` (ruling **R-BAL80**).  A
+    row's OWN leg, linked by ``journal_entries.transaction_id``, was grouped
+    beside them until plan step ``balance:X-bi-6-5``'s second leaf (card
+    plan#1845) deleted that link.
 
-    A ``transaction_id IS NULL`` group is a hard-deleted transaction's
-    SET-NULL'd legs: the reverse-before-delete pair MUST net to zero, asserted
-    here so a stranded (un-reversed) leg would be caught.
+    A group with no parent row is a deleted movement's legs, their movement
+    link SET NULL by the movement's delete.  No row delete takes a movement
+    (``fk_transaction_entries_transaction_id`` is NO ACTION): the removal act,
+    ``movement_removal.remove_movements``, reverses each movement's postings
+    and deletes it before its row goes.  The reverse-before-delete pair MUST
+    net to zero, asserted here so a stranded (un-reversed) leg would be
+    caught.
 
     **The owner's Transfers-in-transit account is a counter account too**
     (plan step ``balance:X-bi-6-3``, rulings **R-BAL45** and **R-BAL101**):
@@ -430,21 +436,18 @@ def _assert_counter_accounts_reconcile(scenario_id: int) -> None:
     )
     for counter in counters:
         lhs = _ledger_account_sum(counter.id, scenario_id)
-        # A MOVEMENT's counter leg links by ``transaction_entry_id`` and carries
-        # NO ``transaction_id`` (plan step X-f3b, ruling **R-FM**), so grouping
-        # on that column alone would drop every one of them into the
-        # hard-deleted bucket below and fail with the wrong cause.  Resolving it
-        # to the movement's PARENT is what keeps the per-transaction expectation
-        # whole: a row's counter net is its dated movements' (plan step
-        # ``balance:X-bi-4a``).
-        parent_of_purchase = (
+        # A row's counter leg links by its MOVEMENT's ``transaction_entry_id``
+        # (plan step X-f3b, ruling **R-FM**), so resolving it to the movement's
+        # PARENT is what keeps the per-transaction expectation whole: a row's
+        # counter net is its dated movements' (plan step ``balance:X-bi-4a``).
+        # The row's OWN ``journal_entries.transaction_id`` link was coalesced
+        # beside it until plan step ``balance:X-bi-6-5``'s second leaf (card
+        # plan#1845) deleted that link.
+        source_transaction_id = (
             _db.session.query(TransactionEntry.transaction_id)
             .filter(TransactionEntry.id == JournalEntry.transaction_entry_id)
             .correlate(JournalEntry)
             .scalar_subquery()
-        )
-        source_transaction_id = _db.func.coalesce(
-            JournalEntry.transaction_id, parent_of_purchase,
         )
         # A transfer side's record carries no parent row at all (it hangs off
         # the TRANSFER since plan step balance:X-bi-6-4d-2), so its legs group
@@ -482,10 +485,11 @@ def _assert_counter_accounts_reconcile(scenario_id: int) -> None:
                 rhs += _checked_side_counter_net(counter, side_record_id, net)
                 continue
             if transaction_id is None:
-                # Legs whose source transaction was hard-deleted (transaction_id
-                # SET NULL): the reverse-before-delete pair must net to zero.
+                # Legs whose movement was deleted (the removal act deletes
+                # it, never a cascade from its row; the link SET NULL): the
+                # reverse-before-delete pair must net to zero.
                 assert net == 0, (
-                    f"counter {counter.id}: orphaned (transaction_id NULL) "
+                    f"counter {counter.id}: orphaned (no parent row) "
                     f"legs net {net}, not zero -- a delete failed to reverse"
                 )
                 continue

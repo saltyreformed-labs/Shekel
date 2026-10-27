@@ -750,67 +750,37 @@ class TestPostingSourceRefCache:
     """Tests for ref_cache posting-source resolution."""
 
     def test_posting_source_ref_cache(self, app, db):
-        """ref_cache.posting_source_id() returns a positive int for TRANSFER."""
+        """ref_cache.posting_source_id() returns a positive int for TRANSFER_MOVEMENT."""
         with app.app_context():
-            transfer_id = ref_cache.posting_source_id(
-                PostingSourceEnum.TRANSFER
+            source_id = ref_cache.posting_source_id(
+                PostingSourceEnum.TRANSFER_MOVEMENT
             )
-            assert isinstance(transfer_id, int), (
-                f"posting_source_id(TRANSFER) returned {type(transfer_id)}, "
-                f"expected int"
+            assert isinstance(source_id, int), (
+                f"posting_source_id(TRANSFER_MOVEMENT) returned "
+                f"{type(source_id)}, expected int"
             )
-            assert transfer_id > 0, (
-                f"TRANSFER id should be positive, got {transfer_id}"
-            )
-
-    def test_posting_source_resolves_transaction(self, app, db):
-        """ref_cache resolves the Step-3 TRANSACTION source distinctly.
-
-        The ordinary-transaction source added in Build-Order Step 3 must
-        resolve to a positive ID distinct from Step 2's TRANSFER, guarding
-        that ``PostingSourceEnum.TRANSACTION.value`` matches its seeded
-        ``ref.posting_sources.name`` row.
-        """
-        with app.app_context():
-            transfer_id = ref_cache.posting_source_id(
-                PostingSourceEnum.TRANSFER
-            )
-            transaction_id = ref_cache.posting_source_id(
-                PostingSourceEnum.TRANSACTION
-            )
-            assert transaction_id > 0, (
-                f"transaction source id must be positive, got {transaction_id}"
-            )
-            assert transaction_id != transfer_id, (
-                f"transaction source id {transaction_id} collides with "
-                f"transfer {transfer_id}"
+            assert source_id > 0, (
+                f"TRANSFER_MOVEMENT id should be positive, got {source_id}"
             )
 
     def test_posting_source_resolves_loan_payment(self, app, db):
-        """ref_cache resolves the Step-4 LOAN_PAYMENT source distinctly.
+        """ref_cache resolves the Step-4 LOAN_PAYMENT source.
 
         The loan-payment correction source added in Build-Order Step 4 must
-        resolve to a positive ID distinct from Step 2's TRANSFER and Step 3's
-        TRANSACTION, guarding that
+        resolve to a positive ID, guarding that
         ``PostingSourceEnum.LOAN_PAYMENT.value`` matches its seeded
-        ``ref.posting_sources.name`` row.
+        ``ref.posting_sources.name`` row.  The two sources it was held
+        distinct from, Step 2's TRANSFER and Step 3's TRANSACTION, are gone
+        (plan step ``balance:X-bi-6-5``'s second leaf, card plan#1845); its
+        distinctness from the sources that remain is the read-switch case's
+        below and ``test_posting_source_enum_matches_db``'s.
         """
         with app.app_context():
-            transfer_id = ref_cache.posting_source_id(
-                PostingSourceEnum.TRANSFER
-            )
-            transaction_id = ref_cache.posting_source_id(
-                PostingSourceEnum.TRANSACTION
-            )
             loan_payment_id = ref_cache.posting_source_id(
                 PostingSourceEnum.LOAN_PAYMENT
             )
             assert loan_payment_id > 0, (
                 f"loan_payment source id must be positive, got {loan_payment_id}"
-            )
-            assert len({transfer_id, transaction_id, loan_payment_id}) == 3, (
-                f"source ids collide: transfer={transfer_id}, "
-                f"transaction={transaction_id}, loan_payment={loan_payment_id}"
             )
 
     def test_posting_source_resolves_loan_opening_and_trueup(self, app, db):
@@ -818,8 +788,10 @@ class TestPostingSourceRefCache:
 
         The two loan-genesis source events added by the loan read switch (the
         deferred second half of Build-Order Step 4) must each resolve to a
-        distinct positive ID, distinct from one another and from Step 2's
-        TRANSFER, Step 3's TRANSACTION, and Step 4's LOAN_PAYMENT.  This guards
+        distinct positive ID, distinct from one another and from Step 4's
+        LOAN_PAYMENT (Step 2's TRANSFER and Step 3's TRANSACTION, held apart
+        here too until plan step ``balance:X-bi-6-5``'s second leaf, card
+        plan#1845, are gone).  This guards
         that the enum ``.value`` strings match the seeded
         ``ref.posting_sources.name`` rows and that no two members collapse onto
         one row (a copy-paste value collision).
@@ -828,8 +800,6 @@ class TestPostingSourceRefCache:
             existing = {
                 ref_cache.posting_source_id(member)
                 for member in (
-                    PostingSourceEnum.TRANSFER,
-                    PostingSourceEnum.TRANSACTION,
                     PostingSourceEnum.LOAN_PAYMENT,
                 )
             }
@@ -844,7 +814,7 @@ class TestPostingSourceRefCache:
                 assert isinstance(source_id, int) and source_id > 0, (
                     f"{member.name} id must be a positive int, got {source_id}"
                 )
-            # Two distinct new sources, neither colliding with the earlier three.
+            # Two distinct new sources, neither colliding with the earlier one.
             assert len(set(new_sources.values())) == 2, new_sources
             assert existing.isdisjoint(set(new_sources.values())), (
                 f"read-switch sources {new_sources} collide with earlier "

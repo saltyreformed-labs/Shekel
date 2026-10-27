@@ -52,9 +52,9 @@ class UserScopedMixin:
     guarantee about the statement.
 
     Applied to the user-owned tables whose ``user_id`` is exactly this
-    shape: a NOT NULL CASCADE FK with no ``unique`` qualifier.  Four
-    ``user_id`` columns are deliberately EXCLUDED because their DDL
-    differs:
+    shape: a NOT NULL CASCADE FK with no ``unique`` qualifier and
+    PostgreSQL's default constraint name.  Five ``user_id`` columns are
+    deliberately EXCLUDED because their DDL differs:
 
       * ``ref.*`` per-user override rows (``AccountType``) -- the FK is
         ``ON DELETE RESTRICT`` and ``nullable=True`` (a NULL ``user_id``
@@ -63,6 +63,9 @@ class UserScopedMixin:
         tables whose ``user_id`` carries ``unique=True``.
       * ``budget.transactions`` -- the FK is ``ON DELETE RESTRICT``; see
         below.
+      * ``salary.state_child_deductions`` -- its migration named the FK
+        ``fk_state_child_deductions_user_id``, and production holds that
+        name, so the mixin's default-named FK would diverge (plan#1858).
 
     ``Transaction`` HAS a ``user_id`` since plan step
     ``pay_calendar:C13-a`` (ruling **R-PC32**) -- until then it had none
@@ -181,15 +184,16 @@ class SalaryProfileScopedMixin:
                                to the raise / deduction / calibration /
                                pay entry row.
 
-    Applied to ``salary_raise``, ``paycheck_line``,
-    ``calibration_override`` and (plan step salary:X-av-3a)
-    ``salary_pay_entry``, whose ``salary_profile_id`` blocks are
+    Applied to ``salary_raise``, ``paycheck_line`` and
+    ``calibration_override``, whose ``salary_profile_id`` blocks are
     byte-identical and form a duplicate-code clique.  EXCLUDES
     ``pension_profile``, whose FK is ``ON DELETE SET NULL`` and
     ``nullable=True`` (a pension can outlive the linked salary profile),
-    and ``pay_stub``, whose FK is ``ON DELETE RESTRICT`` (a transcribed stub
+    ``pay_stub``, whose FK is ``ON DELETE RESTRICT`` (a transcribed stub
     is a record, so a profile holding one cannot be deleted; plan step
-    salary:S11-a).
+    salary:S11-a), and ``salary_pay_entry``, whose migration named its FK
+    ``fk_pay_entries_salary_profile_id`` where this one takes PostgreSQL's
+    default name; production holds the migration's (plan#1858).
 
     Same mid-table reorder + order-independence argument as
     :class:`UserScopedMixin`.

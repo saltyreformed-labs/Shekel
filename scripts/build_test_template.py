@@ -27,9 +27,12 @@ Three steps, in order:
    13+ required for ``WITH (FORCE)``.
 2. **Populate** the template.  Creates the five user-facing schemas,
    runs the Alembic chain to ``head`` through the deploy's own runner,
-   :func:`app.migration_runner.upgrade_to_head` (ruling R-BAL114, so
-   any model-vs-migration drift, or a migration that cannot run inside
-   the deploy's transaction, surfaces on the next template rebuild),
+   :func:`app.migration_runner.upgrade_to_head` (ruling R-BAL114, so a
+   migration that cannot run inside the deploy's transaction fails the
+   next template rebuild), refuses any table, column, constraint or index
+   the chain builds differently from the models
+   (:func:`scripts.schema_parity.refuse_schema_drift`, finding plan#1858;
+   its module says what it does not compare),
    applies the audit infrastructure idempotently (so the LATEST
    in-code trigger definitions win over any migration-frozen state),
    and seeds reference data via :func:`app.ref_seeds.seed_reference_data`.
@@ -190,6 +193,7 @@ from app.posting_infrastructure import (
     apply_posting_infrastructure,
 )
 from app.ref_seeds import seed_reference_data
+from scripts.schema_parity import refuse_schema_drift
 
 
 def _recreate_template_database() -> None:
@@ -313,9 +317,16 @@ def _populate_template(app) -> None:
        this build hands over inside a transaction it opened -- the
        path the deploy takes, so a migration that cannot run inside the
        deploy's one transaction fails HERE, on every template rebuild,
-       instead of at a release.  Running against an empty database
-       validates the chain end-to-end the same way: any model-vs-
-       migration drift surfaces here, not at test time.  Because the
+       instead of at a release.  Then
+       :func:`scripts.schema_parity.refuse_schema_drift` builds the
+       models beside the migrated schemas and refuses the template when
+       the two disagree on any table, column, constraint or index (finding
+       plan#1858): ``scripts/init_database.py`` builds a fresh database
+       from the models, so a difference is a schema a fresh install holds
+       and production does not.  It runs BEFORE step 3 so it compares the
+       chain with the models and nothing else; the infrastructure the
+       later steps apply is triggers and functions, which it does not
+       compare.  Because the
        connection is handed over, ``migrations/env.py`` leaves this
        process's logging to the app, as the deploy's (ruling R-BAL121):
        Alembic's per-revision lines print as the app's JSON log on
@@ -402,6 +413,11 @@ def _populate_template(app) -> None:
 
         with db.engine.begin() as connection:
             upgrade_to_head(connection)
+
+        # Its own connection, whose transaction closes unwritten: the
+        # comparison builds the models inside a savepoint it rolls back.
+        with db.engine.connect() as connection:
+            refuse_schema_drift(connection, db.metadata)
 
         apply_audit_infrastructure(
             lambda statement: db.session.execute(db.text(statement))

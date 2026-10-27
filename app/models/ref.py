@@ -208,7 +208,13 @@ class AccountType(db.Model):
     # paired partial unique indexes that enforce it.
     user_id = db.Column(
         db.Integer,
-        db.ForeignKey("auth.users.id", ondelete="RESTRICT"),
+        # Named as migration d477228fee56 named it, which production holds
+        # (plan#1858).
+        db.ForeignKey(
+            "auth.users.id",
+            name="fk_account_types_user_id_users",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
     )
 

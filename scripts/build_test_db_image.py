@@ -120,9 +120,10 @@ _FIXED_KEY_INPUTS = (
 
 _TEMPLATE_BUILDER = "scripts/build_test_template.py"
 
-# Modules the builder imports from ``app``, parsed out of the builder itself.
-APP_IMPORT = re.compile(
-    r"^(?:from|import)\s+(app(?:\.[A-Za-z_][A-Za-z0-9_]*)*)", re.M
+# Modules the builder imports from this repository (``app`` and ``scripts``),
+# parsed out of the builder itself.
+REPO_IMPORT = re.compile(
+    r"^(?:from|import)\s+((?:app|scripts)(?:\.[A-Za-z_][A-Za-z0-9_]*)*)", re.M
 )
 
 
@@ -139,11 +140,15 @@ def key_inputs() -> tuple[str, ...]:
     is a set defined by recollection, and this repo has paid for that shape
     before.
 
-    So the ``app`` half is DERIVED from the builder's own import block: the
-    census comes from the file that does the work, and a future import lands
-    in the key without anyone remembering to add it.  The rest is fixed
-    because it shapes the template without appearing there -- see
-    :data:`_FIXED_KEY_INPUTS`.
+    So the repository half is DERIVED from the builder's own import block:
+    the census comes from the file that does the work, and a future import
+    lands in the key without anyone remembering to add it.  It reads
+    ``scripts`` imports as well as ``app`` ones because the build's verdict
+    is an input too: ``scripts/schema_parity.py`` (finding plan#1858)
+    decides whether a template is built at all, and a change to what it
+    compares must re-run it rather than reuse an image it never judged.
+    The rest is fixed because it shapes the template without appearing
+    there -- see :data:`_FIXED_KEY_INPUTS`.
 
     Deriving still cannot see a TRANSITIVE import, which is why
     ``app/models`` is in the fixed half and why the key is only an
@@ -168,7 +173,7 @@ def key_inputs() -> tuple[str, ...]:
     if not builder.exists():
         raise BuildError(f"{_TEMPLATE_BUILDER} is missing; cannot derive the key")
     found: set[str] = set(_FIXED_KEY_INPUTS)
-    for dotted in APP_IMPORT.findall(builder.read_text(encoding="utf-8")):
+    for dotted in REPO_IMPORT.findall(builder.read_text(encoding="utf-8")):
         relative = dotted.replace(".", "/")
         if (_REPO_ROOT / f"{relative}.py").exists():
             found.add(f"{relative}.py")

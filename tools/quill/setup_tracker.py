@@ -60,7 +60,9 @@ rulings ``balance:R-BAL348``, ``R-BAL354``, and the developer's word of 2026-10-
 single select of the arcs, which a card's arc moves into after the cutover, its matching
 label then kept as display; and GitHub's four defaults, Priority, Effort, Start date and
 Target date, which the developer keeps, empty for now.  Any other is a difference, deleted
-on the web.
+on the web.  The board lists each one it shows as a field of its own, which GitHub marks
+``isIssueField``: its value is the issue's, so the board stores nothing for it (finding
+plan#1839, measured 2026-10-27), and it is no stored field.
 
 Usage, from the repository root::
 
@@ -257,7 +259,8 @@ LINKED_REPOSITORIES = "repositories(first: 100) { totalCount nodes { nameWithOwn
 
 #: A board field of one of these types STORES a value per card; every other
 #: type (title, labels, parent issue, sub-issue progress, ...) shows a fact
-#: the card itself holds.
+#: the card itself holds, and so does an organization's issue field shown on the board
+#: (:func:`stores_values`).
 STORED_FIELD_TYPES = frozenset(
     {"TEXT", "SINGLE_SELECT", "MULTI_SELECT", "NUMBER", "DATE", "ITERATION"}
 )
@@ -281,12 +284,12 @@ GITHUB_DEFAULT_VIEW = "View 1"
 _PROJECT_FIELDS = """
   id number title public url
   """ + LINKED_REPOSITORIES + """
-  fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType } } }
+  fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType isIssueField } } }
   workflows(first: 50) { nodes { name enabled } }
   views(first: 20) { nodes {
     id number name filter layout sortByFields(first: 1) { totalCount }
     groupByFields(first: 1) { totalCount } verticalGroupByFields(first: 1) { totalCount }
-    fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType } } }
+    fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType isIssueField } } }
   } }
   items(first: 1, archivedStates: [ARCHIVED, NOT_ARCHIVED]) { totalCount }
 """
@@ -462,8 +465,12 @@ def linked(place: Place, repositories: dict) -> bool | None:
 
 
 def stores_values(board_field: dict) -> bool:
-    """Whether a board field holds a value per card."""
-    return bool(board_field) and board_field["dataType"] in STORED_FIELD_TYPES
+    """Whether a board field holds a value per card: one of :data:`STORED_FIELD_TYPES`, and not
+    one of the organization's issue fields (``isIssueField``), whose value the issue holds, as
+    a label's (finding plan#1839: Arc, Priority, Start date and Effort read as board fields, so
+    no check could pass)."""
+    return (bool(board_field) and board_field["dataType"] in STORED_FIELD_TYPES
+            and not board_field["isIssueField"])
 
 
 def is_github_status(board_field: dict) -> bool:

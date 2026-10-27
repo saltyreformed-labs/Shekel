@@ -79,8 +79,8 @@ def test_before_names_an_open_task_under_the_same_card(tmp_path, code, capsys):
 
 
 def test_a_finishing_task_and_a_task_with_none_open_stay_last(tmp_path, code, capsys):
-    """A finishing task is never moved above its sibling; and with no finishing task open, a
-    new task stays where its link put it."""
+    """The suite and pull request is never moved above the review; and with no finishing task
+    open, a new task stays where its link put it."""
     tracker = FakeTracker()
     tracker.add(1)
     tracker.add_task(2, 1, title=REVIEW)

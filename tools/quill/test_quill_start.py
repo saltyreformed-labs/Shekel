@@ -43,9 +43,11 @@ def _commit_its_file(tracker, code, task):
 def test_start_begins_a_piece_with_one_empty_commit_naming_it_and_pushes_it(code, capsys):
     """One commit on the branch's tip, ``start plan#T: <title>`` with the trailer naming T,
     holding the tip's own tree; the branch pushed; the index and working tree left as they
-    were; nothing written to the tracker; and the task in progress."""
+    were; nothing written to the tracker (the claim filed plan#1's finishing tasks, ruling
+    plan#1875); and the task in progress."""
     tracker = _card_with_two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
+    writes = list(tracker.writes)
     claimed = _tip(code)
     (code / "staged.txt").write_text("work\n")
     _run(code, "add", "staged.txt")
@@ -58,7 +60,7 @@ def test_start_begins_a_piece_with_one_empty_commit_naming_it_and_pushes_it(code
                                                                  f"{claimed}^{{tree}}")
     assert _on_origin(code) == begun
     assert _run(code, "diff", "--cached", "--name-only") == "staged.txt"
-    assert not tracker.writes
+    assert tracker.writes == writes
     assert _git.in_progress(code, "HEAD") == {2}
     assert (f"started plan#2 [task, no arc] piece a: {begun[:12]} on card/1, pushed; each commit "
             "until the one writing its file (`quill task-file plan#2`) is a commit of this piece"
@@ -83,9 +85,11 @@ def test_start_run_again_for_a_task_begun_pushes_and_commits_nothing(code, capsy
 def test_start_refuses_a_second_task_until_the_first_ends_and_a_task_done(code, capsys):
     """One piece at a time: a second task is refused while the first is in progress; once the
     commit writing the first's file ends it, the second begins, and the first, done, is
-    refused.  A refusal writes nothing."""
+    refused.  A refusal writes nothing (the claim filed plan#1's finishing tasks, ruling
+    plan#1875)."""
     tracker = _card_with_two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
+    writes = list(tracker.writes)
     assert run(tracker, code, "start", "plan#2") == 0
     begun = _tip(code)
     assert run(tracker, code, "start", "plan#3") == 1
@@ -103,7 +107,7 @@ def test_start_refuses_a_second_task_until_the_first_ends_and_a_task_done(code, 
     assert ("refused: plan#2 [task, no arc] piece a is done: card/1 holds plan/tasks/2"
             in capsys.readouterr().err)
     assert _tip(code) == ended
-    assert not tracker.writes
+    assert tracker.writes == writes
 
 
 def test_start_refuses_what_task_file_refuses(code, capsys):

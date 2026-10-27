@@ -480,7 +480,8 @@ def claim(root, number, when=CLAIMED):
     """Claim card ``number`` on ``origin`` as a session in another clone would
     (:func:`_git.claim` on the ``dev`` ``origin`` holds, from :func:`scratch.elsewhere`):
     ``root`` learns of it only through a read of its own, and its HEAD and branches are left
-    as they were; the claim's sha."""
+    as they were; the claim's sha.  Its git alone: the finishing tasks ``quill claim`` files
+    (ruling plan#1875) are the tracker's, which a test adds where it reads them."""
     return _git.claim(elsewhere(root), number, tracking(DEV), when)
 
 

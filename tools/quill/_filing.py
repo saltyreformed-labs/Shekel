@@ -185,8 +185,7 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
     if parent is not None:
         reads = _git.read(root)
         cards = with_closure(tracker, {parent.number: parent})
-        owner = Owner(parent.kind, is_live(parent.number, cards, reads.shipped.cards),
-                      is_container(parent, cards, reads.shipped.cards))
+        owner = _owner(parent, cards, reads.shipped.cards)
     if args.kind == TASK and is_container(parent, cards, reads.shipped.cards):
         raise Refused(f"{_label(parent)} is split into smaller steps (R-BAL177): a task is a "
                       "piece of one of them, so file it under that one")
@@ -210,6 +209,14 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
                    reads.shipped.cards, reads.claims, asked,
                    _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
                    if args.kind == "step" and parent is not None else _NO_MILESTONE)
+
+
+def _owner(parent: Card, cards: dict[int, Card], shipped: frozenset[int]) -> Owner:
+    """``parent`` as the check reads a card's owner (:class:`check.Owner`): its kind, whether it
+    is still work (:func:`_state.is_live`) and whether it is split into smaller steps
+    (:func:`_state.is_container`), from git (``shipped``) and the cards (``cards``)."""
+    return Owner(parent.kind, is_live(parent.number, cards, shipped),
+                 is_container(parent, cards, shipped))
 
 
 def _before(tracker: Tracker, args, parent: Card | None) -> Card | None:
@@ -480,6 +487,27 @@ def _shipped_for(filing: _Filing, card: Card, root: Path) -> frozenset[int]:
     return _git.read(root).shipped.cards
 
 
+def _standing(tracker: Tracker, filing: _Filing, root: Path) -> Card | None:
+    """The card an earlier run of ``filing`` made (:func:`_same_filing`), read again by its
+    number, for the caller to finish or find filed already; None when there is none.  Refused,
+    before anything is written, when a decision ended its filing (:func:`_ended_unfinished`),
+    it is linked otherwise than ``filing`` names (:func:`_refuse_rehoming`), or its labels are
+    not the filing's (:func:`_refuse_relabel`)."""
+    card = _same_filing(tracker, filing.draft, filing.parent)
+    if card is None:
+        return None
+    fresh = tracker.cards([card.number]).get(card.number)
+    if fresh is None:
+        raise TrackerError(f"plan#{card.number} is listed, but a read by its number does not "
+                           "hold it (that read has not caught up yet, or the card was deleted "
+                           "or moved since): run the same command again")
+    if withdrawn_filing(fresh, _shipped_for(filing, fresh, root)):
+        raise Refused(_ended_unfinished(fresh))
+    _refuse_rehoming(fresh, filing.draft.kind, filing.parent)
+    _refuse_relabel(fresh, filing.draft)
+    return fresh
+
+
 def cmd_file(args, tracker: Tracker, root: Path) -> int:
     """File a step, finding, ruling, question or task, after :func:`check.violations` passes;
     finish one a failure cut short (R-BAL186); write nothing over one the earlier run
@@ -507,32 +535,86 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
         raise Refused("not filed:\n  " + "\n  ".join(problems))
     if filing.asked is not None:
         return _convert_question(args, tracker, filing.draft, filing.parent, filing.asked)
-    card = _same_filing(tracker, filing.draft, filing.parent)
-    if card is not None:
-        fresh = tracker.cards([card.number]).get(card.number)
-        if fresh is None:
-            raise TrackerError(f"plan#{card.number} is listed, but a read by its number does not "
-                               "hold it (that read has not caught up yet, or the card was deleted "
-                               "or moved since): run the same command again")
-        card = fresh
-        if withdrawn_filing(card, _shipped_for(filing, card, root)):
-            raise Refused(_ended_unfinished(card))
-        _refuse_rehoming(card, args.kind, filing.parent)
-        _refuse_relabel(card, filing.draft)
-        if not filing_unfinished(card):
-            return _filed_already(card, args.kind, filing.parent)
+    card = _standing(tracker, filing, root)
+    if card is not None and not filing_unfinished(card):
+        return _filed_already(card, args.kind, filing.parent)
     if args.kind == "step" and filing.parent is not None:
         _refuse_under_a_claim(filing, card)
         _refuse_beside_unfinished(filing, card)
         _refuse_over_tasks(filing)
+    _write(tracker, filing, card, before)
+    return 0
+
+
+def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
+           before: Card | None) -> None:
+    """Every write of ``filing``, decided over already, each printed as it lands: ``earlier``,
+    the card an earlier run made, finished, or with none a new card created
+    (:func:`_created`), then the rest of its filing (:func:`_finish`), a task placed above
+    ``before`` when the filing names one."""
+    card = earlier
     if card is None:
-        card = _created(args.kind, tracker, filing.draft, filing.milestone)
+        card = _created(filing.draft.kind, tracker, filing.draft, filing.milestone)
     else:
         print(f"finishing {_label(card)}: its filing has not finished (it is still marked "
               f"{FILING!r}), so this command finishes it rather than filing another (R-BAL186, "
               "R-BAL202)")
     _finish(tracker, card, filing, before)
-    return 0
+
+
+@dataclass(frozen=True)
+class Finishing:
+    """One of a card's finishing tasks its claim files (:func:`finishing_filings`): its
+    ``filing``, and ``earlier``, the card an earlier run made whose filing a failure cut
+    short, which this one finishes (R-BAL186); None for a new card."""
+
+    filing: _Filing
+    earlier: Card | None
+
+
+def finishing_filings(tracker: Tracker, root: Path, card: Card, cards: dict[int, Card],
+                      reads: _git.Reads) -> list[Finishing]:
+    """What ``quill claim`` files of ``card``'s finishing tasks (:func:`_tasks.finishing`,
+    ruling plan#1875), in order, each as ``quill file task`` files a task under it: decided
+    before anything is written, so that a refusal writes nothing, over ``cards``
+    (:func:`with_closure` of ``card``) and ``reads``, the claim's read of git.  A task under
+    ``card`` with a finishing task's title whose filing finished is that task filed, whatever
+    its text and state -- filed by hand, done, or dropped -- so a re-claim files none; each
+    task under it is read by its number for its title.  One not so filed is filed, finishing
+    the card an earlier run made (:func:`_standing`), else a new one; refused, before any
+    write, for what that filing refuses."""
+    held = tracker.cards(card.task_children) if card.task_children else {}
+    filed = {task.title.strip() for task in held.values() if not filing_unfinished(task)}
+    owner = _owner(card, cards, reads.shipped.cards)
+    planned = []
+    for title, body in _tasks.finishing(card.number):
+        if title in filed:
+            continue
+        filing = _Filing(Draft(TASK, title, body, (), owner), card, cards, reads.shipped.cards,
+                         reads.claims, None, _NO_MILESTONE)
+        if problems := violations(filing.draft):
+            raise Refused(f"{title!r} not filed:\n  " + "\n  ".join(problems))
+        earlier = _standing(tracker, filing, root)
+        if earlier is not None and not filing_unfinished(earlier):
+            _filed_already(earlier, TASK, card)
+            continue
+        planned.append(Finishing(filing, earlier))
+    return planned
+
+
+def file_finishing(tracker: Tracker, card: Card, planned: list[Finishing]) -> None:
+    """File each of ``card``'s finishing tasks :func:`finishing_filings` decided on, in order,
+    each write printed as it lands (:func:`_write`), so each is linked last in its order, the
+    review above the suite and pull request (:func:`_tasks.place`); a failure that cuts it
+    short leaves what the same ``quill claim`` run again, on ``card``'s branch, finishes."""
+    if not planned:
+        print("  its finishing tasks are filed already (ruling plan#1875)")
+        return
+    print(f"  its finishing tasks, last in its order (ruling plan#1875); cut short, `quill "
+          f"claim plan#{card.number}` run again on {_git.card_branch(card.number)} files the "
+          "rest:")
+    for item in planned:
+        _write(tracker, item.filing, item.earlier, None)
 
 
 def _created(kind: str, tracker: Tracker, draft: Draft, milestone: _LeafMilestone) -> Card:

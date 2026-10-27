@@ -3,7 +3,8 @@ inside its card's one pull request, done when its file ``plan/tasks/N`` is in gi
 (``_state.done_tasks``).
 
 ``quill file task`` files one (``_filing``), on the board under a step the board holds
-(:func:`_command.on_board`, the one rule).  Here are ``quill start``, which begins a piece
+(:func:`_command.on_board`, the one rule), and ``quill claim`` files a card's two finishing
+tasks (:data:`FINISHING`, ruling plan#1875).  Here are ``quill start``, which begins a piece
 with a commit naming it (:func:`cmd_start`, ruling plan#1872), and which tasks are in
 progress (:func:`in_progress`); ``quill task-file``, which writes a
 task's file into the working tree for the session to commit with the piece it finishes
@@ -31,21 +32,37 @@ from tools.quill.setup_tracker import TASK
 #: What a task's file says: the instant it was written (:func:`_git.instant`), so each write
 #: is a new line, as each claim's marker is.
 DONE = "done "
-#: The tasks that finish every card, last in its order, each title with what the piece is
-#: (ruling plan#1875, plan#1870): a card is ready to land once both are done.  A task filed
-#: under a card goes above the first of them still open (:func:`place`).
+#: The tasks that finish every card, last in its order, each title with what the piece is,
+#: ``{card}`` standing for the card's number (ruling plan#1875, plan#1870): a card is ready to
+#: land once both are done.  ``quill claim`` files them (:func:`finishing`), and a task filed
+#: under a card goes above the first of them still open that comes after it here
+#: (:func:`place`).
 FINISHING = (
     ("Adversarial review",
      "A neutral fresh subagent reviews the design and the whole diff against the card's spec "
-     "and its edits since the claim (`quill spec-history plan#N --since card/N`), grading the "
-     "change's claims about itself hardest. Each finding to fix in this pull request is filed "
-     "as a task above \"Full suite and pull request\"."),
+     "and its edits since the claim (`quill spec-history plan#{card} --since card/{card}`), "
+     "grading the change's claims about itself hardest. Each finding to fix in this pull "
+     "request is filed as a task above \"Full suite and pull request\"."),
     ("Full suite and pull request",
      "The full suite through `./scripts/test.sh`, `pylint app/` with CLAUDE.md's `--fail-on`, "
      "the tools packages' own tests and pylint floor, the developer's comments read and "
-     "answered, then the card's pull request into dev, queued."),
+     "answered, then plan#{card}'s pull request into dev, queued."),
 )
-_FINISHING_TITLES = frozenset(title for title, _ in FINISHING)
+#: Each finishing task's title, with its place among them.
+_FINISHING_RANKS = {title: rank for rank, (title, _) in enumerate(FINISHING)}
+
+
+def finishing(card: int) -> tuple[tuple[str, str], ...]:
+    """Card ``plan#<card>``'s finishing tasks (:data:`FINISHING`), each title with its body,
+    in order: each body names the card, so no two cards' finishing tasks share a title and a
+    text, a filing's identity (``_filing._same_filing``)."""
+    return tuple((title, body.format(card=card)) for title, body in FINISHING)
+
+
+def finishing_rank(title: str) -> int:
+    """Where a task titled ``title`` stands among its card's finishing tasks: its place in
+    :data:`FINISHING`, or -1 for a piece built before them."""
+    return _FINISHING_RANKS.get(title.strip(), -1)
 
 
 def _on_its_branch(tracker: Tracker, number: int, root: Path, what: str,
@@ -89,14 +106,14 @@ def in_progress(cards: Mapping[int, BareCard],
 def place(tracker: Tracker, task: Card, parent: Card, before: Card | None) -> None:
     """Put ``task``, a piece linked under ``parent``, where it is built in ``parent``'s order of
     its tasks (ruling plan#1868), each write printed as it lands: above ``before`` when the
-    filing names one, else above the first of ``parent``'s finishing tasks still open
-    (:data:`FINISHING`); a finishing task itself, and a task under a card with none open,
-    stay where the link put them, last.  ``parent``'s order is its read before the link, with
-    ``task`` last where that read does not list it, as GitHub lists a sub-issue linked last
-    (``recorded/priority.json``).  A task already just above its place is not moved, so the
-    filing run again sends nothing more."""
-    if task.title.strip() in _FINISHING_TITLES:
-        return
+    filing names one, else above the first of ``parent``'s finishing tasks still open that
+    comes after it in :data:`FINISHING` (:func:`finishing_rank`), so a piece goes above the
+    review and the review above the suite and pull request; a task with none open after it,
+    the last finishing task always, stays where the link put it, last.
+    ``parent``'s order is its read before the link, with ``task`` last where that read does
+    not list it, as GitHub lists a sub-issue linked last (``recorded/priority.json``).  A task
+    already just above its place is not moved, so the filing run again sends nothing more."""
+    rank = finishing_rank(task.title)
     order = [child.number for child in parent.children]
     if task.number not in order:
         order.append(task.number)
@@ -105,9 +122,10 @@ def place(tracker: Tracker, task: Card, parent: Card, before: Card | None) -> No
                  if child.kind == TASK and child.is_open and child.number != task.number]
         held = tracker.cards(tasks) if tasks else {}
         before = next((held[number] for number in tasks if number in held
-                       and held[number].title.strip() in _FINISHING_TITLES), None)
+                       and finishing_rank(held[number].title) > rank), None)
     if before is None:
-        print(f"  in plan#{parent.number}'s order: last, no finishing task being open")
+        print(f"  in plan#{parent.number}'s order: last, no finishing task "
+              f"{'after it ' if rank >= 0 else ''}being open")
     elif order.index(task.number) + 1 == order.index(before.number):
         print(f"  in plan#{parent.number}'s order: already above plan#{before.number}")
     else:

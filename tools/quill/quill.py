@@ -25,7 +25,8 @@ its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
 A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-issue
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,
-``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842),
+``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842), ``claim`` files a
+card's two finishing tasks (ruling plan#1875, ``_filing.finishing_filings``),
 ``start`` begins it with a commit naming it (ruling plan#1872), ``task-file`` writes its file
 for the commit that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show``
 read it.
@@ -103,7 +104,7 @@ import requests
 
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
-from tools.quill import _comments, _findings, _git, _tasks
+from tools.quill import _comments, _filing, _findings, _git, _tasks
 from tools.quill._command import (
     Refused,
     _label,
@@ -218,12 +219,15 @@ def cmd_claim(args, tracker: Tracker, root: Path,
     """Claim a card (R-BAL359): a commit adding its ship marker, made on ``origin/dev`` --
     or with ``--here`` on the commit checked out, for work already started -- and pushed
     create-only as the branch ``card/N`` (:func:`_git.claim`), then checked out here as
-    that branch, with no upstream.  Refused, with nothing written, for what is no work to
-    claim (work shown done that a revert unshipped says to sync first); while ``card/N``
-    holds a claim; while ``origin`` holds a ``card/N`` already merged, which a create-only
-    push cannot replace; and while this clone already has a branch of that name, which the
-    check-out would collide with.  The claim line is printed once the push lands, so a
-    failed check-out after it says what to run."""
+    that branch, with no upstream; then its two finishing tasks filed under it, last in its
+    order, unless they are filed already (ruling plan#1875): decided before the push
+    (:func:`_filing.finishing_filings`), written after it.  Refused, with nothing written,
+    for what is no work to claim (work shown done that a revert unshipped says to sync
+    first); while ``card/N`` holds a claim (:func:`_claimed_again`); while ``origin`` holds
+    a ``card/N`` already merged, which a create-only push cannot replace; while this clone
+    already has a branch of that name, which the check-out would collide with; and for what
+    the filing of a finishing task refuses.  The claim line is printed once the push lands,
+    so a failed check-out or filing after it says what to run."""
     card = _one(tracker, args.card)
     reads = _git.read(root)
     shipped = reads.shipped.cards
@@ -239,8 +243,8 @@ def cmd_claim(args, tracker: Tracker, root: Path,
         raise Refused(f"{_label(card)} is never offered as work: {why}")
     if card.number in shipped:
         raise Refused(f"{_label(card)} shipped in git: no work is left on it to claim")
-    if held := reads.claims.get(card.number):
-        raise Refused(f"plan#{card.number} is already claimed: {holder(held)}")
+    if card.number in reads.claims:
+        return _claimed_again(tracker, root, card, cards, reads)
     branch = _git.card_branch(card.number)
     if tip := reads.merged.get(card.number):
         raise Refused(f"origin holds {branch} at {tip[:12]}, whose work {DEV} or {MAIN} already "
@@ -251,6 +255,7 @@ def cmd_claim(args, tracker: Tracker, root: Path,
     if _git.has_branch(root, branch):
         raise Refused(f"this clone already has a branch {branch!r}, which a claim of "
                       f"plan#{card.number} checks out: delete or rename it first")
+    finishing = _filing.finishing_filings(tracker, root, card, cards, reads)
     base = "HEAD" if args.here else tracking(DEV)
     try:
         sha = _git.claim(root, card.number, base, clock())
@@ -265,6 +270,25 @@ def cmd_claim(args, tracker: Tracker, root: Path,
               f"`git switch {branch}`")
     else:
         print(f"  switched to {branch}")
+    _filing.file_finishing(tracker, card, finishing)
+    return 0
+
+
+def _claimed_again(tracker: Tracker, root: Path, card: Card, cards: dict[int, Card],
+                   reads: _git.Reads) -> int:
+    """``claim`` of ``card``, which one of ``reads``' claims holds: refused, with nothing
+    written, but where that claim's branch is checked out here and some of the card's
+    finishing tasks are not filed (a failure cut the claim short, or the claim came before
+    ruling plan#1875), the claim is finished: they are filed
+    (:func:`_filing.file_finishing`, R-BAL186)."""
+    held = reads.claims[card.number]
+    finishing = (_filing.finishing_filings(tracker, root, card, cards, reads)
+                 if _git.checked_out(root) == held.branch else [])
+    if not finishing:
+        raise Refused(f"plan#{card.number} is already claimed: {holder(held)}")
+    print(f"plan#{card.number} is claimed already, {holder(held)}, and checked out here; its "
+          "finishing tasks are not all filed, so this finishes its claim")
+    _filing.file_finishing(tracker, card, finishing)
     return 0
 
 

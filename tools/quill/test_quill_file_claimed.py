@@ -58,10 +58,13 @@ def _claimed_by_a_race(code, number):
 def test_a_new_leaf_under_a_claimed_step_is_refused_until_the_claim_is_released(code, tmp_path,
                                                                                  capsys):
     """Nothing is written while a branch holds plan#1; the refusal names the claim and the
-    command that releases it.  Released, the same command splits plan#1."""
+    command that releases it.  Released, the same command splits plan#1.  The claim is
+    another clone's (:func:`_fake.claim`), its git alone: the finishing tasks a claim files
+    (ruling plan#1875) hold back a split until they are dropped
+    (``test_quill_claim_finishing.py``)."""
     tracker = FakeTracker()
     tracker.add(1)
-    assert run(tracker, code, "claim", "plan#1") == 0
+    claim(code, 1)
     capsys.readouterr()
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 1
     assert capsys.readouterr().err == f"refused: {_refused(_holder(code))}\n"
@@ -99,7 +102,8 @@ def test_a_leaf_reopened_after_sync_unlinked_it_never_splits_the_claimed_step(co
     """C2 review M4's probe: a person closes the still-marked leaf, `sync` unlinks it and puts
     plan#1 back on the board, the person reopens the leaf, and plan#1 is claimed.  The
     leaf's command run again linked it under the claimed plan#1 without a word; it is
-    refused, and once the claim is released it finishes the split."""
+    refused, and once the claim is released it finishes the split.  The claim is another
+    clone's, its git alone, as in the test above."""
     tracker = FakeTracker()
     tracker.add(1)
     FailOnce(tracker, "unmark")
@@ -109,7 +113,7 @@ def test_a_leaf_reopened_after_sync_unlinked_it_never_splits_the_claimed_step(co
     assert run(tracker, code, "sync") == 0
     tracker.cards_by_number[2] = replace(tracker.cards_by_number[2], is_open=True,
                                          state_reason="REOPENED", touched_by_hand=True)
-    assert run(tracker, code, "claim", "plan#1") == 0
+    claim(code, 1)
     writes = list(tracker.writes)
     capsys.readouterr()
     assert run(tracker, code, *leaf_filing(tmp_path, "Half")) == 1

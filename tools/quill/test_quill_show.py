@@ -17,7 +17,8 @@ def test_show_resolves_an_old_id_by_its_title_alias(code, capsys):
     """``R-BAL80`` finds the card titled ``[R-BAL80] ...``; two arcs' same id need the arc."""
     tracker = FakeTracker()
     tracker.add(1, "ruling", title="[R-GU] one", labels=("balance",), is_open=False)
-    tracker.add(2, "ruling", title="[R-GU] two", labels=("bank_import",), is_open=False)
+    tracker.add(2, "ruling", title="[R-GU] two", labels=("bank_import",), arc="bank_import",
+                is_open=False)
     tracker.add(3, "ruling", title="[R-GUX] other", labels=("balance",), is_open=False)
     assert run(tracker, code, "show", "R-GU") == 1
     assert "names 2 cards" in capsys.readouterr().err

@@ -44,7 +44,7 @@ def test_the_first_leaf_takes_its_split_steps_milestone_and_the_split_step_gives
     tracker.add(1)
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert tracker.milestone_of == {2: 1}
-    assert tracker.writes == [("create", 2, "step", "half", ("balance", FILING), 1),
+    assert tracker.writes == [("create", 2, "step", "half", ("balance", FILING), "balance", 1),
                               ("add_child", 1, 2), ("board_add", 2), ("board_place", 2, "PVTI_1"),
                               ("board_remove", 1), ("set_milestone", 1, None), ("unmark", 2)]
     out = capsys.readouterr().out
@@ -63,7 +63,7 @@ def test_a_leaf_of_a_split_step_holding_none_is_filed_in_none_and_names_its_leav
     _split(tracker, 1, 2, 3)
     assert run(tracker, code, *leaf_filing(tmp_path, "more")) == 0
     assert tracker.milestone_of == {2: 2}
-    assert tracker.writes[0] == ("create", 4, "step", "more", ("balance", FILING))
+    assert tracker.writes[0] == ("create", 4, "step", "more", ("balance", FILING), "balance")
     assert not [write for write in tracker.writes if write[0] == "set_milestone"]
     out = capsys.readouterr().out
     assert ("  in no milestone: its split step holds none, so the tracker records no outcome "
@@ -81,7 +81,8 @@ def test_a_second_leaf_after_the_first_took_the_milestone_is_filed_in_none(code,
     made = len(tracker.writes)
     assert run(tracker, code, *leaf_filing(tmp_path, "second half")) == 0
     assert tracker.milestone_of == {2: 2}
-    assert tracker.writes[made] == ("create", 3, "step", "second half", ("balance", FILING))
+    assert tracker.writes[made] == ("create", 3, "step", "second half", ("balance", FILING),
+                                    "balance")
 
 
 def test_a_leaf_of_a_step_split_twice_names_the_milestone_held_below_it(
@@ -106,7 +107,7 @@ def test_leaves_in_differing_milestones_file_the_leaf_in_none_and_say_which(
     _split(tracker, 1, 2, 3)
     assert run(tracker, code, *leaf_filing(tmp_path, "third")) == 0
     assert 4 not in tracker.milestone_of
-    assert tracker.writes[0] == ("create", 4, "step", "third", ("balance", FILING))
+    assert tracker.writes[0] == ("create", 4, "step", "third", ("balance", FILING), "balance")
     assert ("; below it, plan#2 is in milestone #1, plan#3 is in milestone #2: if this leaf "
             "belongs with one of them, set it on the web") in capsys.readouterr().out
 
@@ -117,7 +118,7 @@ def test_a_leaf_with_no_milestone_held_anywhere_is_filed_as_before(code, tmp_pat
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
-    assert tracker.writes[0] == ("create", 2, "step", "half", ("balance", FILING))
+    assert tracker.writes[0] == ("create", 2, "step", "half", ("balance", FILING), "balance")
     assert not tracker.milestone_of
     assert not [write for write in tracker.writes if write[0] == "set_milestone"]
     assert "milestone" not in capsys.readouterr().out
@@ -136,7 +137,7 @@ def test_a_run_cut_before_the_clear_is_finished_by_the_same_command_filing_no_se
     assert FILING in tracker.cards_by_number[2].labels
     assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
     assert [write for write in tracker.writes if write[0] == "create"] == [
-        ("create", 2, "step", "half", ("balance", FILING), 1)]
+        ("create", 2, "step", "half", ("balance", FILING), "balance", 1)]
     assert tracker.milestone_of == {2: 1}
     assert FILING not in tracker.cards_by_number[2].labels
 

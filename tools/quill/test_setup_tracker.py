@@ -289,10 +289,11 @@ def _project(cards=0, public=False, linked=True, views=(("View 1", "", 0),)):
         "repositories": {"totalCount": int(linked), "nodes": [
             {"nameWithOwner": setup_tracker.PLAN.full_name}] if linked else []},
         "fields": {"nodes": [
-            {"id": "F1", "name": "Title", "dataType": "TITLE"},
-            {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT"},
-            {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE"},
-            {"id": "F4", "name": "Rank", "dataType": "NUMBER"},
+            {"id": "F1", "name": "Title", "dataType": "TITLE", "isIssueField": False},
+            {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT", "isIssueField": False},
+            {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE",
+             "isIssueField": False},
+            {"id": "F4", "name": "Rank", "dataType": "NUMBER", "isIssueField": False},
             {},
         ]},
         "workflows": {"nodes": [
@@ -306,11 +307,11 @@ def _project(cards=0, public=False, linked=True, views=(("View 1", "", 0),)):
 
 
 _FIELDS = {
-    "F1": {"id": "F1", "name": "Title", "dataType": "TITLE"},
-    "F2": {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT"},
-    "F3": {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE"},
-    "F4": {"id": "F4", "name": "Rank", "dataType": "NUMBER"},
-    "F6": {"id": "F6", "name": "Labels", "dataType": "LABELS"},
+    "F1": {"id": "F1", "name": "Title", "dataType": "TITLE", "isIssueField": False},
+    "F2": {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT", "isIssueField": False},
+    "F3": {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE", "isIssueField": False},
+    "F4": {"id": "F4", "name": "Rank", "dataType": "NUMBER", "isIssueField": False},
+    "F6": {"id": "F6", "name": "Labels", "dataType": "LABELS", "isIssueField": False},
 }
 
 
@@ -472,7 +473,8 @@ def test_github_status_is_tolerated_only_hidden_and_a_custom_select_is_not():
     ]
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
     assert not setup_tracker.board_differences(project)
-    project["fields"]["nodes"].append({"id": "F5", "name": "Tier", "dataType": "SINGLE_SELECT"})
+    project["fields"]["nodes"].append({"id": "F5", "name": "Tier", "dataType": "SINGLE_SELECT",
+                                       "isIssueField": False})
     assert setup_tracker.board_differences(project) == ["the board stores a field, 'Tier'"]
 
 

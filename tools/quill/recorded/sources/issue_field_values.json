@@ -1,0 +1,462 @@
+[
+ {
+  "read": {
+   "repository": "saltyreformed-labs/plan-views-demo",
+   "at": "2026-10-27T14:24:24Z",
+   "how": "GitHub GraphQL, read-only, through the shared gh token (gh api graphql)",
+   "why": "plan#1811: the issue field values of each card a recording reads with tools.quill._queries' card fields (s2 census), which _arcs.FIELD_VALUES now asks and no recording session did; copied into the recordings by the re-key, never typed by hand",
+   "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c220: issue(number: 220) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c221: issue(number: 221) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c222: issue(number: 222) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c223: issue(number: 223) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c224: issue(number: 224) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c225: issue(number: 225) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c226: issue(number: 226) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c227: issue(number: 227) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } } }",
+   "not_found": [
+    220,
+    221,
+    222,
+    223,
+    224,
+    225,
+    226,
+    227
+   ],
+   "not_found_answered_as": "no value ({totalCount: 0, nodes: []}), INFERRED, not read, as GitHub answers NOT_FOUND for each today: each was a scratch card a recording session filed (its recorded title begins '[L2 measurement] scratch'), a recording session sends only quill's own writes (_recorded.refusal), and no quill write set an issue field before plan#1811"
+  },
+  "answer": {
+   "data": {
+    "repository": {
+     "c220": null,
+     "c221": null,
+     "c222": null,
+     "c223": null,
+     "c224": null,
+     "c225": null,
+     "c226": null,
+     "c227": null
+    }
+   },
+   "errors": [
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c220"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 76
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 220."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c221"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 258
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 221."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c222"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 440
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 222."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c223"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 622
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 223."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c224"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 804
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 224."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c225"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 986
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 225."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c226"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 1168
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 226."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c227"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 1350
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 227."
+    }
+   ]
+  }
+ },
+ {
+  "read": {
+   "repository": "saltyreformed-labs/shekel-plan",
+   "at": "2026-10-27T14:24:25Z",
+   "how": "GitHub GraphQL, read-only, through the shared gh token (gh api graphql)",
+   "why": "plan#1811: the issue field values of each card a recording reads with tools.quill._queries' card fields (s2 census), which _arcs.FIELD_VALUES now asks and no recording session did; copied into the recordings by the re-key, never typed by hand",
+   "query": "query { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") { c1: issue(number: 1) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c2: issue(number: 2) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c3: issue(number: 3) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c4: issue(number: 4) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c5: issue(number: 5) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c6: issue(number: 6) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c7: issue(number: 7) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c8: issue(number: 8) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c9: issue(number: 9) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c10: issue(number: 10) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c11: issue(number: 11) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c12: issue(number: 12) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c13: issue(number: 13) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c14: issue(number: 14) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c15: issue(number: 15) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c21: issue(number: 21) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c22: issue(number: 22) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c23: issue(number: 23) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c24: issue(number: 24) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c25: issue(number: 25) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c26: issue(number: 26) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c27: issue(number: 27) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c28: issue(number: 28) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c29: issue(number: 29) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } c30: issue(number: 30) { number issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } } } } } }",
+   "not_found": [
+    11,
+    12,
+    13,
+    14,
+    15,
+    21,
+    22,
+    23,
+    24,
+    25,
+    28,
+    29,
+    30
+   ],
+   "not_found_answered_as": "no value ({totalCount: 0, nodes: []}), INFERRED, not read, as GitHub answers NOT_FOUND for each today: each was a scratch card a recording session filed (its recorded title begins '[L2 measurement] scratch'), a recording session sends only quill's own writes (_recorded.refusal), and no quill write set an issue field before plan#1811"
+  },
+  "answer": {
+   "data": {
+    "repository": {
+     "c1": {
+      "number": 1,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c2": {
+      "number": 2,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c3": {
+      "number": 3,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c4": {
+      "number": 4,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c5": {
+      "number": 5,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c6": {
+      "number": 6,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c7": {
+      "number": 7,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c8": {
+      "number": 8,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c9": {
+      "number": 9,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c10": {
+      "number": 10,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c11": null,
+     "c12": null,
+     "c13": null,
+     "c14": null,
+     "c15": null,
+     "c21": null,
+     "c22": null,
+     "c23": null,
+     "c24": null,
+     "c25": null,
+     "c26": {
+      "number": 26,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c27": {
+      "number": 27,
+      "issueFieldValues": {
+       "totalCount": 0,
+       "nodes": []
+      }
+     },
+     "c28": null,
+     "c29": null,
+     "c30": null
+    }
+   },
+   "errors": [
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c11"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 1854
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 11."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c12"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 2034
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 12."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c13"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 2214
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 13."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c14"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 2394
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 14."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c15"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 2574
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 15."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c21"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 2754
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 21."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c22"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 2934
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 22."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c23"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 3114
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 23."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c24"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 3294
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 24."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c25"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 3474
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 25."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c28"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 4014
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 28."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c29"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 4194
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 29."
+    },
+    {
+     "type": "NOT_FOUND",
+     "path": [
+      "repository",
+      "c30"
+     ],
+     "locations": [
+      {
+       "line": 1,
+       "column": 4374
+      }
+     ],
+     "message": "Could not resolve to an Issue with the number of 30."
+    }
+   ]
+  }
+ }
+]

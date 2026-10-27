@@ -14,13 +14,15 @@ are sent through.
 """
 from __future__ import annotations
 
+from tools.quill._arcs import LABELS_AND_ARC
 from tools.quill.setup_tracker import FILING, LINKED_REPOSITORIES, Place
 
-#: What a card says of itself and its links, read first.
+#: What a card says of itself and its links, read first: its labels and its arc among them, the
+#: value of its issue field Arc (:data:`_arcs.LABELS_AND_ARC`, rulings ``R-BAL349``, ``R-BAL354``).
 _ISSUE_FIELDS = """
   id number fullDatabaseId title state stateReason
   issueType { name }
-  labels(first: 100) { totalCount nodes { name } }
+""" + LABELS_AND_ARC + """\
   parent { number repository { nameWithOwner } }
   subIssues(first: 100) { totalCount nodes {
     number state issueType { name } repository { nameWithOwner } } }
@@ -188,6 +190,20 @@ def milestones(place: Place) -> str:
 COMMENT_EDITS = """query($id: ID!, $after: String) { node(id: $id) { ... on IssueComment {
   userContentEdits(first: 100, after: $after) {
     pageInfo { hasNextPage endCursor } nodes { %s } } } } }""" % EDIT_FIELDS
+
+
+def issue_fields(place: Place) -> str:
+    """The read of ``place``'s issue fields, each single select's REST id and name, how many
+    the repository holds beside them: what a filing reads to write a card's Arc
+    (:meth:`_tracker.Tracker.create`).  A field of another type answers ``{}``, as
+    :data:`_arcs.FIELD_VALUES`' values do.  Measured 2026-10-27 with quill's App token: it
+    reads them (Arc's ``fullDatabaseId`` 48771436), five fields in all."""
+    return (
+        """query { repository(owner: "%s", name: "%s") {
+  issueFields(first: 100) { totalCount nodes {
+    ... on IssueFieldSingleSelect { fullDatabaseId name } } } } }"""
+        % (place.owner, place.name)
+    )
 
 
 #: The repositories a board is linked to, read when quill connects

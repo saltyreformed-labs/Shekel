@@ -36,7 +36,7 @@ def test_a_finding_is_filed_under_its_owner_and_kept_off_the_board(code):
     tracker.add(1)
     assert run(tracker, code, "file", "finding", "--arc", "balance", "--title", "Twice",
                 "--owner", "plan#1", "--text", "The report counts a refund twice.") == 0
-    assert tracker.writes == [("create", 2, "finding", "Twice", ("balance", FILING)),
+    assert tracker.writes == [("create", 2, "finding", "Twice", ("balance", FILING), "balance"),
                               ("block", 2, 1), ("unmark", 2)]
     finding = tracker.cards_by_number[2]
     assert (finding.labels, finding.parent, finding.blocked_by) == (("balance",), None, (1,))
@@ -271,7 +271,7 @@ def test_a_matching_card_under_another_owner_or_with_other_labels_is_refused_unw
             "and is no card's sub-issue (R-BAL395)" in capsys.readouterr().err)
     spec = tmp_path / "spec.md"
     spec.write_text("New work.")
-    tracker.add(4, body="New work.", title="New", labels=("salary",))
+    tracker.add(4, body="New work.", title="New", labels=("salary",), arc="salary")
     assert run(tracker, code, "file", "step", "--arc", "salary", "--title", "New",
                "--body-file", str(spec), "--label", "moves-money") == 1
     assert "relabel it by hand" in capsys.readouterr().err
@@ -289,8 +289,9 @@ def test_a_top_level_card_is_added_at_the_bottom_with_one_board_write(code, tmp_
     tracker.add(1)
     assert run(tracker, code, "file", "question", "--arc", "recurrence", "--title", "Day",
                "--body-file", str(text)) == 0
-    assert tracker.writes == [("create", 2, "question", "Day", (FILING, "recurrence")),
-                              ("board_add", 2), ("unmark", 2)]
+    assert tracker.writes == [
+        ("create", 2, "question", "Day", (FILING, "recurrence"), "recurrence"),
+        ("board_add", 2), ("unmark", 2)]
 
 
 
@@ -301,7 +302,8 @@ def test_a_label_named_twice_files_the_card_once(code, tmp_path):
     tracker = FakeTracker()
     assert run(tracker, code, "file", "step", "--arc", "salary", "--title", "New",
                "--body-file", str(text), "--label", "moves-money", "--label", "moves-money") == 0
-    assert tracker.writes[0] == ("create", 1, "step", "New", (FILING, "moves-money", "salary"))
+    assert tracker.writes[0] == ("create", 1, "step", "New", (FILING, "moves-money", "salary"),
+                                 "salary")
 
 
 
@@ -323,7 +325,7 @@ def test_a_question_becomes_a_ruling_only_in_its_own_arc(code, tmp_path, capsys)
     answer.write_text("Yes.")
     tracker = FakeTracker()
     tracker.add(1)
-    tracker.add(2, "question", body="Ship it?", title="Ship", labels=("salary",))
+    tracker.add(2, "question", body="Ship it?", title="Ship", labels=("salary",), arc="salary")
     assert run(tracker, code, "file", "ruling", "--arc", "balance", "--title", "Ship",
                "--owner", "plan#1", "--from-question", "plan#2",
                "--answer-file", str(answer)) == 1

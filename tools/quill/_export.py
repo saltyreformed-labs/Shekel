@@ -36,7 +36,7 @@ anything is read, so a directory that cannot be written fails at once; a run tha
 before the rename leaves no file and every earlier day's as it was, and a run killed by
 a signal mid-write leaves its hidden ``.partial`` file, never a file under a day's name.
 Any failed read -- GitHub, the network, or a card or connection GitHub answers cut short
-or null (:func:`_tracker.card_from`, :func:`_tracker.connection_nodes`) -- and any
+or null (:func:`_tracker.card_from`, :func:`_github.connection_nodes`) -- and any
 failed write end the command with exit status 2 (``quill.py``'s module docstring): one
 bad read costs that night's file, and the timer's alert says so.  The file is its
 owner's to read only: the tracker is private, and its cards may hold real figures
@@ -56,14 +56,12 @@ from functools import partial
 from pathlib import Path
 
 from tools.quill import _queries
-from tools.quill._github import GitHub
+from tools.quill._github import GitHub, connection_nodes, issue_listing
 from tools.quill._tracker import (
     Tracker,
     card_from,
     comment_nodes,
     comment_versions,
-    connection_nodes,
-    listing,
     milestone_nodes,
     saved_versions,
 )
@@ -77,7 +75,7 @@ def _to_the_end(connection: dict | None, what: str, number: int,
 
     Raises:
         TrackerError: When GitHub answers the connection, or a node of it, as null
-            (:func:`_tracker.connection_nodes`).
+            (:func:`_github.connection_nodes`).
     """
     nodes = connection_nodes(connection, what, number)
     if connection["pageInfo"]["hasNextPage"]:
@@ -118,7 +116,7 @@ def snapshot(tracker: Tracker, taken_at: datetime) -> dict:
             (:func:`_tracker.card_from`, :func:`_to_the_end`).
     """
     github, place = tracker.github, tracker.place
-    cards = listing(github, _queries.export_cards(place), "every card, for the backup")
+    cards = issue_listing(github, _queries.export_cards(place), "every card, for the backup")
     for card in cards:
         card_from(card, place, tracker.board_id, tracker.app_login)
     return {

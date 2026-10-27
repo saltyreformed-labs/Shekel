@@ -26,7 +26,7 @@ reported for a person to settle, so a re-run never destroys anyone's work.
 
 **One home per fact (rule 14) is why the board stores no field.**  A card's
 order is the board's own drag order (``items(orderBy: {field: POSITION})``),
-its kind is its issue type, its arc one label, whether it shipped is git's
+its kind is its issue type, its arc its issue field Arc, whether it shipped is git's
 answer (its ship marker ``plan/ships/N``, ruling ``balance:R-BAL359``).  A
 field holding any of those would be a second home, so every custom field that
 stores a value is a difference.  GitHub's
@@ -60,7 +60,12 @@ rulings ``balance:R-BAL348``, ``R-BAL354``, and the developer's word of 2026-10-
 single select of the arcs, which a card's arc moves into after the cutover, its matching
 label then kept as display; and GitHub's four defaults, Priority, Effort, Start date and
 Target date, which the developer keeps, empty for now.  Any other is a difference, deleted
-on the web.
+on the web.  The board lists each one it shows as a field of its own, which GitHub marks
+``isIssueField``: its value is the issue's, so the board stores nothing for it (finding
+plan#1839, measured 2026-10-27), and it is no stored field.  **Every card's arc labels display
+its Arc** (R-BAL354, views_spec s.6): each card the rule ``quill sync``'s label pass reports
+and writes by finds anything for is a difference (:func:`check_card_arcs`), read as sync reads
+them.
 
 Usage, from the repository root::
 
@@ -79,11 +84,13 @@ from urllib.parse import quote
 import requests
 
 from tools.ci.arcs import ARCS
+from tools.quill._arcs import ARC_FIELD, arc_verdict, card_arcs
 from tools.quill._github import (
     APP_DIR,
     CredentialsError,
     GitHub,
     GitHubError,
+    TrackerError,
     app_credentials,
     app_installation,
     app_jwt,
@@ -131,14 +138,14 @@ REHEARSAL = Place("saltyreformed-labs", "shekel-plan-rehearsal", "Shekel plan re
 #: :data:`PLAN`'s names, which this module's checks configure.
 ORG, REPO, PROJECT_TITLE = PLAN.owner, PLAN.name, PLAN.board_title
 
-#: The four kinds of card: each carries one arc label, and ``check.violations`` holds
-#: each to its kind's rules.
+#: The four kinds of card: each holds one arc, its issue field :data:`_arcs.ARC_FIELD`, its
+#: arc label display (R-BAL354), and ``check.violations`` holds each to its kind's rules.
 CARD_TYPES = ("step", "finding", "ruling", "question")
 #: A piece of one step or finding, a commit inside its card's one pull request (ruling
-#: ``balance:R-BAL386``): a sub-issue of that card, which carries no arc label (its arc is its
-#: card's), and is done when its file ``plan/tasks/N`` is in git.  A task under a step the board
-#: holds is on it too, nested under that step in the Plan view and in no order (rulings
-#: plan#1814, plan#1842).
+#: ``balance:R-BAL386``): a sub-issue of that card, which holds no Arc and no arc label (its
+#: arc is its card's), and is done when its file ``plan/tasks/N`` is in git.  A task under a
+#: step the board holds is on it too, nested under that step in the Plan view and in no order
+#: (rulings plan#1814, plan#1842).
 TASK = "task"
 #: The kinds of card in the developer's drag order (R-BAL177), the order every reader of the
 #: board reads (``_tracker.Board.order``): a task on the board is in none.
@@ -162,7 +169,8 @@ class IssueField:
 
 
 #: The organization's issue fields, by name (rulings ``balance:R-BAL348``, ``R-BAL354``).
-#: Arc is a single select whose options are the arcs, :data:`tools.ci.arcs.ARCS`.  GitHub
+#: Arc (:data:`_arcs.ARC_FIELD`) is a single select whose options are the arcs,
+#: :data:`tools.ci.arcs.ARCS`.  GitHub
 #: makes four more when issue fields are switched on, Priority, Effort, Start date and Target
 #: date.  R-BAL348 ruled them deleted, a click on the web that was never made, and on
 #: 2026-10-25 the developer kept them ("I want to use those fields even if they are empty for
@@ -171,7 +179,7 @@ class IssueField:
 #: scope, so the developer changes them on the web and this module checks them; any other
 #: field is a difference.
 ISSUE_FIELDS = {
-    "Arc": IssueField("SINGLE_SELECT", ARCS, "the arcs"),
+    ARC_FIELD: IssueField("SINGLE_SELECT", ARCS, "the arcs"),
     "Priority": IssueField("SINGLE_SELECT", ("Urgent", "High", "Medium", "Low")),
     "Start date": IssueField("DATE"),
     "Target date": IssueField("DATE"),
@@ -257,7 +265,8 @@ LINKED_REPOSITORIES = "repositories(first: 100) { totalCount nodes { nameWithOwn
 
 #: A board field of one of these types STORES a value per card; every other
 #: type (title, labels, parent issue, sub-issue progress, ...) shows a fact
-#: the card itself holds.
+#: the card itself holds, and so does an organization's issue field shown on the board
+#: (:func:`stores_values`).
 STORED_FIELD_TYPES = frozenset(
     {"TEXT", "SINGLE_SELECT", "MULTI_SELECT", "NUMBER", "DATE", "ITERATION"}
 )
@@ -281,12 +290,12 @@ GITHUB_DEFAULT_VIEW = "View 1"
 _PROJECT_FIELDS = """
   id number title public url
   """ + LINKED_REPOSITORIES + """
-  fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType } } }
+  fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType isIssueField } } }
   workflows(first: 50) { nodes { name enabled } }
   views(first: 20) { nodes {
     id number name filter layout sortByFields(first: 1) { totalCount }
     groupByFields(first: 1) { totalCount } verticalGroupByFields(first: 1) { totalCount }
-    fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType } } }
+    fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType isIssueField } } }
   } }
   items(first: 1, archivedStates: [ARCHIVED, NOT_ARCHIVED]) { totalCount }
 """
@@ -462,8 +471,12 @@ def linked(place: Place, repositories: dict) -> bool | None:
 
 
 def stores_values(board_field: dict) -> bool:
-    """Whether a board field holds a value per card."""
-    return bool(board_field) and board_field["dataType"] in STORED_FIELD_TYPES
+    """Whether a board field holds a value per card: one of :data:`STORED_FIELD_TYPES`, and not
+    one of the organization's issue fields (``isIssueField``), whose value the issue holds, as
+    a label's (finding plan#1839: Arc, Priority, Start date and Effort read as board fields, so
+    no check could pass)."""
+    return (bool(board_field) and board_field["dataType"] in STORED_FIELD_TYPES
+            and not board_field["isIssueField"])
 
 
 def is_github_status(board_field: dict) -> bool:
@@ -684,6 +697,33 @@ def check_issue_fields(github: GitHub, report: Report) -> None:
     if not differences:
         report.ok(f"issue fields: exactly the {len(ISSUE_FIELDS)} declared: "
                   f"{', '.join(map(repr, ISSUE_FIELDS))}")
+
+
+def check_card_arcs(github: GitHub, report: Report) -> None:
+    """Check every card's arc labels against its Arc (ruling ``balance:R-BAL354``, views_spec
+    s.6) over the read and by the rule ``quill sync``'s label pass makes
+    (:func:`_arcs.card_arcs`, :func:`_arcs.arc_verdict`): each card it finds anything for is
+    a difference, named as sync names it: the Arc sync sets from its one arc label (ruling
+    plan#1856), what a person must fix in its Arc, which sync reports, or the arc labels sync
+    puts back."""
+    cards = card_arcs(github, ORG, REPO)
+    differ = 0
+    for card in cards:
+        verdict = arc_verdict(card, card.kind == TASK)
+        if verdict.fill:
+            report.differs(f"card {REPO}#{card.number} holds no Arc: sync sets it to "
+                           f"{verdict.fill!r}, the one arc label it carries (ruling plan#1856)")
+        elif verdict.fault:
+            report.differs(f"card {REPO}#{card.number} {verdict.fault}")
+        elif verdict.add or verdict.remove:
+            report.differs(f"card {REPO}#{card.number}'s arc labels do not display its Arc "
+                           f"{card.arc!r}: it lacks {list(verdict.add)} and holds "
+                           f"{list(verdict.remove)}")
+        else:
+            continue
+        differ += 1
+    if not differ:
+        report.ok(f"every card's arc labels display its Arc ({len(cards)} cards)")
 
 
 def _project(github: GitHub, project_id: str) -> dict:
@@ -915,11 +955,12 @@ def main(argv: list[str] | None = None) -> int:
         repository = check_repository(github, apply, report)
         if repository is not None:
             check_labels(github, apply, report)
+            check_card_arcs(github, report)
         check_issue_types(github, report)
         check_issue_fields(github, report)
         check_board(github, repository, apply, report)
         check_app(report)
-    except (GitHubError, requests.RequestException) as error:
+    except (GitHubError, TrackerError, requests.RequestException) as error:
         print("\n".join(report.lines))
         print(f"failed: {described(error)}", file=sys.stderr)
         return 2

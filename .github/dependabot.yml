@@ -5,9 +5,13 @@
 # Every pin in this repo is exact (requirements*.txt ``==``, Dockerfile and
 # compose ``image@sha256:`` digests, workflow ``uses:`` commit SHAs with a
 # version comment), and Dependabot rewrites each in place, digest and
-# comment included.  The coordinator session merges these PRs on green CI
-# like any feature -> dev PR (CLAUDE.md, Multi-session operation); a major
-# version arrives as its own PR so its changelog is read on its own.
+# comment included.  Who lands these PRs is ruled but not yet built: a
+# grouped minor or patch update is to merge itself on green (R-BAL295), but a
+# bump of a file production runs lands only on a card a session takes it
+# onto (R-BAL362, which amends it), so X-em (plan#1183) re-derives the
+# auto-merge at its claim.  Until it lands no session is named to land
+# them, and they wait.  A major version arrives as its own PR so its
+# changelog is read on its own.
 #
 # Every ``ignore`` below is a developer ruling written as configuration
 # rather than prose, so the first run after this file lands proposes

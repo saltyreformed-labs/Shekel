@@ -29,13 +29,16 @@ deletes them and what existed only for them:
      link silently; or
      (b) the ``transfer`` / ``transaction`` entries of one (scenario, ledger
      account, pay period, entry date, source kind, transfer link, transaction
-     link) net to anything but zero.  That key is the finest any reader groups
-     them by -- the account walk sums them per period, the loan sync's
-     checked projection (``loan_posting_service._linked_ledger._visible_nets``)
-     reads every entry on a loan's ledger per DATE, and the deleted readers
-     bucketed them per link -- and it is the key the resync reconciled them
-     to, per (period, entry date) and per source.  So a pass proves the
-     delete moves no figure any reader shows.
+     link, movement link) net to anything but zero.  That key is the finest
+     any reader groups them by -- the account walk sums them per period, the
+     loan sync's checked projection
+     (``loan_posting_service._linked_ledger._visible_nets``) reads every
+     entry on a loan's ledger per DATE, the deleted readers bucketed them
+     per link, and the account walk's and the ledger report's movement
+     readers read any entry carrying ``transaction_entry_id`` under that
+     movement, at the movement's day, whatever its kind -- and it is the key
+     the resync reconciled them to, per (period, entry date) and per source.
+     So a pass proves the delete moves no sum any reader shows.
   2. It deletes every ``transfer`` and ``transaction`` entry.  Each entry's
      legs go with it by ``ON DELETE CASCADE``; the balanced trigger
      (``ck_account_postings_balanced``) has no DELETE arm, and the audit
@@ -102,17 +105,19 @@ SELECT je.id
 #: reader reads them by (step 1 (b)), each with its net and its entry count.
 _NONZERO_LEGACY_GROUP_SQL = """
 SELECT je.scenario_id, p.ledger_account_id, je.pay_period_id, je.entry_date,
-       ps.name, je.transfer_id, je.transaction_id,
+       ps.name, je.transfer_id, je.transaction_id, je.transaction_entry_id,
        sum(p.amount) AS net, count(DISTINCT je.id) AS entries
   FROM budget.journal_entries je
   JOIN ref.posting_sources ps ON ps.id = je.source_kind_id
   JOIN budget.account_postings p ON p.journal_entry_id = je.id
  WHERE ps.name IN :sources
  GROUP BY je.scenario_id, p.ledger_account_id, je.pay_period_id,
-          je.entry_date, ps.name, je.transfer_id, je.transaction_id
+          je.entry_date, ps.name, je.transfer_id, je.transaction_id,
+          je.transaction_entry_id
 HAVING sum(p.amount) <> 0
  ORDER BY je.scenario_id, p.ledger_account_id, je.pay_period_id,
-          je.entry_date, ps.name, je.transfer_id, je.transaction_id
+          je.entry_date, ps.name, je.transfer_id, je.transaction_id,
+          je.transaction_entry_id
 """
 
 #: The entries this revision deletes, and their legs, counted for the print.
@@ -191,7 +196,8 @@ def refuse_what_the_delete_would_move(bind) -> None:
         found.append(
             f"{len(groups)} group(s) of {list(_LEGACY_SOURCES)} entries net "
             "nonzero by (scenario, ledger account, pay period, entry date, "
-            "source kind, transfer_id, transaction_id, net, entries), first "
+            "source kind, transfer_id, transaction_id, transaction_entry_id, "
+            "net, entries), first "
             f"{[tuple(group) for group in groups[:_NAMED_AT_MOST]]}: deleting "
             "one moves that account's balance on that day.  Diagnose with: "
             f"{_NONZERO_LEGACY_GROUP_SQL.strip()}"

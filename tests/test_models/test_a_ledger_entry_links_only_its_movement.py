@@ -5,8 +5,9 @@ Plan step ``balance:X-bi-6-5``'s second leaf, card plan#1845 (rulings
 **R-BAL102**, plan#1843, plan#1867).  The revision refuses while an entry of
 another kind carries ``journal_entries.transfer_id`` or ``transaction_id``, or
 while the ``transfer`` / ``transaction`` entries of one (scenario, ledger
-account, pay period, entry date, source kind, transfer link, transaction link)
-net to anything but zero; then it deletes every entry of those two kinds with
+account, pay period, entry date, source kind, transfer link, transaction link,
+movement link) net to anything but zero; then it deletes every entry of those
+two kinds with
 its legs, drops both columns with their keys and indexes, and deletes both
 ``ref.posting_sources`` rows.  Its downgrade restores the schema and both rows,
 and no entry.
@@ -169,22 +170,23 @@ def _plant(world, source, legs, **key):
     """INSERT one *source*-kind entry with *legs* ``{ledger id: amount}``; return its id.
 
     *key* overrides the entry's ``period`` / ``day`` (the world's first
-    period and day otherwise) and sets ``transfer_id`` / ``transaction_id``.
-    The legs carry the ``transfer`` posting kind, which head keeps.  Not
-    committed: the deferred balanced trigger reads each entry at the caller's
-    commit.
+    period and day otherwise) and sets ``transfer_id`` / ``transaction_id`` /
+    ``transaction_entry_id``.  The legs carry the ``transfer`` posting kind,
+    which head keeps.  Not committed: the deferred balanced trigger reads each
+    entry at the caller's commit.
     """
     entry_id = _db.session.execute(text(
         "INSERT INTO budget.journal_entries (user_id, scenario_id, "
         "pay_period_id, entry_date, source_kind_id, transfer_id, "
-        "transaction_id, description) "
-        "SELECT :u, :s, :p, :d, id, :xfer, :txn, 'legacy plant' "
+        "transaction_id, transaction_entry_id, description) "
+        "SELECT :u, :s, :p, :d, id, :xfer, :txn, :mov, 'legacy plant' "
         "FROM ref.posting_sources WHERE name = :source RETURNING id"
     ), {
         "u": world["user"], "s": world["scenario"],
         "p": key.get("period", world["periods"][0]),
         "d": key.get("day", world["day"]),
         "xfer": key.get("transfer_id"), "txn": key.get("transaction_id"),
+        "mov": key.get("transaction_entry_id"),
         "source": source,
     }).scalar_one()
     for ledger_id, amount in legs.items():
@@ -410,7 +412,7 @@ class TestTheUpgradeRefuses:
             first_ledger = min(legs)
             first_group = (
                 world["scenario"], first_ledger, world["periods"][0],
-                world["day"], "transfer", world["transfers"][0], None,
+                world["day"], "transfer", world["transfers"][0], None, None,
                 legs[first_ledger], 1,
             )
             refusal = self._refused(
@@ -449,6 +451,50 @@ class TestTheUpgradeRefuses:
             self._refused(
                 planted,
                 "4 group(s) of ['transfer', 'transaction'] entries net nonzero",
+            )
+
+    def test_a_pair_apart_only_by_its_movement_link(
+        self, app, seed_user, seed_periods,
+    ):
+        """An original carrying a movement link, its reversal not: four groups refused.
+
+        The account walk's and the ledger report's movement readers read any
+        entry carrying ``transaction_entry_id`` under that movement, at the
+        movement's day, whatever its kind, while the reversal, carrying no
+        movement link, is read apart from it (by the base's row loader at the
+        row's day, as its period's residue since).  Wherever those days
+        differ the delete would move a figure, so the refusal keys on the
+        movement link itself rather than on whether they differ here.  The
+        first group named is the original's, on the lowest ledger: NULL sorts
+        last.
+        """
+        with app.app_context():
+            world = _world(seed_user, seed_periods)
+            movement = _db.session.execute(text(
+                "SELECT min(transaction_entry_id) FROM budget.journal_entries"
+            )).scalar_one()
+            assert movement is not None, (
+                "the world's settled transfer must post a movement entry"
+            )
+            legs = _legs(world, Decimal("40.00"))
+            planted = [
+                _plant(world, "transaction", legs,
+                       transaction_id=world["transaction"],
+                       transaction_entry_id=movement),
+                _plant(world, "transaction", _reversed(legs),
+                       transaction_id=world["transaction"]),
+            ]
+            _db.session.commit()
+            first_ledger = min(legs)
+            first_group = (
+                world["scenario"], first_ledger, world["periods"][0],
+                world["day"], "transaction", None, world["transaction"],
+                movement, legs[first_ledger], 1,
+            )
+            self._refused(
+                planted,
+                "4 group(s) of ['transfer', 'transaction'] entries net nonzero",
+                repr(first_group),
             )
 
     def test_both_refusals_are_named_at_once_by_the_module_level_check(

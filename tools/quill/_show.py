@@ -57,7 +57,9 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
     state = "open" if card.is_open else f"closed ({card.state_reason})"
     ship = (f"done (git): {_YES[card.number in done]}" if card.kind == TASK else
             f"shipped (git): {_YES[card.number in reads.shipped.cards]}")
-    place = f"#{order.index(card.number) + 1}" if card.number in order else "not on it"
+    place = (f"#{order.index(card.number) + 1}" if card.number in order else
+             "not on it" if card.board_item is None else
+             "on it, in no order: the order is its steps and questions (R-BAL177)")
     lines = [
         _label(card),
         f"  state: {state}",

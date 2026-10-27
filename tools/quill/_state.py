@@ -75,17 +75,18 @@ into smaller steps, so some claim's pull request owes it (CI's landing check ref
 pull request while it does, ``landing``'s rule 7), and an open finding whose owner is not
 one such step is reported (:func:`_owner_lost`).
 
-**A task is a piece of one step or finding** (ruling ``balance:R-BAL386``): a sub-issue
-of type ``task`` under that card, a commit inside its one pull request, never offered,
-claimed or on the board.  It is DONE when git says so (:func:`done_tasks`): its file
-``plan/tasks/N`` is in the merge of ``dev`` and ``main``, or the live claim of the card it
-is under wrote it.  Its open or closed state is the tool's display of that, which
-``sync`` keeps in step both ways, as it does a step's: closed as completed once done,
-reopened once a revert (or a claim released, or a branch rewritten) takes its file away
-while the tool's close stands.  A person's close is a drop, and ``quill drop`` of a card
-drops the tasks under it that are still to do (R-BAL190's shape, :func:`drop_takes`).
-An open task under a card that can never take its file -- dropped, shipped without it, or
-no work -- is reported, never closed (:func:`_stale_task`).
+**A task is a piece of one step or finding** (ruling ``balance:R-BAL386``): a sub-issue of
+type ``task`` under that card, a commit inside its one pull request, never offered or
+claimed, and in no order: on the board under a step it nests there (ruling plan#1814).  It
+is DONE when git says so (:func:`done_tasks`): its file ``plan/tasks/N`` is in the merge of
+``dev`` and ``main``, or the live claim of the card it is under wrote it.  Its open or
+closed state is the tool's display of that, which ``sync`` keeps in step both ways, as it
+does a step's: closed as completed once done, reopened once a revert (or a claim released,
+or a branch rewritten) takes its file away while the tool's close stands.  A person's close
+is a drop, and ``quill drop`` of a card drops the tasks under it that are still to do
+(R-BAL190's shape, :func:`drop_takes`).  An open task under a card that can never take its
+file -- dropped, shipped without it, or no work -- is reported, never closed
+(:func:`_stale_task`).
 
 **``sync`` never overrides a person** (the build plan: a check "never acts on"
 the developer's own edit): a card whose last close or reopen was a person's is

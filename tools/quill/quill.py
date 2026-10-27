@@ -3,7 +3,8 @@
 The plan lives in the private repository ``saltyreformed-labs/shekel-plan``
 (ruling ``balance:R-BAL170``): each step, finding, ruling and question is one
 issue, a "card", and one board holds the steps and questions in the order the
-developer drags them (``R-BAL177``).  Every write goes through quill's
+developer drags them (``R-BAL177``), each step's tasks nested under it in no order
+(ruling plan#1814).  Every write goes through quill's
 GitHub App, and every card a session files passes :mod:`check` first.
 
 Whether a card SHIPPED is git's answer, never the card's state: its ship
@@ -23,7 +24,8 @@ this checkout's ``origin/dev``, ``origin/main`` and ``origin/card/N``.
 its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
 A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-issue
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
-``file task`` files one, ``task-file`` writes its file for the commit that finishes
+``file task`` files one, on the board under a step (ruling plan#1814, ``_command.on_board``),
+``task-file`` writes its file for the commit that finishes
 the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
 A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
 ``finding-file`` writes its ship marker on its owner's branch, for the commit that fixes it,
@@ -97,7 +99,6 @@ from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
 from tools.quill import _findings, _git, _tasks
 from tools.quill._command import (
-    ON_BOARD,
     Refused,
     _label,
     _one,
@@ -148,6 +149,7 @@ from tools.quill.check import (
 from tools.quill.setup_tracker import (
     DEPLOY_TOGETHER_LABEL,
     FILING,
+    IN_ORDER,
     MOVES_MONEY_LABEL,
     PLAN,
     TASK,
@@ -408,8 +410,9 @@ def cmd_move(args, tracker: Tracker, root: Path) -> int:
     card = _one(tracker, args.card)
     shipped = _git.read(root).shipped.cards
     cards = with_closure(tracker, {card.number: card})
-    if card.kind not in ON_BOARD or not card.is_open or is_container(card, cards, shipped):
-        raise Refused(f"the board holds open steps and questions only, and no step split into "
+    if card.kind not in IN_ORDER or not card.is_open or is_container(card, cards, shipped):
+        raise Refused(f"the board's order holds open steps and questions only (a task nests "
+                      f"under its step in no order, ruling plan#1814), and no step split into "
                       f"leaves (R-BAL177, R-BAL179): {_label(card)}")
     if filing_unfinished(card) and card.kind == "step":
         raise Refused(f"{_label(card)}'s filing has not finished (R-BAL202): finish it first.  "
@@ -419,7 +422,8 @@ def cmd_move(args, tracker: Tracker, root: Path) -> int:
     items = dict(order)
     if args.after is not None:
         if args.after not in items:
-            raise Refused(f"plan#{args.after} is not on the board")
+            raise Refused(f"plan#{args.after} is not in the board's order, its steps and "
+                          "questions (R-BAL177)")
         after = items[args.after]
     elif args.bottom:
         rest = [item for number, item in order if number != card.number]

@@ -37,10 +37,11 @@ value reported as a difference.  Those automations matter twice over: one of
 them, "Auto-close issue", would close a card when someone set its Status to
 Done -- a third way to close a card, beside git and the developer's own hand.
 **Nor may an automation put a card on the board** (ruling ``balance:R-BAL177``):
-the board holds steps and questions only, and quill places each one
-itself, a new leaf where the step it splits sat.  "Auto-add sub-issues to
-project" would put every sub-issue -- a task under its card (``R-BAL386``), a
-leaf under the step it splits -- at the bottom of the ordered list (measured
+the board holds the steps and questions in the developer's order, and each step's tasks
+nested under it in no order (ruling plan#1814), and quill places each one itself, a new
+leaf where the step it splits sat, a task at the bottom, where the order does not read
+it.  "Auto-add sub-issues to project" would put every sub-issue -- a task under its card
+(``R-BAL386``), a leaf under the step it splits -- at the bottom of the ordered list (measured
 2026-10-04, when findings and rulings were their owner's sub-issues: within ten
 seconds; since ``R-BAL395`` each is blocked by its owner instead).  **Nor may one hide
 a card**: "Auto-archive items" archives closed cards, and an archived card is in no

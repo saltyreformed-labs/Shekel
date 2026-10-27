@@ -34,6 +34,7 @@ from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
+from tools.quill._command import on_board as goes_on_board
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Card, Child, Comment, Edit
 from tools.quill.setup_tracker import APP_LOGIN, FILING, IN_ORDER, PLAN, unmarked
@@ -118,7 +119,8 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.board = FakeBoard(self.writes, self.cards_by_number)
 
     def add(self, number, kind="step", body="", on_board=True, **fields):
-        """Put a card in the tracker (open, unclaimed, by default on the board's bottom)."""
+        """Put a card in the tracker (open, unclaimed, and by default on the board's bottom when
+        quill would put it there, :func:`_command.on_board`)."""
         values = {"number": number, "id": 1000 + number, "node_id": f"I_{number}",
                   "title": f"card {number}", "kind": kind, "labels": ("balance",),
                   "is_open": True, "state_reason": None, "parent": None, "children": (),
@@ -126,14 +128,16 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
                   "touched_by_hand": False, "outside": (), **fields}
         self.cards_by_number[number] = Card(**values)
         self.bodies[number] = body
-        if on_board and values["is_open"] and kind in quill.ON_BOARD:
+        if (on_board and values["is_open"]
+                and goes_on_board(kind, self.cards_by_number.get(values["parent"]))):
             self.board.items.append(number)
         return self.cards_by_number[number]
 
     def add_task(self, number, parent, **fields):
         """Put a task in the tracker (R-BAL386): a sub-issue of type ``task`` under the card
         ``parent``, which lists it, as GitHub links one; open and carrying no label by
-        default, and never on the board."""
+        default, and on the board under a step (ruling plan#1814) unless ``on_board=False``
+        says it was filed before tasks went on it."""
         task = self.add(number, "task", labels=(), parent=parent, **fields)
         held = self.cards_by_number[parent]
         self._set(parent, children=(*held.children, Child(number, "task", task.is_open)))

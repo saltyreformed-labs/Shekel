@@ -24,7 +24,8 @@ this checkout's ``origin/dev``, ``origin/main`` and ``origin/card/N``.
 its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
 A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-issue
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
-``file task`` files one, on the board under a step (ruling plan#1814, ``_command.on_board``),
+``file task`` files one, on the board under a step the board holds (ruling plan#1814,
+``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842),
 ``task-file`` writes its file for the commit that finishes
 the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
 A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
@@ -692,8 +693,11 @@ def _sync_reads(tracker: Tracker, reads: _git.Reads,
 def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     """Write each step's, finding's and task's open or closed state from git (display only), then
     undo each split a leaf closed while still being filed is linked under (R-BAL205,
-    :func:`_undo_splits`): last, after every state write and every REPORT and HISTORY
-    line, so a failed undo costs none of them; run again, it finishes the undo.
+    :func:`_undo_splits`): after every state write and every REPORT and HISTORY line, so a
+    failed undo costs none of them; run again, it finishes the undo.  Last, put on the board
+    each task whose step is on it and that is not (ruling plan#1842,
+    :func:`_tasks.put_on_board`), display of the plan, so a failed add costs nothing above it;
+    run again, it adds the tasks still off.
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold
@@ -725,6 +729,7 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     for line in history:
         print(f"HISTORY: {line}")
     _undo_splits(tracker, cards, shipped, changes, args.dry_run)
+    _tasks.put_on_board(tracker, cards, args.dry_run)
     return 1 if changes.reports else 0
 
 

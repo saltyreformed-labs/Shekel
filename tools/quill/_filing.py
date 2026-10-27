@@ -555,9 +555,9 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
     again clears it), then each open finding the split step owns handed to the leaf, which a
     split step never owns (ruling plan#1784, :func:`_findings.hand_on`: a run cut short
     between a finding's two writes leaves it two owners, and the same command run again
-    finishes it), a top-level step's or question's board place, or a task's under a step
-    (:func:`_command.on_board`, ruling plan#1814), at the bottom, where the order does not
-    read it."""
+    finishes it), a top-level step's or question's board place, or a task's under a step the
+    board holds (:func:`_command.on_board`, rulings plan#1814, plan#1842), at the bottom,
+    where the order does not read it."""
     kind, parent = filing.draft.kind, filing.parent
     _attach(tracker, card, kind, parent)
     if kind == "ruling" and card.is_open:

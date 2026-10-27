@@ -42,7 +42,8 @@ Done -- a third way to close a card, beside git and the developer's own hand.
 the board holds the steps and questions in the developer's order, and each step's tasks
 nested under it in no order (ruling plan#1814), and quill places each one itself, a new
 leaf where the step it splits sat, a task at the bottom, where the order does not read
-it.  "Auto-add sub-issues to project" would put every sub-issue -- a task under its card
+it: filed under a step on the board, or put on by ``quill sync`` once its step is (ruling
+plan#1842).  "Auto-add sub-issues to project" would put every sub-issue -- a task under its card
 (``R-BAL386``), a leaf under the step it splits -- at the bottom of the ordered list (measured
 2026-10-04, when findings and rulings were their owner's sub-issues: within ten
 seconds; since ``R-BAL395`` each is blocked by its owner instead).  **Nor may one hide
@@ -132,8 +133,9 @@ ORG, REPO, PROJECT_TITLE = PLAN.owner, PLAN.name, PLAN.board_title
 CARD_TYPES = ("step", "finding", "ruling", "question")
 #: A piece of one step or finding, a commit inside its card's one pull request (ruling
 #: ``balance:R-BAL386``): a sub-issue of that card, which carries no arc label (its arc is its
-#: card's), and is done when its file ``plan/tasks/N`` is in git.  A step's tasks are on the
-#: board, nested under it in the Plan view and in no order (ruling plan#1814).
+#: card's), and is done when its file ``plan/tasks/N`` is in git.  A task under a step the board
+#: holds is on it too, nested under that step in the Plan view and in no order (rulings
+#: plan#1814, plan#1842).
 TASK = "task"
 #: The kinds of card in the developer's drag order (R-BAL177), the order every reader of the
 #: board reads (``_tracker.Board.order``): a task on the board is in none.

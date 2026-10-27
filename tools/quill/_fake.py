@@ -128,16 +128,17 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
                   "touched_by_hand": False, "outside": (), **fields}
         self.cards_by_number[number] = Card(**values)
         self.bodies[number] = body
-        if (on_board and values["is_open"]
-                and goes_on_board(kind, self.cards_by_number.get(values["parent"]))):
+        parent = values["parent"]
+        if (on_board and values["is_open"] and goes_on_board(
+                kind, self._view(parent) if parent in self.cards_by_number else None)):
             self.board.items.append(number)
         return self.cards_by_number[number]
 
     def add_task(self, number, parent, **fields):
         """Put a task in the tracker (R-BAL386): a sub-issue of type ``task`` under the card
         ``parent``, which lists it, as GitHub links one; open and carrying no label by
-        default, and on the board under a step (ruling plan#1814) unless ``on_board=False``
-        says it was filed before tasks went on it."""
+        default, and on the board under a step the board holds (:func:`_command.on_board`)
+        unless ``on_board=False`` says it was filed off the board."""
         task = self.add(number, "task", labels=(), parent=parent, **fields)
         held = self.cards_by_number[parent]
         self._set(parent, children=(*held.children, Child(number, "task", task.is_open)))

@@ -98,6 +98,18 @@ def test_a_task_under_a_finding_stays_off_the_board(code, tmp_path):
     assert tracker.board.items == [1]
 
 
+def test_a_task_under_a_step_off_the_board_stays_off_it(code, tmp_path):
+    """Ruling plan#1842's one rule: a task belongs on the board only under a step the board
+    holds, or it would stand alone among the steps as a row of its own (plan#1810's review,
+    N6); it goes on once its step does (``sync``)."""
+    tracker = FakeTracker()
+    tracker.add(1, on_board=False)
+    assert run(tracker, code, *_task_filing(tmp_path)) == 0
+    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",)), ("add_child", 1, 2),
+                              ("unmark", 2)]
+    assert not tracker.board.items
+
+
 def test_file_task_refuses_a_parent_that_is_no_live_piece_of_work(code, tmp_path, capsys):
     """A task's card is work still to do: never a step split into smaller steps, work that
     shipped, a ruling, nor a card whose own filing has not finished; nothing is written."""
@@ -309,6 +321,60 @@ def test_sync_leaves_a_task_the_tool_dropped(code):
     writes = list(tracker.writes)
     assert run(tracker, code, "sync") == 0
     assert tracker.writes == writes
+
+
+def test_sync_puts_on_the_board_each_task_whose_step_is_on_it(code, capsys):
+    """Ruling plan#1842: a task off the board (filed by a session's older code, or linked by
+    hand on the web), open or closed, under a step the board holds goes on it, each write
+    printed; one under a step off the board, or under a finding, stays off until its step is
+    on; a dry run writes nothing, and a re-run adds none."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(5, on_board=False)
+    tracker.add(7, "finding", blocked_by=(1,), on_board=False)
+    tracker.add_task(2, 1, on_board=False)
+    tracker.add_task(3, 1, is_open=False, state_reason="COMPLETED", closed_by_tool=True)
+    tracker.add_task(4, 1)
+    tracker.add_task(6, 5)
+    tracker.add_task(8, 7)
+    finish(code, 3)
+    assert tracker.board.items == [1, 4]
+    assert run(tracker, code, "sync", "--dry-run") == 0
+    assert capsys.readouterr().out == (
+        "would put on the board, nested under its step plan#1 (ruling plan#1842): plan#2 [task, "
+        "no arc] card 2\n"
+        "would put on the board, nested under its step plan#1 (ruling plan#1842): plan#3 [task, "
+        "no arc] card 3\n")
+    assert not tracker.writes
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == (
+        "put on the board, nested under its step plan#1 (ruling plan#1842): plan#2 [task, no "
+        "arc] card 2\n"
+        "put on the board, nested under its step plan#1 (ruling plan#1842): plan#3 [task, no "
+        "arc] card 3\n")
+    assert tracker.writes == [("board_add", 2), ("board_add", 3)]
+    assert run(tracker, code, "sync") == 0
+    assert capsys.readouterr().out == ""
+    assert run(tracker, code, "move", "plan#5", "--bottom") == 0
+    assert run(tracker, code, "sync") == 0
+    assert tracker.writes[2:] == [("board_add", 5), ("board_place", 5, "PVTI_1"),
+                                  ("board_add", 6)]
+    assert tracker.board.items == [1, 5, 4, 2, 3, 6]
+
+
+def test_a_sync_put_on_cut_short_costs_no_state_write_and_the_next_run_finishes_it(code):
+    """The put-on is sync's last write: an add GitHub cut off fails the run after its state
+    writes landed, and is never re-sent within it (ruling plan#1816); the next run adds it."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(9)
+    tracker.add_task(2, 1, on_board=False)
+    ship(code, 9)
+    FailOnce(tracker.board, "add")
+    assert run(tracker, code, "sync") == 2
+    assert tracker.writes == [("close", 9, "completed")]
+    assert run(tracker, code, "sync") == 0
+    assert tracker.writes[1:] == [("board_add", 2)]
 
 # -- show, next, claim, edit ----------------------------------------------------------------
 

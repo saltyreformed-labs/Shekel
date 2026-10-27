@@ -49,7 +49,8 @@ request but a DELETE, and a GraphQL answer holding no ``data`` object are each a
 :class:`GitHubError` naming the request, never a value a caller takes a field from (two runs
 on 2026-10-26 ended in an ``AttributeError`` instead of quill's ``failed:`` line,
 plan#1812).  Refused to a WRITE, it says GitHub answered the write, so the tracker is read
-back before the command runs again.
+back before the command runs again.  A card's connection -- its labels, its field values,
+its links -- answered null or cut short is a :class:`TrackerError` (:func:`counted`).
 
 **A failure names the read it cut short** (plan#1809 item 3): each read quill's commands, CI's
 landing check and the release tool make runs inside :func:`reading`, which notes what it was
@@ -139,6 +140,10 @@ class GitHubError(RuntimeError):
         """Keep the HTTP status beside the message (200 for a GraphQL error)."""
         super().__init__(message)
         self.status = status
+
+
+class TrackerError(RuntimeError):
+    """The tracker refused a write or answered something quill cannot read."""
 
 
 class CredentialsError(ValueError):
@@ -459,6 +464,35 @@ def paged(read: Callable[..., dict], connection: Callable[[dict], dict],
         if not page["pageInfo"]["hasNextPage"]:
             return nodes, answer
         after, number = page["pageInfo"]["endCursor"], number + 1
+
+
+def connection_nodes(connection: dict | None, what: str, number: int) -> list:
+    """A connection's nodes, refusing one GitHub answered as null, which would read as none,
+    and one holding a null node, which no fact can be read from: GitHub's schema lets it
+    answer an issue's ``labels`` so, any connection's ``nodes``, and each node in them
+    (``[Label]``, ``[Issue]``, ``[IssueTimelineItems]``; read 2026-10-18)."""
+    if connection is None or connection["nodes"] is None:
+        raise TrackerError(f"GitHub answered plan#{number}'s {what} as null, so the read "
+                           "holds none of them")
+    if None in connection["nodes"]:
+        raise TrackerError(f"GitHub answered one of plan#{number}'s {what} as null, so the "
+                           "read cannot say what it is")
+    return connection["nodes"]
+
+
+def counted(connection: dict | None, what: str, number: int) -> list:
+    """A connection's nodes (:func:`connection_nodes`), refusing one GitHub truncated (a silent
+    partial read): the one read of a card's connection whole, which every read of a card
+    makes, :mod:`_tracker`'s and the every-card listing's (:func:`_arcs.card_arcs`).  Here,
+    beside :func:`paged`, because :mod:`setup_tracker` reads that listing too, and
+    :mod:`_tracker` imports :mod:`setup_tracker`, so it cannot import :mod:`_tracker`."""
+    nodes = connection_nodes(connection, what, number)
+    if connection["totalCount"] > len(nodes):
+        raise TrackerError(
+            f"plan#{number} has {connection['totalCount']} {what}; the read holds "
+            f"{len(nodes)}"
+        )
+    return nodes
 
 
 def user_token() -> str:

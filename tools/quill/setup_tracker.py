@@ -26,7 +26,7 @@ reported for a person to settle, so a re-run never destroys anyone's work.
 
 **One home per fact (rule 14) is why the board stores no field.**  A card's
 order is the board's own drag order (``items(orderBy: {field: POSITION})``),
-its kind is its issue type, its arc one label, whether it shipped is git's
+its kind is its issue type, its arc its issue field Arc, whether it shipped is git's
 answer (its ship marker ``plan/ships/N``, ruling ``balance:R-BAL359``).  A
 field holding any of those would be a second home, so every custom field that
 stores a value is a difference.  GitHub's
@@ -62,7 +62,9 @@ label then kept as display; and GitHub's four defaults, Priority, Effort, Start 
 Target date, which the developer keeps, empty for now.  Any other is a difference, deleted
 on the web.  The board lists each one it shows as a field of its own, which GitHub marks
 ``isIssueField``: its value is the issue's, so the board stores nothing for it (finding
-plan#1839, measured 2026-10-27), and it is no stored field.
+plan#1839, measured 2026-10-27), and it is no stored field.  **Every card's arc labels display
+its Arc** (R-BAL354, views_spec s.6): each card the producer ``quill sync`` puts them back by
+would change is a difference (:func:`check_card_arcs`), read as sync reads them.
 
 Usage, from the repository root::
 
@@ -81,12 +83,13 @@ from urllib.parse import quote
 import requests
 
 from tools.ci.arcs import ARCS
-from tools.quill._arcs import ARC_FIELD
+from tools.quill._arcs import ARC_FIELD, card_arcs, label_corrections
 from tools.quill._github import (
     APP_DIR,
     CredentialsError,
     GitHub,
     GitHubError,
+    TrackerError,
     app_credentials,
     app_installation,
     app_jwt,
@@ -695,6 +698,24 @@ def check_issue_fields(github: GitHub, report: Report) -> None:
                   f"{', '.join(map(repr, ISSUE_FIELDS))}")
 
 
+def check_card_arcs(github: GitHub, report: Report) -> None:
+    """Check every card's arc labels against its Arc (ruling ``balance:R-BAL354``, views_spec
+    s.6) over the read ``quill sync``'s label pass makes (:func:`_arcs.card_arcs`): each card
+    the producer that pass puts them back by would change (:func:`_arcs.label_corrections`) is
+    a difference.  Sync puts each back, but a card it reports instead, a card but a task
+    holding no Arc and a task holding one (``_relabel.arc_report``)."""
+    cards = card_arcs(github, ORG, REPO)
+    differ = 0
+    for card in cards:
+        add, remove = label_corrections(card.labels, card.arc)
+        if add or remove:
+            differ += 1
+            report.differs(f"card {REPO}#{card.number}'s arc labels do not display its Arc "
+                           f"{card.arc!r}: it lacks {list(add)} and holds {list(remove)}")
+    if not differ:
+        report.ok(f"every card's arc labels display its Arc ({len(cards)} cards)")
+
+
 def _project(github: GitHub, project_id: str) -> dict:
     """One board, read by its id (a fresh board can lag in the organization's list)."""
     return github.graphql(_PROJECT, id=project_id)["node"]
@@ -924,11 +945,12 @@ def main(argv: list[str] | None = None) -> int:
         repository = check_repository(github, apply, report)
         if repository is not None:
             check_labels(github, apply, report)
+            check_card_arcs(github, report)
         check_issue_types(github, report)
         check_issue_fields(github, report)
         check_board(github, repository, apply, report)
         check_app(report)
-    except (GitHubError, requests.RequestException) as error:
+    except (GitHubError, TrackerError, requests.RequestException) as error:
         print("\n".join(report.lines))
         print(f"failed: {described(error)}", file=sys.stderr)
         return 2

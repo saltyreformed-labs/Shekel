@@ -63,14 +63,17 @@ from functools import partial
 from typing import overload
 from urllib.parse import quote
 
-from tools.quill import _queries
-from tools.quill._arcs import ARC_FIELD, arc_answered, arc_labels, arc_of
+from tools.quill import _arcs, _queries
+from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_labels, arc_of
 from tools.quill._draft import Draft
 from tools.quill._github import (
     GitHub,
+    TrackerError,
     app_credentials,
     app_installation,
     app_jwt,
+    connection_nodes,
+    counted,
     installation_token,
     paged,
     reading,
@@ -115,10 +118,6 @@ BOARD_TOP = ("mutation($p: ID!, $i: ID!) { updateProjectV2ItemPosition(input: "
              "{projectId: $p, itemId: $i}) { clientMutationId } }")
 BOARD_AFTER = ("mutation($p: ID!, $i: ID!, $a: ID!) { updateProjectV2ItemPosition(input: "
                "{projectId: $p, itemId: $i, afterId: $a}) { clientMutationId } }")
-
-
-class TrackerError(RuntimeError):
-    """The tracker refused a write or answered something quill cannot read."""
 
 
 @dataclass(frozen=True)
@@ -224,32 +223,6 @@ class Comment:
     body: str
 
 
-def connection_nodes(connection: dict | None, what: str, number: int) -> list:
-    """A connection's nodes, refusing one GitHub answered as null, which would read as none,
-    and one holding a null node, which no fact can be read from: GitHub's schema lets it
-    answer an issue's ``labels`` so, any connection's ``nodes``, and each node in them
-    (``[Label]``, ``[Issue]``, ``[IssueTimelineItems]``; read 2026-10-18)."""
-    if connection is None or connection["nodes"] is None:
-        raise TrackerError(f"GitHub answered plan#{number}'s {what} as null, so the read "
-                           "holds none of them")
-    if None in connection["nodes"]:
-        raise TrackerError(f"GitHub answered one of plan#{number}'s {what} as null, so the "
-                           "read cannot say what it is")
-    return connection["nodes"]
-
-
-def _counted(connection: dict | None, what: str, number: int) -> list:
-    """A connection's nodes (:func:`connection_nodes`), refusing one GitHub truncated (a silent
-    partial read)."""
-    nodes = connection_nodes(connection, what, number)
-    if connection["totalCount"] > len(nodes):
-        raise TrackerError(
-            f"plan#{number} has {connection['totalCount']} {what}; the read holds "
-            f"{len(nodes)}"
-        )
-    return nodes
-
-
 def listing(github: GitHub, query: str, what: str) -> list[dict]:
     """Every issue node a listing ``query`` holds (:func:`_queries.open_cards`,
     :func:`_queries.marked_cards`, :func:`_queries.export_cards`), read page by page
@@ -334,9 +307,9 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
     last_actor = ((events[-1].get("actor") or {}).get("login")) if events else None
     is_open = node["state"] == "OPEN"
     links = [(node["parent"], "parent")] if node["parent"] else []
-    links += [(child, "sub-issue") for child in _counted(node["subIssues"], "sub-issues", number)]
+    links += [(child, "sub-issue") for child in counted(node["subIssues"], "sub-issues", number)]
     links += [(blocker, "blocker")
-              for blocker in _counted(node["blockedBy"], "blockers", number)]
+              for blocker in counted(node["blockedBy"], "blockers", number)]
     inside = [(link, what) for link, what in links if _is_tracker_issue(link, place)]
     facts = {
         "number": number,
@@ -344,8 +317,8 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
         "node_id": node["id"],
         "title": node["title"],
         "kind": (node["issueType"] or {}).get("name"),
-        "labels": tuple(label["name"] for label in _counted(node["labels"], "labels", number)),
-        "arc": arc_of(_counted(node["issueFieldValues"], "issue field values", number)),
+        "labels": tuple(label["name"] for label in counted(node["labels"], "labels", number)),
+        "arc": arc_of(counted(node["issueFieldValues"], "issue field values", number)),
         "is_open": is_open,
         "state_reason": node["stateReason"],
         "parent": next((link["number"] for link, what in inside if what == "parent"), None),
@@ -362,7 +335,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
     if board_id is None:
         return BareCard(**facts)
     items = [
-        item["id"] for item in _counted(node["projectItems"], "board items", number)
+        item["id"] for item in counted(node["projectItems"], "board items", number)
         if item["project"]["id"] == board_id
     ]
     return Card(**facts, board_item=items[0] if items else None)
@@ -536,7 +509,7 @@ class CardReader:
             raise TrackerError(f"plan#{number} could not be read: GitHub answered it as null")
         return tuple(
             Child(node["number"], (node["issueType"] or {}).get("name"), node["state"] == "OPEN")
-            for node in _counted(issue["blocking"], "cards it blocks", number)
+            for node in counted(issue["blocking"], "cards it blocks", number)
             if _is_tracker_issue(node, self.place))
 
     def _lookup[T](self, numbers: Iterable[int], card_fields: str,
@@ -571,8 +544,10 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     """A tracker as the App sees it: its cards, each with its board item, and its
     :class:`Board`.
 
-    Pylint: ``too-many-public-methods`` (22/20, measured at plan#1772, which moved the read
-    of what a card blocks down to :class:`CardReader`, where CI's landing check reads it) --
+    Pylint: ``too-many-public-methods`` (24/20, measured at plan#1811, whose arc-label pass
+    reads every card's labels and Arc and puts its arc labels back; 22 at plan#1772, which
+    moved the read of what a card blocks down to :class:`CardReader`, where CI's landing
+    check reads it) --
     ``connect``, then **one method per read or write quill makes of the tracker**
     (most one request; this module is the one place it speaks to GitHub), the
     board's own writes already apart in :class:`Board`: among them the filing
@@ -648,6 +623,12 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         number: each a filing quill began; whether it is still unfinished is
         ``_state.filing_unfinished``'s answer (one dropped while marked is not)."""
         return self._listing(_queries.marked_cards(self.place), "the marked cards")
+
+    def card_arcs(self) -> list[ArcCard]:
+        """Every card, open and closed, with its type, title, labels and Arc and nothing more
+        (:func:`_arcs.card_arcs`, the one read of them): ``quill sync``'s label pass reads it
+        (:mod:`_relabel`)."""
+        return _arcs.card_arcs(self.github, self.place.owner, self.place.name)
 
     def milestones_of(self, numbers: Iterable[int]) -> dict[int, int | None]:
         """The number of the milestone each card numbered ``numbers`` is in, None for none;
@@ -834,6 +815,31 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     def unmark(self, number: int) -> None:
         """Remove a card's :data:`setup_tracker.FILING` mark: its filing's last write."""
         self.github.rest("DELETE", f"{self.place.path}/issues/{number}/labels/{FILING}")
+
+    def relabel(self, number: int, add: Iterable[str], remove: Iterable[str]) -> None:
+        """Add the labels ``add`` to a card and remove the labels ``remove`` from it, its other
+        labels left as they are: an add sends only what it names, and a removal one label
+        (GitHub's REST description; never its "set labels", which replaces them all and so
+        would undo a label a person added since the card was read).  ``quill sync``'s put-back
+        of a card's arc labels (:mod:`_relabel`), read back from GitHub's last answer, which
+        is the card's labels after it (measured on the filing mark's removal,
+        ``recorded/tracker.json``).  A removal of a label the card no longer carries is
+        answered 404 "Label does not exist" (:meth:`unmark`), and fails the run.
+
+        Raises:
+            TrackerError: When that answer lacks a label added or holds one removed.
+        """
+        add, remove, held = tuple(add), tuple(remove), []
+        if add:
+            held = self.github.rest("POST", f"{self.place.path}/issues/{number}/labels",
+                                    {"labels": list(add)})
+        for label in remove:
+            held = self.github.rest(
+                "DELETE", f"{self.place.path}/issues/{number}/labels/{quote(label, safe='')}")
+        names = {label["name"] for label in held}
+        if [label for label in add if label not in names] or names.intersection(remove):
+            raise TrackerError(f"plan#{number} holds the labels {sorted(names)} after adding "
+                               f"{list(add)} and removing {list(remove)}: fix it by hand")
 
     def add_child(self, parent: int, child: Card) -> None:
         """Make ``child`` a sub-issue of ``parent``."""

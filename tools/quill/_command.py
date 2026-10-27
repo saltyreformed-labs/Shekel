@@ -16,6 +16,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Protocol
 
+from tools.quill._arcs import ArcCard
 from tools.quill._state import filing_unfinished, missing
 from tools.quill._tracker import BareCard, Card, Tracker, TrackerError
 from tools.quill.setup_tracker import IN_ORDER, TASK
@@ -96,9 +97,10 @@ def _read(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
-def _label(card: Card) -> str:
+def _label(card: BareCard | ArcCard) -> str:
     """``plan#7 [step, balance] title``: its arc is its Arc's (rulings ``balance:R-BAL349``,
-    ``R-BAL354``), never its arc label's, which is display."""
+    ``R-BAL354``), never its arc label's, which is display.  ``card`` is any card read, the
+    every-card listing's too (:func:`_arcs.card_arcs`)."""
     return f"plan#{card.number} [{card.kind or 'no type'}, {card.arc or 'no arc'}] {card.title}"
 
 

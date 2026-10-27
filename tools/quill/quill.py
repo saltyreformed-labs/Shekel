@@ -98,7 +98,7 @@ import requests
 
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
-from tools.quill import _findings, _git, _tasks
+from tools.quill import _findings, _git, _relabel, _tasks
 from tools.quill._arcs import other_labels
 from tools.quill._command import (
     Refused,
@@ -709,10 +709,12 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     """Write each step's, finding's and task's open or closed state from git (display only), then
     undo each split a leaf closed while still being filed is linked under (R-BAL205,
     :func:`_undo_splits`): after every state write and every REPORT and HISTORY line, so a
-    failed undo costs none of them; run again, it finishes the undo.  Last, put on the board
-    each task whose step is on it and that is not (ruling plan#1842,
-    :func:`_tasks.put_on_board`), display of the plan, so a failed add costs nothing above it;
-    run again, it adds the tasks still off.
+    failed undo costs none of them; run again, it finishes the undo.  Then put each card's arc
+    labels back to display its Arc, over a read of every card (R-BAL354,
+    :func:`_relabel.put_back`), reporting each card whose Arc no label can fix.  Last, put on
+    the board each task whose step is on it and that is not (ruling plan#1842,
+    :func:`_tasks.put_on_board`).  Both are display of the plan, so a failed write in either
+    costs nothing above it; run again, it makes what is still to make.
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold
@@ -744,8 +746,9 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     for line in history:
         print(f"HISTORY: {line}")
     _undo_splits(tracker, cards, shipped, changes, args.dry_run)
+    reports = _relabel.put_back(tracker, args.dry_run)
     _tasks.put_on_board(tracker, cards, args.dry_run)
-    return 1 if changes.reports else 0
+    return 1 if changes.reports or reports else 0
 
 
 # -- spec-history, spec-revert ------------------------------------------------------

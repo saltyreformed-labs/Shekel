@@ -12,11 +12,12 @@ system ``python`` lacks quill's packages).  It makes the worktree ``shekel-NAME`
 main checkout (``~/projects/shekel-NAME``), DETACHED at the ``origin/dev`` its one fetch has
 just brought, so it makes no branch and writes no upstream into the configuration every
 worktree shares (``git worktree add -b`` from a remote-tracking branch writes one); links
-the worktree's ``.venv`` to the main checkout's, as every lane's is (a session's hooks put
-its own worktree's ``.venv/bin`` first on ``PATH``, ``scripts/hooks/_hooklib.sh``); and
-starts ``claude`` there in place of this process, with that venv active (:func:`start`), so
-the session's ``python`` and its commits' pre-commit hooks run the pinned packages, and with
-a first prompt that claims the step named, or the one ``quill next`` hands out.  ``quill
+the worktree's ``.venv`` to the main checkout's, as every lane's is (so a ``.venv/bin/...``
+command typed in the worktree runs the pinned packages; the session's hooks find the main
+checkout's venv for themselves, ``scripts/hooks/_hooklib.sh``); and starts ``claude`` there
+in place of this process, with that venv active (:func:`start`), so the session's ``python``
+and its commits' pre-commit hooks run the pinned packages, and with a first prompt that
+claims the step named, or the one ``quill next`` hands out.  ``quill
 claim`` then makes the card's branch and checks it out in the lane's worktree.  A path that
 is already there is refused before anything is fetched or made.
 

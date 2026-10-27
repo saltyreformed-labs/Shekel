@@ -25,12 +25,16 @@
 #
 # **$PWD FIRST, and CLAUDE_PROJECT_DIR only as a fallback.** That order is the
 # reverse of what stood here, and the reversal is MEASURED rather than tidy.
-# ``CLAUDE_PROJECT_DIR`` resolves to the PRIMARY checkout whatever worktree the
-# session is actually in -- ``session-start.sh`` has said exactly that in its
-# own header since it was written, and reads ``$PWD`` for this reason. It was
-# never FIXED -- one commit, and it was born reading ``$PWD`` -- so the
-# knowledge lived in one hook from the start and was never carried into this
-# shared helper, and every other hook inherited the bug:
+# ``CLAUDE_PROJECT_DIR`` is not the tree a session edits. Claude Code's hooks
+# reference (read 2026-10-27) calls it "the project root where the session
+# started", and says it "stays put" when the session then enters a worktree,
+# while the hook's ``cwd`` follows the session. Both measurements agree:
+# sessions working in worktrees on 2026-08-29 and 2026-09-04 got the PRIMARY
+# checkout, and a session LAUNCHED in a worktree on 2026-10-26 (Claude Code
+# 2.1.310) got that worktree. Either way the tree being edited is the one the
+# hook runs in. ``session-start.sh`` read ``$PWD`` from
+# its first commit, and that knowledge was never carried into this shared
+# helper, so every other hook inherited the bug:
 #
 #   * ``hook_target_relpath`` normalized each edited file against the primary
 #     root. A worktree file is not under it, so the function returned an
@@ -68,31 +72,55 @@ hook_repo_root() {
     printf '%s\n' "${root%/}"
 }
 
-# Echo the checkout that holds the TOOLCHAIN. Deliberately NOT
-# hook_repo_root: "which tree is being edited" and "where does pylint live" are
-# two questions, and one function answering both is what made the worktree fix
-# above a regression before review caught it (2026-09-04).
+# Echo the MAIN worktree of the repository that holds directory $1, or
+# nothing outside a repository: the one reading of it every hook uses.
+# `git worktree list` names the main worktree FIRST from inside any worktree
+# of the repository; the porcelain form keeps a path with spaces whole.
+hook_main_checkout() {
+    # shellcheck disable=SC2312 # a failing git (not a repository) prints nothing, and every caller tests for the empty value.
+    git -C "$1" worktree list --porcelain 2>/dev/null \
+        | sed -n '1s/^worktree //p'
+}
+
+# The directory this library sits in: inside a checkout of this repository
+# whatever directory the session is working in, since every hook sources it by
+# its own path.
+_hooklib_dir="${BASH_SOURCE[0]%/*}"
+
+# Echo the checkout that holds the TOOLCHAIN: the repository's MAIN worktree.
+# Deliberately NOT hook_repo_root: "which tree is being edited" and "where
+# does pylint live" are two questions, and one function answering both is
+# what made the worktree fix above a regression before review caught it
+# (2026-09-04).
 #
-# **Worktrees borrow the PRIMARY checkout's venv and have none of their own.**
+# **Worktrees borrow the main checkout's venv and have none of their own.**
 # Measured 2026-09-04 across the eight worktrees on this machine: a real .venv
-# in the primary, a SYMLINK to it in one worktree, and nothing in the other six
-# -- and no pylint anywhere else on the box (/usr/bin, /usr/local/bin and
-# ~/.local/bin all lack it). .gitignore ignores .venv/, so a worktree never
-# acquires one by checkout. A symlinked .venv is borrowing the primary's too,
-# not an exception to the convention.
+# in the primary, a SYMLINK to it in one worktree, and nothing in the other
+# six. .gitignore ignores .venv, so a worktree never acquires one by checkout;
+# `tools.quill.lane` links one into each lane it makes (plan#1824). A linked
+# .venv borrows the main checkout's too; it is not an exception.
 #
-# So this stays anchored to CLAUDE_PROJECT_DIR. Pointing it at the session's
-# own worktree leaves _hook_venv_bin naming a directory that does not exist,
-# the guard below skips the PATH prefix, and `pylint` becomes unresolvable --
-# at which point the two gates that invoke it, the Python per-edit gate
-# (post-edit-python.sh) and the Stop floor (stop-check.sh), capture "command
-# not found" into their output variable, find it non-empty, and hard-block
-# while blaming a financial-correctness rule (the template, deps and
-# migration hooks never touch the venv). That is exactly the
-# infrastructure-error failure the paragraph below records happening once
-# already.
+# **So the answer is git's, never the launch directory's** (ruling plan#1848,
+# finding plan#1849). Until 2026-10-27 this answered CLAUDE_PROJECT_DIR, on
+# the belief that it is always the primary checkout. It is the directory a
+# session was launched in (above), so a session launched in a worktree with
+# no .venv link got no PATH prefix below, and from a terminal without the venv
+# the two gates that invoke pylint, the Python per-edit gate
+# (post-edit-python.sh) and the Stop floor (stop-check.sh), ran whatever
+# pylint PATH held. Measured 2026-10-27: the system's unpinned
+# /usr/bin/pylint crashed (F0002, an astroid mismatch) on an untouched
+# app/__init__.py, and the per-edit gate blocked the edit while blaming a
+# code rule. (On 2026-09-04 no pylint existed outside the venv, so the same
+# miss would have read "command not found", with the same block.)
+#
+# Git is asked from this library's own directory, not the session's: a
+# session whose working directory is outside any repository still sources the
+# library from a checkout. Only a library outside any checkout (a copy with no
+# .git) falls back to the old answer, and there is no venv beside it to find.
 hook_toolchain_root() {
-    local root="${CLAUDE_PROJECT_DIR:-$PWD}"
+    local root
+    root="$(hook_main_checkout "${_hooklib_dir}")"
+    [ -n "$root" ] || root="${CLAUDE_PROJECT_DIR:-$PWD}"
     printf '%s\n' "${root%/}"
 }
 

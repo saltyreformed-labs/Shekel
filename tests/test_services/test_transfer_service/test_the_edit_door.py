@@ -398,8 +398,8 @@ class TestUpdateTransfer:
                 # The ASSERTION is withdrawn ...
                 assert record.settled_on is None
                 assert record.reconciled_by_id is None
-                # ... and WHAT MOVED is kept, for BOTH sides, on the transfer
-                # they share (Invariant 3).
+                # ... and WHAT MOVED is kept, for BOTH sides, once, on the
+                # transfer they share.
                 assert (xfer.settled_figure, xfer.settled_figure_source_id) == (
                     Decimal("100"), typed_id,
                 )

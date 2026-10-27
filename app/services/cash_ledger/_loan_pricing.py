@@ -18,8 +18,9 @@ that SUPERSEDED a loan-payment shadow's stored figure on every balance and
 display surface -- together with the scenario-wide ``{transfer_id: config}``
 map that decided which shadows it fired for.  Ruling **R-FI** deletes a
 read-time repair by making the state it repairs unrepresentable, and that is
-what a shadow declaring ``PARENT_TRANSFER`` with no stored figure does: there
-is no stale copy left to supersede, so the override has nothing to find and
+what a shadow declaring ``PARENT_TRANSFER`` with no stored figure did (plan
+step ``balance:X-bi-6-4d-2`` deleted the shadows): there was no stale copy
+left to supersede, so the override had nothing to find and
 :func:`._amount_source.resolve_transfer_amount` prices the row directly -- at
 the PARENT since plan step X-au-f-2 (ruling **R-BAL10**), which is why nothing
 below this line names a :class:`~app.models.transaction.Transaction` any more.

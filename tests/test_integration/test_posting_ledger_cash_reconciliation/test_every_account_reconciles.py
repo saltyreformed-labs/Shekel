@@ -58,7 +58,6 @@ def _assert_every_settled_transaction_posts(user_id: int) -> None:
         .join(PayPeriod, Transaction.pay_period_id == PayPeriod.id)
         .filter(
             PayPeriod.user_id == user_id,
-            Transaction.transfer_id.is_(None),
             Transaction.is_deleted.is_(False),
             Transaction.status_id.in_(settled_status_ids()),
         )

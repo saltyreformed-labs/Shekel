@@ -126,7 +126,7 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # from (plan step X-au-b, ruling R-FI).  FIVE names, one ruling, because
     # they are one question at two tiers: ``amount_basis`` resolves the live
     # producers ONCE for a row set, the two ``*amount_rule`` entries say
-    # which of the five sources prices a row of each TABLE (the transfer
+    # which of the four sources prices a row of each TABLE (the transfer
     # classifier arrived with rule 4 at plan step X-au-f-2, ruling R-BAL10),
     # and the two ``resolve_*_amount`` entries answer what one
     # row's AMOUNT COLUMN holds or would hold.  Non-producers on exactly the
@@ -381,8 +381,9 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # escrow" became "that installment's escrow", because the derivation
     # resolves it on the shadow's own due date (ruling D5), never on a
     # current one.  ``live_cash`` was the non-derive arm beside it and is
-    # gone; a shadow DECLARES ``parent_transfer`` now and the amount model
-    # answers what the override used to.
+    # gone; a shadow DECLARED ``parent_transfer`` from then and the amount
+    # model answered what the override used to, until plan step
+    # ``balance:X-bi-6-4d-2`` deleted the shadows.
     "derive_cash",
     # The named constructor for the derivation.  Ingredients; it resolves
     # nothing when it is called.  Word for word from the

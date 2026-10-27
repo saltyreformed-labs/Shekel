@@ -763,7 +763,7 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     # user_trueup LoanAnchorEvent) survive the wipe, and
     # ``resync_user_loan_postings`` below re-posts them onto the rebuilt
     # schedule in this same transaction (review M2 / R7).
-    settled = pay_period_gates.settled_transaction_count(user_id)
+    settled = pay_period_gates.settled_item_count(user_id)
     if settled > 0:
         raise PayPeriodResetBlocked(settled_count=settled)
     # The second gate (plan step credit_card:CC-5-4a-4, ruling R-CC65): a row
@@ -771,7 +771,7 @@ def reset_pay_periods(user_id, new_start_date, num_periods, rhythm):
     # below would take with it -- and the movement's key refuses
     # (fk_transaction_entries_transaction_id for a row's, the two side keys
     # fk_transaction_entries_expense_side / _income_side for a transfer's).
-    holding = pay_period_gates.movement_holding_row_count(user_id)
+    holding = pay_period_gates.movement_holding_item_count(user_id)
     if holding > 0:
         raise PayPeriodResetBlocked(holding_count=holding)
 

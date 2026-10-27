@@ -109,8 +109,13 @@ def _is_bare_or_minted(row):
     grid-made one-off does on both sides (3 on the 2026-09-18 restore) -- so
     the key set is the same on both sides and, keyed by row id, the diff sees
     the bare rows as MOVED links and the pre-existing one-offs as unmoved.
+
+    A transfer's shadow, which named its transfer, was excluded here too
+    until plan step ``balance:X-bi-6-5`` dropped that column (plan step
+    ``balance:X-bi-6-4d-2`` having deleted the shadows); a before-side run
+    on a checkout that still holds shadows must exclude them again.
     """
-    if row.transfer_id is not None or row.credit_payback_for_id is not None:
+    if row.credit_payback_for_id is not None:
         return False
     return row.template_id is None or not row.recurs
 

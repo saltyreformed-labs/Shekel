@@ -7,6 +7,7 @@ import re
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 
 from app import ref_cache
 from app.enums import AmountSourceEnum
@@ -121,6 +122,7 @@ class TestTheDowngradeRefusesToInventAFigure:
             _MIGRATION.refuse_rows_without_a_figure(db.session.connection())
 
 
+@pytest.mark.usefixtures("below_the_transfer_column_drop")
 class TestTheShadowCutoverDowngradeRefusesToInventAFigure:
     """Migration ``c9a4e7b21d58``'s only non-DDL logic, driven directly.
 
@@ -145,6 +147,10 @@ class TestTheShadowCutoverDowngradeRefusesToInventAFigure:
     two, each DECLARED derived from its parent: the population this guard
     probes, at the revision it ran on.  Setup only: no assertion changed, and
     the accepting case gains one, its precondition that both are declared.
+    Below that again, each case first steps down through ``c956c1d83108``
+    (the fixture), which puts back the column a shadow names its transfer by
+    and the ``parent_transfer`` source, read by name since that revision
+    deleted its enum member.
     """
 
     def test_it_passes_when_every_parent_states_a_figure(
@@ -165,9 +171,9 @@ class TestTheShadowCutoverDowngradeRefusesToInventAFigure:
                 td, amount_ownership=AmountOwnership.own(Decimal("100.00")),
             )
             run_migration_callable(_TWINS_DELETED.downgrade, db.session)
-            parent_transfer = ref_cache.amount_source_id(
-                AmountSourceEnum.PARENT_TRANSFER,
-            )
+            parent_transfer = db.session.execute(text(
+                "SELECT id FROM ref.amount_sources WHERE name = 'parent_transfer'"
+            )).scalar_one()
             assert [leg.amount_source_id for leg in _legs_of(xfer)] == [
                 parent_transfer, parent_transfer,
             ]

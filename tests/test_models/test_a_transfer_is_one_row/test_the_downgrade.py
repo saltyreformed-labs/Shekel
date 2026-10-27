@@ -39,6 +39,11 @@ from ._helpers import (
 )
 
 
+#: Every case runs below ``c956c1d83108``, where the transfer column stands (the
+#: package docstring).
+pytestmark = pytest.mark.usefixtures("below_the_transfer_column_drop")
+
+
 def _side_record(transfer_id, *, income):
     """Return the side's payment record's day, basis and link, or ``None``."""
     link = "income_transfer_id" if income else "expense_transfer_id"
@@ -488,7 +493,10 @@ class TestTheDowngrade:
         ``scripts/init_database.py`` never runs the upgrade, so the copy table
         is missing; the downgrade reads it as empty and finishes (ruling
         **R-BAL261**: the undo always finishes), building two twins for every
-        transfer.  Simulated by dropping the copy at head.
+        transfer.  Every database meets this revision with no copy now:
+        ``c956c1d83108`` drops it (ruling plan#1851) and its downgrade, which
+        the package's fixture runs first, does not re-create it.  The premise
+        is asserted rather than built.
         """
         with app.app_context():
             savings, _van = _accounts(seed_user)
@@ -497,8 +505,9 @@ class TestTheDowngrade:
                 seed_periods[0], amount=Decimal("35.00"),
             )
             db.session.commit()
-            db.session.execute(text("DROP TABLE system.transfer_twin_purge"))
-            db.session.commit()
+            assert db.session.execute(text(
+                "SELECT to_regclass('system.transfer_twin_purge') IS NULL"
+            )).scalar_one() is True
             _downgrade()
 
             assert [

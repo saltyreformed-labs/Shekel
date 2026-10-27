@@ -34,6 +34,11 @@ from ._helpers import (
 )
 
 
+#: Every case runs below ``c956c1d83108``, where the transfer column stands (the
+#: package docstring).
+pytestmark = pytest.mark.usefixtures("below_the_transfer_column_drop")
+
+
 def _figures(transfer_id):
     """Each twin's ``(estimated_amount, amount_source_id)``, from-side first."""
     return [

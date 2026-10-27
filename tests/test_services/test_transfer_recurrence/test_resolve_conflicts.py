@@ -522,8 +522,9 @@ class TestResolveConflictsServiceRouting:
 
     # ``test_all_five_invariants_hold_after_resolution`` was deleted at plan step
     # ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**): its one assertion read the
-    # transfer's twin rows, which the database refuses to store
-    # (``ck_transactions_names_no_transfer``), so it read none (measured 0);
+    # transfer's twin rows, which the database refused to store
+    # (``ck_transactions_names_no_transfer``, until plan step balance:X-bi-6-5
+    # dropped the column), so it read none (measured 0);
     # its act is ``test_update_action_routes_amount_through_service``'s.
 
     def test_multiple_transfers_each_routed_through_service(

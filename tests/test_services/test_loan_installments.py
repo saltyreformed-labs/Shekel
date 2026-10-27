@@ -50,7 +50,6 @@ from app.services.transfer_service import (
 )
 from tests._test_helpers import (
     an_entered_day,
-    assert_a_twin_is_refused,
     create_loan_account,
     generate_transfer_of,
     loan_params_for,
@@ -401,7 +400,7 @@ class TestPaymentInstallments:
     def test_a_projected_row_holding_a_stale_settle_day_reports_none(
         self, app, db, seed_user, seed_periods,
     ):
-        """A Projected payment is NOT confirmed, and the row a stale day sat on is refused.
+        """A Projected payment is NOT confirmed: it is its parent's leg, carrying no day.
 
         Only a bypass of the status seam could produce that row: a settle DAY
         on the payment's loan-side shadow while it was Projected, which no
@@ -417,11 +416,11 @@ class TestPaymentInstallments:
         **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
         class 2): a transfer is one row since that step (ruling **R-BAL258**),
         so the row the bypass wrote the day onto -- the loan-side twin --
-        cannot be stored: ``ck_transactions_names_no_transfer`` refuses it at
-        the write with or without the settle-day pair it carried (measured
-        both ways), so it is staged as
-        :func:`~tests._test_helpers.assert_a_twin_is_refused` builds it and
-        that refusal asserted.  A side's day lives on its payment record since
+        could not be stored, and the case asserted
+        ``ck_transactions_names_no_transfer`` refusing it until plan step
+        balance:X-bi-6-5 dropped the column the twin named its transfer by:
+        no statement can write it now, and that refusal went with the column
+        (ruling plan#1850).  A side's day lives on its payment record since
         plan step balance:X-bi-6-4d-2, where a DATED record under a Projected
         transfer is money that moved (ruling **R-BAL140**) and the
         status-band rule refuses it at commit: a different state, graded in
@@ -438,10 +437,6 @@ class TestPaymentInstallments:
             )
             db.session.commit()
             transfer_id = transfer.id
-            # The bypass's row, the loan-side twin, cannot be stored.
-            assert_a_twin_is_refused(
-                db.session, db.session.get(Transfer, transfer_id), is_income=True,
-            )
 
             installments = payment_installments(
                 loan.id, seed_user["scenario"].id, loan_params_for(db.session, loan.id),

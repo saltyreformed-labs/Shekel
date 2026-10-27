@@ -512,15 +512,15 @@ class TestAccessDeniedLogging:
 # (``is_transfer_shadow``) sits in ``get_accessible_transaction``: after both
 # access branches, so the owner's own shadow logged ``resource_not_found`` at
 # INFO with its transfer named, and a stranger's probe of one logged
-# ``access_denied_cross_user`` at WARNING, first.  No shadow can exist now
-# (the database refuses one, ``ck_transactions_names_no_transfer``, ruling
-# R-BAL258, pinned once by
+# ``access_denied_cross_user`` at WARNING, first.  No shadow can exist now:
+# no transaction has a transfer column since plan step X-bi-6-5, and
+# ``ck_transactions_names_no_transfer`` refused a row naming one until then
+# (ruling R-BAL258, pinned once, below that drop, by
 # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
-# ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
-# and no app code builds one), so the fence is reachable by no row and goes
-# with the column at plan step X-bi-6-5.  The order its stranger's case graded
-# is graded below, on the row the shared predicate can still refuse: a DELETED
-# one, probed by a stranger and by a companion.
+# ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``).
+# The fence was reachable by no row, and it went at that step.  The order its
+# stranger's case graded is graded below, on the row the shared predicate can
+# still refuse: a DELETED one, probed by a stranger and by a companion.
 
 
 class TestAProbeOfAnotherOwnersDeletedRowIsADenial:

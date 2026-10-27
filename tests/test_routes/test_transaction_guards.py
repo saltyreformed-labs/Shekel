@@ -103,12 +103,12 @@ def _create_regular_txn(seed_user, seed_periods_today):
 # PATCHes, delete, Mark Paid, Mark Credit and its undo, Cancel -- on a
 # transfer's SHADOW row and asserted a 404 that moved nothing: plan step
 # X-bi-6-1's interval fence, ``auth_helpers.is_transfer_shadow`` behind both
-# ownership doors.  No shadow can exist now: the database refuses one
-# (``ck_transactions_names_no_transfer``, ruling R-BAL258, pinned once by
-# ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
-# ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``)
-# and no app code builds one, so no request reaches the fence, which goes with
-# the column at plan step X-bi-6-5.  A transfer's leg doors are the
+# ownership doors.  No shadow can exist now: no transaction has a transfer
+# column since plan step X-bi-6-5, and ``ck_transactions_names_no_transfer``
+# refused a row naming one until then (ruling R-BAL258, pinned once, below
+# that drop, by ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
+# ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``).
+# No request reached the fence, and it went at that step.  A transfer's leg doors are the
 # transfer's own, graded in ``test_transfers/test_grid_cells.py``
 # (``TestLegContextResponse``).
 

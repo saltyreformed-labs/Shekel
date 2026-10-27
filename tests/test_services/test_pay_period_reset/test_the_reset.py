@@ -301,8 +301,9 @@ class TestResetHappyPath:
         helper also counted two shadows per transfer until plan step
         ``balance:X-bi-6-4d-2``, and the expense count carried a
         ``transfer_id=None`` term that kept those shadows out of it; no row
-        names a transfer since (``ck_transactions_names_no_transfer``), so the
-        term changed no count and is gone.
+        names a transfer since (``ck_transactions_names_no_transfer`` refused
+        one until plan step balance:X-bi-6-5 dropped the column), so the term
+        changed no count and is gone.
         """
         with app.app_context():
             user_id = seed_user["user"].id

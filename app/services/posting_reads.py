@@ -348,7 +348,6 @@ def posted_purchase_effect(account_id: int, scenario_id: int) -> Decimal:
         .filter(
             TransactionEntry.account_id == account_id,
             Transaction.scenario_id == scenario_id,
-            Transaction.transfer_id.is_(None),
             Transaction.is_deleted.is_(False),
             Transaction.status_id.notin_(balance_excluded_status_ids()),
             TransactionEntry.settled_on.isnot(None),

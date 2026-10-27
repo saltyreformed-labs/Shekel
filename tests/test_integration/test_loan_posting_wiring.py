@@ -526,7 +526,7 @@ class TestNonLoanTransferIgnored:
 
         classify_account(Savings) is not AMORTIZING, so the loan wiring
         short-circuits: no loan-payment-sourced journal entry is booked under
-        the transfer's income shadow.
+        the transfer's to-side.
 
         **Read at the savings side's key and over the owner's entries since
         plan step ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 1):

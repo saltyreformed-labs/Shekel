@@ -35,7 +35,7 @@ from app.services import (
 )
 from app.services.investment_projection import (
     AccountPayrollFeed,
-    ShadowContributions,
+    TransferContributions,
     build_contribution_timeline,
 )
 from app.services.projection_inputs import (
@@ -44,7 +44,7 @@ from app.services.projection_inputs import (
     load_payroll,
 )
 from app.services.recorded_contributions import (
-    load_shadow_income_contributions_for_accounts,
+    load_transfer_contributions_for_accounts,
 )
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import DerivedPeriod, PeriodWindow
@@ -156,7 +156,7 @@ class ProjectionBatch:
             candidate horizon a retire-later probe asks.  The ``/savings``
             horizon band reads this build; the retirement picture reads its
             own per-point build over :attr:`payroll` and never this one.
-        contributions: The priced shadow-income contributions across all
+        contributions: The priced transfer contributions across all
             projected accounts (filtered per account in the loop).
         params_by_account: :class:`InvestmentParams` keyed by account ID
             (accounts with no params row are absent) -- one ``IN`` query
@@ -195,7 +195,7 @@ class ProjectionBatch:
 
     payroll: PayrollWiring
     feeds: dict[int, AccountPayrollFeed]
-    contributions: ShadowContributions
+    contributions: TransferContributions
     params_by_account: dict[int, InvestmentParams]
     balance_map: dict[int, Decimal]
     seed_memo: (
@@ -459,7 +459,7 @@ def load_projection_batch(
 ) -> ProjectionBatch:
     """Load the per-request data shared across all account projections.
 
-    Runs the deduction, shadow-income, investment-params, salary-gross,
+    Runs the deduction, transfer-contribution, investment-params, salary-gross,
     and entries-aware balance queries a single time (F-22 / Commit 18 for
     the shared batch loaders) so the per-account loop does no repeated
     I/O.  Everything loaded here is date-independent, so the P2b probes
@@ -489,7 +489,7 @@ def load_projection_batch(
     # figure (plan steps X-au-c2 and X-au-c2b).  That basis is the PASS's,
     # resolved once at the door and shared by every producer in the render,
     # rather than a second one built here as it was until plan step C2-f2d-1.
-    contributions = load_shadow_income_contributions_for_accounts(
+    contributions = load_transfer_contributions_for_accounts(
         ctx.balance_ctx.amounts(), account_ids, period_ids,
     )
 
@@ -888,7 +888,7 @@ def _project_one_account(
     # payroll deduction currently prices at $0.00; telling either owner to
     # link a feed would be wrong.  Each half is read off the flag its loader
     # carries beside the amounts for exactly this reader
-    # (:attr:`ShadowContributions.linked_account_ids` and
+    # (:attr:`TransferContributions.linked_account_ids` and
     # :attr:`AccountPayrollFeed.is_payroll_linked`), because pricing destroys
     # the presence -- an adversarial review caught this flipping when the
     # status screen moved to the boundary, and plan step salary:R14-b would

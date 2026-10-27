@@ -964,9 +964,9 @@ document.addEventListener('keydown', function(e) {
       case 'C': {
         // C marks the focused cell credit.  The template stamps
         // data-can-credit with the same predicate as the card's
-        // Credit button (expense, projected, not a transfer shadow,
-        // not an envelope), so this cannot fire where the button
-        // would not render.
+        // Credit button (expense, projected, a row rather than a
+        // transfer leg, not an envelope), so this cannot fire where
+        // the button would not render.
         //
         // Ctrl+C / Cmd+C is the OS copy shortcut: bail before any
         // preventDefault so the browser still copies and no

@@ -190,11 +190,11 @@ def query_settled_expenses(
     parent), so the chain this query would have had to load was
     ``Transaction.transfer -> pay_period``; the count was unchanged and the
     relationship was not.  A row reached that arm only as a transfer's
-    shadow, through rule 5, and no row names a transfer since plan step
-    ``balance:X-bi-6-4d-2`` (``ck_transactions_names_no_transfer``), so this
-    query's rows no longer reach it; whether the census is total again is
-    not re-measured here.  The removal is not re-litigated here, and whether
-    this query should adopt
+    shadow, through rule 5: plan step ``balance:X-bi-6-4d-2`` deleted the
+    shadows and plan step ``balance:X-bi-6-5`` the rule, so no row this query
+    loads reaches it (a transaction's dispatch holds no rule 4); whether the
+    census is total again is not re-measured here.  The removal is not
+    re-litigated here, and whether this query should adopt
     ``amount_relationships.pricing_load_options`` -- which would re-add the
     ``pay_period`` load C2-f3d removed -- is finding **N-296**'s, whose census
     of unguarded batch pricing callers this reader joined.

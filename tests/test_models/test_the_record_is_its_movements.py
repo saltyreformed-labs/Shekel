@@ -86,6 +86,7 @@ from tests._test_helpers import (
     load_migration_module,
     make_expense_template,
     run_migration_callable as _run,
+    step_down_through_the_transfer_column_drop,
     typed,
 )
 
@@ -96,7 +97,7 @@ _M = load_migration_module("45f10b870c8b_the_record_is_its_movements.py")
 #: round trip's transfer pair needs.
 _TWINS_DELETED = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
 
-#: Plan step ``balance:X-bi-6-4d-2``'s head revision, which empties a side's
+#: Plan step ``balance:X-bi-6-4d-2``'s last revision, which empties a side's
 #: record of the figure its transfer holds; its downgrade copies the figure
 #: back onto the records, the shape every revision below holds.
 _SIDE_RECORD_FIGURE = load_migration_module(
@@ -259,6 +260,10 @@ class TestTheRoundTrip:
         twin and refuses a new one -- so no door writes the shape this
         revision reads any more (each twin settled, holding its covering
         movement).  The pair is settled through the door, then
+        ``c956c1d83108``'s downgrade puts back the column a twin names its
+        transfer by
+        (:func:`tests._test_helpers.step_down_through_the_transfer_column_drop`;
+        the model has none, so the twins are found by SQL), then
         ``b7d2e4f19a63``'s downgrade copies its transfer's figure back onto
         both records (at head a side's record holds none), then
         ``82f7b7ed4332``'s downgrade builds its two twins, each with the
@@ -298,6 +303,7 @@ class TestTheRoundTrip:
             amount=Decimal("200.00"),
         )
         db.session.commit()
+        step_down_through_the_transfer_column_drop(db.session)
         _run(_SIDE_RECORD_FIGURE.downgrade, db.session)
         _run(_TWINS_DELETED.downgrade, db.session)
         _exec(
@@ -310,9 +316,10 @@ class TestTheRoundTrip:
             t=transfer.id,
         )
         db.session.commit()
-        legs = (
-            db.session.query(Transaction)
-            .filter_by(transfer_id=transfer.id).order_by(Transaction.id).all()
+        legs = _sql(
+            "SELECT id FROM budget.transactions WHERE transfer_id = :t "
+            "ORDER BY id",
+            t=transfer.id,
         )
         return {
             "resolved": resolved.id, "corrected": corrected.id,

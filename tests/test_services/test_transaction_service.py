@@ -358,8 +358,8 @@ class TestSettleFromEntriesPreconditions:
     The helper is the lowest-level "settle a tracked row" mutation,
     used by both manual mark-done and the carry-forward batch.  A
     permissive helper would silently corrupt state when fed a
-    soft-deleted row, a transfer shadow, an immutable status, or a
-    non-envelope template; defensive validation keeps the bug
+    soft-deleted row, an immutable status, or a non-envelope template;
+    defensive validation keeps the bug
     surface narrow.  Each test below confirms one rule.
     """
 
@@ -404,39 +404,6 @@ class TestSettleFromEntriesPreconditions:
             with pytest.raises(ValidationError) as exc_info:
                 transaction_service.settle_from_entries(txn)
             assert "envelope-tracked" in str(exc_info.value)
-
-    def test_rejects_transfer_shadow(self, app, db, seed_user, seed_periods):
-        """Transfer shadows must settle through transfer_service.
-
-        The invariants in CLAUDE.md require shadow legs and the
-        parent transfer to mutate together; settling one shadow in
-        isolation would break the invariant ``shadow amounts and
-        statuses always equal the parent transfer's``.
-
-        Uses ``no_autoflush`` because the test stamps a synthetic
-        ``transfer_id`` in memory that would violate the FK if
-        SQLAlchemy autoflushed before the helper's guard fires.  The
-        helper itself only reads the attribute -- the FK never enters
-        the picture in production callers.
-        """
-        with app.app_context():
-            template = _make_template(seed_user)
-            txn = generate_row_of(template, seed_periods[0])
-            db.session.commit()
-
-            with db.session.no_autoflush:
-                # The helper inspects ``transfer_id`` directly without
-                # a DB query, so an in-memory non-None value is enough
-                # to exercise the guard -- avoiding a real
-                # transfer/category setup that the rule does not
-                # depend on.
-                txn.transfer_id = 999_999
-
-                with pytest.raises(ValidationError) as exc_info:
-                    transaction_service.settle_from_entries(txn)
-                assert "transfer" in str(exc_info.value).lower()
-
-            db.session.rollback()
 
     def test_rejects_already_settled_status(
         self, app, db, seed_user, seed_periods,
@@ -542,47 +509,6 @@ class TestSettleTransactionTheVerb:
     leaf (the reconcile panel's tick) whose shape nothing pinned.
     """
 
-    def test_a_transfer_shadow_is_refused(self, app, seed_user, seed_periods):
-        """A shadow cannot settle through this verb (transfer invariants 3-4).
-
-        **The control for a defect the first draft of this verb shipped.**  Its
-        docstring claimed ``settle_from_entries`` refused a shadow by
-        precondition.  That guard is real but UNREACHABLE for a shadow: a
-        shadow carries no ``template_id`` and no ``is_envelope``, so
-        ``tracks_purchases`` is False and it always takes the MANUAL branch,
-        where nothing looked at ``transfer_id``.  A review ran it and settled
-        one leg of a pair -- expense shadow Paid, income shadow Projected,
-        parent transfer Projected -- which is ``CLAUDE.md`` transfer invariants
-        3 and 4 broken in one call, silently, because the posting reconcile
-        returns ``[]`` for a shadow so the ledger stays flat under a grid that
-        shows one leg settled.
-
-        Shown to FIRE: deleting the ``transfer_id`` guard settles the row.
-        """
-        with app.app_context():
-            template = _make_template(seed_user)
-            txn = generate_row_of(template, seed_periods[0])
-            # Make it a shadow the cheap way -- the verb reads exactly one
-            # field to decide, and a real transfer pair would grade the
-            # transfer service rather than this guard.
-            txn.transfer_id = 1
-            status_before = txn.status_id
-
-            with pytest.raises(ValidationError) as exc:
-                transaction_service.settle_transaction(txn)
-
-            assert "transfer shadow" in str(exc.value)
-            assert "transfer_service.update_transfer" in str(exc.value)
-            # A refused call leaves the row untouched.  The record read loads
-            # the row's entries, and the flush that load would trigger lands
-            # the cheap ``transfer_id`` beside the row's ``template_id`` --
-            # a pairing ``ck_transactions_one_pricing_link`` refuses, and not
-            # what this case is about.
-            assert txn.status_id == status_before
-            assert txn.settled_on is None
-            with db.session.no_autoflush:
-                assert status_seam.recorded_settlement(txn) is None
-
     def test_a_soft_deleted_row_is_refused(
         self, app, seed_user, seed_periods,
     ):
@@ -626,8 +552,8 @@ class TestSettleTransactionTheVerb:
 
         A deleted row values at ``Decimal("0")`` through ``effective_amount``,
         so answering here would publish a figure ``settle_transaction`` will not
-        book -- the exact argument the transfer-shadow half of
-        ``reject_unsettleable`` already made, applied to the rule that was
+        book -- the argument ``reject_unsettleable``'s transfer-shadow half
+        made while transfers had twin rows, applied to the rule that was
         missing beside it.
         """
         with app.app_context():
@@ -1104,39 +1030,6 @@ class TestASettleBooksTheFreshestFigure:
             )
             assert settled_figure(txn) == Decimal("500.00")
             assert settled_contribution(txn) == Decimal("500.00")
-
-    def test_settle_amount_refuses_a_transfer_shadow(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """The valuation refuses what the verb refuses to book.
-
-        ``settle_amount`` is PUBLIC and the reconcile panel reads it, so a
-        version that priced a shadow off the loan-payment seam would publish a
-        figure ``settle_transaction`` then refuses -- which is what plan step
-        X-f2-c3 would have walked into with the transfer arm.  One rule
-        (``reject_unsettleable``), three doors.
-        """
-        with app.app_context():
-            template = _make_template(seed_user, is_envelope=False)
-            txn = generate_row_of(template, seed_periods[0])
-            txn.transfer_id = 1
-
-            # The basis comes from the SEEDED bundle, not from the row:
-            # this row is deliberately left dirty in memory (a template link
-            # AND a transfer link, which ``ck_transactions_one_pricing_link``
-            # forbids), and reading ``txn.account`` to build one would autoflush
-            # that state into an IntegrityError before the refusal under test
-            # could speak.  ``reject_unsettleable`` fires first either way; the
-            # bundle just keeps the session clean while it does.
-            with pytest.raises(ValidationError) as exc:
-                transaction_service.settle_amount(
-                    txn,
-                    derived_amount_basis(
-                        seed_user["user"].id, seed_user["scenario"].id,
-                    ),
-                )
-
-            assert "transfer shadow" in str(exc.value)
 
     def test_the_figure_is_resolved_BEFORE_the_status_flip(
         self, app, db, seed_user, seed_periods, tax_law,

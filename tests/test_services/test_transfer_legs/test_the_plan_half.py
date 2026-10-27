@@ -17,7 +17,7 @@ from app.models.transfer import Transfer
 from app.services.balance_at._asset_contributions import _recorded_contributions
 from app.services.balance_at._cash_fold import assembled_fold
 from app.services.cash_ledger import planned_cash_rows, planned_leg_contribution, sum_projected
-from app.services.recorded_contributions import load_shadow_income_contributions_for_account
+from app.services.recorded_contributions import load_transfer_contributions_for_account
 from app.services.transfer_legs import (
     TransferLeg,
     leg_of,
@@ -125,9 +125,10 @@ class TestTheCashFoldReadsTheParent:
         would have counted the transfer twice) until plan step
         ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint: a transfer is
         one row since that step (ruling **R-BAL258**), and the database
-        refuses a row naming one (``ck_transactions_names_no_transfer``,
+        refused a row naming one (``ck_transactions_names_no_transfer``,
         pinned by ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``'s
-        ``TestTheUpgrade::test_the_database_refuses_a_twin``), so that read
+        ``TestTheUpgrade::test_the_database_refuses_a_twin``) until plan step
+        balance:X-bi-6-5 dropped the column, so that read
         walked a list holding no such row (measured empty).  Renamed from
         ``test_the_plan_holds_a_leg_and_no_shadow_row``.
         """
@@ -326,7 +327,7 @@ class TestTheContributionFeedsReadTheParent:
             db.session.commit()
             basis = basis_for(account, seed_user["scenario"])
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis, account.id, [period.id],
             )
             recorded = _recorded_contributions(basis, account.id)
@@ -351,7 +352,7 @@ class TestTheContributionFeedsReadTheParent:
             db.session.commit()
             basis = basis_for(account, seed_user["scenario"])
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis, account.id, [period.id],
             )
 
@@ -379,7 +380,7 @@ class TestTheContributionFeedsReadTheParent:
             db.session.commit()
             basis = basis_for(account, seed_user["scenario"])
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis, account.id, [period.id],
             )
 

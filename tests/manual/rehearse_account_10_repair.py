@@ -2868,22 +2868,22 @@ def _grade_twin(arms: _Arms, context: BalanceContext, last: date) -> None:
 
 
 def _grade_dropped_transfer(arms: _Arms) -> None:
-    """Grade act 1: the dropped transfer and its rows Cancelled.
+    """Grade act 1: the dropped transfer Cancelled.
+
+    A transfer is one row: plan step ``balance:X-bi-6-4d-2`` deleted its twin
+    rows and ``balance:X-bi-6-5`` dropped the transaction's transfer column,
+    so the transfer's own status is the whole state.
 
     Args:
         arms: The arms so far.
     """
     cancelled = ref_cache.status_id(StatusEnum.CANCELLED)
-    states = {db.session.get(Transfer, DROPPED_TRANSFER).status_id} | {
-        row.status_id for row in db.session.query(Transaction).filter_by(
-            transfer_id=DROPPED_TRANSFER, is_deleted=False,
-        )
-    }
+    status_id = db.session.get(Transfer, DROPPED_TRANSFER).status_id
     arms.grade(
-        states == {cancelled},
-        f"transfer {DROPPED_TRANSFER} and its rows are Cancelled",
-        f"transfer {DROPPED_TRANSFER} and its rows hold statuses "
-        f"{sorted(states)}, not Cancelled: was the card's grey Cancel pressed?",
+        status_id == cancelled,
+        f"transfer {DROPPED_TRANSFER} is Cancelled",
+        f"transfer {DROPPED_TRANSFER} holds status {status_id}, not "
+        "Cancelled: was the card's grey Cancel pressed?",
     )
 
 
@@ -3000,9 +3000,8 @@ def _created_rows(snapshot: _Snapshot) -> "tuple[list[Transaction], int]":
 
     **The pay-period window's rows are told apart by what MADE them**: a row
     filed in a paycheck the snapshot does not hold, from a RECURRING
-    definition -- its own, or for a transfer's side its transfer's.  The
-    rolling window tops up on the owner's first grid or dashboard load after a
-    payday and fills only the paychecks it appends
+    definition.  The rolling window tops up on the owner's first grid or
+    dashboard load after a payday and fills only the paychecks it appends
     (``routes/_period_population.py``), so these appear when the dump was
     taken before that load: measured 2026-10-10 on a copy one paycheck short,
     rows from the owner's recurring items, one transfer's two sides among
@@ -3021,9 +3020,7 @@ def _created_rows(snapshot: _Snapshot) -> "tuple[list[Transaction], int]":
     ).order_by(Transaction.id).all()
     typed = [
         txn for txn in created
-        if txn.pay_period_id in snapshot.pay_periods or not (
-            txn.recurs or (txn.transfer is not None and txn.transfer.recurs)
-        )
+        if txn.pay_period_id in snapshot.pay_periods or not txn.recurs
     ]
     return typed, len(created) - len(typed)
 

@@ -76,7 +76,7 @@ class TestTheFigureCorrectionDoorOnAPair:
     def test_a_correction_records_once_on_a_paid_transfer_keeping_it_paid_and_both_sides_days(
         self, app, db, transfer_data,
     ):
-        """Transfer Invariant 3 for the settlement record.
+        """The settlement record is ONE figure, on the transfer.
 
         A transfer's money moves on its two sides, and the figure it moved is
         ONE: the TRANSFER stores it and who wrote it, its one home since plan
@@ -146,8 +146,9 @@ class TestTheFigureCorrectionDoorOnAPair:
 
         It also asked each of the transfer's shadow rows for a recorded
         settlement until that checkpoint.  From that step's create door on no
-        row can name a transfer (``ck_transactions_names_no_transfer``), so
-        the loop ran over none (a vacuous read: such rows counted 0 before
+        row can name a transfer (``ck_transactions_names_no_transfer``, until
+        plan step balance:X-bi-6-5 dropped the column), so the loop ran over
+        none (a vacuous read: such rows counted 0 before
         the update and after it, measured at that checkpoint), and it is
         dropped, not moved onto each side's record: with this gate deleted,
         the status seam refuses the figure itself, in other words, before

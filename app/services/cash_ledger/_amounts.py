@@ -9,7 +9,7 @@ question for one loan payment (principal / interest / escrow).
 
 **The VALUATION is here and the AMOUNT is next door.**  :mod:`._amount_source`
 answers *what is this row's amount* -- the quantity the amount column holds or
-would hold, by ruling R-FI's five rules.  This module answers *what is it
+would hold, by ruling R-FI's four rules.  This module answers *what is it
 worth*, which composes that amount with an entered actual, an excluded status, a
 soft delete and an envelope's purchases.  :func:`contributed_amount` is that
 composition in one function and it took over from

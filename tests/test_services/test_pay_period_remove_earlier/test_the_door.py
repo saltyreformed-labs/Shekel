@@ -358,7 +358,8 @@ class TestAnAddUndoneLeavesNothingBehind:
         was counted with ``transfer_id IS NULL``, until plan step
         ``balance:X-bi-6-4d-2`` made a transfer one row (ruling
         **R-BAL258**): no row holds a link since
-        (``ck_transactions_names_no_transfer``), so both went -- every link
+        (``ck_transactions_names_no_transfer`` refused one until plan step
+        balance:X-bi-6-5 dropped the column), so both went -- every link
         was ``None`` and the count read 2 without the term (measured).
         """
         with app.app_context():

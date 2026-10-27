@@ -128,7 +128,6 @@ from decimal import Decimal
 from app import create_app
 from app.models.account import Account
 from app.models.pay_period import PayPeriod
-from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
@@ -557,10 +556,10 @@ def main():
             "started periods: "
             + ", ".join(sorted(str(row.occurs_on) for row in wiped))
         )
+        # Each row goes alone: it took its two shadow rows first until plan
+        # step balance:X-bi-6-4d-2 deleted the shadows, and plan step
+        # balance:X-bi-6-5 dropped the column they named it by.
         for row in wiped:
-            db.session.query(Transaction).filter(
-                Transaction.transfer_id == row.id,
-            ).delete(synchronize_session=False)
             db.session.delete(row)
         db.session.flush()
         ctx2 = BalanceContext.build(USER_ID, as_of_2)

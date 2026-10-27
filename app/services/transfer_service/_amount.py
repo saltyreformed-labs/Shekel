@@ -54,7 +54,8 @@ def apply_amount_ownership(rows: TransferRows, ownership) -> None:
     **A twin row's ownership FOLLOWED the parent's** until plan step
     ``balance:X-bi-6-4d-2`` deleted the twins (its leaf 3b deleted the loop
     that wrote it): a twin COPIED an owned figure, and declared
-    :attr:`~app.enums.AmountSourceEnum.PARENT_TRANSFER` under a derived one.
+    ``PARENT_TRANSFER`` under a derived one (a member plan step
+    ``balance:X-bi-6-5`` deleted).
 
     **A THIRD answer the twins once had is gone because it has no caller left
     to express it.**  It was *say nothing and leave each leg as it stands*, and

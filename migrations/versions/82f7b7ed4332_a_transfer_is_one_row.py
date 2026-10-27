@@ -123,9 +123,9 @@ link and nothing reads a twin, so this revision deletes them:
   3. **It deletes every twin** and adds ``ck_transactions_names_no_transfer``
      (``transfer_id IS NULL``), so a row naming a transfer is unstorable from
      here on (ruling **R-BAL258**, "Database refuses").  Plan step
-     ``X-bi-6-5`` drops ``transactions.transfer_id`` with this CHECK, its
+     ``X-bi-6-5`` dropped ``transactions.transfer_id`` with this CHECK, its
      index, its partial unique index, its foreign key and its term in
-     ``ck_transactions_one_pricing_link``.
+     ``ck_transactions_one_pricing_link`` (``c956c1d83108``).
 
 **No money moves.**  No balance reads a twin (Transfer Invariant 5: a
 projected leg is drawn off its transfer and a settled one is its side's dated
@@ -260,10 +260,10 @@ A database built AT this revision (``scripts/init_database.py``:
 ``create_all``, then a stamp) never ran the upgrade and so holds no copy and
 no twin.  The downgrade cannot tell that database from one that ran the
 upgrade and LOST its copy since (dropped by hand, a partial restore, a later
-revision), so its print says only that no copy table was found.  **For plan
-step X-bi-6-5, which decides the copy's fate: dropping the copy turns this
-downgrade's exact restore into a rebuild of every twin, with no error** --
-new ids, the transfer's category, derived figures, no ``$0.00``-close day --
+revision), so its print says only that no copy table was found.  **Plan step
+X-bi-6-5 decided the copy's fate and dropped it** (``c956c1d83108``, ruling
+**plan#1851**), so once that revision has run, this downgrade rebuilds every
+twin where it restored each exactly, with no error -- new ids, the transfer's category, derived figures, no ``$0.00``-close day --
 and ``c4e91a7b2d38``'s downgrade, which writes old due dates back by the twin
 ids its backfill table names, then updates no twin.
 

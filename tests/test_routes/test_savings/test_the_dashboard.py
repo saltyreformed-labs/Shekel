@@ -369,8 +369,8 @@ class TestSavingsDashboardShadowTransactions:
     def test_hysa_balance_includes_transfer_deposit(
         self, app, auth_client, seed_user, seed_periods
     ):
-        """Verify that the savings dashboard passes shadow income
-        transactions to the HYSA balance calculator, so transfer deposits
+        """Verify that the savings dashboard passes the deposits transfers
+        make into the account to the HYSA balance calculator, so they
         increase the projected balance.  Without this, HYSA projections
         underestimate the balance by the total of all missed deposits.
         """
@@ -441,7 +441,7 @@ class TestSavingsDashboardShadowTransactions:
         self, app, auth_client, seed_user, seed_periods
     ):
         """Verify that a regular savings account (no HYSA params) includes
-        shadow income from transfers in its balance calculation.  The
+        the deposits transfers make into it in its balance calculation.  The
         balance for a savings account receiving a $1000 transfer must
         reflect the deposit, not just the anchor balance.
         """

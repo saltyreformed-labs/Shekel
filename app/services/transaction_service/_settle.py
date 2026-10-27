@@ -249,9 +249,7 @@ def settle_amount(txn: Transaction, basis: AmountBasis) -> Decimal:
         ValidationError: On a row no door may settle
             (:func:`reject_unsettleable`).  A deleted row's value is nothing,
             and answering for one here would publish a figure
-            :func:`settle_transaction` refuses to book.  The other refusal,
-            a row naming a transfer, answers a row the database refuses to
-            store (``ck_transactions_names_no_transfer``).
+            :func:`settle_transaction` refuses to book.
 
     **The MANUAL branch was two figures until plan step X-au-d**, resolved
     together by a ``_manual_branch_figures`` helper: what the settle books, and
@@ -416,28 +414,17 @@ def settle_transaction(
 
     Does NOT commit -- the caller owns the session boundary.
 
-    **The refusal of a row naming a transfer is THIS function's, and the first
-    draft borrowed it from a branch such a row never reached.**  That draft
-    said :func:`settle_from_entries` refuses one by precondition -- true of
-    that helper, and unreachable here: a transfer's twin row carried no
-    ``template_id`` and no ``is_envelope``, so ``tracks_purchases`` was False
-    and a twin always took the MANUAL branch, where nothing looked at
-    ``transfer_id``.  An adversarial review ran it and settled one leg of a
-    pair: expense twin Paid, income twin still Projected, parent transfer
-    still Projected -- ``CLAUDE.md`` transfer invariants **3** and **4**
-    broken in one call, and silently, because ``sync_transaction_postings``
-    returned ``[]`` for a twin then, so the ledger stayed flat while the grid
-    showed one leg settled.  No such row exists now: plan step
-    ``balance:X-bi-6-4d-2`` deleted the twins (ruling **R-BAL166**) and
-    ``ck_transactions_names_no_transfer`` refuses a new one, so the refusal
-    (:func:`reject_unsettleable`) answers a row that cannot be stored; it
-    goes with the ``transfer_id`` column at plan step ``balance:X-bi-6-5``.
-    A verb owns its own preconditions.
+    **A verb owns its own preconditions** (:func:`reject_unsettleable`).  A
+    first draft borrowed the refusal of a transfer's twin row from
+    :func:`settle_from_entries`, a branch such a row never reached, and an
+    adversarial review settled one leg of a pair through it, silently.  No
+    row can be a twin since plan step ``balance:X-bi-6-4d-2`` deleted them
+    (ruling **R-BAL166**) and plan step ``balance:X-bi-6-5`` the
+    ``transfer_id`` column that named one.
 
     Args:
-        txn: The transaction to settle.  Must not name a transfer -- such a
-            row is REFUSED here, and the database refuses to store one; a
-            transfer is one row and settles through ``transfer_service``.
+        txn: The transaction to settle.  A transfer is not one: it is one
+            row of its own and settles through ``transfer_service``.
         submitted: What the row actually cost and WHO SAID SO, when the CALLER
             knows (:class:`~app.services.stated_figure.StatedFigure`; plan step
             **X-bi-3e-1**, ruling **R-BAL61**): ``typed`` from the reconcile

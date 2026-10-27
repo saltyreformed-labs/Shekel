@@ -5,8 +5,8 @@ assertions into the double-entry ledger: the once-per-account OPENING (its
 earliest ``AccountAnchorHistory`` row) and a TRUE-UP per later row, each a
 balanced correction driving the linked ledger's total to the asserted balance
 as of the day it is the closing balance for.  The walk partitions source facts
-by their settled CIVIL DAY (the stored ``settled_on``; transfers by the
-income shadow's, period-start fallback) against each anchor's stored
+by their settled CIVIL DAY (the stored ``settled_on``; a transfer by its side's
+covering movement on the walked account) against each anchor's stored
 ``observed_on`` -- never by pay period (the plan review's CRITICAL-1) and never
 by instant, which decided the question by click order and cost production
 $4,001.42 (ruling R-DH).  These tests drive the walk and the sync entry points directly;
@@ -635,17 +635,19 @@ class TestWalkAccountLedger:
         when a transfer's legs became its two covering movements' own entries,
         read by the movement loader off the movement on THIS account) resolved
         the transfer's INCOME shadow whatever account was being walked, which
-        is harmless for the DAY -- Transfer Invariant 3 mirrors ``settled_on``
-        onto both legs -- and wrong for the LINK, because clearing is
-        deliberately NOT mirrored: a transfer leaves one bank and arrives at
+        was harmless for the DAY -- the transfer service mirrored
+        ``settled_on`` onto both shadows -- and wrong for the LINK, because
+        clearing is deliberately NOT mirrored: a transfer leaves one bank and arrives at
         another, and each statement reports its own leg.  The property is
         structural now (a movement sits on one account and carries its own
         link) and this test pins it as such.  **The link is planted on the
         Savings side's RECORD since plan step ``balance:X-bi-6-4d-2``**: the
-        record hangs off the transfer and the twins keep no day, so a link on
-        the Savings twin -- where this planted it, mirrored onto the movement
-        by the seam until then -- is refused by the twin's
+        record hangs off the transfer, and the twins that step left kept no
+        day, so a link on the Savings twin -- where this planted it, mirrored
+        onto the movement by the seam until then -- was refused by the twin's
         ``ck_transactions_cleared_needs_settle_day`` (ruling R-BAL167 class 2).
+        No transaction names a transfer since plan step
+        ``balance:X-bi-6-5``.
 
         The fixture makes the two answers differ.  A $200.00 Checking ->
         Savings transfer settles the day AFTER Savings' origination.  The
@@ -779,7 +781,7 @@ class TestWalkAccountLedger:
     def test_transfer_attribution_uses_income_shadow_day(
         self, app, db, seed_user,
     ):
-        """A transfer is attributed by its INCOME shadow's settled civil day.
+        """A transfer is attributed by its walked side's settled civil day.
 
         Two Checking -> Savings transfers into a $500.00-anchored Savings:
         $50.00 settled the day BEFORE the origination assertion (absorbed) and

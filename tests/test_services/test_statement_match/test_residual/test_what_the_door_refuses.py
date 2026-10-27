@@ -360,7 +360,7 @@ class TestOneRowIsDeterminateHoweverManyLinesExplainIt:
     def test_a_TRANSFER_LEG_in_a_group_refuses_the_difference(
         self, app, db, seed_user,
     ):
-        """Transfer invariant 3, carried into the group arm.
+        """A transfer's one figure, carried into the group arm.
 
         A leg is one half of its transfer and moves the transfer's one
         figure, so correcting it means correcting the TRANSFER -- and

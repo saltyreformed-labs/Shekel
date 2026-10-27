@@ -37,7 +37,6 @@ from app.exceptions import ForeignAccountError
 from app.models.account import Account
 from tests._test_helpers import (
     add_escrow_line,
-    assert_a_twin_is_refused,
     create_loan_account,
     create_settled_transfer,
     freeze_today,
@@ -203,10 +202,10 @@ def _project_loan_payment(seed_user, db, loan, period, amount, due_date):
     return transfer
 
 
-def test_a_projected_loan_payment_is_priced_and_its_derived_twin_refused(
+def test_a_projected_loan_payment_is_priced_by_the_plan_tier(
     seed_user, db, seed_periods,
 ):
-    """A projected loan payment is priced by the plan tier, and a derived twin of it is refused.
+    """A projected loan payment is priced by the plan tier, off its parent transfer.
 
     **The PLAN tier's half of plan step balance:X-au-g-2c-1**, and the reason
     that step routed two readers rather than the one its finding named.
@@ -226,11 +225,13 @@ def test_a_projected_loan_payment_is_priced_and_its_derived_twin_refused(
     That step made a transfer one row (ruling **R-BAL258**), so there is no
     shadow to declare or to ask that accessor of.  What the case grades now
     (re-expressed under ruling **R-BAL167** class 2, the cp2a review's L-2):
-    that a twin built derived (``PARENT_TRANSFER``) is refused by
-    ``ck_transactions_names_no_transfer``, which the 82f7 migration's and the
-    transfer schema's tests also grade, and that the tier prices the projected
-    payment off its parent transfer (ruling **R-BAL13**), the same June
-    measurement as :func:`test_a_projected_record_makes_its_slot_planned_not_estimated`.
+    that the tier prices the projected payment off its parent transfer
+    (ruling **R-BAL13**), the same June measurement as
+    :func:`test_a_projected_record_makes_its_slot_planned_not_estimated`.  It
+    also asserted a twin built derived (``PARENT_TRANSFER``) refused, until
+    plan step balance:X-bi-6-5 dropped the column the twin named its transfer
+    by; that refusal went with it (ruling plan#1850), and the case was renamed
+    from ``test_a_projected_loan_payment_is_priced_and_its_derived_twin_refused``.
     It is kept beside that case as the record of finding N-266(a)'s second
     caller, not as a control the other lacks.
     """
@@ -244,10 +245,7 @@ def test_a_projected_loan_payment_is_priced_and_its_derived_twin_refused(
         amount=Decimal("2100.00"), due_date=date(2026, 6, 1),
     )
 
-    # A derived twin of the payment cannot be stored...
-    assert_a_twin_is_refused(db.session, transfer, is_income=True)
-
-    # ...and the tier prices the payment, from the parent transfer.
+    # The tier prices the payment, from the parent transfer.
     ctx = BalanceContext.build(seed_user["user"].id, _AS_OF)
     plan = loan_plan(account, ctx)
 

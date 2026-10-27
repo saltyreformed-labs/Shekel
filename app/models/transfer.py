@@ -241,7 +241,7 @@ class Transfer(
         # across periods.  ``is_deleted = FALSE`` keeps soft-deleted
         # rows out of the index so a delete-and-recreate workflow
         # remains legal, mirroring the predicate on
-        # ``uq_transactions_transfer_type_active``.  scenario_id is
+        # ``uq_transactions_credit_payback_unique``.  scenario_id is
         # included so an ad-hoc transfer in the baseline scenario
         # does not block the same transfer in a what-if scenario.
         db.Index(

@@ -244,7 +244,9 @@ def _assert_reconciles(scenario_id, *accounts):
     test asserts the figure directly and says so at the call site.
 
     **TWO terms since plan step ``balance:X-bi-4a``** (ruling **R-BAL80**): a
-    transfer's settled effect off the income shadow's record, and every DATED
+    transfer's settled effect (off the income shadow's record then, off the
+    side's record and the transfer's one figure since plan step
+    ``balance:X-bi-6-4d-2``), and every DATED
     movement of a contributing non-transfer parent (``posted_purchase_effect``,
     keyed on the movement's own account).  A plan row posts nothing of its
     own, so the transaction source's term (``settled_transaction_effect``,

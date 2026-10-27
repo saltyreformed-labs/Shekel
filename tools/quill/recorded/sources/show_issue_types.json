@@ -1,0 +1,303 @@
+{
+ "read": {
+  "repository": "saltyreformed-labs/plan-views-demo",
+  "at": "2026-10-27T00:42:29Z",
+  "how": "GitHub GraphQL, read-only, through the shared gh token (gh api graphql)",
+  "why": "plan#1810: the issue type of each card on the demo board's recorded order (show.json's board reads, #20-#67), which tools.quill._queries.BOARD_ORDER now asks and show.json's recording session did not; copied into show.json by the re-key, never typed by hand",
+  "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c20: issue(number: 20) { number issueType { name } } c21: issue(number: 21) { number issueType { name } } c22: issue(number: 22) { number issueType { name } } c23: issue(number: 23) { number issueType { name } } c24: issue(number: 24) { number issueType { name } } c25: issue(number: 25) { number issueType { name } } c26: issue(number: 26) { number issueType { name } } c27: issue(number: 27) { number issueType { name } } c28: issue(number: 28) { number issueType { name } } c29: issue(number: 29) { number issueType { name } } c30: issue(number: 30) { number issueType { name } } c31: issue(number: 31) { number issueType { name } } c32: issue(number: 32) { number issueType { name } } c33: issue(number: 33) { number issueType { name } } c34: issue(number: 34) { number issueType { name } } c35: issue(number: 35) { number issueType { name } } c36: issue(number: 36) { number issueType { name } } c37: issue(number: 37) { number issueType { name } } c38: issue(number: 38) { number issueType { name } } c39: issue(number: 39) { number issueType { name } } c40: issue(number: 40) { number issueType { name } } c41: issue(number: 41) { number issueType { name } } c42: issue(number: 42) { number issueType { name } } c43: issue(number: 43) { number issueType { name } } c44: issue(number: 44) { number issueType { name } } c45: issue(number: 45) { number issueType { name } } c46: issue(number: 46) { number issueType { name } } c47: issue(number: 47) { number issueType { name } } c48: issue(number: 48) { number issueType { name } } c49: issue(number: 49) { number issueType { name } } c50: issue(number: 50) { number issueType { name } } c51: issue(number: 51) { number issueType { name } } c52: issue(number: 52) { number issueType { name } } c53: issue(number: 53) { number issueType { name } } c54: issue(number: 54) { number issueType { name } } c55: issue(number: 55) { number issueType { name } } c56: issue(number: 56) { number issueType { name } } c57: issue(number: 57) { number issueType { name } } c58: issue(number: 58) { number issueType { name } } c59: issue(number: 59) { number issueType { name } } c60: issue(number: 60) { number issueType { name } } c61: issue(number: 61) { number issueType { name } } c62: issue(number: 62) { number issueType { name } } c63: issue(number: 63) { number issueType { name } } c64: issue(number: 64) { number issueType { name } } c65: issue(number: 65) { number issueType { name } } c66: issue(number: 66) { number issueType { name } } c67: issue(number: 67) { number issueType { name } } } }"
+ },
+ "answer": {
+  "data": {
+   "repository": {
+    "c20": {
+     "number": 20,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c21": {
+     "number": 21,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c22": {
+     "number": 22,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c23": {
+     "number": 23,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c24": {
+     "number": 24,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c25": {
+     "number": 25,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c26": {
+     "number": 26,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c27": {
+     "number": 27,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c28": {
+     "number": 28,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c29": {
+     "number": 29,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c30": {
+     "number": 30,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c31": {
+     "number": 31,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c32": {
+     "number": 32,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c33": {
+     "number": 33,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c34": {
+     "number": 34,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c35": {
+     "number": 35,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c36": {
+     "number": 36,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c37": {
+     "number": 37,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c38": {
+     "number": 38,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c39": {
+     "number": 39,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c40": {
+     "number": 40,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c41": {
+     "number": 41,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c42": {
+     "number": 42,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c43": {
+     "number": 43,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c44": {
+     "number": 44,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c45": {
+     "number": 45,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c46": {
+     "number": 46,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c47": {
+     "number": 47,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c48": {
+     "number": 48,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c49": {
+     "number": 49,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c50": {
+     "number": 50,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c51": {
+     "number": 51,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c52": {
+     "number": 52,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c53": {
+     "number": 53,
+     "issueType": {
+      "name": "question"
+     }
+    },
+    "c54": {
+     "number": 54,
+     "issueType": {
+      "name": "question"
+     }
+    },
+    "c55": {
+     "number": 55,
+     "issueType": {
+      "name": "question"
+     }
+    },
+    "c56": {
+     "number": 56,
+     "issueType": {
+      "name": "question"
+     }
+    },
+    "c57": {
+     "number": 57,
+     "issueType": {
+      "name": "question"
+     }
+    },
+    "c58": {
+     "number": 58,
+     "issueType": {
+      "name": "question"
+     }
+    },
+    "c59": {
+     "number": 59,
+     "issueType": {
+      "name": "question"
+     }
+    },
+    "c60": {
+     "number": 60,
+     "issueType": {
+      "name": "question"
+     }
+    },
+    "c61": {
+     "number": 61,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c62": {
+     "number": 62,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c63": {
+     "number": 63,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c64": {
+     "number": 64,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c65": {
+     "number": 65,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c66": {
+     "number": 66,
+     "issueType": {
+      "name": "step"
+     }
+    },
+    "c67": {
+     "number": 67,
+     "issueType": {
+      "name": "step"
+     }
+    }
+   }
+  }
+ }
+}

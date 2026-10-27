@@ -36,21 +36,28 @@ from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Card, Child, Comment, Edit
-from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, unmarked
+from tools.quill.setup_tracker import APP_LOGIN, FILING, IN_ORDER, PLAN, unmarked
 
 
 class FakeBoard:
-    """The board in memory: card numbers in drag order; its writes go to the tracker's log."""
+    """The board in memory: card numbers in their positions, each card's kind read from the
+    tracker's ``cards``; its writes go to the tracker's log."""
 
-    def __init__(self, writes):
-        """An empty board logging into ``writes``; it shows each placement at once."""
+    def __init__(self, writes, cards):
+        """An empty board logging into ``writes``, reading kinds from ``cards``; it shows each
+        placement at once."""
         self.items: list[int] = []
         self.writes = writes
+        self.cards = cards
         self.lagging = False
 
+    def held(self):
+        """Every card on the board, in its positions: ``(card number, item id, kind)``."""
+        return [(n, f"PVTI_{n}", self.cards[n].kind) for n in self.items]
+
     def order(self):
-        """The board's order: ``(card number, item id)``."""
-        return [(n, f"PVTI_{n}") for n in self.items]
+        """The board's order, its steps and questions alone: ``(card number, item id)``."""
+        return [(n, item) for n, item, kind in self.held() if kind in IN_ORDER]
 
     def add(self, card):
         """Add a card at the bottom; one already on the board keeps its item, as GitHub
@@ -108,7 +115,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.milestones: set[int] = set()
         self.milestone_of: dict[int, int] = {}
         self.writes: list[tuple] = []
-        self.board = FakeBoard(self.writes)
+        self.board = FakeBoard(self.writes, self.cards_by_number)
 
     def add(self, number, kind="step", body="", on_board=True, **fields):
         """Put a card in the tracker (open, unclaimed, by default on the board's bottom)."""

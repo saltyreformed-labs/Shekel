@@ -128,9 +128,13 @@ ORG, REPO, PROJECT_TITLE = PLAN.owner, PLAN.name, PLAN.board_title
 #: each to its kind's rules.
 CARD_TYPES = ("step", "finding", "ruling", "question")
 #: A piece of one step or finding, a commit inside its card's one pull request (ruling
-#: ``balance:R-BAL386``): a sub-issue of that card, never on the board, which carries no arc
-#: label (its arc is its card's), and is done when its file ``plan/tasks/N`` is in git.
+#: ``balance:R-BAL386``): a sub-issue of that card, which carries no arc label (its arc is its
+#: card's), and is done when its file ``plan/tasks/N`` is in git.  A step's tasks are on the
+#: board, nested under it in the Plan view and in no order (ruling plan#1814).
 TASK = "task"
+#: The kinds of card in the developer's drag order (R-BAL177), the order every reader of the
+#: board reads (``_tracker.Board.order``): a task on the board is in none.
+IN_ORDER = ("step", "question")
 #: Every issue type the plan reads: the four kinds of card, and a task.  The organization's
 #: issue types are managed only with the ``admin:org`` scope, which the token every session
 #: shares does not carry, so the developer sets them on the web and this module checks them.

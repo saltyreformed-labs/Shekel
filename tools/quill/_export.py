@@ -17,8 +17,9 @@ idea of a card stands between the backup and the tracker; the board as quill rea
   each kept as ``{"nodes": [...]}``, every node, read to the end
   (:func:`_github.paged`).
 - ``milestones``: every milestone, open and closed, whole (:func:`_queries.milestones`).
-- ``board``: the tracker's cards on the board, in the developer's drag order (R-BAL177),
-  which no card holds (:meth:`_tracker.Board.order`).
+- ``board``: the tracker's cards on the board, in their positions, which no card holds
+  (:meth:`_tracker.Board.held`): the developer's drag order of the steps and questions
+  (R-BAL177), with each task the board holds nested under its step (ruling plan#1814).
 - ``tracker`` and ``taken_at``: whose cards, and when the export began.
 
 **What it does not hold:** a card's timeline -- its title's renames, its labels and its
@@ -126,7 +127,7 @@ def snapshot(tracker: Tracker, taken_at: datetime) -> dict:
                         key=lambda card: card["number"]),
         "milestones": sorted(milestone_nodes(github, place),
                              key=lambda milestone: milestone["number"]),
-        "board": [number for number, _ in tracker.board.order()],
+        "board": [number for number, _, _ in tracker.board.held()],
     }
 
 

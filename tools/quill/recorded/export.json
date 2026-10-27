@@ -1376,7 +1376,7 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {\n  items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {\n    pageInfo { hasNextPage endCursor }\n    nodes { id content { ... on Issue { number repository { nameWithOwner } } } } } } } }",
+    "query": "query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {\n  items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {\n    pageInfo { hasNextPage endCursor }\n    nodes { id content { ... on Issue {\n      number issueType { name } repository { nameWithOwner } } } } } } } }",
     "variables": {
      "id": "PVT_kwDOFB5GWc4Bln4u",
      "after": null
@@ -1396,6 +1396,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-aIIE",
          "content": {
           "number": 2,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1405,6 +1408,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-aIIU",
          "content": {
           "number": 3,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1414,6 +1420,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-aIIo",
          "content": {
           "number": 4,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1423,6 +1432,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-aII4",
          "content": {
           "number": 5,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1432,6 +1444,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJM",
          "content": {
           "number": 6,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1441,6 +1456,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJg",
          "content": {
           "number": 9,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1450,6 +1468,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJs",
          "content": {
           "number": 7,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1459,6 +1480,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-aIJ4",
          "content": {
           "number": 8,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1468,6 +1492,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-aIKI",
          "content": {
           "number": 10,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1477,6 +1504,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-4ELQ",
          "content": {
           "number": 26,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }
@@ -1486,6 +1516,9 @@
          "id": "PVTI_lADOFB5GWc4Bln4uzg-9VP4",
          "content": {
           "number": 27,
+          "issueType": {
+           "name": "step"
+          },
           "repository": {
            "nameWithOwner": "saltyreformed-labs/shekel-plan"
           }

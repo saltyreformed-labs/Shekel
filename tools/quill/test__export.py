@@ -251,6 +251,17 @@ def test_the_days_file_is_written_whole_and_its_owners_only(tmp_path, capsys):
         f"wrote {path}: 12 cards, 0 milestones, 11 on the board\n")
 
 
+def test_the_board_is_kept_with_each_task_it_holds_where_it_sits():
+    """Ruling plan#1814: a task the board holds, nested under its step and in no order, is kept
+    in the file's board where it sits (:meth:`_tracker.Board.held`): the recorded board's
+    first item made a task."""
+    def first_a_task(body, answer):
+        if "orderBy: {field: POSITION" in body["query"]:
+            answer["data"]["node"]["items"]["nodes"][0]["content"]["issueType"] = {"name": "task"}
+        return answer
+    assert snapshot(_tracker(_Recorded(first_a_task)), TAKEN)["board"] == BOARD
+
+
 def test_the_file_is_named_for_the_utc_day(tmp_path):
     """Begun at 23:30 in New York on 10-21, the export is 03:30 on 10-22 in UTC, and its
     file and ``taken_at`` say so."""

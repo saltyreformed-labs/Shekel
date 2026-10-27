@@ -41,10 +41,12 @@ class _GitHub:
 
 
 def test_each_card_whose_arc_labels_do_not_display_its_arc_is_a_difference():
-    """Every card the producer sync puts back by would change is one difference, named with
-    what it lacks and holds: a swapped label, a missing one, a task's stray one, and a card
-    holding no Arc whose label displays nothing (sync reports that one instead); a card whose
-    arc labels display its Arc, its other labels aside, is none.  The read is sync's."""
+    """Every card sync's rule finds anything for (``_arcs.arc_verdict``) is one difference:
+    one whose labels sync puts back named with what it lacks and holds (a swapped label, a
+    missing one, a task's stray one), and a card holding no Arc named as sync reports it, its
+    label kept (plan#1811's review, M2: not "holds ['balance']", which would delete the only
+    record of its arc); a card whose arc labels display its Arc, its other labels aside, is
+    none.  The read is sync's."""
     github = _GitHub(_node(1, ("balance", "moves-money"), "balance"),
                      _node(2, ("recurrence",), "balance"),
                      _node(3, (), "salary", "question"),
@@ -60,10 +62,29 @@ def test_each_card_whose_arc_labels_do_not_display_its_arc_is_a_difference():
         "['salary'] and holds []",
         "DIFFERS card shekel-plan#4's arc labels do not display its Arc None: it lacks [] and "
         "holds ['balance']",
-        "DIFFERS card shekel-plan#5's arc labels do not display its Arc None: it lacks [] and "
-        "holds ['balance']"]
+        "DIFFERS card shekel-plan#5 holds no Arc, its arc's one home (R-BAL349), so no arc "
+        "label can display it: set its Arc on the web (its labels: ['balance'])"]
     assert report.differences == 4
     assert github.queries == [_arcs.listing("saltyreformed-labs", "shekel-plan")]
+
+
+def test_each_card_whose_arc_a_person_must_fix_is_named_as_sync_reports_it():
+    """By sync's own rule (plan#1811's review, M2 and L1): a card but a task holding no Arc and
+    no arc label, one holding an Arc none of quill's arcs, and a task holding one are each a
+    difference named as sync's REPORT names it, never as a label to add or remove."""
+    github = _GitHub(_node(7, ()), _node(8, ("balance",), "tracker"),
+                     _node(9, (), "balance", "task"))
+    report = Report()
+    setup_tracker.check_card_arcs(github, report)
+    assert report.lines == [
+        "DIFFERS card shekel-plan#7 holds no Arc, its arc's one home (R-BAL349), so no arc "
+        "label can display it: set its Arc on the web (its labels: [])",
+        "DIFFERS card shekel-plan#8 holds the Arc 'tracker', none of quill's arcs (balance, "
+        "recurrence, pay_calendar, credit_card, bank_import, salary), so no arc label can "
+        "display it: set its Arc on the web to one of them",
+        "DIFFERS card shekel-plan#9 is a task, whose arc is its card's (R-BAL386), and holds "
+        "the Arc 'balance': clear it on the web"]
+    assert report.differences == 3
 
 
 def test_every_card_displaying_its_arc_is_one_ok_line():

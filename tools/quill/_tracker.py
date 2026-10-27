@@ -64,7 +64,7 @@ from typing import overload
 from urllib.parse import quote
 
 from tools.quill import _arcs, _queries
-from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_labels, arc_of
+from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_labels, labels_and_arc
 from tools.quill._draft import Draft
 from tools.quill._github import (
     GitHub,
@@ -75,6 +75,7 @@ from tools.quill._github import (
     connection_nodes,
     counted,
     installation_token,
+    issue_listing,
     paged,
     reading,
 )
@@ -223,14 +224,6 @@ class Comment:
     body: str
 
 
-def listing(github: GitHub, query: str, what: str) -> list[dict]:
-    """Every issue node a listing ``query`` holds (:func:`_queries.open_cards`,
-    :func:`_queries.marked_cards`, :func:`_queries.export_cards`), read page by page
-    (:func:`_github.paged`); ``what`` names the listing in a failure's line."""
-    return paged(partial(github.graphql, query),
-                 lambda answer: answer["repository"]["issues"], what)[0]
-
-
 def saved_versions(github: GitHub, place: Place, number: int) -> tuple[list[dict], dict]:
     """Every saved version of card ``number``'s text as GitHub answers it
     (:func:`_queries.edits`), and the last answer read, which holds the card's text, who
@@ -311,14 +304,15 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
     links += [(blocker, "blocker")
               for blocker in counted(node["blockedBy"], "blockers", number)]
     inside = [(link, what) for link, what in links if _is_tracker_issue(link, place)]
+    labels, arc = labels_and_arc(node)
     facts = {
         "number": number,
         "id": int(node["fullDatabaseId"]),
         "node_id": node["id"],
         "title": node["title"],
         "kind": (node["issueType"] or {}).get("name"),
-        "labels": tuple(label["name"] for label in counted(node["labels"], "labels", number)),
-        "arc": arc_of(counted(node["issueFieldValues"], "issue field values", number)),
+        "labels": labels,
+        "arc": arc,
         "is_open": is_open,
         "state_reason": node["stateReason"],
         "parent": next((link["number"] for link, what in inside if what == "parent"), None),
@@ -612,7 +606,8 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     def _listing(self, query: str, what: str) -> dict[int, Card]:
         """Every card a listing ``query`` holds, by number; ``what`` names it in a failure's
         line."""
-        return {node["number"]: self._card(node) for node in listing(self.github, query, what)}
+        return {node["number"]: self._card(node)
+                for node in issue_listing(self.github, query, what)}
 
     def open_cards(self) -> dict[int, Card]:
         """Every open card, by number."""

@@ -63,8 +63,9 @@ Target date, which the developer keeps, empty for now.  Any other is a differenc
 on the web.  The board lists each one it shows as a field of its own, which GitHub marks
 ``isIssueField``: its value is the issue's, so the board stores nothing for it (finding
 plan#1839, measured 2026-10-27), and it is no stored field.  **Every card's arc labels display
-its Arc** (R-BAL354, views_spec s.6): each card the producer ``quill sync`` puts them back by
-would change is a difference (:func:`check_card_arcs`), read as sync reads them.
+its Arc** (R-BAL354, views_spec s.6): each card the rule ``quill sync``'s label pass reports
+and writes by finds anything for is a difference (:func:`check_card_arcs`), read as sync reads
+them.
 
 Usage, from the repository root::
 
@@ -83,7 +84,7 @@ from urllib.parse import quote
 import requests
 
 from tools.ci.arcs import ARCS
-from tools.quill._arcs import ARC_FIELD, card_arcs, label_corrections
+from tools.quill._arcs import ARC_FIELD, arc_verdict, card_arcs
 from tools.quill._github import (
     APP_DIR,
     CredentialsError,
@@ -700,18 +701,22 @@ def check_issue_fields(github: GitHub, report: Report) -> None:
 
 def check_card_arcs(github: GitHub, report: Report) -> None:
     """Check every card's arc labels against its Arc (ruling ``balance:R-BAL354``, views_spec
-    s.6) over the read ``quill sync``'s label pass makes (:func:`_arcs.card_arcs`): each card
-    the producer that pass puts them back by would change (:func:`_arcs.label_corrections`) is
-    a difference.  Sync puts each back, but a card it reports instead, a card but a task
-    holding no Arc and a task holding one (``_relabel.arc_report``)."""
+    s.6) over the read and by the rule ``quill sync``'s label pass makes
+    (:func:`_arcs.card_arcs`, :func:`_arcs.arc_verdict`): each card it finds anything for is
+    a difference, named as sync names it: what a person must fix in its Arc, which sync
+    reports, or the arc labels sync puts back."""
     cards = card_arcs(github, ORG, REPO)
     differ = 0
     for card in cards:
-        add, remove = label_corrections(card.labels, card.arc)
-        if add or remove:
-            differ += 1
+        fault, add, remove = arc_verdict(card, card.kind == TASK)
+        if fault:
+            report.differs(f"card {REPO}#{card.number} {fault}")
+        elif add or remove:
             report.differs(f"card {REPO}#{card.number}'s arc labels do not display its Arc "
                            f"{card.arc!r}: it lacks {list(add)} and holds {list(remove)}")
+        else:
+            continue
+        differ += 1
     if not differ:
         report.ok(f"every card's arc labels display its Arc ({len(cards)} cards)")
 

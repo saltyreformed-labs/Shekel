@@ -14,16 +14,15 @@ are sent through.
 """
 from __future__ import annotations
 
-from tools.quill._arcs import FIELD_VALUES
+from tools.quill._arcs import LABELS_AND_ARC
 from tools.quill.setup_tracker import FILING, LINKED_REPOSITORIES, Place
 
-#: What a card says of itself and its links, read first: its arc among them, the value of its
-#: issue field Arc (:data:`_arcs.FIELD_VALUES`, rulings ``balance:R-BAL349``, ``R-BAL354``).
+#: What a card says of itself and its links, read first: its labels and its arc among them, the
+#: value of its issue field Arc (:data:`_arcs.LABELS_AND_ARC`, rulings ``R-BAL349``, ``R-BAL354``).
 _ISSUE_FIELDS = """
   id number fullDatabaseId title state stateReason
   issueType { name }
-  labels(first: 100) { totalCount nodes { name } }
-""" + FIELD_VALUES + """\
+""" + LABELS_AND_ARC + """\
   parent { number repository { nameWithOwner } }
   subIssues(first: 100) { totalCount nodes {
     number state issueType { name } repository { nameWithOwner } } }

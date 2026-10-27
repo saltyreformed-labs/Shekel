@@ -63,6 +63,24 @@ def test_a_question_becomes_a_ruling_in_the_arc_its_field_holds(code, tmp_path, 
     assert {("retype", 2, "ruling"), ("close", 2, "completed")} <= set(tracker.writes)
 
 
+def test_a_question_holding_no_arc_is_refused_with_what_fixes_it(code, tmp_path, capsys):
+    """A question holding no Arc (filed before the one-time pass, or by older code) matches no
+    ``--arc``, so its refusal names the fix, its Arc set on the web, never another --arc
+    (plan#1811's review, L2); nothing is written."""
+    answer = tmp_path / "a"
+    answer.write_text("Yes.")
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add(2, "question", body="Ship it?", title="Ship", labels=("balance",), arc=None)
+    assert run(tracker, code, "file", "ruling", "--title", "Ship", "--owner", "plan#1",
+               "--from-question", "plan#2", "--answer-file", str(answer), "--arc",
+               "balance") == 1
+    assert capsys.readouterr().err == (
+        "refused: plan#2 [question, no arc] Ship holds no Arc, its arc's one home (R-BAL349): "
+        "set its Arc on the web, then convert it\n")
+    assert not tracker.writes
+
+
 def _spec(tmp_path):
     """A step's spec, written to a file."""
     spec = tmp_path / "spec.md"
@@ -81,6 +99,22 @@ def test_a_filing_run_again_over_a_card_whose_arc_was_changed_by_hand_is_refused
     assert capsys.readouterr().err == (
         "refused: plan#4 [step, balance] New has this kind, title and text but holds the Arc "
         "'balance', not 'salary': set its Arc by hand\n")
+    assert not tracker.writes
+
+
+def test_a_task_filing_run_again_over_an_arc_set_by_hand_says_to_clear_it(code, tmp_path, capsys):
+    """A task holds no Arc (R-BAL386), so one a person set on a task an earlier run filed is
+    cleared by hand, not set (plan#1811's review, L2); nothing is written."""
+    piece = tmp_path / "piece.md"
+    piece.write_text("Build it.")
+    filing = ("file", "task", "--parent", "plan#1", "--title", "Piece", "--body-file", str(piece))
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add_task(2, 1, title="Piece", body="Build it.", labels=("filing",), arc="balance")
+    assert run(tracker, code, *filing) == 1
+    assert capsys.readouterr().err == (
+        "refused: plan#2 [task, balance] Piece has this kind, title and text but holds the Arc "
+        "'balance', not None: clear its Arc by hand\n")
     assert not tracker.writes
 
 

@@ -280,10 +280,12 @@ def _refuse_relabel(card: Card, draft: Draft) -> None:
     """Refuse a card with ``draft``'s kind, title and text whose Arc is not ``draft``'s, or
     whose labels, the filing mark and its arc labels aside, are not: changing either is a
     person's call.  Its arc labels are display of its Arc, which ``sync`` puts back
-    (R-BAL354), so a person's change of one decides nothing here."""
+    (R-BAL354), so a person's change of one decides nothing here.  A task's draft holds no
+    Arc (R-BAL386), so one a person set on it is cleared, not set."""
     if card.arc != draft.arc:
+        remedy = "clear its Arc" if draft.arc is None else "set its Arc"
         raise Refused(f"{_label(card)} has this kind, title and text but holds the Arc "
-                      f"{card.arc!r}, not {draft.arc!r}: set its Arc by hand")
+                      f"{card.arc!r}, not {draft.arc!r}: {remedy} by hand")
     labels = sorted(other_labels(unmarked(card.labels)))
     if labels != sorted(draft.labels):
         raise Refused(f"{_label(card)} has this kind, title and text but the labels "
@@ -602,6 +604,9 @@ def _convert_question(args, tracker: Tracker, draft: Draft, owner: Card, asked: 
     if filing_unfinished(question):
         raise Refused(f"{_label(question)}'s filing has not finished (R-BAL202): finish it with "
                       "the `quill file` command that filed it first, then convert it")
+    if question.arc is None:
+        raise Refused(f"{_label(question)} holds no Arc, its arc's one home (R-BAL349): set its "
+                      "Arc on the web, then convert it")
     if question.arc != args.arc:
         raise Refused(f"{_label(question)} is not in the {args.arc} arc; pass its own --arc")
     _refuse_rehoming(question, "ruling", owner)

@@ -70,6 +70,20 @@ def test_a_card_whose_arc_no_label_can_fix_is_reported_and_left_as_it_is(code, c
     assert run(tracker, code, "sync", "--dry-run") == 1
 
 
+def test_a_card_holding_an_arc_none_of_quills_is_reported_and_never_relabelled(code, capsys):
+    """An Arc none of quill's arcs (an option added to the field on the web before the code
+    knows it) is displayed by no arc label, so a put-back would add one on every run and never
+    settle (plan#1811's review, L1): it is a REPORT, and the card is left as it is."""
+    tracker = FakeTracker()
+    tracker.add(1, labels=("balance",), arc="tracker")
+    assert run(tracker, code, "sync") == 1
+    assert capsys.readouterr().out == (
+        "REPORT: plan#1 [step, tracker] card 1 holds the Arc 'tracker', none of quill's arcs "
+        "(balance, recurrence, pay_calendar, credit_card, bank_import, salary), so no arc label "
+        "can display it: set its Arc on the web to one of them\n")
+    assert not tracker.writes
+
+
 def test_a_card_still_being_filed_is_put_back_too_and_keeps_its_mark(code, capsys):
     """Every card is read, a marked one too (plan#1811 S4, amending its plan's C5): a card is
     born holding its Arc and its arc label, and a filing run again compares its Arc and its

@@ -72,6 +72,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
+from functools import partial
 from pathlib import Path
 
 import requests
@@ -464,6 +465,16 @@ def paged(read: Callable[..., dict], connection: Callable[[dict], dict],
         if not page["pageInfo"]["hasNextPage"]:
             return nodes, answer
         after, number = page["pageInfo"]["endCursor"], number + 1
+
+
+def issue_listing(github: GitHub, query: str, what: str) -> list[dict]:
+    """Every issue node a listing ``query`` holds (``_queries.open_cards``,
+    ``_queries.marked_cards``, ``_queries.export_cards``, ``_arcs.listing``), read page by
+    page (:func:`paged`); ``what`` names the listing in a failure's line.  Here, below
+    :mod:`_tracker`, so :mod:`_arcs`, which :mod:`setup_tracker` imports, walks a listing
+    as every other reader does."""
+    return paged(partial(github.graphql, query),
+                 lambda answer: answer["repository"]["issues"], what)[0]
 
 
 def connection_nodes(connection: dict | None, what: str, number: int) -> list:

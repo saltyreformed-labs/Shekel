@@ -37,7 +37,7 @@ def _resolve_reference(tracker: Tracker, text: str) -> int:
         if title.startswith(alias)
     ]
     if arc:
-        found = [n for n, card in tracker.cards(found).items() if arc in card.labels]
+        found = [n for n, card in tracker.cards(found).items() if card.arc == arc]
     if len(found) != 1:
         raise Refused(f"{text!r} names {len(found)} cards ({found}); name one as plan#N"
                       + ("" if arc else " or give its arc, e.g. balance:" + ident))

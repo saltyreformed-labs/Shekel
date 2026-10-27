@@ -16,6 +16,7 @@ import re
 import pytest
 
 from tools.quill import _tracker, quill
+from tools.quill._draft import Draft
 from tools.quill._recorded import recording
 from tools.quill._tracker import (
     BOARD_ADD,
@@ -360,7 +361,7 @@ def test_every_write_to_a_rehearsal_tracker_goes_to_the_rehearsal_repository():
     github = _AnyWrite()
     tracker = Tracker(github, Board(github, REHEARSAL, "PVT_r"), APP)
     card = card_from(_recorded_open_node(2), REHEARSAL, "PVT_r", APP)
-    tracker.create("step", "t", "b", ["balance"])
+    tracker.create(Draft("step", "t", "b", ("balance",), None))
     tracker.retype(5, "step")
     tracker.retitle(5, "t")
     tracker.set_body(5, "b")

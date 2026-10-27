@@ -37,7 +37,7 @@ def test_a_finding_filed_for_the_leaf_of_a_split_step_is_filed(code):
     tracker = FakeTracker()
     _split(tracker)
     assert run(tracker, code, *finding_filing("plan#2")) == 0
-    assert tracker.writes == [("create", 3, "finding", "Twice", ("balance", FILING)),
+    assert tracker.writes == [("create", 3, "finding", "Twice", ("balance", FILING), "balance"),
                               ("block", 3, 2), ("unmark", 3)]
 
 

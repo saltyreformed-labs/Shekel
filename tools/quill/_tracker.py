@@ -64,7 +64,8 @@ from typing import overload
 from urllib.parse import quote
 
 from tools.quill import _queries
-from tools.quill._arcs import arc_of
+from tools.quill._arcs import ARC_FIELD, arc_answered, arc_labels, arc_of
+from tools.quill._draft import Draft
 from tools.quill._github import (
     GitHub,
     app_credentials,
@@ -297,6 +298,15 @@ def _is_tracker_issue(node: dict, place: Place) -> bool:
     one test, for a parent, a sub-issue, a blocker and the board alike, on the whole
     ``owner/name`` token."""
     return (node.get("repository") or {}).get("nameWithOwner") == place.full_name
+
+
+def filed_labels(labels: Iterable[str], arc: str | None) -> list[str]:
+    """The labels a create sends for a card filed in ``arc`` (None: a task, which holds no
+    arc) beside ``labels``: those, its arc's label as display of its Arc
+    (:func:`_arcs.arc_labels`, ruling ``balance:R-BAL354``) and the :data:`setup_tracker.FILING`
+    mark (R-BAL202), sorted, as GitHub's answer is read back.  The one composition, which
+    :meth:`Tracker.create` sends and the tests' tracker files by."""
+    return sorted({*labels, *arc_labels(arc), FILING})
 
 
 def _comment(node: dict) -> Comment:
@@ -706,12 +716,19 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
     # -- writes --------------------------------------------------------------
 
-    def create(self, kind: str, title: str, body: str, labels: Iterable[str],
-               milestone: int | None = None) -> int:
-        """File a card, marked :data:`setup_tracker.FILING` beside ``labels`` in this, its
-        first write (R-BAL202): every card quill files is born marked, and its
-        filing's last write, :meth:`unmark`, removes the mark.  Its number, once GitHub's
-        answer shows the type, labels and milestone sent.
+    def create(self, card: Draft, milestone: int | None = None) -> int:
+        """File ``card``, the card ``check`` passed (its owner is linked by a write of its
+        own), marked :data:`setup_tracker.FILING` beside its labels in this, its first write
+        (R-BAL202): every card quill files is born marked, and its filing's last write,
+        :meth:`unmark`, removes the mark.  Its number, once GitHub's answer shows the type,
+        labels, Arc and milestone sent.
+
+        Its arc is written in the same call to its issue field Arc, the arc's one home, and
+        as its arc label beside, display of it (rulings ``balance:R-BAL349``, ``R-BAL354``;
+        :func:`filed_labels`); the Arc's id is read first (:meth:`_arc_field_id`).  A task,
+        which holds neither (R-BAL386), sends no field and reads no id, so its request is
+        what it was.  GitHub drops a field value silently where the feature is off (its REST
+        description), so the Arc is read back as the type is.
 
         ``milestone``: the number of the milestone the card is filed in: a leaf's that
         ``quill file step --parent`` files in its split step's while that step holds one
@@ -729,21 +746,43 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         finds both by kind, title and text and refuses while two stand
         (``_filing._same_filing``); this answer is the re-sent create's card.
         """
-        labels = sorted({*labels, FILING})
-        sent = {"title": title, "body": body, "type": kind, "labels": labels}
+        labels = filed_labels(card.labels, card.arc)
+        sent = {"title": card.title, "body": card.body, "type": card.kind, "labels": labels}
+        if card.arc is not None:
+            sent["issue_field_values"] = [{"field_id": self._arc_field_id(), "value": card.arc}]
         if milestone is not None:
             sent["milestone"] = milestone
         issue = self.github.rest("POST", f"{self.place.path}/issues", sent)
-        got = ((issue.get("type") or {}).get("name"), sorted(l["name"] for l in issue["labels"]))
-        if got != (kind, labels):
-            raise TrackerError(
-                f"plan#{issue['number']} was filed as {got}, not {(kind, labels)}: fix it by hand"
-            )
+        got = ((issue.get("type") or {}).get("name"), sorted(l["name"] for l in issue["labels"]),
+               arc_answered(issue.get("issue_field_values") or []))
+        if got != (wanted := (card.kind, labels, card.arc)):
+            raise TrackerError(f"plan#{issue['number']} was filed as {got}, not {wanted}: fix it "
+                               "by hand")
         held = (issue.get("milestone") or {}).get("number")
         if held != milestone:
             raise TrackerError(f"plan#{issue['number']} was filed in milestone {held}, not "
                                f"{milestone}: fix it by hand")
         return issue["number"]
+
+    def _arc_field_id(self) -> int:
+        """The REST id of the tracker's issue field :data:`_arcs.ARC_FIELD`, read
+        (:func:`_queries.issue_fields`) for the create that writes a card's Arc.
+
+        Raises:
+            TrackerError: When the repository holds no such field, or the read GitHub cut
+                short does not hold it.
+        """
+        with reading(f"{self.place.full_name}'s issue field {ARC_FIELD!r}"):
+            fields = self.github.graphql(_queries.issue_fields(self.place))[
+                "repository"]["issueFields"]
+        found = [node["fullDatabaseId"] for node in fields["nodes"]
+                 if (node or {}).get("name") == ARC_FIELD]
+        if len(found) != 1:
+            raise TrackerError(
+                f"{self.place.full_name} holds {len(found)} issue fields named {ARC_FIELD!r} "
+                f"in a read of {len(fields['nodes'])} of its {fields['totalCount']}: run "
+                "python -m tools.quill.setup_tracker")
+        return int(found[0])
 
     def set_milestone(self, number: int, milestone: int | None) -> None:
         """Put a card in the milestone numbered ``milestone``, or with None take it out of its

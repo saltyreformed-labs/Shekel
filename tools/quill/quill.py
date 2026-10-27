@@ -99,6 +99,7 @@ import requests
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
 from tools.quill import _findings, _git, _tasks
+from tools.quill._arcs import other_labels
 from tools.quill._command import (
     Refused,
     _label,
@@ -332,7 +333,7 @@ def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
     (:meth:`_tracker.Tracker.retitle`, :meth:`_tracker.Tracker.set_body`), after the check
     ``file`` runs on what it writes: :func:`check.violations`, grading the parts written
     -- a title (R-BAL180), a finding's one sentence (R-BAL136) -- and the card's type and
-    arc label, which every written card keeps.  Refused, with nothing written: with
+    Arc, which every written card keeps.  Refused, with nothing written: with
     nothing to write, before any card is read; for the card itself
     (:func:`_card_refusal`), before ``--body-file`` is read; and for its new text
     (:func:`_text_refusal`).  Each part is written only when it differs from the card's
@@ -350,7 +351,8 @@ def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
         if why := _text_refusal(card, args.body_file, body):
             raise Refused(why)
     written = {part for part, new in ((TITLE, args.title), (BODY, body)) if new is not None}
-    draft = Draft(card.kind, card.title if args.title is None else args.title, body, card.labels)
+    draft = Draft(card.kind, card.title if args.title is None else args.title, body,
+                  other_labels(card.labels), card.arc)
     if problems := violations(draft, written):
         raise Refused("not edited:\n  " + "\n  ".join(problems))
     number = card.number

@@ -17,7 +17,10 @@ to another repository, a pending release) starts from a recorded answer and
 changes the one field it is about, and says so.  The recorder's own guard and
 redaction are graded in ``test__recorded.py``.  The claims' exchanges were deleted
 from the recordings at X-cx's M1, when a claim left the tracker to become the code
-repository's branch ``card/N`` (ruling ``balance:R-BAL359``).
+repository's branch ``card/N`` (ruling ``balance:R-BAL359``).  Every create here files a card
+as quill filed one when these were kept, before plan#1811 gave a card its Arc
+(:func:`_before_the_arc`), so its request is the one recorded; ``test__tracker_arc.py``
+grades the create that writes the Arc.
 """
 from __future__ import annotations
 
@@ -26,6 +29,7 @@ import copy
 import pytest
 
 from tools.quill import quill
+from tools.quill._draft import Draft
 from tools.quill._fake import Sent
 from tools.quill._github import GitHub, GitHubError
 from tools.quill._recorded import (
@@ -59,6 +63,12 @@ FILED_ID = 5705455461
 #: A GraphQL lookup of a repository that does not exist (review cp3 L-c).
 MISSING_REPOSITORY = ('query { repository(owner: "saltyreformed-labs", name: '
                       '"no-such-repository") { c1: issue(number: 1) { number } } }')
+
+
+def _before_the_arc(kind, title, body, labels=("balance",)):
+    """A card as quill filed one before plan#1811: its arc as its label alone, among
+    ``labels``, and no Arc, which sends no field value and reads no field's id."""
+    return Draft(kind, title, body, labels, None)
 
 
 @pytest.fixture(name="recorded")
@@ -142,9 +152,9 @@ def _replay_filed_card(tracker):
     a second parent, changed every way, closed, reopened, then closed as completed, again as
     NOT planned and again as completed: GitHub changes the reason of a closed card either
     way (sync re-closes a split step as its leaves change, R-BAL187, R-BAL190)."""
-    number = tracker.create("finding", f"{SCRATCH} finding, filed by the recorder (delete me)",
-                            "The recorder files this card to record GitHub's answers.",
-                            ["balance"])
+    number = tracker.create(_before_the_arc(
+        "finding", f"{SCRATCH} finding, filed by the recorder (delete me)",
+        "The recorder files this card to record GitHub's answers."))
     assert number == 22
     card = tracker.cards([number])[number]
     assert (card.kind, card.labels, card.id) == ("finding", ("balance", FILING), FILED_ID)
@@ -198,9 +208,9 @@ def _replay_marked_step(tracker):
     just after the create and just after the unmark (cp5 LOW 3: each showed the write at
     that first read; one sample, the delay not timed), and unmarked again: GitHub answers
     404 "Label does not exist" for a mark the card lacks."""
-    split = tracker.create("step", f"{SCRATCH} step S, split by the recorder (delete me)",
-                           "The recorder files this step to record the filing mark.",
-                           ["balance"])
+    split = tracker.create(_before_the_arc(
+        "step", f"{SCRATCH} step S, split by the recorder (delete me)",
+        "The recorder files this step to record the filing mark."))
     assert split == 23
     assert tracker.cards([split])[split].labels == ("balance", FILING)
     assert split in tracker.marked() and split in tracker.open_cards()
@@ -219,16 +229,16 @@ def _replay_unfinished_leaf_and_ruling(tracker, split, split_item):
     into S's place, S off the board) and its ruling R likewise (created marked, linked,
     closed as completed): the listing of marked cards holds the open L and the CLOSED R,
     each still an unfinished filing (R-BAL206), and not S, whose filing finished."""
-    leaf = tracker.create("step", f"{SCRATCH} leaf L of step S, by the recorder (delete me)",
-                          "The recorder files this leaf; its filing stops before its unmark.",
-                          ["balance"])
+    leaf = tracker.create(_before_the_arc(
+        "step", f"{SCRATCH} leaf L of step S, by the recorder (delete me)",
+        "The recorder files this leaf; its filing stops before its unmark."))
     tracker.add_child(split, tracker.cards([leaf])[leaf])
     item = tracker.board.add(tracker.cards([leaf])[leaf])
     assert tracker.board.place(item, split_item)
     tracker.board.remove(split_item)
-    ruling = tracker.create("ruling", f"{SCRATCH} ruling R of step S, by the recorder (delete me)",
-                            "The recorder files this ruling; its filing stops before its unmark.",
-                            ["balance"])
+    ruling = tracker.create(_before_the_arc(
+        "ruling", f"{SCRATCH} ruling R of step S, by the recorder (delete me)",
+        "The recorder files this ruling; its filing stops before its unmark."))
     tracker.add_child(split, tracker.cards([ruling])[ruling])
     tracker.close(ruling, "completed")
     marked = tracker.marked()
@@ -300,9 +310,9 @@ def test_a_create_naming_a_label_the_tracker_lacks_makes_the_label():
     github = GitHub("token", replay)
     tracker = Tracker(github, Board(github, PLAN, recording("label_missing")["scratch"]["board"]),
                       APP)
-    number = tracker.create("finding", f"{SCRATCH} finding filed before the filing label "
-                            "exists (delete me)", "The recorder files this card to record "
-                            "GitHub's answer to a label it lacks.", ["balance"])
+    number = tracker.create(_before_the_arc(
+        "finding", f"{SCRATCH} finding filed before the filing label exists (delete me)",
+        "The recorder files this card to record GitHub's answer to a label it lacks."))
     assert tracker.cards([number])[number].labels == ("balance", FILING)
     tracker.unmark(number)
     assert tracker.cards([number])[number].labels == ("balance",)
@@ -337,10 +347,10 @@ def test_a_type_github_dropped_is_refused_not_trusted():
     filed = _recorded_answer("POST", "/shekel-plan/issues")
     assert filed["type"]["name"] == "finding"
     assert Tracker(_Answers(filed), Board(None, PLAN, "B"), APP).create(
-        "finding", "t", "b", ["balance"]) == filed["number"]
+        _before_the_arc("finding", "t", "b")) == filed["number"]
     tracker = Tracker(_Answers({**filed, "type": None}), Board(None, PLAN, "B"), APP)
     with pytest.raises(TrackerError, match="not .*'finding'"):
-        tracker.create("finding", "t", "b", ["balance"])
+        tracker.create(_before_the_arc("finding", "t", "b"))
 
 
 def test_a_mark_github_dropped_is_refused_not_trusted():
@@ -353,7 +363,7 @@ def test_a_mark_github_dropped_is_refused_not_trusted():
     dropped = {**filed, "labels": [l for l in filed["labels"] if l["name"] != FILING]}
     tracker = Tracker(_Answers(dropped), Board(None, PLAN, "B"), APP)
     with pytest.raises(TrackerError):
-        tracker.create("finding", "t", "b", ["balance"])
+        tracker.create(_before_the_arc("finding", "t", "b"))
 
 
 class _Echo:
@@ -378,7 +388,7 @@ def test_the_mark_is_sent_and_read_back_whatever_the_labels_sort_beside_it():
     answer, its labels made the ones sent."""
     github = _Echo(_recorded_answer("POST", "/shekel-plan/issues"))
     tracker = Tracker(github, Board(None, PLAN, "B"), APP)
-    number = tracker.create("finding", "t", "b", ["salary", "moves-money"])
+    number = tracker.create(_before_the_arc("finding", "t", "b", ("salary", "moves-money")))
     assert number == github.answer["number"]
     assert sorted(github.sent[0]["labels"]) == [FILING, "moves-money", "salary"]
 

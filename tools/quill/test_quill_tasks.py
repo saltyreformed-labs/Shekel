@@ -42,8 +42,8 @@ def test_file_task_files_a_sub_issue_of_its_card_with_no_arc_and_on_the_board(co
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, *_task_filing(tmp_path)) == 0
-    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",)), ("add_child", 1, 2),
-                              ("board_add", 2), ("unmark", 2)]
+    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",), None),
+                              ("add_child", 1, 2), ("board_add", 2), ("unmark", 2)]
     assert tracker.board.items == [1, 2]
     capsys.readouterr()
     assert run(tracker, code, *_task_filing(tmp_path)) == 0
@@ -59,8 +59,8 @@ def test_a_task_filing_cut_short_is_finished_by_the_same_command(code, tmp_path,
     assert run(tracker, code, *_task_filing(tmp_path)) == 2
     assert run(tracker, code, *_task_filing(tmp_path)) == 0
     assert "finishing plan#2 [task, no arc] 4d-4a" in capsys.readouterr().out
-    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",)), ("add_child", 1, 2),
-                              ("board_add", 2), ("unmark", 2)]
+    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",), None),
+                              ("add_child", 1, 2), ("board_add", 2), ("unmark", 2)]
 
 
 def test_a_task_filing_cut_short_at_its_board_add_is_finished_by_the_same_command(code, tmp_path,
@@ -72,7 +72,8 @@ def test_a_task_filing_cut_short_at_its_board_add_is_finished_by_the_same_comman
     tracker.add(1)
     FailOnce(tracker.board, "add")
     assert run(tracker, code, *_task_filing(tmp_path)) == 2
-    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",)), ("add_child", 1, 2)]
+    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",), None),
+                              ("add_child", 1, 2)]
     assert run(tracker, code, *_task_filing(tmp_path)) == 0
     assert "finishing plan#2" in capsys.readouterr().out
     assert tracker.writes[2:] == [("board_add", 2), ("unmark", 2)]
@@ -82,8 +83,8 @@ def test_a_task_filing_cut_short_at_its_board_add_is_finished_by_the_same_comman
     assert run(again, code, *_task_filing(tmp_path, title="4d-4b")) == 2
     assert run(again, code, *_task_filing(tmp_path, title="4d-4b")) == 0
     assert "  board: already on it\n" in capsys.readouterr().out
-    assert again.writes == [("create", 2, "task", "4d-4b", ("filing",)), ("add_child", 1, 2),
-                            ("board_add", 2), ("unmark", 2)]
+    assert again.writes == [("create", 2, "task", "4d-4b", ("filing",), None),
+                            ("add_child", 1, 2), ("board_add", 2), ("unmark", 2)]
 
 
 def test_a_task_under_a_finding_stays_off_the_board(code, tmp_path):
@@ -93,8 +94,8 @@ def test_a_task_under_a_finding_stays_off_the_board(code, tmp_path):
     tracker.add(1)
     tracker.add(3, "finding", blocked_by=(1,), on_board=False)
     assert run(tracker, code, *_task_filing(tmp_path, parent="plan#3")) == 0
-    assert tracker.writes == [("create", 4, "task", "4d-4a", ("filing",)), ("add_child", 3, 4),
-                              ("unmark", 4)]
+    assert tracker.writes == [("create", 4, "task", "4d-4a", ("filing",), None),
+                              ("add_child", 3, 4), ("unmark", 4)]
     assert tracker.board.items == [1]
 
 
@@ -105,8 +106,8 @@ def test_a_task_under_a_step_off_the_board_stays_off_it(code, tmp_path):
     tracker = FakeTracker()
     tracker.add(1, on_board=False)
     assert run(tracker, code, *_task_filing(tmp_path)) == 0
-    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",)), ("add_child", 1, 2),
-                              ("unmark", 2)]
+    assert tracker.writes == [("create", 2, "task", "4d-4a", ("filing",), None),
+                              ("add_child", 1, 2), ("unmark", 2)]
     assert not tracker.board.items
 
 

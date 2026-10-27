@@ -36,7 +36,7 @@ from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
 from tools.quill._command import on_board as goes_on_board
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Card, Child, Comment, Edit, in_order
+from tools.quill._tracker import Card, Child, Comment, Edit, filed_labels, in_order
 from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
 
 
@@ -215,19 +215,20 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         return [(n, c.title) for n, c in self.cards_by_number.items() if text in c.title]
 
     # -- writes
-    def create(self, kind, title, body, labels, milestone=None):
-        """File a card at the next number, marked :data:`setup_tracker.FILING` beside
-        ``labels``, as :meth:`_tracker.Tracker.create` files every card, in ``milestone``
-        when one is given, holding no Arc, as the create sends none.  One the tracker lacks is
-        a write the tool must never send, so it fails loudly rather than guess GitHub's
-        answer."""
+    def create(self, card, milestone=None):
+        """File ``card`` (a ``check.Draft``) at the next number holding its Arc (a task none),
+        marked :data:`setup_tracker.FILING` beside its labels and its arc label, by the labels
+        :meth:`_tracker.Tracker.create` sends (:func:`_tracker.filed_labels`), in
+        ``milestone`` when one is given.  One the tracker lacks is a write the tool must never
+        send, so it fails loudly rather than guess GitHub's answer."""
         number = max(self.cards_by_number, default=0) + 1
-        labels = tuple(sorted({*labels, FILING}))
+        labels = tuple(filed_labels(card.labels, card.arc))
         assert milestone is None or milestone in self.milestones, (
             f"no milestone #{milestone} to file plan#{number} in")
-        self.writes.append(("create", number, kind, title, labels)
+        self.writes.append(("create", number, card.kind, card.title, labels, card.arc)
                            + (() if milestone is None else (milestone,)))
-        self.add(number, kind, body, on_board=False, title=title, labels=labels, arc=None)
+        self.add(number, card.kind, card.body, on_board=False, title=card.title, labels=labels,
+                 arc=card.arc)
         if milestone is not None:
             self.milestone_of[number] = milestone
         return number

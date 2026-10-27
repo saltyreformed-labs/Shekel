@@ -3,7 +3,8 @@
 Quill runs it before it sends a card (``quill file``) and refuses to
 send what fails.  The tracker's Action (step X-cx's leaf L6) runs the SAME
 function on a card the developer files or edits by hand, and comments on what
-fails without reverting it -- so the two hold a card to one set of rules.  What
+fails without reverting it -- so the two hold a card to one set of rules.  A card is
+described to it as a :class:`_draft.Draft`, the card a filing then files.  What
 each passes in can differ, never the rules: whether the owner is still work
 (:attr:`Owner.live`), which quill reads from git and the cards
 (``_state.is_live``) and the Action from whatever it reads; and ``changed``, the
@@ -11,12 +12,13 @@ parts a change writes, which a new card's filing and a hand edit name
 differently.
 
 What it holds a card to (rulings ``balance:R-BAL136``, ``R-BAL138``,
-``R-BAL177``, ``R-BAL178``, ``R-BAL179``, ``R-BAL180`` and ``R-BAL395``):
+``R-BAL177``, ``R-BAL178``, ``R-BAL179``, ``R-BAL180``, ``R-BAL354`` and ``R-BAL395``):
 
-- always: its type is one of the four kinds, and it carries exactly one arc
-  label -- or it is a TASK (ruling ``balance:R-BAL386``), a piece of one step or finding,
-  which carries none: its arc is its card's (rule 14), and a task set under a parent is a
-  sub-issue of a LIVE step or finding;
+- always: its type is one of the four kinds, and it holds one arc, the value of its issue
+  field Arc, the arc's one home (rulings ``balance:R-BAL349``, ``R-BAL354``: its arc label is
+  display, which no check reads) -- or it is a TASK (ruling ``balance:R-BAL386``), a piece of
+  one step or finding, which holds none: its arc is its card's (rule 14), and a task set
+  under a parent is a sub-issue of a LIVE step or finding;
 - a title the change writes is a short name: present, and at most
   :data:`TITLE_CAP` characters;
 - an owner the change sets is the one its kind needs: a finding is blocked by a
@@ -48,9 +50,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Collection
-from dataclasses import dataclass
 
 from tools.ci.arcs import ARCS
+from tools.quill._draft import Draft, Owner
 from tools.quill._state import SHIPPABLE, may_own
 from tools.quill.setup_tracker import CARD_TYPES, TASK
 
@@ -83,32 +85,6 @@ _ENDS = re.compile(_END + r"\Z")
 #: of two letters or more (``U.S.``, ``e.g.``): a letter, a dot and a letter
 #: just before it.  A single letter's dot (``plan A. The ...``) still ends one.
 _BREAK = re.compile(r"(?<![A-Za-z]\.[A-Za-z])" + _END + r"\s+[A-Z`*_\"'(\[]")
-
-
-@dataclass(frozen=True)
-class Owner:
-    """A card's owner, as the check reads it -- the card a finding or ruling is blocked
-    by (``R-BAL395``), a step's or task's parent: its issue type (None when it has
-    none), and the caller's answers to whether it is still work (``live``) and whether it is
-    a step split into smaller steps (``split``, which no branch builds) -- quill asks git
-    and the cards, the Action the cards.  ``split`` has no default, so no caller holds a
-    finding to its owner rule without answering it (plan#1784)."""
-
-    kind: str | None
-    live: bool
-    split: bool
-
-
-@dataclass(frozen=True)
-class Draft:
-    """A card as it would stand after the change; ``owner`` None when it has none
-    (:class:`Owner`)."""
-
-    kind: str | None
-    title: str
-    body: str | None
-    labels: tuple[str, ...]
-    owner: Owner | None = None
 
 
 def alias_mark(alias: str) -> str:
@@ -251,14 +227,14 @@ def _title_problems(title: str, changed: Collection[str]) -> list[str]:
 
 
 def _task_problems(draft: Draft, changed: Collection[str]) -> list[str]:
-    """Every way a task breaks the plan's rules (R-BAL386): it carries no arc label, since
-    its arc is its card's (rule 14); a title it writes is a short name; and a parent it sets
+    """Every way a task breaks the plan's rules (R-BAL386): it holds no Arc, since its arc is
+    its card's (rule 14); a title it writes is a short name; and a parent it sets
     is a LIVE step or finding, the piece of work it is part of (whether that is a step split
     into smaller steps, which is no work, is the caller's to refuse: it reads the steps
     linked under it)."""
     problems = []
-    if arcs := sorted(label for label in draft.labels if label in ARCS):
-        problems.append(f"a task carries no arc label: its arc is its card's; it has {arcs}")
+    if draft.arc is not None:
+        problems.append(f"a task holds no Arc: its arc is its card's; it holds {draft.arc!r}")
     problems += _title_problems(draft.title, changed)
     owner = draft.owner
     if OWNER in changed and not (owner is not None and owner.kind in SHIPPABLE and owner.live):
@@ -271,7 +247,7 @@ def violations(draft: Draft, changed: Collection[str] = NEW_CARD) -> list[str]:
     """Every way ``draft`` breaks the plan's rules; empty when it may be written.
 
     ``changed``: the parts the change writes (:data:`TITLE`, :data:`BODY`,
-    :data:`OWNER`); only those are graded beyond the type and arc label.  A task
+    :data:`OWNER`); only those are graded beyond the type and the Arc.  A task
     (:data:`setup_tracker.TASK`) is held to its own rules (:func:`_task_problems`).
     """
     if draft.kind == TASK:
@@ -279,9 +255,9 @@ def violations(draft: Draft, changed: Collection[str] = NEW_CARD) -> list[str]:
     problems = []
     if draft.kind not in CARD_TYPES:
         problems.append(f"its type is {draft.kind!r}, not one of {', '.join(CARD_TYPES)}")
-    arcs = sorted(label for label in draft.labels if label in ARCS)
-    if len(arcs) != 1:
-        problems.append(f"it carries exactly one arc label of {', '.join(ARCS)}; it has {arcs}")
+    if draft.arc not in ARCS:
+        problems.append(f"it holds one arc in its Arc field, one of {', '.join(ARCS)}; it holds "
+                        f"{'none' if draft.arc is None else repr(draft.arc)}")
     problems += _title_problems(draft.title, changed)
     if OWNER in changed:
         problems += _owner_problems(draft)

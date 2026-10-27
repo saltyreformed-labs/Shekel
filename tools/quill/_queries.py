@@ -193,6 +193,20 @@ COMMENT_EDITS = """query($id: ID!, $after: String) { node(id: $id) { ... on Issu
     pageInfo { hasNextPage endCursor } nodes { %s } } } } }""" % EDIT_FIELDS
 
 
+def issue_fields(place: Place) -> str:
+    """The read of ``place``'s issue fields, each single select's REST id and name, how many
+    the repository holds beside them: what a filing reads to write a card's Arc
+    (:meth:`_tracker.Tracker.create`).  A field of another type answers ``{}``, as
+    :data:`_arcs.FIELD_VALUES`' values do.  Measured 2026-10-27 with quill's App token: it
+    reads them (Arc's ``fullDatabaseId`` 48771436), five fields in all."""
+    return (
+        """query { repository(owner: "%s", name: "%s") {
+  issueFields(first: 100) { totalCount nodes {
+    ... on IssueFieldSingleSelect { fullDatabaseId name } } } } }"""
+        % (place.owner, place.name)
+    )
+
+
 #: The repositories a board is linked to, read when quill connects
 #: (:func:`_tracker.board_of`).
 BOARD_REPOSITORIES = """query($id: ID!) { node(id: $id) { ... on ProjectV2 {

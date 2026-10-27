@@ -134,8 +134,8 @@ def test_a_blocker_that_shipped_or_was_dropped_releases_the_step():
 
 def test_next_filters_by_arc_and_never_skips_an_unplaced_card_silently():
     """A hand-filed step (not on the board) cannot be ordered, so it is named instead."""
-    cards = _cards(_card(1, labels=("salary",)), _card(2, labels=("balance",), board_item=None),
-                   _card(3, labels=("balance",)))
+    cards = _cards(_card(1, labels=("salary",), arc="salary"),
+                   _card(2, labels=("balance",), board_item=None), _card(3, labels=("balance",)))
     answer = next_step([1, 3], cards, shipped=set(), claims={}, arc="balance")
     assert answer.card.number == 3
     assert [card.number for card in answer.unplaced] == [2]

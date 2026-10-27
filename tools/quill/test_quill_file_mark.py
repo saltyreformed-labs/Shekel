@@ -27,12 +27,12 @@ def test_a_leaf_and_a_ruling_are_created_marked_and_unmarked_by_their_last_write
     for number in (1, 2, 3):
         tracker.add(number)
     assert run(tracker, code, *leaf_filing(tmp_path, "half", "plan#2")) == 0
-    assert tracker.writes == [("create", 4, "step", "half", ("balance", FILING)),
+    assert tracker.writes == [("create", 4, "step", "half", ("balance", FILING), "balance"),
                               ("add_child", 2, 4), ("board_add", 4), ("board_place", 4, "PVTI_2"),
                               ("board_remove", 2), ("unmark", 4)]
     tracker.writes.clear()
     assert run(tracker, code, *ruling_filing(tmp_path, "plan#4")) == 0
-    assert tracker.writes == [("create", 5, "ruling", "Home", ("balance", FILING)),
+    assert tracker.writes == [("create", 5, "ruling", "Home", ("balance", FILING), "balance"),
                               ("block", 5, 4), ("close", 5, "completed"), ("unmark", 5)]
 
 
@@ -67,7 +67,7 @@ def test_a_mark_removed_by_hand_mid_filing_fails_its_unmark_and_the_same_command
     _HandUnmarks(tracker)
     assert run(tracker, code, *args) == 2
     assert "Label does not exist" in capsys.readouterr().err
-    assert tracker.writes == [("create", 1, "step", "Alone", ("balance", FILING)),
+    assert tracker.writes == [("create", 1, "step", "Alone", ("balance", FILING), "balance"),
                               ("board_add", 1)]
     tracker.writes.clear()
     assert run(tracker, code, *args) == 0

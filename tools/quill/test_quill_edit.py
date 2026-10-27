@@ -108,13 +108,14 @@ def test_edit_holds_a_title_to_the_check_file_runs(code, capsys, title, said):
 
 @pytest.mark.parametrize(("fields", "said"), [
     ({"kind": None}, "its type is None, not one of step, finding, ruling, question"),
-    ({"labels": ("balance", "salary")}, "it carries exactly one arc label of"),
-    ({"labels": ()}, "it carries exactly one arc label of"),
+    ({"arc": None}, "it holds one arc in its Arc field, one of"),
+    ({"arc": None, "labels": ()}, "it holds one arc in its Arc field, one of"),
 ])
 def test_edit_holds_the_cards_type_and_arc_to_the_check(code, capsys, fields, said):
-    """Every card the check passes has one of the four kinds and exactly one arc label, so a
-    card ``edit`` would write must too (:func:`check.violations` grades both whatever the
-    change): a card with no type, two arcs or none is refused, nothing written."""
+    """Every card the check passes has one of the four kinds and holds one arc in its Arc
+    field (R-BAL354), so a card ``edit`` would write must too (:func:`check.violations`
+    grades both whatever the change): a card with no type, or no Arc, its arc label kept or
+    not, is refused, nothing written."""
     tracker = FakeTracker()
     tracker.add(1, **fields)
     assert run(tracker, code, "edit", "plan#1", "--title", "Renamed") == 1

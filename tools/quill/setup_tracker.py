@@ -134,14 +134,14 @@ REHEARSAL = Place("saltyreformed-labs", "shekel-plan-rehearsal", "Shekel plan re
 #: :data:`PLAN`'s names, which this module's checks configure.
 ORG, REPO, PROJECT_TITLE = PLAN.owner, PLAN.name, PLAN.board_title
 
-#: The four kinds of card: each carries one arc label, and ``check.violations`` holds
-#: each to its kind's rules.
+#: The four kinds of card: each holds one arc, its issue field :data:`_arcs.ARC_FIELD`, its
+#: arc label display (R-BAL354), and ``check.violations`` holds each to its kind's rules.
 CARD_TYPES = ("step", "finding", "ruling", "question")
 #: A piece of one step or finding, a commit inside its card's one pull request (ruling
-#: ``balance:R-BAL386``): a sub-issue of that card, which carries no arc label (its arc is its
-#: card's), and is done when its file ``plan/tasks/N`` is in git.  A task under a step the board
-#: holds is on it too, nested under that step in the Plan view and in no order (rulings
-#: plan#1814, plan#1842).
+#: ``balance:R-BAL386``): a sub-issue of that card, which holds no Arc and no arc label (its
+#: arc is its card's), and is done when its file ``plan/tasks/N`` is in git.  A task under a
+#: step the board holds is on it too, nested under that step in the Plan view and in no order
+#: (rulings plan#1814, plan#1842).
 TASK = "task"
 #: The kinds of card in the developer's drag order (R-BAL177), the order every reader of the
 #: board reads (``_tracker.Board.order``): a task on the board is in none.

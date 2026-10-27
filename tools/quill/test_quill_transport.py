@@ -16,6 +16,7 @@ import requests
 
 from tools.quill import _tracker, landing, quill, setup_tracker
 from tools.quill._queries import marked_cards, open_cards
+from tools.quill._draft import Draft
 from tools.quill._export import snapshot
 from tools.quill._github import (
     CUT_OFF_RETRIES,
@@ -198,8 +199,8 @@ def _tracker_over(github: GitHub) -> Tracker:
 #: filing a card, moving it to a milestone, changing its kind, minting the App's token, and
 #: the tracker repository's creation and its settings' correction.
 _WRITES_READ = {
-    "create": (lambda session: _tracker_over(_github(session)).create("step", "t", "b",
-                                                                 ["balance"]), []),
+    "create": (lambda session: _tracker_over(_github(session)).create(
+        Draft("step", "t", "b", ("balance",), None)), []),
     "set_milestone": (lambda session: _tracker_over(_github(session)).set_milestone(5, 2), []),
     "retype": (lambda session: _tracker_over(_github(session)).retype(5, "finding"), []),
     "installation_token": (lambda session: installation_token(

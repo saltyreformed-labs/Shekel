@@ -41,7 +41,6 @@ from app.enums import (
     PostingSourceEnum,
     StatusEnum,
 )
-from app.exceptions import UndatedSettleError
 from app.services.posting_reads import PostingError
 from sqlalchemy import text as sa_text
 
@@ -51,7 +50,6 @@ from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
 from app.models.pay_period import PayPeriod
 from app.models.scenario import Scenario
-from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.user import User
 from app.services import (
@@ -62,18 +60,13 @@ from app.services import (
     loan_posting_service,
     posting_service,
     status_seam,
-    transaction_service,
 )
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.pay_calendar import PayCalendarError
 from app.services.auth_service import hash_password
 from app.utils.dates import display_today, to_display_date
 from tests._test_helpers import (
-    add_entry,
-    add_txn,
     figure_source_columns,
-    generate_row_of,
-    make_expense_template,
     record_paydays_across_a_hole,
     rhythm_of,
     an_entered_day,
@@ -513,88 +506,10 @@ class TestWalkAccountLedger:
             )
             assert corrections[1].ledger_before == Decimal("300.00")
 
-    def test_a_settled_row_with_no_day_is_REFUSED_by_this_walk_too(
-        self, app, db, seed_user,
-    ):
-        """The POSTED walk refuses an undated settled row behind a LEGACY leg.
-
-        Pinned separately from ``test_cash_walk.py`` because it is a
-        different reader on a different table: this walk reaches
-        ``balance_predicates.settled_day`` from ``_transaction_source_days``,
-        which resolves the day of a row it found through the POSTINGS.  The
-        pin is here to prove that call site really consults it.
-
-        **The row's own leg is a LEGACY shape since plan step
-        ``balance:X-bi-4a``** (ruling **R-BAL80**): the writer posts nothing
-        under ``transaction_id`` any more, and the deploy resync brings every
-        such leg production held to zero.  So the one way a transaction-linked
-        non-zero net still reaches this arm is a legacy leg the resync has
-        not yet met, staged here through the balanced-write leaf exactly as
-        the writer once wrote it; the cash walk's own alarm moved to
-        ``integrity_check`` DC-11 with its row read.
-        """
-        # pylint: disable=import-outside-toplevel  -- the module convention.
-        from app.services import ledger_account_service
-        from app.services._posting_write import (
-            emit_typed_source_deltas, ledger_class_of,
-        )
-        from app.services.posting_reads import _ledger_account_for
-
-        with app.app_context():
-            account = _make_account(seed_user, "500.00")
-            txn = add_txn(
-                _db.session, seed_user, seed_user["bootstrap_period"],
-                "Groceries", "200.00", status_enum=StatusEnum.DONE,
-                category_key="Groceries", account=account,
-                settled_on=seed_user["bootstrap_period"].start_date,
-            )
-            cash = _ledger_account_for(txn.account_id)
-            category = ledger_account_service.get_or_create_category_ledger_account(
-                txn.user_id, txn.category_id, ledger_class_of(txn),
-            )
-            emit_typed_source_deltas(
-                txn,
-                targets={
-                    (txn.pay_period_id, txn.settled_on): {
-                        cash.id: Decimal("-200.00"), category.id: Decimal("200.00"),
-                    },
-                },
-                source=PostingSourceEnum.TRANSACTION,
-                description=txn.name,
-                log_label=f"legacy row leg {txn.id}",
-                transaction_id=txn.id,
-            )
-            _db.session.commit()
-            assert _db.session.query(JournalEntry).filter(
-                JournalEntry.transaction_id == txn.id,
-            ).count() == 1, "the legacy leg must post under the row"
-            # Break the row AFTER its postings exist: a bulk update bypasses
-            # the ORM, exactly as the real hazard does.  The purchases RECORD
-            # stays: the row's entries are its record, and a retained record
-            # with no day is the state a revert leaves.
-            _db.session.query(Transaction).filter(
-                Transaction.id == txn.id,
-            ).update(
-                {
-                    "settled_on": None,
-                    # The day's BASIS goes with the day
-                    # (``ck_transactions_settle_day_basis_pairing``).
-                    "settled_day_basis_id": None,
-                },
-                synchronize_session=False,
-            )
-            _db.session.commit()
-
-            with pytest.raises(UndatedSettleError) as exc:
-                account_posting_service.walk_account_ledger(
-                    account.id, seed_user["scenario"].id,
-                )
-            assert str(txn.id) in str(exc.value)
-
     def test_a_posted_movement_with_no_day_is_REFUSED_by_this_walk(
         self, app, db, seed_user,
     ):
-        """The control above, on the row that carries a settled bill's money.
+        """A posted movement whose day is nulled is refused by the posted walk.
 
         Plan step **X-bi-3a**: a bill's settle mirrors its figure onto a
         covering movement, posted at the movement's own day.  A movement

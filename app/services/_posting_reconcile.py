@@ -76,7 +76,8 @@ _ZERO_MONEY = Decimal("0.00")
 # period, never the source row's current period"
 # (:mod:`app.services.posting_service`).  The other two reconciles in this
 # ledger obey it structurally by carrying the period in their key --
-# ``posting_service._posted_by_period`` for a transaction / transfer and
+# ``_posting_write.posted_by_period`` for a movement (a transaction's and a
+# transfer's own sources too, until plan#1845 deleted them) and
 # the loan payment split's own reader (folded into :func:`posted_correction_legs`
 # at ``balance:X-bi-6-3``), both ``(pay_period_id, entry_date)``.  This one did not: it read
 # the posted side keyed ``(source_kind_id, entry_date)`` with no period, so
@@ -500,8 +501,6 @@ def emit_correction_entry(
         pay_period_id=pay_period_id,
         entry_date=entry_date,
         source_kind_id=source_kind_id,
-        transfer_id=None,
-        transaction_id=None,
         transaction_entry_id=None,
         description=_correction_description(source_kind_id, entry_date),
     )

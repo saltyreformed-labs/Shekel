@@ -310,6 +310,17 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self._set(parent, children=(*held.children, Child(child.number, child.kind, True)))
         self._set(child.number, parent=parent)
 
+    def place_child(self, parent, child, before):
+        """Move ``child``, a sub-issue of ``parent``, to just above ``before``, another, in
+        ``parent``'s order of them; the same move sent again changes nothing
+        (``recorded/priority.json``)."""
+        self.writes.append(("place_child", parent, child.number, before.number))
+        held = self.cards_by_number[parent].children
+        moved = next(c for c in held if c.number == child.number)
+        rest = [c for c in held if c.number != child.number]
+        at = next(i for i, c in enumerate(rest) if c.number == before.number)
+        self._set(parent, children=(*rest[:at], moved, *rest[at:]))
+
     def remove_child(self, parent, child):
         """Unlink ``child`` from ``parent``.  One that is no sub-issue of ``parent`` -- a read
         that lags an unlink makes the tool send it -- is refused as GitHub refuses it, 403

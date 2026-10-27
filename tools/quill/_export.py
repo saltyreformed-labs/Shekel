@@ -19,8 +19,9 @@ idea of a card stands between the backup and the tracker; the board as quill rea
 - ``milestones``: every milestone, open and closed, whole (:func:`_queries.milestones`).
 - ``board``: the tracker's cards on the board, in their positions, which no card holds
   (:meth:`_tracker.Board.held`): the steps and questions in the developer's drag order
-  (R-BAL177), and each task the board holds at a position of its own, which is in no order
-  (ruling plan#1814).  Which step a task nests under is its parent, which ``cards`` holds.
+  (R-BAL177), and each task the board holds at a position of its own, which is in no place
+  of that order (ruling plan#1814): its card's order of its tasks is its own (plan#1868).
+  Which step a task nests under is its parent, which ``cards`` holds.
 - ``tracker`` and ``taken_at``: whose cards, and when the export began.
 
 **What it does not hold:** a card's timeline -- its title's renames, its labels and its

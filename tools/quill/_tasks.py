@@ -31,6 +31,21 @@ from tools.quill.setup_tracker import TASK
 #: What a task's file says: the instant it was written (:func:`_git.instant`), so each write
 #: is a new line, as each claim's marker is.
 DONE = "done "
+#: The tasks that finish every card, last in its order, each title with what the piece is
+#: (ruling plan#1875, plan#1870): a card is ready to land once both are done.  A task filed
+#: under a card goes above the first of them still open (:func:`place`).
+FINISHING = (
+    ("Adversarial review",
+     "A neutral fresh subagent reviews the design and the whole diff against the card's spec "
+     "and its edits since the claim (`quill spec-history plan#N --since card/N`), grading the "
+     "change's claims about itself hardest. Each finding to fix in this pull request is filed "
+     "as a task above \"Full suite and pull request\"."),
+    ("Full suite and pull request",
+     "The full suite through `./scripts/test.sh`, `pylint app/` with CLAUDE.md's `--fail-on`, "
+     "the tools packages' own tests and pylint floor, the developer's comments read and "
+     "answered, then the card's pull request into dev, queued."),
+)
+_FINISHING_TITLES = frozenset(title for title, _ in FINISHING)
 
 
 def _on_its_branch(tracker: Tracker, number: int, root: Path, what: str,
@@ -69,6 +84,35 @@ def in_progress(cards: Mapping[int, BareCard],
     nothing done (:func:`_state.done_tasks`).  ``show`` reads it."""
     return frozenset(number for claim in claims.values() for number in claim.in_progress
                      if names_no_task(number, cards, claim.card) is None)
+
+
+def place(tracker: Tracker, task: Card, parent: Card, before: Card | None) -> None:
+    """Put ``task``, a piece linked under ``parent``, where it is built in ``parent``'s order of
+    its tasks (ruling plan#1868), each write printed as it lands: above ``before`` when the
+    filing names one, else above the first of ``parent``'s finishing tasks still open
+    (:data:`FINISHING`); a finishing task itself, and a task under a card with none open,
+    stay where the link put them, last.  ``parent``'s order is its read before the link, with
+    ``task`` last where that read does not list it, as GitHub lists a sub-issue linked last
+    (``recorded/priority.json``).  A task already just above its place is not moved, so the
+    filing run again sends nothing more."""
+    if task.title.strip() in _FINISHING_TITLES:
+        return
+    order = [child.number for child in parent.children]
+    if task.number not in order:
+        order.append(task.number)
+    if before is None:
+        tasks = [child.number for child in parent.children
+                 if child.kind == TASK and child.is_open and child.number != task.number]
+        held = tracker.cards(tasks) if tasks else {}
+        before = next((held[number] for number in tasks if number in held
+                       and held[number].title.strip() in _FINISHING_TITLES), None)
+    if before is None:
+        print(f"  in plan#{parent.number}'s order: last, no finishing task being open")
+    elif order.index(task.number) + 1 == order.index(before.number):
+        print(f"  in plan#{parent.number}'s order: already above plan#{before.number}")
+    else:
+        tracker.place_child(parent.number, task, before)
+        print(f"  in plan#{parent.number}'s order: placed above plan#{before.number}")
 
 
 def cmd_start(args, tracker: Tracker, root: Path) -> int:

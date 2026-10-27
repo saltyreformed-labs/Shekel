@@ -181,6 +181,9 @@ _ROUTES: tuple[tuple[str, re.Pattern, _Allows], ...] = tuple(
         ("POST", r"/issues/([0-9]+)/sub_issues",
          lambda m, body, s: int(m[1]) in s.numbers and set(body) == {"sub_issue_id"}
          and body["sub_issue_id"] in s.ids),
+        ("PATCH", r"/issues/([0-9]+)/sub_issues/priority",
+         lambda m, body, s: int(m[1]) in s.numbers and set(body) == {"sub_issue_id", "before_id"}
+         and body["sub_issue_id"] in s.ids and body["before_id"] in s.ids),
         ("DELETE", r"/issues/([0-9]+)/sub_issue",
          lambda m, body, s: int(m[1]) in s.numbers and set(body) == {"sub_issue_id"}
          and body["sub_issue_id"] in s.ids),

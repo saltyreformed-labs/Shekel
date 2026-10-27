@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.quill import _findings, _git
+from tools.quill import _findings, _git, _tasks
 from tools.quill._command import (
     Refused,
     _label,
@@ -210,6 +210,19 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
                    reads.shipped.cards, reads.claims, asked,
                    _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
                    if args.kind == "step" and parent is not None else _NO_MILESTONE)
+
+
+def _before(tracker: Tracker, args, parent: Card | None) -> Card | None:
+    """The task a new task is placed above, ``--before plan#T``, read by its number: an open
+    task under the same card, a piece still to build (ruling plan#1868).  None when none is
+    named.  Refused for any other card, before anything is written."""
+    if getattr(args, "before", None) is None:
+        return None
+    before = _one(tracker, args.before)
+    if before.kind != TASK or before.parent != parent.number or not before.is_open:
+        raise Refused(f"{_label(before)} is no open task under plan#{parent.number}: a task is "
+                      "placed above another piece of its card still to build")
+    return before
 
 
 def _place_leaf(tracker: Tracker, leaf: Card, filing: _Filing) -> None:
@@ -488,6 +501,7 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
     removes the mark.
     """
     filing = _filing_for(args, tracker, root)
+    before = _before(tracker, args, filing.parent)
     problems = violations(filing.draft)
     if problems:
         raise Refused("not filed:\n  " + "\n  ".join(problems))
@@ -517,7 +531,7 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
         print(f"finishing {_label(card)}: its filing has not finished (it is still marked "
               f"{FILING!r}), so this command finishes it rather than filing another (R-BAL186, "
               "R-BAL202)")
-    _finish(tracker, card, filing)
+    _finish(tracker, card, filing, before)
     return 0
 
 
@@ -547,7 +561,7 @@ def _created(kind: str, tracker: Tracker, draft: Draft, milestone: _LeafMileston
     return card
 
 
-def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
+def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) -> None:
     """Every write of a filing after the create that ``card`` does not show done, each
     printed as it lands, then its mark removed, last (R-BAL202): the link, a ruling's
     close, a leaf's place and its split step's milestone cleared (after the leaf's create
@@ -557,9 +571,13 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing) -> None:
     between a finding's two writes leaves it two owners, and the same command run again
     finishes it), a top-level step's or question's board place, or a task's under a step the
     board holds (:func:`_command.on_board`, rulings plan#1814, plan#1842), at the bottom,
-    where the order does not read it."""
+    where the board's order does not read it; a task is first placed in its card's order of
+    its tasks, above ``before`` when the filing names one (:func:`_tasks.place`, ruling
+    plan#1868)."""
     kind, parent = filing.draft.kind, filing.parent
     _attach(tracker, card, kind, parent)
+    if kind == TASK:
+        _tasks.place(tracker, card, parent, before)
     if kind == "ruling" and card.is_open:
         tracker.close(card.number, "completed")
         print("  closed: a ruling is a record")

@@ -405,8 +405,9 @@ def in_order(held: Iterable[tuple[int, str, str | None]]) -> list[tuple[int, str
 
 class Board:
     """``place``'s board: the steps and questions in the developer's drag order (R-BAL177),
-    and each step's tasks, which nest under it in the Plan view and are in no order (ruling
-    plan#1814).  :meth:`order` is that order, read by each item's issue type, so no reader
+    and each step's tasks, which nest under it in the Plan view outside that order (ruling
+    plan#1814), in their card's order of them (:meth:`Tracker.place_child`, plan#1868).
+    :meth:`order` is that order, read by each item's issue type, so no reader
     of it meets a task.
 
     ``sleep`` waits out the board's lag; tests pass one that does not wait.
@@ -797,6 +798,13 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         """Make ``child`` a sub-issue of ``parent``."""
         self.github.rest("POST", f"{self.place.path}/issues/{parent}/sub_issues",
                          {"sub_issue_id": child.id})
+
+    def place_child(self, parent: int, child: Card, before: Card) -> None:
+        """Move ``child``, a sub-issue of ``parent``, to just above ``before``, another of its
+        sub-issues, in ``parent``'s order of them: the order a parent's read lists them in
+        (``subIssues``), and its board nests them in (ruling plan#1868)."""
+        self.github.rest("PATCH", f"{self.place.path}/issues/{parent}/sub_issues/priority",
+                         {"sub_issue_id": child.id, "before_id": before.id})
 
     def remove_child(self, parent: int, child: Card) -> None:
         """Unlink ``child`` from ``parent``, whose sub-issue it is."""

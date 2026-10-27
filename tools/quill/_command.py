@@ -75,8 +75,9 @@ def with_closure[CardT: BareCard](tracker: _ReadsCards[CardT],
 def on_board(kind: str | None, parent: Card | None) -> bool:
     """Whether a card of ``kind`` under ``parent`` (None: at the top level) belongs on the
     board: a step or question, in the developer's order (:data:`setup_tracker.IN_ORDER`), and a
-    task under a step the board holds, which nests under it in the Plan view and is in no order
-    (rulings plan#1814, plan#1842).  The ONE rule, which the filing (``_filing._finish``) and
+    task under a step the board holds, which nests under it in the Plan view, outside the
+    board's order, in its card's order of its tasks (rulings plan#1814, plan#1842, plan#1868).
+    The ONE rule, which the filing (``_filing._finish``) and
     ``quill sync`` (:func:`_tasks.put_on_board`) both read.  A task under a finding, or under a
     step off the board, stays off: it would stand alone among the steps as a row of its own
     (plan#1810's call D5, its review's N6), and goes on once its step does."""

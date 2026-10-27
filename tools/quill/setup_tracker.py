@@ -40,7 +40,8 @@ them, "Auto-close issue", would close a card when someone set its Status to
 Done -- a third way to close a card, beside git and the developer's own hand.
 **Nor may an automation put a card on the board** (ruling ``balance:R-BAL177``):
 the board holds the steps and questions in the developer's order, and each step's tasks
-nested under it in no order (ruling plan#1814), and quill places each one itself, a new
+nested under it outside that order, in its card's order of its tasks (rulings plan#1814,
+plan#1868), and quill places each one itself, a new
 leaf where the step it splits sat, a task at the bottom, where the order does not read
 it: filed under a step on the board, or put on by ``quill sync`` once its step is (ruling
 plan#1842).  "Auto-add sub-issues to project" would add each sub-issue of a card on the
@@ -137,8 +138,8 @@ CARD_TYPES = ("step", "finding", "ruling", "question")
 #: A piece of one step or finding, a commit inside its card's one pull request (ruling
 #: ``balance:R-BAL386``): a sub-issue of that card, which carries no arc label (its arc is its
 #: card's), and is done when its file ``plan/tasks/N`` is in git.  A task under a step the board
-#: holds is on it too, nested under that step in the Plan view and in no order (rulings
-#: plan#1814, plan#1842).
+#: holds is on it too, nested under that step in the Plan view, outside the board's order, in
+#: its card's order of its tasks (rulings plan#1814, plan#1842, plan#1868).
 TASK = "task"
 #: The kinds of card in the developer's drag order (R-BAL177), the order every reader of the
 #: board reads (``_tracker.Board.order``): a task on the board is in none.

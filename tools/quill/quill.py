@@ -3,8 +3,8 @@
 The plan lives in the private repository ``saltyreformed-labs/shekel-plan``
 (ruling ``balance:R-BAL170``): each step, finding, ruling and question is one
 issue, a "card", and one board holds the steps and questions in the order the
-developer drags them (``R-BAL177``), each step's tasks nested under it in no order
-(ruling plan#1814).  Every write goes through quill's
+developer drags them (``R-BAL177``), each step's tasks nested under it outside that order,
+in its card's order of its tasks (rulings plan#1814, plan#1868).  Every write goes through quill's
 GitHub App, and every card a session files passes :mod:`check` first.
 
 Whether a card SHIPPED is git's answer, never the card's state: its ship
@@ -57,6 +57,7 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
                                 (--question-file Q | --from-question plan#Q) --answer-file A
     python -m tools.quill.quill file question --arc ARC --title NAME --body-file QUESTION
     python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE
+                                         [--before plan#T]
     python -m tools.quill.quill start plan#T
     python -m tools.quill.quill task-file plan#T
     python -m tools.quill.quill finding-file plan#F
@@ -418,7 +419,7 @@ def cmd_block(args, tracker: Tracker, root: Path) -> int:
 def _not_in_order(card: Card) -> str:
     """Why nothing is moved after ``card``, which the board's order read does not list: a step
     or question off the board, or on it but not yet listed by a read that lags a write
-    (``_tracker``'s doctrine); any other kind, a task among them, is in no order."""
+    (``_tracker``'s doctrine); any other kind, a task among them, is in no place of it."""
     if card.kind not in IN_ORDER:
         return (f"plan#{card.number} is not in the board's order, its steps and questions "
                 "(R-BAL177)")
@@ -854,6 +855,9 @@ def _file_parser(commands) -> None:
                       help="the step or finding it is a piece of")
     task.add_argument("--title", required=True, help="a short name (R-BAL178)")
     task.add_argument("--body-file", required=True, help="what the piece builds")
+    task.add_argument("--before", type=card_number,
+                      help="the open task under the same card it is built before; else it goes "
+                           "above the card's finishing tasks")
 
 
 def parser() -> argparse.ArgumentParser:

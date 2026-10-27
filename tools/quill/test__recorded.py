@@ -255,6 +255,12 @@ _REFS = f"https://api.github.com/repos/{TRACKER}/git/refs"
     ("DELETE", f"{_ISSUES}/11/sub_issue", {"sub_issue_id": 5698680001}),
     ("DELETE", f"{_ISSUES}/11/sub_issue", {"sub_issue_id": 911, "x": 1}),
     ("DELETE", f"{_ISSUES}/11/sub_issue", None),
+    ("PATCH", f"{_ISSUES}/2/sub_issues/priority", {"sub_issue_id": 911, "before_id": 911}),
+    ("PATCH", f"{_ISSUES}/11/sub_issues/priority", {"sub_issue_id": 5698680001,
+                                                    "before_id": 911}),
+    ("PATCH", f"{_ISSUES}/11/sub_issues/priority", {"sub_issue_id": 911,
+                                                    "before_id": 5698680001}),
+    ("PATCH", f"{_ISSUES}/11/sub_issues/priority", {"sub_issue_id": 911, "after_id": 911}),
 ])
 def test_a_write_that_is_not_a_known_write_to_a_scratch_card_is_refused(method, url, body):
     """Review cp3 M-3 (d), (e) and review cp4 M-3: a text-writing GraphQL mutation slipped
@@ -278,6 +284,7 @@ def test_a_write_that_is_not_a_known_write_to_a_scratch_card_is_refused(method, 
     ("DELETE", f"{_ISSUES}/11/dependencies/blocked_by/911", None),
     ("DELETE", f"{_ISSUES}/11/labels/{FILING}", None),
     ("DELETE", f"{_ISSUES}/11/sub_issue", {"sub_issue_id": 911}),
+    ("PATCH", f"{_ISSUES}/11/sub_issues/priority", {"sub_issue_id": 911, "before_id": 911}),
     ("POST", "https://api.github.com/graphql",
      {"query": BOARD_ADD, "variables": {"p": "PVT_1", "c": "S_11"}}),
     ("POST", "https://api.github.com/graphql",
@@ -340,8 +347,8 @@ def test_a_create_github_refused_counts_nothing_as_scratch():
 #: board read holds item numbers, no title).  A recording added or removed must be named
 #: here (the next test).
 RECORDINGS_READ_REAL_CARDS = {"blocking": False, "comments": False, "export": True,
-                              "label_missing": False, "show": False, "tracker": True,
-                              "twice": False, "unlink": False}
+                              "label_missing": False, "priority": False, "show": False,
+                              "tracker": True, "twice": False, "unlink": False}
 
 
 def test_every_recording_is_in_the_census():

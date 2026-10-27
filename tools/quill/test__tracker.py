@@ -626,6 +626,43 @@ def test_an_unlink_of_a_card_not_linked_is_refused_and_a_closed_parent_is_not_wh
     assert replay.unused() == 0
 
 
+def test_a_sub_issue_is_placed_above_another_in_its_parents_order():
+    """Recorded 2026-10-27 on scratch plan#1887-#1889 (plan#1877, ruling plan#1868): a parent's
+    read lists its sub-issues in the order they were linked; ``place_child`` moves the second
+    above the first, and the read lists it so; the same move sent again is answered 200 and
+    changes nothing, so a filing run again may send it again."""
+    replay = Replay("priority")
+    github = GitHub("token", replay)
+    tracker = Tracker(github, Board(github, PLAN, recording("priority")["scratch"]["board"]),
+                      "shekel-quill")
+    parent = tracker.create("step", f"{SCRATCH}: a parent whose sub-issues are reordered",
+                            "Scratch for plan#1877's recording; closed when it ends.", [])
+    first = tracker.create("task", f"{SCRATCH}: the first sub-issue linked",
+                           "Scratch for plan#1877's recording.", [])
+    second = tracker.create("task", f"{SCRATCH}: the second sub-issue linked",
+                            "Scratch for plan#1877's recording.", [])
+    numbers = [parent, first, second]
+    for number in numbers:
+        tracker.unmark(number)
+
+    def order():
+        return [child.number for child in tracker.cards(numbers)[parent].children]
+
+    cards = tracker.cards(numbers)
+    tracker.add_child(parent, cards[first])
+    tracker.add_child(parent, cards[second])
+    assert order() == [first, second]
+    tracker.place_child(parent, cards[second], cards[first])
+    assert order() == [second, first]
+    tracker.place_child(parent, cards[second], cards[first])
+    assert order() == [second, first]
+    for number in numbers:
+        tracker.close(number, "not_planned")
+    assert order() == [second, first]
+    assert not any(card.is_open for card in tracker.cards(numbers).values())
+    assert replay.unused() == 0
+
+
 #: The App's login as the comments recording holds it: kept after the App's rename (R-BAL227).
 QUILL = "shekel-quill"
 #: The scratch cards the comments recording filed: step S, the finding C linked under it (and

@@ -77,7 +77,8 @@ one such step is reported (:func:`_owner_lost`).
 
 **A task is a piece of one step or finding** (ruling ``balance:R-BAL386``): a sub-issue of
 type ``task`` under that card, a commit inside its one pull request, never offered or
-claimed, and in no order: on the board under a step it nests there (ruling plan#1814).  It
+claimed, and outside the board's order: on the board under a step it nests there (ruling
+plan#1814), in its card's order of its tasks (ruling plan#1868).  It
 is DONE when git says so (:func:`done_tasks`): its file ``plan/tasks/N`` is in the merge of
 ``dev`` and ``main``, or the live claim of the card it is under wrote it.  Its open or
 closed state is the tool's display of that, which ``sync`` keeps in step both ways, as it

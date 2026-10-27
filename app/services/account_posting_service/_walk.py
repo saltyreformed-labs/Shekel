@@ -41,11 +41,13 @@ nets to zero and drops out regardless of partition) and future-proof for new
 source kinds (any movement-linked entry is attributed by its linkage, not by
 an enumerated source-kind list).  A transfer's legs are its two covering
 movements' since plan step ``balance:X-bi-6-3`` (ruling **R-BAL45**), read by
-the movement loader like any movement's.  The loaders the one-entry transfer
-shape and a row's own leg were read by, keyed ``transfer_id`` and
-``transaction_id``, went with plan step ``balance:X-bi-6-5``'s second leaf
-(card plan#1845), whose migration deletes every entry those two sources posted
-(ruling plan#1867): all of them were reversed to zero, each on its own key.
+the movement loader like any movement's; that step deleted the
+``transfer_id``-keyed loader the one-entry transfer shape was read by.  The
+``transaction_id``-keyed loader a row's own leg was read by, and the
+``transfer_id IS NULL`` guard every loader carried, went with plan step
+``balance:X-bi-6-5``'s second leaf (card plan#1845), whose migration deletes
+every entry those two sources posted (ruling plan#1867): all of them were
+reversed to zero, each on its own key.
 
 The loan analogue is :mod:`app.services.loan_ledger`; loans
 never walk here (their anchors are dated ``LoanAnchorEvent`` facts replayed

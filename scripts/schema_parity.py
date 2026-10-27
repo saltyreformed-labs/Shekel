@@ -36,9 +36,15 @@ NOT compared, each for a stated reason:
 * Triggers, constraint triggers and functions: no model declares one.  The infrastructure
   modules attach them on both paths, and :func:`scripts._template_checks.template_checks`
   counts every family but the posting and opening triggers (finding BAL-542).
-* Sequences by name (an identity's or a serial's), column order, comments, grants and storage
-  parameters: none is a rule a row is held to.
-* Any schema no model is in (``system``: its one table is the audit infrastructure's).
+* Sequences as objects of their own, column order, comments, grants and storage parameters: none
+  is a rule a row is held to.  A serial's sequence IS compared by name, through its column's
+  default (``nextval('<schema>.<sequence>'::regclass)``), so a table renamed while its sequence
+  keeps the old name is a difference; an identity's would not be, and no model declares an
+  identity column (2026-10-27).
+* Any schema no model is in.  ``system`` is one: both paths build the audit infrastructure's
+  ``audit_log`` there, and a database the chain built also holds the three snapshot tables
+  migrations keep for their own downgrades (``transfer_twin_purge``, ``pre_origination_purge``,
+  ``loan_due_date_backfill``), which no model declares.
 """
 
 from __future__ import annotations

@@ -14,10 +14,11 @@ Plan step **balance:X-bi-6-5**, its second leaf, card plan#1845.  A journal
 entry linked its source by one of three columns: ``transfer_id`` for the
 one-entry ``transfer`` source (Build-Order Step 2), ``transaction_id`` for a
 row's own ``transaction`` leg (Step 3), and ``transaction_entry_id`` for a
-movement (plan step X-f3b).  Neither older source has been written since
-(plan steps ``balance:X-bi-4a`` and ``balance:X-bi-6-3``): the deploy resync
-reversed every entry of both to zero, and the reversed pairs it left are the
-only entries either column links (ruling **R-BAL102**).  This revision
+movement (plan step X-f3b).  Since plan steps ``balance:X-bi-4a`` and
+``balance:X-bi-6-3`` neither older source has been written but to reverse what
+it had posted: the deploy resync reversed every entry of both to zero, and the
+reversed pairs it left are the only entries either column links (ruling
+**R-BAL102**).  This revision
 deletes them and what existed only for them:
 
   1. **It refuses, writing nothing** (:func:`refuse_what_the_delete_would_move`),

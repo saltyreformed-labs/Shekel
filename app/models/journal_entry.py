@@ -90,8 +90,9 @@ class JournalEntry(UserScopedMixin, CreatedAtMixin, db.Model):
 
     **Two older links are gone.**  Step 2's ``transfer_id`` linked the
     one-entry ``transfer`` source and Step 3's ``transaction_id`` a row's own
-    ``transaction`` leg; neither source has been written since plan steps
-    ``balance:X-bi-6-3`` and ``balance:X-bi-4a``, and plan step
+    ``transaction`` leg; after plan steps ``balance:X-bi-6-3`` and
+    ``balance:X-bi-4a`` each source was written only to reverse what it had
+    posted, which the deploy resync brought to zero, and plan step
     ``balance:X-bi-6-5``'s second leaf (card plan#1845, migration
     ``1712c506ee99``) deleted both columns, both kinds and every entry the
     deploy resync had reversed under them (ruling **plan#1867**).  Plan step

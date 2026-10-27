@@ -405,10 +405,13 @@ def _assert_counter_accounts_reconcile(scenario_id: int) -> None:
     beside them until plan step ``balance:X-bi-6-5``'s second leaf (card
     plan#1845) deleted that link.
 
-    A group with no parent row is a hard-deleted transaction's legs, their
-    movement link SET NULL as the movement cascaded with the row: the
-    reverse-before-delete pair MUST net to zero, asserted here so a stranded
-    (un-reversed) leg would be caught.
+    A group with no parent row is a deleted movement's legs, their movement
+    link SET NULL by the movement's delete.  No row delete takes a movement
+    (``fk_transaction_entries_transaction_id`` is NO ACTION): the removal act,
+    ``movement_removal.remove_movements``, reverses each movement's postings
+    and deletes it before its row goes.  The reverse-before-delete pair MUST
+    net to zero, asserted here so a stranded (un-reversed) leg would be
+    caught.
 
     **The owner's Transfers-in-transit account is a counter account too**
     (plan step ``balance:X-bi-6-3``, rulings **R-BAL45** and **R-BAL101**):
@@ -482,8 +485,8 @@ def _assert_counter_accounts_reconcile(scenario_id: int) -> None:
                 rhs += _checked_side_counter_net(counter, side_record_id, net)
                 continue
             if transaction_id is None:
-                # Legs whose source transaction was hard-deleted (its
-                # movement cascaded, the link SET NULL): the
+                # Legs whose movement was deleted (the removal act deletes
+                # it, never a cascade from its row; the link SET NULL): the
                 # reverse-before-delete pair must net to zero.
                 assert net == 0, (
                     f"counter {counter.id}: orphaned (no parent row) "

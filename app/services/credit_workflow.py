@@ -269,10 +269,12 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
     every ordinary delete.
 
     **It walks :func:`live_payback_chain` where it used to RECURSE**, and
-    the order is unchanged: DEEPEST FIRST, so each level reverses and
-    deletes before the level above it does and every ledger account is
-    net-zero before any of its entries' movement links
-    (``journal_entries.transaction_entry_id``) is SET-NULLed.
+    the order is unchanged: DEEPEST FIRST, so each level is deleted before
+    the level above it, which ``fk_transactions_credit_payback_for``
+    (``ON DELETE RESTRICT``) requires: a level deleted while the one below
+    it still names it is refused.  The order carries nothing for the
+    ledger, because the one caller reversed every level's postings and
+    took every movement off the books before this runs.
     The walk is published because the delete verb and its confirm dialog
     need the same chain and neither may write to get it (plan step
     ``bank_import:X-gb``).

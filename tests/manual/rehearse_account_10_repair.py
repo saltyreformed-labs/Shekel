@@ -1639,7 +1639,8 @@ def _postings_fingerprint() -> str:
 
     Every column that could carry money or attribution is in the digest --
     the posting's, and its journal entry's date, period, source, scenario,
-    owner, description and the row, transfer and movement it books -- and the
+    owner, description and the movement it books (an entry's one source link
+    since card plan#1845 dropped its row and transfer links) -- and the
     ORDER is fixed
     by ``ap.id`` so two equal ledgers cannot hash differently for a row-order
     reason.
@@ -1651,8 +1652,7 @@ def _postings_fingerprint() -> str:
         select ap.id, ap.journal_entry_id, ap.ledger_account_id,
                ap.posting_kind_id, ap.amount, je.entry_date, je.pay_period_id,
                je.source_kind_id, je.scenario_id, je.user_id,
-               je.transaction_id, je.transfer_id, je.transaction_entry_id,
-               je.description
+               je.transaction_entry_id, je.description
         from budget.account_postings ap
         join budget.journal_entries je on je.id = ap.journal_entry_id
         order by ap.id

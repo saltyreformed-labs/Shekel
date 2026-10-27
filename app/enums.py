@@ -542,9 +542,10 @@ class PostingSourceEnum(enum.Enum):
     rulings **R-BAL45** and **R-BAL101**): it links ``transaction_entry_id``
     exactly as ``purchase`` does.  Two older values are gone: ``transfer``,
     the one-entry-per-transfer shape (Build-Order Step 2), and
-    ``transaction``, a settled row's own cash leg (Step 3).  Neither was
-    written after plan steps ``balance:X-bi-6-3`` and ``balance:X-bi-4a``,
-    the deploy resync reversed every entry of both, and plan step
+    ``transaction``, a settled row's own cash leg (Step 3).  After plan steps
+    ``balance:X-bi-6-3`` and ``balance:X-bi-4a`` each was written only to
+    reverse what it had posted, the deploy resync bringing every entry of
+    both to zero, and plan step
     ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted the reversed
     pairs, both kinds and both links (ruling **plan#1867**).  Later steps add
     ``paycheck`` and ``credit_payback`` via data migrations.  Values match

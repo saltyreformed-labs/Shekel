@@ -168,7 +168,7 @@ def test_the_hook_refuses_a_message_naming_another_task(code, tmp_path, capsys):
 def test_the_hook_reads_a_message_as_git_keeps_it(code, tmp_path):
     """Comments, and ``-v``'s diff below git's cut line, are no text: such a message is not
     stamped while a task is in progress, and is refused while none is.  A trailer's key is
-    matched in any case, as ``_git.named_tasks`` reads one, and a ``Task:`` line inside the
+    matched in any case, as ``_git.stamps`` reads one, and a ``Task:`` line inside the
     body's prose is no trailer."""
     tracker = _claimed_with_tasks(code)
     assert _judged(code, tmp_path, VERBOSE) == (1, VERBOSE)

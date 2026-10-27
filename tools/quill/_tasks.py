@@ -12,22 +12,24 @@ task's file into the working tree for the session to commit with the piece it fi
 (:func:`cmd_task_file`), the read a card's drop makes of the tasks under it
 (:func:`taken_by_drop`), and ``quill sync``'s put-on of each task that rule says belongs on
 the board and is not (:func:`put_on_board`, ruling plan#1842).  ``quill sync`` writes each
-task's state from git, and ``quill show`` names each task under a card with it.
+task's state from git, and ``quill show`` names each task under a card with it.  And CI's
+landing check refuses a claim's pull request while a task under its card that was not dropped
+lacks its done file (:func:`owed`, ``landing``'s rule 7).
 
-Split out of the command module, which these would take past the 1,000 lines
-``too-many-lines`` allows.
+Split out of the command module and the landing check, which these would take past the 1,000
+lines ``too-many-lines`` allows.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
-from tools.quill._command import Refused, _label, _one, on_board
+from tools.quill._command import Refused, _label, _one, on_board, with_cards
 from tools.quill._state import done_tasks, drop_takes, dropped, names_no_task
-from tools.quill._tracker import BareCard, Card, Tracker
+from tools.quill._tracker import BareCard, Card, CardReader, Tracker
 from tools.quill.setup_tracker import TASK
 
 #: What a task's file says: the instant it was written (:func:`_git.instant`), so each write
@@ -268,3 +270,35 @@ def put_on_board(tracker: Tracker, cards: Mapping[int, Card], dry_run: bool) -> 
             tracker.board.add(task)
         print(f"{'would ' if dry_run else ''}put on the board, nested under its step "
               f"plan#{task.parent} (ruling plan#1842): {_label(task)}")
+
+
+def owed(reader: CardReader, card: BareCard, held: dict[int, BareCard],
+         done: Collection[int]) -> list[str]:
+    """CI's landing check's open-task arm (``R-BAL386``; ``tools/quill/landing.py``): one
+    sentence for each task under ``card``, which the pull request of its claim ``card/N``
+    records, that was not dropped (:func:`_state.dropped`: closed by a person, or by ``quill
+    drop``; a task the TOOL closed as done counts, as that close only shows git) and whose
+    done file the merge it lands does not hold (``done``, the tasks whose file it holds).  Each
+    task is read by its number through ``reader``, as a parent's listing of it names no closer:
+    those ``held`` lacks, which it then holds (:func:`_command.with_cards`).  A task the tool
+    closed is dropped only once ``quill sync`` has reopened it (``quill drop`` refuses a closed
+    card), so its sentence says so.
+
+    Raises:
+        _tracker.TrackerError: when a task ``card`` lists does not exist.
+    """
+    numbers, head = card.task_children, _git.card_branch(card.number)
+    with_cards(reader, held, numbers)
+    reasons = []
+    for number in sorted(numbers):
+        if number in done or dropped(number, held, set()):
+            continue
+        shown, drop = (("", f"drop the task (quill drop plan#{number})") if held[number].is_open
+                       else (" (quill closed it as done while a branch held that file)",
+                             f"drop the task once quill sync reopens it (quill sync, then quill "
+                             f"drop plan#{number})"))
+        reasons.append(f"{_git.task_file(number)}: {head} records card {card.number}, but holds "
+                       f"no done file for task plan#{number} under it, which is neither done "
+                       f"nor dropped{shown}: write it in the commit that finishes the task "
+                       f"(quill task-file plan#{number}), or {drop}")
+    return reasons

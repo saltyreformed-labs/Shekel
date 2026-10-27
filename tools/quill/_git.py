@@ -29,8 +29,8 @@ longer done.  Which change may write one is the markers' write rule, judged in t
 **A task is IN PROGRESS while a commit of its card's claim names it, no commit since records
 its drop, and the claim's tip holds no file for it** (rulings plan#1872, plan#1900;
 :func:`in_progress`).  A commit names the task it builds by the trailer ``Task: plan#T``
-(:func:`task_trailer`); ``quill start`` begins a piece with an empty commit carrying it
-(:func:`start`), the commit hook stamps it on each commit of the piece
+(:func:`task_trailer`, read by :func:`stamps`); ``quill start`` begins a piece with an empty
+commit carrying it (:func:`start`), the commit hook stamps it on each commit of the piece
 (``tools/quill/commit_hook.py``), and the commit that writes the task's file ends it, done.
 ``quill drop`` of a task begun ends it dropped instead, with an empty commit carrying
 ``Dropped: plan#T`` too (:func:`dropped_trailer`, :func:`drop`).
@@ -155,6 +155,20 @@ class Took:
 
 
 @dataclass(frozen=True)
+class Stamp:
+    """One of a claim's own commits as its trailers name tasks (:func:`stamps`): its ``sha``,
+    ``parents`` and ``subject``; ``tasks``, each task its trailers ``Task: plan#T`` name
+    (:func:`task_trailer`), and ``dropped``, each its trailers ``Dropped: plan#T`` name
+    (:func:`dropped_trailer`), each in the order the message holds them."""
+
+    sha: str
+    parents: tuple[str, ...]
+    subject: str
+    tasks: tuple[int, ...]
+    dropped: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class Reads:
     """What one command reads of git (:func:`read`): what shipped, and every claim by card."""
 
@@ -220,7 +234,7 @@ def task_of(path: str) -> int | None:
 def task_named(value: str) -> int | None:
     """The task a :data:`TASK_TRAILER` trailer's value names, ``plan#<number>`` (the space
     around it aside); None for a value naming none.  The ONE reading of that value:
-    :func:`named_tasks` reads a claim's commits by it, and the commit hook a message
+    :func:`stamps` reads a claim's commits by it, and the commit hook a message
     (``tools/quill/commit_hook.py``)."""
     found = _TASK_NAMED.fullmatch(value.strip())
     return int(found.group(1)) if found else None
@@ -512,29 +526,51 @@ def own_tasks(root: Path, tip: str) -> frozenset[int]:
                      if all(held.get(number) != blob for held in grew_from))
 
 
-def begun_tasks(root: Path, tip: str) -> frozenset[int]:
-    """Each task the claim at ``tip`` has begun and not dropped since (rulings plan#1872,
-    plan#1900): one a commit of its own names by its trailer ``Task: plan#T``
-    (:func:`task_trailer`), unless the newest of those commits, or one after it, records its
-    drop (``Dropped: plan#T``, :func:`dropped_trailer`).  Its own commits are those neither
-    ``dev`` nor ``main`` holds, as :func:`own_tasks` reads them, walked newest first (git's
-    ``--topo-order``: a commit before each it grew from), so each task's newest record
-    decides, a drop beside the name in one commit winning.  Git matches each key in any case,
-    and a value naming no card (``plan#<number>``) names nothing (:func:`task_named`).
+def _named(values: str) -> tuple[int, ...]:
+    """Each task the trailer values ``values``, one a line, name (:func:`task_named`)."""
+    return tuple(number for line in values.splitlines()
+                 if (number := task_named(line)) is not None)
+
+
+def stamps(root: Path, tip: str) -> list[Stamp]:
+    """Each of the claim at ``tip``'s own commits, with the tasks its trailers name and drop
+    (:class:`Stamp`): those neither ``dev`` nor ``main`` holds, as :func:`own_tasks` reads
+    them, newest first (git's ``--topo-order``: a commit before each it grew from).  Git
+    matches each key in any case, and a value naming no card (``plan#<number>``) names
+    nothing (:func:`task_named`).  The ONE reading of what a claim's commits name:
+    :func:`begun_tasks` reads which tasks are begun from it, and CI's landing check which of
+    a card's commits name no task under it (``tools/quill/_stamps.py``).
 
     Raises:
         GitError: When git cannot read ``tip``.
     """
     out = git(root, "log", "--topo-order",
-              f"--format=%x01%(trailers:key={TASK_TRAILER},valueonly)%x02"
-              f"%(trailers:key={DROPPED_TRAILER},valueonly)", tip, "--not", *TIPS)
-    newest: dict[int, bool] = {}
+              f"--format=%x01%H%x02%P%x02%(trailers:key={TASK_TRAILER},valueonly)%x02"
+              f"%(trailers:key={DROPPED_TRAILER},valueonly)%x02%s", tip, "--not", *TIPS)
+    found = []
     for record in out.split("\x01")[1:]:
-        named, _, dropped = record.partition("\x02")
-        for values, begun in ((dropped, False), (named, True)):
-            for line in values.splitlines():
-                if (number := task_named(line)) is not None:
-                    newest.setdefault(number, begun)
+        sha, parents, named, dropped, subject = record.split("\x02", 4)
+        found.append(Stamp(sha, tuple(parents.split()), subject.rstrip("\n"), _named(named),
+                           _named(dropped)))
+    return found
+
+
+def begun_tasks(root: Path, tip: str) -> frozenset[int]:
+    """Each task the claim at ``tip`` has begun and not dropped since (rulings plan#1872,
+    plan#1900): one a commit of its own names by its trailer ``Task: plan#T``
+    (:func:`task_trailer`), unless the newest of those commits, or one after it, records its
+    drop (``Dropped: plan#T``, :func:`dropped_trailer`).  Its own commits are walked newest
+    first (:func:`stamps`), so each task's newest record decides, a drop beside the name in
+    one commit winning.
+
+    Raises:
+        GitError: When git cannot read ``tip``.
+    """
+    newest: dict[int, bool] = {}
+    for stamp in stamps(root, tip):
+        for numbers, begun in ((stamp.dropped, False), (stamp.tasks, True)):
+            for number in numbers:
+                newest.setdefault(number, begun)
     return frozenset(number for number, begun in newest.items() if begun)
 
 

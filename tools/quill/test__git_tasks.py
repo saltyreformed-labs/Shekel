@@ -238,3 +238,28 @@ def test_a_drop_is_read_before_the_start_it_ends_whatever_the_clocks_say(code, m
     tip = run(root, "commit-tree", run(root, "merge-tree", "--write-tree", other, dropped),
               "-p", other, "-p", dropped, "-m", "merge")
     assert _git.in_progress(root, tip) == frozenset()
+
+
+def test_a_claims_own_commits_are_read_with_what_their_trailers_name(code):
+    """``stamps``, the one reading of a claim's commits' trailers (ruling plan#1872): each of
+    its own commits, a merge first, ahead of the commits it grew from, with its parents, its
+    subject, the tasks its ``Task`` trailers name and those its ``Dropped`` trailers name, each
+    key in any case and in the message's order, a value naming no card left out; and no commit
+    dev or main holds, whatever it names."""
+    root, base = code
+    landed = commit_files(root, base, "card 3's piece\n\nTask: plan#40", {"a.py": "a\n"})
+    point_dev(root, landed)
+    claimed = commit_files(root, landed, "claim plan#8",
+                           {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
+    one = commit_files(root, claimed, "piece one\n\nTask: plan#42\ntask: plan#41\nTask: 43",
+                       {"b.py": "b\n"})
+    side = commit_files(root, claimed, "a drop\n\nTask: plan#41\nDROPPED: plan#41", {})
+    tip = run(root, "commit-tree", run(root, "merge-tree", "--write-tree", one, side),
+              "-p", one, "-p", side, "-m", "merge the drop")
+    found = _git.stamps(root, tip)
+    assert (found[0], found[-1].sha) == (_git.Stamp(tip, (one, side), "merge the drop", (), ()),
+                                         claimed)
+    assert {stamp.sha: stamp for stamp in found} == {
+        tip: found[0], claimed: _git.Stamp(claimed, (landed,), "claim plan#8", (), ()),
+        one: _git.Stamp(one, (claimed,), "piece one", (42, 41), ()),
+        side: _git.Stamp(side, (claimed,), "a drop", (41,), (41,))}

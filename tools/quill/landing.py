@@ -158,9 +158,11 @@ comes only through the merge that took it in.  Rule 5 lets only a claim write on
 reads a claim's done file (:func:`_state.names_no_task`), so the file of a task since moved
 under another card is refused on N's branch.  Rule 6 is the markers' alone: a task's file
 makes a change no records-only one.  And **a change from ``card/N`` recording card N is
-refused while a task under N that was not dropped lacks its done file in M** (:func:`_owed`):
-a task the TOOL closed counts, as its close only shows git; a person's close, or ``quill
-drop``'s, is a drop.  The release tool never reads a task.
+refused while a task under N that was not dropped lacks its done file in M**
+(:func:`_tasks.owed`): a task the TOOL closed counts, as its close only shows git; a person's
+close, or ``quill drop``'s, is a drop.  **It is refused too while a commit of its claim names
+no task under N** (:mod:`tools.quill._stamps`, the commit hook's backstop).  The release tool
+never reads a task.
 
 **The tracker is read only when a card or a task must be**, through the card-only reader
 (:class:`_tracker.CardReader`) and the token :data:`TOKEN_VARIABLE` holds: never quill's
@@ -205,10 +207,10 @@ import requests
 
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, tracking
-from tools.quill import _findings, _git, _production
-from tools.quill._command import with_cards, with_closure
+from tools.quill import _findings, _git, _production, _stamps, _tasks
+from tools.quill._command import with_closure
 from tools.quill._github import GitHub, GitHubError, described, reading
-from tools.quill._state import dropped, filing_ended, filing_unfinished, names_no_task, no_work
+from tools.quill._state import filing_ended, filing_unfinished, names_no_task, no_work
 from tools.quill._tracker import BareCard, CardReader, TrackerError
 from tools.quill.setup_tracker import PLAN
 
@@ -813,36 +815,6 @@ def _wrong(number: int, card: BareCard | None, cards: Mapping[int, BareCard],
     return None
 
 
-def _owed(landing: Landing, card: BareCard, held: dict[int, BareCard],
-           reader: CardReader) -> list[str]:
-    """The open-task arm (``R-BAL386``): one sentence for each task under ``card``, which the
-    pull request's own claim records, that was not dropped (:func:`_state.dropped`: closed by
-    a person, or by ``quill drop``; a task the TOOL closed as done counts, as that close only
-    shows git) and whose done file M's tree does not hold.  Each task is read by its number,
-    as a parent's listing of it names no closer: those ``held`` lacks, which it then holds
-    (:func:`_command.with_cards`).  A task the tool closed is dropped only once ``quill sync``
-    has reopened it (``quill drop`` refuses a closed card), so its sentence says so.
-
-    Raises:
-        _tracker.TrackerError: when a task ``card`` lists does not exist.
-    """
-    numbers = card.task_children
-    with_cards(reader, held, numbers)
-    done, head, reasons = landing.lines[_git.TASKS], landing.pull.head, []
-    for number in sorted(numbers):
-        if number in done or dropped(number, held, set()):
-            continue
-        shown, drop = (("", f"drop the task (quill drop plan#{number})") if held[number].is_open
-                       else (" (quill closed it as done while a branch held that file)",
-                             f"drop the task once quill sync reopens it (quill sync, then quill "
-                             f"drop plan#{number})"))
-        reasons.append(f"{_git.task_file(number)}: {head} records card {card.number}, but holds "
-                       f"no done file for task plan#{number} under it, which is neither done "
-                       f"nor dropped{shown}: write it in the commit that finishes the task "
-                       f"(quill task-file plan#{number}), or {drop}")
-    return reasons
-
-
 def _others(landing: Landing, numbers: set[int], held: Mapping[int, BareCard],
             recorded: BareCard | None) -> dict[int, str]:
     """Rule 5's arm that rule 7 judges: for each marker of another card than its claim's that
@@ -864,19 +836,22 @@ def refusals(landing: Landing, read: Mapping[str, set[int]], shipped: Iterable[i
     its card owns (:func:`_findings.foreign`, rule 5's sentence and why), then for each task
     whose done file it writes that the tracker says the file marks nothing done on the
     claim's branch (:func:`_state.names_no_task`: no task, or one under another card,
-    ``R-BAL386``), by task, then for each task the claim's card owes (:func:`_owed`), each
-    finding it owes (:func:`_findings.unfixed`) and each a step above it owes
+    ``R-BAL386``), by task, then for each task the claim's card owes (:func:`_tasks.owed`),
+    each commit of the claim naming no task under it (:func:`_stamps.unnamed`), each finding
+    it owes (:func:`_findings.unfixed`) and each a step above it owes
     (:func:`_findings.unhanded`), and each a step rule 6's door records owes
     (:func:`_findings.unrecorded`); ``read`` holds the cards (under :data:`_git.MARKERS`) and
     the tasks (under :data:`_git.TASKS`), and ``shipped`` is git's answer once the change and
     the other integration branch meet.  The tracker is read through the reader ``connect``
     makes: the cards and the tasks the change writes in one read, then each card a decision
     over those cards reads (:func:`_command.with_closure`), then each task under the claim's
-    card not read yet (:func:`_owed`), then what the claim's card and each step above it
+    card not read yet (:func:`_tasks.owed`), then each card a commit of the claim names not
+    read yet (:func:`_stamps.unnamed`), then what the claim's card and each step above it
     block, and each finding among those not read yet (:func:`_findings.owned`).
 
     Raises:
         NotSet: when ``connect`` has no token to read with.
+        tools.ci.gitcmd.GitError: when git cannot read the claim's commits.
         _tracker.TrackerError: when a card links to one the tracker lacks, or GitHub's
             answer is cut short, answers a list as null or holds a null node in one.
         _github.GitHubError: when GitHub answers a read with an error.
@@ -898,7 +873,8 @@ def refusals(landing: Landing, read: Mapping[str, set[int]], shipped: Iterable[i
                 for number in sorted(tasks) if (why := names_no_task(number, held,
                                                                      landing.claim))]
     if recorded is not None:
-        reasons += _owed(landing, recorded, held, reader)
+        reasons += _tasks.owed(reader, recorded, held, landing.lines[_git.TASKS])
+        reasons += _stamps.unnamed(reader, landing.root, landing.pull.head_sha, recorded, held)
         reasons += _findings.unfixed(reader, recorded, shipped, held)
         reasons += _findings.unhanded(reader, recorded, cards, shipped, held)
     reasons += _findings.unrecorded(reader, landing.facts.door, head, shipped, held)
@@ -916,10 +892,10 @@ def problems(root: Path, merge: str, pull: PullRequest,
 
     Raises:
         CannotJudge: as :func:`_landing` raises it.
-        tools.ci.gitcmd.GitError: when git cannot read the merge, its change or a branch's
-            line, or merge either tip with the other branch; or a marker or a task's done
-            file conflicts AFTER where :func:`_unwritten` says, or a marker anywhere once a
-            card or task must be read.
+        tools.ci.gitcmd.GitError: when git cannot read the merge, its change, a branch's
+            line or the claim's commits, or merge either tip with the other branch; or a
+            marker or a task's done file conflicts AFTER where :func:`_unwritten` says, or a
+            marker anywhere once a card or task must be read.
         _production.IgnoreFileError: as :func:`_unrecorded` raises it.
         NotSet, _tracker.TrackerError, _github.GitHubError, requests.RequestException: as
             :func:`refusals` raises them.

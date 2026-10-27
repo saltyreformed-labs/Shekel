@@ -25,8 +25,9 @@ is one whose editor is still to open: it is not stamped, since a stamp is text, 
 turn the empty message that aborts a commit into a commit (measured), and it is refused only
 while no task is in progress; ``commit-msg`` judges what the editor leaves.  So a commit made
 with both ``--no-verify`` and the editor is not stamped: that is left to CI's backstop at the
-pull request (the spec's item 5, plan#1880).  An amend of the commit that finished a piece is
-refused, that piece's file being at the tip: ``git reset --soft HEAD~1``, then commit again.
+pull request (``tools/quill/_stamps.py``, plan#1880).  An amend of the commit that finished a
+piece is refused, that piece's file being at the tip: ``git reset --soft HEAD~1``, then commit
+again.
 
 The repository is the one git runs the hook in, from the top of its working tree
 (githooks(5)): the working directory.  Every git call goes through :mod:`tools.ci.gitcmd`, so
@@ -117,7 +118,7 @@ def _merging(root: Path) -> bool:
 def _values(root: Path, message: Path) -> list[str]:
     """Each value of the ``Task`` trailers of the message in the file ``message``, as git
     parses a message's trailers (``interpret-trailers --parse``: the key matched in any case,
-    as :func:`_git.named_tasks` reads a commit's), each with the space around it removed."""
+    as :func:`_git.stamps` reads a commit's), each with the space around it removed."""
     out = git(root, "interpret-trailers", "--parse", str(message))
     pairs = [line.partition(":") for line in out.splitlines()]
     return [value.strip() for key, _, value in pairs

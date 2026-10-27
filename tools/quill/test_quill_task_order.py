@@ -1,11 +1,12 @@
 """A card's tasks in the order they are built (ruling plan#1868): ``quill file task`` places a
-new task above the card's finishing tasks still open, or above the task ``--before`` names,
-over the in-memory tracker (:class:`_fake.FakeTracker`), whose reorder keeps the order
-``recorded/priority.json`` shows GitHub keeping.
+new task above the card's finishing tasks still to begin, as git says (neither done nor in
+progress), or above the task ``--before`` names, over the in-memory tracker
+(:class:`_fake.FakeTracker`), whose reorder keeps the order ``recorded/priority.json`` shows
+GitHub keeping, and the ``code`` fixture's real git.
 """
 from __future__ import annotations
 
-from tools.quill._fake import FailOnce, FakeTracker, run
+from tools.quill._fake import FailOnce, FakeTracker, claim, named, piece, run
 from tools.quill._tasks import FINISHING
 
 (REVIEW, _), (LAND, _) = FINISHING
@@ -56,6 +57,56 @@ def test_a_task_filed_after_the_review_is_placed_above_the_suite_and_pull_reques
     assert _order(tracker) == [2, 3, 5, 4]
 
 
+def test_a_fix_filed_while_the_review_is_in_progress_goes_above_the_suite(tmp_path, code):
+    """Spec item 8: a piece filed before the review begins goes above it; once plan#1's claim
+    has begun the review (a commit naming it, ruling plan#1872), a fix it finds goes above the
+    suite and pull request, though the tracker still shows the review open."""
+    tracker = _card()
+    claim(code, 1)
+    assert run(tracker, code, *_filing(tmp_path)) == 0
+    assert _order(tracker) == [2, 5, 3, 4]
+    named(code, 1, 3)
+    assert run(tracker, code, *_filing(tmp_path, "the review's fix")) == 0
+    assert _order(tracker) == [2, 5, 3, 6, 4]
+
+
+def test_a_fix_filed_once_the_reviews_file_is_pushed_goes_above_the_suite(tmp_path, code):
+    """The review's file on plan#1's claim and the tracker showing it open until `quill sync`:
+    git says it is done, so the fix goes above the suite and pull request."""
+    tracker = _card()
+    claim(code, 1)
+    piece(code, 1, 3)
+    assert tracker.cards_by_number[3].is_open
+    assert run(tracker, code, *_filing(tmp_path, "the review's fix")) == 0
+    assert _order(tracker) == [2, 3, 5, 4]
+
+
+def test_a_task_filed_while_the_suite_is_in_progress_stays_last(tmp_path, code, capsys):
+    """The review done and the suite and pull request begun: no finishing task is still to
+    begin, so the new task stays where its link put it."""
+    tracker = _card(review_done=True)
+    claim(code, 1)
+    named(code, 1, 4)
+    assert run(tracker, code, *_filing(tmp_path, "the suite's fix")) == 0
+    assert _order(tracker) == [2, 3, 4, 5]
+    assert "  in plan#1's order: last, no finishing task still to begin\n" in (
+        capsys.readouterr().out)
+
+
+def test_before_refuses_a_task_git_says_is_done(tmp_path, code, capsys):
+    """A task whose file is on its card's claim is no piece still to build, though the tracker
+    shows it open until `quill sync`: refused before anything is written."""
+    tracker = _card()
+    claim(code, 1)
+    piece(code, 1, 2)
+    assert run(tracker, code, *_filing(tmp_path, "piece b", ("--before", "plan#2"))) == 1
+    assert ("refused: plan#2 [task, no arc] piece a is done in git (plan/tasks/2 is on its "
+            "card's claim, or on dev or main), though the tracker shows it open until `quill "
+            "sync`: a task is placed above another piece of its card still to build"
+            ) in capsys.readouterr().err
+    assert not tracker.writes
+
+
 def test_a_task_is_placed_above_the_task_before_names(tmp_path, code):
     """A split or an added piece goes where it is built: above the open task named."""
     tracker = _card()
@@ -71,8 +122,8 @@ def test_before_names_an_open_task_under_the_same_card(tmp_path, code, capsys):
     tracker.add(6)
     tracker.add_task(7, 6)
     tracker.add_task(8, 1, is_open=False, state_reason="COMPLETED", closed_by_tool=True)
-    for named in ("plan#6", "plan#7", "plan#8"):
-        assert run(tracker, code, *_filing(tmp_path, "piece b", ("--before", named))) == 1
+    for other in ("plan#6", "plan#7", "plan#8"):
+        assert run(tracker, code, *_filing(tmp_path, "piece b", ("--before", other))) == 1
         assert ("is no open task under plan#1: a task is placed above another piece of its card "
                 "still to build") in capsys.readouterr().err
     assert not tracker.writes
@@ -92,7 +143,8 @@ def test_a_finishing_task_and_a_task_with_none_open_stay_last(tmp_path, code, ca
     capsys.readouterr()
     assert run(other, code, *_filing(tmp_path)) == 0
     assert _order(other) == [2, 3]
-    assert "  in plan#1's order: last, no finishing task being open\n" in capsys.readouterr().out
+    assert "  in plan#1's order: last, no finishing task still to begin\n" in (
+        capsys.readouterr().out)
     assert not [write for write in tracker.writes + other.writes if write[0] == "place_child"]
 
 

@@ -25,7 +25,7 @@ from pathlib import Path
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
 from tools.quill._command import Refused, _label, _one, on_board
-from tools.quill._state import drop_takes, dropped, names_no_task
+from tools.quill._state import done_tasks, drop_takes, dropped, names_no_task
 from tools.quill._tracker import BareCard, Card, Tracker
 from tools.quill.setup_tracker import TASK
 
@@ -35,7 +35,7 @@ DONE = "done "
 #: The tasks that finish every card, last in its order, each title with what the piece is,
 #: ``{card}`` standing for the card's number (ruling plan#1875, plan#1870): a card is ready to
 #: land once both are done.  ``quill claim`` files them (:func:`finishing`), and a task filed
-#: under a card goes above the first of them still open that comes after it here
+#: under a card goes above the first of them still to begin that comes after it here
 #: (:func:`place`).
 FINISHING = (
     ("Adversarial review",
@@ -98,21 +98,27 @@ def in_progress(cards: Mapping[int, BareCard],
     the card the tracker says it is under has begun it and not finished it
     (:attr:`_git.Claim.in_progress`).  One a claim names that is under another card, or is no
     task, is in progress nowhere (:func:`_state.names_no_task`), as its file there would mark
-    nothing done (:func:`_state.done_tasks`).  ``show`` reads it."""
+    nothing done (:func:`_state.done_tasks`).  ``show`` reads it, and :func:`place`."""
     return frozenset(number for claim in claims.values() for number in claim.in_progress
                      if names_no_task(number, cards, claim.card) is None)
 
 
-def place(tracker: Tracker, task: Card, parent: Card, before: Card | None) -> None:
+def place(tracker: Tracker, task: Card, parent: Card, before: Card | None,
+          reads: _git.Reads) -> None:
     """Put ``task``, a piece linked under ``parent``, where it is built in ``parent``'s order of
     its tasks (ruling plan#1868), each write printed as it lands: above ``before`` when the
-    filing names one, else above the first of ``parent``'s finishing tasks still open that
-    comes after it in :data:`FINISHING` (:func:`finishing_rank`), so a piece goes above the
-    review and the review above the suite and pull request; a task with none open after it,
-    the last finishing task always, stays where the link put it, last.
-    ``parent``'s order is its read before the link, with ``task`` last where that read does
-    not list it, as GitHub lists a sub-issue linked last (``recorded/priority.json``).  A task
-    already just above its place is not moved, so the filing run again sends nothing more."""
+    filing names one, else above the first of ``parent``'s finishing tasks still to begin
+    that comes after it in :data:`FINISHING` (:func:`finishing_rank`), so a piece goes above
+    the review, the review above the suite and pull request, and a fix the review finds, filed
+    while it is in progress or once it is done, above the suite and pull request (ruling
+    plan#1870).  Still to begin is open and neither done (:func:`_state.done_tasks`) nor in
+    progress (:func:`in_progress`) by ``reads``, the filing's read of git, never the
+    tracker's open state alone, which shows a task done in git open until ``quill sync``.  A
+    task with none still to begin after it, the last finishing task always, stays where the
+    link put it, last.  ``parent``'s order is its read before the link, with ``task`` last
+    where that read does not list it, as GitHub lists a sub-issue linked last
+    (``recorded/priority.json``).  A task already just above its place is not moved, so the
+    filing run again sends nothing more."""
     rank = finishing_rank(task.title)
     order = [child.number for child in parent.children]
     if task.number not in order:
@@ -121,11 +127,14 @@ def place(tracker: Tracker, task: Card, parent: Card, before: Card | None) -> No
         tasks = [child.number for child in parent.children
                  if child.kind == TASK and child.is_open and child.number != task.number]
         held = tracker.cards(tasks) if tasks else {}
+        begun = (done_tasks(held, reads.shipped.tasks, reads.claims)
+                 | in_progress(held, reads.claims))
         before = next((held[number] for number in tasks if number in held
-                       and finishing_rank(held[number].title) > rank), None)
+                       and number not in begun and finishing_rank(held[number].title) > rank),
+                      None)
     if before is None:
         print(f"  in plan#{parent.number}'s order: last, no finishing task "
-              f"{'after it ' if rank >= 0 else ''}being open")
+              f"{'after it ' if rank >= 0 else ''}still to begin")
     elif order.index(task.number) + 1 == order.index(before.number):
         print(f"  in plan#{parent.number}'s order: already above plan#{before.number}")
     else:

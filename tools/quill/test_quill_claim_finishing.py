@@ -51,7 +51,8 @@ def test_a_claim_files_the_two_finishing_tasks_last_each_naming_its_card(code, c
     assert ("\n  switched to card/1\n  its finishing tasks, last in its order (ruling "
             "plan#1875); cut short, `quill claim plan#1` run again on card/1 files the rest:\n"
             "filed plan#2\n") in out
-    assert out.count("  in plan#1's order: last, no finishing task after it being open\n") == 2
+    assert out.count("  in plan#1's order: last, no finishing task after it still to "
+                     "begin\n") == 2
     other = FakeTracker()
     other.add(5)
     other.add_task(6, 5, title="piece a")

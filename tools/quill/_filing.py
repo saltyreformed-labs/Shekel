@@ -30,6 +30,7 @@ from tools.quill._command import (
 )
 from tools.quill._state import (
     OWNED,
+    done_tasks,
     filing_ended,
     filing_unfinished,
     holder,
@@ -147,9 +148,9 @@ class _Filing:
     finding's or ruling's owner, which it is blocked by (``R-BAL395``), or the step or piece
     of work a step or task is a sub-issue of; None for a top-level card.  ``cards``: every
     card a decision over that parent reads (:func:`with_closure`: the cards linked under it among
-    them, each read by number); ``shipped``: the cards git says shipped; and
-    ``claims``: every claim, by card, from the same read of git
-    (:func:`_git.read`) -- all three empty with no parent.  ``asked``: for a
+    them, each read by number); ``reads``: the one read of git (:func:`_git.read`) decided
+    over -- what shipped (:attr:`shipped`), which tasks are done, and every claim, by card
+    (:attr:`claims`) -- both empty with no parent.  ``asked``: for a
     ruling converted from a question, that question as read.  ``milestone``: for a leaf,
     the milestone it is filed in, which its split step gives up (:func:`_leaf_milestone`).
     """
@@ -157,10 +158,19 @@ class _Filing:
     draft: Draft
     parent: Card | None
     cards: dict[int, Card]
-    shipped: frozenset[int]
-    claims: dict[int, _git.Claim]
+    reads: _git.Reads
     asked: _Asked | None
     milestone: _LeafMilestone
+
+    @property
+    def shipped(self) -> frozenset[int]:
+        """The cards git says shipped, of :attr:`reads`."""
+        return self.reads.shipped.cards
+
+    @property
+    def claims(self) -> dict[int, _git.Claim]:
+        """Every claim, by card, of :attr:`reads`."""
+        return self.reads.claims
 
 
 def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
@@ -205,9 +215,8 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
         body = ruling_body(_read(args.question_file), _read(args.answer_file))
     arc = () if args.kind == TASK else (args.arc,)
     labels = tuple(dict.fromkeys((*arc, *(getattr(args, "label", None) or ()))))
-    return _Filing(Draft(args.kind, args.title, body, labels, owner), parent, cards,
-                   reads.shipped.cards, reads.claims, asked,
-                   _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
+    return _Filing(Draft(args.kind, args.title, body, labels, owner), parent, cards, reads,
+                   asked, _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
                    if args.kind == "step" and parent is not None else _NO_MILESTONE)
 
 
@@ -219,16 +228,24 @@ def _owner(parent: Card, cards: dict[int, Card], shipped: frozenset[int]) -> Own
                  is_container(parent, cards, shipped))
 
 
-def _before(tracker: Tracker, args, parent: Card | None) -> Card | None:
+def _before(tracker: Tracker, args, filing: _Filing) -> Card | None:
     """The task a new task is placed above, ``--before plan#T``, read by its number: an open
-    task under the same card, a piece still to build (ruling plan#1868).  None when none is
-    named.  Refused for any other card, before anything is written."""
+    task under the same card (``filing``'s parent), a piece still to build (ruling
+    plan#1868), which git does not say is done (:func:`_state.done_tasks`, over ``filing``'s
+    read of git).  None when none is named.  Refused for any other card, before anything is
+    written."""
     if getattr(args, "before", None) is None:
         return None
-    before = _one(tracker, args.before)
+    before, parent = _one(tracker, args.before), filing.parent
     if before.kind != TASK or before.parent != parent.number or not before.is_open:
         raise Refused(f"{_label(before)} is no open task under plan#{parent.number}: a task is "
                       "placed above another piece of its card still to build")
+    reads = filing.reads
+    if done_tasks({before.number: before}, reads.shipped.tasks, reads.claims):
+        raise Refused(f"{_label(before)} is done in git ({_git.task_file(before.number)} is on "
+                      "its card's claim, or on dev or main), though the tracker shows it open "
+                      "until `quill sync`: a task is placed above another piece of its card "
+                      "still to build")
     return before
 
 
@@ -529,7 +546,7 @@ def cmd_file(args, tracker: Tracker, root: Path) -> int:
     removes the mark.
     """
     filing = _filing_for(args, tracker, root)
-    before = _before(tracker, args, filing.parent)
+    before = _before(tracker, args, filing)
     problems = violations(filing.draft)
     if problems:
         raise Refused("not filed:\n  " + "\n  ".join(problems))
@@ -590,8 +607,8 @@ def finishing_filings(tracker: Tracker, root: Path, card: Card, cards: dict[int,
     for title, body in _tasks.finishing(card.number):
         if title in filed:
             continue
-        filing = _Filing(Draft(TASK, title, body, (), owner), card, cards, reads.shipped.cards,
-                         reads.claims, None, _NO_MILESTONE)
+        filing = _Filing(Draft(TASK, title, body, (), owner), card, cards, reads, None,
+                         _NO_MILESTONE)
         if problems := violations(filing.draft):
             raise Refused(f"{title!r} not filed:\n  " + "\n  ".join(problems))
         earlier = _standing(tracker, filing, root)
@@ -659,7 +676,7 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
     kind, parent = filing.draft.kind, filing.parent
     _attach(tracker, card, kind, parent)
     if kind == TASK:
-        _tasks.place(tracker, card, parent, before)
+        _tasks.place(tracker, card, parent, before, filing.reads)
     if kind == "ruling" and card.is_open:
         tracker.close(card.number, "completed")
         print("  closed: a ruling is a record")

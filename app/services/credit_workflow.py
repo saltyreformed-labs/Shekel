@@ -271,7 +271,8 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
     **It walks :func:`live_payback_chain` where it used to RECURSE**, and
     the order is unchanged: DEEPEST FIRST, so each level reverses and
     deletes before the level above it does and every ledger account is
-    net-zero before a ``transaction_id`` link SET-NULLs on the delete.
+    net-zero before any of its entries' movement links
+    (``journal_entries.transaction_entry_id``) is SET-NULLed.
     The walk is published because the delete verb and its confirm dialog
     need the same chain and neither may write to get it (plan step
     ``bank_import:X-gb``).
@@ -300,8 +301,9 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
     for depth in range(len(chain) - 1, -1, -1):
         payback = chain[depth]
         parent = txn if depth == 0 else chain[depth - 1]
-        # Reverse this level's postings while ``journal_entries.transaction_id``
-        # still links them.  Idempotent no-op for a still-Projected payback.
+        # Reverse this level's postings before the row goes.  Idempotent: a
+        # no-op for a still-Projected payback, and for one whose family the
+        # caller already reversed before taking its movements off.
         posting_service.reverse_postings_before_delete(payback)
         db.session.delete(payback)
 

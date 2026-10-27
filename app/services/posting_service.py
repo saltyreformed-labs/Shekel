@@ -351,11 +351,12 @@ def sync_transaction_postings(txn: Transaction) -> list[JournalEntry]:
     by ruling **R-FM**'s identity and, for a ``purchases``-basis envelope,
     the envelope's UN-DATED purchases on the close day.  Those are movements
     in flight now: they post when they are dated, on their own day, and the
-    close books nothing.  So the TRANSACTION source posts nothing; the arm
-    that reversed what it posted before that step went with plan step
-    ``balance:X-bi-6-5``'s second leaf (card plan#1845), whose migration
-    deleted every entry that source wrote, each pair at zero on its own key
-    (ruling plan#1867).  The cash walk reads the same family
+    close books nothing.  So the row books nothing: the TRANSACTION source
+    it booked under stopped posting at that step, and plan step
+    ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted that source
+    with the arm that reversed what it had posted, its migration every entry
+    the source wrote, each pair at zero on its own key (ruling plan#1867).
+    The cash walk reads the same family
     (``cash_ledger.settled_cash_facts``: every dated movement, on the
     movement's own account, ruling **R-BAL75**), so the two cannot price
     one movement two ways.

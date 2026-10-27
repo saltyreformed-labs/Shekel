@@ -155,9 +155,9 @@ def _movement_nets_by_date(
     NULL`` residue -- are excluded: there is no row left to re-sync, so any
     cross-date residue there is an F1-class data item the checked-projection
     assert surfaces rather than something the probe's consumer can heal.  The
-    LEGACY one-entry ``transfer`` source is not read here at all: the pair's
-    door reverses it on every call, so a transfer the probe re-syncs for any
-    reason brings it to zero too.
+    LEGACY one-entry ``transfer`` source, which this never read, is gone with
+    every entry it posted (plan step ``balance:X-bi-6-5``'s second leaf, card
+    plan#1845, ruling plan#1867).
 
     **Date-keyed, deliberately period-blind.**  A right-date / right-amount
     posting filed under the WRONG pay period would read clean here: no app

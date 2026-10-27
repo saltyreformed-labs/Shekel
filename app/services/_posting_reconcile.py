@@ -465,8 +465,8 @@ def emit_correction_entry(
 
     The one definition of a sourceless correction's journal header, shared by
     the loan and account anchor reconciles and the loan payment split (plan
-    step ``balance:X-bi-6-3``, ruling **R-BAL102**): ``transfer_id``,
-    ``transaction_id`` and ``transaction_entry_id`` all NULL (a correction is
+    step ``balance:X-bi-6-3``, ruling **R-BAL102**): ``transaction_entry_id``,
+    the one row link an entry carries since plan#1845, NULL (a correction is
     a derivation and links no row; ``source_kind_id`` disambiguates it), and
     described from its source kind (:func:`_correction_description`).  Writes
     the balanced *legs* through the shared balanced-write path.  Flushes; does

@@ -35,10 +35,13 @@ door's own precondition, asked before the sequence starts.
    refused before anything is written, its popover redrawn under ruling
    **R-CC128**.
 1. **Reverse the postings** (``posting_service``), while
-   ``journal_entries.transaction_id`` and ``.transaction_entry_id`` still link
-   them.  Both are ``ON DELETE SET NULL``: reversing afterwards is impossible
-   and the original legs would be stranded on their ledger accounts with
-   nothing to offset them.  Each row's WHOLE family at once -- the row's, and
+   ``journal_entries.transaction_entry_id`` still links them to their
+   movements.  It is ``ON DELETE SET NULL`` and step 2 deletes the movements:
+   reversing afterwards is impossible and the original legs would be stranded
+   on their ledger accounts with nothing to offset them.  (The row's own
+   ``journal_entries.transaction_id`` link went with plan step
+   ``balance:X-bi-6-5``'s second leaf, card plan#1845.)  Each row's WHOLE
+   family at once -- the row's, and
    each live CC payback's in its chain -- so the anchor is re-checked once per
    row rather than once per movement (the churn ruling **R-BAL103** removed
    from the deploy resync); FIRST since plan step ``credit_card:CC-5-4a-3``,
@@ -362,9 +365,9 @@ def delete_transaction(
     the whole sequence land atomically with whatever else that request writes.
 
     Args:
-        txn: The row to delete.  Must still be flushed (``txn.id`` set) so the
-            reversal entries can link by it and the match members can be read
-            back.
+        txn: The row to delete.  Must still be flushed (``txn.id`` set) so its
+            movements can be found for the reversal entries to link and the
+            match members can be read back.
         owner_id: The user the caller proved owns it, recorded on the events
             AND reconciled against the row (step 0 of the module docstring's
             order, finding **N-373**).

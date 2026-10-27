@@ -81,6 +81,7 @@ from urllib.parse import quote
 import requests
 
 from tools.ci.arcs import ARCS
+from tools.quill._arcs import ARC_FIELD
 from tools.quill._github import (
     APP_DIR,
     CredentialsError,
@@ -164,7 +165,8 @@ class IssueField:
 
 
 #: The organization's issue fields, by name (rulings ``balance:R-BAL348``, ``R-BAL354``).
-#: Arc is a single select whose options are the arcs, :data:`tools.ci.arcs.ARCS`.  GitHub
+#: Arc (:data:`_arcs.ARC_FIELD`) is a single select whose options are the arcs,
+#: :data:`tools.ci.arcs.ARCS`.  GitHub
 #: makes four more when issue fields are switched on, Priority, Effort, Start date and Target
 #: date.  R-BAL348 ruled them deleted, a click on the web that was never made, and on
 #: 2026-10-25 the developer kept them ("I want to use those fields even if they are empty for
@@ -173,7 +175,7 @@ class IssueField:
 #: scope, so the developer changes them on the web and this module checks them; any other
 #: field is a difference.
 ISSUE_FIELDS = {
-    "Arc": IssueField("SINGLE_SELECT", ARCS, "the arcs"),
+    ARC_FIELD: IssueField("SINGLE_SELECT", ARCS, "the arcs"),
     "Priority": IssueField("SINGLE_SELECT", ("Urgent", "High", "Medium", "Low")),
     "Start date": IssueField("DATE"),
     "Target date": IssueField("DATE"),

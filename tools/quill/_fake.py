@@ -37,7 +37,7 @@ from tools.quill import _git, quill
 from tools.quill._command import on_board as goes_on_board
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Card, Child, Comment, Edit, in_order
-from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, unmarked
+from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
 
 
 class FakeBoard:
@@ -121,10 +121,12 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
 
     def add(self, number, kind="step", body="", on_board=True, **fields):
         """Put a card in the tracker (open, unclaimed, and by default on the board's bottom when
-        quill would put it there, :func:`_command.on_board`)."""
+        quill would put it there, :func:`_command.on_board`), by default in the balance arc, its
+        Arc and its label, but a task, which holds neither (R-BAL386)."""
         values = {"number": number, "id": 1000 + number, "node_id": f"I_{number}",
                   "title": f"card {number}", "kind": kind, "labels": ("balance",),
-                  "is_open": True, "state_reason": None, "parent": None, "children": (),
+                  "arc": None if kind == TASK else "balance", "is_open": True,
+                  "state_reason": None, "parent": None, "children": (),
                   "blocked_by": (), "board_item": None, "closed_by_tool": False,
                   "touched_by_hand": False, "outside": (), **fields}
         self.cards_by_number[number] = Card(**values)
@@ -216,15 +218,16 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     def create(self, kind, title, body, labels, milestone=None):
         """File a card at the next number, marked :data:`setup_tracker.FILING` beside
         ``labels``, as :meth:`_tracker.Tracker.create` files every card, in ``milestone``
-        when one is given.  One the tracker lacks is a write the tool must never send, so it
-        fails loudly rather than guess GitHub's answer."""
+        when one is given, holding no Arc, as the create sends none.  One the tracker lacks is
+        a write the tool must never send, so it fails loudly rather than guess GitHub's
+        answer."""
         number = max(self.cards_by_number, default=0) + 1
         labels = tuple(sorted({*labels, FILING}))
         assert milestone is None or milestone in self.milestones, (
             f"no milestone #{milestone} to file plan#{number} in")
         self.writes.append(("create", number, kind, title, labels)
                            + (() if milestone is None else (milestone,)))
-        self.add(number, kind, body, on_board=False, title=title, labels=labels)
+        self.add(number, kind, body, on_board=False, title=title, labels=labels, arc=None)
         if milestone is not None:
             self.milestone_of[number] = milestone
         return number

@@ -64,6 +64,7 @@ from typing import overload
 from urllib.parse import quote
 
 from tools.quill import _queries
+from tools.quill._arcs import arc_of
 from tools.quill._github import (
     GitHub,
     app_credentials,
@@ -144,9 +145,13 @@ class BareCard:  # pylint: disable=too-many-instance-attributes
     about the board that is handed one raises AttributeError, never reads it as off the
     board.
 
-    Pylint: too-many-instance-attributes (14/7) -- **fourteen because a card
-    states fourteen facts the plan reads without the board**, each its own GitHub
+    Pylint: too-many-instance-attributes (15/7) -- **fifteen because a card
+    states fifteen facts the plan reads without the board**, each its own GitHub
     field, and no subset of them travels apart from the others.
+
+    ``arc``: the value of its issue field Arc, the arc's one home (rulings
+    ``balance:R-BAL349``, ``R-BAL354``; :mod:`_arcs`), None when it holds none; its arc label
+    is display.
 
     ``parent``, ``children`` and ``blocked_by`` name cards of the tracker only;
     ``outside`` holds every link to an issue anywhere else (R-BAL188).
@@ -166,6 +171,7 @@ class BareCard:  # pylint: disable=too-many-instance-attributes
     title: str
     kind: str | None
     labels: tuple[str, ...]
+    arc: str | None
     is_open: bool
     state_reason: str | None
     parent: int | None
@@ -329,6 +335,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
         "title": node["title"],
         "kind": (node["issueType"] or {}).get("name"),
         "labels": tuple(label["name"] for label in _counted(node["labels"], "labels", number)),
+        "arc": arc_of(_counted(node["issueFieldValues"], "issue field values", number)),
         "is_open": is_open,
         "state_reason": node["stateReason"],
         "parent": next((link["number"] for link, what in inside if what == "parent"), None),

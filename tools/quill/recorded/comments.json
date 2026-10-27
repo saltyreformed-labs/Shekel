@@ -446,7 +446,7 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") { c28: issue(number: 28) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c29: issue(number: 29) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c30: issue(number: 30) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") { c28: issue(number: 28) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c29: issue(number: 29) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c30: issue(number: 30) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
     "variables": {}
    },
    "status": 200,
@@ -470,6 +470,10 @@
           "name": "balance"
          }
         ]
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
        },
        "parent": null,
        "subIssues": {
@@ -506,6 +510,10 @@
          }
         ]
        },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
        "parent": null,
        "subIssues": {
         "totalCount": 0,
@@ -540,6 +548,10 @@
           "name": "balance"
          }
         ]
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
        },
        "parent": null,
        "subIssues": {
@@ -1251,7 +1263,7 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") { c28: issue(number: 28) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") { c28: issue(number: 28) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
     "variables": {}
    },
    "status": 200,
@@ -1275,6 +1287,10 @@
           "name": "balance"
          }
         ]
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
        },
        "parent": null,
        "subIssues": {
@@ -1319,7 +1335,7 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") { c29: issue(number: 29) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c30: issue(number: 30) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") { c29: issue(number: 29) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c30: issue(number: 30) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
     "variables": {}
    },
    "status": 200,
@@ -1343,6 +1359,10 @@
           "name": "balance"
          }
         ]
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
        },
        "parent": {
         "number": 28,
@@ -1383,6 +1403,10 @@
           "name": "balance"
          }
         ]
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
        },
        "parent": null,
        "subIssues": {

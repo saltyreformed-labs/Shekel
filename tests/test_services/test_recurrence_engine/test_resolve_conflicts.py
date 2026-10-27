@@ -423,8 +423,10 @@ class TestResolveConflicts:
             assert txn_b.estimated_amount == Decimal("888.88")
 
 
-class TestResolveConflictsShadowGuard:
-    """C-20 / F-007: ``resolve_conflicts`` refused to mutate a transfer shadow
+class TestResolveConflictsHandsARegularRowBack:
+    """The control C-20 / F-007's guard left behind: a regular row resolves.
+
+    C-20 / F-007: ``resolve_conflicts`` refused to mutate a transfer shadow
     transaction (``transfer_id IS NOT NULL``), closing CLAUDE.md Transfer
     invariant 4 for this loop.
 
@@ -449,19 +451,17 @@ class TestResolveConflictsShadowGuard:
     The control below stays.
     """
 
-    def test_regular_transaction_still_resolves_after_guard(
+    def test_an_overridden_row_is_handed_back_to_its_definition(
         self, app, db, seed_user, seed_periods,
     ):
-        """Sanity: the C-20 guard does not regress regular-transaction
-        resolution.
+        """An overridden regular row's update clears its flag and prices it by its definition.
 
         With a regular transaction (the only kind since plan step
-        ``balance:X-bi-6-4d-2``), ``resolve_conflicts`` must keep
-        applying its existing semantics: clear flags and apply the
-        new amount.  Companion to ``TestResolveConflicts`` -- this
-        test exists explicitly under the C-20 class so a future
-        refactor of the shadow guard cannot accidentally break the
-        baseline path.
+        ``balance:X-bi-6-4d-2``), ``resolve_conflicts`` keeps its
+        semantics: clear the flags and hand the row back to its
+        definition's price.  Companion to ``TestResolveConflicts``; it
+        was the control beside the C-20 shadow guard, which plan step
+        ``balance:X-bi-6-5`` deleted.
         """
         with app.app_context():
             expense_type = (

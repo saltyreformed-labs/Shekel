@@ -60,9 +60,10 @@ class TestRestoreTransfer:
     ``test_corrects_drifted_shadow_category``,
     ``test_corrects_drifted_shadow_is_override`` and
     ``test_a_shadow_amount_CANNOT_drift_from_its_transfer`` (its amount).
-    No side row can be stored since that step's create door
-    (``ck_transactions_names_no_transfer``, ruling R-BAL258), so there is
-    nothing to plant.  The refusal was pinned by
+    No side row could be stored from that step's create door
+    (``ck_transactions_names_no_transfer``, ruling R-BAL258), and no row can
+    name a transfer since plan step ``balance:X-bi-6-5`` dropped the column,
+    so there is nothing to plant.  The refusal was pinned by
     ``test_a_transfer_is_one_row/test_the_upgrade.py``'s
     ``test_the_database_refuses_a_twin`` (the expense side; it runs below the
     drop) and by a twin case in

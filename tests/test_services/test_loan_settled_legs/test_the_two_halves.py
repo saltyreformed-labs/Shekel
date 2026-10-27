@@ -140,8 +140,9 @@ class TestTheSettledHalfComplementsThePlanHalf:
         ``test_a_transfer_shadow_is_derived/test_the_declaration.py`` and,
         for a loan payment, in ``test_loan_plan_assembly.py``, until plan step
         balance:X-bi-6-5 dropped the column the twin named its transfer by,
-        after which no statement can write it (ruling plan#1850).  The fourth, "parent Paid, twin still Projected" (its status written
-        past the seam), is without its twin the SAME stored state as the
+        after which no statement can write it (ruling plan#1850).  The
+        fourth, "parent Paid, twin still Projected" (its status written past
+        the seam), is without its twin the SAME stored state as the
         ``$0.00`` close: measured, every ``budget.transfers`` column is equal
         bar the literal figure and name (the close stores its PLAN figure:
         ``$0.00`` is the absence of a record, ruling **R-BAL141**), both are
@@ -467,17 +468,23 @@ class TestTheContributionFeedCountsADriftOnce:
             ) is None
 
 
-class TestTheLineageProbeNamesADeadShadowsMovement:
-    """The posting sync resolves a stale movement's transfer through ``movement_parent``."""
+class TestTheLoanSidesMovementIsItsRecord:
+    """A paid loan payment's movement is the loan side's record, posted on its day.
 
-    def test_a_movement_under_a_dead_shadow_is_reversed(
+    The class graded the posting sync resolving a stale movement's transfer
+    through ``movement_parent``, under a dead shadow; no shadow can exist
+    since plan step ``balance:X-bi-6-5`` (the case's docstring says how).
+    """
+
+    def test_a_paid_loan_payment_s_movement_posts_on_its_settle_day(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """Paid $1,000.00, then its twin soft-deleted around the service.
+        """Paid $1,000.00: the loan side's movement posts $1,000.00 on 03-05.
 
-        The movement was no leg's record any more (a dead shadow's), so the
-        walk expected no cash for it and the posted cash leg was STALE; the
-        probe had to still name its transfer so the transfer's pair door
+        The case paid $1,000.00, then soft-deleted its twin around the
+        service.  The movement was no leg's record any more (a dead shadow's),
+        so the walk expected no cash for it and the posted cash leg was STALE;
+        the probe had to still name its transfer so the transfer's pair door
         reversed it.
 
         **The state is REFUSED since plan step ``balance:X-bi-6-4d-2``**

@@ -121,8 +121,8 @@ def pricing_load_options() -> tuple:
     dated its installment from.  That step deleted the shadows, and no stored
     row named a transfer (``ck_transactions_names_no_transfer`` refused one
     until plan step ``balance:X-bi-6-5`` dropped the column), so a
-    selectin load over the relationship meets only NULL foreign keys and
-    issues no ``SELECT`` -- measured, not argued, by that step's review and
+    selectin load over the relationship met only NULL foreign keys and
+    issued no ``SELECT`` -- measured, not argued, by that step's review and
     again by the lane: a scenario holding one transaction row and one
     transfer, its rows loaded under this set, issues the same statements with
     and without the entry, and none touches ``budget.transfers``.  Rule 5

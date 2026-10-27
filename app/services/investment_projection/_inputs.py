@@ -26,7 +26,7 @@ from app.utils.money import ZERO, round_money
 
 @dataclass(frozen=True)
 class PricedContribution:
-    """ONE shadow contribution, already valued, screened and DATED.
+    """ONE transfer contribution, already valued, screened and DATED.
 
     The boundary record this module consumes in place of a
     :class:`~app.models.transaction.Transaction` (plan step X-au-c2).  It
@@ -69,14 +69,17 @@ class PricedContribution:
             it at.  It is a PAYDAY rather than a posting date on purpose: the
             growth engine matches a contribution to a period by that period's
             opening day.
-        amount: What the row CONTRIBUTES
-            (:func:`app.services.cash_ledger.contributions_by_id`): the entered
-            ``actual_amount`` where a human read one off a statement, else the
-            row's resolved amount.
-        is_confirmed: Whether the contribution actually happened
-            (``status.is_settled``), as opposed to being still projected.  The
-            growth engine's :class:`~app.services.growth_engine.ContributionRecord`
-            takes it verbatim.
+        amount: What the to-side leg CONTRIBUTES: the figure its transfer
+            stores for a leg that has SETTLED
+            (:func:`app.services.row_valuation.leg_settled_contribution`), else
+            what the transfer resolves to
+            (:func:`app.services.cash_ledger.planned_leg_contribution`).
+        is_confirmed: Whether the contribution actually happened, as opposed
+            to being still projected: WHICH half of
+            :func:`app.services.loan_loaders.income_legs` the leg came from.
+            The growth engine's
+            :class:`~app.services.growth_engine.ContributionRecord` takes it
+            verbatim.
     """
 
     account_id: int
@@ -86,7 +89,7 @@ class PricedContribution:
 
 
 @dataclass(frozen=True)
-class ShadowContributions:
+class TransferContributions:
     """A batch of priced contributions, and WHICH accounts had any at all.
 
     Two facts that must travel together, because screening the first destroys
@@ -112,9 +115,9 @@ class ShadowContributions:
             ``status_contributes_to_balance`` and priced through the amount
             model.  Cancelled and Credit rows are absent (see
             :class:`PricedContribution` on why absent rather than zero).
-        linked_account_ids: Every account id that had a contribution shadow in
-            the window, WHATEVER its status.  A cancelled contribution is still
-            a link.
+        linked_account_ids: Every account id that had a live transfer INTO
+            it in the window, WHATEVER its status.  A cancelled contribution is
+            still a link.
     """
 
     records: list[PricedContribution]
@@ -158,7 +161,7 @@ class InvestmentInputs:
 
 
 def _average_transfer_contribution(all_contributions):
-    """Average per-period contribution from priced shadow contributions.
+    """Average per-period contribution from priced transfer contributions.
 
     ``all_contributions`` are :class:`PricedContribution` records already
     filtered to one account by the caller.  Cancelled / Credit rows never reach
@@ -169,8 +172,8 @@ def _average_transfer_contribution(all_contributions):
     ``savings_dashboard_service`` -- it just lives at the boundary now.
 
     Contributions are summed on the record's :attr:`~PricedContribution.amount`
-    -- the realized actual when a shadow is settled, else what the row's amount
-    RESOLVES to -- which is the same figure the per-period timeline reads off
+    -- the figure its transfer stores when the leg has settled, else what the
+    transfer RESOLVES to -- which is the same figure the per-period timeline reads off
     the same records, so this average and the YTD/limit accounting cannot
     disagree with the engine on a settled transfer whose actual differs from its
     estimate (deep-quality-hunt #11).
@@ -271,17 +274,17 @@ def _ytd_contributions(all_contributions, current_period, *, inclusive):
 
     Every record here has already passed the boundary's
     ``status_contributes_to_balance`` screen, so this sums what it is given.
-    :attr:`~PricedContribution.amount` -- the realized actual when a shadow is
-    settled, else what its amount resolves to -- is the ONE answer to what a row
-    contributes, so this YTD/limit accounting agrees with the per-period
-    timeline (:func:`build_contribution_timeline`, reading the same records)
-    once a transfer shadow is settled with an actual that differs from its
-    estimate (deep-quality-hunt #11).  Summing ``estimated_amount`` here
-    previously let the cap/limit math read a different dollar than the engine
-    actually applied; the prior "F-027 S18 contract-safe" rationale assumed a
-    shadow's ``actual_amount`` is always ``None``, which is untrue once a settle
-    sets it (the ``Transfer`` parent has no ``actual_amount`` column, so a
-    settled actual lives only on the shadows).
+    :attr:`~PricedContribution.amount` -- the figure its transfer stores when
+    the leg has settled, else what the transfer resolves to -- is the ONE answer
+    to what a leg contributes, so this YTD/limit accounting agrees with the
+    per-period timeline (:func:`build_contribution_timeline`, reading the same
+    records) once a transfer settles at a figure that differs from its estimate
+    (deep-quality-hunt #11).  Summing ``estimated_amount`` here previously let
+    the cap/limit math read a different dollar than the engine actually
+    applied; the prior "F-027 S18 contract-safe" rationale assumed a shadow's
+    ``actual_amount`` was always ``None``, which was untrue once a settle set
+    it.  The settled figure has lived on the transfer itself since plan step
+    balance:X-bi-6-4d-2 deleted the shadows.
 
     Args:
         all_contributions: :class:`PricedContribution` records for one account.
@@ -338,7 +341,7 @@ def calculate_investment_inputs(
                                what its payroll puts in per payday, priced by
                                the paycheck engine at the boundary.
         all_contributions:     List of :class:`PricedContribution` records
-                               for this account -- shadow-income rows already
+                               for this account -- to-side legs already
                                valued, screened and dated at the boundary.
         current_period:        The current
                                :class:`~app.services.pay_calendar.DerivedPeriod`,
@@ -387,7 +390,7 @@ def build_contribution_timeline(
     periods,
     as_of,
 ):
-    """Build ContributionRecords from the payroll feed and shadow transfers.
+    """Build ContributionRecords from the payroll feed and transfer legs.
 
     Combines two contribution paths into a unified per-period timeline
     for the growth engine:
@@ -406,10 +409,10 @@ def build_contribution_timeline(
     no per-period transaction record for deductions.
 
     Path 2 -- Transfer-based contributions: Per-record amounts from the priced
-    shadow contributions.  Confirmation is status-based
-    (:attr:`PricedContribution.is_confirmed`, resolved from
-    ``status.is_settled`` at the boundary) -- factual from the transaction
-    workflow.
+    transfer contributions.  Confirmation is settlement-based
+    (:attr:`PricedContribution.is_confirmed`, decided at the boundary by which
+    half of the loan loaders' partition the leg came from) -- factual from the
+    transfer workflow.
 
     The growth engine handles same-date aggregation (summing amounts,
     conservative is_confirmed rule) via its lookup dict.
@@ -460,7 +463,7 @@ def build_contribution_timeline(
         feed:                       The account's :class:`AccountPayrollFeed`
                                     -- what its payroll puts in per period.
         contribution_transactions:  List of :class:`PricedContribution`
-                                    records -- shadow-income rows already
+                                    records -- to-side legs already
                                     valued, screened and dated at the boundary.
         periods:                    The timeline's DOMAIN:
                                     :class:`~app.services.pay_calendar

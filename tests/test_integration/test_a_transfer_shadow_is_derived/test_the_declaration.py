@@ -4,11 +4,7 @@ writer, and the eager load that keeps a priced leg set off an N+1.
 
 from decimal import Decimal
 
-import pytest
-import sqlalchemy.exc
-
 from app.extensions import db as _db
-from app.models.transfer import Transfer
 from app.services.cash_ledger import (
     derived_amount_basis,
     leg_amounts_by_key,
@@ -16,10 +12,6 @@ from app.services.cash_ledger import (
 )
 from app.services.transfer_legs import planned_transfer_legs
 from tests._test_helpers import (
-    a_twin_of,
-    assert_a_twin_is_refused,
-    constraint_name_from,
-    write_past_the_amount_seam,
     capture_sql_statements,
     transfer_amount,
 )
@@ -32,92 +24,41 @@ class TestAShadowIsBornDerived:
     """The declaration is made by the constructor, not by a later writer.
 
     Since plan step balance:X-bi-6-4d-2 the constructor makes ONE row, so what
-    the first case asked of the two legs it built is asked of the transfer
-    (ruling **R-BAL167** class 1, with a refusal of either twin added), and
-    the second, which planted a figure on a leg, asserts that row unstorable
-    (class 2).
+    the case asked of the two legs it built is asked of the transfer (ruling
+    **R-BAL167** class 1).  It also asserted either twin refused, and a second
+    case asserted a twin carrying a figure refused (class 2), until plan step
+    balance:X-bi-6-5 dropped the column a twin named its transfer by: no
+    statement can write a twin now, so that refusal and that case went with
+    it (ruling plan#1850).
     """
 
-    def test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored(
-        self, app, db, seed_user, seed_periods,
+    def test_the_transfer_is_born_owning_its_figure(
+        self, app, seed_user, seed_periods,
     ):
-        """``create_transfer`` births one owning row, and no leg row beside it.
+        """``create_transfer`` births one row, and it owns its figure.
 
         **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_both_legs_declare_their_parent_and_store_nothing``; ruling
-        **R-BAL167** class 1, with a refusal ADDED: it planted nothing, it read
-        the two legs ``create_transfer`` made, so the twin refused below is a
-        shape this case adds rather than one it planted).  It asserted three
-        things per leg -- declared
+        **R-BAL167** class 1).  It asserted three things per leg -- declared
         ``PARENT_TRANSFER``, stored nothing, worth the transfer's figure --
         because the leg was a ROW that could hold a copy.  No leg row is born
-        now and the database refuses one on either side
-        (``ck_transactions_names_no_transfer``, ruling **R-BAL258**), so the
-        copy is not merely derived but absent.  What each leg is worth is the
-        transfer's own resolution (**R-BAL13**), asserted as `$250.00` here
-        where it was asserted per leg.  "Owns its figure" is the stored
-        `$250.00` (``ck_transfers_amount_ownership`` pairs a stored figure with
-        no source): an ``owns_its_amount`` read of this AD-HOC transfer could
+        now and none can be stored, so the copy is not merely derived but
+        absent.  What each leg is worth is the transfer's own resolution
+        (**R-BAL13**), asserted as `$250.00` here where it was asserted per
+        leg.  "Owns its figure" is the stored `$250.00`
+        (``ck_transfers_amount_ownership`` pairs a stored figure with no
+        source): an ``owns_its_amount`` read of this AD-HOC transfer could
         not fail under ``ck_transfers_adhoc_owns_amount``, so none is taken
         (the cp2c review's L-4; the AD-HOC retype case asserts that CHECK's
-        refusal).
+        refusal).  **Renamed again at plan step balance:X-bi-6-5** (it was
+        ``test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored``):
+        its refusal of either twin went with the column (ruling plan#1850).
         """
         with app.app_context():
             xfer = _plain_transfer(seed_user, seed_periods)
 
             assert xfer.amount == Decimal("250.00")
             assert transfer_amount(xfer) == Decimal("250.00")
-            db.session.commit()
-            for is_income in (False, True):
-                assert_a_twin_is_refused(
-                    db.session, db.session.get(Transfer, xfer.id), is_income,
-                )
-
-    def test_a_leg_cannot_hold_a_figure_while_it_declares_a_parent(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """The drift the deleted corrector repaired is unconstructible.
-
-        This is the whole of "structural rather than maintained": there is no
-        window -- soft-deleted, mid-edit or otherwise -- in which a leg's figure
-        can disagree with its transfer, because the pair cannot be written.
-
-        **The rival figure is written past the MAPPING since plan step
-        X-au-k**, and it has to be: the pair is one attribute now, so
-        ``state_own_amount`` would release the leg's declaration and produce a
-        leg that legitimately owns the figure -- a different row, and not the
-        drifted one this case is about. Reaching the private column is the only
-        way left to construct the drift, and the database still refuses it.
-
-        **Re-expressed at plan step balance:X-bi-6-4d-2** (ruling **R-BAL167**
-        class 2): no leg row is born to write the figure onto, so the planted
-        row is the twin :func:`~tests._test_helpers.a_twin_of` builds -- the
-        shape ``_build_shadow`` built -- with the rival figure written past
-        the seam.  That row breaks TWO checks, this one and
-        ``ck_transactions_names_no_transfer`` (ruling **R-BAL258**).  The
-        PostgreSQL ``CREATE TABLE`` reference states that a table's CHECK
-        constraints are tested in alphabetical order of name, and the refusal
-        reported was MEASURED as this one, on either side, before this case
-        asserted it.  The same twin without the figure is refused by the other
-        check (the case above), so the figure is what this check answers.
-        """
-        with app.app_context():
-            xfer = _plain_transfer(seed_user, seed_periods)
-            db.session.commit()
-
-            for is_income in (False, True):
-                twin = a_twin_of(db.session.get(Transfer, xfer.id), is_income)
-                write_past_the_amount_seam(twin, Decimal("999.00"))
-                db.session.add(twin)
-                # The constraint IS the claim: a bare ``IntegrityError`` would
-                # be satisfied by an FK, a NOT NULL or a unique index just as
-                # well.
-                with pytest.raises(sqlalchemy.exc.IntegrityError) as excinfo:
-                    db.session.flush()
-                db.session.rollback()
-                assert constraint_name_from(excinfo.value) == (
-                    "ck_transactions_amount_ownership"
-                ), f"the figure-carrying twin was refused by: {excinfo.value}"
 
 
 class TestTheAmountModelsOwnEagerLoad:

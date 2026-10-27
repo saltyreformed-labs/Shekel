@@ -30,7 +30,7 @@ re-ruled **R-BAL100**).  The split is re-computed from scratch by every walk,
 exactly as the loan's opening and true-ups are, so it is reconciled in the
 SAME loop as they are (:mod:`._corrections`) and its entry links no row: not
 the loan-side shadow (its key through ``balance:X-bi-6-1b``, a row plan step
-``X-bi-6-5`` deletes), not the shadow's covering movement (R-BAL100's key,
+``X-bi-6-4d-2`` deleted), not the shadow's covering movement (R-BAL100's key,
 which a ``$0.00`` payment does not have -- the seam writes no movement for a
 figure of nothing, and the walk still charges the installment), not the
 transfer.  A key with no row has nothing to lose: no teardown door owes it a

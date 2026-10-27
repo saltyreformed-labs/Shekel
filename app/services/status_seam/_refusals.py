@@ -322,8 +322,8 @@ def reject_settlement_on_a_deleted_row(
     (``transfer_service._validation._get_transfer_or_raise``), so only a
     service caller that skipped it reaches this.  (A deleted SHADOW, which
     this sentence named until then -- finding **BAL-550** -- no longer
-    reaches the seam at all: no transaction row names a transfer,
-    ``ck_transactions_names_no_transfer``.)
+    reaches the seam at all: no transaction row names a transfer, the table
+    having no column for one since plan step ``balance:X-bi-6-5``.)
 
     Args:
         row: The row being written.

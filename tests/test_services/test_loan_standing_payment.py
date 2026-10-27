@@ -488,10 +488,12 @@ class TestPayoffDoesNotMoveWithMaterialisation:
         return account, ctx, future_ids
 
     def _delete(self, row_ids):
-        """Delete *row_ids* and their shadows, as a pay-period CASCADE would."""
-        db.session.execute(db.text(
-            "DELETE FROM budget.transactions WHERE transfer_id = ANY(:ids)"
-        ), {"ids": row_ids})
+        """Delete the transfers *row_ids*, as a pay-period CASCADE would.
+
+        Each took its two shadow rows first until plan step
+        ``balance:X-bi-6-4d-2`` deleted the shadows; plan step
+        ``balance:X-bi-6-5`` dropped the column they named it by.
+        """
         db.session.execute(db.text(
             "DELETE FROM budget.transfers WHERE id = ANY(:ids)"
         ), {"ids": row_ids})

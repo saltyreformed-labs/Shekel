@@ -593,7 +593,7 @@ class TestConfirmedViewRowEconomics:
     ):
         """A payment reverted to Projected is not a settled fact, so it folds nowhere.
 
-        The walk's payment set is the loan's SETTLED income shadows, so a
+        The walk's payment set is the loan's SETTLED payments, so a
         reverted payment simply is not in it -- there is no residue to classify,
         which is the structural version of the drop the posting reader had to
         perform by recognising payment lineage across two entry dates.  The

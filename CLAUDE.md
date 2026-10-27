@@ -158,6 +158,10 @@ root; never silence it with a bare disable.
   into context at session start, a warning when the shared main checkout is pinned to a release
   branch, a pointer to the Multi-session doctrine, and one to `python -m tools.quill.quill next` for
   the next step (it reads no network, so a start never waits on the tracker).
+- **Context hook** (`scripts/hooks/context_meter.py`, after each batch of tool calls; ruling
+  plan#1834) tells the session, once each, that its context passed 33% of 1,000,000 tokens (finish
+  what is in flight, then `/handoff`), 45% (start no new build loop) and 65% (commit what is clean
+  and stop). It reads only the session's own transcript and never blocks.
 - **Stop hook** runs full `pylint app/` -- the only place cross-file `duplicate-code` is caught --
   and hard-blocks once `scripts/hooks/ENFORCE_PYLINT_FLOOR` exists (the 10.00/10 lock-in).
 - **Custom checkers:** `tools/pylint/shekel_checkers/` (+ tests), loaded via `.pylintrc`. Add one

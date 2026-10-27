@@ -1024,10 +1024,10 @@ class TestNegativePaths:
     # step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer 2026-10-15:
     # "Delete all 27").  It handed ``mark_as_credit`` a transfer's expense
     # SHADOW row and asserted the service's own refusal (M-03, the
-    # ``transfer_id`` guard in ``credit_workflow``).  No shadow can exist now
-    # (the database refuses one, ``ck_transactions_names_no_transfer``, ruling
-    # R-BAL258, pinned once by
+    # ``transfer_id`` guard in ``credit_workflow``).  No shadow can exist now:
+    # no transaction has a transfer column since plan step X-bi-6-5, and
+    # ``ck_transactions_names_no_transfer`` refused a row naming one until
+    # then (ruling R-BAL258, pinned once, below that drop, by
     # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
-    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
-    # and no app code builds one), so the guard is reachable by no row and
-    # goes with the column at plan step X-bi-6-5.
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``).
+    # The guard was reachable by no row, and it went at that step.

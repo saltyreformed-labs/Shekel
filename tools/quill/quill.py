@@ -41,7 +41,8 @@ dropped before its filing finished gives it back (``_unsplit``).
 ``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
 ``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
-says when sync is behind.
+says when sync is behind.  ``answer`` answers the developer's comments on a card, and ``next``
+names each claimed card holding one no answer has followed (plan#1822, :mod:`_comments`).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -60,6 +61,7 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill hand plan#F --to plan#S
     python -m tools.quill.quill edit plan#N [--title NAME] [--body-file TEXT]
     python -m tools.quill.quill comment plan#N --body-file TEXT
+    python -m tools.quill.quill answer plan#N --body-file TEXT
     python -m tools.quill.quill block plan#N --by plan#M [--remove]
     python -m tools.quill.quill move plan#N (--top | --bottom | --after plan#M)
     python -m tools.quill.quill drop plan#N --why REASON
@@ -98,7 +100,7 @@ import requests
 
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
-from tools.quill import _findings, _git, _relabel, _tasks
+from tools.quill import _comments, _findings, _git, _relabel, _tasks
 from tools.quill._arcs import other_labels
 from tools.quill._command import (
     Refused,
@@ -166,7 +168,10 @@ CONNECT = partial(Tracker.connect, PLAN)
 
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The first open step in the board's order that is unclaimed, unshipped and unblocked;
-    then how far ``sync`` is behind, and what it cannot offer that a person must act on.
+    then how far ``sync`` is behind, what it cannot offer that a person must act on, and last,
+    after every line no further read can cost, each claimed card holding a comment of the
+    developer's that no answer of quill's has followed (plan#1822,
+    :func:`_comments.unanswered_lines`).
 
     **Sync is behind** (ruling plan#1815) while git says work shipped or a task is done that
     the tracker still shows open: the cards ``sync`` would close over what this reads, by
@@ -201,6 +206,8 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
         print(f"OUTSIDE LINK: {line}")
     for line in unfinished_reports(cards, shipped):
         print(f"UNFINISHED FILING: {line}")
+    for line in _comments.unanswered_lines(tracker, reads.claims, cards):
+        print(f"UNANSWERED COMMENT: {line}")
     return 0
 
 
@@ -375,8 +382,8 @@ def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
 def cmd_comment(args, tracker: Tracker, _root: Path) -> int:
     """Add a comment to a card through :meth:`_tracker.Tracker.comment`, its text read
     from ``--body-file``: a note beside the card's own text, which it never changes, so a
-    ruling takes one too.  A text that is only space is refused before any card is
-    read."""
+    ruling takes one too.  A note is no answer: ``quill answer`` answers a person's comments
+    (plan#1822).  A text that is only space is refused before any card is read."""
     text = _read(args.body_file)
     if not text.strip():
         raise Refused(f"{args.body_file} holds no text: a comment says something")
@@ -874,6 +881,10 @@ def parser() -> argparse.ArgumentParser:
     comment = commands.add_parser("comment", help="add a comment to a card")
     comment.add_argument("card", type=card_number)
     comment.add_argument("--body-file", required=True, help="a file holding the comment")
+    answer = commands.add_parser("answer", help="answer a card's comments no answer has "
+                                                "followed, quoting and mentioning each author")
+    answer.add_argument("card", type=card_number)
+    answer.add_argument("--body-file", required=True, help="a file holding what was done")
     block = commands.add_parser("block", help="record a blocked-by edge")
     block.add_argument("card", type=card_number)
     block.add_argument("--by", type=card_number, required=True)
@@ -911,7 +922,8 @@ def parser() -> argparse.ArgumentParser:
 
 COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
-    "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment, "block": cmd_block,
+    "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment,
+    "answer": _comments.cmd_answer, "block": cmd_block,
     "move": cmd_move, "drop": cmd_drop, "task-file": _tasks.cmd_task_file,
     "finding-file": _findings.cmd_finding_file, "hand": _findings.cmd_hand,
     "sync": cmd_sync, "spec-history": cmd_spec_history, "spec-revert": cmd_spec_revert,

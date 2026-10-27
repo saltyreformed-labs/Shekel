@@ -423,17 +423,19 @@ class TestResolveConflicts:
             assert txn_b.estimated_amount == Decimal("888.88")
 
 
-class TestResolveConflictsShadowGuard:
-    """C-20 / F-007: ``resolve_conflicts`` refused to mutate a transfer shadow
+class TestResolveConflictsHandsARegularRowBack:
+    """The control C-20 / F-007's guard left behind: a regular row resolves.
+
+    C-20 / F-007: ``resolve_conflicts`` refused to mutate a transfer shadow
     transaction (``transfer_id IS NOT NULL``), closing CLAUDE.md Transfer
     invariant 4 for this loop.
 
-    The guard (``app/services/recurrence_engine/_conflicts.py``) is
-    unreachable since plan step ``balance:X-bi-6-4d-2``: a transaction naming
-    a transfer is refused at the INSERT (``ck_transactions_names_no_transfer``,
-    graded by ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``'s
-    ``test_the_database_refuses_a_twin``), and the guard goes with the column at
-    ``balance:X-bi-6-5``.  The two cases that drove it were deleted at plan
+    The guard (``app/services/recurrence_engine/_conflicts.py``) was
+    unreachable from plan step ``balance:X-bi-6-4d-2``, where a transaction
+    naming a transfer was refused at the INSERT
+    (``ck_transactions_names_no_transfer``), and plan step
+    ``balance:X-bi-6-5`` deleted the guard and then the column it read.  The
+    two cases that drove it were deleted at plan
     step ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**):
     ``test_update_action_on_shadow_raises_validation_error`` planted the
     refused row, and ``test_cross_user_shadow_silently_skipped`` read two
@@ -441,27 +443,25 @@ class TestResolveConflictsShadowGuard:
     ``test_cross_user_update_blocked`` on a regular row, which fails first when
     the cross-user skip's ``continue`` is dropped (measured).  Its no-raise read
     graded the ORDER -- the cross-user skip before this guard -- which no state
-    can show without a twin, so it goes unchecked until ``balance:X-bi-6-5``
-    deletes the guard.  The deleted case read no access event; the warning is
+    could show without a twin, and went unchecked until ``balance:X-bi-6-5``
+    deleted the guard.  The deleted case read no access event; the warning is
     logged before the ``continue``, so dropping it leaves
     ``tests/test_services/test_service_log_events/test_the_period_and_recurrence_events.py``'s
     ``test_resolve_conflicts_cross_user_emits_access_event`` passing (measured).
     The control below stays.
     """
 
-    def test_regular_transaction_still_resolves_after_guard(
+    def test_an_overridden_row_is_handed_back_to_its_definition(
         self, app, db, seed_user, seed_periods,
     ):
-        """Sanity: the C-20 guard does not regress regular-transaction
-        resolution.
+        """An overridden regular row's update clears its flag and prices it by its definition.
 
-        With a non-shadow transaction
-        (``transfer_id IS NULL``), ``resolve_conflicts`` must keep
-        applying its existing semantics: clear flags and apply the
-        new amount.  Companion to ``TestResolveConflicts`` -- this
-        test exists explicitly under the C-20 class so a future
-        refactor of the shadow guard cannot accidentally break the
-        baseline path.
+        With a regular transaction (the only kind since plan step
+        ``balance:X-bi-6-4d-2``), ``resolve_conflicts`` keeps its
+        semantics: clear the flags and hand the row back to its
+        definition's price.  Companion to ``TestResolveConflicts``; it
+        was the control beside the C-20 shadow guard, which plan step
+        ``balance:X-bi-6-5`` deleted.
         """
         with app.app_context():
             expense_type = (
@@ -490,9 +490,6 @@ class TestResolveConflictsShadowGuard:
             )
             db.session.flush()
             txn = created[0]
-            assert txn.transfer_id is None, (
-                "Pre-condition: regular transaction must not be a shadow."
-            )
             txn.is_override = True
             state_own_amount(txn, Decimal("999.99"))
             db.session.flush()

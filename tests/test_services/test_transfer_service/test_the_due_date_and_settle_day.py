@@ -168,7 +168,8 @@ class TestDueDateAndSettleDayShadows:
         It also asked the transfer's shadow rows for a day after the refusal
         until plan step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2b.  From
         that step's create door no row can name a transfer
-        (``ck_transactions_names_no_transfer``), so the loop ran over none
+        (``ck_transactions_names_no_transfer``, until plan step
+        balance:X-bi-6-5 dropped the column), so the loop ran over none
         (a vacuous read, structurally empty), and it is dropped, not moved
         onto each side's record: with the three refusals the update asks
         deleted (its own before the first write, the transfer status

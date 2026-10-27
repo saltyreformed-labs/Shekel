@@ -559,12 +559,11 @@ class TestTheFeedPricesADerivedRow:
     income shadow declared derived (``PARENT_TRANSFER``), and the accessor
     the ROW accessor :func:`~app.services.row_valuation.settled_contribution`.
     A transfer is one row since that step (ruling **R-BAL258**), so that
-    shadow cannot be stored: its refusal is pinned on the income side by
-    ``test_a_transfer_shadow_is_derived/test_the_declaration.py``'s
-    ``TestAShadowIsBornDerived::test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored``
-    and ``test_loan_plan_assembly.py``'s
-    ``test_a_projected_loan_payment_is_priced_and_its_derived_twin_refused``.
-    The payment that stores no figure today is one GENERATED from its
+    shadow cannot be stored: the database refused it on the income side,
+    pinned in ``test_a_transfer_shadow_is_derived/test_the_declaration.py``
+    and ``test_loan_plan_assembly.py``, until plan step balance:X-bi-6-5
+    dropped the column it named its transfer by, after which no statement
+    can write one (ruling plan#1850).  The payment that stores no figure today is one GENERATED from its
     definition (:func:`_generated_loan_payment`), priced at the same
     ``$1,500.00``, and the settled half's accessor is the row accessor's
     twin over a leg, :func:`~app.services.row_valuation.leg_settled_contribution`.

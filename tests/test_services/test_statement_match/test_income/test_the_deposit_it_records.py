@@ -82,7 +82,8 @@ class TestTheRowItWrites:
         the name, type and figure (one version dated on the row's due date)
         plus this placed row, priced ``derived(TEMPLATE)``.  A link-less row
         owning its figure was a third meaning of ``template_id IS NULL``.
-        It still names no transfer and no card spend.
+        It still names no card spend (and no transfer, which no row can name
+        since plan step balance:X-bi-6-5 dropped the column).
         """
         line = _a_deposit(seed_user)
 
@@ -96,7 +97,6 @@ class TestTheRowItWrites:
             AmountSourceEnum.TEMPLATE,
         )
         assert row.estimated_amount is None
-        assert row.transfer_id is None
         assert row.credit_payback_for_id is None
         # The definition carries what the row used to: no category (R-FN),
         # the deposit's type, the merchant's name.

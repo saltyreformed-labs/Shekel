@@ -266,14 +266,15 @@ def _installment_cash(
 # caller changing its mind.  It derived a MANUAL-mode loan payment's cash as
 # ``round_money(shadow.estimated_amount + extra_principal)`` -- the operator's
 # stored base plus the standing extra -- under a docstring asserting that
-# column was "the recurring base".  A transfer shadow stores no figure at all
-# now: it declares ``PARENT_TRANSFER`` and reads its parent through the amount
-# model, so the manual arm is the parent's own series price plus the extra
-# (:func:`._amount_source._loan_payment_cash`) -- the DEFINITION's price
-# rather than a copy of it, which is the same arm ruling **R-FI** gives every
-# other manually-priced row.  Plan step X-au-f-2 moved that arm off the SHADOW
-# dispatch onto the TRANSFER's (**R-BAL10**), which is where both arms of rule
-# 4 now live.
+# column was "the recurring base".  A transfer shadow stored no figure at all
+# from then: it declared ``PARENT_TRANSFER`` and read its parent through the
+# amount model (plan step ``balance:X-bi-6-4d-2`` deleted the shadows, and
+# ``balance:X-bi-6-5`` the relation), so the manual arm is the parent's own
+# series price plus the extra (:func:`._amount_source._loan_payment_cash`) --
+# the DEFINITION's price rather than a copy of it, which is the same arm ruling
+# **R-FI** gives every other manually-priced row.  Plan step X-au-f-2 moved
+# that arm off the SHADOW dispatch onto the TRANSFER's (**R-BAL10**), which is
+# where both arms of rule 4 now live.
 #
 # **The two answered the same number for every row that existed**: Transfer
 # Invariant 3 held on the column, so a shadow's ``estimated_amount`` WAS its

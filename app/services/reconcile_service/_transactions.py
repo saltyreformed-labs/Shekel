@@ -291,17 +291,14 @@ def _own_clauses(statement: _rows.Statement) -> tuple:
     plan step ``credit_card:CC-5-4b``, which made it each scope's; its
     complement is :func:`_settlement_clauses`' first.
 
-    ``transfer_id IS NULL`` -- a transfer is one row and settles through
+    A transfer is one row and settles through
     ``transfer_service.settle_transfer`` (the transfer paragraph of
-    ``CLAUDE.md``'s Architecture), and
-    ``transaction_service.settle_transaction`` REFUSES a row naming one, so
-    admitting one here would turn a design boundary into a 400.  No row
-    names a transfer since plan step ``balance:X-bi-6-4d-2``
-    (``ck_transactions_names_no_transfer``), so the clause excludes no
-    stored row.  A transfer is the
-    transfer arm's (:mod:`._transfers`), which offers its LEG off
-    ``budget.transfers`` since leaf ``balance:X-bi-6-4c-2``; until then its
-    clause was this one's complement over this table.
+    ``CLAUDE.md``'s Architecture): it is the transfer arm's
+    (:mod:`._transfers`), which offers its LEG off ``budget.transfers`` since
+    leaf ``balance:X-bi-6-4c-2``.  Until then a ``transfer_id IS NULL``
+    clause here was that arm's complement over this table; it went with the
+    column at plan step ``balance:X-bi-6-5``, since no transaction row names
+    a transfer after ``balance:X-bi-6-4d-2``.
 
     **NOT a row whose payment moved on ANOTHER account** (plan step
     ``credit_card:CC-5-4a-5``, ruling **R-CC126**, developer 2026-09-30,
@@ -335,7 +332,6 @@ def _own_clauses(statement: _rows.Statement) -> tuple:
     """
     return (
         Transaction.account_id == statement.account_id,
-        Transaction.transfer_id.is_(None),
         ~status_seam.payment_recorded_elsewhere_clause(statement.account_id),
     )
 
@@ -403,19 +399,13 @@ def _settlement_clauses(statement: _rows.Statement) -> tuple:
     row scope shares -- Projected, contributing, an offerable period -- and
     :func:`~._rows.outstanding_rows` the landing-day bound, which is the one
     Checking's own list applies to the same row (ruling **R-CC118**, "Once the
-    bill is due").  Four clauses of its own, each load-bearing:
+    bill is due").  Three clauses of its own, each load-bearing:
 
     * the row is on ANOTHER account -- the complement of :data:`ARM`'s first
       clause, so the two scopes partition every row and one posted id loads
       in at most one (ruling **R-CC116**).  The row's own account's list
       leaves it out (ruling **R-CC126**, :func:`_own_clauses`), so it is
       offered here alone.
-    * ``transfer_id IS NULL`` -- a transfer is one row and settles through
-      ``transfer_service.settle_transfer``, and ``settle_transaction``
-      REFUSES a row naming one.  No row names a transfer since plan step
-      ``balance:X-bi-6-4d-2`` (``ck_transactions_names_no_transfer``), so the
-      clause excludes no stored row; it keeps the scope inside the verb's
-      domain rather than relying on that.
     * it holds an UN-DATED covering movement ON THIS ACCOUNT -- the payment
       the statement may show.  Un-dated, because that is the payment R-CC44
       lists: a dated one already posts and folds on its own day, so it is in
@@ -442,7 +432,6 @@ def _settlement_clauses(statement: _rows.Statement) -> tuple:
     """
     return (
         Transaction.account_id != statement.account_id,
-        Transaction.transfer_id.is_(None),
         Transaction.entries.any(and_(
             status_seam.covering_clause(),
             TransactionEntry.settled_on.is_(None),

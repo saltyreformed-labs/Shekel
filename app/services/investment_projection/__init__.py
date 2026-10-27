@@ -19,7 +19,7 @@ used to ask each row for its ``effective_amount`` and screen it with
 ``status_contributes_to_balance`` -- a model property that cannot answer for a
 row whose amount is DERIVED, since such a row stores no figure and resolving one
 needs a database this module deliberately does not have.  Valuing at the
-BOUNDARY instead (``recorded_contributions.load_shadow_income_contributions_*``)
+BOUNDARY instead (``recorded_contributions.load_transfer_contributions_*``)
 resolves the whole row set ONCE, drops the rows that contribute nothing, and
 retires all four copies of the status screen with them.  What is left here is
 arithmetic over plain data, which is what the paragraph above always claimed.
@@ -75,7 +75,7 @@ from app.services.investment_projection._feed import AccountPayrollFeed
 from app.services.investment_projection._inputs import (
     InvestmentInputs,
     PricedContribution,
-    ShadowContributions,
+    TransferContributions,
     build_contribution_timeline,
     calculate_investment_inputs,
     employer_contribution_params,
@@ -85,7 +85,7 @@ __all__ = [
     "AccountPayrollFeed",
     "InvestmentInputs",
     "PricedContribution",
-    "ShadowContributions",
+    "TransferContributions",
     "build_contribution_timeline",
     "calculate_investment_inputs",
     "employer_contribution_params",

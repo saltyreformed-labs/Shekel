@@ -169,13 +169,14 @@ class TestCreateEntry:
     # "Delete all 27").  It added a purchase to a transfer's expense SHADOW
     # row, which names no definition, so ``tracks_purchases`` answered
     # ``False`` (ruling R-BAL73) and the envelope guard refused it.  No shadow
-    # can exist now (the database refuses one,
-    # ``ck_transactions_names_no_transfer``, ruling R-BAL258, pinned once by
+    # can exist now: no transaction has a transfer column since plan step
+    # X-bi-6-5, and ``ck_transactions_names_no_transfer`` refused a row naming
+    # one until then (ruling R-BAL258, pinned once, below that drop, by
     # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
-    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
-    # and no app code builds one).  The envelope guard's refusal of a row
-    # that tracks no purchases is the case above's, and ``tracks_purchases``
-    # still answers ``False`` for the one link-less row left, a card payback.
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``).
+    # The envelope guard's refusal of a row that tracks no purchases is the
+    # case above's, and ``tracks_purchases`` still answers ``False`` for the
+    # one link-less row left, a card payback.
 
     def test_create_entry_rejects_income(
         self, app, db, seed_user, seed_periods,

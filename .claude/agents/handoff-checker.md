@@ -65,7 +65,9 @@ Each reads PASS, or what differs, quoting the line of s.0 and the output that sh
    exit with `; echo "exit=$?"`, never through a pipe).
 7. **The first act and the next leaf.** s.0 gives the next session a FIRST act that checks `pwd`,
    `git rev-parse --show-toplevel`, the branch, HEAD and the tree against check 1's values and
-   STOPs on a difference; then it names the next leaf and the first command its session runs.
+   STOPs on a difference; then it reads Josh's comments on its card and answers each of his
+   still unanswered (`/charter` item 8), after the claim when the next leaf is a card it claims;
+   then it names the next leaf and the first command its session runs.
 8. **The claim.** When s.0's where-it-is item names the card the lane builds (`plan#N`; not a card
    it only cites), check 1's branch is `card/N`, or s.0 names the branch it merges into `card/N`.
 9. **Each finished task's file.** For each task s.0 says this session finished (`plan#T`), `git -C

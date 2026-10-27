@@ -69,7 +69,7 @@ _M = load_migration_module(
 #: the hidden-leg case below needs.
 _TWINS_DELETED = load_migration_module("82f7b7ed4332_a_transfer_is_one_row.py")
 
-#: Plan step ``balance:X-bi-6-4d-2``'s head revision, which empties a side's
+#: Plan step ``balance:X-bi-6-4d-2``'s last revision, which empties a side's
 #: record of the figure its transfer holds; its downgrade, run before
 #: :data:`_TWINS_DELETED`'s, copies the figure back onto the records and
 #: withdraws the band's figure arm, the shape every revision below holds.
@@ -296,8 +296,15 @@ class TestTheOneActStillRemovesAMovement:
             assert db.session.get(Transaction, row.id) is not None
 
 
+@pytest.mark.usefixtures("below_the_transfer_column_drop")
 class TestTheMigration:
-    """``c4a4e7d1b9f2``: the three keys each way, and its two refusals."""
+    """``c4a4e7d1b9f2``: the three keys each way, and its two refusals.
+
+    Every case runs below ``c956c1d83108`` (the fixture): this revision's
+    upgrade installs the deleted-row rule's row-only text, which names
+    ``budget.transactions.transfer_id``, and its hidden-row refusal reads it.
+    That revision restores none of the three keys, so they read as head's.
+    """
 
     def test_the_keys_are_no_action_at_head(self, app, db):
         """The test database is built at head, so the keys read as upgraded."""
@@ -395,9 +402,10 @@ class TestTheMigration:
         the shape this revision ran against.  No transfer has a shadow since
         plan step ``balance:X-bi-6-4d-2`` (``82f7b7ed4332`` deletes them and
         refuses a new one), so the case runs that revision's downgrade, which
-        builds both, each settled like its transfer, after head's own
-        (``b7d2e4f19a63``), which puts the transfer's figure back on each
-        side's record.  Since plan step
+        builds both, each settled like its transfer, after the two above it:
+        ``c956c1d83108``'s (the class's fixture), which puts back the column a
+        shadow names its transfer by, and ``b7d2e4f19a63``'s, which puts the
+        transfer's figure back on each side's record.  Since plan step
         ``balance:X-bi-6-4d-2`` each side's record hangs off the TRANSFER
         (ruling **R-BAL88**), and the downgrade leaves it there, so both
         records are then re-parented under their shadows in one statement,

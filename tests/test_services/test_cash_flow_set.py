@@ -338,9 +338,10 @@ class TestOwnRowsClause:
         not; with no row off checking in the scenario, the equality held
         whatever the clause filtered on.  The filter it is compared with
         also read ``transfer_id IS NULL`` until plan step
-        ``balance:X-bi-6-4d-2``: no row may name a transfer
-        (``ck_transactions_names_no_transfer``, ruling **R-BAL258**), so
-        that term held on every row and is gone.
+        ``balance:X-bi-6-4d-2``: no row could name a transfer
+        (``ck_transactions_names_no_transfer``, ruling **R-BAL258**, until
+        plan step balance:X-bi-6-5 dropped the column), so that term held on
+        every row and is gone.
         """
         with app.app_context():
             checking = seed_user["account"]

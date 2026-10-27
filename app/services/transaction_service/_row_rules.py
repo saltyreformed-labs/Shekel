@@ -198,26 +198,18 @@ def deletion_refusal(
     drift.  Its sibling :func:`reject_unsettleable` raises instead, because no
     screen asks that one.
 
-    **Two rows may not be deleted by themselves, and both are rows that are
-    half of something else.**
-
-    * **A row naming a transfer**, which no stored row is.  Until plan step
-      ``balance:X-bi-6-4d-2`` every transfer had two such twin rows, and a
-      delete of one alone would have orphaned the other, so this arm sent it
-      to ``transfer_service.delete_transfer``.  That step deleted the twins
-      (ruling **R-BAL166**), and the database refuses a row naming a transfer
-      at the write (``ck_transactions_names_no_transfer``,
-      ``app/models/_transaction_table_args.py``), so the arm answers a row
-      that cannot be stored (one reaches it only unflushed); it goes with the
-      ``transfer_id`` column at plan step ``balance:X-bi-6-5``.
-    * **A CC PAYBACK.**  A payback exists only because its source is marked
-      Credit, and the source stays Credit and out of the balance
-      (``ref.statuses.excludes_from_balance``) when the payback goes -- so
-      deleting one alone does not remove a plan, it removes the repayment of
-      spending the books still hold, silently.  It is the same rule, one column
-      over, as :func:`repays_card_spend`'s refusal of a hand-typed figure: a
-      payback's facts are not its own to state, and its EXISTENCE is one of
-      them.
+    **A row that is half of something else may not be deleted by itself: a CC
+    PAYBACK.**  A payback exists only because its source is marked Credit,
+    and the source stays Credit and out of the balance
+    (``ref.statuses.excludes_from_balance``) when the payback goes -- so
+    deleting one alone does not remove a plan, it removes the repayment of
+    spending the books still hold, silently.  It is the same rule, one column
+    over, as :func:`repays_card_spend`'s refusal of a hand-typed figure: a
+    payback's facts are not its own to state, and its EXISTENCE is one of
+    them.  (A transfer's twin row was the other such row, sent to
+    ``transfer_service.delete_transfer``, until plan step
+    ``balance:X-bi-6-4d-2`` deleted the twins; its arm went with the
+    ``transfer_id`` column at plan step ``balance:X-bi-6-5``.)
 
     **The payback refusal FORKS on which repair actually exists**, through
     :func:`repays_tracked_purchases` -- the same fork the withdrawn Estimated
@@ -252,10 +244,10 @@ def deletion_refusal(
     that holds OTHER rows is not refused: nothing is disposed of.
 
     Args:
-        txn: The row a door or a screen is asking about.  Reads ``transfer_id``
-            and ``credit_payback_for_id``, and -- only for a payback -- the
-            source relationship the repair fork needs.  Two column reads for
-            every ordinary row, so a card render pays nothing for asking; a
+        txn: The row a door or a screen is asking about.  Reads
+            ``credit_payback_for_id``, and -- only for a payback -- the source
+            relationship the repair fork needs.  One column read for every
+            ordinary row, so a card render pays nothing for asking; a
             rule-less definition's row adds the two small reads the third arm
             needs.
         last_row_of_definition: Whether deleting *txn* would leave a
@@ -268,12 +260,6 @@ def deletion_refusal(
     Returns:
         The sentence to show the owner, or ``None`` when the row may go.
     """
-    if txn.transfer_id is not None:
-        return (
-            "This row is one leg of a transfer, and a transfer's two legs "
-            "always move together. Delete the transfer itself and both legs "
-            "go with it."
-        )
     if last_row_of_definition is None:
         last_row_of_definition = is_last_row_of_its_definition(txn)
     if last_row_of_definition and template_has_standing_rule(txn.template_id):
@@ -301,10 +287,10 @@ def deletion_refusal(
 
 
 def reject_unsettleable(txn: Transaction) -> None:
-    """Refuse a row NO settle door may touch -- both rules, stated once.
+    """Refuse a row NO settle door may touch -- the rule stated once.
 
-    **Two refusals in one statement, because they are the same kind of rule and
-    they had drifted apart** (finding **N-233**).  Every public settle surface
+    **It was two refusals in one statement, because they were the same kind of
+    rule and they had drifted apart** (finding **N-233**).  Every public settle surface
     asks it, and since plan step X-au-j they all live NEXT DOOR in
     :mod:`._settle` rather than beside it: :func:`~._settle.settle_transaction`,
     which would otherwise have settled one of a transfer's twin rows silently
@@ -316,13 +302,12 @@ def reject_unsettleable(txn: Transaction) -> None:
     second, shorter spelling.  A verb owns its own preconditions; three verbs
     owning the same two own them once.
 
-    **A row naming a transfer** was one of a transfer's twin rows, which
-    settled through ``transfer_service.update_transfer`` with their transfer.
-    No stored row is one since plan step ``balance:X-bi-6-4d-2`` deleted the
-    twins (ruling **R-BAL166**), and the database refuses a new one
-    (``ck_transactions_names_no_transfer``), so this arm answers a row that
-    cannot be stored (one reaches it only unflushed); it goes with the
-    ``transfer_id`` column at plan step ``balance:X-bi-6-5``.
+    **ONE rule is left of the two.**  The other refused a row naming a
+    transfer, one of a transfer's twin rows, which settled through
+    ``transfer_service.update_transfer`` with their transfer.  Plan step
+    ``balance:X-bi-6-4d-2`` deleted the twins (ruling **R-BAL166**) and plan
+    step ``balance:X-bi-6-5`` the ``transfer_id`` column that named one, so
+    no row can be one and the arm went with the column.
 
     **A soft-deleted row** must not be resurrected by a status change.  It
     values at ``Decimal("0")`` through the valuation gate, so settling one
@@ -343,34 +328,24 @@ def reject_unsettleable(txn: Transaction) -> None:
     ruling **R-CC98**, and saying "was archived" where its recurring item is,
     ruling **R-CC107**.)
 
-    Ordered shadow-then-deleted so a row that is both reports the rule that
-    routes it somewhere else rather than the one that refuses it outright.  Both
-    tests are column reads, so neither triggers the relationship lazy-load
-    :func:`settles_from_entries`' cheap-first precondition ordering avoids; the
-    deleted row's sentence adds one read, on the refusal alone
+    The test is a column read, so it does not trigger the relationship
+    lazy-load :func:`settles_from_entries`' cheap-first precondition ordering
+    avoids; the deleted row's sentence adds one read, on the refusal alone
     (:meth:`~app.utils.hidden_row.HiddenRow.of`).  **None of it flushes**:
-    the two columns are read under ``no_autoflush`` -- a row the caller's
-    commit expired refreshes them by a statement, which would otherwise write
-    the caller's staged state first (review 8 of plan step
+    the column is read under ``no_autoflush`` -- a row the caller's commit
+    expired refreshes it by a statement, which would otherwise write the
+    caller's staged state first (review 8 of plan step
     ``credit_card:CC-5-4a-4``, measured 2026-09-24) -- and the sentence's
     read is guarded the same way, so a call refused here writes none of a
     caller's staged state.
 
     Args:
-        txn: The row to check.  Reads ``transfer_id`` and ``is_deleted``.
+        txn: The row to check.  Reads ``is_deleted``.
 
     Raises:
-        ValidationError: When *txn* names a transfer (a row the database
-            refuses) or is soft-deleted.
+        ValidationError: When *txn* is soft-deleted.
     """
     with db.session.no_autoflush:
-        is_shadow = txn.transfer_id is not None
         is_deleted = txn.is_deleted
-    if is_shadow:
-        raise ValidationError(
-            f"Transaction {txn.id} is a transfer shadow; "
-            "transfers settle via transfer_service.update_transfer so both "
-            "legs and the parent move together.",
-        )
     if is_deleted:
         raise ValidationError(deleted_row_payment_refusal(HiddenRow.of(txn)))

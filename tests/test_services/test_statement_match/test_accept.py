@@ -1086,7 +1086,7 @@ class TestATransferShadowIsMatchedThroughItsService:
     def test_a_projected_shadow_settles_through_the_transfer_service(
         self, app, db, seed_user,
     ):
-        """Both sides and the parent move in one call, which is invariant 3.
+        """One call settles the transfer and dates both its sides' records.
 
         Each side is its RECORD since plan step ``balance:X-bi-6-4d-2`` (ruling
         **R-BAL167** class 1): the transfer says Paid and each side's record

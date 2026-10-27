@@ -36,6 +36,11 @@ from ._helpers import (
 )
 
 
+#: Every case runs below ``c956c1d83108``, where the transfer column stands (the
+#: package docstring).
+pytestmark = pytest.mark.usefixtures("below_the_transfer_column_drop")
+
+
 def _assert_nothing_written(transfer_ids, twins_before):
     """A refused upgrade left the twins, and made no copy and no CHECK.
 

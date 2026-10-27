@@ -18,10 +18,11 @@ linted a tree the session was not editing, reporting a peer's uncommitted work
 as this lane's failure while passing this lane's real one.
 
 **Why these cases are shaped as they are.**  The bug needs the session's cwd and
-``CLAUDE_PROJECT_DIR`` to DISAGREE, which is exactly what a worktree produces
-and what a single-checkout test would never reproduce -- so the cases that grade
-the fix build a real git checkout, point ``CLAUDE_PROJECT_DIR`` somewhere else,
-and assert against the cwd.
+``CLAUDE_PROJECT_DIR`` to DISAGREE, which is what the sessions working in
+worktrees on 2026-08-29 and 2026-09-04 measured, and what a single-checkout
+test would never reproduce -- so the cases that grade the fix build a real git
+checkout, point ``CLAUDE_PROJECT_DIR`` somewhere else, and assert against the
+cwd.
 
 **Which cases are the CONTROL, measured rather than reasoned.**  Substituting
 ``origin/dev``'s helper and re-running gives **7 failed, 3 passed** (2026-09-04).
@@ -30,28 +31,37 @@ they are boundary guards: the fallback arm, the trailing-slash strip finding
 HOOK/SH-12 added, and the file genuinely outside the project, which is what
 stops the fix turning "resolve the right root" into "match everything".
 
-**Two of those seven failures are weaker than the other five, and saying so is
-the point.**  The three ``TestTheToolchainRootStaysWithThePrimaryCheckout``
-cases fail against dev only because ``hook_toolchain_root`` does not exist
-there, so bash errors -- that guards the function being DELETED and says
-nothing about it returning a wrong value.  The value-level control is a
-separate injection, also run: re-pointing the toolchain resolver at the edited
-tree (``hook_toolchain_root() { hook_repo_root; ... }``) fails those same three
-and only those three, 3 failed / 7 passed.  Both directions were run; neither
-was inferred.
+**Two of those seven failures were weaker than the other five, and saying so
+was the point.**  The three toolchain cases of the day failed against dev only
+because ``hook_toolchain_root`` did not exist there, so bash errored -- that
+guarded the function being DELETED and said nothing about it returning a wrong
+value.  The value-level control was a separate injection, also run:
+re-pointing the toolchain resolver at the edited tree
+(``hook_toolchain_root() { hook_repo_root; ... }``) failed those same three and
+only those three, 3 failed / 7 passed.  Both directions were run; neither was
+inferred.
 
 **The toolchain cases grade the review's H-1**, which is a regression this fix
 introduced before review caught it: ``hook_repo_root`` had consumers in five
 files, and a further one inside ``_hooklib.sh`` itself -- the ``_hook_venv_bin``
 PATH prefix -- was asking "where does the pinned toolchain live", not "which
-tree is being edited".  For that question the
-PRIMARY checkout is the right answer, because worktrees carry no ``.venv`` of
-their own.  Re-pointing it at the session's worktree left the venv path naming
-a directory that does not exist, so ``pylint`` became unresolvable and the two
-gates that invoke it (the Python per-edit gate and the Stop floor) hard-blocked
-on "command not found" while blaming a financial-correctness rule.
-:class:`TestTheToolchainRootStaysWithThePrimaryCheckout` is what stops that
-being re-introduced.
+tree is being edited".  For that question the MAIN checkout is the right
+answer, because worktrees carry no ``.venv`` of their own.  Re-pointing it at
+the session's worktree left the venv path naming a directory that does not
+exist, so ``pylint`` became unresolvable and the two gates that invoke it (the
+Python per-edit gate and the Stop floor) hard-blocked on "command not found"
+while blaming a financial-correctness rule.
+
+**That guard answered ``CLAUDE_PROJECT_DIR`` until 2026-10-27, which was the
+same defect one step removed** (finding plan#1849, ruling plan#1848).  It held
+only while ``CLAUDE_PROJECT_DIR`` named the primary checkout, and a session
+LAUNCHED in a worktree gets that worktree (measured 2026-10-26).  So a session
+launched in a worktree with no ``.venv`` link ran whatever ``pylint`` its PATH
+held: the system's crashed on an untouched file and the gate blocked the edit
+(measured 2026-10-27).  :class:`TestTheToolchainRootIsTheMainCheckout` now
+asks git from the library's own directory, and holds the cases the old guard
+never tried: ``CLAUDE_PROJECT_DIR`` naming the session's own worktree, and a
+session standing outside every repository.
 """
 
 import json
@@ -66,7 +76,10 @@ import pytest
 _HOOKLIB = Path(__file__).resolve().parents[2] / "scripts" / "hooks" / "_hooklib.sh"
 
 
-def _bash(script: str, cwd: Path, project_dir: Path, stdin: str = "") -> str:
+def _bash(
+    script: str, cwd: Path, project_dir: Path | str, stdin: str = "",
+    library: Path = _HOOKLIB,
+) -> str:
     """Source the hook library and run *script*, returning its stdout.
 
     Args:
@@ -74,14 +87,18 @@ def _bash(script: str, cwd: Path, project_dir: Path, stdin: str = "") -> str:
         cwd: The working directory to run in -- stands in for the session's
             own checkout.
         project_dir: The value of ``CLAUDE_PROJECT_DIR`` -- stands in for the
-            PRIMARY checkout, which is what the harness actually sets it to.
+            directory the session was launched in, which need not be the tree
+            it edits.  A ``str`` keeps a trailing slash; a ``Path`` drops it.
         stdin: Payload piped to the script, for the helpers that read it.
+        library: The copy of ``_hooklib.sh`` to source.  The toolchain
+            resolver asks git from the library's own directory, so its cases
+            source a copy inside the fixture repository.
 
     Returns:
         Stdout, stripped.
     """
     completed = subprocess.run(
-        ["bash", "-c", f'set -uo pipefail; . "{_HOOKLIB}"; {script}'],
+        ["bash", "-c", f'set -uo pipefail; . "{library}"; {script}'],
         cwd=cwd,
         env={
             "PATH": "/usr/bin:/bin:/usr/local/bin",
@@ -146,9 +163,10 @@ def _linked_worktree(checkout: Path) -> Path:
 def _primary(tmp_path: Path) -> Path:
     """A DIFFERENT directory, standing in for the primary checkout.
 
-    This is the decoy: the harness sets ``CLAUDE_PROJECT_DIR`` to the primary
-    checkout whatever worktree the session is in, and the pre-fix helper
-    returned it unconditionally.
+    This is the decoy: ``CLAUDE_PROJECT_DIR`` can name a directory other than
+    the tree the session edits (the primary checkout, as two sessions working
+    in worktrees measured it on 2026-08-29), and the pre-fix helper returned it
+    unconditionally.
     """
     root = tmp_path / "primary-checkout"
     root.mkdir()
@@ -188,10 +206,13 @@ class TestTheRootResolvesToTheSessionsCheckout:
         any repository, and if ``TMPDIR`` were ever pointed inside a checkout
         ``git rev-parse`` would succeed, git output never carries a trailing
         slash, and the strip would go ungraded while the test still passed.
+
+        **The slash goes in as a string.**  Until 2026-10-27 this passed
+        ``Path(f"{primary}/")``, and pathlib drops a trailing slash, so the
+        helper never saw one and the strip went ungraded (a mutant deleting the
+        strip in the toolchain resolver survived the same way that day).
         """
-        root = _bash(
-            "hook_repo_root", checkout.parent, Path(f"{primary}/"),
-        )
+        root = _bash("hook_repo_root", checkout.parent, f"{primary}/")
         assert root == str(primary)
 
     def test_it_FALLS_BACK_outside_a_git_checkout(
@@ -243,59 +264,156 @@ class TestTheShapeTheFixExistsFor:
         assert _bash("hook_repo_root", nested, primary) == str(linked_worktree)
 
 
-class TestTheToolchainRootStaysWithThePrimaryCheckout:
+@pytest.fixture(name="hooked")
+def _hooked(checkout: Path) -> tuple[Path, Path]:
+    """Return (main, linked): a repository holding this library, and a worktree.
+
+    The toolchain resolver asks git from the library's OWN directory, so the
+    copy under test must sit inside the fixture repository, committed so the
+    linked worktree checks out a copy of its own, as every lane does.
+    """
+    library = checkout / "scripts" / "hooks" / "_hooklib.sh"
+    library.parent.mkdir(parents=True)
+    library.write_bytes(_HOOKLIB.read_bytes())
+    identity = [
+        "-c", "user.email=test@example.invalid", "-c", "user.name=Test",
+    ]
+    subprocess.run(["git", "-C", str(checkout), "add", "scripts"], check=True)
+    subprocess.run(
+        ["git", "-C", str(checkout), *identity, "commit", "-q", "-m", "hooks"],
+        check=True,
+    )
+    linked = checkout.parent / "hooked-worktree"
+    subprocess.run(
+        ["git", "-C", str(checkout), "worktree", "add", "-q", str(linked)],
+        check=True,
+    )
+    return checkout, linked
+
+
+def _library(tree: Path) -> Path:
+    """The copy of ``_hooklib.sh`` checked out in *tree*."""
+    return tree / "scripts" / "hooks" / "_hooklib.sh"
+
+
+class TestTheToolchainRootIsTheMainCheckout:
     """The H-1 regression's guard: two questions, two answers.
 
     ``_hook_venv_bin`` asks where the PINNED toolchain lives, which is not the
-    tree being edited.  Worktrees carry no ``.venv`` -- measured across the
-    eight on this machine: a real one in the primary, a symlink in one
-    worktree, nothing in the other six, and no ``pylint`` anywhere else on the
-    box.  So this must keep answering with the primary even from a worktree, or
-    the PATH prefix silently vanishes and the two gates that invoke ``pylint``
-    (the Python per-edit gate and the Stop floor) hard-block on "command not
-    found" while blaming a financial-correctness rule.
+    tree being edited.  Worktrees carry no ``.venv`` of their own -- measured
+    across the eight on this machine on 2026-09-04: a real one in the primary,
+    a symlink in one worktree, nothing in the other six.  So this answers the
+    repository's MAIN worktree, as git names it from the library's own
+    directory, whatever directory the session is in and whatever
+    ``CLAUDE_PROJECT_DIR`` names (ruling plan#1848).  Otherwise the PATH prefix
+    silently vanishes and the two gates that invoke ``pylint`` (the Python
+    per-edit gate and the Stop floor) block an edit for a reason that is not in
+    it.
+
+    **The control, run 2026-10-27:** against the resolver that stood before
+    (``CLAUDE_PROJECT_DIR``), every case here but the last fails; the last, the
+    fallback outside any checkout, passes on both, as it should.
     """
 
-    def test_the_toolchain_root_ignores_the_sessions_worktree(
-        self, linked_worktree: Path, primary: Path,
+    @pytest.mark.parametrize("launched_in", ["its-worktree", "a-decoy"])
+    def test_from_a_worktree_it_answers_the_main_checkout(
+        self, hooked: tuple[Path, Path], primary: Path, launched_in: str,
     ):
-        """From inside a worktree it still answers ``CLAUDE_PROJECT_DIR``.
+        """Whatever directory the session was launched in.
 
-        The exact inverse of :func:`test_repo_root_prefers_the_sessions_own_checkout`,
-        and asserting them side by side is the point: one function must follow
-        the cwd and the other must not.
+        ``its-worktree`` is the case measured 2026-10-26: a session launched in
+        its worktree gets that worktree as ``CLAUDE_PROJECT_DIR``.  The resolver
+        that stood until 2026-10-27 answered it, and the worktree holds no
+        venv (finding plan#1849).  ``a-decoy`` is a directory outside the
+        repository, which the old cases used in the primary checkout's place.
         """
+        main, linked = hooked
+        launch = linked if launched_in == "its-worktree" else primary
         assert _bash(
-            "hook_toolchain_root", linked_worktree, primary,
-        ) == str(primary)
+            "hook_toolchain_root", linked, launch, library=_library(linked),
+        ) == str(main)
+
+    def test_from_a_directory_outside_any_repository(
+        self, hooked: tuple[Path, Path], tmp_path: Path,
+    ):
+        """The session's working directory does not matter, only the library's.
+
+        A session can stand in a directory outside every repository (a
+        scratchpad, ``/tmp``); asking git from there found nothing and fell
+        back to the launch directory, the defect itself (review of plan#1823).
+        """
+        main, linked = hooked
+        elsewhere = tmp_path / "scratchpad"
+        elsewhere.mkdir()
+        assert _bash(
+            "hook_toolchain_root", elsewhere, linked, library=_library(linked),
+        ) == str(main)
+
+    def test_from_the_main_checkout_it_answers_itself(
+        self, hooked: tuple[Path, Path], primary: Path,
+    ):
+        """The first worktree git names is the main one, wherever it is asked.
+
+        Asked from the main checkout's own copy while a linked worktree exists,
+        so an answer read off the wrong entry of ``git worktree list`` names the
+        linked one and fails here.
+        """
+        main, linked = hooked
+        assert linked.is_dir()
+        assert _bash(
+            "hook_toolchain_root", main, primary, library=_library(main),
+        ) == str(main)
 
     def test_the_two_roots_DISAGREE_from_a_worktree(
-        self, linked_worktree: Path, primary: Path,
+        self, hooked: tuple[Path, Path],
     ):
         """They must not collapse back into one answer.
 
-        A future edit that re-unified them would pass both cases above only if
-        cwd and ``CLAUDE_PROJECT_DIR`` happened to agree -- which they never do
-        in the situation this file exists for.  This asserts the divergence
-        itself.
+        From a session launched in its own worktree, the tree being edited is
+        that worktree and the toolchain is the main checkout's.  A future edit
+        that re-unified the two resolvers would answer one of them wrong here.
         """
+        main, linked = hooked
         both = _bash(
-            "hook_repo_root; hook_toolchain_root", linked_worktree, primary,
+            "hook_repo_root; hook_toolchain_root", linked, linked,
+            library=_library(linked),
         ).split("\n")
-        assert both == [str(linked_worktree), str(primary)]
+        assert both == [str(linked), str(main)]
 
-    def test_it_strips_a_trailing_slash_too(
-        self, linked_worktree: Path, primary: Path,
+    def test_the_PATH_prefix_is_the_main_checkouts_venv(
+        self, hooked: tuple[Path, Path],
     ):
-        """The HOOK/SH-12 behaviour belongs to BOTH resolvers now.
+        """The consequence the resolver exists for, read off PATH itself.
+
+        The main checkout holds ``.venv/bin``; the worktree the session was
+        launched in holds none.  Measured 2026-10-27 before the fix: no prefix,
+        so the gates ran the system's ``pylint``.
+        """
+        main, linked = hooked
+        venv_bin = main / ".venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        path = _bash(
+            'printf "%s" "$PATH"', linked, linked, library=_library(linked),
+        )
+        assert path.split(":")[0] == str(venv_bin)
+
+    def test_a_library_outside_any_checkout_falls_back_and_strips_a_slash(
+        self, tmp_path: Path, primary: Path,
+    ):
+        """The old answer stands where git has none, HOOK/SH-12's strip with it.
 
         The trailing-slash strip was a property of the single helper; splitting
-        it in two is exactly how one half quietly loses it.
+        it in two is exactly how one half quietly loses it, and git's own
+        answer never carries a slash, so only the fallback can grade it.  The
+        slash goes in as a string: a ``Path`` would drop it.
         """
-        root = _bash(
-            "hook_toolchain_root", linked_worktree, Path(f"{primary}/"),
-        )
-        assert root == str(primary)
+        loose = tmp_path / "not-a-repo"
+        loose.mkdir()
+        library = loose / "_hooklib.sh"
+        library.write_bytes(_HOOKLIB.read_bytes())
+        assert _bash(
+            "hook_toolchain_root", loose, f"{primary}/", library=library,
+        ) == str(primary)
 
 
 class TestTheEditedFileNormalizesAgainstThatRoot:

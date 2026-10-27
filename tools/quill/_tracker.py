@@ -657,8 +657,12 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
     def comments(self, number: int) -> list[Comment]:
         """Every comment on a card, oldest first, read page by page.  A number nobody
-        filed is GitHub's NOT_FOUND error, which :meth:`_github.GitHub.graphql` raises."""
-        return [_comment(node) for node in comment_nodes(self.github, self.place, number)]
+        filed is GitHub's NOT_FOUND error, which :meth:`_github.GitHub.graphql` raises, and a
+        comment GitHub answered as null, which no author can be read from, is
+        :func:`connection_nodes`' refusal (the backup, :mod:`_export`, keeps such an answer as
+        given)."""
+        nodes = comment_nodes(self.github, self.place, number)
+        return [_comment(node) for node in connection_nodes({"nodes": nodes}, "comments", number)]
 
     def find_titles(self, text: str) -> list[tuple[int, str]]:
         """Cards whose title holds ``text`` (GitHub's search: words, not characters), read
@@ -821,7 +825,7 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
         A retry may add it twice, as a create may file twice (:meth:`create`); no command
         reads how many comments a card has, so a doubled note is shown on the card and
-        decides nothing."""
+        decides nothing, and a doubled answer (``quill answer``) answers what one does."""
         self.github.rest("POST", f"{self.place.path}/issues/{number}/comments", {"body": text})
 
     def close(self, number: int, reason: str) -> None:

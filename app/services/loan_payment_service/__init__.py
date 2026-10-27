@@ -55,13 +55,14 @@ read that composes these loaders with the pure resolver lives in
 ``app.services.balance_at._resolution``; that module imports THIS one, and this
 one imports nothing from the seam, so there is no cycle.
 
-Shadow income transactions represent payments received by a debt account via
-transfers.  When a user transfers money from checking to a mortgage account,
-the transfer service creates two shadow transactions: an expense on checking
-(money out) and an income on the mortgage (money in).  The payment feed reads
-the income side (via the :mod:`app.services.loan_loaders` leaf, which owns the
-row loaders and the shadow-income query this package used to host) to discover
-all payments into a loan account.
+A payment received by a debt account is the to-side LEG of a transfer into
+it.  When a user transfers money from checking to a mortgage account, the
+transfer is ONE row whose two sides are its legs: money out of checking and
+money into the mortgage.  The payment feed reads the to-side legs (via
+:func:`app.services.loan_loaders.income_legs`, the leaf that owns the row
+loaders and the payment query this package used to host, which read income
+shadow rows until plan step balance:X-bi-6-4b) to discover all payments into a
+loan account.
 
 **What queries what, and the history matters because the sentence has been
 wrong here before.**  This file once asserted that the service "queries ONLY

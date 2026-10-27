@@ -19,8 +19,12 @@ the copy.  Every refusal is driven through the shipped ``upgrade``, so a
 refusal it stopped asking fails here.
 
 Driven against the test database, which is built at head, through the shipped
-``upgrade`` / ``downgrade``.  At head no twin exists, so the first downgrade in
-each case BUILDS two per transfer (the copy holds none) -- the pre-step shape the
+``upgrade`` / ``downgrade``.  Each case first steps down through
+``c956c1d83108`` (``below_the_transfer_column_drop``), which drops the
+transfer column this revision deletes twins from and restores them into, and
+drops the copy (ruling plan#1851).  No twin exists there and no copy, so the
+first downgrade in each case BUILDS two per transfer -- the pre-step shape the
 upgrade meets.  The schema differs between the two revisions only by the CHECK
-and the copy, so the app's doors run at either.  Every case ends at head.
+and the copy, so the app's doors run at either.  Every case ends at this
+revision or below it, never back at head.
 """

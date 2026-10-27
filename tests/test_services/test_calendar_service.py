@@ -1756,19 +1756,32 @@ class TestEdgeCases:
             assert 29 in result.day_entries
             assert result.day_entries[29][0].name == "Leap Day"
 
-    def test_transfer_shadow_included(self, app, seed_user, seed_periods, db):
-        """Transfer shadow transactions are included in calendar data.
+    def test_a_projected_transfer_is_a_day_cell_on_its_due_day(
+        self, app, seed_user, seed_periods, db,
+    ):
+        """A projected $500.00 checking -> savings transfer due 01-05 is one cell.
 
-        Transfer shadows are regular Transaction rows (with transfer_id
-        set) and should appear like any other transaction.
+        On checking's calendar the transfer is its from-side LEG, on its due
+        day, like any other entry: day 5 holds exactly that cell, keyed by the
+        pair, $500.00 out and not yet paid, and it is the month's whole
+        expense total (no other entry is seeded in January).
+
+        **Re-expressed on a real transfer at plan step balance:X-bi-6-5**
+        (finding **BAL-526**).  It was ``test_transfer_shadow_included``,
+        which built a plain row named "Transfer Out" with no ``transfer_id``
+        and graded that, so the case its name claimed was graded by nothing.
+        No transaction names a transfer since that step, and the calendar
+        has drawn a transfer as legs read off its parent since leaf
+        ``X-bi-6-1b``.
         """
         with app.app_context():
-            # Create a regular transaction simulating a transfer shadow.
-            # Shadows have transfer_id set but are otherwise normal
-            # Transaction rows.
-            _add_transaction(
-                db.session, seed_user, seed_periods[0], "Transfer Out",
-                "500.00", due_date=date(2026, 1, 5),
+            checking = seed_user["account"]
+            savings = create_savings_account(
+                seed_user, db.session, "Savings", Decimal("0.00"),
+            )
+            transfer = create_transfer(
+                seed_user, db.session, checking, savings, seed_periods[0],
+                amount=Decimal("500.00"), due_date=date(2026, 1, 5),
             )
             db.session.commit()
 
@@ -1778,8 +1791,13 @@ class TestEdgeCases:
                 month=1,
                 user_settings=None,
             )
-            assert 5 in result.day_entries
-            assert result.day_entries[5][0].name == "Transfer Out"
+            [entry] = result.day_entries[5]
+            assert entry.item_key == (transfer.id, checking.id)
+            assert entry.name == "Transfer to Savings"
+            assert entry.amount == Decimal("500.00")
+            assert entry.is_income is False
+            assert entry.is_paid is False
+            assert result.total_expenses == Decimal("500.00")
 
 
 class TestATransferIsALegOfItsParent:
@@ -1805,7 +1823,8 @@ class TestATransferIsALegOfItsParent:
         checking; savings' answers no row and one INCOME leg on savings.
         Until plan step ``balance:X-bi-6-4d-2`` the case also read that no row
         checking's load answered named a transfer (a shadow); no row can since
-        (``ck_transactions_names_no_transfer``).  Renamed from
+        (``ck_transactions_names_no_transfer`` refused one until plan step
+        balance:X-bi-6-5 dropped the column).  Renamed from
         ``test_the_loader_answers_own_rows_and_both_sides_legs_and_no_shadow``.
         """
         with app.app_context():

@@ -349,7 +349,6 @@ def _recent_settled_expenses_monthly(
             Transaction.account_id.in_(checking_ids),
             Transaction.scenario_id == scenario_id,
             Transaction.is_deleted.is_(False),
-            Transaction.transfer_id.is_(None),
             Transaction.transaction_type_id == ref_cache.txn_type_id(
                 TxnTypeEnum.EXPENSE,
             ),

@@ -88,9 +88,10 @@ class TestOrphanDetection:
         It also re-categorised the transfer's shadow rows to no category
         around the service, so that only the transfer's own row named the
         category -- the state a shadowless transfer presents -- until plan
-        step ``balance:X-bi-6-4d-2``: a transfer is one row and no row may
+        step ``balance:X-bi-6-4d-2``: a transfer is one row and no row could
         name one (``ck_transactions_names_no_transfer``, ruling
-        **R-BAL258**), so that state is every transfer's and the statement
+        **R-BAL258**, until plan step balance:X-bi-6-5 dropped the column), so
+        that state is every transfer's and the statement
         updated no row.
         """
         def fresh(name):

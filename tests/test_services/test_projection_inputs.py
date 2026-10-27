@@ -54,7 +54,7 @@ from app.services.projection_inputs import (
     price_payroll_feeds,
 )
 from app.services.recorded_contributions import (
-    load_shadow_income_contributions_for_account,
+    load_transfer_contributions_for_account,
 )
 from tests._test_helpers import (
     an_entered_day,
@@ -1085,7 +1085,7 @@ class TestLoadInvestmentParamsForAccounts:
 class TestShadowContributionBoundary:
     """The BOUNDARY where a shadow contribution is valued and screened.
 
-    ``load_shadow_income_contributions_for_account(s)`` became the one place a
+    ``load_transfer_contributions_for_account(s)`` became the one place a
     contribution's dollar is decided at plan step X-au-c2: it prices the whole
     row set through :func:`app.services.cash_ledger.contributions_by_id` and
     hands :mod:`app.services.investment_projection` frozen
@@ -1227,7 +1227,7 @@ class TestShadowContributionBoundary:
             )
             db.session.commit()
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [seed_periods[0].id],
             ).records
@@ -1255,7 +1255,7 @@ class TestShadowContributionBoundary:
             # The pass's ``DerivedPeriod`` for that row (ruling R-SAL19).
             period = calendar_for(seed_user["user"].id).saved()[0]
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [period.period_id],
             ).records
@@ -1286,7 +1286,7 @@ class TestShadowContributionBoundary:
             # The pass's ``DerivedPeriod`` for that row (ruling R-SAL19).
             period = calendar_for(seed_user["user"].id).saved()[0]
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [period.period_id],
             ).records
@@ -1320,7 +1320,7 @@ class TestShadowContributionBoundary:
                 )
             db.session.commit()
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [p.id for p in periods],
             ).records
@@ -1363,7 +1363,7 @@ class TestShadowContributionBoundary:
             period = calendar_for(seed_user["user"].id).saved()[0]
             assert period.period_id == seed_periods[0].id
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [period.period_id],
             ).records
@@ -1408,7 +1408,7 @@ class TestShadowContributionBoundary:
             )
             db.session.commit()
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [seed_periods[0].id, seed_periods[1].id],
             ).records
@@ -1445,7 +1445,7 @@ class TestShadowContributionBoundary:
             )
             db.session.commit()
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [seed_periods[0].id],
             ).records
@@ -1475,7 +1475,7 @@ class TestShadowContributionBoundary:
             )
             db.session.commit()
 
-            loaded = load_shadow_income_contributions_for_account(
+            loaded = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [seed_periods[0].id],
             )

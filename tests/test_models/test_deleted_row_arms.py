@@ -177,6 +177,7 @@ class TestTheStatementIsTotalRatherThanAdditive:
         )
         assert detach < drop
 
+    @pytest.mark.usefixtures("below_the_transfer_column_drop")
     def test_withdrawing_and_restoring_the_transfer_arm_against_the_database(
         self, app, db,
     ):
@@ -184,6 +185,9 @@ class TestTheStatementIsTotalRatherThanAdditive:
         transfer function, and every arm restores all three.
 
         Ends at every arm, which is the state the suite's template carries.
+        Run below ``c956c1d83108`` (the fixture): the row-only text names
+        ``budget.transactions.transfer_id``, which exists only there (the
+        module's caller contract, :mod:`app.deleted_row_infrastructure`).
         """
         del app
 

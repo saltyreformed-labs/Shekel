@@ -144,11 +144,18 @@ such an arm (every one of the 175 transfers still owns its amount; plan step
 fixtures in ``tests/test_services/test_amount_source.py`` and by nothing here.
 
 **WHICH ROWS MUST MOVE IS READ OFF THE DECLARATION AND STORED COLUMNS.**  The
-expectation is built in pass 1 from ``amount_source_id``, the parent transfer's
-own ``amount_source_id``, the loan payment MODE
-(``recurring_transfer_query.loan_payment_config``), ``template_id``,
-``transfer_id`` and the version dates -- no amount, and no call into the
-resolver.
+expectation is built in pass 1 from ``amount_source_id``, ``template_id`` and
+the version dates -- no amount, and no call into the resolver.  It read the
+parent transfer's own ``amount_source_id``, the loan payment MODE and
+``transfer_id`` too, for the shadows, until plan step balance:X-bi-6-5.
+
+**NO TRANSACTION ROW READS A TRANSFER SINCE PLAN STEP balance:X-bi-6-5**
+(2026-10-27).  Plan step X-bi-6-4d-2 deleted the shadows and that step amount
+rule 5 and ``transactions.transfer_id``, so ``transfer_series`` and
+``parent_figure`` declare no movers and grade every row in the holding
+direction, and the record lost its parent fields.  The measurement and the
+mutation table below are of the tree before; their rule-5 rows describe a rule
+that no longer exists.
 
 **IT DOES SHARE THE CLASSIFIER WITH THE RESOLVER, AND THAT IS A BLIND SPOT
 rather than a clean separation.**  A first draft claimed the two sides "do not
@@ -186,8 +193,9 @@ together.  Traced, the four misclassifications split three to one:
 * the LOAN_PAYMENT rule prices **0 rows** here, so it is graded by
   ``test_amount_source`` and by nothing in this file;
 * ``budget.transfers.amount`` -- the second column ruling R-FI's CHECK covers --
-  is reached only THROUGH a shadow.  A transfer carrying no shadows (Transfer
-  Invariant 2 broken) is never priced or graded here at all.
+  is never priced or graded here at all: this harness walks transaction rows,
+  and it reached a transfer only THROUGH its shadows, which plan step
+  balance:X-bi-6-4d-2 deleted.
 
 **Measured 2026-09-09** on a clone of production at ``a1c7e5d20f43``: 1,028
 rows and 0 refusals.  The rule census was 525
@@ -294,7 +302,6 @@ from app.services.cash_ledger import (
     resolve_transaction_amount,
 )
 from app.services.amount_ownership import state_own_amount
-from app.services.recurring_transfer_query import loan_payment_config
 from tests._test_helpers import write_past_the_amount_seam
 
 # The unit every money perturbation is built from.  It is SCALED by the source
@@ -322,15 +329,6 @@ _CONTROL_RAISE = Decimal("10000.00")
 # what a refusal answers with, and a value that could compare EQUAL to a Decimal
 # would be scored as a magnitude.  This one is recognised only by identity.
 _RISES = object()
-
-# How a parent transfer is priced, as the two strings the expectation is keyed
-# on.  A transfer either owns its figure or is priced by its definition's
-# series: :func:`app.services.cash_ledger.resolve_transfer_amount` REFUSES any
-# other declared relation, so such a row is a pass-1 refusal and never reaches
-# the scorer.
-_PARENT_OWN = "own"
-_PARENT_TEMPLATE = "template"
-
 
 def _money(value):
     """JSON-stable string for a Decimal (or None)."""
@@ -415,77 +413,6 @@ def _resolves_to_newest_version(txn):
     return len(versions) == 1
 
 
-def _parent_pricing(txn):
-    """Return how *txn*'s PARENT transfer is priced, or ``None`` for no parent.
-
-    One of :data:`_PARENT_OWN` / :data:`_PARENT_TEMPLATE`, read off the parent's
-    ``amount_source_id`` -- a STORED fact, so the expectation this feeds shares
-    no producer with the resolver it grades.
-
-    A parent declaring any relation other than its definition is refused by
-    :func:`app.services.cash_ledger.resolve_transfer_amount`, so such a row
-    fails pass 1 and the scorer never asks this about it; mapping every declared
-    parent to :data:`_PARENT_TEMPLATE` is therefore total over the rows that
-    reach a perturbation.
-
-    Args:
-        txn: The Transaction to classify.
-
-    Returns:
-        The parent's pricing, or ``None`` when the row has no parent transfer.
-    """
-    xfer = txn.transfer
-    if xfer is None:
-        return None
-    return _PARENT_OWN if xfer.amount_source_id is None else _PARENT_TEMPLATE
-
-
-def _loan_derives(txn, rule):
-    """Return whether a LOAN_PAYMENT row's cash is DERIVED from the loan.
-
-    ``True`` for derive mode -- the loan's own resolution prices the shadow, so
-    no perturbation below reaches it -- and ``False`` for manual mode, where the
-    answer is the parent's figure plus the standing extra and a nudge to the
-    parent arrives in full.  ``None`` for every other rule.
-
-    Args:
-        txn: The Transaction to classify.
-        rule: The :class:`~app.services.cash_ledger.AmountRule` pricing it.
-
-    Returns:
-        ``True``, ``False``, or ``None`` when the row is not a loan payment.
-    """
-    if rule is not AmountRule.LOAN_PAYMENT:
-        return None
-    derive, _extra = loan_payment_config(txn.transfer.template)
-    return derive
-
-
-def _prices_from_parent(rec, pricing) -> bool:
-    """Whether *rec*'s amount is its parent transfer's figure, priced *pricing*.
-
-    True for a plain transfer shadow, and for a MANUAL-mode loan payment --
-    whose answer is ``resolve_transfer_amount(parent) + extra``, so it follows
-    the parent by exactly a nudge to it.  A DERIVE-mode payment is priced by the
-    loan and follows nothing here.
-
-    Args:
-        rec: The row's pass-1 record.
-        pricing: :data:`_PARENT_OWN` or :data:`_PARENT_TEMPLATE`.
-
-    Returns:
-        ``True`` when a perturbation of that parent kind must move this row.
-    """
-    if rec["parent_pricing"] != pricing:
-        return False
-    if rec["rule"] == AmountRule.TRANSFER.value:
-        return True
-    return (
-        rec["rule"] == AmountRule.LOAN_PAYMENT.value
-        and rec["loan_derives"] is False
-    )
-
-
 # ── The seven perturbations ─────────────────────────────────────────
 #
 # Each APPLIES a change to one kind of source and STATES what every row's
@@ -511,7 +438,8 @@ def _prices_from_parent(rec, pricing) -> bool:
 # money-moving class this arc exists to prevent.  The scale is now the SOURCE
 # ROW's own id, so two instances can never move a row by the same amount, and
 # the expected magnitude is read off a stored column already in the pass-1
-# record (``template_id``, ``transfer_id``, ``parent_template_id``).
+# record (``template_id``; ``transfer_id`` and ``parent_template_id`` until
+# plan step balance:X-bi-6-5, when no transaction row read a transfer any more).
 #
 # Nothing here flushes.  ``main`` wraps each apply and re-resolution in
 # ``no_autoflush`` (the series and parent lookups issue SELECTs, and an
@@ -729,9 +657,8 @@ def _apply_parent_figure(_records):
         .all()
     ):
         # A transfer that owns its amount and carries none is
-        # ``ck_transfers_amount_ownership`` broken: its shadows already REFUSE
-        # in pass 1 (``resolve_transfer_amount`` -> ``_own_figure``), so there
-        # is nothing here to move and nothing that would be graded.
+        # ``ck_transfers_amount_ownership`` broken: there is nothing here to
+        # move (``resolve_transfer_amount`` -> ``_own_figure`` refuses it).
         if xfer.amount is None:
             continue
         state_own_amount(xfer, xfer.amount + _NUDGE * xfer.id)
@@ -918,17 +845,21 @@ def _expect_newest_transaction_version(rec, before):
     return before
 
 
-def _expect_transfer_series(rec, before):
-    """The answer every row must give once transfer series move."""
-    if _prices_from_parent(rec, _PARENT_TEMPLATE):
-        return before + _NUDGE * rec["parent_template_id"]
+def _expect_transfer_series(_rec, before):
+    """The answer every row must give once transfer series move: its own.
+
+    No transaction row reads a transfer since plan step balance:X-bi-6-5
+    deleted amount rule 5 (its shadows went at X-bi-6-4d-2), so every row
+    holds and the arm is a negative control in the holding direction alone.
+    """
     return before
 
 
-def _expect_parent_figure(rec, before):
-    """The answer every row must give once owned transfer figures move."""
-    if _prices_from_parent(rec, _PARENT_OWN):
-        return before + _NUDGE * rec["transfer_id"]
+def _expect_parent_figure(_rec, before):
+    """The answer every row must give once owned transfer figures move: its own.
+
+    For the reason :func:`_expect_transfer_series` gives.
+    """
     return before
 
 
@@ -1076,8 +1007,7 @@ def _resolve_everything():
 def _baseline_records():
     """Grade every row's pass-1 answer and record what pass 2 will expect of it.
 
-    The expectation fields -- ``rule``, ``parent_pricing``, ``loan_derives``,
-    ``template_id``, ``transfer_id``, ``parent_template_id`` and
+    The expectation fields -- ``rule``, ``template_id`` and
     ``prices_from_a_superseded_version`` -- are STORED facts read here while the
     ORM rows are live, so the scorer needs no session and pass 2's expected
     MAGNITUDES come from columns rather than from the producer under test.
@@ -1105,11 +1035,6 @@ def _baseline_records():
                 "is_override": txn.is_override,
                 "is_deleted": txn.is_deleted,
                 "template_id": txn.template_id,
-                "transfer_id": txn.transfer_id,
-                "parent_template_id": (
-                    None if txn.transfer is None
-                    else txn.transfer.transfer_template_id
-                ),
                 "credit_payback_for_id": txn.credit_payback_for_id,
                 "due_date": (
                     None if txn.due_date is None else txn.due_date.isoformat()
@@ -1119,8 +1044,6 @@ def _baseline_records():
                     else txn.pay_period.start_date.isoformat()
                 ),
                 "rule": rule.value,
-                "parent_pricing": _parent_pricing(txn),
-                "loan_derives": _loan_derives(txn, rule),
                 "prices_from_a_superseded_version": _superseded(txn),
                 "resolves_to_newest_version": _resolves_to_newest_version(txn),
                 "resolved": _money(resolved),
@@ -1340,33 +1263,26 @@ def _assert_every_row_is_reachable(records, reached):
     **The structural half of "this arm grades nothing".**  Naming an empty arm
     is only honest while the rows it does not reach are reached by another; a
     row no perturbation declares is a row pass 2 grades in the holding
-    direction alone, which is the shape N-445 was.  The one legitimate
-    exception is a DERIVE-mode loan payment: its source is the loan's own
-    terms, which no perturbation here moves.  Stated as an equality of SETS
-    rather than as an allowlist, so it cannot go stale -- when plan step
-    X-au-f gives ``transfer_series`` a population, nothing here needs editing.
+    direction alone, which is the shape N-445 was.  There is no exception: a
+    DERIVE-mode loan payment was one, its source the loan's own terms, while
+    a loan payment's shadow took rule 4 -- which ended at plan step X-au-f-2
+    (ruling R-BAL10), and the shadows themselves at X-bi-6-4d-2.
 
     Args:
         records: Every pass-1 record.
         reached: The union of every perturbation's declared-mover ids.
 
     Raises:
-        AssertionError: When the unreached set is not exactly the derive-mode
-            loan payments.
+        AssertionError: When any scored row is unreached.
     """
     scored = {rec["id"] for rec in records if rec["refusal"] is None}
-    by_the_loan = {
-        rec["id"] for rec in records
-        if rec["refusal"] is None and rec["loan_derives"] is True
-    }
     unreachable = scored - reached
-    if unreachable != by_the_loan:
+    if unreachable:
         raise AssertionError(
             "pass 2 declares no perturbation able to move "
-            f"{len(unreachable)} rows, and only the {len(by_the_loan)} "
-            "DERIVE-mode loan payments may be in that set -- the rest are "
-            "graded in the holding direction alone, which is the state finding "
-            f"N-445 named: {sorted(unreachable - by_the_loan)[:10]}"
+            f"{len(unreachable)} rows, which are graded in the holding "
+            "direction alone -- the state finding N-445 named: "
+            f"{sorted(unreachable)[:10]}"
         )
 
 

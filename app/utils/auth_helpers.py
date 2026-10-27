@@ -375,37 +375,6 @@ def get_owned_via_parent(model, pk, parent_attr,
     return record
 
 
-def is_transfer_shadow(txn) -> bool:
-    """Return whether *txn* is a transfer shadow row, logging the refusal.
-
-    The interval fence (leaf ``balance:X-bi-6-1``): a shadow names its
-    transfer, and a transaction door refuses it as "not found".  One of the
-    two rows :func:`is_not_found_to_transaction_doors` refuses.  Logged at
-    INFO under the not-found event -- the request named a row this door does
-    not serve, which is what a missing primary key is to the caller.
-
-    Args:
-        txn: A loaded :class:`Transaction`.
-
-    Returns:
-        ``True`` for a shadow (``transfer_id`` set).
-    """
-    if txn.transfer_id is None:
-        return False
-    log_event(
-        logger, logging.INFO,
-        EVT_RESOURCE_NOT_FOUND, ACCESS,
-        "Transaction door asked about a transfer shadow row; a transfer's "
-        "legs are served by the transfer routes",
-        user_id=_safe_user_id(),
-        model=Transaction.__name__,
-        pk=txn.id,
-        transfer_id=txn.transfer_id,
-        path=request.path,
-    )
-    return True
-
-
 def is_not_found_to_transaction_doors(txn) -> bool:
     """Return whether a transaction door answers *txn* as "not found", logging why.
 
@@ -413,29 +382,27 @@ def is_not_found_to_transaction_doors(txn) -> bool:
     :func:`get_accessible_transaction` and
     ``routes/transactions/_helpers._get_owned_transaction``: each asks it once,
     after its own access check, so the two cannot drift on which rows they
-    serve.  Two rows are refused:
+    serve.  It refuses **a deleted row** (plan step ``credit_card:CC-5-4a-4``,
+    ruling **R-CC89**, developer 2026-09-23: *"Every page and button treats a
+    deleted row as not found: the stale tab's save and the stale Mark Credit
+    get 'not found', exactly as for another user's row."*).  Measured by the
+    step's third review: a stale second tab's popover on a deleted Paid
+    $120.00 Hotel saved an Actual of $125.00 into a payment record under the
+    hidden row, and a stale Mark Credit on a deleted $80.00 occurrence turned
+    it Credit and created a live $80.00 card payback the owner could never
+    trace.  No route serves a deleted row on purpose: a deleted row leaves
+    the grid, and the un-archive that brings one back is a template door.
+    What the page is TOLD at three doors is ruling **R-CC104**'s amendment
+    (developer 2026-09-23): Mark Paid, the popover's Save and add purchase
+    name the row -- "Hotel was deleted: ..." -- through
+    :func:`get_accessible_transaction_or_deleted`, and say "was archived"
+    where its recurring item is (ruling **R-CC107**); every other door still
+    answers "not found".  It is a column read.
 
-    * **a transfer shadow** (:func:`is_transfer_shadow`, ruling **R-BAL87**);
-    * **a deleted row** (plan step ``credit_card:CC-5-4a-4``, ruling
-      **R-CC89**, developer 2026-09-23: *"Every page and button treats a
-      deleted row as not found: the stale tab's save and the stale Mark Credit
-      get 'not found', exactly as for another user's row."*).  Measured by the
-      step's third review: a stale second tab's popover on a deleted Paid
-      $120.00 Hotel saved an Actual of $125.00 into a payment record under the
-      hidden row, and a stale Mark Credit on a deleted $80.00 occurrence turned
-      it Credit and created a live $80.00 card payback the owner could never
-      trace.  No route serves a deleted row on purpose: a deleted row leaves
-      the grid, and the un-archive that brings one back is a template door.
-      What the page is TOLD at three doors is ruling **R-CC104**'s amendment
-      (developer 2026-09-23): Mark Paid, the popover's Save and add purchase
-      name the row -- "Hotel was deleted: ..." -- through
-      :func:`get_accessible_transaction_or_deleted`, and say "was archived"
-      where its recurring item is (ruling **R-CC107**); every other door still
-      answers "not found".
-
-    Ordered shadow-then-deleted, so a deleted shadow logs as the fence it met
-    first -- and is never named for it (review 6, L2).  Both are column
-    reads.
+    It refused a second row until plan step ``balance:X-bi-6-5``: a transfer's
+    SHADOW (leaf ``balance:X-bi-6-1``, ruling **R-BAL87**), the interval's
+    fence while a transfer had twin rows, which went with the ``transfer_id``
+    column that named one.
 
     Args:
         txn: A loaded :class:`Transaction` the requester may otherwise access.
@@ -443,8 +410,6 @@ def is_not_found_to_transaction_doors(txn) -> bool:
     Returns:
         ``True`` when the door must answer 404.
     """
-    if is_transfer_shadow(txn):
-        return True
     if not txn.is_deleted:
         return False
     log_event(
@@ -485,19 +450,14 @@ def get_accessible_transaction(txn_id):
     "not found" and "not accessible" so the caller returns 404 in either
     case.
 
-    **A transfer SHADOW row is "not found" here** (leaf ``balance:X-bi-6-1``,
-    ruling **R-BAL87**): the grid draws a transfer as a LEG read off its
-    parent and the leg's doors are the transfer's own, so no surface asks a
-    transaction door about a shadow any more, and a request that names one
-    -- a stale page, a bookmark, a probe -- is refused rather than admitted
-    to a door that would write past the transfer's invariants.  This is the
-    interval's fence: ``X-bi-6``'s last leaf deletes the shadow rows, after
-    which the predicate has nothing to match and goes with them.  **So is a
-    DELETED row** (ruling **R-CC89**): a deleted row takes no money, and a
-    stale page naming one is refused rather than admitted to a door that
-    would write a payment or a card payback under a row no screen shows.
-    Both rules are :func:`is_not_found_to_transaction_doors`, the one
-    predicate this door and ``_get_owned_transaction`` share.
+    **A DELETED row is "not found" here** (ruling **R-CC89**): a deleted row
+    takes no money, and a stale page naming one is refused rather than
+    admitted to a door that would write a payment or a card payback under a
+    row no screen shows.  The rule is :func:`is_not_found_to_transaction_doors`,
+    the one predicate this door and ``_get_owned_transaction`` share.  (A
+    transfer's SHADOW row was "not found" too, leaf ``balance:X-bi-6-1``'s
+    interval fence, until plan step ``balance:X-bi-6-5`` dropped the
+    ``transfer_id`` column that named one.)
 
     Mirrors :func:`get_or_404`'s F-144 logging contract (deep-hunt #85):
     a missing PK emits ``resource_not_found`` at INFO; an ownership or
@@ -540,9 +500,8 @@ def get_accessible_transaction_or_deleted(txn_id):
     recurring item is archived, and no row, so a door holding one has no row
     to write money under.
     Every other refusal stays ``None``: a missing id, another user's row, a
-    companion's hidden row, a transfer shadow, live or deleted -- the shadow
-    fence is the one it met first (review 6, L2) -- and a one-off row whose
-    delete removed it from the table, which is a missing id by then.  That
+    companion's hidden row, and a one-off row whose delete removed it from
+    the table, which is a missing id by then.  That
     is what keeps the uniform 404 uniform: only a row the requester may
     already reach is ever named, and the rest share
     :data:`app.utils.error_fragments.ROW_NO_LONGER_EXISTS_MSG`.
@@ -553,7 +512,7 @@ def get_accessible_transaction_or_deleted(txn_id):
     Returns:
         The :class:`Transaction` when found, accessible and served; a
         :class:`~app.utils.hidden_row.HiddenRow` when found and accessible
-        but deleted, and not a transfer shadow; else ``None``.
+        but deleted; else ``None``.
     """
     txn = db.session.get(Transaction, txn_id)
     if txn is None:
@@ -607,17 +566,13 @@ def get_accessible_transaction_or_deleted(txn_id):
             )
             return None
     # AFTER both access branches, deliberately: a stranger's or a companion's
-    # probe naming another owner's shadow or deleted row is an access denial
-    # first (WARNING, the F-144 contract above) and "not found" second, exactly
-    # as ``routes/transactions/_helpers._get_owned_transaction`` orders it --
+    # probe naming another owner's deleted row is an access denial first
+    # (WARNING, the F-144 contract above) and "not found" second, exactly as
+    # ``routes/transactions/_helpers._get_owned_transaction`` orders it --
     # which is also why a HiddenRow is only ever handed to a requester who
-    # may reach the row.  A shadow is refused as a shadow, deleted or not: it
-    # met that fence first, and "a payment cannot be recorded under it" is
-    # the wrong door's sentence for a transfer's leg.
+    # may reach the row.
     if is_not_found_to_transaction_doors(txn):
-        if txn.transfer_id is None and txn.is_deleted:
-            return HiddenRow.of(txn)
-        return None
+        return HiddenRow.of(txn)
     return txn
 
 

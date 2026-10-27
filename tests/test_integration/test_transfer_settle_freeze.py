@@ -1061,12 +1061,13 @@ class TestOneBrokenPairCannotStopTheDeployResync:
     would have posted a figure and carried on.
 
     **That drift has no row to live on since plan step balance:X-bi-6-4d-2**: a
-    transfer is one row and ``ck_transactions_names_no_transfer`` refuses a
-    twin (ruling **R-BAL258**).  The batch's blast radius is still the subject,
-    so the case below breaks a transfer the way one still CAN be broken -- its
-    to-side's record carried onto an account whose ledger pairing is gone,
-    ``test_posting_service.py``'s recipe -- beside a healthy transfer the
-    resync genuinely has to re-post.
+    transfer is one row, and no transaction can name it:
+    ``ck_transactions_names_no_transfer`` refused a twin (ruling **R-BAL258**)
+    until plan step balance:X-bi-6-5 dropped the column.  The batch's blast
+    radius is still the subject, so the case below breaks a transfer the way
+    one still CAN be broken -- its to-side's record carried onto an account
+    whose ledger pairing is gone, ``test_posting_service.py``'s recipe --
+    beside a healthy transfer the resync genuinely has to re-post.
     """
 
     @staticmethod

@@ -219,8 +219,9 @@ class TestThePeriodLock:
         a drift to tell them apart; from that step a settle left the twins
         Projected under the Paid transfer, until the next deleted them.  The
         plant's count also left the shadows out
-        (``transfer_id IS NULL``), a term no row can fail since
-        (``ck_transactions_names_no_transfer``), dropped at that step's
+        (``transfer_id IS NULL``), a term no row could fail since
+        (``ck_transactions_names_no_transfer``, until plan step
+        balance:X-bi-6-5 dropped the column), dropped at that step's
         vacuous-residue checkpoint: the count was 0 with it and without it
         (measured).
         """
@@ -313,7 +314,7 @@ class TestTheParentDecidesADrift:
             )
 
             assert locks[period.id] is PeriodLockReason.SETTLED_TXN
-            assert pay_period_gates.settled_transaction_count(user_id) == 1
+            assert pay_period_gates.settled_item_count(user_id) == 1
 
 
 class TestTheResetCounts:
@@ -347,7 +348,7 @@ class TestTheResetCounts:
             _paid_500(seed_user, seed_periods_today)
             user_id = seed_user["user"].id
 
-            assert pay_period_gates.settled_transaction_count(user_id) == 2
+            assert pay_period_gates.settled_item_count(user_id) == 2
             refusal = self._refusal(seed_user, seed_periods_today)
             assert (refusal.settled_count, refusal.holding_count) == (2, 0)
             assert str(refusal).startswith(
@@ -365,8 +366,8 @@ class TestTheResetCounts:
             _reverted_500(seed_user, seed_periods_today)
             user_id = seed_user["user"].id
 
-            assert pay_period_gates.settled_transaction_count(user_id) == 0
-            assert pay_period_gates.movement_holding_row_count(user_id) == 1
+            assert pay_period_gates.settled_item_count(user_id) == 0
+            assert pay_period_gates.movement_holding_item_count(user_id) == 1
             refusal = self._refusal(seed_user, seed_periods_today)
             assert (refusal.settled_count, refusal.holding_count) == (0, 1)
             assert str(refusal).startswith(

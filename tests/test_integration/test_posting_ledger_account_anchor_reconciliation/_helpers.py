@@ -254,7 +254,6 @@ def _independent_post_assertion_source_effect(
         .filter(
             Transaction.account_id == account_id,
             Transaction.scenario_id == scenario_id,
-            Transaction.transfer_id.is_(None),
             Transaction.is_deleted.is_(False),
             Transaction.status_id.in_(settled_status_ids()),
         )

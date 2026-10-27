@@ -722,12 +722,10 @@ def _movements_of(account_id: int, scenario_id: int, *narrowing):
       :func:`~app.utils.balance_predicates.balance_contributing_clause`, so a
       soft-deleted or Credit / Cancelled parent's movements are worth nothing
       here, as they post nothing (``_posting_purchases.purchase_posts``).
-    * the parent is a PLAN ROW, not a transfer's shadow (leaf ``X-bi-6-4a``):
-      a leg's movement is read with its transfer by :func:`settled_cash_facts`'
-      other arm.  A shadow took no purchase (``tracks_purchases`` was
-      ``False``), so the in-flight tier lost nothing; the clause excludes
-      nothing since ``X-bi-6-4d`` deleted the shadows, and goes with the
-      ``transfer_id`` column at ``X-bi-6-5``.
+    * the parent is a PLAN ROW, by the join on ``transaction_id``: a
+      transfer side's movement names no row (plan step
+      ``balance:X-bi-6-4d-2``, ruling **R-BAL88**) and is read with its
+      transfer by :func:`settled_cash_facts`' other arm.
 
     Deliberately NOT narrowed by the parent's STATUS: a dated purchase
     against a still-Projected envelope has left the bank exactly as one
@@ -760,7 +758,6 @@ def _movements_of(account_id: int, scenario_id: int, *narrowing):
             TransactionEntry.account_id == account_id,
             Transaction.scenario_id == scenario_id,
             balance_contributing_clause(),
-            Transaction.transfer_id.is_(None),
             TransactionEntry.is_credit.is_(False),
             *narrowing,
         )

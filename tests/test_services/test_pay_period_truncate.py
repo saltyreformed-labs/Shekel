@@ -245,8 +245,10 @@ class TestTruncateHappyPath:
 
         Until plan step ``balance:X-bi-6-4d-2`` the case also read that
         neither of the transfer's two shadow rows survived in the deleted
-        period.  A transfer is one row since (``ck_transactions_names_no_transfer``),
-        so that count found no row to count.  Renamed from
+        period.  A transfer is one row since, and no row could name one
+        (``ck_transactions_names_no_transfer``, until plan step
+        balance:X-bi-6-5 dropped the column), so that count found no row to
+        count.  Renamed from
         ``test_cascade_removes_transfers_and_both_shadows``.
         """
         with app.app_context():

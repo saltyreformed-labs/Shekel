@@ -88,9 +88,10 @@ def is_transfer_leg(parent) -> bool:
     parent :func:`app.services.transfer_legs.movement_parent` resolved, a
     plan row or a :class:`~app.services.transfer_legs.TransferLeg`, so no
     door of this writer reaches a movement's parent through
-    ``transaction.transfer_id``.  One reader of the column remains beside it:
-    the deploy resync's row selector keeps shadow rows out of its ROW arm
-    (the fold's ``_movements_of`` twin) until ``X-bi-6-5`` drops the column.
+    ``transaction.transfer_id``.  One reader of the column remained beside
+    it: the deploy resync's row selector kept shadow rows out of its ROW arm
+    (the fold's ``_movements_of`` twin) until plan step ``X-bi-6-5`` deleted
+    that exclusion and then the column.
     The loan ledger's stale-movement probe (``loan_posting_service._sync``)
     was a second until leaf ``X-bi-6-4b``, which gave it
     :func:`~app.services.transfer_legs.movement_parent`, and spelled that

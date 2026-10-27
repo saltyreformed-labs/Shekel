@@ -60,14 +60,17 @@ class TestRestoreTransfer:
     ``test_corrects_drifted_shadow_category``,
     ``test_corrects_drifted_shadow_is_override`` and
     ``test_a_shadow_amount_CANNOT_drift_from_its_transfer`` (its amount).
-    No side row can be stored since that step's create door
-    (``ck_transactions_names_no_transfer``, ruling R-BAL258), so there is
-    nothing to plant; the refusal is ``test_a_transfer_is_one_row/test_the_upgrade.py``'s
-    ``test_the_database_refuses_a_twin`` (the expense side) and
-    ``test_a_transfer_shadow_is_derived/test_the_declaration.py``'s
-    ``test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored``
-    (both sides) until plan step ``balance:X-bi-6-5`` deletes the column
-    it guards.  The eighth,
+    No side row could be stored from that step's create door
+    (``ck_transactions_names_no_transfer``, ruling R-BAL258), and no row can
+    name a transfer since plan step ``balance:X-bi-6-5`` dropped the column,
+    so there is nothing to plant.  The refusal was pinned by
+    ``test_a_transfer_is_one_row/test_the_upgrade.py``'s
+    ``test_the_database_refuses_a_twin`` (the expense side; it runs below the
+    drop) and by a twin case in
+    ``test_a_transfer_shadow_is_derived/test_the_declaration.py`` (both
+    sides) until plan step ``balance:X-bi-6-5`` dropped the column it
+    guarded, which took that case's twin refusal with it (ruling
+    plan#1850).  The eighth,
     ``test_raises_on_missing_shadows``, asked the restore to refuse a
     transfer with no side rows, which every transfer is now (ruling
     R-BAL273, "Delete it").

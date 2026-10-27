@@ -14,6 +14,7 @@ from pathlib import Path
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
 from tools.quill._command import Refused, _label, _one, _outside_parent, card_number
+from tools.quill._comments import byline
 from tools.quill._state import OWNED, done_tasks, filing_unfinished, holder, never_split, owner
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import alias_mark
@@ -179,7 +180,7 @@ def cmd_show(args, tracker: Tracker, root: Path) -> int:
     if not comments:
         print("no comments")
     for comment in comments:
-        print(f"== comment, {comment.created_at} by {comment.author or '?'}")
+        print(f"== comment, {byline(comment)}")
         print(comment.body.rstrip())
     print()
     history = _git.history(root, number)

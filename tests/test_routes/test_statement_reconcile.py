@@ -1090,14 +1090,14 @@ def _uncategorized_rows(db, seed_user):
         seed_user: The seeded user bundle.
 
     Returns:
-        The uncategorised, non-transfer transactions on the seeded account.
+        The uncategorised transactions on the seeded account (no
+        transaction is a transfer's: a transfer is one row of its own).
     """
     return (
         db.session.query(Transaction)
         .filter(
             Transaction.account_id == seed_user["account"].id,
             Transaction.category_id.is_(None),
-            Transaction.transfer_id.is_(None),
         )
         .all()
     )

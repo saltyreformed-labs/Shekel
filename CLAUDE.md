@@ -274,7 +274,6 @@ A task is NOT complete until ALL of these are true:
 8. A neutral adversarial review of the design and diff ran, and its findings are fixed or reported
    (see Design doctrine).
 9. Commit message format: `<type>(<scope>): <what changed>`
-10. Developer asked if they want to commit and push.
 
 ## Standards
 

@@ -16,7 +16,7 @@ tooling and `A-` for runtime; every `file:line` is as committed at `1e1c7003a`, 
 was measured there. Of 240 fences, 83 were classed KEEP, 60 are deleted by existing open steps, 59
 needed the steps the census minted, 18 re-ask a constraint PostgreSQL enforces, 10 are obsolete or
 duplicate, 7 are kept by rulings and 3 are replaced rather than deleted. The census's working tables
-are the coordinator's and are not in the repository; this file is the record.
+were kept outside the repository, with that day's session records; this file is the record.
 
 ## The KEEP list (83)
 
@@ -58,7 +58,7 @@ for a fence, the kind is this record's reading.
 | T-04 | `tools/pylint/shekel_checkers/disable_rationale.py:54` (W9903) | a `pylint: disable` with no written reason | a process rule; no app state stands behind it |
 | T-18 | `scripts/hooks/post-edit-deps.sh` | a `requirements*.txt` edit nobody approved (it asks) | a developer-approval rule |
 | T-21 | `scripts/hooks/session-start.sh` | nothing; it prints the session's context | process |
-| T-22 | `scripts/hooks/guard-pr-actions.sh` | a pull request opened or merged outside the coordinator (it asks) | an advisory process control |
+| T-22 | `scripts/hooks/guard-pr-actions.sh` | a pull request opened or merged outside the coordinator (it asks) | an advisory process control; deleted by plan#1819 on the developer's word (plan#1828, asked under `balance:R-BAL268`), each session queueing its own pull request into `dev` |
 | T-56 | `tools/ci/commit_trailers.py`, `tools/ci/trailers.py` | a malformed `Ships:` trailer, a revert git would answer wrongly | git is the truth of what shipped (`balance:R-BAL170`); deleted by the tracker switch (`balance:X-cx`, L8; `balance:R-BAL389`), the done file `plan/ships/N` replacing the trailer (`balance:R-BAL359`) |
 | T-97 | `tests/test_models/test_books_boundary_arms.py:387`, `:499` | a revision that rewrites frozen function bodies | an applied migration is immutable history |
 | T-213 | `tests/test_models/test_posting_ref_seed_parity.py:388` | an enum member no migration seeds | migrations are frozen history; `X-dl` may retire its migration leg |

@@ -29,8 +29,11 @@ them now if this session has not. Then hold the work to this brief:
    saved (R-BAL174), so the review also reads every edit since the work started:
    `python -m tools.quill.quill spec-history plan#N --since card/N` is handed to the reviewer, and a
    spec change the code does not answer is a finding.
-6. **Coordinate.** When peer sessions are active: PRs and merges go through the coordinator
-   session; pushing a branch to back up work is fine. Suite runs need no slot -- each gets its own
-   cluster -- but the wrapper names any peer run it can see, and a gating run of yours slows theirs.
+6. **Land your own work.** The card's pull request is yours to open into `dev` and queue once its
+   review is done and the full suite is green; the queue tests it on top of `dev`, and a classifier
+   refusal of the enqueue is a question, never a detour (CLAUDE.md, Multi-session operation).
+   Pushing a branch to back up work is fine. Suite runs need no slot --
+   each gets its own cluster -- but the wrapper names any peer run it can see, and a gating run of
+   yours slows theirs.
 7. **Ask.** An unanswered design question is a STOP, not a fork to take unilaterally. Ask questions
    if anything is unclear.

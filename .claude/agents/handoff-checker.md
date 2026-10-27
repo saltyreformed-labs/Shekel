@@ -71,7 +71,7 @@ Each reads PASS, or what differs, quoting the line of s.0 and the output that sh
 9. **Each finished task's file.** For each task s.0 says this session finished (`plan#T`), `git -C
    <worktree> ls-tree <the sha check 2's ls-remote printed> -- plan/tasks/<T>` prints one entry, a
    `blob`: a task closes only once the pushed branch, or dev after landing, holds its file
-   (R-BAL386). When HEAD is not pushed (s.0 says why, as an open pull request requires), s.0 names
+   (R-BAL386). When HEAD is not pushed (s.0 says why), s.0 names
    each such task as open until the branch is pushed or its pull request lands.
 10. **Nothing for Josh in prose.** s.0 asks Josh for nothing: no decision, approval or act at a
    terminal. Quote any line that does; what the lane needs from him is asked by AskUserQuestion

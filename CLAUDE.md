@@ -113,11 +113,21 @@ decision).
 ## Multi-session operation
 
 Several Claude sessions regularly work this repo at once, each in its own worktree
-(`~/projects/shekel-*`), with one session acting as COORDINATOR.
+(`~/projects/shekel-*`). None coordinates the others: each claims its own card and lands its own
+work.
 
-- **PRs and merges are coordinated.** When multiple sessions are active, the coordinator session
-  opens, orders and merges every PR. **Any session may `git push` its own branch to back up work**
-  (developer ruling 2026-09-02); a pushed branch is not a handoff and not a request to merge.
+- **Each session lands its own work in `dev`** (**plan#1828**). It opens its card's pull request
+  into `dev` and puts it in `dev`'s merge queue (Git Workflow); the queue tests it on top of `dev`
+  and lands it or refuses it, so no session waits on another to merge and no hook asks the
+  developer. The auto-mode classifier can still refuse an enqueue ('Merge Without Review'): that
+  refusal is a question to the developer for that one act, its alert first, never routed around.
+  **Any session may `git push` its own branch to back up work** (developer ruling 2026-09-02); a
+  pushed branch is not a handoff and not a request to merge.
+- **A release is a session of its own** (**plan#1829**). `/release` merges a release into `main`
+  once the developer approves it (**R-BAL217**, **R-BAL279**). On his word a fresh session in the
+  release worktree `~/projects/shekel-release`, the one worktree that holds `dev` (**plan#1838**),
+  runs `/release` to the end and stops, so no building lane spends its context on one. The line that
+  starts it is in `/release`'s section 0.
 - **GitHub numbers the cards, so there is no id to reserve.** A step, finding, ruling or question is
   filed as a card (`quill file`, Common Commands) and its number, `plan#N`, is GitHub's.
 - **Suite runs no longer need coordinating, and there is no slot to take.** `./scripts/test.sh`
@@ -148,9 +158,6 @@ root; never silence it with a bare disable.
   into context at session start, a warning when the shared main checkout is pinned to a release
   branch, a pointer to the Multi-session doctrine, and one to `python -m tools.quill.quill next` for
   the next step (it reads no network, so a start never waits on the tracker).
-- **PR-guard hook** (`scripts/hooks/guard-pr-actions.sh`) turns `gh pr create` / `gh pr merge` into
-  a permission prompt outside the coordinator session (which exports `SHEKEL_PR_COORDINATOR=1`);
-  `git push` is never gated. Advisory by design: an ask decision, never a deny.
 - **Stop hook** runs full `pylint app/` -- the only place cross-file `duplicate-code` is caught --
   and hard-blocks once `scripts/hooks/ENFORCE_PYLINT_FLOOR` exists (the 10.00/10 lock-in).
 - **Custom checkers:** `tools/pylint/shekel_checkers/` (+ tests), loaded via `.pylintrc`. Add one
@@ -267,7 +274,6 @@ A task is NOT complete until ALL of these are true:
 8. A neutral adversarial review of the design and diff ran, and its findings are fixed or reported
    (see Design doctrine).
 9. Commit message format: `<type>(<scope>): <what changed>`
-10. Developer asked if they want to commit and push.
 
 ## Standards
 
@@ -348,12 +354,12 @@ each take a change only through a pull request and the merge queue (rulesets `de
 for everyone, and so is `gh pr merge --admin`. A merge is `gh pr merge N --merge`, which puts the PR
 in the queue; the queue lands it only once `lint-and-test` and `polyglot-lint` pass on the exact
 merge commit it lands. CI runs on pull requests, on each queue group and on pushes to `main` -- NOT
-on pushes to `dev`, so `dev` work is validated when you open its PR. To ship `dev` to `main`: open a
-PR `dev` -> `main`, wait for the green check, then queue it. Do NOT
+on pushes to `dev`, so `dev` work is validated when you open its PR. Shipping `dev` to `main` is
+`/release`'s, on the developer's word (Multi-session operation): it opens a PR into `main` from a
+release branch at the cut it judged, waits for the green check, then queues it. Do NOT
 `git checkout main && git merge dev && git push origin main` -- the `main-queue` ruleset rejects it.
 After a PR merges into `main`, resync `dev` so it holds every commit `main` does: a PR `main` ->
-`dev`, queued through `dev`'s queue (`git push origin dev` is rejected). When several sessions are
-active, PR and merge timing is the coordinator session's call -- see Multi-session operation.
+`dev`, queued through `dev`'s queue (`git push origin dev` is rejected).
 
 **Work for card N is on its branch `card/N`**, which `quill claim N` makes from `dev` with the
 card's done file `plan/ships/N` as its first commit: one branch records one card, merging it ships

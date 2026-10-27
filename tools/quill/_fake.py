@@ -192,21 +192,30 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
 
     def edits(self, number):
         """A card's body and its versions (the body as filed when it was never edited).  A
-        number nobody filed is GitHub's NOT_FOUND error, which the strict read raises
-        (:meth:`_github.GitHub.graphql`): the type and message ``recorded/tracker.json``
-        records for a missing issue, at this query's path, without the recorded
-        ``locations``."""
-        if number not in self.cards_by_number:
-            raise GitHubError(200, 'graphql: [{"type": "NOT_FOUND", "path": ["repository", '
-                              f'"issue"], "message": "Could not resolve to an Issue with the '
-                              f'number of {number}."}}]')
+        number nobody filed is GitHub's NOT_FOUND error (:meth:`_refuse_unfiled`)."""
+        self._refuse_unfiled(number)
         versions = self.versions.get(number) or [
             Edit(None, "2026-10-01T00:00:00Z", self.app_login, self.bodies[number])]
         return self.bodies[number], list(versions)
 
     def comments(self, number):
-        """A card's comments, oldest first."""
+        """A card's comments, oldest first.  A number nobody filed is GitHub's NOT_FOUND
+        error (:meth:`_refuse_unfiled`)."""
+        self._refuse_unfiled(number)
         return list(self.notes.get(number, []))
+
+    def _refuse_unfiled(self, number):
+        """GitHub's NOT_FOUND error, which the strict read raises
+        (:meth:`_github.GitHub.graphql`), for a read by number of a card nobody filed, as
+        the read of its versions and the read of its comments each ask for it, at
+        ``repository.issue``: the type and message ``recorded/tracker.json`` records for a
+        missing issue (at the by-number lookup's path), without the recorded ``locations``.
+        Neither read's own answer is recorded; the strict read raises on any error, so what
+        either command does with it holds whatever the path."""
+        if number not in self.cards_by_number:
+            raise GitHubError(200, 'graphql: [{"type": "NOT_FOUND", "path": ["repository", '
+                              f'"issue"], "message": "Could not resolve to an Issue with the '
+                              f'number of {number}."}}]')
 
     def find_titles(self, text):
         """Cards whose title holds ``text``."""

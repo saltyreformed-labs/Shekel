@@ -65,7 +65,9 @@ history. s.0 holds:
    (Josh cannot relaunch a terminal from the web); then `pwd` and `git rev-parse --show-toplevel`
    print item 1's worktree, `git rev-parse --abbrev-ref HEAD` and `git rev-parse HEAD` print its
    branch and sha, and `git status --porcelain` prints only item 2's paths; any difference is a STOP
-   to report. Then the next leaf and the first command it runs.
+   to report. Then it reads Josh's comments on its card and answers each of his still unanswered
+   (`/charter` item 8), after the claim when the next leaf is a card it claims. Then the next leaf
+   and the first command it runs.
 6. What the next session must not do (edit a file a peer's open card changes, say), and the traps
    learned or review findings that recurred.
 

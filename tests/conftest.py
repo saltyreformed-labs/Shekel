@@ -1562,7 +1562,7 @@ def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylin
 
 @pytest.fixture()
 def below_the_transfer_column_drop(db):
-    """The case's database, stepped down through revision ``c956c1d83108``.
+    """The case's database, stepped down through revisions ``1712c506ee99`` and ``c956c1d83108``.
 
     For a migration case of a revision below plan step ``balance:X-bi-6-5``'s
     column drop, requested as ``pytest.mark.usefixtures``;

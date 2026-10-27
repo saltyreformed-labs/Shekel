@@ -300,8 +300,8 @@ class TestATransferIsCoveredOnBothLegs:
         **R-BAL101**), which pinned the interval that step closes.  The cash
         nets move by exactly the figure on each account, each MOVEMENT links
         its own entry (two, against the owner's Transfers-in-transit
-        account), NO entry links the transfer whole, the oracle's per-account
-        identity holds on both, transit nets to zero, and the deploy resync --
+        account), the oracle's per-account identity holds on both, transit
+        nets to zero, and the deploy resync --
         which walks every settled source -- finds nothing to post.  A
         movement posted beside a whole-pair entry would read ``$1,000.00``
         against the oracle's ``$500.00`` on that account.
@@ -320,7 +320,7 @@ class TestATransferIsCoveredOnBothLegs:
                 account.id: posting_service.account_posting_total(account.id, scenario_id)
                 for account in accounts
             }
-            xfer, expense, income = _settled_pair(
+            _xfer, expense, income = _settled_pair(
                 seed_user, seed_periods[0], to_account=savings,
             )
             movement_ids = [_only_movement(leg).id for leg in (expense, income)]
@@ -330,11 +330,7 @@ class TestATransferIsCoveredOnBothLegs:
             }
             assert after[accounts[0].id] - before[accounts[0].id] == Decimal("-500.00")
             assert after[savings.id] - before[savings.id] == Decimal("500.00")
-            # ONE entry per MOVEMENT, and none linked by the transfer whole.
-            pair_entries = (
-                db.session.query(JournalEntry).filter_by(transfer_id=xfer.id).all()
-            )
-            assert pair_entries == []
+            # ONE entry per MOVEMENT.
             assert len(_movement_entries(movement_ids)) == 2
             transit = transit_ledger_account(db.session, seed_user["user"].id)
             assert db.session.query(

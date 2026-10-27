@@ -10,12 +10,15 @@ invokes the migration's idempotent
 :func:`_backfill_settled_transfers` directly -- the same pattern the
 ``ledger_accounts`` / ``loan_anchor_events`` backfill tests use.
 
-Since Commit 5 wires the transfer service to auto-post on settle, each
-settled-transfer test first clears those go-forward postings (raw SQL, via the
+Since Commit 5 wired the transfer service to auto-post on settle, each
+settled-transfer test first cleared those go-forward postings (raw SQL, via the
 shared ``clear_postings_for_transfer`` helper -- the ORM blocks deletes on the
 append-only tables) to reproduce the pre-ledger historical state the backfill
 targets; otherwise the backfill's ``NOT EXISTS`` guard would no-op and the test
-would assert on the auto-posted entry instead of the backfilled one.
+would assert on the auto-posted entry instead of the backfilled one.  The
+helper keyed on ``journal_entries.transfer_id`` and had no caller left when plan
+step ``balance:X-bi-6-5``'s second leaf (card plan#1845) dropped that column,
+so it went with it.
 
 **THE EXECUTABLE HALF OF THIS SUITE WAS DELETED AT PLAN STEP X-f1** (developer
 ruling, 2026-08-03), and what survives is the revision pair and the

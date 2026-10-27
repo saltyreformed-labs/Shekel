@@ -70,34 +70,33 @@ class JournalEntry(UserScopedMixin, CreatedAtMixin, db.Model):
     ``pay_period_id`` the event is attributed to (the join keys the
     reconciliation oracle uses), the civil ``entry_date`` of the confirmed
     event, a ``source_kind_id`` naming the *kind* of source
-    (``ref.posting_sources`` -- ``transfer`` in Step 2, ``transaction`` in
-    Step 3), an optional concrete ``transfer_id`` / ``transaction_id`` /
-    ``transaction_entry_id`` linking back to the source row, and a human
-    ``description``.
+    (``ref.posting_sources``), an optional concrete ``transaction_entry_id``
+    linking back to the source movement, and a human ``description``.
 
     The source references are deliberately layered: ``source_kind_id``
     answers "what kind of event posted this?" (a non-removable ref
-    invariant, RESTRICT) while each concrete nullable FK answers "which
+    invariant, RESTRICT) while the concrete nullable FK answers "which
     concrete source row?" (SET NULL, so the immutable posted fact survives a
-    source delete).  Step 2 added ``transfer_id``; Step 3 added
-    ``transaction_id`` beside it for ordinary (non-transfer) settled
-    transactions; plan step X-f3b adds ``transaction_entry_id`` for a PURCHASE
-    that has cleared the bank (ruling **R-FM**).  ``source_kind_id``
-    disambiguates which is set: a ``transfer`` entry carries ``transfer_id``,
-    a ``transaction`` entry ``transaction_id``, a ``purchase`` or
-    ``transfer_movement`` entry ``transaction_entry_id``, and each carries
-    NULL in the other two; a CORRECTION -- ``loan_opening`` / ``loan_trueup``
+    source delete).  A ``purchase`` or ``transfer_movement`` entry carries
+    ``transaction_entry_id`` (plan step X-f3b, ruling **R-FM**; plan step
+    ``balance:X-bi-6-3``); a CORRECTION -- ``loan_opening`` / ``loan_trueup``
     / ``loan_payment`` / ``account_opening`` / ``account_trueup`` -- carries
-    NULL in all three, because it is a derivation of a walk and keyed by its
+    NULL there, because it is a derivation of a walk and keyed by its
     ``(source kind, pay period, entry date)`` rather than by a row (the loan
     payment split joined that family at plan step ``balance:X-bi-6-3``,
-    ruling **R-BAL102**; it linked the loan-side shadow before).  Later
-    Build-Order steps add one concrete nullable FK per new ROW-LINKED source
-    kind beside these three.  (The one-set-FK-per-entry rule is maintained by the posting
-    builder, not a storage CHECK -- a CHECK would have to grow with every
-    future source kind and reference ref-table IDs it cannot see; the
-    reconciliation oracle is the cross-source correctness gate.  Plan step
-    X-ai-s replaces the convention with an exclusive arc.)
+    ruling **R-BAL102**; it linked the loan-side shadow before).  Which kinds
+    carry the link is the posting builder's, not a storage CHECK's: a CHECK
+    would reference ref-table ids it cannot see.
+
+    **Two older links are gone.**  Step 2's ``transfer_id`` linked the
+    one-entry ``transfer`` source and Step 3's ``transaction_id`` a row's own
+    ``transaction`` leg; neither source has been written since plan steps
+    ``balance:X-bi-6-3`` and ``balance:X-bi-4a``, and plan step
+    ``balance:X-bi-6-5``'s second leaf (card plan#1845, migration
+    ``1712c506ee99``) deleted both columns, both kinds and every entry the
+    deploy resync had reversed under them (ruling **plan#1867**).  Plan step
+    ``balance:X-ai-s`` (an exclusive arc of typed source keys, card plan#1232)
+    is re-measured against this one-link shape before it is built.
 
     Append-only: see the module docstring.  Disposal is the database-level
     CASCADE from a deleted user / scenario / pay period, which runs outside
@@ -113,32 +112,12 @@ class JournalEntry(UserScopedMixin, CreatedAtMixin, db.Model):
             "idx_journal_entries_user_scenario_period",
             "user_id", "scenario_id", "pay_period_id",
         ),
-        # Lifecycle lookups ("what has this transfer posted?").  Partial so
-        # the index covers only entries that carry a concrete transfer link;
-        # entries from later source kinds with a NULL ``transfer_id`` fall
-        # outside it.  The ``postgresql_where`` text matches the migration's
-        # index DDL byte-for-byte so autogenerate produces no spurious diff.
-        db.Index(
-            "idx_journal_entries_transfer",
-            "transfer_id",
-            postgresql_where=db.text("transfer_id IS NOT NULL"),
-        ),
-        # The transaction analog (Step 3): lifecycle lookups ("what has this
-        # transaction posted?") and the per-transaction reconcile-to-target
-        # filter.  Partial (``WHERE transaction_id IS NOT NULL``) for the
-        # same reason as the transfer index -- transfer-sourced entries carry
-        # a NULL ``transaction_id`` and fall outside it.  Verbatim shape of
-        # the transfer index above.
-        db.Index(
-            "idx_journal_entries_transaction",
-            "transaction_id",
-            postgresql_where=db.text("transaction_id IS NOT NULL"),
-        ),
-        # The PURCHASE analog (plan step X-f3b, ruling **R-FM**): the
-        # per-purchase reconcile-to-target filter reads back what one
-        # ``budget.transaction_entries`` row has posted.  Partial for the same
-        # reason as its two siblings -- an entry of any other source kind
-        # carries NULL here and falls outside the index.
+        # The per-movement reconcile-to-target filter reads back what one
+        # ``budget.transaction_entries`` row has posted (plan step X-f3b,
+        # ruling **R-FM**).  Partial so the index covers only entries that
+        # carry the link: a correction carries NULL here and falls outside
+        # it.  The ``postgresql_where`` text matches the migration's index
+        # DDL byte-for-byte so autogenerate produces no spurious diff.
         db.Index(
             "idx_journal_entries_transaction_entry",
             "transaction_entry_id",
@@ -231,45 +210,19 @@ class JournalEntry(UserScopedMixin, CreatedAtMixin, db.Model):
         ),
         nullable=False,
     )
-    # The concrete source transfer, or NULL once that transfer is hard-
-    # deleted.  SET NULL (not CASCADE): the posted fact is immutable history
-    # and must survive a source-transfer delete; only the back-link is
-    # cleared.  Nullable because a hard-deleted transfer leaves the entry
-    # orphaned-but-intact, and because later source kinds carry NULL here.
-    transfer_id = db.Column(
-        db.Integer,
-        db.ForeignKey(
-            "budget.transfers.id",
-            name="fk_journal_entries_transfer_id",
-            ondelete="SET NULL",
-        ),
-        nullable=True,
-    )
-    # The concrete source transaction (Step 3), or NULL once that
-    # transaction is hard-deleted (and NULL on every transfer-sourced
-    # entry).  Verbatim shape of ``transfer_id`` above: SET NULL so the
-    # immutable posted fact survives a source-transaction delete with only
-    # the back-link cleared.  ``source_kind_id`` disambiguates which of the
-    # two concrete FKs is set (see the class docstring).
-    transaction_id = db.Column(
-        db.Integer,
-        db.ForeignKey(
-            "budget.transactions.id",
-            name="fk_journal_entries_transaction_id",
-            ondelete="SET NULL",
-        ),
-        nullable=True,
-    )
-    # The concrete source PURCHASE (plan step X-f3b, ruling **R-FM**), or NULL
-    # once that purchase is deleted (and NULL on every entry of another source
-    # kind).  Verbatim shape of the two FKs above.
+    # The concrete source MOVEMENT (plan step X-f3b, ruling **R-FM**), or NULL
+    # once that movement is deleted (and NULL on every correction).  SET NULL
+    # (not CASCADE): the posted fact is immutable history and must survive a
+    # source delete; only the back-link is cleared.  Nullable because a
+    # deleted movement leaves the entry orphaned-but-intact, and because a
+    # correction links no row.
     #
     # **It is a source of its own rather than more legs on the parent's entry**
     # because the posted walk reads a source's day and its clearing link off the
     # SOURCE ROW: a purchase carries its own ``settled_on`` and its own
     # ``reconciled_by_id``, and a still-projected envelope has no settle day at
-    # all -- so legs grouped under the parent's ``transaction_id`` could not be
-    # dated or attributed.
+    # all -- so legs grouped under the parent row's own link (``transaction_id``,
+    # deleted at card plan#1845) could not be dated or attributed.
     transaction_entry_id = db.Column(
         db.Integer,
         db.ForeignKey(
@@ -302,8 +255,7 @@ class JournalEntry(UserScopedMixin, CreatedAtMixin, db.Model):
 
     def __repr__(self):
         return (
-            f"<JournalEntry id={self.id} transfer_id={self.transfer_id} "
-            f"transaction_id={self.transaction_id} "
+            f"<JournalEntry id={self.id} "
             f"transaction_entry_id={self.transaction_entry_id} "
             f"date={self.entry_date}>"
         )

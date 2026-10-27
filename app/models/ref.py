@@ -661,10 +661,12 @@ class PostingSource(db.Model):
 
     Tags every ``budget.journal_entries`` row with the kind of source
     event that produced it, independently of the concrete (nullable)
-    source FK the entry also carries.  Step 2 seeds the single value
+    source FK the entry also carries.  Step 2 seeded the single value
     ``transfer``; later steps INSERT ``transaction``, ``loan_payment``,
     ``paycheck``, ``credit_payback`` via their own migrations -- new
-    values are data, never schema.
+    values are data, never schema -- and a retired value is deleted by
+    one: card plan#1845's ``1712c506ee99`` deleted ``transfer`` and
+    ``transaction``.
 
     Application code resolves these via ``ref_cache.posting_source_id``
     and compares against the integer ID -- never the string ``name`` --

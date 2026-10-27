@@ -740,7 +740,7 @@ def posting_source_id(member):
 
     Args:
         member: A ``PostingSourceEnum`` member
-                (e.g. ``PostingSourceEnum.TRANSFER``).
+                (e.g. ``PostingSourceEnum.TRANSFER_MOVEMENT``).
 
     Returns:
         int -- the ``ref.posting_sources.id`` value.

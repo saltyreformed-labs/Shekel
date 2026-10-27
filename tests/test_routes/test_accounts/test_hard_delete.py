@@ -288,7 +288,8 @@ class TestHardDeletePostingLedgerGuard:
     Regression for the Build-Order Step 2 / Commit 5 cascade-imbalance hole:
     settling a transfer writes balanced journal entries onto both accounts'
     ledgers, and those entries survive a transfer hard-delete
-    (``journal_entries.transfer_id`` SET NULL).  Hard-deleting a participating
+    (their movement link, ``journal_entries.transaction_entry_id``, SET NULL
+    as each side's movement goes).  Hard-deleting a participating
     account would then CASCADE-delete only ITS legs, stranding the paired legs
     as unbalanced single-leg entries (the balanced trigger does not fire on
     DELETE).  Guard 5 in ``hard_delete_account`` archives the account instead,

@@ -967,8 +967,6 @@ class TestSyncAccountAnchorPostings:
                 linked.id: (Decimal("500.00"), opening_kind),
                 equity.id: (Decimal("-500.00"), opening_kind),
             }
-            assert entry.transfer_id is None
-            assert entry.transaction_id is None
             history_row = (
                 _db.session.query(AccountAnchorHistory)
                 .filter_by(account_id=account.id)

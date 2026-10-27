@@ -159,7 +159,7 @@ class TestPeriodAttribution:
     land in the NEW period -- leaving the original entry
     and its reversal straddling two periods, where a later truncate of the new
     period CASCADE-deletes one half and permanently strands the other
-    (``transaction_id`` SET NULL, unhealable).  The reconcile instead reads
+    (its link SET NULL, unhealable).  The reconcile instead reads
     the posted side back per period, so the reversal nets the ORIGINAL period
     to zero and inherits the latest entry date it reverses.
     """

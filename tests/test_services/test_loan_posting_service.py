@@ -1076,8 +1076,6 @@ class TestSyncLoanPaymentPostings:
             # then (ruling R-BAL167 class 1).  The period is the transfer's
             # since plan step balance:X-bi-6-4d-2; it read the shadow's
             # mirrored copy until then (ruling R-BAL167 class 1).
-            assert entry.transfer_id is None
-            assert entry.transaction_id is None
             assert entry.transaction_entry_id is None
             assert entry.pay_period_id == xfer.pay_period_id
             assert entry.entry_date == _loan_side_movement(xfer, loan).settled_on
@@ -1582,8 +1580,7 @@ class TestTheSplitIsADateKeyedCorrection:
             )
             assert len(entries) == 1
             entry = entries[0]
-            assert (entry.transaction_id, entry.transfer_id,
-                    entry.transaction_entry_id) == (None, None, None)
+            assert entry.transaction_entry_id is None
             legs = _entry_legs(entry.id)
             interest_ledger = _find_loan_ledger(
                 loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
@@ -3347,8 +3344,11 @@ class TestCheckedProjection:
                 scenario_id=scenario_id,
                 pay_period_id=seed_periods[_P1].id,
                 entry_date=date(2026, 2, 15),
+                # A purchase linking no movement: a kind the loan walk does
+                # not model (it was the ``transaction`` source, deleted at
+                # card plan#1845).
                 source_kind_id=ref_cache.posting_source_id(
-                    PostingSourceEnum.TRANSACTION
+                    PostingSourceEnum.PURCHASE
                 ),
                 description="forced walk-invisible drift",
             )

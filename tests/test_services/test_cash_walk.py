@@ -282,12 +282,14 @@ def _linked_ledger_net(account, scenario, *, transaction_id=None):
     a lookup bug -- the same rule the loan reconciliation suite follows.
 
     **``transaction_id`` scopes to a row's whole posted FAMILY** since plan step
-    X-f3b (ruling **R-FM**): the row's own cash leg, plus every leg its
-    PURCHASES booked on their own days.  A purchase links by
-    ``transaction_entry_id`` and carries no ``transaction_id``, so the two are
-    unioned here rather than read as one column -- which is also what keeps the
-    grading window a different shape from the production reconcile, whose two
-    halves each read exactly one of them.
+    X-f3b (ruling **R-FM**): every leg the row's movements -- its covering
+    movement and its PURCHASES -- booked on their own days, found by the row's
+    id through a ``transaction_entries`` subquery, where the production
+    reconcile reads one movement's ``transaction_entry_id`` at a time; that is
+    what keeps the grading window a different shape from it.  The row's own
+    cash leg, linked by ``journal_entries.transaction_id``,
+    was unioned beside them until plan step ``balance:X-bi-6-5``'s second leaf
+    (card plan#1845) deleted that link.
     """
     from app.models.journal_entry import JournalEntry, Posting  # pylint: disable=import-outside-toplevel
     from app.models.transaction_entry import TransactionEntry  # pylint: disable=import-outside-toplevel
@@ -303,14 +305,13 @@ def _linked_ledger_net(account, scenario, *, transaction_id=None):
         )
     )
     if transaction_id is not None:
-        query = query.filter(db.or_(
-            JournalEntry.transaction_id == transaction_id,
+        query = query.filter(
             JournalEntry.transaction_entry_id.in_(
                 db.session.query(TransactionEntry.id).filter(
                     TransactionEntry.transaction_id == transaction_id,
                 )
             ),
-        ))
+        )
     return Decimal(str(query.scalar()))
 
 

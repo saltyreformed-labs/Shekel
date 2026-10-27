@@ -99,7 +99,6 @@ from app.enums import (
     StatusEnum,
 )
 from app.extensions import db as _db
-from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.services import match_withdrawal, movement_removal
 from tests._test_helpers import (
@@ -150,12 +149,16 @@ def _run_backfill():
 
 
 def _entry_for_transaction(transaction_id):
-    """Return the single journal entry for *transaction_id*, or None."""
-    return (
-        _db.session.query(JournalEntry)
-        .filter_by(transaction_id=transaction_id)
-        .one_or_none()
-    )
+    """Return the id of the single journal entry linking *transaction_id*, or None.
+
+    Read by SQL: the model has had no ``transaction_id`` since revision
+    ``1712c506ee99`` (plan step ``balance:X-bi-6-5``'s second leaf, card
+    plan#1845), whose downgrade the class's fixture runs to put the column
+    back for the frozen backfill to write.
+    """
+    return _db.session.execute(text(
+        "SELECT id FROM budget.journal_entries WHERE transaction_id = :t"
+    ), {"t": transaction_id}).scalar_one_or_none()
 
 
 @pytest.fixture()
@@ -181,9 +184,10 @@ def savings(app, db, seed_user):  # pylint: disable=unused-argument
 class TestBackfillExclusions:
     """Projected / Cancelled / Credit / soft-deleted / shadow rows are excluded.
 
-    Every case runs below ``c956c1d83108`` (the fixture): the backfill's frozen
-    existence check reads ``t.transfer_id``, a column head's table no longer
-    has.
+    Every case runs below ``c956c1d83108`` and ``1712c506ee99`` (the
+    fixture): the backfill's frozen existence check reads ``t.transfer_id``,
+    a column head's table no longer has, and an entry it wrote would carry
+    ``journal_entries.transaction_id``, another.
     """
 
     @pytest.mark.parametrize("status_enum", [

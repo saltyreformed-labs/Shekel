@@ -13,7 +13,7 @@ request naming a shadow row is a 404 at the ownership helper.
 The edit and status concerns share this one module deliberately: their
 paths are near-identical parallel code (the apply +
 posting reconcile + commit body, the ``StaleDataError`` / ``IntegrityError``
-tails, the ``_RenderTarget`` response handling).  Splitting those across
+tails, the ``RenderTarget`` response handling).  Splitting those across
 modules would re-surface the intra-file duplication the monolith hid (R0801
 is cross-file only); co-locating them keeps that intentional parallel code in
 one file.
@@ -740,7 +740,7 @@ def _mark_done_regular(txn, submitted, tender_account_id, posted, target):
         posted: What the surface said about the bank lines the settle frees:
             the popover's captions, or the one-click's silence (ruling
             **R-CC56**).
-        target: The :class:`_RenderTarget` describing the response
+        target: The :class:`~app.routes._mobile_card.RenderTarget` describing the response
             surface (mobile card vs desktop cell).
 
     Returns:

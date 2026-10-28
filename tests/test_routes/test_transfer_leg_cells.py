@@ -355,6 +355,109 @@ class TestTheTransferDoorsServeTheLeg:
         assert f'id="card-tp-xfer-{xfer_id}-{checking_id}"' in html
         assert "Invalid transfer status transition" in html
 
+    def test_a_stale_card_of_a_cancelled_leg_answers_the_legs_desktop_cell(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """A stale card's conflict on a CANCELLED transfer: the leg's desktop cell.
+
+        A stale PATCH's 409 names no refusal, and a cancelled leg yields no
+        card row key, so the one card renderer falls back to the item's
+        desktop cell -- the rule a row's card takes (finding BAL-565's race),
+        written once for both shapes by ruling plan#1983's route fold and
+        decided by the lane.  The transfer twin drew the banner-only wrapper
+        here with no message: a red banner reading ``None``.
+        """
+        with app.app_context():
+            savings = _create_savings(seed_user)
+            xfer = _create_transfer(seed_user, seed_periods_today[4], savings)
+            checking_id = seed_user["account"].id
+            transfer_service.update_transfer(
+                xfer.id, seed_user["user"].id,
+                status_id=ref_cache.status_id(StatusEnum.CANCELLED),
+            )
+            db.session.commit()
+            xfer_id = xfer.id
+            # A card form pinned to a version the cancel has since bumped.
+            resp = auth_client.patch(
+                f"/transfers/instance/{xfer_id}",
+                data={
+                    "leg_account_id": str(checking_id),
+                    "version_id": "1",
+                    "render": "mobile_card",
+                    "card_prefix": "tp",
+                    "can_edit": "1",
+                },
+            )
+        assert resp.status_code == 409, resp.get_data(as_text=True)[:300]
+        html = resp.get_data(as_text=True)
+        assert f'data-cell="{leg_dom_id(xfer_id, checking_id)}"' in html
+        assert "$200" in html
+        assert "mobile-card-wrapper" not in html
+        assert "<span>None</span>" not in html
+
+    def test_one_card_renderer_falls_back_alike_for_a_row_and_a_leg(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """No card row key and no refusal: a row's card and a leg's answer their desktop cells.
+
+        The two shapes' cards are ONE renderer since ruling plan#1983
+        (``routes/_mobile_card.render_mobile_card``), so the fallback is one
+        rule: a cancelled row and a cancelled transfer's leg, each drawn as a
+        card with no refusal to show, come back as the cell the desktop grid
+        draws for that item -- its own ``data-cell`` id and its own figure.
+        """
+        # pylint: disable=import-outside-toplevel
+        from flask_login import login_user
+
+        from app.enums import TxnTypeEnum
+        from app.models.transaction import Transaction
+        from app.models.transfer import Transfer
+        from app.routes._mobile_card import render_mobile_card
+        from app.services.transfer_legs import grid_transfer_leg
+        from tests._test_helpers import one_off_row_of
+
+        with app.app_context():
+            period = seed_periods_today[4]
+            savings = _create_savings(seed_user)
+            xfer = _create_transfer(seed_user, period, savings)
+            row = one_off_row_of(
+                period, name="Water", amount=Decimal("61.00"),
+                user_id=period.user_id, account_id=seed_user["account"].id,
+                scenario_id=seed_user["scenario"].id,
+                transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
+                category_id=seed_user["categories"]["Rent"].id,
+            )
+            db.session.commit()
+            row_id, xfer_id = row.id, xfer.id
+            checking_id = seed_user["account"].id
+            transfer_service.update_transfer(
+                xfer_id, seed_user["user"].id,
+                status_id=ref_cache.status_id(StatusEnum.CANCELLED),
+            )
+            db.session.commit()
+            cancelled_row = auth_client.post(f"/transactions/{row_id}/cancel")
+            assert cancelled_row.status_code == 200, (
+                cancelled_row.get_data(as_text=True)[:300]
+            )
+            with app.test_request_context("/"):
+                login_user(seed_user["user"])
+                row_card = render_mobile_card(
+                    db.session.get(Transaction, row_id),
+                    card_prefix="tp", can_edit=True,
+                )
+                leg_card = render_mobile_card(
+                    grid_transfer_leg(
+                        db.session.get(Transfer, xfer_id), checking_id,
+                    ),
+                    card_prefix="tp", can_edit=True,
+                )
+        assert f'data-cell="txn-cell-{row_id}"' in row_card
+        assert "$61" in row_card
+        assert f'data-cell="{leg_dom_id(xfer_id, checking_id)}"' in leg_card
+        assert "$200" in leg_card
+        for card in (row_card, leg_card):
+            assert "mobile-card-wrapper" not in card
+
     def test_the_popover_from_a_leg_carries_the_leg_back_on_every_door(
         self, app, auth_client, seed_user, seed_periods_today,
     ):

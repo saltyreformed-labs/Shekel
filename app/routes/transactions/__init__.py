@@ -19,8 +19,10 @@ Module map:
 * :mod:`app.routes.transactions._bp` -- ``transactions_bp`` declaration
   (leaf; cycle-break).
 * :mod:`app.routes.transactions._helpers` -- shared Marshmallow schema
-  singletons, the credit-payback unique-index constant, the
-  ``_RenderTarget`` bundle, and the render / ownership / FK helpers.
+  singletons, the credit-payback unique-index constant, and the render /
+  ownership / FK helpers; the ``RenderTarget`` bundle and the phone card
+  they answer with live in :mod:`app.routes._mobile_card`, shared with the
+  transfer routes.
 * :mod:`app.routes.transactions.forms` -- read-only GET HTMX partials.
 * :mod:`app.routes.transactions.create` -- create handlers.
 * :mod:`app.routes.transactions.mutations` -- PATCH/DELETE edit + the

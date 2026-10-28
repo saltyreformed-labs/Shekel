@@ -513,7 +513,7 @@ class TestTheAddPurchaseFormReadsTheUsersClock:
     ):
         """The rendered add-purchase input comes from ``display_today``.
 
-        ``_render_mobile_card`` is driven directly, on a PROJECTED envelope.
+        ``render_mobile_card`` is driven directly, on a PROJECTED envelope.
         Its add-purchase input must read ``value`` and ``max`` off the
         substituted ``display_today``, and must not carry the process's own
         ``date.today()``.
@@ -536,16 +536,22 @@ class TestTheAddPurchaseFormReadsTheUsersClock:
         pass a form that rendered no date at all.
 
         Negative-controlled (Section 7.3): restoring ``today=date.today()`` in
-        ``_render_mobile_card`` fails this with
-        ``assert 'value="2019-07-04"' in ...``, measured 2026-08-01.
+        the card renderer fails this with
+        ``assert 'value="2019-07-04"' in ...``, measured 2026-08-01 on
+        ``routes/transactions/_helpers._render_mobile_card`` and again
+        2026-10-28 on ``routes/_mobile_card.render_mobile_card``, the one
+        renderer for a row's card and a transfer side's since ruling
+        plan#1983.
         """
         # pylint: disable=import-outside-toplevel
-        from app.routes.transactions import _helpers
+        from app.routes import _mobile_card
 
         # The premise: the sentinel is not what any real clock answers, so a
         # render reading ``date.today()`` cannot produce it by coincidence.
         assert date.today() != self._SENTINEL
-        monkeypatch.setattr(_helpers, "display_today", lambda: self._SENTINEL)
+        monkeypatch.setattr(
+            _mobile_card, "display_today", lambda: self._SENTINEL,
+        )
 
         with app.app_context(), app.test_request_context("/"):
             period = current_pay_period(
@@ -559,7 +565,7 @@ class TestTheAddPurchaseFormReadsTheUsersClock:
             # the login gate; this direct call supplies the owner the gate
             # would have.
             login_user(seed_user["user"])
-            html = _helpers._render_mobile_card(
+            html = _mobile_card.render_mobile_card(
                 txn, card_prefix="tp", can_edit=True,
             )
 

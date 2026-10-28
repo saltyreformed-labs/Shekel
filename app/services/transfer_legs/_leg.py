@@ -72,12 +72,13 @@ def leg_label(from_account: Account, to_account: Account) -> tuple[str, str]:
 class TransferLeg:  # pylint: disable=too-many-public-methods
     """One side of a transfer, as the account on that side sees it.
 
-    Pylint: ``too-many-public-methods`` (22/20) -- each answers a question a
+    Pylint: ``too-many-public-methods`` (23/20) -- each answers a question a
     plan ROW answers (the grid's, the dashboard's, the fold's, since leaf
-    ``X-bi-6-4a`` the ledger writer's ``user_id``, and since leaf
-    ``X-bi-6-4c-1`` the statement register's ``covering_movements``), derived
-    from the parent, its endpoints or the leg's record, so every reader asks
-    a row and a leg the same question.  Fewer would put a shape branch back
+    ``X-bi-6-4a`` the ledger writer's ``user_id``, since leaf
+    ``X-bi-6-4c-1`` the statement register's ``covering_movements``, and
+    since ruling **plan#1983** the fragment renderers' ``purchases``),
+    derived from the parent, its endpoints or the leg's record, so every
+    reader asks a row and a leg the same question.  Fewer would put a shape branch back
     at each reader's site, the thing :attr:`tracks_purchases` says this class
     exists to stop.
 
@@ -254,10 +255,28 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
         here from what a leg IS rather than answered by a branch at each of
         those sites (leaf ``X-bi-6-1b``).  A shadow row answered the same
         ``False`` through ``Transaction.tracks_purchases``' link-less arm
-        (ruling **R-BAL73**).  Every reader of a row's ``purchases`` asks
-        this first, so a leg needs no ``purchases`` of its own.
+        (ruling **R-BAL73**).  A reader that draws a purchase LIST asks this
+        first; the one that sums whatever purchases an item holds asks
+        :attr:`purchases`.
         """
         return False
+
+    @property
+    def purchases(self) -> tuple[()]:
+        """``()``: a leg holds no purchase.
+
+        What ``Transaction.purchases`` answers for a plan row -- what a person
+        recorded against it, less the status seam's covering movement --
+        asked of a leg, which has nothing recorded against it but its
+        :attr:`record`.  It is asked because the entry-sums builder
+        (``entry_service.build_entry_sums_dict``) sums whatever purchases an
+        item holds without asking :attr:`tracks_purchases`, so one cell
+        renderer and one card renderer draw a row and a leg through the one
+        call (``routes._render_helpers.render_transaction_cell``,
+        ``routes._mobile_card.render_mobile_card``, ruling **plan#1983**),
+        where each leg renderer passed an empty map by hand until then.
+        """
+        return ()
 
     @property
     def covering_movements(self) -> tuple[TransactionEntry, ...]:

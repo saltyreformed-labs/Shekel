@@ -172,10 +172,10 @@ def retained_amounts_by_key(
         ``{cell_key: Decimal | None}`` covering every item; a row's key is
         its id.
     """
-    return {cell_key(item): _retained_amount(parent_of(item)) for item in items}
+    return {cell_key(item): retained_amount(parent_of(item)) for item in items}
 
 
-def _retained_amount(parent: PlanParent) -> "Decimal | None":
+def retained_amount(parent: PlanParent) -> "Decimal | None":
     """Return what a re-settle of *parent* would re-book, where it is not on screen.
 
     :func:`retained_amounts_by_key`'s value, one rule against a parent:
@@ -183,6 +183,13 @@ def _retained_amount(parent: PlanParent) -> "Decimal | None":
     instead), else the retained correction it still states
     (:func:`~app.services.status_seam.honoured_correction`), ``None`` when
     it states none.
+
+    **Public since ruling plan#1983's route fold** for the one surface whose
+    subject is a PARENT rather than a side: the transfer popover and the
+    transfers page's cell (``routes._render_helpers
+    .transfer_settlement_amounts``) ask it of the transfer, beside
+    :func:`~app.services.row_valuation.settled_figure`, where they built a
+    leg to ask the map and read it back at the leg's key.
 
     Args:
         parent: A row or a transfer (``transfer_legs.parent_of``).

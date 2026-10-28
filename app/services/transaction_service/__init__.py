@@ -85,6 +85,7 @@ from app.services.transaction_service._row_rules import (
 )
 from app.services.transaction_service._settle import (
     fixed_settle_amount,
+    retained_amount,
     retained_amounts_by_key,
     settle_amount,
     settle_from_entries,
@@ -109,6 +110,7 @@ __all__ = [
     "offerable_status_ids",
     "reject_mismatched_settled_status",
     "reject_unsettleable",
+    "retained_amount",
     "retained_amounts_by_key",
     "settle_amount",
     "settle_from_entries",

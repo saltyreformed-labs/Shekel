@@ -25,7 +25,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
-from tools.ci.gitcmd import DEV, MAIN
+from tools.ci.gitcmd import DEV, MAIN, is_ancestor
 from tools.quill import _git
 from tools.quill._command import _label, _one, on_board, with_cards
 from tools.quill._exits import Refused
@@ -143,18 +143,38 @@ def place(tracker: Tracker, task: Card, parent: Card, before: Card | None,
         print(f"  in plan#{parent.number}'s order: placed above plan#{before.number}")
 
 
+def _holds_its_claim(root: Path, card: int, tip: str, then: str) -> None:
+    """Refuse a write on card ``card``'s branch, checked out, while it lacks work ``origin``'s
+    claim holds: ``tip``, the claim's tip, fetched, is not in ``HEAD``'s history, the branch
+    behind the claim or diverged from it.  What such a branch says is done and in progress
+    is not the claim's, and its push would be refused, so the write is refused before it
+    reads either; ``then`` says what to run once the branch holds that work."""
+    if not is_ancestor(root, tip, "HEAD"):
+        branch = _git.card_branch(card)
+        raise Refused(f"origin's {branch} holds work {branch} here does not (its tip "
+                      f"{tip[:12]}), so what is in progress on it is not read here: bring that "
+                      f"work in first (`git merge origin/{branch}`), then {then}")
+
+
 def cmd_start(args, tracker: Tracker, root: Path) -> int:
     """Begin task ``plan#T`` (rulings plan#1872, plan#2009): a commit on its card's branch
     writing the card's file ``plan/doing/N`` to name it, pushed (:func:`_git.start`), so it is
     in progress (:func:`_git.in_progress`) and each commit until the one that writes its done
     file is a commit of its piece.  Begun on the branch checked out, ``card/<its card>``,
-    while no other task of that card is in progress there, and while ``origin`` holds that
-    branch, the card's claim, which the push moves forward and never makes.  Refused, with
-    nothing written, for what ``task-file`` refuses (:func:`_on_its_branch`), a task whose
-    file the branch holds (it is done), another task of the card in progress, and a claim
-    ``origin`` no longer holds.  Run again for a task begun already, it pushes the branch: a
-    start whose push failed is finished so."""
+    while ``origin`` holds that branch, the card's claim, which the push moves forward and
+    never makes, and the branch here holds all of the claim's work, fetched first
+    (:func:`_holds_its_claim`), and while no other task of that card is in progress there.
+    Refused, with nothing committed or pushed, for what ``task-file`` refuses
+    (:func:`_on_its_branch`), a claim ``origin`` no longer holds, a branch behind the claim
+    or diverged from it, a task whose file the branch holds (it is done), and another task of
+    the card in progress.  Run again for a task begun already, it pushes the branch: a start
+    whose push failed is finished so."""
     task, branch = _on_its_branch(tracker, args.task, root, "its start", "begin a dropped piece")
+    if (tip := _git.on_origin(root).get(task.parent)) is None:
+        raise Refused(f"origin holds no {branch}, so plan#{task.parent} is claimed by no one: "
+                      f"`quill claim plan#{task.parent}` claims it")
+    _git.fetch(root, [task.parent])
+    _holds_its_claim(root, task.parent, tip, f"start plan#{task.number}")
     if _git.blob_at(root, "HEAD", _git.task_file(task.number)) is not None:
         raise Refused(f"{_label(task)} is done: {branch} holds {_git.task_file(task.number)}")
     begun = _git.in_progress(root, "HEAD", task.parent)
@@ -163,9 +183,6 @@ def cmd_start(args, tracker: Tracker, root: Path) -> int:
                       f"(`quill task-file plan#{begun}`) in the commit that ends it, then "
                       f"start plan#{task.number}; or drop it (`quill drop plan#{begun} --why "
                       f"REASON`), which records its drop on {branch}")
-    if task.parent not in _git.on_origin(root):
-        raise Refused(f"origin holds no {branch}, so plan#{task.parent} is claimed by no one: "
-                      f"`quill claim plan#{task.parent}` claims it")
     if begun == task.number:
         _git.push(root, task.parent)
         print(f"{_label(task)} is begun on {branch} already: pushed {branch}")

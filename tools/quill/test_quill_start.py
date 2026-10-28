@@ -138,18 +138,70 @@ def test_start_refuses_a_claim_origin_no_longer_holds(code, capsys):
     assert _on_origin(code) == ""
 
 
-def test_a_start_whose_push_is_refused_stands_on_the_local_branch(code, capsys):
-    """``origin``'s branch holding work this one does not, the push is refused, never forced:
-    the start commit stands on the local branch, and the failure says so."""
+def test_start_refuses_a_branch_behind_origins_claim_writing_nothing(code, capsys):
+    """Another clone finished plan#2 on ``origin``'s ``card/1``, so the branch here, which
+    still says plan#2 is in progress, is behind the claim: the start of plan#3 is refused as
+    behind, never as plan#2 in progress, and so is plan#2's started again, whose push would
+    be refused, each writing nothing; once that work is brought in, plan#3 begins."""
     tracker = two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
-    elsewhere_tip = piece(code, 1, 9)
+    assert run(tracker, code, "start", "plan#2") == 0
+    here, there = _tip(code), piece(code, 1, 2)
+    capsys.readouterr()
+    for task in (3, 2):
+        assert run(tracker, code, "start", f"plan#{task}") == 1
+        assert (f"refused: origin's card/1 holds work card/1 here does not (its tip "
+                f"{there[:12]}), so what is in progress on it is not read here: bring that "
+                f"work in first (`git merge origin/card/1`), then start plan#{task}\n"
+                ) in capsys.readouterr().err
+        assert (_tip(code), _on_origin(code)) == (here, there)
+    _run(code, "merge", "--quiet", "--ff-only", f"origin/{BRANCH}")
+    assert run(tracker, code, "start", "plan#3") == 0
+    assert _git.in_progress(code, "HEAD", 1) == 3
+    assert _on_origin(code) == _tip(code)
+
+
+def test_start_refuses_a_branch_diverged_from_origins_claim_writing_nothing(code, capsys):
+    """The branch here holds a commit ``origin``'s claim does not, and the claim one it does
+    not: the start is refused before any write, so no start commit stands unpushed; once the
+    claim's work is merged in, the start is made and pushed, the merge with it."""
+    tracker = two_tasks()
+    assert run(tracker, code, "claim", "plan#1") == 0
+    assert run(tracker, code, "start", "plan#2") == 0
+    there = piece(code, 1, 9)
+    _commit_its_file(tracker, code, 2)
+    here = _tip(code)
+    capsys.readouterr()
+    assert run(tracker, code, "start", "plan#3") == 1
+    assert (f"refused: origin's card/1 holds work card/1 here does not (its tip {there[:12]})"
+            in capsys.readouterr().err)
+    assert (_tip(code), _on_origin(code)) == (here, there)
+    _run(code, "merge", "--quiet", "--no-edit", f"origin/{BRANCH}")
+    merged = _tip(code)
+    assert run(tracker, code, "start", "plan#3") == 0
+    assert _run(code, "rev-parse", f"{BRANCH}^") == merged
+    assert _on_origin(code) == _tip(code)
+
+
+def test_a_start_whose_push_is_refused_stands_on_the_local_branch(code, capsys, monkeypatch):
+    """``origin``'s branch moving on after the start read it, the push is refused, never
+    forced: the start commit stands on the local branch, and the failure says so."""
+    tracker = two_tasks()
+    assert run(tracker, code, "claim", "plan#1") == 0
+    fetched, moved = _git.fetch, []
+
+    def fetch_then_move(root, cards=()):
+        """The start's fetch, then another clone's push onto ``card/1``."""
+        fetched(root, cards)
+        moved.append(piece(code, 1, 9))
+
+    monkeypatch.setattr(_git, "fetch", fetch_then_move)
     assert run(tracker, code, "start", "plan#2") == 2
     err = capsys.readouterr().err
     assert "failed: the push of card/1 answered ! " in err
     assert ("the commits stand on the local branch; bring in what origin's holds, then push it"
             in err)
-    assert _on_origin(code) == elsewhere_tip
+    assert _on_origin(code) == moved[0]
     assert _run(code, "log", "-1", "--format=%s", BRANCH) == "start plan#2: piece a"
 
 

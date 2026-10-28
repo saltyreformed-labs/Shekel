@@ -96,6 +96,7 @@ from app.services.status_seam._refusals import (
 )
 from app.services.transfer_legs import side_movements
 from app.utils.balance_predicates import (
+    enters_settled_band,
     settled_status_ids,
     touches_settled_band,
 )
@@ -116,7 +117,9 @@ def sync_side_records(
 
     Called by the transfer writer BEFORE it writes the transfer's own status
     (``status_seam.apply_status_change``), so the transfer's ``status_id`` is
-    still the status the act is LEAVING -- which is what "was settled" reads.
+    still the status the act is LEAVING -- which is what
+    ``balance_predicates.enters_settled_band`` and ``touches_settled_band``
+    read.
     Three cases, total over what the writer can ask:
 
     * **neither before nor after in the settled band** -- a cancel of a
@@ -177,10 +180,8 @@ def sync_side_records(
         reject_future_settle_day(day)
     reject_settlement_without_settled_status(new_status_id, settlement)
     reject_settlement_on_a_deleted_row(transfer, settlement)
-    settled_ids = settled_status_ids()
-    was_settled = transfer.status_id in settled_ids
-    now_settled = new_status_id in settled_ids
-    if now_settled and not was_settled and settlement is None:
+    # The predicate the row seam's twin refusal asks (``_seam``).
+    if enters_settled_band(transfer, new_status_id) and settlement is None:
         raise ValueError(
             f"Transfer {transfer.id} is entering the settled band with no "
             "settlement record. A settle states what moved as well as when: "
@@ -190,6 +191,7 @@ def sync_side_records(
     # asks the same predicate before it loads the sides' records).
     if not touches_settled_band(transfer, new_status_id):
         return
+    now_settled = new_status_id in settled_status_ids()
     # As the act FOUND them: a side's record is read live, and the writes
     # below append one (a first settle) or take both out (a ``$0.00`` close).
     held = any(leg.record is not None for leg in legs)

@@ -16,6 +16,7 @@ from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
 from tools.quill._command import Refused, _label, _one, _outside_parent, card_number
 from tools.quill._comments import byline, unanswered
+from tools.quill._notes import superseded
 from tools.quill._state import OWNED, done_tasks, filing_unfinished, holder, never_split, owner
 from tools.quill._tasks import in_progress
 from tools.quill._tracker import Card, Tracker, TrackerError
@@ -186,13 +187,31 @@ def _listed(tracker: Tracker, card: Card, read: dict[int, Card],
     return {number: cards[number] for number in numbers}
 
 
+def _print_comments(tracker: Tracker, number: int) -> None:
+    """Card ``number``'s comments, oldest first, each in full but a stop's note older than its
+    newest (:func:`_notes.superseded`, ruling plan#1921), which a line names: the next session
+    reads the current note, and the card keeps every older one."""
+    comments = tracker.comments(number)
+    if not comments:
+        print("no comments")
+    older = superseded(comments, tracker.app_login)
+    for index, comment in enumerate(comments):
+        if index in older:
+            print(f"== comment, {byline(comment)}: a stop's note, superseded by the newest, of "
+                  f"{older[index].created_at}; the card holds its text")
+            continue
+        print(f"== comment, {byline(comment)}")
+        print(comment.body.rstrip())
+
+
 def cmd_show(args, tracker: Tracker, root: Path) -> int:
     """A card -- the title of each card linked below it, blocking it or, for a step, each
     finding, ruling and question it owns (R-BAL395), and each task under it holding a comment
     no answer has followed saying so (ruling plan#1924), among its facts -- then its text, its
-    comments oldest first, and the code repository's history for it: each commit on ``dev``
-    or ``main`` that added, changed or deleted its ship marker (:func:`_git.history`), newest
-    first."""
+    comments oldest first, each in full but a stop's note older than the card's newest, which
+    a line names (:func:`_notes.superseded`, ruling plan#1921), and the code repository's
+    history for it: each commit on ``dev`` or ``main`` that added, changed or deleted its ship
+    marker (:func:`_git.history`), newest first."""
     number = _resolve_reference(tracker, args.card)
     card = _one(tracker, number)
     reads = _git.read(root)
@@ -202,12 +221,7 @@ def cmd_show(args, tracker: Tracker, root: Path) -> int:
     print()
     print(tracker.body(number))
     print()
-    comments = tracker.comments(number)
-    if not comments:
-        print("no comments")
-    for comment in comments:
-        print(f"== comment, {byline(comment)}")
-        print(comment.body.rstrip())
+    _print_comments(tracker, number)
     print()
     history = _git.history(root, number)
     for status, sha, subject in history:

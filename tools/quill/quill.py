@@ -48,7 +48,10 @@ says when sync is behind.  ``watch`` runs every minute from the same clone, neve
 ``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
 since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
 :mod:`_watch`).  ``answer`` answers the developer's comments on a card, and ``next``
-names each claimed card holding one no answer has followed (plan#1822, :mod:`_comments`).
+names each claimed card, and each task under one, holding one no answer has followed
+(plan#1822, ruling plan#1924, :mod:`_comments`).  ``note`` posts a stop's note on the task a
+claimed card's next session starts and prints its prompt (rulings plan#1921, plan#1922,
+:mod:`_notes`).
 ``pr`` opens a card's pull request into ``dev``, its text naming the card so the card links it,
 and ``file question --owner`` links a question to the step it is asked for, a link its ruling
 keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).
@@ -75,6 +78,7 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill edit plan#N [--title NAME] [--body-file TEXT]
     python -m tools.quill.quill comment plan#N --body-file TEXT
     python -m tools.quill.quill answer plan#N --body-file TEXT
+    python -m tools.quill.quill note plan#N --body-file NOTE
     python -m tools.quill.quill block plan#N --by plan#M [--remove]
     python -m tools.quill.quill move plan#N (--top | --bottom | --after plan#M)
     python -m tools.quill.quill drop plan#N --why REASON
@@ -116,7 +120,18 @@ import requests
 
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
-from tools.quill import _comments, _filing, _findings, _git, _pr, _status, _sync, _tasks, _watch
+from tools.quill import (
+    _comments,
+    _filing,
+    _findings,
+    _git,
+    _notes,
+    _pr,
+    _status,
+    _sync,
+    _tasks,
+    _watch,
+)
 from tools.quill._command import (
     Refused,
     _label,
@@ -862,8 +877,8 @@ def _file_parser(commands) -> None:
 
 
 def _text_parser(commands) -> None:
-    """``edit``, ``comment``, ``answer`` and ``pr``, and their arguments: each names a card and
-    a file holding the text it writes."""
+    """``edit``, ``comment``, ``answer``, ``note`` and ``pr``, and their arguments: each names a
+    card and a file holding the text it writes."""
     edit = commands.add_parser("edit", help="rewrite a card's title or text (never a ruling's)")
     edit.add_argument("card", type=card_number)
     edit.add_argument("--title", help="its new short name (R-BAL178, R-BAL180)")
@@ -875,6 +890,10 @@ def _text_parser(commands) -> None:
                                                 "followed, quoting and mentioning each author")
     answer.add_argument("card", type=card_number)
     answer.add_argument("--body-file", required=True, help="a file holding what was done")
+    note = commands.add_parser("note", help="post a stop's note on the task a claimed card's "
+                                            "next session starts, and print its prompt")
+    note.add_argument("card", type=card_number)
+    note.add_argument("--body-file", required=True, help="a file holding the note")
     pull = commands.add_parser("pr", help="open a card's pull request into dev from card/N, "
                                           "linked to its card")
     pull.add_argument("card", type=card_number)
@@ -941,7 +960,7 @@ def parser() -> argparse.ArgumentParser:
 COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
     "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment,
-    "answer": _comments.cmd_answer, "block": cmd_block,
+    "answer": _comments.cmd_answer, "note": _notes.cmd_note, "block": cmd_block,
     "move": cmd_move, "drop": cmd_drop, "start": _tasks.cmd_start,
     "task-file": _tasks.cmd_task_file,
     "finding-file": _findings.cmd_finding_file, "hand": _findings.cmd_hand,

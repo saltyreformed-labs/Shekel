@@ -140,9 +140,14 @@ Then, line by line:
   too. A group's way out is reverting the merge that landed each member it names, never deleting a
   marker by hand (that leaves the code in production, unseen).
 - For each card reading `moves money: yes` and each `ADDED` migration, find the rehearsal kit its
-  lane wrote (the lane's handoff names the kit's directory), and append each directory found to
-  `current.sh` as `KITS="<dir> <dir> ..."`. For each with no kit, re-run with
-  `--unrehearsed plan#N` or `--unrehearsed <revision>`; `plan` then refuses the release for it.
+  lane wrote: card N's is `~/projects/shekel-handoffs/kits/plan-N/`, and a migration's is the kit
+  of the card whose pull request added it, the merge on `dev`'s first-parent line that brought the
+  file naming its branch `card/N` (ruling plan#1980); a kit written before that ruling is named by
+  its lane's handoff file, `~/projects/shekel-handoffs/HANDOFF-<lane>.md`, or, once the lane
+  posted its first note, the same file under `~/projects/shekel-handoffs/archive/` (`/handoff`
+  moves it there). Append each directory found to `current.sh` as `KITS="<dir> <dir> ..."`.
+  For each with no kit, re-run with `--unrehearsed plan#N` or `--unrehearsed <revision>`; `plan`
+  then refuses the release for it.
 - A refusal naming a card the tracker does not hold, a card that is no work, or an entry under
   `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no judgment for this run to make:
   STOP and report it to Josh.
@@ -196,7 +201,8 @@ grade to the lane.
 
 **What a lane writing a kit is told:**
 
-- The kit is a directory in the lane's handoff folder. Its README names what it grades and its
+- The kit is the directory `~/projects/shekel-handoffs/kits/plan-N/`, N its card (ruling
+  plan#1980), which no note or file need name. Its README names what it grades and its
   command, which takes the dump's path and exits 0 only when every grade passes.
 - Its FIRST act creates `release-manifest.txt` in that directory (`touch`), and it only ever
   appends to it (`>>`), never truncates (`>`). One line per thing it makes, ending in a newline:

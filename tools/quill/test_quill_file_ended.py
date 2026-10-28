@@ -12,10 +12,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from tools.ci.scratch import elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git
-from tools.quill._fake import (AnswerLostOnce, FailOnce, FakeTracker, leaf_filing, ruling_filing,
-                              run, ship, unship)
+from tools.quill._fake import (AnswerLostOnce, FailOnce, FakeTracker, claim, leaf_filing,
+                              ruling_filing, run, ship, unship)
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Child
 from tools.quill.check import ruling_body
@@ -619,14 +620,16 @@ def test_a_stale_label_removed_after_sync_never_drops_a_step_that_shipped(code, 
     into dev, which ends the claim.  At leaf C the link stayed and the label was all that
     kept the leaf out, so removing it made `sync` re-close the shipped plan#1 "not planned,
     every leaf dropped" and call its Ships trailer a stale number.  `sync` unlinks the leaf
-    at its first run, so the label decides nothing."""
+    at its first run, so the label decides nothing.  The claim is another clone's
+    (:func:`_fake.claim`), its git alone, so plan#1 holds no finishing task (ruling
+    plan#1875) whose file its merge would lack."""
     tracker = FakeTracker()
     _split_by_an_unfinished_leaf(tracker, code, tmp_path)
     _closed_by_hand(tracker, 2)
     assert run(tracker, code, "sync") == 0
     assert tracker.cards_by_number[2].parent is None
-    assert run(tracker, code, "claim", "plan#1") == 0
-    _run(code, "push", "--quiet", "origin", "refs/heads/card/1:refs/heads/dev")
+    claimed = claim(code, 1)
+    _run(elsewhere(code), "push", "--quiet", "origin", f"{claimed}:refs/heads/dev")
     assert run(tracker, code, "sync") == 0
     assert tracker.writes[-1] == ("close", 1, "completed") and not _git.read(code).claims
     _unlabelled_by_hand(tracker, 2)
@@ -672,7 +675,9 @@ def test_sync_prints_the_undo_it_would_make_then_makes_it(code, tmp_path, capsys
         "  board: plan#1 would be added back at the bottom, a plain step again\n"
         "  board: plan#1 would be moved into plan#2's place\n"
         "  plan#2 would be unlinked from plan#1: its filing never finished, so it was never "
-        "part of that split (R-BAL205)\n")
+        "part of that split (R-BAL205)\n"
+        "would show plan#2 [step, balance] Half as Dropped in the board's Status (it showed "
+        "none)\n")
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == (
         "undo the split of plan#1 [step, balance] card 1 by plan#2, closed while still being "
@@ -680,7 +685,9 @@ def test_sync_prints_the_undo_it_would_make_then_makes_it(code, tmp_path, capsys
         "  board: plan#1 added back at the bottom, a plain step again\n"
         "  board: plan#1 moved into plan#2's place\n"
         "  plan#2 unlinked from plan#1: its filing never finished, so it was never part of "
-        "that split (R-BAL205)\n")
+        "that split (R-BAL205)\n"
+        "show plan#1 [step, balance] card 1 as Todo in the board's Status (it showed none)\n"
+        "show plan#2 [step, balance] Half as Dropped in the board's Status (it showed none)\n")
 
 
 def test_a_sync_whose_unlink_failed_is_finished_by_the_next_with_no_second_board_add(

@@ -443,7 +443,7 @@ def test_plan_exits_2_when_the_tracker_cannot_be_read(repo, capsys):
 
 def test_plan_prints_a_failed_read_as_one_line_naming_the_read(repo, capsys):
     """plan#1809: the failure is printed as every quill printer prints one
-    (``_github.described``): GitHub's page held on one line, then the read it cut short."""
+    (``_exits.described``): GitHub's page held on one line, then the read it cut short."""
     base, cutover = after_cutover(repo)
     cut = pull_request(repo, cutover, ship(40))
 

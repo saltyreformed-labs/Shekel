@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from tools.quill._arcs import arc_answered
 from tools.quill._fake import Sent
 from tools.quill._recorded import (
     REDACTED,
@@ -23,7 +24,14 @@ from tools.quill._recorded import (
     redacted,
     refusal,
 )
-from tools.quill._tracker import BOARD_ADD, BOARD_AFTER, BOARD_REMOVE, BOARD_TOP
+from tools.quill._tracker import (
+    BOARD_ADD,
+    BOARD_AFTER,
+    BOARD_REMOVE,
+    BOARD_STATUS_CLEAR,
+    BOARD_STATUS_SET,
+    BOARD_TOP,
+)
 from tools.quill.setup_tracker import FILING, PLAN, REHEARSAL
 
 #: The real tracker's ``owner/name``, as every recording here names it.
@@ -39,6 +47,24 @@ def test_a_recording_never_keeps_a_token():
     with pytest.raises(ValueError, match="token"):
         recorder.save("never-written")
     assert not (RECORDINGS / "never-written.json").exists()
+
+
+def test_a_create_s_answer_keeps_the_name_and_type_of_each_field_value_it_wrote():
+    """plan#1811: a card is filed holding its Arc, and the create reads its Arc back from
+    REST's answer by the field's name (``_arcs.arc_answered``); a field's name and type are no
+    card's text, so a recording keeps them, and the replayed create reads the Arc it wrote.
+    The answer's shape is GitHub's to the status recording's create, 2026-10-28."""
+    answer = {"number": 11, "title": f"{SCRATCH} card", "issue_field_values": [
+        {"issue_field_id": 48771436, "node_id": "IFSSV_1", "data_type": "single_select",
+         "issue_field_name": "Arc", "value": 85383809,
+         "single_select_option": {"id": 85383809, "name": "balance", "color": "blue"}}]}
+    kept = redacted([{"method": "POST", "url": _ISSUES, "status": 201, "answer": answer,
+                      "body": {"title": f"{SCRATCH} card", "body": "b", "type": "step",
+                               "labels": ["balance"], "issue_field_values": [
+                                   {"field_id": 48771436, "value": "balance"}]}}],
+                    _scratch(11))[0]["answer"]["issue_field_values"]
+    assert arc_answered(kept) == "balance"
+    assert (kept[0]["data_type"], kept[0]["issue_field_name"]) == ("single_select", "Arc")
 
 
 def test_a_recording_keeps_a_scratch_cards_text_and_redacts_every_other_cards():
@@ -218,6 +244,12 @@ _REFS = f"https://api.github.com/repos/{TRACKER}/git/refs"
     ("POST", "https://api.github.com/graphql",
      {"query": BOARD_ADD, "variables": {"p": "PVT_another_project", "c": "S_11"}}),
     ("POST", "https://api.github.com/graphql",
+     {"query": BOARD_STATUS_SET, "variables": {"p": "PVT_1", "i": "PVTI_of_a_real_card",
+                                               "f": "PVTSSF_1", "o": "f75ad846"}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": BOARD_STATUS_CLEAR, "variables": {"p": "PVT_another_project", "i": "SI_11",
+                                                 "f": "PVTSSF_1"}}),
+    ("POST", "https://api.github.com/graphql",
      {"query": BOARD_ADD + ' b: updateIssue(input: {id: "I_2", body: "x"}) { issue { id } }',
       "variables": {"p": "PVT_1", "c": "S_11"}}),
     ("POST", f"{_ISSUES}/11/sub_issues", {"sub_issue_id": 911, "replace_parent": True}),
@@ -240,6 +272,10 @@ _REFS = f"https://api.github.com/repos/{TRACKER}/git/refs"
     ("PATCH", f"https://api.github.com/repos/{TRACKER}-other/issues/11", {"body": "anything"}),
     ("POST", _ISSUES, {"title": f"{SCRATCH} new", "body": "b", "type": "step",
                        "labels": ["balance"], "assignees": ["x"]}),
+    ("POST", _ISSUES, {"title": f"{SCRATCH} new", "body": "b", "type": "step",
+                       "labels": ["balance"], "issue_field_values": [], "milestone": 1}),
+    ("POST", _ISSUES, {"title": "Real title", "body": "b", "type": "step",
+                       "labels": ["balance"], "issue_field_values": []}),
     ("PATCH", f"{_ISSUES}/11", {"body": "b", "milestone": 1}),
     ("PATCH", f"{_ISSUES}/11", {"title": f"{SCRATCH} renamed", "body": "b"}),
     ("POST", f"{_ISSUES}/11/dependencies/blocked_by", {"issue_id": 911, "x": 1}),
@@ -255,6 +291,12 @@ _REFS = f"https://api.github.com/repos/{TRACKER}/git/refs"
     ("DELETE", f"{_ISSUES}/11/sub_issue", {"sub_issue_id": 5698680001}),
     ("DELETE", f"{_ISSUES}/11/sub_issue", {"sub_issue_id": 911, "x": 1}),
     ("DELETE", f"{_ISSUES}/11/sub_issue", None),
+    ("PATCH", f"{_ISSUES}/2/sub_issues/priority", {"sub_issue_id": 911, "before_id": 911}),
+    ("PATCH", f"{_ISSUES}/11/sub_issues/priority", {"sub_issue_id": 5698680001,
+                                                    "before_id": 911}),
+    ("PATCH", f"{_ISSUES}/11/sub_issues/priority", {"sub_issue_id": 911,
+                                                    "before_id": 5698680001}),
+    ("PATCH", f"{_ISSUES}/11/sub_issues/priority", {"sub_issue_id": 911, "after_id": 911}),
 ])
 def test_a_write_that_is_not_a_known_write_to_a_scratch_card_is_refused(method, url, body):
     """Review cp3 M-3 (d), (e) and review cp4 M-3: a text-writing GraphQL mutation slipped
@@ -271,6 +313,9 @@ def test_a_write_that_is_not_a_known_write_to_a_scratch_card_is_refused(method, 
 @pytest.mark.parametrize(("method", "url", "body"), [
     ("POST", _ISSUES, {"title": f"{SCRATCH} new", "body": "b", "type": "step",
                        "labels": ["balance"]}),
+    ("POST", _ISSUES, {"title": f"{SCRATCH} new", "body": "b", "type": "step",
+                       "labels": ["balance"],
+                       "issue_field_values": [{"field_id": 1, "value": "balance"}]}),
     ("PATCH", f"{_ISSUES}/11", {"title": f"{SCRATCH} renamed"}),
     ("PATCH", f"{_ISSUES}/11", {"state": "closed", "state_reason": "not_planned"}),
     ("POST", f"{_ISSUES}/11/sub_issues", {"sub_issue_id": 911}),
@@ -278,10 +323,16 @@ def test_a_write_that_is_not_a_known_write_to_a_scratch_card_is_refused(method, 
     ("DELETE", f"{_ISSUES}/11/dependencies/blocked_by/911", None),
     ("DELETE", f"{_ISSUES}/11/labels/{FILING}", None),
     ("DELETE", f"{_ISSUES}/11/sub_issue", {"sub_issue_id": 911}),
+    ("PATCH", f"{_ISSUES}/11/sub_issues/priority", {"sub_issue_id": 911, "before_id": 911}),
     ("POST", "https://api.github.com/graphql",
      {"query": BOARD_ADD, "variables": {"p": "PVT_1", "c": "S_11"}}),
     ("POST", "https://api.github.com/graphql",
      {"query": BOARD_AFTER, "variables": {"p": "PVT_1", "i": "SI_11", "a": "PVTI_real"}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": BOARD_STATUS_SET, "variables": {"p": "PVT_1", "i": "SI_11", "f": "PVTSSF_1",
+                                               "o": "f75ad846"}}),
+    ("POST", "https://api.github.com/graphql",
+     {"query": BOARD_STATUS_CLEAR, "variables": {"p": "PVT_1", "i": "SI_11", "f": "PVTSSF_1"}}),
     ("GET", f"{_ISSUES}/2", None),
 ])
 def test_a_known_write_to_a_scratch_card_or_any_read_is_sent(method, url, body):
@@ -335,13 +386,21 @@ def test_a_create_github_refused_counts_nothing_as_scratch():
 
 #: Every recording in ``recorded/``, and whether it read the real cards (it must then hold a
 #: redacted title on a card node): ``tracker.json`` and ``export.json`` read them;
-#: ``label_missing.json`` read only its scratch card, and ``blocking.json`` and ``show.json``
-#: only their scratch cards on the throwaway ``plan-views-demo`` (R-BAL395; ``show.json``'s
-#: board read holds item numbers, no title).  A recording added or removed must be named
-#: here (the next test).
-RECORDINGS_READ_REAL_CARDS = {"blocking": False, "comments": False, "export": True,
-                              "label_missing": False, "show": False, "tracker": True,
-                              "twice": False, "unlink": False}
+#: ``label_missing.json`` read only its scratch card, and ``blocking.json``, ``show.json``,
+#: ``status.json``, ``priority.json`` and ``comment_lookup.json`` only their scratch cards on the
+#: throwaway ``plan-views-demo`` (R-BAL395, plan#1925; ``show.json``'s and ``status.json``'s
+#: board reads
+#: hold item numbers, no title).  A recording added or removed must be named here (the next
+#: test).
+RECORDINGS_READ_REAL_CARDS = {"blocking": False, "comment_lookup": False, "comments": False,
+                              "export": True, "label_missing": False, "priority": False,
+                              "show": False, "status": False, "tracker": True, "twice": False,
+                              "unlink": False}
+#: The recordings that hold no title at all (ruling plan#1952): ``comment_lookup.json`` reads
+#: only comments (``Tracker.comments_of``, plan#1925).  The census holds each to more than a
+#: title census could: every card in it is one of its own scratch cards, so every word of a
+#: card's it holds is scratch text.
+RECORDINGS_HOLDING_NO_TITLE = frozenset({"comment_lookup"})
 
 
 def test_every_recording_is_in_the_census():
@@ -359,16 +418,21 @@ def test_the_recording_the_tests_replay_shows_no_title_but_a_scratch_cards(name)
     answers), and a recording that read the real cards holds a redacted title on a card
     node (a GraphQL issue's ``I_`` id; a pull request's redacted title does not count).
     Requests are not walked: :func:`_recorded.refusal`, through ``redacted``, guards what a
-    recording sends.  And the file is exactly what the current redactor writes from it --
-    which proves only that it was saved by this redactor and not edited by hand since, not
-    that the redactor is right."""
+    recording sends.  A recording holding no title (:data:`RECORDINGS_HOLDING_NO_TITLE`, ruling
+    plan#1952) holds no title anywhere in its answers, and every card it holds (an object
+    carrying a number) is one of its own scratch cards, at least one.  And the file is exactly
+    what the current redactor writes from it -- which proves only that it was saved by this
+    redactor and not edited by hand since, not that the redactor is right."""
     saved = recording(name)
-    titles = []
+    scratch = Scratch.from_json(saved["scratch"])
+    titles, numbers = [], []
 
     def walk(value):
         if isinstance(value, dict):
             if isinstance(value.get("title"), str):
                 titles.append((value.get("id", ""), value["title"]))
+            if "number" in value:
+                numbers.append(value["number"])
             for item in value.values():
                 walk(item)
         elif isinstance(value, list):
@@ -377,14 +441,21 @@ def test_the_recording_the_tests_replay_shows_no_title_but_a_scratch_cards(name)
 
     answers = [exchange["answer"] for exchange in saved["exchanges"]]
     walk(answers)
-    assert titles and len(titles) == json.dumps(answers).count('"title": "'), (
-        "the walk must reach every title the recording holds")
+    if name in RECORDINGS_HOLDING_NO_TITLE:
+        assert not titles and '"title"' not in json.dumps(answers), (
+            "a recording named as holding no title holds one")
+        assert numbers and set(numbers) <= scratch.numbers, (
+            f"a recording holding no title holds a card that is no scratch card of its own: "
+            f"{sorted(set(numbers) - scratch.numbers)}")
+        assert not RECORDINGS_READ_REAL_CARDS[name]
+    else:
+        assert titles and len(titles) == json.dumps(answers).count('"title": "'), (
+            "the walk must reach every title the recording holds")
     for node, title in titles:
         assert title == REDACTED or title.startswith(SCRATCH) or (
             str(node).startswith("PVT_") and title == "Shekel plan"), title
     assert any(title == REDACTED and str(node).startswith("I_")
                for node, title in titles) == RECORDINGS_READ_REAL_CARDS[name]
-    scratch = Scratch.from_json(saved["scratch"])
     assert redacted(saved["exchanges"], scratch) == saved["exchanges"]
 
 

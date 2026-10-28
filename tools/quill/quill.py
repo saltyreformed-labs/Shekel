@@ -3,8 +3,8 @@
 The plan lives in the private repository ``saltyreformed-labs/shekel-plan``
 (ruling ``balance:R-BAL170``): each step, finding, ruling and question is one
 issue, a "card", and one board holds the steps and questions in the order the
-developer drags them (``R-BAL177``), each step's tasks nested under it in no order
-(ruling plan#1814).  Every write goes through quill's
+developer drags them (``R-BAL177``), each step's tasks nested under it outside that order,
+in its card's order of its tasks (rulings plan#1814, plan#1868).  Every write goes through quill's
 GitHub App, and every card a session files passes :mod:`check` first.
 
 Whether a card SHIPPED is git's answer, never the card's state: its ship
@@ -25,9 +25,12 @@ its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
 A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-issue
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,
-``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842),
-``task-file`` writes its file for the commit that finishes
-the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it.
+``_command.on_board``; ``sync`` puts on one that is not, ruling plan#1842), ``claim`` files a
+card's two finishing tasks (ruling plan#1875, ``_filing.finishing_filings``),
+``start`` begins it with a commit naming it (ruling plan#1872), the commit hook stamps each
+commit of the piece with it (:mod:`commit_hook`), ``task-file`` writes its file for the commit
+that finishes the piece (:mod:`_tasks`), and ``sync``, ``drop`` and ``show`` read it; ``sync``
+writes the board's Status of each card from git (:mod:`_status`).
 A FINDING fixed inside its owner step's pull request ships in it (ruling plan#1777):
 ``finding-file`` writes its ship marker on its owner's branch, for the commit that fixes it,
 and ``hand`` hands an open finding from its one owner to another step, a step a branch
@@ -41,8 +44,17 @@ dropped before its filing finished gives it back (``_unsplit``).
 ``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
 ``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
-says when sync is behind.  ``answer`` answers the developer's comments on a card, and ``next``
-names each claimed card holding one no answer has followed (plan#1822, :mod:`_comments`).
+says when sync is behind.  ``watch`` runs every minute from the same clone, never beside
+``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
+since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
+:mod:`_watch`).  ``answer`` answers the developer's comments on a card, and ``next``
+names each claimed card, and each task under one, holding one no answer has followed
+(plan#1822, ruling plan#1924, :mod:`_comments`).  ``note`` posts a stop's note on the task a
+claimed card's next session starts and prints its prompt (rulings plan#1921, plan#1922,
+:mod:`_notes`).
+``pr`` opens a card's pull request into ``dev``, its text naming the card so the card links it,
+and ``file question --owner`` links a question to the step it is asked for, a link its ruling
+keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -52,25 +64,33 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill show plan#N | OLD-ID
     python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC [--parent plan#P]
     python -m tools.quill.quill file finding --arc ARC --title NAME --owner plan#S --text SENTENCE
-    python -m tools.quill.quill file ruling --arc ARC --title NAME --owner plan#S
-                                (--question-file Q | --from-question plan#Q) --answer-file A
+    python -m tools.quill.quill file ruling --arc ARC --title NAME
+                                (--owner plan#S --question-file Q | [--owner plan#S]
+                                 --from-question plan#Q) --answer-file A
     python -m tools.quill.quill file question --arc ARC --title NAME --body-file QUESTION
+                                             [--owner plan#S]
     python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE
+                                         [--before plan#T]
+    python -m tools.quill.quill start plan#T
     python -m tools.quill.quill task-file plan#T
     python -m tools.quill.quill finding-file plan#F
     python -m tools.quill.quill hand plan#F --to plan#S
     python -m tools.quill.quill edit plan#N [--title NAME] [--body-file TEXT]
     python -m tools.quill.quill comment plan#N --body-file TEXT
     python -m tools.quill.quill answer plan#N --body-file TEXT
+    python -m tools.quill.quill note plan#N --body-file NOTE
     python -m tools.quill.quill block plan#N --by plan#M [--remove]
     python -m tools.quill.quill move plan#N (--top | --bottom | --after plan#M)
     python -m tools.quill.quill drop plan#N --why REASON
     python -m tools.quill.quill sync [--dry-run]
+    python -m tools.quill.quill watch [--dry-run]
+    python -m tools.quill.quill pr plan#N --title TITLE --body-file TEXT
     python -m tools.quill.quill spec-history plan#N [--since BRANCH_OR_DATE]
     python -m tools.quill.quill spec-revert plan#N --to EDIT_ID
     python -m tools.quill.quill export --to DIR
 
-Exit status: 0 done; 1 refused, with nothing written (or, for ``sync``, a
+Exit status: 0 done (for ``watch``, its REPORT lines printed: they alert from ``sync``, ruling
+plan#1907); 1 refused, with nothing written (or, for ``sync``, a
 REPORT a person must act on); 2 a call failed -- GitHub, git, the network, or
 a file the command reads or writes (the App's credentials, a ``--body-file``,
 ``export``'s file) -- or the command line itself is not one of the forms above
@@ -100,10 +120,21 @@ import requests
 
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
-from tools.quill import _comments, _findings, _git, _relabel, _tasks
+from tools.quill import (
+    _comments,
+    _filing,
+    _findings,
+    _git,
+    _notes,
+    _pr,
+    _relabel,
+    _status,
+    _sync,
+    _tasks,
+    _watch,
+)
 from tools.quill._arcs import other_labels
 from tools.quill._command import (
-    Refused,
     _label,
     _one,
     _read,
@@ -111,9 +142,10 @@ from tools.quill._command import (
     card_number,
     with_closure,
 )
+from tools.quill._exits import Refused, exit_status
 from tools.quill._export import cmd_export
 from tools.quill._filing import cmd_file
-from tools.quill._github import CredentialsError, GitHubError, described
+from tools.quill._github import CredentialsError, GitHubError
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -169,9 +201,9 @@ CONNECT = partial(Tracker.connect, PLAN)
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The first open step in the board's order that is unclaimed, unshipped and unblocked;
     then how far ``sync`` is behind, what it cannot offer that a person must act on, and last,
-    after every line no further read can cost, each claimed card holding a comment of the
-    developer's that no answer of quill's has followed (plan#1822,
-    :func:`_comments.unanswered_lines`).
+    after every line no further read can cost, each claimed card, and each task under one,
+    holding a comment of the developer's that no answer of quill's has followed (plan#1822,
+    ruling plan#1924, :func:`_comments.unanswered_lines`).
 
     **Sync is behind** (ruling plan#1815) while git says work shipped or a task is done that
     the tracker still shows open: the cards ``sync`` would close over what this reads, by
@@ -216,12 +248,15 @@ def cmd_claim(args, tracker: Tracker, root: Path,
     """Claim a card (R-BAL359): a commit adding its ship marker, made on ``origin/dev`` --
     or with ``--here`` on the commit checked out, for work already started -- and pushed
     create-only as the branch ``card/N`` (:func:`_git.claim`), then checked out here as
-    that branch, with no upstream.  Refused, with nothing written, for what is no work to
-    claim (work shown done that a revert unshipped says to sync first); while ``card/N``
-    holds a claim; while ``origin`` holds a ``card/N`` already merged, which a create-only
-    push cannot replace; and while this clone already has a branch of that name, which the
-    check-out would collide with.  The claim line is printed once the push lands, so a
-    failed check-out after it says what to run."""
+    that branch, with no upstream; then its two finishing tasks filed under it, last in its
+    order, unless they are filed already (ruling plan#1875): decided before the push
+    (:func:`_filing.finishing_filings`), written after it.  Refused, with nothing written,
+    for what is no work to claim (work shown done that a revert unshipped says to sync
+    first); while ``card/N`` holds a claim (:func:`_claimed_again`); while ``origin`` holds
+    a ``card/N`` already merged, which a create-only push cannot replace; while this clone
+    already has a branch of that name, which the check-out would collide with; and for what
+    the filing of a finishing task refuses.  The claim line is printed once the push lands,
+    so a failed check-out or filing after it says what to run."""
     card = _one(tracker, args.card)
     reads = _git.read(root)
     shipped = reads.shipped.cards
@@ -237,8 +272,8 @@ def cmd_claim(args, tracker: Tracker, root: Path,
         raise Refused(f"{_label(card)} is never offered as work: {why}")
     if card.number in shipped:
         raise Refused(f"{_label(card)} shipped in git: no work is left on it to claim")
-    if held := reads.claims.get(card.number):
-        raise Refused(f"plan#{card.number} is already claimed: {holder(held)}")
+    if card.number in reads.claims:
+        return _claimed_again(tracker, root, card, cards, reads)
     branch = _git.card_branch(card.number)
     if tip := reads.merged.get(card.number):
         raise Refused(f"origin holds {branch} at {tip[:12]}, whose work {DEV} or {MAIN} already "
@@ -249,6 +284,7 @@ def cmd_claim(args, tracker: Tracker, root: Path,
     if _git.has_branch(root, branch):
         raise Refused(f"this clone already has a branch {branch!r}, which a claim of "
                       f"plan#{card.number} checks out: delete or rename it first")
+    finishing = _filing.finishing_filings(tracker, root, card, cards, reads)
     base = "HEAD" if args.here else tracking(DEV)
     try:
         sha = _git.claim(root, card.number, base, clock())
@@ -263,6 +299,25 @@ def cmd_claim(args, tracker: Tracker, root: Path,
               f"`git switch {branch}`")
     else:
         print(f"  switched to {branch}")
+    _filing.file_finishing(tracker, card, finishing)
+    return 0
+
+
+def _claimed_again(tracker: Tracker, root: Path, card: Card, cards: dict[int, Card],
+                   reads: _git.Reads) -> int:
+    """``claim`` of ``card``, which one of ``reads``' claims holds: refused, with nothing
+    written, but where that claim's branch is checked out here and some of the card's
+    finishing tasks are not filed (a failure cut the claim short, or the claim came before
+    ruling plan#1875), the claim is finished: they are filed
+    (:func:`_filing.file_finishing`, R-BAL186)."""
+    held = reads.claims[card.number]
+    finishing = (_filing.finishing_filings(tracker, root, card, cards, reads)
+                 if _git.checked_out(root) == held.branch else [])
+    if not finishing:
+        raise Refused(f"plan#{card.number} is already claimed: {holder(held)}")
+    print(f"plan#{card.number} is claimed already, {holder(held)}, and checked out here; its "
+          "finishing tasks are not all filed, so this finishes its claim")
+    _filing.file_finishing(tracker, card, finishing)
     return 0
 
 
@@ -418,7 +473,7 @@ def cmd_block(args, tracker: Tracker, root: Path) -> int:
 def _not_in_order(card: Card) -> str:
     """Why nothing is moved after ``card``, which the board's order read does not list: a step
     or question off the board, or on it but not yet listed by a read that lags a write
-    (``_tracker``'s doctrine); any other kind, a task among them, is in no order."""
+    (``_tracker``'s doctrine); any other kind, a task among them, is in no place of it."""
     if card.kind not in IN_ORDER:
         return (f"plan#{card.number} is not in the board's order, its steps and questions "
                 "(R-BAL177)")
@@ -563,8 +618,15 @@ def _leave_split(tracker: Tracker, leaf: Card, cards: dict[int, Card],
 def _refuse_drop(card: Card, cards: dict[int, Card], reads: _git.Reads) -> None:
     """Refuse to drop ``card``, no step split into smaller steps, when it is closed already, or
     is work git says shipped, or a task whose file is on ``dev`` or ``main``: each is undone
-    by a revert."""
+    by a revert.  A task closed on the web while its claim has begun it is still in progress
+    in git, so the refusal says how its drop is recorded there (ruling plan#1900)."""
     if not card.is_open:
+        claim = reads.claims.get(card.parent) if card.kind == TASK else None
+        if claim is not None and card.number == claim.in_progress:
+            raise Refused(f"{_label(card)} is already closed, and git still says it is in "
+                          f"progress on {claim.branch}: reopen it on the web, then drop it "
+                          f"here with {claim.branch} checked out, which records its drop in git "
+                          "(ruling plan#1900)")
         raise Refused(f"{_label(card)} is already closed")
     if is_work(card, cards, reads.shipped.cards) and card.number in reads.shipped.cards:
         raise Refused(f"{_label(card)} shipped in git: undo it by reverting the change that "
@@ -586,6 +648,8 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
     :func:`_findings.refuse_orphaning`): a task's drop, or a leaf's still being filed, leaves
     the steps above as they were.  A card's drop drops each task under it still to do first
     (:func:`_drop`, R-BAL190's shape: the tool records the decision where the work is).
+    A task its card's claim has begun is dropped in git first, on its card's branch checked
+    out, so it is in progress no longer (:func:`_tasks.record_drop`, ruling plan#1900).
     A leaf dropped while its filing has not finished is first taken out of the
     split it began, which it was never part of (R-BAL205, :func:`_leave_split`):
     unlinked, and its split step, if it was the only leaf and will be open, a
@@ -627,6 +691,8 @@ def cmd_drop(args, tracker: Tracker, root: Path) -> int:
             _leave_split(tracker, card, cards, shipped)
         for undo in drop_unlinks(card, cards, shipped, set()):
             _unsplit(tracker, undo, cards)
+        if card.kind == TASK:
+            _tasks.record_drop(tracker, card, root, args.why, reads)
         _drop(tracker, card, args.why, reads)
         return 0
     below = leaves_below(card, cards, shipped)
@@ -673,89 +739,40 @@ def _undo_splits(tracker: Tracker, cards: dict[int, Card], shipped: frozenset[in
         _unsplit(tracker, undo, cards, dry_run)
 
 
-def _sync_reads(tracker: Tracker, reads: _git.Reads,
-                ever: frozenset[int]) -> tuple[dict[int, Card], list[str]]:
-    """The cards ``sync`` decides over, and a HISTORY line for each card a ship marker in
-    ``reads`` names that does not exist.  ``ever``: every card whose marker a commit on
-    ``dev`` or ``main`` ever touched (:func:`_git.ever_marked`).
-
-    The listings of open cards and of EVERY card still marked (a filing unfinished, or
-    one closed while still being filed, whose link under its split step ``sync``
-    undoes wherever that step is) only FIND the cards it decides over; each
-    is then read by its number, which decides, since a listing may still show a card
-    as it was before a write: a leaf's close the listing lagged made its split step,
-    which ``quill drop`` had just closed, read as split again, and sync reopened it.
-    Every card a marker ever named (``ever``, which holds every card git says shipped now
-    too), and every claimed card, is read by its number too -- the first so that a card
-    the tool closed as shipped is reopened once a revert has deleted its marker, which no
-    listing finds (it is closed, and carries no mark); the
-    claimed ones so that a claim on a split step is reported whatever that step's
-    state (:func:`_state.sync_plan`) -- and then every card a decision over them reads
-    (:func:`with_closure`).  Every card a task file on ``dev`` or ``main``, or one a
-    claim's own commits wrote, names is read by its number too, and then every task linked
-    under a card read (R-BAL386): a task the tool closed as done is found through the card it
-    is under, so it is reopened once git no longer says it is done.  (Not found: one under a
-    card a PERSON closed while it was claimed, never shipped nor marked, whose claim was
-    released since; it stays shown done under that dropped card.)
-    """
-    listed = {**tracker.open_cards(), **tracker.marked()}
-    named = set(reads.shipped.tasks).union(*(claim.tasks for claim in reads.claims.values()))
-    cards = tracker.cards(ever | set(listed) | set(reads.claims) | named)
-    if unread := sorted(set(listed) - set(cards)):
-        raise TrackerError(f"plan#{unread[0]} is listed, but a read by its number does not hold "
-                           "it (that read has not caught up yet, or the card was deleted or "
-                           "moved since): run sync again")
-    history = [f"the marker {_git.marker(number)} on {DEV} or {MAIN} names plan#{number}, "
-               "which does not exist" for number in sorted(reads.shipped.cards - set(cards))]
-    cards = with_closure(tracker, cards)
-    tasks = {number for card in cards.values() for number in card.task_children} - set(cards)
-    return with_closure(tracker, {**cards, **tracker.cards(tasks)}), history
-
-
 def cmd_sync(args, tracker: Tracker, root: Path) -> int:
-    """Write each step's, finding's and task's open or closed state from git (display only), then
-    undo each split a leaf closed while still being filed is linked under (R-BAL205,
-    :func:`_undo_splits`): after every state write and every REPORT and HISTORY line, so a
-    failed undo costs none of them; run again, it finishes the undo.  Then put each card's arc
-    labels back to display its Arc, over a read of every card (R-BAL354,
-    :func:`_relabel.put_back`), reporting each card whose Arc no label can fix.  Last, put on
-    the board each task whose step is on it and that is not (ruling plan#1842,
-    :func:`_tasks.put_on_board`).  Both are display of the plan, so a failed write in either
-    costs nothing above it; run again, it makes what is still to make.
+    """Write each step's, finding's and task's open or closed state from git (display only,
+    :func:`_sync.write_states`), then undo each split a leaf closed while still being filed is
+    linked under (R-BAL205, :func:`_undo_splits`): after every state write and every REPORT and
+    HISTORY line, so a failed undo costs none of them; run again, it finishes the undo.  Then
+    put each card's arc labels back to display its Arc, over a read of every card (R-BAL354,
+    :func:`_relabel.put_back`), reporting each card whose Arc no label can fix; put on the
+    board each task whose step is on it and that is not (ruling plan#1842,
+    :func:`_tasks.put_on_board`); and last write the board's Status of every card it holds
+    from git (rulings plan#1873, plan#1905, :func:`_status.sync_statuses`).  Each is display
+    of the plan, so a failed write in one costs nothing above it; run again, it makes the
+    writes still owed.
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold
-    wrongly, which no tracker write can change and so never fails it (R-BAL184).
+    wrongly, which no tracker write can change and so never fails it (R-BAL184): those
+    about the cards it decides, and each entry under ``plan/ships`` or ``plan/tasks`` there
+    that is no card's (:attr:`_git.Shipped.history`).
 
-    What it reads: :func:`_sync_reads`.
+    What it reads: :func:`_sync.every_card`.  ``quill watch`` runs the same producer over
+    the cards a moved branch names (:mod:`_watch`).
     """
     reads = _git.read(root)
     shipped = reads.shipped.cards
-    cards, history = _sync_reads(tracker, reads, _git.ever_marked(root))
-    changes = sync_plan(cards, shipped, reads.claims, reads.shipped.tasks)
-    verb = "would " if args.dry_run else ""
-    for number in changes.close:
-        if not args.dry_run:
-            tracker.close(number, "completed")
-        print(f"{verb}close {_label(cards[number])}")
-    for number in changes.drop:
-        if not args.dry_run:
-            tracker.close(number, "not_planned")
-        print(f"{verb}close as not planned, every leaf dropped (R-BAL187): "
-              f"{_label(cards[number])}")
-    for number in changes.reopen:
-        if not args.dry_run:
-            tracker.reopen(number)
-        print(f"{verb}reopen {_label(cards[number])}")
-    for line in changes.reports:
-        print(f"REPORT: {line}")
-    history += changes.history + list(reads.shipped.history)
-    for line in history:
+    decided = _sync.every_card(tracker, reads, _git.ever_marked(root))
+    changes = _sync.write_states(tracker, decided, shipped, args.dry_run)
+    for line in reads.shipped.history:
         print(f"HISTORY: {line}")
-    _undo_splits(tracker, cards, shipped, changes, args.dry_run)
+    _undo_splits(tracker, decided.cards, shipped, changes, args.dry_run)
     reports = _relabel.put_back(tracker, args.dry_run)
-    _tasks.put_on_board(tracker, cards, args.dry_run)
-    return 1 if changes.reports or reports else 0
+    _tasks.put_on_board(tracker, decided.cards, args.dry_run)
+    for line in (shown := _status.sync_statuses(tracker, decided.cards, reads, args.dry_run)):
+        print(f"REPORT: {line}")
+    return 1 if changes.reports or reports or shown else 0
 
 
 # -- spec-history, spec-revert ------------------------------------------------------
@@ -843,7 +860,8 @@ def _file_parser(commands) -> None:
     finding.add_argument("--owner", type=card_number, required=True, help="its owner step")
     finding.add_argument("--text", required=True, help="one sentence, at most 400 characters")
     ruling = sub.add_parser("ruling", parents=[common], help="the developer's decision")
-    ruling.add_argument("--owner", type=card_number, required=True, help="its owner step")
+    ruling.add_argument("--owner", type=card_number,
+                        help="its owner step; from a question that names one, that one")
     asked = ruling.add_mutually_exclusive_group(required=True)
     asked.add_argument("--question-file", help="his question, word for word")
     asked.add_argument("--from-question", type=card_number,
@@ -851,12 +869,42 @@ def _file_parser(commands) -> None:
     ruling.add_argument("--answer-file", required=True, help="his answer, word for word")
     question = sub.add_parser("question", parents=[common], help="for the developer to answer")
     question.add_argument("--body-file", required=True, help="the question")
+    question.add_argument("--owner", type=card_number,
+                          help="the step it is asked for, if one, which its ruling keeps")
     task = sub.add_parser(TASK, help="a piece of one step or finding: a commit in its card's "
                                      "pull request (its arc is its card's)")
     task.add_argument("--parent", type=card_number, required=True,
                       help="the step or finding it is a piece of")
     task.add_argument("--title", required=True, help="a short name (R-BAL178)")
     task.add_argument("--body-file", required=True, help="what the piece builds")
+    task.add_argument("--before", type=card_number,
+                      help="the open task under the same card it is built before; else it goes "
+                           "above the card's finishing tasks")
+
+
+def _text_parser(commands) -> None:
+    """``edit``, ``comment``, ``answer``, ``note`` and ``pr``, and their arguments: each names a
+    card and a file holding the text it writes."""
+    edit = commands.add_parser("edit", help="rewrite a card's title or text (never a ruling's)")
+    edit.add_argument("card", type=card_number)
+    edit.add_argument("--title", help="its new short name (R-BAL178, R-BAL180)")
+    edit.add_argument("--body-file", help="a file holding its new text")
+    comment = commands.add_parser("comment", help="add a comment to a card")
+    comment.add_argument("card", type=card_number)
+    comment.add_argument("--body-file", required=True, help="a file holding the comment")
+    answer = commands.add_parser("answer", help="answer a card's comments no answer has "
+                                                "followed, quoting and mentioning each author")
+    answer.add_argument("card", type=card_number)
+    answer.add_argument("--body-file", required=True, help="a file holding what was done")
+    note = commands.add_parser("note", help="post a stop's note on the task a claimed card's "
+                                            "next session starts, and print its prompt")
+    note.add_argument("card", type=card_number)
+    note.add_argument("--body-file", required=True, help="a file holding the note")
+    pull = commands.add_parser("pr", help="open a card's pull request into dev from card/N, "
+                                          "linked to its card")
+    pull.add_argument("card", type=card_number)
+    pull.add_argument("--title", required=True, help="the pull request's title")
+    pull.add_argument("--body-file", required=True, help="a file holding what it changes")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -874,17 +922,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("show", help="a card, its comments and its git history").add_argument(
         "card")
     _file_parser(commands)
-    edit = commands.add_parser("edit", help="rewrite a card's title or text (never a ruling's)")
-    edit.add_argument("card", type=card_number)
-    edit.add_argument("--title", help="its new short name (R-BAL178, R-BAL180)")
-    edit.add_argument("--body-file", help="a file holding its new text")
-    comment = commands.add_parser("comment", help="add a comment to a card")
-    comment.add_argument("card", type=card_number)
-    comment.add_argument("--body-file", required=True, help="a file holding the comment")
-    answer = commands.add_parser("answer", help="answer a card's comments no answer has "
-                                                "followed, quoting and mentioning each author")
-    answer.add_argument("card", type=card_number)
-    answer.add_argument("--body-file", required=True, help="a file holding what was done")
+    _text_parser(commands)
     block = commands.add_parser("block", help="record a blocked-by edge")
     block.add_argument("card", type=card_number)
     block.add_argument("--by", type=card_number, required=True)
@@ -898,6 +936,8 @@ def parser() -> argparse.ArgumentParser:
     drop = commands.add_parser("drop", help="retire a card with no code")
     drop.add_argument("card", type=card_number)
     drop.add_argument("--why", required=True)
+    commands.add_parser("start", help="begin a task: a commit naming it on its card's "
+                                      "branch, pushed").add_argument("task", type=card_number)
     commands.add_parser("task-file", help="write a task's file plan/tasks/T, to commit with "
                                           "its piece on its card's branch").add_argument(
         "task", type=card_number)
@@ -908,6 +948,9 @@ def parser() -> argparse.ArgumentParser:
     hand.add_argument("finding", type=card_number)
     hand.add_argument("--to", type=card_number, required=True, help="its new owner step")
     commands.add_parser("sync", help="write cards' state from git").add_argument(
+        "--dry-run", action="store_true")
+    commands.add_parser("watch", help="write the state of each card whose branch moved since "
+                                      "the last pass, from git").add_argument(
         "--dry-run", action="store_true")
     history = commands.add_parser("spec-history", help="a card's body edits")
     history.add_argument("card", type=card_number)
@@ -923,27 +966,34 @@ def parser() -> argparse.ArgumentParser:
 COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
     "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment,
-    "answer": _comments.cmd_answer, "block": cmd_block,
-    "move": cmd_move, "drop": cmd_drop, "task-file": _tasks.cmd_task_file,
+    "answer": _comments.cmd_answer, "note": _notes.cmd_note, "block": cmd_block,
+    "move": cmd_move, "drop": cmd_drop, "start": _tasks.cmd_start,
+    "task-file": _tasks.cmd_task_file,
     "finding-file": _findings.cmd_finding_file, "hand": _findings.cmd_hand,
     "sync": cmd_sync, "spec-history": cmd_spec_history, "spec-revert": cmd_spec_revert,
     "export": cmd_export,
 }
 
 
+#: The commands handed how to reach the tracker, ``connect``, in place of a tracker: each
+#: connects only once it has something to read or write there.  ``watch`` runs every minute,
+#: and most minutes ask git alone (:mod:`_watch`); ``pr`` writes the code repository and reads
+#: nothing of the tracker (:mod:`_pr`).
+CONNECTS_LATE: dict[str, Callable[..., int]] = {"watch": _watch.cmd_watch, "pr": _pr.cmd_pr}
+
+#: What a command's failed call raises: exit status 2 (:func:`exit_status`).
+FAILURES = (GitHubError, TrackerError, GitError, requests.RequestException, OSError,
+            CredentialsError, _pr.PullRequestError)
+
+
 def main(argv: list[str] | None = None, connect: Callable[[], Tracker] = CONNECT,
          root: Path | None = None) -> int:
     """Run one command; its exit status."""
     args = parser().parse_args(argv)
-    try:
-        return COMMANDS[args.command](args, connect(), root or REPO)
-    except Refused as refused:
-        print(f"refused: {refused}", file=sys.stderr)
-        return 1
-    except (GitHubError, TrackerError, GitError, requests.RequestException,
-            OSError, CredentialsError) as error:
-        print(f"failed: {described(error)}", file=sys.stderr)
-        return 2
+    if args.command in CONNECTS_LATE:
+        return exit_status(partial(CONNECTS_LATE[args.command], args, connect, root or REPO),
+                           FAILURES)
+    return exit_status(lambda: COMMANDS[args.command](args, connect(), root or REPO), FAILURES)
 
 
 if __name__ == "__main__":

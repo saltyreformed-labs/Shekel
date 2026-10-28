@@ -130,10 +130,24 @@ def test_the_owner_is_graded_only_when_the_change_sets_it():
 
 
 def test_a_step_splits_only_a_step_and_a_question_needs_no_owner():
-    """A leaf's parent is the step it splits (R-BAL179); a question's owner is the developer."""
+    """A leaf's parent is the step it splits (R-BAL179); a question names an owner only when
+    it is asked for a step (plan#1861's item 10), so it needs none."""
     leaf = Draft("step", "leaf", "", (), "balance", Owner("finding", True, False))
     assert violations(leaf) == ["a step's parent is the step it splits, not a finding"]
     assert not violations(Draft("question", "q", "Why?", (), "balance"))
+
+
+@pytest.mark.parametrize(("kind", "named"), [("finding", "finding"), ("ruling", "ruling"),
+                                             ("question", "question"),
+                                             (None, "a card with no type")])
+def test_a_question_that_names_an_owner_is_asked_for_a_step(kind, named):
+    """Spec item 10: a question's owner, when it names one, is the step it is asked for, done or
+    not and split or not, as a ruling's is (R-BAL395); any other card is refused."""
+    asked = Draft("question", "q", "Why?", (), "balance", Owner("step", False, True))
+    assert not violations(asked)
+    assert violations(Draft("question", "q", "Why?", (), "balance", Owner(kind, True, False))) == [
+        "a question that names an owner is blocked by the step it is asked for (R-BAL395); its "
+        f"owner is {named}"]
 
 
 @pytest.mark.parametrize(("body", "said"), [

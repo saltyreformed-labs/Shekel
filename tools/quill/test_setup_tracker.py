@@ -8,7 +8,7 @@ from functools import partial
 import pytest
 
 from tools.ci.arcs import ARCS
-from tools.quill import setup_tracker
+from tools.quill import _board_fields, setup_tracker
 from tools.quill._github import GitHubError, app_credentials, app_jwt
 from tools.quill.setup_tracker import (
     APP_PERMISSIONS,
@@ -270,6 +270,17 @@ def test_the_app_may_hold_exactly_its_declared_permissions():
     ]
 
 
+#: Each board field by id; Status holds the options quill writes (rulings plan#1873, plan#1906).
+_FIELDS = {
+    "F1": {"id": "F1", "name": "Title", "dataType": "TITLE", "isIssueField": False},
+    "F2": {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT", "isIssueField": False,
+           "options": [{"name": name} for name in _board_fields.STATUS_OPTIONS]},
+    "F3": {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE", "isIssueField": False},
+    "F4": {"id": "F4", "name": "Rank", "dataType": "NUMBER", "isIssueField": False},
+    "F6": {"id": "F6", "name": "Labels", "dataType": "LABELS", "isIssueField": False},
+}
+
+
 def _view(index, name, view_filter, sorts):
     """An ungrouped table view as the board query answers it, showing Title and Status."""
     return {"id": f"V{index}", "number": index, "name": name, "filter": view_filter,
@@ -290,7 +301,7 @@ def _project(cards=0, public=False, linked=True, views=(("View 1", "", 0),)):
             {"nameWithOwner": setup_tracker.PLAN.full_name}] if linked else []},
         "fields": {"nodes": [
             {"id": "F1", "name": "Title", "dataType": "TITLE", "isIssueField": False},
-            {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT", "isIssueField": False},
+            dict(_FIELDS["F2"]),
             {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE",
              "isIssueField": False},
             {"id": "F4", "name": "Rank", "dataType": "NUMBER", "isIssueField": False},
@@ -306,29 +317,24 @@ def _project(cards=0, public=False, linked=True, views=(("View 1", "", 0),)):
     }
 
 
-_FIELDS = {
-    "F1": {"id": "F1", "name": "Title", "dataType": "TITLE", "isIssueField": False},
-    "F2": {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT", "isIssueField": False},
-    "F3": {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE", "isIssueField": False},
-    "F4": {"id": "F4", "name": "Rank", "dataType": "NUMBER", "isIssueField": False},
-    "F6": {"id": "F6", "name": "Labels", "dataType": "LABELS", "isIssueField": False},
-}
-
-
 def _visible(*ids):
     """A view's visible columns, by field id."""
     return [dict(_FIELDS[ident]) for ident in ids]
 
 
-#: The columns of a Plan view as declared, by field id: Title, and the Parent issue, where a
-#: leaf names the step it splits (ruling plan#1814); no stored field.
-_DECLARED = ("F1", "F3")
+#: The columns of a Plan view as declared, by field id: Title, Status, which quill writes
+#: (ruling plan#1873), and the Parent issue, where a leaf names the step it splits (ruling
+#: plan#1814); no other stored field.
+_DECLARED = ("F1", "F2", "F3")
 
 
-def _status_item(number, value, kind="ISSUE", archived=False):
+def _status_item(number, value, kind="ISSUE", archived=False,
+                 repository=setup_tracker.PLAN.full_name):
     """One board item as the items query answers it (``value`` None: no Status set;
-    a draft has no content fields; ``archived``: whether it is archived)."""
-    content = {"number": number, "repository": {"name": "shekel-plan"}} if number else {}
+    a draft has no content fields; ``archived``: whether it is archived; ``repository``: the
+    ``owner/name`` its content is of, whose ``name`` it shows as)."""
+    content = {"number": number, "repository": {
+        "name": "shekel-plan", "nameWithOwner": repository}} if number else {}
     return {"id": f"PVTI_{number or 'draft'}", "type": kind, "isArchived": archived,
             "content": content, "fieldValueByName": {"name": value} if value else None}
 
@@ -409,13 +415,13 @@ class _Board(_GitHub):
         return {}
 
 
-def test_apply_on_an_empty_board_deletes_rank_hides_status_and_no_automation():
+def test_apply_on_an_empty_board_deletes_rank_keeps_status_shown_and_no_automation():
     """A board with no card holds nothing to lose; an automation is never deleted.
 
     GitHub refuses to delete its built-in Status and ignores emptying its choices
-    (measured 2026-10-03), so it is left in place and hidden from the plan view;
-    any other stored field is deleted.  The same write shows the Parent issue column
-    (ruling plan#1814).
+    (measured 2026-10-03), and quill writes it (ruling plan#1873), so it stays, shown in the
+    plan view; any other stored field is deleted.  The same write shows the Parent issue
+    column (ruling plan#1814).
     """
     github = _Board(_project(cards=0))
     report = Report()
@@ -424,7 +430,7 @@ def test_apply_on_an_empty_board_deletes_rank_hides_status_and_no_automation():
     assert [ident for name, ident in sent if name == "deleteProjectV2Field"] == ["F4"]
     assert not [name for name, _ in sent if name in ("deleteProjectV2Workflow",
                                                      "updateProjectV2Field")]
-    assert ("updateProjectV2View", {"id": "V1", "fields": ["F1", "F3"]}) in github.mutations
+    assert ("updateProjectV2View", {"id": "V1", "fields": ["F1", "F2", "F3"]}) in github.mutations
     assert report.differences == 2
     assert any("'Item closed' is on" in line for line in report.lines)
     assert not any("'Auto-close issue'" in line for line in report.lines)
@@ -462,32 +468,54 @@ def test_a_refused_field_deletion_is_still_a_difference():
     assert report.differences == 3
 
 
-def test_github_status_is_tolerated_only_hidden_and_a_custom_select_is_not():
-    """The undeletable Status may exist; shown in the plan view it differs, as does any other."""
-    project = _project(views=(("Plan", "is:open", 0),))
-    project["fields"]["nodes"] = [_FIELDS["F1"], _FIELDS["F2"]]
-    project["workflows"]["nodes"] = []
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED, "F2")
-    assert setup_tracker.board_differences(project) == [
-        "the 'Plan' view shows stored fields ['Status']"
-    ]
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible(*_DECLARED)
+def test_status_is_shown_holding_exactly_its_four_options_and_a_custom_select_is_not_kept():
+    """Rulings plan#1873 and plan#1906: quill writes Status, so the plan view shows it, and it
+    holds exactly Todo, In Progress, Done and Dropped in any order; lacking one, quill writes
+    none, which the difference says; an extra option differs too.  Any other stored field
+    differs, as before."""
+    project = _as_declared()
     assert not setup_tracker.board_differences(project)
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1", "F3")
+    assert setup_tracker.board_differences(project) == [
+        "the 'Plan' view does not show the Status column, where quill shows each card's progress "
+        "(ruling plan#1873)"]
+    project = _as_declared()
+    status = project["fields"]["nodes"][1] = dict(
+        _FIELDS["F2"], options=[{"name": name} for name in ("Done", "Todo", "In Progress")])
+    assert setup_tracker.board_differences(project) == [
+        "the board's Status holds the options ['Done', 'Todo', 'In Progress'], not exactly "
+        "['Todo', 'In Progress', 'Done', 'Dropped'] (rulings plan#1873, plan#1906), so quill "
+        "writes no card's Status until it holds ['Dropped']: correct them in the board's "
+        "settings, at https://github.com/orgs/o/projects/1/settings"]
+    status["options"] += [{"name": "Dropped"}, {"name": "Blocked"}]
+    assert setup_tracker.board_differences(project) == [
+        "the board's Status holds the options ['Done', 'Todo', 'In Progress', 'Dropped', "
+        "'Blocked'], not exactly ['Todo', 'In Progress', 'Done', 'Dropped'] (rulings "
+        "plan#1873, plan#1906): correct them in the board's settings, at "
+        "https://github.com/orgs/o/projects/1/settings"]
+    project = _as_declared()
     project["fields"]["nodes"].append({"id": "F5", "name": "Tier", "dataType": "SINGLE_SELECT",
                                        "isIssueField": False})
     assert setup_tracker.board_differences(project) == ["the board stores a field, 'Tier'"]
 
 
-def test_every_card_holding_a_status_is_a_difference_on_every_page():
-    """A Status set by hand is a second home of a card's progress; each card is named."""
-    github = _Board(_project(cards=3, views=(("Plan", "is:open", 0),)),
+def test_a_status_on_an_item_that_is_no_card_differs_on_every_page_and_a_cards_does_not():
+    """Ruling plan#1905: a card's Status is quill sync's, which puts back any value but its own,
+    so a card holding one is no difference; an item that is no card of the tracker -- a pull
+    request, another repository's issue -- holding one is, since sync reads no such item."""
+    github = _Board(_project(cards=4, views=(("Plan", "is:open", 0),)),
                     status_pages=([_status_item(1, None), _status_item(2, "Todo")],
-                                  [_status_item(3, "Done")]))
+                                  [_status_item(3, "Done", kind="PULL_REQUEST"),
+                                   _status_item(4, "Todo",
+                                                repository="saltyreformed-labs/Shekel")]))
     report = Report()
     setup_tracker.check_board(github, {"node_id": "R"}, apply=False, report=report)
     held = [line for line in report.lines if "holds Status" in line]
-    assert held == ["DIFFERS card shekel-plan#2 holds Status 'Todo': clear it",
-                    "DIFFERS card shekel-plan#3 holds Status 'Done': clear it"]
+    assert held == [
+        "DIFFERS pull request shekel-plan#3 holds Status 'Done', and only a card of "
+        "saltyreformed-labs/shekel-plan holds one, which quill writes: clear it",
+        "DIFFERS issue shekel-plan#4 holds Status 'Todo', and only a card of "
+        "saltyreformed-labs/shekel-plan holds one, which quill writes: clear it"]
 
 
 def test_a_draft_holding_a_status_is_a_difference_too():
@@ -495,7 +523,9 @@ def test_a_draft_holding_a_status_is_a_difference_too():
     differences = setup_tracker.status_differences(
         [_status_item(None, "Todo", kind="DRAFT_ISSUE"), _status_item(None, None, "DRAFT_ISSUE")]
     )
-    assert differences == ["draft issue item PVTI_draft holds Status 'Todo': clear it"]
+    assert differences == ["draft issue item PVTI_draft holds Status 'Todo', and only a card of "
+                           "saltyreformed-labs/shekel-plan holds one, which quill writes: clear "
+                           "it"]
 
 
 def test_a_renamed_status_is_a_difference():
@@ -795,112 +825,6 @@ def test_every_archived_item_is_a_difference_on_every_page():
         "the board's archived items"]
 
 
-# -- the organization's issue fields (R-BAL348, R-BAL354; four kept 2026-10-25) ------------
-
-def _issue_field(name, data_type="SINGLE_SELECT", options=None):
-    """One issue field as the issue fields query answers it."""
-    field = {"name": name, "dataType": data_type}
-    if data_type == "SINGLE_SELECT":
-        field["options"] = [{"name": option} for option in options or ()]
-    return field
-
-
-def _fields(*nodes, total=None):
-    """The organization's ``issueFields`` connection holding ``nodes``."""
-    return {"totalCount": len(nodes) if total is None else total, "nodes": list(nodes)}
-
-
-#: GitHub's four default fields as the organization held them on 2026-10-25, in the order
-#: GitHub answered them (read by GraphQL that evening): the developer keeps them beside Arc.
-_KEPT = (_issue_field("Priority", options=("Urgent", "High", "Medium", "Low")),
-         _issue_field("Start date", "DATE"), _issue_field("Target date", "DATE"),
-         _issue_field("Effort", options=("High", "Medium", "Low")))
-
-
-def _declared_but(name):
-    """The five declared fields as the organization held them on 2026-10-25, ``name`` out."""
-    return [node for node in (*_KEPT, _issue_field("Arc", options=ARCS))
-            if node["name"] != name]
-
-
-def test_the_five_declared_fields_holding_their_options_in_any_order_match():
-    """Arc, a single select of the six arcs (R-BAL348), and the four defaults the developer
-    kept on 2026-10-25, each a single select holding its options in any order, in any order
-    of fields."""
-    reordered = [_issue_field(node["name"], node["dataType"],
-                              [option["name"] for option in reversed(node.get("options", []))])
-                 for node in reversed(_KEPT)]
-    assert not setup_tracker.issue_field_differences(
-        _fields(_issue_field("Arc", options=reversed(ARCS)), *reordered))
-
-
-def test_the_organization_as_read_on_2026_10_25_matches():
-    """The developer, 2026-10-25, of GitHub's four default fields, which R-BAL348 ruled
-    deleted (that click on the web was never made): "I don't want to delete them unless the
-    tracker won't work with them empty. I want to use those fields even if they are empty
-    for now."  So the organization as read that evening, the four beside Arc, differs
-    nowhere."""
-    read = _fields(*_KEPT, _issue_field("Arc", options=ARCS))
-    assert not setup_tracker.issue_field_differences(read)
-
-
-@pytest.mark.parametrize(("read", "difference"), [
-    (_fields(*_KEPT), "issue field 'Arc' is missing: make it"),
-    (_fields(*_KEPT, _issue_field("Arc", "TEXT")),
-     "issue field 'Arc' is a TEXT, not a single select: correct it"),
-    (_fields(*_KEPT, _issue_field("Arc", options=ARCS[:-1])),
-     f"issue field 'Arc' holds the options {list(ARCS[:-1])}, not the arcs {list(ARCS)}: "
-     "correct it"),
-    (_fields(*_KEPT, _issue_field("Arc", options=ARCS), total=6),
-     "the organization has 6 issue fields and the read holds 5: the rest are unread"),
-])
-def test_arc_missing_mistyped_or_holding_other_options_or_a_short_read_differs(read, difference):
-    """Each way Arc can be wrong beside the four kept fields, and a read GitHub cut short."""
-    assert setup_tracker.issue_field_differences(read) == [difference]
-
-
-@pytest.mark.parametrize(("name", "node", "difference"), [
-    ("Priority", None, "issue field 'Priority' is missing: make it"),
-    ("Target date", None, "issue field 'Target date' is missing: make it"),
-    ("Start date", _issue_field("Start date", "TEXT"),
-     "issue field 'Start date' is a TEXT, not a date: correct it"),
-    ("Effort", _issue_field("Effort", "DATE"),
-     "issue field 'Effort' is a DATE, not a single select: correct it"),
-    ("Priority", _issue_field("Priority", options=("High", "Low")),
-     "issue field 'Priority' holds the options ['High', 'Low'], not the options declared here "
-     "['Urgent', 'High', 'Medium', 'Low']: correct it"),
-    ("Effort", _issue_field("Effort", options=("High", "Medium", "Low", "None")),
-     "issue field 'Effort' holds the options ['High', 'Medium', 'Low', 'None'], not the options "
-     "declared here ['High', 'Medium', 'Low']: correct it"),
-])
-def test_a_kept_field_missing_mistyped_or_holding_other_options_differs(name, node, difference):
-    """Each of the four the developer kept is declared as the organization held it, so one
-    missing, of another type or holding other options is a difference, as Arc is."""
-    read = _fields(*_declared_but(name), *([node] if node else []))
-    assert setup_tracker.issue_field_differences(read) == [difference]
-
-
-def test_check_issue_fields_names_the_page_to_settle_each_difference_on():
-    """Each difference names the organization's issue fields page (measured 2026-10-24: a
-    route GitHub knows, as its issue types page is); none, and the check says so."""
-    def read(fields):
-        return _GitHub(graphql=lambda query, **_: {"organization": {"issueFields": fields}})
-
-    report = Report()
-    setup_tracker.check_issue_fields(read(_fields(*_KEPT, _issue_field("Arc", options=ARCS),
-                                                  _issue_field("Size", options=("Low",)))),
-                                     report)
-    assert report.lines == [
-        "DIFFERS issue field 'Size' is not declared here: delete it at "
-        "https://github.com/organizations/saltyreformed-labs/settings/issue-fields"]
-    report = Report()
-    setup_tracker.check_issue_fields(read(_fields(*_KEPT, _issue_field("Arc", options=ARCS))),
-                                     report)
-    assert report.lines == ["ok      issue fields: exactly the 5 declared: 'Arc', 'Priority', "
-                            "'Start date', 'Target date', 'Effort'"]
-    assert report.differences == 0
-
-
 def test_a_board_link_is_proven_by_a_read_that_names_it_and_unread_when_a_short_one_does_not():
     """Review A2 rounds 2 and 3: a whole read without the tracker is "not linked"; a read
     GitHub cut short that names it proves the link (a short read hides, never invents);
@@ -941,16 +865,16 @@ def test_a_plan_view_without_the_parent_issue_column_is_a_difference():
     column (plan#1814's picked text): a view without that column differs."""
     project = _as_declared()
     assert not setup_tracker.board_differences(project)
-    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1", "F6")
+    project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1", "F2", "F6")
     assert setup_tracker.board_differences(project) == [
         "the 'Plan' view does not show the Parent issue column, where a leaf names the step it "
         "splits"]
 
 
-def test_apply_shows_the_parent_issue_column_keeping_every_other_column():
-    """``visibleFieldIds`` is the view's whole list of columns, so the Parent issue joins those
-    shown, on a board holding cards too, and the re-read view is no difference; check mode
-    sends nothing."""
+def test_apply_shows_the_parent_issue_and_status_columns_keeping_every_other_column():
+    """``visibleFieldIds`` is the view's whole list of columns, so the Parent issue and Status
+    (ruling plan#1873) join those shown, on a board holding cards too, in one write, and the
+    re-read view is no difference; check mode sends nothing."""
     project = _as_declared()
     project["items"]["totalCount"] = 4
     project["views"]["nodes"][0]["fields"]["nodes"] = _visible("F1", "F6")
@@ -958,8 +882,9 @@ def test_apply_shows_the_parent_issue_column_keeping_every_other_column():
     report = Report()
     setup_tracker.check_board(github, {"node_id": "R"}, apply=True, report=report)
     assert github.mutations == [("updateProjectV2View",
-                                 {"id": "V1", "fields": ["F1", "F6", "F3"]})]
+                                 {"id": "V1", "fields": ["F1", "F6", "F3", "F2"]})]
     assert "made    showed the Parent issue column in the 'Plan' view" in report.lines
+    assert "made    showed the Status column in the 'Plan' view" in report.lines
     assert report.differences == 0
     github = _Board(project)
     setup_tracker.check_board(github, {"node_id": "R"}, apply=False, report=Report())

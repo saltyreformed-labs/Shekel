@@ -299,7 +299,7 @@ def instant(when: datetime) -> str:
 
 
 #: The two integration branches as ``origin`` names them (``refs/heads/<name>``).
-INTEGRATION = ("dev", "main")
+INTEGRATION = tuple(name.removeprefix("origin/") for name in (DEV, MAIN))
 
 
 def origin_tips(root: Path) -> dict[str, str]:

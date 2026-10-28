@@ -137,6 +137,25 @@ def test_a_commit_naming_a_card_that_is_no_task_under_the_claims_card_is_refused
     assert github.asked == [[7, 12], [named]]
 
 
+def test_a_commit_naming_its_task_then_another_cards_is_refused_for_the_other(check, code):
+    """A commit of card/7 naming task 12, then task 21, under card 9, made with the hook
+    skipped (the hook refuses a message naming two tasks): refused once, for its second name
+    alone, which is read then; its first, task 12, passes."""
+    root, base = code
+    onto = _hooked(root, base)
+    both = commit_files(root, _begun(root, _claimed(root, onto)),
+                        "two pieces at once\n\nTask: plan#12\nTask: plan#21",
+                        {"both.py": "both\n"})
+    github = _cards()
+    status, out, _ = check(onto, _ended(root, both), "card/7", github=github)
+    assert (status, out.splitlines()) == (1, [
+        f"REFUSED -- commit {both[:12]} (two pieces at once): card/7 brings it, naming plan#21, "
+        "but task plan#21 is under plan#9, not plan#7, so it builds no piece of plan#7: reword "
+        "it to name the task under plan#7 it builds, then push card/7 again",
+        verdict("card/7", 1, 1, tasks=1)])
+    assert github.asked == [[7, 12], [21]]
+
+
 def test_the_claim_commit_and_a_merge_of_dev_are_never_work(check, code):
     """card/7 merges dev in, which moved on with a commit of its own; neither the merge nor
     the claim commit names a task, and neither is work: it lands."""

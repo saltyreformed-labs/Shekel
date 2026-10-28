@@ -11,7 +11,10 @@ import pytest
 from tools.ci.scratch import run as _run
 from tools.quill import _git
 from tools.quill._fake import AnswerLostOnce, FailOnce, FakeTracker, claim, leaf_filing, run
+from tools.quill._state import SHIPPABLE
 from tools.quill._tasks import finishing
+from tools.quill.check import Draft, Owner, violations
+from tools.quill.setup_tracker import TASK
 
 (REVIEW, REVIEW_TEXT), (LAND, LAND_TEXT) = finishing(1)
 
@@ -182,6 +185,16 @@ def test_a_refused_finishing_filing_refuses_the_claim_before_its_push(code, caps
             "and its filing finished at the top level, not under plan#1: re-homing a card is "
             "done by hand") in capsys.readouterr().err
     assert not tracker.writes and not _git.on_origin(code)
+
+
+@pytest.mark.parametrize("kind", SHIPPABLE)
+def test_each_finishing_task_passes_the_check_under_live_work(kind):
+    """Each finishing task's title and text, a task under a live step or finding, the one
+    owner ``quill claim`` files them under (it refuses any other card first): the check a
+    filing makes passes it, so the claim never grades them again
+    (``_filing.finishing_filings``)."""
+    for title, body in finishing(1):
+        assert not violations(Draft(TASK, title, body, (), Owner(kind, True, False)))
 
 
 def test_a_released_claims_finishing_tasks_are_dropped_before_its_step_splits(code, tmp_path,

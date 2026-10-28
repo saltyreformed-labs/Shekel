@@ -619,7 +619,9 @@ def finishing_filings(tracker: Tracker, root: Path, card: Card, cards: dict[int,
     its text and state -- filed by hand, done, or dropped -- so a re-claim files none; each
     task under it is read by its number for its title.  One not so filed is filed, finishing
     the card an earlier run made (:func:`_standing`), else a new one; refused, before any
-    write, for what that filing refuses."""
+    write, for what that filing refuses.  Its draft is not graded again: :func:`check.violations`
+    passes each constant title and text under the live step or finding the claim refuses
+    every other card for (``test_quill_claim_finishing.py`` pins the constants)."""
     held = tracker.cards(card.task_children) if card.task_children else {}
     filed = {task.title.strip() for task in held.values() if not filing_unfinished(task)}
     held_by = _owner(card, cards, reads.shipped.cards)
@@ -629,8 +631,6 @@ def finishing_filings(tracker: Tracker, root: Path, card: Card, cards: dict[int,
             continue
         filing = _Filing(Draft(TASK, title, body, (), held_by), card, cards, reads, None,
                          _NO_MILESTONE)
-        if problems := violations(filing.draft):
-            raise Refused(f"{title!r} not filed:\n  " + "\n  ".join(problems))
         earlier = _standing(tracker, filing, root)
         if earlier is not None and not filing_unfinished(earlier):
             _filed_already(earlier, TASK, card)

@@ -11,8 +11,10 @@ follows it, whatever other notes of quill's do (a drop's reason, say: :func:`una
 one reading).  ``/charter`` says a session acts only on his, and ``/charter`` and
 ``/handoff`` say when a session reads them: when it claims the card, at each fresh session
 start, and before each leaf's pull request.  ``quill show`` prints each comment whole, an
-answer's mark among its text, and ``quill next`` names every claimed card holding a comment
-still unanswered (:func:`unanswered_lines`).
+answer's mark among its text, and says of each task under the card it shows that holds a
+comment still unanswered so (``_show``); ``quill next`` names every claimed card, and every
+task under one, holding a comment still unanswered (:func:`unanswered_lines`, ruling
+plan#1924), and ``quill answer`` answers a task's as it answers a card's.
 
 Kept apart from the command module and ``_state``, each near the 1,000 lines
 ``too-many-lines`` allows (933 and 978 lines on 2026-10-27).
@@ -100,20 +102,36 @@ def cmd_answer(args, tracker: Tracker, _root: Path) -> int:
 
 def unanswered_lines(tracker: Tracker, claims: Mapping[int, Claim],
                      cards: Mapping[int, Card]) -> list[str]:
-    """A line for each claimed card (``claims``) holding a comment of a person's that no
-    answer of quill's has followed (:func:`unanswered`), in card order: what ``quill next``
-    prints.  ``cards`` holds the cards ``next`` read already.  A claimed card it does not hold
-    (closed, so no open listing finds it, as one dropped while claimed is) is read by its
-    number first, and one that read does not find either (a ``card/N`` pushed by hand for a
-    number nobody filed) is passed over: a read of its comments is GitHub's NOT_FOUND error.
-    Then one read of the comments per claimed card (:meth:`_tracker.Tracker.comments`)."""
-    filed = set(cards) | set(tracker.cards(set(claims) - set(cards)))
+    """A line for each claimed card (``claims``), and each task under one (ruling plan#1924),
+    holding a comment of a person's that no answer of quill's has followed
+    (:func:`unanswered`): each claimed card in card order, then its tasks in its order of them,
+    what ``quill next`` prints.  ``cards`` holds the cards ``next`` read already.  A claimed
+    card it does not hold (closed, so no open listing finds it, as one dropped while claimed
+    is) is read by its number first, and one that read does not find either (a ``card/N``
+    pushed by hand for a number nobody filed) is passed over.  Then one read of the comments
+    of every claimed card and every task under each, open or closed, many cards a request
+    (:meth:`_tracker.Tracker.comments_of`, ruling plan#1931); a task deleted between the two
+    reads is absent from the second, and passed over too."""
+    claimed = {number: cards[number] for number in claims if number in cards}
+    claimed.update(tracker.cards(set(claims) - set(cards)))
+    comments = tracker.comments_of(
+        {*claimed, *(task for card in claimed.values() for task in card.task_children)})
     lines = []
-    for number in sorted(set(claims) & filed):
-        if waiting := unanswered(tracker.comments(number), tracker.app_login):
-            lines.append(f"plan#{number} on {holder(claims[number])}: {len(waiting)} comment"
-                         f"{'s' if len(waiting) > 1 else ''} no answer of quill's has followed, "
-                         f"the newest {byline(waiting[-1])} -- its session reads them "
-                         f"(`quill show plan#{number}`) and answers them "
-                         f"(`quill answer plan#{number} --body-file TEXT`)")
+    for number in sorted(claimed):
+        for asked in (number, *claimed[number].task_children):
+            if waiting := unanswered(comments.get(asked, ()), tracker.app_login):
+                lines.append(_unanswered_line(asked, number, claims[number], waiting))
     return lines
+
+
+def _unanswered_line(asked: int, card: int, claim: Claim, waiting: Sequence[Comment]) -> str:
+    """The line ``quill next`` names card ``asked`` by, claimed card ``card`` itself or a task
+    under it, ``claim`` its claim: how many comments of a person's no answer has followed
+    (``waiting``), the newest's byline, and the commands its session reads and answers them
+    with."""
+    what = f"plan#{asked}" if asked == card else f"plan#{asked}, a task of plan#{card},"
+    return (f"{what} on {holder(claim)}: {len(waiting)} comment"
+            f"{'s' if len(waiting) > 1 else ''} no answer of quill's has followed, "
+            f"the newest {byline(waiting[-1])} -- its session reads them "
+            f"(`quill show plan#{asked}`) and answers them "
+            f"(`quill answer plan#{asked} --body-file TEXT`)")

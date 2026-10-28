@@ -77,6 +77,11 @@ def marked_cards(place: Place) -> str:
 
 #: What quill reads of a comment (:func:`_tracker._comment`).
 COMMENT_FIELDS = "author { login } createdAt body"
+#: What a read of many cards by number reads of each card's comments
+#: (:meth:`_tracker.Tracker.comments_of`, ruling plan#1931): their first page, a page as
+#: :func:`comments` reads one, and whether another follows, which is then read whole that way.
+COMMENT_PAGE_FIELDS = ("number comments(first: 100) { pageInfo { hasNextPage } nodes { %s } }"
+                       % COMMENT_FIELDS)
 
 
 #: The board's cards in their positions, each with its issue type, a page at a time

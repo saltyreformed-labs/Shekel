@@ -185,9 +185,9 @@ CONNECT = partial(Tracker.connect, PLAN)
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The first open step in the board's order that is unclaimed, unshipped and unblocked;
     then how far ``sync`` is behind, what it cannot offer that a person must act on, and last,
-    after every line no further read can cost, each claimed card holding a comment of the
-    developer's that no answer of quill's has followed (plan#1822,
-    :func:`_comments.unanswered_lines`).
+    after every line no further read can cost, each claimed card, and each task under one,
+    holding a comment of the developer's that no answer of quill's has followed (plan#1822,
+    ruling plan#1924, :func:`_comments.unanswered_lines`).
 
     **Sync is behind** (ruling plan#1815) while git says work shipped or a task is done that
     the tracker still shows open: the cards ``sync`` would close over what this reads, by

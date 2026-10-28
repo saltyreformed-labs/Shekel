@@ -7,9 +7,13 @@ cards #11-#25 (``_recorded.Recorder``, which writes to scratch cards only and
 redacts every other card's text); ``recorded/label_missing.json`` was kept the
 same evening, before the mark's label existed; ``recorded/comments.json`` was kept
 2026-10-06 20:23 EDT, after the App's rename, on scratch cards #28-#30;
-``recorded/blocking.json`` and ``recorded/show.json`` were kept 2026-10-24 on the
-throwaway ``plan-views-demo`` (R-BAL395), on scratch cards #220-#222 and #223-#228, and
-``recorded/status.json`` 2026-10-27 there, on its board, on scratch card #243.
+``recorded/blocking.json`` was kept 2026-10-24 on the throwaway ``plan-views-demo``
+(R-BAL395), on scratch cards #220-#222, ``recorded/status.json`` 2026-10-27 there, on its
+board, on scratch card #243, and ``recorded/show.json`` 2026-10-27 21:58 EDT there, on
+scratch cards #244-#249, with the developer's own token (plan#1925, ruling plan#1950; the
+first show recording's #223-#228 were deleted after it on 2026-10-24, so it could not be made
+again on them; ``recorded/comment_lookup.json``, kept with it, is replayed in
+``test__tracker_comment_lookup.py``).
 These tests replay them (``_recorded.Replay``), which answers only a request
 it recorded, in the order recorded.  Nothing here calls GitHub.  A query whose
 text changes no longer matches its recording: re-record it, never edit an
@@ -828,32 +832,36 @@ def test_edits_are_read_page_by_page_and_the_text_is_the_last_pages():
         node["id"] for node in sorted(nodes, key=lambda node: node["editedAt"])]
 
 
-#: The scratch cards the show recording filed on the throwaway plan-views-demo, 2026-10-24
-#: (R-BAL395): step SS with the task ST under it, the finding SF and the ruling SR it owns
-#: (each blocked by it), the step SB blocking it and the step SW waiting on it.
-SS, ST, SF, SR, SB, SW = 223, 224, 225, 226, 227, 228
+#: The scratch cards the show recording filed on the throwaway plan-views-demo, 2026-10-27
+#: (R-BAL395, plan#1925, ruling plan#1950), each deleted after: step SS with the task ST under
+#: it, the finding SF and the ruling SR it owns (each blocked by it), the step SB blocking it
+#: and the step SW waiting on it; the developer commented on SS and on ST.
+SS, ST, SF, SR, SB, SW = 244, 245, 246, 247, 248, 249
 
 
 def _show_line(name, kind):
     """A scratch card's title in the show recording."""
-    return f"{SCRATCH} show {name} ({kind}), R-BAL395"
+    return f"{SCRATCH} show {name} ({kind}), plan#1925"
 
 
 def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_comments(
         code, capsys):
-    """The ``quill show`` of a step and of the finding it owns, recorded 2026-10-24 12:04 EDT
-    on the throwaway plan-views-demo (``recorded/show.json``, R-BAL395), replayed: every read
-    show makes of the tracker, in its order, answered as GitHub answered it, and nothing
-    written.  The step: by number; its blocking read, which lists the finding, the ruling and
-    the step waiting on it; its task, its blocker and the two cards it owns in ONE read by
-    number, for their titles -- never the waiting step, which is no card it owns; the board;
-    its text; its comments.  The finding: by number; its owner, its one blocker, in one read;
-    the board; its text; its comments.  Whether either shipped, its claim and its marker's
-    history are git's (``code``: no marker, no ``card/N``), not the tracker's."""
+    """The ``quill show`` of a step and of the finding it owns, recorded 2026-10-27 21:58 EDT
+    on the throwaway plan-views-demo (``recorded/show.json``, R-BAL395, plan#1925), replayed:
+    every read show makes of the tracker, in its order, answered as GitHub answered it, and
+    nothing written.  The step: by number; its blocking read, which lists the finding, the
+    ruling and the step waiting on it; its task, its blocker and the two cards it owns in ONE
+    read by number, for their titles -- never the waiting step, which is no card it owns; the
+    board; its task's comments, in one read of many cards (ruling plan#1931), whose one
+    comment, the developer's, no answer has followed, as its line says (ruling plan#1924); its
+    text; its comments.  The finding, with no task under it: by number; its owner, its one
+    blocker, in one read; the board; its text; its comments.  Whether either shipped, its
+    claim and its marker's history are git's (``code``: no marker, no ``card/N``), not the
+    tracker's."""
     replay = Replay("show")
     scratch = Scratch.from_json(recording("show")["scratch"])
     github = GitHub("token", replay)
-    tracker = Tracker(github, Board(github, scratch.place, scratch.board), APP)
+    tracker = Tracker(github, Board(github, scratch.place, scratch.board), QUILL)
     assert quill.main(["show", f"plan#{SS}"], connect=lambda: tracker, root=code) == 0
     assert capsys.readouterr().out == (
         f"plan#{SS} [step, no arc] {_show_line('S', 'step')}\n"
@@ -862,14 +870,15 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
         "  board: not on it\n"
         "  claim: none\n"
         "  parent: none\n"
-        f"  child: plan#{ST} (task, open; done (git): no) {_show_line('T', 'task')}\n"
+        f"  child: plan#{ST} (task, open; done (git): no; 1 comment no answer of quill's has "
+        f"followed) {_show_line('T', 'task')}\n"
         f"  blocked by: plan#{SB} {_show_line('B', 'step')}\n"
         f"  owns: plan#{SF} (finding, open) {_show_line('F', 'finding')}\n"
         f"  owns: plan#{SR} (ruling, closed) {_show_line('R', 'ruling')}\n"
         "\n"
         "THROWAWAY recording of quill show, card S; deleted after.\n"
         "\n"
-        "== comment, 2026-10-24T16:04:50Z by SaltyReformed\n"
+        "== comment, 2026-10-28T01:58:40Z by SaltyReformed\n"
         "A comment the recorder posts on step S.\n"
         "\n"
         f"no commit on origin/dev or origin/main adds, changes or deletes plan/ships/{SS}\n")
@@ -893,7 +902,7 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
     assert [(method, url.removeprefix("https://api.github.com"))
             for method, url, _ in replay.sent] == [
         ("POST", "/graphql"), ("POST", "/graphql"), ("POST", "/graphql"), ("POST", "/graphql"),
-        ("GET", f"{repo}/issues/{SS}"), ("POST", "/graphql"),
+        ("POST", "/graphql"), ("GET", f"{repo}/issues/{SS}"), ("POST", "/graphql"),
         ("POST", "/graphql"), ("POST", "/graphql"), ("POST", "/graphql"),
         ("GET", f"{repo}/issues/{SF}"), ("POST", "/graphql")]
     queries = [str((body or {}).get("query", "")) for _, _, body in replay.sent]
@@ -901,9 +910,12 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
     assert f"c{SS}: issue" in queries[0] and "blocking(first" in queries[1]
     assert [number for number in (ST, SF, SR, SB, SW) if f"c{number}: issue" in queries[2]] == [
         ST, SF, SR, SB]
-    assert "ProjectV2" in queries[3] and "comments(first" in queries[5]
-    assert f"c{SF}: issue" in queries[6] and f"c{SS}: issue" in queries[7]
-    assert "ProjectV2" in queries[8] and "comments(first" in queries[10]
+    assert "ProjectV2" in queries[3]
+    assert [number for number in (SS, ST, SF, SR, SB, SW)
+            if f"c{number}: issue" in queries[4]] == [ST] and "comments(first" in queries[4]
+    assert "comments(first" in queries[6] and "$number" in queries[6]
+    assert f"c{SF}: issue" in queries[7] and f"c{SS}: issue" in queries[8]
+    assert "ProjectV2" in queries[9] and "comments(first" in queries[11]
 
 
 def test_a_steps_blocking_read_lists_the_findings_and_rulings_it_owns():

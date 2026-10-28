@@ -121,10 +121,11 @@ class FakeBoard:
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (24/20, measured at X-cx's S3b) -- it
-    stands in for :class:`_tracker.Tracker`, so it has each of that class's 22
+    Pylint: ``too-many-public-methods`` (26/20, measured at plan#1925) -- it
+    stands in for :class:`_tracker.Tracker`, so it has each of that class's 24
     reads and writes but ``connect`` (its own disable says why there are so many),
-    and ``add`` and ``add_task``, which put a card or a task in.
+    ``blocking``, which that class takes from :class:`_tracker.CardReader`, and ``add``
+    and ``add_task``, which put a card or a task in.
     ``too-many-instance-attributes`` (8/7) -- **one per kind
     of fact it keeps**: seven a command reads back (cards, bodies, saved
     versions, comments, the board, the milestones that exist, and each card's
@@ -232,6 +233,11 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         error (:meth:`_refuse_unfiled`)."""
         self._refuse_unfiled(number)
         return list(self.notes.get(number, []))
+
+    def comments_of(self, numbers):
+        """The comments of each card that exists among ``numbers``, oldest first, as the read of
+        many cards by number answers them: one nobody filed is absent."""
+        return {n: list(self.notes.get(n, [])) for n in numbers if n in self.cards_by_number}
 
     def _refuse_unfiled(self, number):
         """GitHub's NOT_FOUND error, which the strict read raises

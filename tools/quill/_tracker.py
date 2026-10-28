@@ -590,13 +590,15 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     """A tracker as the App sees it: its cards, each with its board item, and its
     :class:`Board`.
 
-    Pylint: ``too-many-public-methods`` (22/20, measured at plan#1772, which moved the read
-    of what a card blocks down to :class:`CardReader`, where CI's landing check reads it) --
+    Pylint: ``too-many-public-methods`` (24/20, measured at plan#1925, which added the read
+    of many cards' comments in one request; plan#1772 moved the read of what a card blocks
+    down to :class:`CardReader`, where CI's landing check reads it) --
     ``connect``, then **one method per read or write quill makes of the tracker**
     (most one request; this module is the one place it speaks to GitHub), the
     board's own writes already apart in :class:`Board`: among them the filing
     mark's read and its removal (R-BAL202), a leaf's unlink (R-BAL205), ``show``'s
-    read of a card's comments, and ``quill file step --parent``'s read of the
+    read of a card's comments and ``next``'s of many cards' (ruling plan#1931),
+    and ``quill file step --parent``'s read of the
     milestones a split step and its leaves are in and its move of a card's
     milestone (the split step's to its leaf, and back when the leaf is dropped
     unfinished; X-cx's S3a).  The claims' three reads and writes and the read of a
@@ -705,6 +707,22 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         given)."""
         nodes = comment_nodes(self.github, self.place, number)
         return [_comment(node) for node in connection_nodes({"nodes": nodes}, "comments", number)]
+
+    def comments_of(self, numbers: Iterable[int]) -> dict[int, list[Comment]]:
+        """Every comment on each card numbered ``numbers``, oldest first, by number (ruling
+        plan#1931): each card's first page of them in the one walk of a read by number,
+        :data:`_LOOKUP_BATCH` cards a request (:meth:`_lookup`,
+        :data:`_queries.COMMENT_PAGE_FIELDS`), and a card whose first page says another
+        follows read again whole, page by page (:meth:`comments`).  One that does not exist is
+        absent from the answer, as :meth:`cards` passes it over; a list of comments, or a
+        comment in it, GitHub answered as null is :func:`connection_nodes`' refusal."""
+        found = {}
+        for number, node in self._lookup(numbers, _queries.COMMENT_PAGE_FIELDS,
+                                         lambda node: node).items():
+            page = connection_nodes(node["comments"], "comments", number)
+            found[number] = (self.comments(number) if node["comments"]["pageInfo"]["hasNextPage"]
+                             else [_comment(comment) for comment in page])
+        return found
 
     def find_titles(self, text: str) -> list[tuple[int, str]]:
         """Cards whose title holds ``text`` (GitHub's search: words, not characters), read

@@ -9,12 +9,13 @@ would take past the 1,000 lines ``too-many-lines`` allows.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from pathlib import Path
 
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
 from tools.quill._command import Refused, _label, _one, _outside_parent, card_number
-from tools.quill._comments import byline
+from tools.quill._comments import byline, unanswered
 from tools.quill._state import OWNED, done_tasks, filing_unfinished, holder, never_split, owner
 from tools.quill._tasks import in_progress
 from tools.quill._tracker import Card, Tracker, TrackerError
@@ -53,7 +54,9 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
     lists as a child, a blocker or a card it owns (:func:`_listed`), whose lines are
     :func:`_link_lines`'.  A task says whether git says it is done
     (:func:`_state.done_tasks`), in place of whether it shipped, and whether it is in progress
-    (:func:`_tasks.in_progress`, ruling plan#1872).  A card on the board that the
+    (:func:`_tasks.in_progress`, ruling plan#1872), and a task under it how many comments no
+    answer has followed (:func:`_waiting`), claimed or not, so a session that claims a card
+    sees a comment left on one of its tasks before the claim.  A card on the board that the
     order read does not list is in no order when it is a task; a step or question is in the
     order, so the read lags a write (``_tracker``'s doctrine), and it says so."""
     claim = reads.claims.get(card.number)
@@ -79,7 +82,7 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
          f"  parent: {outside} (outside the tracker)" if (outside := _outside_parent(card))
          else "  parent: none"),
     ]
-    lines += _link_lines(card, cards, reads, listed, (done, begun))
+    lines += _link_lines(card, cards, reads, listed, (done, begun, _waiting(tracker, card)))
     if filing_unfinished(card):
         lines.append("  filing: not finished (R-BAL202) -- never offered until its `quill file` "
                      "command runs again; with that command lost, make its missing writes on "
@@ -89,24 +92,38 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
     return lines
 
 
+def _waiting(tracker: Tracker, card: Card) -> dict[int, int]:
+    """How many comments of a person's no answer of quill's has followed
+    (:func:`_comments.unanswered`) each task under ``card`` holds that holds one, by number: the
+    comments of every task under it, claimed or not, read in one read of many cards
+    (:meth:`_tracker.Tracker.comments_of`, ruling plan#1931), none for a card with no task."""
+    return {number: len(held) for number, comments
+            in tracker.comments_of(card.task_children).items()
+            if (held := unanswered(comments, tracker.app_login))}
+
+
 def _link_lines(card: Card, cards: dict[int, Card], reads: _git.Reads, listed: dict[int, Card],
-                tasks: tuple[frozenset[int], frozenset[int]]) -> list[str]:
+                tasks: tuple[frozenset[int], frozenset[int], Mapping[int, int]]) -> list[str]:
     """A line for each card ``card`` links to, with its title from ``listed``: each child, in
     the card's order, its sub-issues' (the build order of its tasks, ruling plan#1868) --
     a step linked under it that is no leaf of it saying so (:func:`_state.never_split`, as
-    ``next`` reads it, over ``cards``), a task whether git says it is done and, the one in
-    progress, that it is (``tasks``: those done, those in progress) --
+    ``next`` reads it, over ``cards``), a task whether git says it is done, the one in
+    progress that it is, and one holding comments of a person's that no answer of quill's has
+    followed how many (:func:`_comments.unanswered`, ruling plan#1924; ``tasks``: those done,
+    those in progress, and how many each such task holds) --
     then each blocker, a finding's, a ruling's or a question's owner named so (its one
     blocker, :func:`_state.owner`, R-BAL395, as ``sync``'s report reads it), then each
     finding, ruling and question ``listed`` holds whose owner is ``card``, which it owns."""
     stale = set(never_split(card, cards, reads.shipped.cards))
-    done, begun = tasks
+    done, begun, waiting = tasks
     lines = [f"  child: plan#{child.number} ({child.kind}, "
              f"{'open' if child.is_open else 'closed'}"
              + ("; no leaf: closed while still being filed, so never part of the split, "
                 "R-BAL205" if child.number in stale else "")
              + (f"; done (git): {_YES[child.number in done]}" if child.kind == TASK else "")
              + ("; in progress (git): yes" if child.number in begun else "")
+             + (f"; {waiting[child.number]} comment{'s' if waiting[child.number] > 1 else ''} "
+                "no answer of quill's has followed" if child.number in waiting else "")
              + f") {listed[child.number].title}"
              for child in card.children]
     held_by = owner(card)
@@ -171,7 +188,8 @@ def _listed(tracker: Tracker, card: Card, read: dict[int, Card],
 
 def cmd_show(args, tracker: Tracker, root: Path) -> int:
     """A card -- the title of each card linked below it, blocking it or, for a step, each
-    finding, ruling and question it owns (R-BAL395), among its facts -- then its text, its
+    finding, ruling and question it owns (R-BAL395), and each task under it holding a comment
+    no answer has followed saying so (ruling plan#1924), among its facts -- then its text, its
     comments oldest first, and the code repository's history for it: each commit on ``dev``
     or ``main`` that added, changed or deleted its ship marker (:func:`_git.history`), newest
     first."""

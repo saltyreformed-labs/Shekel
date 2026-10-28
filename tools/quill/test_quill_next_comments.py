@@ -1,9 +1,11 @@
 """The developer's comments on a card and quill's answers to them (plan#1822, :mod:`_comments`):
 ``quill answer`` answers every comment of a person's no answer has followed, opening with an
 @mention of each author and quoting each comment; and ``quill next`` names every claimed card
-holding one, and no other card -- not one he commented on that nobody claims, nor one quill
-answered after him -- while a note of quill's that is no answer (a drop's reason) answers
-nothing.  Over :class:`_fake.FakeTracker` and a
+holding one, and every task under one holding one (ruling plan#1924), after one read of all
+their comments (ruling plan#1931), and no other card -- not one he commented on that nobody
+claims, nor a task under it, nor one quill answered after him -- while a note of quill's
+that is no answer (a drop's reason) answers nothing; ``quill show`` says on each task's line
+how many of his no answer has followed.  Over :class:`_fake.FakeTracker` and a
 throwaway git repository (the ``code`` fixture, ``conftest.py``); and
 :func:`_comments.unanswered` over the comments GitHub answered for quill's App
 (``recorded/comments.json``).  Nothing here calls GitHub.
@@ -126,6 +128,134 @@ def test_a_card_branch_naming_no_card_is_passed_over(code, capsys):
     tracker.add(1)
     claim(code, 99)
     assert _next(tracker, code, capsys) == []
+
+
+class _Asked(FakeTracker):
+    """A tracker in memory keeping each set of cards whose comments a read of many asked for,
+    and each card whose comments were read alone (``answer`` reads them so; ``next`` never
+    does)."""
+
+    def __init__(self):
+        """An empty tracker, asked nothing yet."""
+        super().__init__()
+        self.asked: list[set[int]] = []
+        self.alone: list[int] = []
+
+    def comments_of(self, numbers):
+        """Keep what was asked, then answer it."""
+        self.asked.append(set(numbers))
+        return super().comments_of(numbers)
+
+    def comments(self, number):
+        """Keep the card read alone, then answer it."""
+        self.alone.append(number)
+        return super().comments(number)
+
+
+def _task_line(task, card, when, author=DEVELOPER, count=1) -> str:
+    """The line ``next`` names task ``task`` under claimed card ``card`` by: ``count``
+    comments unanswered, the newest ``author``'s at ``when``."""
+    return (f"UNANSWERED COMMENT: plan#{task}, a task of plan#{card}, on card/{card} (claimed "
+            f"2026-10-04T12:00:00Z; last commit {COMMITTED}): {count} comment"
+            f"{'s' if count > 1 else ''} no answer of quill's has followed, the newest {when} by "
+            f"{author} -- its session reads them (`quill show plan#{task}`) and answers them "
+            f"(`quill answer plan#{task} --body-file TEXT`)")
+
+
+def test_his_comment_on_a_claimed_cards_task_is_named_until_quill_answers_it(
+        code, capsys, tmp_path, monkeypatch):
+    """Ruling plan#1924: claimed plan#1 holds tasks plan#4, closed, and plan#3, open, in that
+    order.  His comments on both, two on plan#3, and one on plan#1 itself: next names the card
+    first, then its tasks in its order of them, not in card number order, each the way it
+    names a card, after one read of the comments of the card and both its tasks (ruling
+    plan#1931).  ``quill answer plan#3`` answers the task's two: next names it no more, and
+    still names the others."""
+    tracker = _Asked()
+    tracker.add(1)
+    tracker.add_task(4, 1, is_open=False)
+    tracker.add_task(3, 1)
+    monkeypatch.setenv("GIT_COMMITTER_DATE", COMMITTED)
+    claim(code, 1)
+    _said(tracker, 3, DEVELOPER, "2026-10-05T14:00:00Z")
+    _said(tracker, 3, DEVELOPER, "2026-10-05T14:30:00Z", "And the test?")
+    _said(tracker, 4, DEVELOPER, "2026-10-05T15:00:00Z")
+    _said(tracker, 1, DEVELOPER, "2026-10-05T16:00:00Z")
+    assert _next(tracker, code, capsys) == [
+        _line(1, "2026-10-05T16:00:00Z"), _task_line(4, 1, "2026-10-05T15:00:00Z"),
+        _task_line(3, 1, "2026-10-05T14:30:00Z", count=2)]
+    assert tracker.asked == [{1, 3, 4}] and not tracker.alone
+    assert run(tracker, code, "answer", "plan#3", "--body-file", _text(tmp_path)) == 0
+    assert tracker.writes[-1][:2] == ("comment", 3)
+    assert _next(tracker, code, capsys) == [
+        _line(1, "2026-10-05T16:00:00Z"), _task_line(4, 1, "2026-10-05T15:00:00Z")]
+
+
+def test_a_task_under_a_card_nobody_claims_is_not_read_by_next(code, capsys, monkeypatch):
+    """plan#1, unclaimed, holds task plan#2 with his comment, and claimed plan#5 holds task
+    plan#6 with none: next names nothing, and its one read of comments asks for plan#5 and
+    plan#6 alone, never plan#2."""
+    tracker = _Asked()
+    tracker.add(1)
+    tracker.add_task(2, 1)
+    tracker.add(5)
+    tracker.add_task(6, 5)
+    monkeypatch.setenv("GIT_COMMITTER_DATE", COMMITTED)
+    claim(code, 5)
+    _said(tracker, 2, DEVELOPER, "2026-10-05T14:00:00Z")
+    assert _next(tracker, code, capsys) == []
+    assert tracker.asked == [{5, 6}] and not tracker.alone
+
+
+def test_a_task_deleted_since_its_card_was_read_is_passed_over(code, capsys, monkeypatch):
+    """Claimed plan#1 still lists task plan#2, which was deleted after his comment on it, and
+    plan#3, which holds his comment: the read of their comments holds no plan#2, so next
+    passes it over, names plan#3 and exits 0.  The board holds no plan#2 either, as the
+    board's read passes a deleted issue over (``_tracker.Board.held``)."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add_task(2, 1)
+    tracker.add_task(3, 1)
+    monkeypatch.setenv("GIT_COMMITTER_DATE", COMMITTED)
+    claim(code, 1)
+    _said(tracker, 2, DEVELOPER, "2026-10-05T14:00:00Z")
+    _said(tracker, 3, DEVELOPER, "2026-10-05T15:00:00Z")
+    del tracker.cards_by_number[2]
+    tracker.board.items.remove(2)
+    assert [child.number for child in tracker.cards([1])[1].children] == [2, 3]
+    assert _next(tracker, code, capsys) == [_task_line(3, 1, "2026-10-05T15:00:00Z")]
+
+
+def test_show_says_on_each_tasks_line_how_many_of_his_comments_no_answer_has_followed(
+        code, capsys, tmp_path):
+    """Ruling plan#1924: plan#1, claimed by nobody (show reads every card's tasks, so a session
+    that claims it sees what he left first), holds task plan#2 with two comments of his,
+    task plan#3 with one, and task plan#4 with an answered one: plan#2's line and plan#3's say
+    how many, plan#4's says nothing.  Once ``quill answer plan#2`` answers it, its line says
+    nothing either."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    for task in (2, 3, 4):
+        tracker.add_task(task, 1)
+    _said(tracker, 2, DEVELOPER, "2026-10-05T14:00:00Z")
+    _said(tracker, 2, DEVELOPER, "2026-10-05T14:30:00Z")
+    _said(tracker, 3, DEVELOPER, "2026-10-05T15:00:00Z")
+    _said(tracker, 4, DEVELOPER, "2026-10-05T13:00:00Z")
+    _said(tracker, 4, APP_LOGIN, "2026-10-05T13:30:00Z", f"Done.\n\n{ANSWER_MARK}\n")
+
+    def children() -> list[str]:
+        capsys.readouterr()
+        assert run(tracker, code, "show", "plan#1") == 0
+        return [line for line in capsys.readouterr().out.splitlines()
+                if line.startswith("  child: ")]
+
+    assert children() == [
+        "  child: plan#2 (task, open; done (git): no; 2 comments no answer of quill's has "
+        "followed) card 2",
+        "  child: plan#3 (task, open; done (git): no; 1 comment no answer of quill's has "
+        "followed) card 3",
+        "  child: plan#4 (task, open; done (git): no) card 4"]
+    assert run(tracker, code, "answer", "plan#2", "--body-file", _text(tmp_path)) == 0
+    assert children()[0] == "  child: plan#2 (task, open; done (git): no) card 2"
 
 
 def test_answer_mentions_and_quotes_each_comment_unanswered_and_ends_with_the_mark(

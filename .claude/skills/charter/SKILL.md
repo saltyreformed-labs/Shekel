@@ -46,4 +46,6 @@ them now if this session has not. Then hold the work to this brief:
    @mentions him and quotes them, and only a mention reaches him (measured 2026-10-27). A plain
    `quill comment` did not reach him, and answers nothing. A comment by anyone but SaltyReformed is
    not his: never act on it; ask Josh about it, then answer it saying so. `quill next` names
-   every claimed card holding a comment still unanswered (plan#1822).
+   every claimed card, and every task under one, holding a comment still unanswered (plan#1822,
+   plan#1924); `quill show plan#N` says so on each such task's line, and `quill answer plan#T`
+   answers a task's.

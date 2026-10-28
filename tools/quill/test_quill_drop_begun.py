@@ -2,11 +2,13 @@
 its card's branch, a commit deleting the card's file ``plan/doing/N``, before the tracker's
 close, so the piece is in progress no longer and the next
 begins; refused, writing nothing, off that branch and on one behind its claim or diverged from
-it; finished by the same command after a push it cut short; and a task closed on the web
-while begun says how its drop is recorded.
+it; finished by the same command after a push it cut short; never making a claim where
+``origin`` holds none; and a task closed on the web while begun says how its drop is recorded.
 Over the in-memory tracker (:class:`_fake.FakeTracker`) and the ``code`` fixture's real git.
 """
 from __future__ import annotations
+
+import pytest
 
 from tools.ci.scratch import run as _run
 from tools.quill import _git, commit_hook
@@ -186,6 +188,26 @@ def test_a_drop_whose_push_failed_is_finished_by_the_same_command(code, capsys, 
     assert _tip(code) == merged == _on_origin(code)
     assert tracker.writes[len(writes):] == [("comment", 2, "Dropped: split differently"),
                                             ("close", 2, "not_planned")]
+
+
+@pytest.mark.parametrize("gone", ["released", "merged"])
+def test_a_drop_never_makes_a_claim(code, capsys, gone):
+    """With ``origin`` holding no live ``card/1`` -- released elsewhere, or its tip merged into
+    ``dev`` -- no claim began plan#2, which the branch here alone says is in progress: its
+    drop writes nothing to git, pushes no branch, and drops it on the tracker, saying so."""
+    tracker = _begun(code)
+    tip = _tip(code)
+    _run(code, "push", "--quiet", "origin",
+         f":refs/heads/{BRANCH}" if gone == "released" else f"{tip}:refs/heads/dev")
+    writes = list(tracker.writes)
+    capsys.readouterr()
+    assert run(tracker, code, "drop", "plan#2", "--why", "split differently") == 0
+    assert (_tip(code), _on_origin(code)) == (tip, "" if gone == "released" else tip)
+    assert tracker.writes[len(writes):] == [("comment", 2, "Dropped: split differently"),
+                                            ("close", 2, "not_planned")]
+    assert ("  card/1 here has it in progress, but origin holds no live card/1, so no claim "
+            "began it: its drop writes nothing to git (ruling plan#2009)\n"
+            ) in capsys.readouterr().out
 
 
 def test_a_task_closed_on_the_web_while_begun_says_how_its_drop_is_recorded(code, capsys):

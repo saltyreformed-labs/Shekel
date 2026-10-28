@@ -206,18 +206,25 @@ def record_drop(tracker: Tracker, task: Card, root: Path, why: str, reads: _git.
     and while it lacks work the claim holds (:func:`_holds_its_claim`): a commit naming the
     task and deleting that file, saying ``why``, pushed (:func:`_git.drop`); or, its drop
     recorded at ``HEAD`` and not yet on ``origin`` (a push a failure cut short), the branch
-    pushed.  A task never begun, or done, or under no card, writes nothing to git."""
+    pushed.  A task never begun, or done, or under no card, writes nothing to git; nor does
+    one while ``origin`` holds no live claim of its card (released, or its tip merged), which
+    no claim began, whatever the branch here says: its push would make a claim, which only
+    ``quill claim`` makes."""
     if task.parent is None:
         return
     claim = reads.claims.get(task.parent)
     branch = _git.card_branch(task.parent)
     at_head = (_git.checked_out(root) == branch
                and _git.in_progress(root, "HEAD", task.parent) == task.number)
-    if not at_head and (claim is None or claim.in_progress != task.number):
+    if claim is None:
+        if at_head:
+            print(f"  {branch} here has it in progress, but origin holds no live {branch}, so "
+                  "no claim began it: its drop writes nothing to git (ruling plan#2009)")
+        return
+    if not at_head and claim.in_progress != task.number:
         return
     _on_its_branch(tracker, task.number, root, "its drop", "drop a dropped piece")
-    if claim is not None:
-        _holds_its_claim(root, task.parent, claim.sha, f"drop plan#{task.number}")
+    _holds_its_claim(root, task.parent, claim.sha, f"drop plan#{task.number}")
     if at_head:
         sha = _git.drop(root, task.parent, task.number, task.title, why)
         print(f"  recorded its drop on {branch}: {sha[:12]}, pushed; it is in progress no "

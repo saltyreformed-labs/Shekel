@@ -22,18 +22,31 @@ the loan-posting glue into ``_loan_posting``.  :func:`assert_restorable`
 joined them at plan step X-aj1 (ruling **R-DR**), bringing ``restore_transfer``'s
 preconditions to the module whose single responsibility they already were.
 
-These helpers plus :class:`TransferRows` are a cohesive,
-transfer-service-private cluster (single responsibility: validate inputs and
-load the rows a mutation operates on).  They write no ``status_id``
-and construct no ``Transaction`` -- so they stay clear of the W9907 status
-fence, whose one transfer entry is the ``_create`` leaf's constructor write --
-and they compute no balance.
+These helpers are a cohesive, transfer-service-private cluster (single
+responsibility: validate inputs and load the transfer a mutation operates on).
+They write no ``status_id`` and construct no ``Transaction`` -- so they stay
+clear of the W9907 status fence, whose one transfer entry is the ``_create``
+leaf's constructor write -- and they compute no balance.
 Flask-isolated like the parent service: plain data in, ORM objects out, no
 ``request`` / ``session`` imports.
+
+**Each act takes the** :class:`~app.models.transfer.Transfer` **itself since
+finding plan#2043**, which deleted the ``TransferRows`` wrapper that stood
+here.  It came in at plan step X-f2-c3 as Transfer Invariant 1 made a TYPE --
+a parent and exactly two shadow transactions, whose statuses and periods were
+kept equal -- because threading the three through the settle's signature put
+it over pylint's argument ceiling, and a call site that could pair one
+transfer with another's shadows could break the invariant by typo.  Plan step
+``balance:X-bi-6-4d-2`` deleted the twin rows (rulings **R-BAL166**,
+**R-BAL258**) and its leaf 3b the ``shadows`` attribute with the loader that
+queried them (``load_transfer_rows``) and the arms of ``_update``,
+``_amount`` and ``_endpoints`` that wrote the mirrors over them.  Its last
+field beside the transfer, ``expense_leg``, went with its last reader at
+plan#2019 (ruling **plan#1983**), which left a wrapper of one field: no
+ceiling to stay under and no pair to keep together.
 """
 
 import logging
-from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
 from app.extensions import db
@@ -51,42 +64,6 @@ from app.utils.log_events import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class TransferRows:
-    """The transfer one act writes.
-
-    Introduced at plan step X-f2-c3 as Transfer Invariant 1 as a TYPE -- a
-    parent and exactly two shadow transactions, whose statuses and periods
-    were kept equal -- because threading the three through the settle's
-    signature put it over pylint's argument ceiling, and a call site that
-    could pair one transfer with another's shadows could break the invariant
-    by typo.  The same reasoning
-    :class:`app.services.reconcile_service._rows.Statement` is built on.
-
-    **It holds ONE row since plan step ``balance:X-bi-6-4d-2``**, which
-    deleted the twin rows and made the database refuse a new one (rulings
-    **R-BAL166**, **R-BAL258**).  The twins had been mirrors and nothing more
-    since ``X-bi-6-4d-2``: a transfer's status is its own column, and each
-    side's day is its payment record's, hung off the transfer by a side
-    link; while the twins stood, that record held the side's figure too,
-    which is the transfer's own since ``X-bi-6-4d-2``'s 4d-4 half.  The
-    step's leaf 3b deleted the
-    ``shadows`` attribute, the loader that queried the twins
-    (``load_transfer_rows``) and the arms of ``_update``, ``_amount`` and
-    ``_endpoints`` that wrote the mirrors over them.  It carried one read
-    beside the transfer after that, ``expense_leg``, the from-side leg an
-    act's settle and its figure grade read the pair's record through; both
-    ask the transfer itself under ruling **plan#1983** (the grade since
-    plan#1999, the settle since plan#1987), and the cached leg went with its
-    last reader (plan#2019).
-
-    Attributes:
-        transfer: The :class:`~app.models.transfer.Transfer` the act writes.
-    """
-
-    transfer: Transfer
 
 
 def _validate_positive_amount(amount):

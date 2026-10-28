@@ -87,7 +87,6 @@ from app.services.status_seam import (
 from app.services.transfer_legs import TransferLeg, parent_of, transfer_side_leg
 from app.services.transfer_service._side_days import PairDays
 from app.services.transfer_service._status import apply_status_to_all_three
-from app.services.transfer_service._validation import TransferRows
 
 
 def _reject_unsettleable(transfer: Transfer) -> None:
@@ -147,7 +146,7 @@ def _reject_unsettleable(transfer: Transfer) -> None:
 
 
 def settle(
-    rows: TransferRows,
+    transfer: Transfer,
     new_status_id: int,
     *,
     submitted: StatedFigure | None,
@@ -231,10 +230,10 @@ def settle(
     edit reconcile through one statement.
 
     Args:
-        rows: The transfer, at its pre-settle status.  The figure and the
-            retained record are read off ``rows.transfer``, the parent both
-            legs are priced as (ruling **plan#1983**), so no leg is chosen to
-            answer for the pair.
+        transfer: The transfer, at its pre-settle status.  The figure and
+            the retained record are read off it, the parent both legs are
+            priced as (ruling **plan#1983**), so no leg is chosen to answer
+            for the pair.
         new_status_id: The settled status the transfer moves to, as the DOOR
             asked for it.  Verified by
             :func:`~app.services.transfer_service._status.apply_status_to_all_three`.
@@ -268,30 +267,28 @@ def settle(
             (:func:`_reject_unsettleable`), or from the status seam's own
             transition and settle-day refusals.
     """
-    _reject_unsettleable(rows.transfer)
+    _reject_unsettleable(transfer)
 
     # Resolved ONCE, and everything below reads this answer rather than asking
     # again.  It was asked up to three times per ticked row before plan step
     # X-f2-c3 -- by the arm's correction predicate, by the dispatch's own
     # predicate, and by its fallback -- and each asking is a ``Transfer`` query
     # plus, for a derive-mode payment, a loan-basis resolve and an escrow load.
-    basis = derived_amount_basis(
-        rows.transfer.user_id, rows.transfer.scenario_id,
-    )
+    basis = derived_amount_basis(transfer.user_id, transfer.scenario_id)
     # Off the TRANSFER, the parent both legs are priced as (ruling
     # plan#1983) -- never its side's record, never a twin row (plan step
     # ``balance:X-bi-6-4d-2``): a twin's status is no longer kept, and a twin
     # left saying Paid under a reverted transfer would price at the sum of its
     # empty entries, ``$0.00``, and a ``$0.00`` settle takes the sides'
     # records off the books.
-    resolved = contribution_of(rows.transfer, basis)
+    resolved = contribution_of(transfer, basis)
     # A RETAINED correction outranks the derivation, through the same published
     # rule :func:`leg_settle_amount` offers from, so the pair's offer and its
     # booking are one expression (plan step X-au-c3).  The record is the
     # transfer's one settled figure, read once for the act off the transfer
     # (``status_seam.recorded_settlement``, the retained-record fact's one
     # branch on a parent's table) and carried into the settlement below.
-    retained = recorded_settlement(rows.transfer)
+    retained = recorded_settlement(transfer)
     held = honoured_figure(retained)
     booked = resolved if held is None else held
     correction = (
@@ -322,7 +319,7 @@ def settle(
     # so re-settling a transfer the user reverted in order to edit honours the
     # figure they read off their statement instead of re-deriving over it.
     apply_status_to_all_three(
-        rows, new_status_id, stated=stated, press=press,
+        transfer, new_status_id, stated=stated, press=press,
         settlement=Settlement.from_settle(booked, correction, retained),
     )
 

@@ -72,7 +72,6 @@ from app.services.transfer_service._side_days import (
     pair_fallback_day,
     resolve_pair_days,
 )
-from app.services.transfer_service._validation import TransferRows
 from app.utils.balance_predicates import (
     delete_returns_to_plan,
     settled_status_ids,
@@ -262,7 +261,7 @@ def reject_stated_day_on_a_zero_close(
 
 
 def apply_status_to_all_three(
-    rows: TransferRows,
+    transfer: Transfer,
     new_status_id: int,
     *,
     stated: PairDays = NO_DAYS,
@@ -303,7 +302,7 @@ def apply_status_to_all_three(
     untouched (F-047 / commit C-21).
 
     Args:
-        rows: The transfer; only it and its sides' records are written.
+        transfer: The transfer; only it and its sides' records are written.
         new_status_id: The ``ref.statuses.id`` the transfer moves to.  The
             pair's CURRENT status for a correction.
         stated: The days the act STATES, by side
@@ -336,18 +335,18 @@ def apply_status_to_all_three(
         ValueError: If the move enters the settled band with no *settlement*
             (propagated from the arm).
     """
-    verify_transition(rows.transfer, new_status_id)
+    verify_transition(transfer, new_status_id)
     # A revert to Projected that the books hold is refused here, the
     # transfer's one status door, before anything is assigned (ruling
     # **R-PC97**).
-    reject_revert_below_the_books(rows.transfer, new_status_id)
+    reject_revert_below_the_books(transfer, new_status_id)
     reject_stated_days_without_settle(new_status_id, stated)
-    legs = _side_legs(rows.transfer)
+    legs = _side_legs(transfer)
     reject_stated_day_on_a_zero_close(legs, stated, settlement)
     # Each SIDE's day, resolved before either side is written; out of the
     # band the arm un-dates both, so nothing is resolved there.
     days = (
-        _resolved_days(legs, stated, _fallback_day(rows.transfer))
+        _resolved_days(legs, stated, _fallback_day(transfer))
         if new_status_id in settled_status_ids() else NO_DAYS
     )
     # The sides BEFORE the transfer's status, so the arm reads the status the
@@ -356,7 +355,7 @@ def apply_status_to_all_three(
         legs, new_status_id, days=tuple(days), settlement=settlement,
         press=press,
     )
-    status_seam.apply_status_change(rows.transfer, new_status_id)
+    status_seam.apply_status_change(transfer, new_status_id)
 
 
 def return_to_plan(transfer: Transfer, *, took_off: bool) -> None:
@@ -406,5 +405,5 @@ def return_to_plan(transfer: Transfer, *, took_off: bool) -> None:
     if not delete_returns_to_plan(transfer, took_off=took_off):
         return
     apply_status_to_all_three(
-        TransferRows(transfer), ref_cache.status_id(StatusEnum.PROJECTED),
+        transfer, ref_cache.status_id(StatusEnum.PROJECTED),
     )

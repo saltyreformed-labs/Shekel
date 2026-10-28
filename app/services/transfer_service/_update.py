@@ -25,6 +25,7 @@ import logging
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
+from app.models.transfer import Transfer
 from app.services.transfer_service import _settle
 from app.services.transfer_service._amount import (
     apply_amount_ownership,
@@ -66,10 +67,7 @@ from app.services.transfer_service._status import (
     apply_status_to_all_three,
     reject_stated_days_without_settle,
 )
-from app.services.transfer_service._validation import (
-    TransferRows,
-    _get_transfer_or_raise,
-)
+from app.services.transfer_service._validation import _get_transfer_or_raise
 from app.utils.balance_predicates import enters_settled_band
 from app.utils.log_events import (
     BUSINESS,
@@ -113,7 +111,7 @@ def _fields_the_settle_left(
 
 
 def _grade_submitted_figure(
-    rows: TransferRows, updates: "dict[str, object]",
+    transfer: Transfer, updates: "dict[str, object]",
 ) -> None:
     """Read what a submitted FIGURE means, and refuse a real conflict.
 
@@ -144,7 +142,7 @@ def _grade_submitted_figure(
     **plan#1983**): both legs would answer it, so neither is asked.
 
     Args:
-        rows: The transfer, at its pre-update status.
+        transfer: The transfer, at its pre-update status.
         updates: The update kwargs as submitted.  Mutated in place: an echoed
             ``figure`` has its key removed.
 
@@ -155,17 +153,17 @@ def _grade_submitted_figure(
     if updates.get("figure") is None:
         return
     figure = figure_for_status(
-        rows.transfer,
-        updates.get("status_id", rows.transfer.status_id),
+        transfer,
+        updates.get("status_id", transfer.status_id),
         updates["figure"],
-        settled_figure(rows.transfer),
+        settled_figure(transfer),
     )
     if figure is None:
         del updates["figure"]
 
 
 def _dispatch_settle(
-    rows: TransferRows, updates: "dict[str, object]", stated: PairDays,
+    transfer: Transfer, updates: "dict[str, object]", stated: PairDays,
     press: Press | None,
 ) -> "bool | None":
     """Run the SETTLE when *updates* moves this transfer into the settled band.
@@ -191,7 +189,7 @@ def _dispatch_settle(
     instead of a kwargs bag to assemble.
 
     Args:
-        rows: The transfer, at its pre-update status.  The
+        transfer: The transfer, at its pre-update status.  The
             caller-stated facts (``is_override``, ``amount``) are already
             applied, which is what lets the settle read the post-edit state.
         updates: The update kwargs as submitted.
@@ -209,16 +207,16 @@ def _dispatch_settle(
     """
     if "status_id" not in updates:
         return None
-    if not enters_settled_band(rows.transfer, updates["status_id"]):
+    if not enters_settled_band(transfer, updates["status_id"]):
         return None
     return _settle.settle(
-        rows, updates["status_id"],
+        transfer, updates["status_id"],
         submitted=updates.get("figure"), stated=stated, press=press,
     )
 
 
 def _apply_remaining_fields(
-    rows: TransferRows, updates: "dict[str, object]", *,
+    transfer: Transfer, updates: "dict[str, object]", *,
     stated: PairDays, date_moves: bool, press: Press | None,
 ) -> None:
     """Apply every field a SETTLE does not own.
@@ -238,7 +236,7 @@ def _apply_remaining_fields(
     means.
 
     Args:
-        rows: The transfer.
+        transfer: The transfer.
         updates: The kwargs left for this function to apply.
         stated: The days by side this change states, as its verb admitted
             them -- empty after a settle, which consumed them.
@@ -304,7 +302,7 @@ def _apply_remaining_fields(
     # whose arm (``status_seam.sync_side_records``) stores it once as the
     # transfer's settled figure: a side's record holds no figure
     # (``ck_transaction_entries_side_record_states_no_figure``).
-    new_status_id = updates.get("status_id", rows.transfer.status_id)
+    new_status_id = updates.get("status_id", transfer.status_id)
     # The transfer's one settled figure, read off the transfer itself
     # (ruling plan#1983): both legs would answer it, so neither is asked.
     # A figure only ever reaches here as a CORRECTION -- a settling one is the
@@ -313,35 +311,36 @@ def _apply_remaining_fields(
     submitted = updates.get("figure")
     correction = (
         None if submitted is None
-        else correction_record(settled_figure(rows.transfer), submitted)
+        else correction_record(settled_figure(transfer), submitted)
     )
     if "status_id" in updates or correction is not None or stated != NO_DAYS:
         apply_status_to_all_three(
-            rows, new_status_id, stated=stated, settlement=correction, press=press,
+            transfer, new_status_id, stated=stated, settlement=correction,
+            press=press,
         )
 
     # ── pay_period_id ──────────────────────────────────────────────
     # Ownership was refused before the first write
     # (:func:`_reject_unowned_references`); this arm only assigns.
     if "pay_period_id" in updates:
-        rows.transfer.pay_period_id = updates["pay_period_id"]
+        transfer.pay_period_id = updates["pay_period_id"]
 
     # ── category_id ────────────────────────────────────────────────
     # Both legs read the transfer's category, so the transfer appears under
     # the user-selected category in both account grids.
     if "category_id" in updates:
-        rows.transfer.category_id = updates["category_id"]
+        transfer.category_id = updates["category_id"]
 
     # ── name ───────────────────────────────────────────────────────
     # Name is display metadata on the transfer.  A leg's label is composed
     # from the endpoints' names (``transfer_legs.leg_label``), not from it.
     if "name" in updates:
-        rows.transfer.name = updates["name"]
+        transfer.name = updates["name"]
 
     # ── notes ──────────────────────────────────────────────────────
     # Notes live on the transfer.
     if "notes" in updates:
-        rows.transfer.notes = updates["notes"]
+        transfer.notes = updates["notes"]
 
     # ── due_date ──────────────────────────────────────────────────
     # **A PLACED transfer's occurrence follows its date** (plan step
@@ -369,9 +368,9 @@ def _apply_remaining_fields(
     # not move it; an ad-hoc transfer answers no occurrence.
     if "due_date" in updates:
         new_due = updates["due_date"]
-        rows.transfer.due_date = new_due
+        transfer.due_date = new_due
         if date_moves:
-            rows.transfer.occurs_on = new_due
+            transfer.occurs_on = new_due
 
 
 def _reject_unowned_references(
@@ -443,12 +442,12 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
             calling :func:`update_transfer`.
         press: The save's press, or ``None`` (:func:`update_transfer`).
     """
-    rows = TransferRows(_get_transfer_or_raise(transfer_id, user_id))
+    transfer = _get_transfer_or_raise(transfer_id, user_id)
     # The transfer's SHAPE, read before any write for the reason the
     # transaction PATCH reads ``recurs`` before its field loop: the accessor
     # lazy-loads the definition, and a load after the first ``setattr`` would
     # autoflush a half-applied row (plan step ``balance:X-ci-1``).
-    placed = rows.transfer.is_placed
+    placed = transfer.is_placed
 
     # The ENDPOINTS this update leaves the transfer with, resolved and refused
     # first because the guard below GRADES against the resulting destination:
@@ -456,7 +455,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # judged by without moving its own installment at all.  Resolving here is
     # also what ownership-checks both accounts before any refusal can name one
     # (plan step R10-b).
-    endpoints = _resolve_endpoints(rows, user_id, updates)
+    endpoints = _resolve_endpoints(transfer, user_id, updates)
     # The days a door STATED, by side, against the endpoints this update leaves
     # (the transfer's own account columns name the OLD accounts until the
     # flush after the move below).  Before any write, like every refusal here.
@@ -479,7 +478,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # and left; a third reader is what made one producer worth the change.
     period_after = (
         _get_owned_period(
-            updates.get("pay_period_id", rows.transfer.pay_period_id), user_id,
+            updates.get("pay_period_id", transfer.pay_period_id), user_id,
         )
         if _POSTING_RELEVANT_INSTALLMENT_FIELDS & updates.keys()
         else None
@@ -493,13 +492,13 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # predicate the due-date arm below keys the occurrence on.  See
     # :mod:`._placed`.
     date_moves = re_place_and_grade_the_day(
-        rows.transfer, updates, period_after, placed=placed,
+        transfer, updates, period_after, placed=placed,
     )
 
     # R-C: refuse an edit that would move a loan payment before its loan, before
     # any field is applied.  See :func:`_reject_installment_move_before_loan`.
     _reject_installment_move_before_loan(
-        rows.transfer, updates, endpoints.to_account, period_after,
+        transfer, updates, endpoints.to_account, period_after,
     )
 
     # The FIGURE's own gate, in the same place and for the same reason: a
@@ -507,7 +506,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # write is two statements below.  It also DROPS an echoed box here, so the
     # settle dispatch and the field arms below both see the payload the user
     # actually meant.
-    _grade_submitted_figure(rows, updates)
+    _grade_submitted_figure(transfer, updates)
 
     # The category's OWNERSHIP refusal, hoisted here for the same rule.  It ran
     # at the arm that assigns it, which is after the settle has already written
@@ -518,7 +517,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # A day beside a status that settles nothing states money that has not
     # moved: refused before the first write (it ran last, at its own door).
     reject_stated_days_without_settle(
-        updates.get("status_id", rows.transfer.status_id), stated,
+        updates.get("status_id", transfer.status_id), stated,
     )
 
     # A PLACED transfer's typed figure RESTATES its definition (ruling
@@ -527,7 +526,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # dispatch, so a figure typed beside a settling status is the price the
     # legs book.  It writes the ownership and the flag into ``updates`` for
     # the arms below to apply, and does nothing when no figure was typed.
-    restate_definition_price(rows.transfer, updates, placed=placed)
+    restate_definition_price(transfer, updates, placed=placed)
 
     # The AMOUNT's own refusal, ahead of the first write
     # (:func:`~._amount.grade_amount_ownership`).
@@ -544,7 +543,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # branch between here and the dispatch is a caller-stated FACT; the
     # derivation comes after all of them.
     if "is_override" in updates:
-        rows.transfer.is_override = bool(updates["is_override"])
+        transfer.is_override = bool(updates["is_override"])
 
     # ── from_account_id / to_account_id ────────────────────────────
     # A caller-stated fact like the flag above, and applied with it for the
@@ -559,7 +558,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # ``balance:X-bi-6-3`` the split was reversed HERE, first, because it was
     # keyed by the income shadow the move was about to hide from the loan's
     # reconcile (the R10-b `-$4.17` that measured it).
-    _apply_endpoint_move(rows, endpoints, press)
+    _apply_endpoint_move(transfer, endpoints, press)
 
     # ── WHO OWNS the transfer's figure ─────────────────────────────
     # Asked exactly when the caller STATED an ownership.  It used to fire on
@@ -569,7 +568,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # and PRESENCE is what distinguishes *stated nothing* from *stated the
     # definition's* now that the second carries no figure to test for.
     if "amount_ownership" in updates:
-        apply_amount_ownership(rows, updates["amount_ownership"])
+        apply_amount_ownership(transfer, updates["amount_ownership"])
 
     # ── the SETTLE ─────────────────────────────────────────────────
     # When this update moves the transfer into the settled band, ONE act writes
@@ -577,7 +576,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # own day (a ``$0.00`` close keeps none); the three kwargs it consumes are
     # then dropped so the field application below cannot write any of them a
     # second time.
-    settled = _dispatch_settle(rows, updates, stated, press)
+    settled = _dispatch_settle(transfer, updates, stated, press)
     if settled is not None:
         remaining = _fields_the_settle_left(updates)
         stated = NO_DAYS
@@ -600,7 +599,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
         remaining = updates
 
     _apply_remaining_fields(
-        rows, remaining, stated=stated, date_moves=date_moves, press=press,
+        transfer, remaining, stated=stated, date_moves=date_moves, press=press,
     )
 
     # The aggregate's lock -- the transfer's counter moving when a side's
@@ -614,7 +613,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # what decides whether the ledger needs re-deriving, and a settle's
     # ``status_id`` is precisely the field that says it does.
     _reconcile_postings_after_update(
-        rows.transfer, updates, endpoints.vacated,
+        transfer, updates, endpoints.vacated,
         endpoints.vacated_destination_id,
     )
 
@@ -628,7 +627,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
         # cardinality from kwarg ordering.
         fields_changed=sorted(updates.keys()),
     )
-    return rows.transfer, bool(settled)
+    return transfer, bool(settled)
 
 
 def settle_transfer(

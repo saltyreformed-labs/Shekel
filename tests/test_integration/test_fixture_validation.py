@@ -684,8 +684,9 @@ class TestGenerateTransferOf:
         declaration's one writer in ``app/`` is gone: the loop in
         ``transfer_service._amount.apply_amount_ownership`` that wrote it onto
         ``TransferRows.shadows``, empty on every transfer, went with that
-        attribute at the step's second leaf (``TransferRows``'s docstring, in
-        ``app/services/transfer_service/_validation.py``).  Measured
+        attribute at the step's second leaf (the module docstring of
+        ``app/services/transfer_service/_validation.py``, which keeps the
+        wrapper's history since finding plan#2043 deleted it).  Measured
         2026-10-18, before that deletion: the loop declaring ``TEMPLATE`` in
         its place failed no test the unmutated suite passed, over the whole
         suite (the coordinator's ruling, **R-BAL207**).

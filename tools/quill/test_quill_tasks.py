@@ -345,14 +345,21 @@ def test_sync_puts_on_the_board_each_task_whose_step_is_on_it(code, capsys):
         "would put on the board, nested under its step plan#1 (ruling plan#1842): plan#2 [task, "
         "no arc] card 2\n"
         "would put on the board, nested under its step plan#1 (ruling plan#1842): plan#3 [task, "
-        "no arc] card 3\n")
+        "no arc] card 3\n"
+        "would show plan#1 [step, balance] card 1 as Todo in the board's Status (it showed "
+        "none)\n"
+        "would show plan#4 [task, no arc] card 4 as Todo in the board's Status (it showed none)\n")
     assert not tracker.writes
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == (
         "put on the board, nested under its step plan#1 (ruling plan#1842): plan#2 [task, no "
         "arc] card 2\n"
         "put on the board, nested under its step plan#1 (ruling plan#1842): plan#3 [task, no "
-        "arc] card 3\n")
+        "arc] card 3\n"
+        "show plan#1 [step, balance] card 1 as Todo in the board's Status (it showed none)\n"
+        "show plan#2 [task, no arc] card 2 as Todo in the board's Status (it showed none)\n"
+        "show plan#3 [task, no arc] card 3 as Done in the board's Status (it showed none)\n"
+        "show plan#4 [task, no arc] card 4 as Todo in the board's Status (it showed none)\n")
     assert tracker.writes == [("board_add", 2), ("board_add", 3)]
     assert run(tracker, code, "sync") == 0
     assert capsys.readouterr().out == ""
@@ -364,8 +371,9 @@ def test_sync_puts_on_the_board_each_task_whose_step_is_on_it(code, capsys):
 
 
 def test_a_sync_put_on_cut_short_costs_no_state_write_and_the_next_run_finishes_it(code):
-    """The put-on is sync's last write: an add GitHub cut off fails the run after its state
-    writes landed, and is never re-sent within it (ruling plan#1816); the next run adds it."""
+    """The put-on follows every state write (only the board's Status follows it): an add
+    GitHub cut off fails the run after its state writes landed, and is never re-sent within it
+    (ruling plan#1816); the next run adds it."""
     tracker = FakeTracker()
     tracker.add(1)
     tracker.add(9)

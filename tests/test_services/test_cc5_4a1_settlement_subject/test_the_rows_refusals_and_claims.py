@@ -76,7 +76,7 @@ class TestTheRowsRefusalsApplyToItsPayment:
             db.session.rollback()
             assert db.session.query(StatementMatch).count() == 0
 
-    def test_a_settled_shadow_legs_payment_refuses_a_correction(
+    def test_a_settled_transfer_sides_payment_refuses_a_correction(
         self, app, seed_user,
     ):
         """A transfer's figure is one: the correction is to the TRANSFER, not here.

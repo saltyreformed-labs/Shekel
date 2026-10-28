@@ -44,10 +44,13 @@ loan service.  Flask-isolated, reads only, no commits.
 Both halves query ``budget.transfers``.  The PROJECTED half has since plan step
 balance:X-bi-6a (the plan, as legs derived from the parent; ruling R-BAL13);
 the SETTLED half has since plan step balance:X-bi-6-4b (ruling R-BAL140):
-the transfers into the account that are no longer Projected or whose to-side
-money has moved, each leg carrying its covering movement -- the record of a
-payment that moved -- through the one join in :mod:`app.services.transfer_legs`.
-No amount is read off a transfer for a payment that has settled.
+the transfers into the account that are no longer Projected, each leg
+carrying its covering movement -- the record of a payment that moved --
+through the one join in :mod:`app.services.transfer_legs`.  Until plan step
+balance:X-bi-6-5's third leaf it took a Projected transfer whose to-side
+money had moved too, a state the status-band rule refuses at commit.  A
+payment that has settled is worth the figure its transfer stores, never a
+figure read off its record (which holds none).
 """
 
 from ._legs import (

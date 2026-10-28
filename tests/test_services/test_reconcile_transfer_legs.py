@@ -332,10 +332,10 @@ class TestTheOfferableLegLoader:
                 {seed_periods[0].id}, options=(),
             ) == []
 
-    def test_a_side_whose_own_movement_is_dated_is_not_offered_but_the_other_is(
+    def test_a_dated_record_under_a_projected_transfer_is_refused_at_commit(
         self, app, db, seed_user, seed_periods,
     ):
-        """R-BAL79 per side: the checking side's money moved; savings' has not.
+        """A side's dated record under a Projected transfer is refused at commit (R-BAL79's state).
 
         The loader offered savings' side alone: checking's dated movement
         meant its money had moved.  **The state is REFUSED at commit since

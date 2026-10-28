@@ -1,8 +1,10 @@
 """A card's arc read from its issue field Arc (rulings ``balance:R-BAL349``, ``R-BAL354``):
 :func:`_arcs.arc_of` and :func:`_tracker.card_from`'s read of it; nothing calls GitHub.
 
-No recording holds a card with an Arc value: no card held one when they were recorded (their
-cards' values are ``recorded/sources/issue_field_values.json``).  So each test starts from a
+No recording plan#1811 re-keyed holds a card with an Arc value: no card held one when they
+were recorded (their cards' values are ``recorded/sources/issue_field_values.json``); the
+status and priority recordings, made after it, file a step holding one, which their replays
+in ``test__tracker.py`` read back.  So each test starts from a
 RECORDED card node, the lookup ``test__tracker.py``'s ``cards`` replay reads, and changes only
 its field values, given in the shape GitHub answered them for plan#1811 on 2026-10-27
 (``tracker_fix/build_1811/first_write.out``).  That every read of a card asks for them, word

@@ -74,14 +74,16 @@ leaf ``X-bi-6-4c-2`` a transfer was offered as its SHADOW row on this account,
 a TRANSACTION, and its paid side as the shadow's movement joined to the shadow,
 which ``X-bi-6-4d`` -- deleting the shadows -- would have left offering
 nothing; the two row arms' ``transfer_id IS NULL`` went with the column at plan
-step ``balance:X-bi-6-5``.  The two leg arms partition by the movement (ruling
-**R-BAL79**): a side is a LEG while its transfer is Projected and its money has
-not moved, and its DATED movement is the subject once it has (ruling
-**R-BAL80**).  Where the row arms offer an un-dated kept movement (a row
-reverted after a card-tendered settle, ruling **R-CC42**), the leg arms offer
-none: under a Paid or Received transfer that record is a state no door writes,
-and an Apply of it would date it on the wrong day
-(:func:`~._valuation.leg_settlement_candidate`).
+step ``balance:X-bi-6-5``.  The two leg arms partition by the transfer's
+status, which the status-band rule (:mod:`app.side_band_infrastructure`) makes
+the movement's too: a side is a LEG while its transfer is Projected, and its
+DATED movement is the subject once the transfer has settled (ruling
+**R-BAL80**).  (The leg arm asked the movement as well, ruling **R-BAL79**,
+until plan step ``balance:X-bi-6-5``'s third leaf.)  Where the row arms offer
+an un-dated kept movement (a row reverted after a card-tendered settle, ruling
+**R-CC42**), the leg arms offer none: under a Paid or Received transfer that
+record is a state the database refuses, and an Apply of it would date it on
+the wrong day (:func:`~._valuation.leg_settlement_candidate`).
 
 **What one candidate is WORTH is** :mod:`._valuation` **'s, in its own module
 since plan step ``credit_card:CC-5-4a-1``** (this one crossed the 1,000-line
@@ -628,9 +630,10 @@ def _leg_candidates(
     TRANSFER:
 
     * this account is one of its endpoints (either side);
-    * it is Projected and live, and THIS side holds no dated movement
-      (ruling **R-BAL79**: the movement decides a side; ruling **R-JM**: a
-      transfer leg reads its parent);
+    * it is Projected and live (ruling **R-JM**: a transfer leg reads its
+      parent), so neither side holds a dated movement (the status-band
+      rule; ruling **R-BAL79** had the movement decide a side until plan
+      step ``balance:X-bi-6-5``'s third leaf);
     * its pay period is one of the OWNER's saved periods -- the owner the
       calendar is, the scope's ownership clause.
 
@@ -690,10 +693,10 @@ def _leg_settlement_candidates(
     * the transfer CONTRIBUTES and is live, and is filed in one of the
       OWNER's saved periods;
     * the movement is DATED -- a settled leg is its dated covering movement
-      (ruling **R-BAL80**), and a side whose money has not moved is on the
-      plan (:func:`_leg_candidates`, ruling **R-BAL79**), so one side is
-      offered once.  An un-dated record under a Paid or Received transfer --
-      a state no door writes -- is offered by neither arm (under a Cancelled
+      (ruling **R-BAL80**), and a side of a still-Projected transfer is on
+      the plan (:func:`_leg_candidates`), so one side is offered once.  An
+      un-dated record under a Paid or Received transfer -- a state the
+      database refuses -- is offered by neither arm (under a Cancelled
       one the contributing clause already excludes it);
       :func:`~._valuation.leg_settlement_candidate` carries why, and re-asks
       the day in Python for :func:`~._valuation.repriced`'s sake.

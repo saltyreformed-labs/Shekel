@@ -86,10 +86,12 @@ def test_claim_pushes_card_n_checks_it_out_and_refuses_a_held_card(code, capsys)
     """R-BAL359: the claim is ``card/1`` on origin, a commit on origin/dev adding
     plan/ships/1, checked out here with no upstream (no ``branch.card/1`` section in the
     shared configuration).  Exactly one session wins: the second claim is refused with the
-    holder named."""
+    holder named, and writes nothing (the first filed plan#1's finishing tasks, ruling
+    plan#1875, ``test_quill_claim_finishing.py``)."""
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, "claim", "plan#1") == 0
+    writes = list(tracker.writes)
     sha = _git.on_origin(code)[1]
     held = _git.read(code).claims[1]
     assert (held.sha, held.branch) == (sha, "card/1") and held.claimed is not None
@@ -100,7 +102,7 @@ def test_claim_pushes_card_n_checks_it_out_and_refuses_a_held_card(code, capsys)
     assert run(tracker, code, "claim", "1") == 1
     assert "plan#1 is already claimed: card/1 (claimed " in capsys.readouterr().err
     assert _git.on_origin(code) == {1: sha}
-    assert not tracker.writes
+    assert tracker.writes == writes
 
 
 def test_claim_here_builds_on_the_commit_checked_out(code):

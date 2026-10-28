@@ -1584,7 +1584,7 @@ class TestATransferIsALegOfItsParent:
     figure the report derives from a leg.
     """
 
-    def test_both_loaders_answer_own_rows_and_settled_expense_legs_and_no_shadow(
+    def test_both_loaders_answer_own_rows_and_settled_expense_legs(
         self, app, seed_user, seed_periods, db,
     ):
         with app.app_context():
@@ -2429,7 +2429,7 @@ class TestTheActualHalfAsksTheAmountModel:
 class TestASettledRowWhosePlanIsDerivedIsPriced:
     """A settled row carrying no figure of its OWN still has a plan."""
 
-    def test_a_settled_shadow_is_priced_from_its_parent_not_refused(
+    def test_a_settled_transfer_leg_is_priced_from_its_parent_not_refused(
         self, app, db, seed_user, seed_periods,
     ):
         """The estimate is the PARENT's figure, and the delta is real.

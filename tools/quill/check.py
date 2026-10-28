@@ -23,8 +23,9 @@ What it holds a card to (rulings ``balance:R-BAL136``, ``R-BAL138``,
   :data:`TITLE_CAP` characters;
 - an owner the change sets is the one its kind needs: a finding is blocked by a
   LIVE step a branch builds, never one split into smaller steps (a finding names a live
-  owner, and some pull request always owes it: plan#1784, "One owner, always a leaf") and
-  a ruling by a step, each never its sub-issue, which the step's progress would count
+  owner, and some pull request always owes it: plan#1784, "One owner, always a leaf"), a
+  ruling by a step, and a question that names an owner by the step it is asked for
+  (plan#1861's item 10), each never its sub-issue, which the step's progress would count
   (``R-BAL395``); a step's
   parent, if it has one, is the LIVE step it splits (a step already done with has
   no work left to split); an owner with no type is no step, whatever the kind;
@@ -204,6 +205,9 @@ def _owner_problems(draft: Draft) -> list[str]:
     elif draft.kind == "ruling" and not is_step:
         problem = (f"a ruling is blocked by a step, its owner (R-BAL395); "
                    f"its owner is {parent}")
+    elif draft.kind == "question" and owner is not None and not is_step:
+        problem = (f"a question that names an owner is blocked by the step it is asked for "
+                   f"(R-BAL395); its owner is {parent}")
     elif draft.kind == "step" and owner is not None and not is_step:
         problem = (f"a step's parent is the step it splits, not a {owner.kind}" if owner.kind
                    else f"a step's parent is the step it splits; its parent is {parent}")

@@ -17,12 +17,12 @@ import requests
 from tools.quill import _tracker, landing, quill, setup_tracker
 from tools.quill._queries import marked_cards, open_cards
 from tools.quill._draft import Draft
+from tools.quill._exits import described
 from tools.quill._export import snapshot
 from tools.quill._github import (
     CUT_OFF_RETRIES,
     GitHub,
     GitHubError,
-    described,
     installation_token,
 )
 from tools.quill._recorded import recording

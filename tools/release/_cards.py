@@ -378,9 +378,9 @@ def _below_each(
 ) -> dict[int, tuple[tuple[int, str | None], ...]]:
     """What stands below each card of ``closure``, as ``(number, kind)``, for
     :func:`_none_hung`: its sub-issues and, for each group's own card and each step below a
-    group that is a step, each finding and ruling it blocks, its owner's link (R-BAL395: a
-    finding or a ruling is no sub-issue of the step that owns it, so a step hung under one
-    is below the group all the same; R395's review, its F1), by that step's blocking read
+    group that is a step, each finding, ruling and question it blocks, its owner's link
+    (R-BAL395: none is a sub-issue of the step that owns it, so a step hung under one is
+    below the group all the same; R395's review, its F1), by that step's blocking read
     (``Tracker.blocking``), once each."""
     below = {number: tuple((child.number, child.kind) for child in card.children)
              for number, card in closure.items()}
@@ -438,8 +438,8 @@ def _none_hung(tracker: Tracker, groups: Mapping[int, Collection[int]],
     production holds could be dropped unseen.  Every card below each group in ``groups``
     (every group the read holds, touched by the release or not), of any kind and in any
     state, is read for it: ``listed`` holds what stands below each card the read holds, as
-    ``(number, kind)`` (its sub-issues and, for a step below a group, the findings and
-    rulings it owns: :func:`_below_each`), and ``kinds`` each one's kind; the rest are read
+    ``(number, kind)`` (its sub-issues and, for a step below a group, the findings, rulings
+    and questions it owns: :func:`_below_each`), and ``kinds`` each one's kind; the rest are read
     from ``tracker`` here, in rounds, each card once, by their sub-issues.
 
     Raises:

@@ -105,11 +105,12 @@ class PaymentDates:
         value is built from (a settled transfer's loan-side covering movement
         since plan step balance:X-bi-6-4b; a ``$0.00`` close holds none and
         is dated by the installment it skips, its interval's -- rulings
-        **R-BAL139** and **R-R107**), and
-        :func:`app.utils.balance_predicates.require_settled_day` refuses to
-        break (through :func:`app.services.loan_ledger.payment_visible_on`;
-        through ``settled_day``, naming the shadow row, until leaf
-        balance:X-bi-6-4d-1).
+        **R-BAL139** and **R-R107**), which the status-band rule
+        (:mod:`app.side_band_infrastructure`) holds at commit: a settled
+        transfer's records are dated.  The loan walk refused a record that
+        broke it (through ``settled_day``, naming the shadow row, until leaf
+        balance:X-bi-6-4d-1; through ``require_settled_day`` from then) until
+        plan step balance:X-bi-6-5's third leaf deleted the refusal.
         Storing the boolean beside the day would be a second copy of one fact,
         free to disagree with it inside a value every consumer reads.
 
@@ -144,8 +145,9 @@ class PaymentDates:
         Returns:
             ``True`` for a payment from the settled half of
             :func:`app.services.loan_loaders.income_legs` -- a settled
-            transfer, or since ruling **R-BAL140** a Projected one whose
-            money has moved -- and ``False`` for a planned one.
+            transfer (until plan step balance:X-bi-6-5's third leaf, by
+            ruling **R-BAL140**, a Projected one whose money had moved too)
+            -- and ``False`` for a planned one.
         """
         return self.settled_on is not None
 

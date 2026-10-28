@@ -55,8 +55,8 @@ def _stage_an_undated_loan_side(transfer, account):
     a reverted record and releases its day, ruling **R-BAL61**).  No door
     writes it, and since that step the status-band rule refuses it at
     COMMIT, so it exists only inside this save (ruling **R-BAL167** class
-    2): the caller asks its readers there, then commits and expects the
-    refusal.
+    2): the caller commits and expects the refusal, and reads the halves
+    only after the rollback.
 
     Returns:
         The loan side's record.  It returned the income twin beside it until

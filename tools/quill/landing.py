@@ -158,9 +158,16 @@ comes only through the merge that took it in.  Rule 5 lets only a claim write on
 reads a claim's done file (:func:`_state.names_no_task`), so the file of a task since moved
 under another card is refused on N's branch.  Rule 6 is the markers' alone: a task's file
 makes a change no records-only one.  And **a change from ``card/N`` recording card N is
-refused while a task under N that was not dropped lacks its done file in M** (:func:`_owed`):
-a task the TOOL closed counts, as its close only shows git; a person's close, or ``quill
-drop``'s, is a drop.  The release tool never reads a task.
+refused while a task under N that was not dropped lacks its done file in M**
+(:func:`_tasks.owed`): a task the TOOL closed counts, as its close only shows git; a person's
+close, or ``quill drop``'s, is a drop.  **It is refused too while a commit of its claim names
+no task under N** (:mod:`tools.quill._stamps`, the commit hook's backstop).  The release tool
+never reads a task.
+
+**The file naming a card's task in progress, ``plan/doing/N``, is judged in the same walk**
+(rulings plan#2009 and plan#2022; :mod:`tools.quill._doing`): only ``card/N`` adds or changes
+it, a release or a resync carrying it as rule 4 carries a marker; a delete passes, from any
+branch; and an entry there that is no card's file, or a file naming no task, is refused.
 
 **The tracker is read only when a card or a task must be**, through the card-only reader
 (:class:`_tracker.CardReader`) and the token :data:`TOKEN_VARIABLE` holds: never quill's
@@ -205,10 +212,11 @@ import requests
 
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, tracking
-from tools.quill import _findings, _git, _production
-from tools.quill._command import with_cards, with_closure
-from tools.quill._github import GitHub, GitHubError, described, reading
-from tools.quill._state import dropped, filing_ended, filing_unfinished, names_no_task, no_work
+from tools.quill import _doing, _findings, _git, _production, _stamps, _tasks
+from tools.quill._command import with_closure
+from tools.quill._exits import described
+from tools.quill._github import GitHub, GitHubError, reading
+from tools.quill._state import filing_ended, filing_unfinished, names_no_task, no_work
 from tools.quill._tracker import BareCard, CardReader, TrackerError
 from tools.quill.setup_tracker import PLAN
 
@@ -283,6 +291,9 @@ _TASKS = _Kind(_git.TASKS, _git.task_file, _git.task_of, attrgetter("task_confli
 _KINDS = (_CARDS, _TASKS)
 #: Each kind's directory, which one walk of git's history reads together.
 _DIRECTORIES = tuple(kind.directory for kind in _KINDS)
+#: Each kind's directory and the one holding each card's file naming its task in progress
+#: (:mod:`_doing`): what M's tree is read for, and the other branch's one walk.
+_WALKED = (*_DIRECTORIES, _git.DOING)
 
 
 class NotSet(LookupError):
@@ -338,11 +349,11 @@ class Landing:
 
     @cached_property
     def lines(self) -> Mapping[str, Mapping[int, str]]:
-        """By directory, each card whose marker M's tree holds and each task whose done file
-        it holds, with that file's line, by quill's one reading of a tree's markers and task
-        files (:func:`_git.lines_in`)."""
+        """By directory, each card whose marker M's tree holds, each task whose done file it
+        holds and each card whose file naming its task in progress it holds, with that file's
+        line, by quill's one reading of a tree's records (:func:`_git.lines_in`)."""
         return {directory: _git.lines_in(self.root, self.merge, directory)[0]
-                for directory in _DIRECTORIES}
+                for directory in _WALKED}
 
     @cached_property
     def held(self) -> Mapping[tuple[str, str], tuple[_git.Took, ...]]:
@@ -353,9 +364,16 @@ class Landing:
 
     @cached_property
     def carried(self) -> Mapping[tuple[str, str], tuple[_git.Took, ...]]:
-        """The lines of markers and task files the other branch's own line took in, with the
-        commits that took each in and undid it (:func:`_git.landings`)."""
-        return _git.landings(self.root, self.other, _DIRECTORIES)
+        """The lines of markers, task files and files naming a card's task in progress the
+        other branch's own line took in, with the commits that took each in and undid it
+        (:func:`_git.landings`)."""
+        return _git.landings(self.root, self.other, _WALKED)
+
+    def carries(self, entry: _git.Entry) -> bool:
+        """Rule 4: whether ``entry``, a line the change writes, is one the other branch's own
+        line took in that the change carries from it (:func:`_carried`)."""
+        took = self.carried.get((entry.path, entry.blob))
+        return bool(took) and _carried(self, took)
 
     @cached_property
     def deleted(self) -> frozenset[tuple[str, str]]:
@@ -586,9 +604,9 @@ def _written(landing: Landing, kind: _Kind, entry: _git.Entry) -> tuple[str | No
         return (f"{entry.path}: {_git.shown(landing.target)} held this very line once and undid "
                 f"it, so it would {said.again.format(s='', it=it)} with no change to its "
                 f"record{counted if kind.counted else ''}: {said.redo.format(n=number)}"), None
-    if took := landing.carried.get((entry.path, entry.blob)):
-        if _carried(landing, took):
-            return None, None
+    if landing.carries(entry):
+        return None, None
+    if (entry.path, entry.blob) in landing.carried:
         other = _git.shown(landing.other)
         return (f"{entry.path}: {other} took this very line in, but this change does not bring "
                 "the commit through which it did, or holds the one through which it undid it, "
@@ -601,8 +619,9 @@ def _written(landing: Landing, kind: _Kind, entry: _git.Entry) -> tuple[str | No
 
 def _judged(landing: Landing) -> tuple[list[str], dict[str, set[int]]]:
     """One sentence for each refusal of rules 1-6 over ``landing``'s entries under
-    :data:`_git.MARKERS` and :data:`_git.TASKS`, and the cards it records and the tasks it
-    writes a done file of that the tracker must be read for, by directory."""
+    :data:`_git.MARKERS` and :data:`_git.TASKS`, then of :mod:`_doing`'s over those under
+    :data:`_git.DOING`, and the cards it records and the tasks it writes a done file of that
+    the tracker must be read for, by directory."""
     written = [(kind, entry) for entry in landing.entries
                if entry.blob is not None and (kind := _kind_of(entry.path)) is not None]
     claim = landing.claim
@@ -620,6 +639,8 @@ def _judged(landing: Landing) -> tuple[list[str], dict[str, set[int]]]:
             reasons.append(why)
         if number is not None:
             read[kind.directory].add(number)
+    reasons += _doing.refused(landing, [entry for entry in landing.entries
+                                        if _under(entry.path, _git.DOING)])
     return reasons, read
 
 
@@ -813,36 +834,6 @@ def _wrong(number: int, card: BareCard | None, cards: Mapping[int, BareCard],
     return None
 
 
-def _owed(landing: Landing, card: BareCard, held: dict[int, BareCard],
-           reader: CardReader) -> list[str]:
-    """The open-task arm (``R-BAL386``): one sentence for each task under ``card``, which the
-    pull request's own claim records, that was not dropped (:func:`_state.dropped`: closed by
-    a person, or by ``quill drop``; a task the TOOL closed as done counts, as that close only
-    shows git) and whose done file M's tree does not hold.  Each task is read by its number,
-    as a parent's listing of it names no closer: those ``held`` lacks, which it then holds
-    (:func:`_command.with_cards`).  A task the tool closed is dropped only once ``quill sync``
-    has reopened it (``quill drop`` refuses a closed card), so its sentence says so.
-
-    Raises:
-        _tracker.TrackerError: when a task ``card`` lists does not exist.
-    """
-    numbers = card.task_children
-    with_cards(reader, held, numbers)
-    done, head, reasons = landing.lines[_git.TASKS], landing.pull.head, []
-    for number in sorted(numbers):
-        if number in done or dropped(number, held, set()):
-            continue
-        shown, drop = (("", f"drop the task (quill drop plan#{number})") if held[number].is_open
-                       else (" (quill closed it as done while a branch held that file)",
-                             f"drop the task once quill sync reopens it (quill sync, then quill "
-                             f"drop plan#{number})"))
-        reasons.append(f"{_git.task_file(number)}: {head} records card {card.number}, but holds "
-                       f"no done file for task plan#{number} under it, which is neither done "
-                       f"nor dropped{shown}: write it in the commit that finishes the task "
-                       f"(quill task-file plan#{number}), or {drop}")
-    return reasons
-
-
 def _others(landing: Landing, numbers: set[int], held: Mapping[int, BareCard],
             recorded: BareCard | None) -> dict[int, str]:
     """Rule 5's arm that rule 7 judges: for each marker of another card than its claim's that
@@ -864,19 +855,22 @@ def refusals(landing: Landing, read: Mapping[str, set[int]], shipped: Iterable[i
     its card owns (:func:`_findings.foreign`, rule 5's sentence and why), then for each task
     whose done file it writes that the tracker says the file marks nothing done on the
     claim's branch (:func:`_state.names_no_task`: no task, or one under another card,
-    ``R-BAL386``), by task, then for each task the claim's card owes (:func:`_owed`), each
-    finding it owes (:func:`_findings.unfixed`) and each a step above it owes
+    ``R-BAL386``), by task, then for each task the claim's card owes (:func:`_tasks.owed`),
+    each commit of the claim naming no task under it (:func:`_stamps.unnamed`), each finding
+    it owes (:func:`_findings.unfixed`) and each a step above it owes
     (:func:`_findings.unhanded`), and each a step rule 6's door records owes
     (:func:`_findings.unrecorded`); ``read`` holds the cards (under :data:`_git.MARKERS`) and
     the tasks (under :data:`_git.TASKS`), and ``shipped`` is git's answer once the change and
     the other integration branch meet.  The tracker is read through the reader ``connect``
     makes: the cards and the tasks the change writes in one read, then each card a decision
     over those cards reads (:func:`_command.with_closure`), then each task under the claim's
-    card not read yet (:func:`_owed`), then what the claim's card and each step above it
+    card not read yet (:func:`_tasks.owed`), then each card a commit of the claim names not
+    read yet (:func:`_stamps.unnamed`), then what the claim's card and each step above it
     block, and each finding among those not read yet (:func:`_findings.owned`).
 
     Raises:
         NotSet: when ``connect`` has no token to read with.
+        tools.ci.gitcmd.GitError: when git cannot read the claim's commits.
         _tracker.TrackerError: when a card links to one the tracker lacks, or GitHub's
             answer is cut short, answers a list as null or holds a null node in one.
         _github.GitHubError: when GitHub answers a read with an error.
@@ -898,7 +892,8 @@ def refusals(landing: Landing, read: Mapping[str, set[int]], shipped: Iterable[i
                 for number in sorted(tasks) if (why := names_no_task(number, held,
                                                                      landing.claim))]
     if recorded is not None:
-        reasons += _owed(landing, recorded, held, reader)
+        reasons += _tasks.owed(reader, recorded, held, landing.lines[_git.TASKS])
+        reasons += _stamps.unnamed(reader, landing.root, landing.pull.head_sha, recorded, held)
         reasons += _findings.unfixed(reader, recorded, shipped, held)
         reasons += _findings.unhanded(reader, recorded, cards, shipped, held)
     reasons += _findings.unrecorded(reader, landing.facts.door, head, shipped, held)
@@ -916,10 +911,10 @@ def problems(root: Path, merge: str, pull: PullRequest,
 
     Raises:
         CannotJudge: as :func:`_landing` raises it.
-        tools.ci.gitcmd.GitError: when git cannot read the merge, its change or a branch's
-            line, or merge either tip with the other branch; or a marker or a task's done
-            file conflicts AFTER where :func:`_unwritten` says, or a marker anywhere once a
-            card or task must be read.
+        tools.ci.gitcmd.GitError: when git cannot read the merge, its change, a branch's
+            line or the claim's commits, or merge either tip with the other branch; or a
+            marker or a task's done file conflicts AFTER where :func:`_unwritten` says, or a
+            marker anywhere once a card or task must be read.
         _production.IgnoreFileError: as :func:`_unrecorded` raises it.
         NotSet, _tracker.TrackerError, _github.GitHubError, requests.RequestException: as
             :func:`refusals` raises them.

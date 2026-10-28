@@ -423,7 +423,7 @@ class TestFarLegsOf:
                 (paid.id, Decimal("80.00")),
             ]
 
-    def test_reads_no_shadow_row(
+    def test_reads_transfers_alone_in_one_statement(
         self, app, db, seed_user, seed_periods_today,
     ):
         """Invariant 5 by statement census, structurally: ONE read, of transfers.

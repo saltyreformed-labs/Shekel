@@ -1,0 +1,2718 @@
+{
+ "scratch": {
+  "numbers": [
+   261,
+   262,
+   263
+  ],
+  "ids": [
+   6079945459,
+   6079945714,
+   6079945902
+  ],
+  "nodes": [
+   "I_kwDOVSOvzs8AAAABamSa8w",
+   "I_kwDOVSOvzs8AAAABamSb8g",
+   "I_kwDOVSOvzs8AAAABamScrg"
+  ],
+  "items": [],
+  "board": "PVT_kwDOFB5GWc4BoEsZ",
+  "place": [
+   "saltyreformed-labs",
+   "plan-views-demo",
+   "Plan views demo"
+  ]
+ },
+ "exchanges": [
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { fullDatabaseId name } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "fullDatabaseId": "47847921",
+         "name": "Priority"
+        },
+        {},
+        {},
+        {
+         "fullDatabaseId": "47847924",
+         "name": "Effort"
+        },
+        {
+         "fullDatabaseId": "48771436",
+         "name": "Arc"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues",
+   "body": {
+    "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+    "body": "Scratch for plan#1877's recording; closed when it ends.",
+    "type": "step",
+    "labels": [
+     "balance",
+     "filing"
+    ],
+    "issue_field_values": [
+     {
+      "field_id": 48771436,
+      "value": "balance"
+     }
+    ]
+   },
+   "status": 201,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/261",
+    "id": 6079945459,
+    "node_id": "I_kwDOVSOvzs8AAAABamSa8w",
+    "number": 261,
+    "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     },
+     {
+      "id": 12780874739,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cyr8w",
+      "url": "[redacted: not a scratch card]",
+      "name": "filing",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:56Z",
+    "updated_at": "2026-10-28T13:30:57Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAOZoIA",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
+    "type": {
+     "id": 891387282,
+     "node_id": "IT_kwDOFB5GWc41IX2S",
+     "name": "step",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 0,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "body": "Scratch for plan#1877's recording; closed when it ends.",
+    "closed_by": null,
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues",
+   "body": {
+    "title": "[L2 measurement] scratch: the first sub-issue linked",
+    "body": "Scratch for plan#1877's recording.",
+    "type": "task",
+    "labels": [
+     "filing"
+    ]
+   },
+   "status": 201,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/262",
+    "id": 6079945714,
+    "node_id": "I_kwDOVSOvzs8AAAABamSb8g",
+    "number": 262,
+    "title": "[L2 measurement] scratch: the first sub-issue linked",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780874739,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cyr8w",
+      "url": "[redacted: not a scratch card]",
+      "name": "filing",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:57Z",
+    "updated_at": "2026-10-28T13:30:57Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [],
+    "type": {
+     "id": 891355547,
+     "node_id": "IT_kwDOFB5GWc41IQGb",
+     "name": "task",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 0,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "body": "Scratch for plan#1877's recording.",
+    "closed_by": null,
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues",
+   "body": {
+    "title": "[L2 measurement] scratch: the second sub-issue linked",
+    "body": "Scratch for plan#1877's recording.",
+    "type": "task",
+    "labels": [
+     "filing"
+    ]
+   },
+   "status": 201,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/263",
+    "id": 6079945902,
+    "node_id": "I_kwDOVSOvzs8AAAABamScrg",
+    "number": 263,
+    "title": "[L2 measurement] scratch: the second sub-issue linked",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780874739,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cyr8w",
+      "url": "[redacted: not a scratch card]",
+      "name": "filing",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:58Z",
+    "updated_at": "2026-10-28T13:30:58Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [],
+    "type": {
+     "id": 891355547,
+     "node_id": "IT_kwDOFB5GWc41IQGb",
+     "name": "task",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 0,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "body": "Scratch for plan#1877's recording.",
+    "closed_by": null,
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "DELETE",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/labels/filing",
+   "body": null,
+   "status": 200,
+   "answer": [
+    {
+     "id": 12780871728,
+     "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+     "url": "[redacted: not a scratch card]",
+     "name": "balance",
+     "color": "[redacted: not a scratch card]",
+     "default": false,
+     "description": "[redacted: not a scratch card]",
+     "archived_at": null,
+     "archived_by": null
+    }
+   ]
+  },
+  {
+   "method": "DELETE",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262/labels/filing",
+   "body": null,
+   "status": 200,
+   "answer": []
+  },
+  {
+   "method": "DELETE",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263/labels/filing",
+   "body": null,
+   "status": 200,
+   "answer": []
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c261: issue(number: 261) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c262: issue(number: 262) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c263: issue(number: 263) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c261": {
+       "id": "I_kwDOVSOvzs8AAAABamSa8w",
+       "number": 261,
+       "fullDatabaseId": "6079945459",
+       "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance"
+         }
+        ]
+       },
+       "issueFieldValues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance",
+          "field": {
+           "name": "Arc"
+          }
+         }
+        ]
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c262": {
+       "id": "I_kwDOVSOvzs8AAAABamSb8g",
+       "number": 262,
+       "fullDatabaseId": "6079945714",
+       "title": "[L2 measurement] scratch: the first sub-issue linked",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c263": {
+       "id": "I_kwDOVSOvzs8AAAABamScrg",
+       "number": 263,
+       "fullDatabaseId": "6079945902",
+       "title": "[L2 measurement] scratch: the second sub-issue linked",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/sub_issues",
+   "body": {
+    "sub_issue_id": 6079945714
+   },
+   "status": 201,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/261",
+    "id": 6079945459,
+    "node_id": "I_kwDOVSOvzs8AAAABamSa8w",
+    "number": 261,
+    "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:56Z",
+    "updated_at": "2026-10-28T13:30:59Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAOZoIA",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
+    "type": {
+     "id": 891387282,
+     "node_id": "IT_kwDOFB5GWc41IX2S",
+     "name": "step",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 1,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "repository": {
+     "id": 1428402126,
+     "node_id": "R_kgDOVSOvzg",
+     "name": "plan-views-demo",
+     "full_name": "saltyreformed-labs/plan-views-demo",
+     "private": true,
+     "owner": {
+      "login": "saltyreformed-labs",
+      "id": 337528409,
+      "node_id": "O_kgDOFB5GWQ",
+      "avatar_url": "[redacted: not a scratch card]",
+      "gravatar_id": "[redacted: not a scratch card]",
+      "url": "[redacted: not a scratch card]",
+      "html_url": "[redacted: not a scratch card]",
+      "followers_url": "[redacted: not a scratch card]",
+      "following_url": "[redacted: not a scratch card]",
+      "gists_url": "[redacted: not a scratch card]",
+      "starred_url": "[redacted: not a scratch card]",
+      "subscriptions_url": "[redacted: not a scratch card]",
+      "organizations_url": "[redacted: not a scratch card]",
+      "repos_url": "[redacted: not a scratch card]",
+      "events_url": "[redacted: not a scratch card]",
+      "received_events_url": "[redacted: not a scratch card]",
+      "type": "Organization",
+      "user_view_type": "[redacted: not a scratch card]",
+      "site_admin": false
+     },
+     "html_url": "[redacted: not a scratch card]",
+     "description": "[redacted: not a scratch card]",
+     "fork": false,
+     "url": "[redacted: not a scratch card]",
+     "forks_url": "[redacted: not a scratch card]",
+     "keys_url": "[redacted: not a scratch card]",
+     "collaborators_url": "[redacted: not a scratch card]",
+     "teams_url": "[redacted: not a scratch card]",
+     "hooks_url": "[redacted: not a scratch card]",
+     "issue_events_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "assignees_url": "[redacted: not a scratch card]",
+     "branches_url": "[redacted: not a scratch card]",
+     "tags_url": "[redacted: not a scratch card]",
+     "blobs_url": "[redacted: not a scratch card]",
+     "git_tags_url": "[redacted: not a scratch card]",
+     "git_refs_url": "[redacted: not a scratch card]",
+     "trees_url": "[redacted: not a scratch card]",
+     "statuses_url": "[redacted: not a scratch card]",
+     "languages_url": "[redacted: not a scratch card]",
+     "stargazers_url": "[redacted: not a scratch card]",
+     "contributors_url": "[redacted: not a scratch card]",
+     "subscribers_url": "[redacted: not a scratch card]",
+     "subscription_url": "[redacted: not a scratch card]",
+     "commits_url": "[redacted: not a scratch card]",
+     "git_commits_url": "[redacted: not a scratch card]",
+     "comments_url": "[redacted: not a scratch card]",
+     "issue_comment_url": "[redacted: not a scratch card]",
+     "contents_url": "[redacted: not a scratch card]",
+     "compare_url": "[redacted: not a scratch card]",
+     "merges_url": "[redacted: not a scratch card]",
+     "archive_url": "[redacted: not a scratch card]",
+     "downloads_url": "[redacted: not a scratch card]",
+     "issues_url": "[redacted: not a scratch card]",
+     "pulls_url": "[redacted: not a scratch card]",
+     "milestones_url": "[redacted: not a scratch card]",
+     "notifications_url": "[redacted: not a scratch card]",
+     "labels_url": "[redacted: not a scratch card]",
+     "releases_url": "[redacted: not a scratch card]",
+     "deployments_url": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "pushed_at": "[redacted: not a scratch card]",
+     "git_url": "[redacted: not a scratch card]",
+     "ssh_url": "[redacted: not a scratch card]",
+     "clone_url": "[redacted: not a scratch card]",
+     "svn_url": "[redacted: not a scratch card]",
+     "homepage": null,
+     "size": 4,
+     "stargazers_count": 0,
+     "watchers_count": 0,
+     "language": null,
+     "has_issues": true,
+     "has_projects": true,
+     "has_downloads": false,
+     "has_wiki": false,
+     "has_pages": false,
+     "has_discussions": false,
+     "forks_count": 0,
+     "mirror_url": null,
+     "archived": false,
+     "disabled": false,
+     "open_issues_count": 88,
+     "license": null,
+     "allow_forking": false,
+     "is_template": false,
+     "web_commit_signoff_required": false,
+     "has_pull_requests": true,
+     "pull_request_creation_policy": "[redacted: not a scratch card]",
+     "topics": [],
+     "visibility": "[redacted: not a scratch card]",
+     "forks": 0,
+     "open_issues": 88,
+     "watchers": 0,
+     "default_branch": "[redacted: not a scratch card]",
+     "permissions": {
+      "admin": true,
+      "maintain": true,
+      "push": true,
+      "triage": true,
+      "pull": true
+     }
+    },
+    "body": "Scratch for plan#1877's recording; closed when it ends.",
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/sub_issues",
+   "body": {
+    "sub_issue_id": 6079945902
+   },
+   "status": 201,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/261",
+    "id": 6079945459,
+    "node_id": "I_kwDOVSOvzs8AAAABamSa8w",
+    "number": 261,
+    "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:56Z",
+    "updated_at": "2026-10-28T13:30:59Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAOZoIA",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
+    "type": {
+     "id": 891387282,
+     "node_id": "IT_kwDOFB5GWc41IX2S",
+     "name": "step",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 2,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "repository": {
+     "id": 1428402126,
+     "node_id": "R_kgDOVSOvzg",
+     "name": "plan-views-demo",
+     "full_name": "saltyreformed-labs/plan-views-demo",
+     "private": true,
+     "owner": {
+      "login": "saltyreformed-labs",
+      "id": 337528409,
+      "node_id": "O_kgDOFB5GWQ",
+      "avatar_url": "[redacted: not a scratch card]",
+      "gravatar_id": "[redacted: not a scratch card]",
+      "url": "[redacted: not a scratch card]",
+      "html_url": "[redacted: not a scratch card]",
+      "followers_url": "[redacted: not a scratch card]",
+      "following_url": "[redacted: not a scratch card]",
+      "gists_url": "[redacted: not a scratch card]",
+      "starred_url": "[redacted: not a scratch card]",
+      "subscriptions_url": "[redacted: not a scratch card]",
+      "organizations_url": "[redacted: not a scratch card]",
+      "repos_url": "[redacted: not a scratch card]",
+      "events_url": "[redacted: not a scratch card]",
+      "received_events_url": "[redacted: not a scratch card]",
+      "type": "Organization",
+      "user_view_type": "[redacted: not a scratch card]",
+      "site_admin": false
+     },
+     "html_url": "[redacted: not a scratch card]",
+     "description": "[redacted: not a scratch card]",
+     "fork": false,
+     "url": "[redacted: not a scratch card]",
+     "forks_url": "[redacted: not a scratch card]",
+     "keys_url": "[redacted: not a scratch card]",
+     "collaborators_url": "[redacted: not a scratch card]",
+     "teams_url": "[redacted: not a scratch card]",
+     "hooks_url": "[redacted: not a scratch card]",
+     "issue_events_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "assignees_url": "[redacted: not a scratch card]",
+     "branches_url": "[redacted: not a scratch card]",
+     "tags_url": "[redacted: not a scratch card]",
+     "blobs_url": "[redacted: not a scratch card]",
+     "git_tags_url": "[redacted: not a scratch card]",
+     "git_refs_url": "[redacted: not a scratch card]",
+     "trees_url": "[redacted: not a scratch card]",
+     "statuses_url": "[redacted: not a scratch card]",
+     "languages_url": "[redacted: not a scratch card]",
+     "stargazers_url": "[redacted: not a scratch card]",
+     "contributors_url": "[redacted: not a scratch card]",
+     "subscribers_url": "[redacted: not a scratch card]",
+     "subscription_url": "[redacted: not a scratch card]",
+     "commits_url": "[redacted: not a scratch card]",
+     "git_commits_url": "[redacted: not a scratch card]",
+     "comments_url": "[redacted: not a scratch card]",
+     "issue_comment_url": "[redacted: not a scratch card]",
+     "contents_url": "[redacted: not a scratch card]",
+     "compare_url": "[redacted: not a scratch card]",
+     "merges_url": "[redacted: not a scratch card]",
+     "archive_url": "[redacted: not a scratch card]",
+     "downloads_url": "[redacted: not a scratch card]",
+     "issues_url": "[redacted: not a scratch card]",
+     "pulls_url": "[redacted: not a scratch card]",
+     "milestones_url": "[redacted: not a scratch card]",
+     "notifications_url": "[redacted: not a scratch card]",
+     "labels_url": "[redacted: not a scratch card]",
+     "releases_url": "[redacted: not a scratch card]",
+     "deployments_url": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "pushed_at": "[redacted: not a scratch card]",
+     "git_url": "[redacted: not a scratch card]",
+     "ssh_url": "[redacted: not a scratch card]",
+     "clone_url": "[redacted: not a scratch card]",
+     "svn_url": "[redacted: not a scratch card]",
+     "homepage": null,
+     "size": 4,
+     "stargazers_count": 0,
+     "watchers_count": 0,
+     "language": null,
+     "has_issues": true,
+     "has_projects": true,
+     "has_downloads": false,
+     "has_wiki": false,
+     "has_pages": false,
+     "has_discussions": false,
+     "forks_count": 0,
+     "mirror_url": null,
+     "archived": false,
+     "disabled": false,
+     "open_issues_count": 88,
+     "license": null,
+     "allow_forking": false,
+     "is_template": false,
+     "web_commit_signoff_required": false,
+     "has_pull_requests": true,
+     "pull_request_creation_policy": "[redacted: not a scratch card]",
+     "topics": [],
+     "visibility": "[redacted: not a scratch card]",
+     "forks": 0,
+     "open_issues": 88,
+     "watchers": 0,
+     "default_branch": "[redacted: not a scratch card]",
+     "permissions": {
+      "admin": true,
+      "maintain": true,
+      "push": true,
+      "triage": true,
+      "pull": true
+     }
+    },
+    "body": "Scratch for plan#1877's recording; closed when it ends.",
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c261: issue(number: 261) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c262: issue(number: 262) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c263: issue(number: 263) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c261": {
+       "id": "I_kwDOVSOvzs8AAAABamSa8w",
+       "number": 261,
+       "fullDatabaseId": "6079945459",
+       "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance"
+         }
+        ]
+       },
+       "issueFieldValues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance",
+          "field": {
+           "name": "Arc"
+          }
+         }
+        ]
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 2,
+        "nodes": [
+         {
+          "number": 262,
+          "state": "OPEN",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         },
+         {
+          "number": 263,
+          "state": "OPEN",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c262": {
+       "id": "I_kwDOVSOvzs8AAAABamSb8g",
+       "number": 262,
+       "fullDatabaseId": "6079945714",
+       "title": "[L2 measurement] scratch: the first sub-issue linked",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c263": {
+       "id": "I_kwDOVSOvzs8AAAABamScrg",
+       "number": 263,
+       "fullDatabaseId": "6079945902",
+       "title": "[L2 measurement] scratch: the second sub-issue linked",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "PATCH",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/sub_issues/priority",
+   "body": {
+    "sub_issue_id": 6079945902,
+    "before_id": 6079945714
+   },
+   "status": 200,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/261",
+    "id": 6079945459,
+    "node_id": "I_kwDOVSOvzs8AAAABamSa8w",
+    "number": 261,
+    "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:56Z",
+    "updated_at": "2026-10-28T13:30:59Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAOZoIA",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
+    "type": {
+     "id": 891387282,
+     "node_id": "IT_kwDOFB5GWc41IX2S",
+     "name": "step",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 2,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "repository": {
+     "id": 1428402126,
+     "node_id": "R_kgDOVSOvzg",
+     "name": "plan-views-demo",
+     "full_name": "saltyreformed-labs/plan-views-demo",
+     "private": true,
+     "owner": {
+      "login": "saltyreformed-labs",
+      "id": 337528409,
+      "node_id": "O_kgDOFB5GWQ",
+      "avatar_url": "[redacted: not a scratch card]",
+      "gravatar_id": "[redacted: not a scratch card]",
+      "url": "[redacted: not a scratch card]",
+      "html_url": "[redacted: not a scratch card]",
+      "followers_url": "[redacted: not a scratch card]",
+      "following_url": "[redacted: not a scratch card]",
+      "gists_url": "[redacted: not a scratch card]",
+      "starred_url": "[redacted: not a scratch card]",
+      "subscriptions_url": "[redacted: not a scratch card]",
+      "organizations_url": "[redacted: not a scratch card]",
+      "repos_url": "[redacted: not a scratch card]",
+      "events_url": "[redacted: not a scratch card]",
+      "received_events_url": "[redacted: not a scratch card]",
+      "type": "Organization",
+      "user_view_type": "[redacted: not a scratch card]",
+      "site_admin": false
+     },
+     "html_url": "[redacted: not a scratch card]",
+     "description": "[redacted: not a scratch card]",
+     "fork": false,
+     "url": "[redacted: not a scratch card]",
+     "forks_url": "[redacted: not a scratch card]",
+     "keys_url": "[redacted: not a scratch card]",
+     "collaborators_url": "[redacted: not a scratch card]",
+     "teams_url": "[redacted: not a scratch card]",
+     "hooks_url": "[redacted: not a scratch card]",
+     "issue_events_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "assignees_url": "[redacted: not a scratch card]",
+     "branches_url": "[redacted: not a scratch card]",
+     "tags_url": "[redacted: not a scratch card]",
+     "blobs_url": "[redacted: not a scratch card]",
+     "git_tags_url": "[redacted: not a scratch card]",
+     "git_refs_url": "[redacted: not a scratch card]",
+     "trees_url": "[redacted: not a scratch card]",
+     "statuses_url": "[redacted: not a scratch card]",
+     "languages_url": "[redacted: not a scratch card]",
+     "stargazers_url": "[redacted: not a scratch card]",
+     "contributors_url": "[redacted: not a scratch card]",
+     "subscribers_url": "[redacted: not a scratch card]",
+     "subscription_url": "[redacted: not a scratch card]",
+     "commits_url": "[redacted: not a scratch card]",
+     "git_commits_url": "[redacted: not a scratch card]",
+     "comments_url": "[redacted: not a scratch card]",
+     "issue_comment_url": "[redacted: not a scratch card]",
+     "contents_url": "[redacted: not a scratch card]",
+     "compare_url": "[redacted: not a scratch card]",
+     "merges_url": "[redacted: not a scratch card]",
+     "archive_url": "[redacted: not a scratch card]",
+     "downloads_url": "[redacted: not a scratch card]",
+     "issues_url": "[redacted: not a scratch card]",
+     "pulls_url": "[redacted: not a scratch card]",
+     "milestones_url": "[redacted: not a scratch card]",
+     "notifications_url": "[redacted: not a scratch card]",
+     "labels_url": "[redacted: not a scratch card]",
+     "releases_url": "[redacted: not a scratch card]",
+     "deployments_url": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "pushed_at": "[redacted: not a scratch card]",
+     "git_url": "[redacted: not a scratch card]",
+     "ssh_url": "[redacted: not a scratch card]",
+     "clone_url": "[redacted: not a scratch card]",
+     "svn_url": "[redacted: not a scratch card]",
+     "homepage": null,
+     "size": 4,
+     "stargazers_count": 0,
+     "watchers_count": 0,
+     "language": null,
+     "has_issues": true,
+     "has_projects": true,
+     "has_downloads": false,
+     "has_wiki": false,
+     "has_pages": false,
+     "has_discussions": false,
+     "forks_count": 0,
+     "mirror_url": null,
+     "archived": false,
+     "disabled": false,
+     "open_issues_count": 88,
+     "license": null,
+     "allow_forking": false,
+     "is_template": false,
+     "web_commit_signoff_required": false,
+     "has_pull_requests": true,
+     "pull_request_creation_policy": "[redacted: not a scratch card]",
+     "topics": [],
+     "visibility": "[redacted: not a scratch card]",
+     "forks": 0,
+     "open_issues": 88,
+     "watchers": 0,
+     "default_branch": "[redacted: not a scratch card]",
+     "permissions": {
+      "admin": true,
+      "maintain": true,
+      "push": true,
+      "triage": true,
+      "pull": true
+     }
+    },
+    "body": "Scratch for plan#1877's recording; closed when it ends.",
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c261: issue(number: 261) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c262: issue(number: 262) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c263: issue(number: 263) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c261": {
+       "id": "I_kwDOVSOvzs8AAAABamSa8w",
+       "number": 261,
+       "fullDatabaseId": "6079945459",
+       "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance"
+         }
+        ]
+       },
+       "issueFieldValues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance",
+          "field": {
+           "name": "Arc"
+          }
+         }
+        ]
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 2,
+        "nodes": [
+         {
+          "number": 263,
+          "state": "OPEN",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         },
+         {
+          "number": 262,
+          "state": "OPEN",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c262": {
+       "id": "I_kwDOVSOvzs8AAAABamSb8g",
+       "number": 262,
+       "fullDatabaseId": "6079945714",
+       "title": "[L2 measurement] scratch: the first sub-issue linked",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c263": {
+       "id": "I_kwDOVSOvzs8AAAABamScrg",
+       "number": 263,
+       "fullDatabaseId": "6079945902",
+       "title": "[L2 measurement] scratch: the second sub-issue linked",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "PATCH",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/sub_issues/priority",
+   "body": {
+    "sub_issue_id": 6079945902,
+    "before_id": 6079945714
+   },
+   "status": 200,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/261",
+    "id": 6079945459,
+    "node_id": "I_kwDOVSOvzs8AAAABamSa8w",
+    "number": 261,
+    "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "open",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:56Z",
+    "updated_at": "2026-10-28T13:30:59Z",
+    "closed_at": null,
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAOZoIA",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
+    "type": {
+     "id": 891387282,
+     "node_id": "IT_kwDOFB5GWc41IX2S",
+     "name": "step",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 2,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "repository": {
+     "id": 1428402126,
+     "node_id": "R_kgDOVSOvzg",
+     "name": "plan-views-demo",
+     "full_name": "saltyreformed-labs/plan-views-demo",
+     "private": true,
+     "owner": {
+      "login": "saltyreformed-labs",
+      "id": 337528409,
+      "node_id": "O_kgDOFB5GWQ",
+      "avatar_url": "[redacted: not a scratch card]",
+      "gravatar_id": "[redacted: not a scratch card]",
+      "url": "[redacted: not a scratch card]",
+      "html_url": "[redacted: not a scratch card]",
+      "followers_url": "[redacted: not a scratch card]",
+      "following_url": "[redacted: not a scratch card]",
+      "gists_url": "[redacted: not a scratch card]",
+      "starred_url": "[redacted: not a scratch card]",
+      "subscriptions_url": "[redacted: not a scratch card]",
+      "organizations_url": "[redacted: not a scratch card]",
+      "repos_url": "[redacted: not a scratch card]",
+      "events_url": "[redacted: not a scratch card]",
+      "received_events_url": "[redacted: not a scratch card]",
+      "type": "Organization",
+      "user_view_type": "[redacted: not a scratch card]",
+      "site_admin": false
+     },
+     "html_url": "[redacted: not a scratch card]",
+     "description": "[redacted: not a scratch card]",
+     "fork": false,
+     "url": "[redacted: not a scratch card]",
+     "forks_url": "[redacted: not a scratch card]",
+     "keys_url": "[redacted: not a scratch card]",
+     "collaborators_url": "[redacted: not a scratch card]",
+     "teams_url": "[redacted: not a scratch card]",
+     "hooks_url": "[redacted: not a scratch card]",
+     "issue_events_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "assignees_url": "[redacted: not a scratch card]",
+     "branches_url": "[redacted: not a scratch card]",
+     "tags_url": "[redacted: not a scratch card]",
+     "blobs_url": "[redacted: not a scratch card]",
+     "git_tags_url": "[redacted: not a scratch card]",
+     "git_refs_url": "[redacted: not a scratch card]",
+     "trees_url": "[redacted: not a scratch card]",
+     "statuses_url": "[redacted: not a scratch card]",
+     "languages_url": "[redacted: not a scratch card]",
+     "stargazers_url": "[redacted: not a scratch card]",
+     "contributors_url": "[redacted: not a scratch card]",
+     "subscribers_url": "[redacted: not a scratch card]",
+     "subscription_url": "[redacted: not a scratch card]",
+     "commits_url": "[redacted: not a scratch card]",
+     "git_commits_url": "[redacted: not a scratch card]",
+     "comments_url": "[redacted: not a scratch card]",
+     "issue_comment_url": "[redacted: not a scratch card]",
+     "contents_url": "[redacted: not a scratch card]",
+     "compare_url": "[redacted: not a scratch card]",
+     "merges_url": "[redacted: not a scratch card]",
+     "archive_url": "[redacted: not a scratch card]",
+     "downloads_url": "[redacted: not a scratch card]",
+     "issues_url": "[redacted: not a scratch card]",
+     "pulls_url": "[redacted: not a scratch card]",
+     "milestones_url": "[redacted: not a scratch card]",
+     "notifications_url": "[redacted: not a scratch card]",
+     "labels_url": "[redacted: not a scratch card]",
+     "releases_url": "[redacted: not a scratch card]",
+     "deployments_url": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "pushed_at": "[redacted: not a scratch card]",
+     "git_url": "[redacted: not a scratch card]",
+     "ssh_url": "[redacted: not a scratch card]",
+     "clone_url": "[redacted: not a scratch card]",
+     "svn_url": "[redacted: not a scratch card]",
+     "homepage": null,
+     "size": 4,
+     "stargazers_count": 0,
+     "watchers_count": 0,
+     "language": null,
+     "has_issues": true,
+     "has_projects": true,
+     "has_downloads": false,
+     "has_wiki": false,
+     "has_pages": false,
+     "has_discussions": false,
+     "forks_count": 0,
+     "mirror_url": null,
+     "archived": false,
+     "disabled": false,
+     "open_issues_count": 88,
+     "license": null,
+     "allow_forking": false,
+     "is_template": false,
+     "web_commit_signoff_required": false,
+     "has_pull_requests": true,
+     "pull_request_creation_policy": "[redacted: not a scratch card]",
+     "topics": [],
+     "visibility": "[redacted: not a scratch card]",
+     "forks": 0,
+     "open_issues": 88,
+     "watchers": 0,
+     "default_branch": "[redacted: not a scratch card]",
+     "permissions": {
+      "admin": true,
+      "maintain": true,
+      "push": true,
+      "triage": true,
+      "pull": true
+     }
+    },
+    "body": "Scratch for plan#1877's recording; closed when it ends.",
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/timeline",
+    "performed_via_github_app": null,
+    "state_reason": null,
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c261: issue(number: 261) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c262: issue(number: 262) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c263: issue(number: 263) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c261": {
+       "id": "I_kwDOVSOvzs8AAAABamSa8w",
+       "number": 261,
+       "fullDatabaseId": "6079945459",
+       "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance"
+         }
+        ]
+       },
+       "issueFieldValues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance",
+          "field": {
+           "name": "Arc"
+          }
+         }
+        ]
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 2,
+        "nodes": [
+         {
+          "number": 263,
+          "state": "OPEN",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         },
+         {
+          "number": 262,
+          "state": "OPEN",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c262": {
+       "id": "I_kwDOVSOvzs8AAAABamSb8g",
+       "number": 262,
+       "fullDatabaseId": "6079945714",
+       "title": "[L2 measurement] scratch: the first sub-issue linked",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      },
+      "c263": {
+       "id": "I_kwDOVSOvzs8AAAABamScrg",
+       "number": 263,
+       "fullDatabaseId": "6079945902",
+       "title": "[L2 measurement] scratch: the second sub-issue linked",
+       "state": "OPEN",
+       "stateReason": null,
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": []
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "PATCH",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261",
+   "body": {
+    "state": "closed",
+    "state_reason": "not_planned"
+   },
+   "status": 200,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/261",
+    "id": 6079945459,
+    "node_id": "I_kwDOVSOvzs8AAAABamSa8w",
+    "number": 261,
+    "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [
+     {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
+    "state": "closed",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:56Z",
+    "updated_at": "2026-10-28T13:31:07Z",
+    "closed_at": "2026-10-28T13:31:07Z",
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAOZoIA",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
+    "type": {
+     "id": 891387282,
+     "node_id": "IT_kwDOFB5GWc41IX2S",
+     "name": "step",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 2,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "body": "Scratch for plan#1877's recording; closed when it ends.",
+    "closed_by": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261/timeline",
+    "performed_via_github_app": null,
+    "state_reason": "not_planned",
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "PATCH",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262",
+   "body": {
+    "state": "closed",
+    "state_reason": "not_planned"
+   },
+   "status": 200,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/262",
+    "id": 6079945714,
+    "node_id": "I_kwDOVSOvzs8AAAABamSb8g",
+    "number": 262,
+    "title": "[L2 measurement] scratch: the first sub-issue linked",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [],
+    "state": "closed",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:57Z",
+    "updated_at": "2026-10-28T13:31:08Z",
+    "closed_at": "2026-10-28T13:31:08Z",
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [],
+    "type": {
+     "id": 891355547,
+     "node_id": "IT_kwDOFB5GWc41IQGb",
+     "name": "task",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 0,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "parent_issue_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261",
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "body": "Scratch for plan#1877's recording.",
+    "closed_by": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/262/timeline",
+    "performed_via_github_app": null,
+    "state_reason": "not_planned",
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "PATCH",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263",
+   "body": {
+    "state": "closed",
+    "state_reason": "not_planned"
+   },
+   "status": 200,
+   "answer": {
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263",
+    "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/263",
+    "id": 6079945902,
+    "node_id": "I_kwDOVSOvzs8AAAABamScrg",
+    "number": 263,
+    "title": "[L2 measurement] scratch: the second sub-issue linked",
+    "user": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "labels": [],
+    "state": "closed",
+    "locked": false,
+    "assignees": [],
+    "milestone": null,
+    "comments": 0,
+    "created_at": "2026-10-28T13:30:58Z",
+    "updated_at": "2026-10-28T13:31:10Z",
+    "closed_at": "2026-10-28T13:31:10Z",
+    "assignee": null,
+    "author_association": "MEMBER",
+    "issue_field_values": [],
+    "type": {
+     "id": 891355547,
+     "node_id": "IT_kwDOFB5GWc41IQGb",
+     "name": "task",
+     "description": "[redacted: not a scratch card]",
+     "color": "[redacted: not a scratch card]",
+     "created_at": "[redacted: not a scratch card]",
+     "updated_at": "[redacted: not a scratch card]",
+     "is_enabled": true
+    },
+    "active_lock_reason": null,
+    "sub_issues_summary": {
+     "total": 0,
+     "completed": 0,
+     "percent_completed": 0
+    },
+    "parent_issue_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/261",
+    "issue_dependencies_summary": {
+     "blocked_by": 0,
+     "total_blocked_by": 0,
+     "blocking": 0,
+     "total_blocking": 0
+    },
+    "body": "Scratch for plan#1877's recording.",
+    "closed_by": {
+     "login": "SaltyReformed",
+     "id": 136745390,
+     "node_id": "U_kgDOCCaRrg",
+     "avatar_url": "[redacted: not a scratch card]",
+     "gravatar_id": "[redacted: not a scratch card]",
+     "url": "[redacted: not a scratch card]",
+     "html_url": "[redacted: not a scratch card]",
+     "followers_url": "[redacted: not a scratch card]",
+     "following_url": "[redacted: not a scratch card]",
+     "gists_url": "[redacted: not a scratch card]",
+     "starred_url": "[redacted: not a scratch card]",
+     "subscriptions_url": "[redacted: not a scratch card]",
+     "organizations_url": "[redacted: not a scratch card]",
+     "repos_url": "[redacted: not a scratch card]",
+     "events_url": "[redacted: not a scratch card]",
+     "received_events_url": "[redacted: not a scratch card]",
+     "type": "User",
+     "user_view_type": "[redacted: not a scratch card]",
+     "site_admin": false
+    },
+    "reactions": {
+     "url": "[redacted: not a scratch card]",
+     "total_count": 0,
+     "+1": 0,
+     "-1": 0,
+     "laugh": 0,
+     "hooray": 0,
+     "confused": 0,
+     "heart": 0,
+     "rocket": 0,
+     "eyes": 0
+    },
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/263/timeline",
+    "performed_via_github_app": null,
+    "state_reason": "not_planned",
+    "pinned_comment": null
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c261: issue(number: 261) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c262: issue(number: 262) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c263: issue(number: 263) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c261": {
+       "id": "I_kwDOVSOvzs8AAAABamSa8w",
+       "number": 261,
+       "fullDatabaseId": "6079945459",
+       "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+       "state": "CLOSED",
+       "stateReason": "NOT_PLANNED",
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance"
+         }
+        ]
+       },
+       "issueFieldValues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance",
+          "field": {
+           "name": "Arc"
+          }
+         }
+        ]
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 2,
+        "nodes": [
+         {
+          "number": 263,
+          "state": "CLOSED",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         },
+         {
+          "number": 262,
+          "state": "CLOSED",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": [
+         {
+          "__typename": "ClosedEvent",
+          "actor": {
+           "login": "SaltyReformed"
+          }
+         }
+        ]
+       }
+      },
+      "c262": {
+       "id": "I_kwDOVSOvzs8AAAABamSb8g",
+       "number": 262,
+       "fullDatabaseId": "6079945714",
+       "title": "[L2 measurement] scratch: the first sub-issue linked",
+       "state": "CLOSED",
+       "stateReason": "NOT_PLANNED",
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": [
+         {
+          "__typename": "ClosedEvent",
+          "actor": {
+           "login": "SaltyReformed"
+          }
+         }
+        ]
+       }
+      },
+      "c263": {
+       "id": "I_kwDOVSOvzs8AAAABamScrg",
+       "number": 263,
+       "fullDatabaseId": "6079945902",
+       "title": "[L2 measurement] scratch: the second sub-issue linked",
+       "state": "CLOSED",
+       "stateReason": "NOT_PLANNED",
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": [
+         {
+          "__typename": "ClosedEvent",
+          "actor": {
+           "login": "SaltyReformed"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c261: issue(number: 261) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c262: issue(number: 262) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c263: issue(number: 263) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c261": {
+       "id": "I_kwDOVSOvzs8AAAABamSa8w",
+       "number": 261,
+       "fullDatabaseId": "6079945459",
+       "title": "[L2 measurement] scratch: a parent whose sub-issues are reordered",
+       "state": "CLOSED",
+       "stateReason": "NOT_PLANNED",
+       "issueType": {
+        "name": "step"
+       },
+       "labels": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance"
+         }
+        ]
+       },
+       "issueFieldValues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance",
+          "field": {
+           "name": "Arc"
+          }
+         }
+        ]
+       },
+       "parent": null,
+       "subIssues": {
+        "totalCount": 2,
+        "nodes": [
+         {
+          "number": 263,
+          "state": "CLOSED",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         },
+         {
+          "number": 262,
+          "state": "CLOSED",
+          "issueType": {
+           "name": "task"
+          },
+          "repository": {
+           "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+          }
+         }
+        ]
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": [
+         {
+          "__typename": "ClosedEvent",
+          "actor": {
+           "login": "SaltyReformed"
+          }
+         }
+        ]
+       }
+      },
+      "c262": {
+       "id": "I_kwDOVSOvzs8AAAABamSb8g",
+       "number": 262,
+       "fullDatabaseId": "6079945714",
+       "title": "[L2 measurement] scratch: the first sub-issue linked",
+       "state": "CLOSED",
+       "stateReason": "NOT_PLANNED",
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": [
+         {
+          "__typename": "ClosedEvent",
+          "actor": {
+           "login": "SaltyReformed"
+          }
+         }
+        ]
+       }
+      },
+      "c263": {
+       "id": "I_kwDOVSOvzs8AAAABamScrg",
+       "number": 263,
+       "fullDatabaseId": "6079945902",
+       "title": "[L2 measurement] scratch: the second sub-issue linked",
+       "state": "CLOSED",
+       "stateReason": "NOT_PLANNED",
+       "issueType": {
+        "name": "task"
+       },
+       "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "parent": {
+        "number": 261,
+        "repository": {
+         "nameWithOwner": "saltyreformed-labs/plan-views-demo"
+        }
+       },
+       "subIssues": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "blockedBy": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "projectItems": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "timelineItems": {
+        "nodes": [
+         {
+          "__typename": "ClosedEvent",
+          "actor": {
+           "login": "SaltyReformed"
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

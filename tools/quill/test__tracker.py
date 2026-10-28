@@ -7,8 +7,15 @@ cards #11-#25 (``_recorded.Recorder``, which writes to scratch cards only and
 redacts every other card's text); ``recorded/label_missing.json`` was kept the
 same evening, before the mark's label existed; ``recorded/comments.json`` was kept
 2026-10-06 20:23 EDT, after the App's rename, on scratch cards #28-#30;
-``recorded/blocking.json`` and ``recorded/show.json`` were kept 2026-10-24 on the
-throwaway ``plan-views-demo`` (R-BAL395), on scratch cards #220-#222 and #223-#228.
+``recorded/blocking.json`` was kept 2026-10-24 on the throwaway ``plan-views-demo``
+(R-BAL395), on scratch cards #220-#222, ``recorded/status.json`` and ``recorded/priority.json``
+2026-10-28 09:30 EDT there, on scratch cards #260 (on its board) and #261-#263, each deleted
+after, and ``recorded/show.json`` 2026-10-28 09:05 EDT there, on
+scratch cards #250-#255, with the developer's own token (plan#1925, ruling plan#1950, made
+again for plan#1861's merge of plan#1811, whose read of a card asks its Arc; the earlier show
+recordings' #223-#228 and #244-#249 were each deleted after it, so it could not be made again
+on them; ``recorded/comment_lookup.json``, kept with the second on #244-#249 and reading no
+card's fields, is replayed in ``test__tracker_comment_lookup.py``).
 These tests replay them (``_recorded.Replay``), which answers only a request
 it recorded, in the order recorded.  Nothing here calls GitHub.  A query whose
 text changes no longer matches its recording: re-record it, never edit an
@@ -19,7 +26,9 @@ redaction are graded in ``test__recorded.py``.  The claims' exchanges were delet
 from the recordings at X-cx's M1, when a claim left the tracker to become the code
 repository's branch ``card/N`` (ruling ``balance:R-BAL359``).  Every create here files a card
 as quill filed one when these were kept, before plan#1811 gave a card its Arc
-(:func:`_before_the_arc`), so its request is the one recorded; ``test__tracker_arc.py``
+(:func:`_before_the_arc`), so its request is the one recorded, but the status and priority
+recordings', kept after it, which file a step holding its Arc as quill files one now (each
+made again for plan#1861's merge of plan#1811, ruling plan#1950); ``test__tracker_arc.py``
 grades the create that writes the Arc.
 """
 from __future__ import annotations
@@ -49,6 +58,7 @@ from tools.quill._tracker import (
     Tracker,
     TrackerError,
     card_from,
+    read_until,
 )
 from tools.quill.setup_tracker import FILING, PLAN, find_board
 
@@ -636,6 +646,135 @@ def test_an_unlink_of_a_card_not_linked_is_refused_and_a_closed_parent_is_not_wh
     assert replay.unused() == 0
 
 
+def _priority_round(tracker):
+    """Every call ``recorded/priority.json`` holds, in its order: the recording session ran this
+    once against GitHub, and the test replays it.  A step filed holding its Arc and two tasks
+    holding none, as quill files each (``_tracker.Tracker.create``), each unmarked; both tasks
+    linked under the step; the second placed above the first, then the same move sent again;
+    the three closed.  The three cards' numbers, the step's order of its sub-issues as read
+    after the links, each move and the closes, and the three cards as read last."""
+    parent = tracker.create(Draft("step", f"{SCRATCH}: a parent whose sub-issues are reordered",
+                                  "Scratch for plan#1877's recording; closed when it ends.", (),
+                                  "balance"))
+    first = tracker.create(Draft("task", f"{SCRATCH}: the first sub-issue linked",
+                                 "Scratch for plan#1877's recording.", (), None))
+    second = tracker.create(Draft("task", f"{SCRATCH}: the second sub-issue linked",
+                                  "Scratch for plan#1877's recording.", (), None))
+    numbers = [parent, first, second]
+    for number in numbers:
+        tracker.unmark(number)
+
+    def order():
+        return [child.number for child in tracker.cards(numbers)[parent].children]
+
+    cards = tracker.cards(numbers)
+    tracker.add_child(parent, cards[first])
+    tracker.add_child(parent, cards[second])
+    orders = [order()]
+    for _ in range(2):
+        tracker.place_child(parent, cards[second], cards[first])
+        orders.append(order())
+    for number in numbers:
+        tracker.close(number, "not_planned")
+    orders.append(order())
+    return (parent, first, second), orders, tracker.cards(numbers)
+
+
+def test_a_sub_issue_is_placed_above_another_in_its_parents_order():
+    """Recorded 2026-10-28 on scratch plan-views-demo #261-#263, each deleted after, with the
+    developer's own token (plan#1877, ruling plan#1868; made again for plan#1861's merge of
+    plan#1811, ruling plan#1950): a parent's read lists its sub-issues in the order they were
+    linked; ``place_child`` moves the second above the first, and the read lists it so; the
+    same move sent again is answered 200 and changes nothing, so a filing run again may send it
+    again.  The step was filed holding its Arc, and every read of it holds it."""
+    replay = Replay("priority")
+    scratch = Scratch.from_json(recording("priority")["scratch"])
+    github = GitHub("token", replay)
+    tracker = Tracker(github, Board(github, scratch.place, scratch.board), QUILL)
+    (parent, first, second), orders, end = _priority_round(tracker)
+    assert orders == [[first, second], [second, first], [second, first], [second, first]]
+    assert [(end[number].arc, end[number].is_open) for number in (parent, first, second)] == [
+        ("balance", False), (None, False), (None, False)]
+    assert replay.unused() == 0
+
+
+def _status_round(tracker, sleep):
+    """Every call ``recorded/status.json`` holds, in its order: the recording session ran this
+    once against GitHub (``sleep`` waiting out the board), and the test replays it.  A scratch
+    step filed and put on the board; the board's Status read until it shows the card holding
+    none (the board lags a write, :func:`_tracker.read_until`); its Status set to In Progress,
+    then to Done, then cleared, each read back the same way; the card taken off the board and
+    closed.  The card, its item, and the read that showed each state, by that state."""
+    number = tracker.create(Draft("step", f"{SCRATCH}: a card whose Status quill writes",
+                                  "Scratch for plan#1881's recording; closed when it ends.", (),
+                                  "balance"))
+    tracker.unmark(number)
+    item = tracker.board.add(tracker.cards([number])[number])
+
+    def shows(status):
+        (read,), held = read_until(lambda: [tracker.board.statuses()],
+                                   lambda reads: reads[0].held.get(number) == (item, status),
+                                   sleep)
+        assert held, f"the board never showed plan#{number} holding {status}"
+        return read
+
+    reads = {"added": shows(None)}
+    field, options = reads["added"].field, reads["added"].options
+    for status in ("In Progress", "Done"):
+        tracker.board.set_status(item, field, options[status])
+        reads[status] = shows(status)
+    tracker.board.set_status(item, field, None)
+    reads["cleared"] = shows(None)
+    tracker.board.remove(item)
+    tracker.close(number, "not_planned")
+    return number, item, reads
+
+
+def test_the_boards_status_is_read_set_and_cleared_on_a_card_it_holds():
+    """Recorded 2026-10-28 09:30 EDT on scratch #260 of the throwaway plan-views-demo, its board
+    "Plan views demo" (``recorded/status.json``, rulings plan#1873, plan#1905), deleted after
+    (made again for plan#1861's merge of plan#1811, ruling plan#1950), with the
+    developer's own token, as ``show.json`` was: ``statuses`` reads the board's Status field by
+    name, with its options' ids, and every card it holds with the Status it holds, the demo's
+    own 48 among them.  The first read after the add did not yet hold the card and the next one
+    did; each write showed at the first read after it.  An option is set by its id and a clear
+    leaves the item holding none."""
+    replay = Replay("status")
+    scratch = Scratch.from_json(recording("status")["scratch"])
+    github = GitHub("token", replay)
+    tracker = Tracker(github, Board(github, scratch.place, scratch.board), APP)
+    number, item, reads = _status_round(tracker, lambda _seconds: None)
+    added = reads["added"]
+    assert added.field.startswith("PVTSSF_")
+    assert dict(added.options) == {"Todo": "f75ad846", "In Progress": "47fc9ee4",
+                                   "Done": "98236657"}
+    assert number == 260 and len(added.held) == 49
+    assert sorted(status or "none" for held, (_, status) in added.held.items()
+                  if held != number) == ["Done"] * 7 + ["In Progress"] * 2 + ["Todo"] * 38 + [
+                      "none"]
+    assert [read.held[number] for read in reads.values()] == [
+        (item, None), (item, "In Progress"), (item, "Done"), (item, None)]
+    assert replay.unused() == 0
+
+
+def test_the_boards_status_passes_over_an_item_that_is_no_card():
+    """The status recording's first read, its board holding only the demo's cards, with one
+    item changed the one way no scratch card can give: an issue of another repository, then a
+    draft (no content fields), each passed over as no card, as the order's read passes them
+    over (``Board.held``)."""
+    (page,) = [exchange["answer"] for exchange in recording("status")["exchanges"]
+               if "fieldValueByName" in str((exchange["body"] or {}).get("query"))][:1]
+    scratch = Scratch.from_json(recording("status")["scratch"])
+    first = page["data"]["node"]["items"]["nodes"][0]
+    for content in ({**first["content"], "repository": {"nameWithOwner": TRACKER}}, {}):
+        answer = copy.deepcopy(page)
+        answer["data"]["node"]["items"]["nodes"][0]["content"] = content
+        github = GitHub("token", Sent(200, answer))
+        held = Board(github, scratch.place, scratch.board).statuses().held
+        assert first["content"]["number"] not in held
+        assert len(held) == len(page["data"]["node"]["items"]["nodes"]) - 1 == 47
+
+
 #: The App's login as the comments recording holds it: kept after the App's rename (R-BAL227).
 QUILL = "shekel-quill"
 #: The scratch cards the comments recording filed: step S, the finding C linked under it (and
@@ -724,32 +863,36 @@ def test_edits_are_read_page_by_page_and_the_text_is_the_last_pages():
         node["id"] for node in sorted(nodes, key=lambda node: node["editedAt"])]
 
 
-#: The scratch cards the show recording filed on the throwaway plan-views-demo, 2026-10-24
-#: (R-BAL395): step SS with the task ST under it, the finding SF and the ruling SR it owns
-#: (each blocked by it), the step SB blocking it and the step SW waiting on it.
-SS, ST, SF, SR, SB, SW = 223, 224, 225, 226, 227, 228
+#: The scratch cards the show recording filed on the throwaway plan-views-demo, 2026-10-28
+#: (R-BAL395, plan#1925, ruling plan#1950), each deleted after: step SS with the task ST under
+#: it, the finding SF and the ruling SR it owns (each blocked by it), the step SB blocking it
+#: and the step SW waiting on it; the developer commented on SS and on ST.
+SS, ST, SF, SR, SB, SW = 250, 251, 252, 253, 254, 255
 
 
 def _show_line(name, kind):
     """A scratch card's title in the show recording."""
-    return f"{SCRATCH} show {name} ({kind}), R-BAL395"
+    return f"{SCRATCH} show {name} ({kind}), plan#1925"
 
 
 def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_comments(
         code, capsys):
-    """The ``quill show`` of a step and of the finding it owns, recorded 2026-10-24 12:04 EDT
-    on the throwaway plan-views-demo (``recorded/show.json``, R-BAL395), replayed: every read
-    show makes of the tracker, in its order, answered as GitHub answered it, and nothing
-    written.  The step: by number; its blocking read, which lists the finding, the ruling and
-    the step waiting on it; its task, its blocker and the two cards it owns in ONE read by
-    number, for their titles -- never the waiting step, which is no card it owns; the board;
-    its text; its comments.  The finding: by number; its owner, its one blocker, in one read;
-    the board; its text; its comments.  Whether either shipped, its claim and its marker's
-    history are git's (``code``: no marker, no ``card/N``), not the tracker's."""
+    """The ``quill show`` of a step and of the finding it owns, recorded 2026-10-28 09:05 EDT
+    on the throwaway plan-views-demo (``recorded/show.json``, R-BAL395, plan#1925), replayed:
+    every read show makes of the tracker, in its order, answered as GitHub answered it, and
+    nothing written.  The step: by number; its blocking read, which lists the finding, the
+    ruling and the step waiting on it; its task, its blocker and the two cards it owns in ONE
+    read by number, for their titles -- never the waiting step, which is no card it owns; the
+    board; its task's comments, in one read of many cards (ruling plan#1931), whose one
+    comment, the developer's, no answer has followed, as its line says (ruling plan#1924); its
+    text; its comments.  The finding, with no task under it: by number; its owner, its one
+    blocker, in one read; the board; its text; its comments.  Whether either shipped, its
+    claim and its marker's history are git's (``code``: no marker, no ``card/N``), not the
+    tracker's."""
     replay = Replay("show")
     scratch = Scratch.from_json(recording("show")["scratch"])
     github = GitHub("token", replay)
-    tracker = Tracker(github, Board(github, scratch.place, scratch.board), APP)
+    tracker = Tracker(github, Board(github, scratch.place, scratch.board), QUILL)
     assert quill.main(["show", f"plan#{SS}"], connect=lambda: tracker, root=code) == 0
     assert capsys.readouterr().out == (
         f"plan#{SS} [step, no arc] {_show_line('S', 'step')}\n"
@@ -758,14 +901,15 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
         "  board: not on it\n"
         "  claim: none\n"
         "  parent: none\n"
-        f"  child: plan#{ST} (task, open; done (git): no) {_show_line('T', 'task')}\n"
+        f"  child: plan#{ST} (task, open; done (git): no; 1 comment no answer of quill's has "
+        f"followed) {_show_line('T', 'task')}\n"
         f"  blocked by: plan#{SB} {_show_line('B', 'step')}\n"
         f"  owns: plan#{SF} (finding, open) {_show_line('F', 'finding')}\n"
         f"  owns: plan#{SR} (ruling, closed) {_show_line('R', 'ruling')}\n"
         "\n"
         "THROWAWAY recording of quill show, card S; deleted after.\n"
         "\n"
-        "== comment, 2026-10-24T16:04:50Z by SaltyReformed\n"
+        "== comment, 2026-10-28T13:05:38Z by SaltyReformed\n"
         "A comment the recorder posts on step S.\n"
         "\n"
         f"no commit on origin/dev or origin/main adds, changes or deletes plan/ships/{SS}\n")
@@ -789,7 +933,7 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
     assert [(method, url.removeprefix("https://api.github.com"))
             for method, url, _ in replay.sent] == [
         ("POST", "/graphql"), ("POST", "/graphql"), ("POST", "/graphql"), ("POST", "/graphql"),
-        ("GET", f"{repo}/issues/{SS}"), ("POST", "/graphql"),
+        ("POST", "/graphql"), ("GET", f"{repo}/issues/{SS}"), ("POST", "/graphql"),
         ("POST", "/graphql"), ("POST", "/graphql"), ("POST", "/graphql"),
         ("GET", f"{repo}/issues/{SF}"), ("POST", "/graphql")]
     queries = [str((body or {}).get("query", "")) for _, _, body in replay.sent]
@@ -797,9 +941,12 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
     assert f"c{SS}: issue" in queries[0] and "blocking(first" in queries[1]
     assert [number for number in (ST, SF, SR, SB, SW) if f"c{number}: issue" in queries[2]] == [
         ST, SF, SR, SB]
-    assert "ProjectV2" in queries[3] and "comments(first" in queries[5]
-    assert f"c{SF}: issue" in queries[6] and f"c{SS}: issue" in queries[7]
-    assert "ProjectV2" in queries[8] and "comments(first" in queries[10]
+    assert "ProjectV2" in queries[3]
+    assert [number for number in (SS, ST, SF, SR, SB, SW)
+            if f"c{number}: issue" in queries[4]] == [ST] and "comments(first" in queries[4]
+    assert "comments(first" in queries[6] and "$number" in queries[6]
+    assert f"c{SF}: issue" in queries[7] and f"c{SS}: issue" in queries[8]
+    assert "ProjectV2" in queries[9] and "comments(first" in queries[11]
 
 
 def test_a_steps_blocking_read_lists_the_findings_and_rulings_it_owns():

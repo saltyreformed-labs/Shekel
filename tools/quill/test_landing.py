@@ -574,7 +574,7 @@ def test_a_tracker_that_cannot_be_read_refuses_to_judge(check, code, fails):
 
 def test_a_tracker_read_cut_off_is_one_line_naming_the_batch(check, code):
     """plan#1809: GitHub's page spread over lines is held on one line, and the read of the
-    cards by number it cut short is named after it (``_github.described``)."""
+    cards by number it cut short is named after it (``_exits.described``)."""
     root, base = code
     fails = GitHubError(504, "POST https://api.github.com/graphql -> 504 after 3 re-sends: "
                              "<html>\n  <title>Unicorn!</title>\n</html>")

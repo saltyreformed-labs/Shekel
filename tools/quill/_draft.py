@@ -13,8 +13,8 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Owner:
-    """A card's owner, as the check reads it -- the card a finding or ruling is blocked
-    by (``R-BAL395``), a step's or task's parent: its issue type (None when it has
+    """A card's owner, as the check reads it -- the card a finding, ruling or question is
+    blocked by (``R-BAL395``), a step's or task's parent: its issue type (None when it has
     none), and the caller's answers to whether it is still work (``live``) and whether it is
     a step split into smaller steps (``split``, which no branch builds) -- quill asks git
     and the cards, the Action the cards.  ``split`` has no default, so no caller holds a

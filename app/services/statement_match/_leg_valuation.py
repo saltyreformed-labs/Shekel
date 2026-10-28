@@ -11,9 +11,10 @@ splits it, by SUBJECT); the seam is the KIND.  What a leg is worth
 (:func:`leg_price`), what it is called (:func:`leg_candidate_label`), the one
 construction the offer set and the re-price share (:func:`leg_candidate`) and
 the re-price's LEG arm (:func:`repriced_leg`) live here.  Which side is a LEG
-is the loader's (``transfer_legs.offerable_transfer_legs``, ruling
-**R-BAL79**: Projected, and this side's money not yet moved); a side whose
-money has moved is its dated record, a SETTLEMENT (ruling **R-BAL80**).  A PAID leg is a
+is the loader's (``transfer_legs.offerable_transfer_legs``: its transfer
+Projected, whose sides hold no dated record by the status-band rule); a
+side whose money has moved is its dated record, a SETTLEMENT (ruling
+**R-BAL80**).  A PAID leg is a
 SETTLEMENT -- a payment, whose parent is a leg rather than a row -- so its
 constructor stays with the other SETTLEMENT's in :mod:`._valuation`, and that
 module imports this one, never the reverse.
@@ -150,8 +151,8 @@ def leg_candidate(
     alone: :attr:`~._subjects.CandidateRow.figure_is_correctable`).
 
     Args:
-        leg: The still-planned leg (its transfer Projected, this side holding
-            no dated movement -- ``transfer_legs.offerable_transfer_legs``).
+        leg: The still-planned leg (its transfer Projected --
+            ``transfer_legs.offerable_transfer_legs``).
         calendar: The pass's :class:`~app.services.pay_calendar.PayCalendar`.
         amount: Its signed cash effect, already resolved by :func:`leg_price`,
             taken for :func:`~._valuation.transaction_candidate`'s reason.

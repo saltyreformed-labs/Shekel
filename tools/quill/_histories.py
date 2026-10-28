@@ -2,15 +2,16 @@
 its tests judge one.
 
 Shared by ``test_landing.py`` (rules 1-7), ``test_landing_done.py`` (rule 8),
-``test_landing_tasks.py`` (a task's done file) and ``test_landing_findings.py`` (a finding's
-marker, and the findings a claim's card owes), so each history and each card's node is
-spelled once.  Every history is a throwaway repository's (:mod:`tools.ci.scratch`), its
-markers written as files and its merges REAL ones (:func:`merge`: git's three-way merge, two
-parents), judged as CI judges one: the merge of the pull request's head into its base's tip
-(:func:`judging`).  The tracker is a stand-in for GitHub answering the REAL card-only reader
-(:class:`Lookup`, :func:`reader`), each card a node in the shape GitHub answers a read without
-the board (:func:`card_node`), held key for key to the recorded lookup's by ``test_landing.py``
-and, with a blocker, to the recorded read of what a card blocks by
+``test_landing_tasks.py`` (a task's done file), ``test_landing_doing.py`` (the file naming a
+card's task in progress), ``test_landing_stamps.py`` (the commit hook's backstop) and
+``test_landing_findings.py`` (a finding's marker, and the findings a claim's card owes), so each
+history and each card's node is spelled once.  Every history is a throwaway repository's
+(:mod:`tools.ci.scratch`), its markers written as files and its merges REAL ones (:func:`merge`:
+git's three-way merge, two parents), judged as CI judges one: the merge of the pull request's
+head into its base's tip (:func:`judging`).  The tracker is a stand-in for GitHub answering the
+REAL card-only reader (:class:`Lookup`, :func:`reader`), each card a node in the shape GitHub
+answers a read without the board (:func:`card_node`), held key for key to the recorded lookup's
+by ``test_landing.py`` and, with a blocker, to the recorded read of what a card blocks by
 ``test_landing_findings.py``, which holds :meth:`Lookup.graphql`'s answer to that read's too.
 Nothing here calls GitHub.
 """
@@ -20,7 +21,7 @@ import copy
 import re
 
 from tools.ci.scratch import commit, commit_files, point_dev, point_main, repository, run
-from tools.quill._git import marker
+from tools.quill._git import doing_file, marker, task_file
 from tools.quill._queries import blocking
 from tools.quill._tracker import CardReader
 from tools.quill.landing import PullRequest, main
@@ -166,16 +167,47 @@ def claim(root, on, number, when=MON):
     return claimed, commit_files(root, claimed, f"work {number}", {f"w{number}.txt": "work\n"})
 
 
+def begun(root, on, card, task):
+    """Task ``task`` begun on ``on``, as ``quill start`` begins it on ``card/<card>``: a commit
+    naming it by its trailer and writing the card's file ``plan/doing/<card>`` to name it
+    (ruling plan#2009); its sha."""
+    return commit_files(root, on, f"start plan#{task}: a piece\n\nTask: plan#{task}",
+                        {doing_file(card): f"plan#{task}\n"})
+
+
+def piece(root, on, task, when=MON):
+    """The commit on ``on`` finishing task ``task``: its work, and its done file as ``quill
+    task-file`` writes it, ``done <when>``; its sha."""
+    return commit_files(root, on, f"task plan#{task}",
+                        {f"t{task}.txt": "work\n", task_file(task): f"done {when}\n"})
+
+
+def built(root, on, card, *tasks, when=MON):
+    """Card ``card``'s claim on ``on``, claimed at ``when`` (:func:`claim`), then each of
+    ``tasks`` begun (:func:`begun`) and finished (:func:`piece`, ``done <when>``); the
+    branch's tip."""
+    tip = claim(root, on, card, when)[1]
+    for task in tasks:
+        tip = piece(root, begun(root, tip, card, task), task, when)
+    return tip
+
+
 def landed(root, onto, number, when=MON):
     """Card ``number`` claimed on ``onto`` and its branch merged into it, as its queue lands
     it; the merge."""
     return merge(root, onto, claim(root, onto, number, when)[1], f"Merge card/{number}")
 
 
-def undone(root, on, number):
-    """A revert on ``on`` of card ``number``'s landing: its marker and work deleted."""
-    return commit_files(root, on, f"Revert plan#{number}",
-                        {marker(number): None, f"w{number}.txt": None})
+def undone(root, on, number, *tasks):
+    """A revert on ``on`` of card ``number``'s landing: its marker and work deleted, and where
+    it landed with ``tasks`` built (:func:`built`), its file naming its task in progress and
+    each task's work and done file too."""
+    files = {marker(number): None, f"w{number}.txt": None}
+    if tasks:
+        files[doing_file(number)] = None
+    for task in tasks:
+        files |= {f"t{task}.txt": None, task_file(task): None}
+    return commit_files(root, on, f"Revert plan#{number}", files)
 
 
 def pull(head, sha, base="dev"):

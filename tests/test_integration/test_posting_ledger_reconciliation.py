@@ -848,10 +848,10 @@ class TestOracleIsNotVacuous:
     """Prove the reconciliation and trial-balance checks catch real breakage."""
 
     @pytest.mark.server_clock
-    def test_per_account_reconciliation_catches_a_tampered_shadow(
+    def test_per_account_reconciliation_catches_a_tampered_settled_figure(
         self, app, db, seed_user,
     ):
-        """Tampering a settled shadow makes ledger != settled-shadow effect.
+        """Tampering a transfer's settled figure makes ledger != settled-shadow effect.
 
         A reconciled $100 Checking -> Savings settle has ledger +100 and
         settled-shadow effect +100 on Savings.  Forcing the TRANSFER's settled

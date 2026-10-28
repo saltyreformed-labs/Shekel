@@ -8,11 +8,12 @@ reaches him: on plan#1822 on 2026-10-27, after his comment, a plain note of quil
 notify him and a reply opening with his @mention did (his answer to the lane's test).  Each
 answer carries :data:`ANSWER_MARK`, so a comment of a person's is unanswered until an answer
 follows it, whatever other notes of quill's do (a drop's reason, say: :func:`unanswered`, the
-one reading).  ``/charter`` says a session acts only on his, and ``/charter`` and
-``/handoff`` say when a session reads them: when it claims the card, at each fresh session
-start, and before each leaf's pull request.  ``quill show`` prints each comment whole, an
-answer's mark among its text, and says of each task under the card it shows that holds a
-comment still unanswered so (``_show``); ``quill next`` names every claimed card, and every
+one reading).  ``/charter`` says a session acts only on his, and when it reads them: when it
+claims the card, at each fresh session start (``Resume plan#T``, its item 0), and before each
+leaf's pull request.  ``quill show`` prints each comment whole, an answer's mark among its
+text, but for a stop's note older than the card's newest, which it names in a line
+(``_notes.superseded``), and says of each task under the card it shows that holds a comment
+still unanswered so (``_show``); ``quill next`` names every claimed card, and every
 task under one, holding a comment still unanswered (:func:`unanswered_lines`, ruling
 plan#1924), and ``quill answer`` answers a task's as it answers a card's.
 

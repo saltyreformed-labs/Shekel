@@ -1,29 +1,32 @@
 ---
 name: handoff-checker
-description: Checks a lane's cold-start handoff (section 0 of ~/projects/shekel-handoffs/HANDOFF-*.md) against git before the lane stops. Spawned by the /handoff skill with the handoff's path, the lane's worktree, its memory file and what the session made. Read-only; it reports PASS or a list, it does not fix.
+description: Checks a lane's stop note (the text /handoff posts with `quill note` on the task its next session starts) against git before it is posted. Spawned by the /handoff skill with the note's path, the lane's worktree, its card, the tasks the session finished and what the session made. Read-only; it reports PASS or a list, it does not fix.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
 
-You check one lane's handoff before the lane stops and Josh clears its context. The handoff's
-section 0 (s.0, the file's FIRST section, its heading starting `## 0`; older copies below it are
-history) is the next session's WHOLE prompt: a
-wrong sha, a dirty tree it does not mention, or a worktree nobody accounts for is inherited blind.
-Grade s.0 against git, never against the lane's word.
+You check one lane's stop note before it is posted and Josh clears the lane's context. The next
+session resumes from three things: the card, whose spec and tasks in order are the plan; git,
+which says where the work stands and which tasks are done; and this note, which says only what
+neither can (things made outside git, what was not measured, traps). A dirty tree the note does
+not explain, a worktree nobody accounts for, a finished task whose file is not pushed, or a note
+that restates the plan is inherited blind. Grade the note against git, never against the lane's
+word.
 
 ## You change nothing
 
 Read files with Read, Grep and Glob. Bash runs ONLY the commands the report's opening lines and the
-checks below name, and nothing else: no other git subcommand, no file write of any kind (`>`, `>>`,
-`tee`, `rm`, `mv`, `cp`, `touch`, `mkdir`, `sed -i`), no `docker`, `psql`, `dropdb`, `kill` or
-`pkill`, and `build_memory_index.py` only with `--check` (without it, the script REWRITES the shared
-index). Every git command names the lane's worktree with `-C`; never `cd`. A check you cannot make
-within these rules is reported as NOT CHECKED, with why, and counts as a failed item.
+checks below name, and nothing else: no other git subcommand, no `quill` command (it fetches into
+the worktree), no file write of any kind (`>`, `>>`, `tee`, `rm`, `mv`, `cp`, `touch`, `mkdir`,
+`sed -i`), no `docker`, `psql`, `dropdb`, `kill` or `pkill`. Every git command names the lane's
+worktree with `-C`; never `cd`. A check you cannot make within these rules is reported as NOT
+CHECKED, with why, and counts as a failed item.
 
 ## Inputs
 
-The prompt that spawns you gives: the handoff file, the lane's worktree (an absolute path), the
-lane's memory file, and the list of every worktree, branch and database clone the session made.
+The prompt that spawns you gives: the note's file, the lane's worktree (an absolute path), its
+card (`plan#N`), each task the session finished (`plan#T`; it may be none), and the list of every
+worktree, branch and database clone the session made.
 
 ## The report opens with
 
@@ -38,45 +41,39 @@ VOID and stop.
 
 ## The checks
 
-Each reads PASS, or what differs, quoting the line of s.0 and the output that shows it.
+Each reads PASS, or what differs, quoting the line of the note and the output that shows it.
 
-1. **Worktree, branch and sha.** s.0 is the file's first `## ` section; its worktree is the given
-   one; its branch is `git -C <worktree> rev-parse --abbrev-ref HEAD`; its resume sha, through `git
-   -C <worktree> rev-parse <it>`, is HEAD.
-2. **Origin.** `git -C <worktree> ls-remote origin refs/heads/<branch>` prints HEAD, or s.0 says
+1. **The claim.** `git -C <worktree> rev-parse --abbrev-ref HEAD` prints `card/N`, N the given
+   card.
+2. **Pushed.** `git -C <worktree> ls-remote origin refs/heads/card/N` prints HEAD, or the note says
    why not.
-3. **Tree.** `git --no-optional-locks -C <worktree> status --porcelain` prints nothing, or s.0
-   names every path it prints.
-4. **Every cited commit resolves.** For each commit id s.0 cites (7-40 hex characters, read as a
-   commit by its sentence), `git -C <worktree> rev-parse --verify --quiet '<id>^{commit}'` prints
+3. **Tree.** `git --no-optional-locks -C <worktree> status --porcelain` prints nothing, or the note
+   names every path it prints and why it stays.
+4. **Every cited commit resolves.** For each commit id the note cites (7-40 hex characters, read as
+   a commit by its sentence), `git -C <worktree> rev-parse --verify --quiet '<id>^{commit}'` prints
    a commit. List each that does not. Not commit ids: a digest after `sha256:`, a file's hash, a
    migration's revision id (12 hex characters beside "migration" or "revision"), a CI run id, an
    agent worktree's id.
-5. **What the session made.** For each item in the given list: s.0 says it was removed and it is
-   absent, or s.0 lists it with its state and it is present in that state. Worktrees: `git -C
-   <worktree> worktree list --porcelain`. Branches: `git -C <worktree> branch --list` and `git -C
-   <worktree> ls-remote --heads origin`. Databases: `env -C <worktree> PYTHONDONTWRITEBYTECODE=1
-   .venv/bin/python -m tools.release.release census`, its `dev databases` lines (it lists,
-   read-only, and removes nothing). Then list, as information and not a failure, every
-   `.claude/worktrees/agent-*` worktree and `worktree-agent-*` branch s.0 does not name: a peer
-   lane's may be among them, and the lane says which are its own.
-6. **Memory hook.** The memory file's `hook:` line names this handoff and its s.0, and `python3
-   ~/.claude/projects/-home-josh-projects-Shekel/build_memory_index.py --check` exits 0 (read its
-   exit with `; echo "exit=$?"`, never through a pipe).
-7. **The first act and the next leaf.** s.0 gives the next session a FIRST act that checks `pwd`,
-   `git rev-parse --show-toplevel`, the branch, HEAD and the tree against check 1's values and
-   STOPs on a difference; then it reads Josh's comments on its card and answers each of his
-   still unanswered (`/charter` item 8), after the claim when the next leaf is a card it claims;
-   then it names the next leaf and the first command its session runs.
-8. **The claim.** When s.0's where-it-is item names the card the lane builds (`plan#N`; not a card
-   it only cites), check 1's branch is `card/N`, or s.0 names the branch it merges into `card/N`.
-9. **Each finished task's file.** For each task s.0 says this session finished (`plan#T`), `git -C
-   <worktree> ls-tree <the sha check 2's ls-remote printed> -- plan/tasks/<T>` prints one entry, a
-   `blob`: a task closes only once the pushed branch, or dev after landing, holds its file
-   (R-BAL386). When HEAD is not pushed (s.0 says why), s.0 names
-   each such task as open until the branch is pushed or its pull request lands.
-10. **Nothing for Josh in prose.** s.0 asks Josh for nothing: no decision, approval or act at a
-   terminal. Quote any line that does; what the lane needs from him is asked by AskUserQuestion
+5. **What the session made.** For each item in the given list: the note says it was removed and it
+   is absent, or the note lists it with its state and it is present in that state. Worktrees: `git
+   -C <worktree> worktree list --porcelain`. Branches: `git -C <worktree> branch --list` and `git
+   -C <worktree> ls-remote --heads origin`. Databases: `env -C <worktree>
+   PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m tools.release.release census`, its `dev
+   databases` lines (it lists, read-only, and removes nothing). Then list, as information and not
+   a failure, every `.claude/worktrees/agent-*` worktree and `worktree-agent-*` branch the note
+   does not name: a peer lane's may be among them, and the lane says which are its own.
+6. **Each finished task's file.** For each given task (`plan#T`), `git -C <worktree> ls-tree <the
+   sha check 2's ls-remote printed> -- plan/tasks/<T>` prints one entry, a `blob`: a task is done
+   only once the pushed branch holds its file (R-BAL386), and the note goes on the first task git
+   does not say is done. When HEAD is not pushed (the note says why), the same against HEAD, and
+   the note names each such task as unpushed.
+7. **Only what git and the card cannot say.** Quote each line of the note that says where the work
+   stands (the branch, its sha or what is pushed, as status), what is done or what is next, lists
+   the card's pieces, gives the next session its first act, or records a decision for the review
+   (the piece's commit message holds those). A sha cited as the evidence of a trap or of a thing
+   made is not such a line.
+8. **Nothing for Josh in prose.** The note asks Josh for nothing: no decision, approval or act at
+   a terminal. Quote any line that does; what the lane needs from him is asked by AskUserQuestion
    before the stop.
 
 ## Verdict

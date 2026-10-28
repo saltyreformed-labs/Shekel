@@ -94,6 +94,7 @@ from app.services.status_seam._refusals import (
     reject_settlement_on_a_deleted_row,
     reject_settlement_without_settled_status,
 )
+from app.services.transfer_legs import side_movements
 from app.utils.balance_predicates import settled_status_ids
 
 if TYPE_CHECKING:  # pragma: no cover -- annotations only
@@ -138,9 +139,12 @@ def sync_side_records(
     either off, and the transfer's ``0.00`` is written after it.
 
     Args:
-        legs: The transfer's ``(expense, income)`` legs, each carrying the
-            side's record as it stands (``transfer_legs.transfer_side_leg``),
-            ``None`` when the side holds none.
+        legs: The transfer's ``(expense, income)`` legs
+            (``transfer_legs.transfer_side_leg``), each reading its side's
+            record LIVE off the transfer's list for that side (ruling
+            **plan#1984**), ``None`` when the side holds none -- so a record
+            this act appends or takes out is what a later read sees, which
+            is why whether a side held one is read before the first write.
         new_status_id: The ``ref.statuses.id`` the transfer is moving to --
             its current one for a correction.
         days: Each side's day once the act lands, ``(expense, income)``, as
@@ -181,6 +185,9 @@ def sync_side_records(
         )
     if not was_settled and not now_settled:
         return
+    # As the act FOUND them: a side's record is read live, and the writes
+    # below append one (a first settle) or take both out (a ``$0.00`` close).
+    held = any(leg.record is not None for leg in legs)
     covers = now_settled and settlement is not None and settlement.amount != 0
     withdraws = now_settled and settlement is not None and not covers
     # The sides this act writes a day onto, each with its day: every side
@@ -197,9 +204,7 @@ def sync_side_records(
             (leg, day) for leg, day in zip(legs, days)
             if leg.record is not None
         )
-    for leg, day in written:
-        if day is not None and _writes_day(leg.record, day):
-            reject_movement_before_books_open(_endpoint(leg).id, day.day)
+    _reject_days_before_books(written)
     if covers:
         moved = [_cover_side(leg, day) for leg, day in written]
     elif withdraws:
@@ -207,13 +212,32 @@ def sync_side_records(
     else:
         moved = [_follow_day(leg.record, day) for leg, day in written]
     _follow_figure(
-        transfer, settlement, now_settled=now_settled,
-        holds_record=any(leg.record is not None for leg in legs),
+        transfer, settlement, now_settled=now_settled, holds_record=held,
     )
     if any(moved):
         # ``status_id`` for the row arm's reason (``_covering._record_moved``):
         # the one column every path here has loaded, re-written at its value.
         flag_modified(transfer, "status_id")
+
+
+def _reject_days_before_books(
+    written: "tuple[tuple[TransferLeg, Optional[SettleDay]], ...]",
+) -> None:
+    """Refuse the act when a day it writes is one its side's books do not reach.
+
+    :func:`sync_side_records`' books grade, before its first write: each side
+    the act writes a day onto, with that day, asked of the side's endpoint
+    (``cash_ledger.reject_movement_before_books_open``) by the one predicate
+    the writes write by (:func:`_writes_day`), so the grade is of exactly the
+    days the writes write.
+
+    Raises:
+        ValidationError: When a written day is on or before its endpoint's
+            books.
+    """
+    for leg, day in written:
+        if day is not None and _writes_day(leg.record, day):
+            reject_movement_before_books_open(_endpoint(leg).id, day.day)
 
 
 def _follow_figure(
@@ -307,10 +331,10 @@ def _cover_side(leg: "TransferLeg", day: SettleDay) -> bool:
         description=leg.name,
     )
     _follow_day(record, day)
-    # Appended to the side's collection, the list the posting writer's pair
-    # door and the one removal act read (``transfer_legs.parent_entries``).
-    side = transfer.income_movements if leg.is_income else transfer.expense_movements
-    side.append(record)
+    # Appended to the side's list, the one list the leg's record is read off,
+    # the posting writer's pair door walks and the one removal act takes a
+    # record out of (``transfer_legs.side_movements``, ruling plan#1984).
+    side_movements(transfer, is_income=leg.is_income).append(record)
     db.session.add(record)
     return True
 
@@ -416,7 +440,8 @@ def record_side_clearing(leg: "TransferLeg", anchor_id: int) -> None:
     it, for the row arm's reason (rule 14).
 
     Args:
-        leg: The side, carrying its record as it stands now.
+        leg: The side, its record read as it stands now (live, off the
+            transfer's list for the side, ruling **plan#1984**).
         anchor_id: The ``budget.account_anchor_history`` row that was read.
     """
     record = leg.record

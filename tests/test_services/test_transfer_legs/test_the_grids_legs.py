@@ -36,10 +36,10 @@ from app.services.transaction_service import retained_amounts_by_key
 from app.services.transfer_legs import (
     TransferLeg,
     cell_key,
-    covering_movements_by_leg,
     grid_transfer_leg,
     grid_transfer_legs,
     parent_of,
+    preload_side_records,
 )
 from app.services.transfer_service import (
     delete_transfer,
@@ -50,9 +50,11 @@ from app.utils.balance_predicates import is_projected_clause
 from app.services.account_resolver import resolve_cash_flow_set
 from tests._test_helpers import (
     basis_for,
+    capture_sql_statements,
     create_account_of_type,
     create_settled_transfer,
     create_transfer,
+    side_records_by_key,
     transfer_side_settle_day,
     typed as typed_figure,
 )
@@ -95,7 +97,12 @@ def _closed_at_zero(seed_user, session, period):
 
 
 class TestALegsRecordIsItsCoveringMovement:
-    """``covering_movements_by_leg`` and the leg it hangs off."""
+    """A side's record read off its transfer's list, and the leg it hangs off.
+
+    ``covering_movements_by_leg``'s cases until ruling **plan#1984** deleted
+    that map: each now reads the same map off the sides' legs
+    (``side_records_by_key``), its assertions unchanged.
+    """
 
     def test_a_settled_transfers_legs_carry_their_movements(
         self, app, db, seed_user, seed_periods,
@@ -120,7 +127,9 @@ class TestALegsRecordIsItsCoveringMovement:
             )
             db.session.commit()
 
-            records = covering_movements_by_leg([settled.id, projected.id])
+            records = {
+                **side_records_by_key(settled), **side_records_by_key(projected),
+            }
 
             assert set(records) == {
                 (settled.id, checking.id), (settled.id, savings.id),
@@ -133,7 +142,8 @@ class TestALegsRecordIsItsCoveringMovement:
                     movement.expense_transfer or movement.income_transfer
                 ).settled_figure == Decimal("240.00")
                 assert movement.settled_on == date(2026, 2, 3)
-            assert covering_movements_by_leg([]) == {}
+            # No transfer named, no statement issued.
+            assert capture_sql_statements(lambda: preload_side_records([]))[1] == []
 
     def test_a_soft_deleted_transfer_holds_no_legs_record(
         self, app, db, seed_user, seed_periods,
@@ -157,12 +167,12 @@ class TestALegsRecordIsItsCoveringMovement:
                 amount=_AMOUNT, settled_on=date(2026, 2, 3),
             )
             db.session.commit()
-            assert len(covering_movements_by_leg([settled.id])) == 2
+            assert len(side_records_by_key(settled)) == 2
 
             delete_transfer(settled.id, seed_user["user"].id, soft=True)
             db.session.commit()
 
-            assert covering_movements_by_leg([settled.id]) == {}
+            assert side_records_by_key(settled) == {}
 
     def test_grid_transfer_leg_loads_one_leg_with_its_record(
         self, app, db, seed_user, seed_periods,
@@ -180,7 +190,6 @@ class TestALegsRecordIsItsCoveringMovement:
 
             assert leg == TransferLeg(
                 transfer=settled, account_id=savings.id, is_income=True,
-                record=leg.record,
             )
             assert leg.record is not None and leg.record.account_id == savings.id
             assert leg.record.settled_on == date(2026, 2, 3)

@@ -662,9 +662,14 @@ def _leg_candidates(
     """
     candidates = []
     unpriceable = []
-    for leg in transfer_legs.offerable_transfer_legs(
+    legs = transfer_legs.offerable_transfer_legs(
         account_id, calendar.user_id, period_ids, options=leg_loads(),
-    ):
+    )
+    # Each candidate states its leg's day (``leg_candidate``), read off the
+    # side's record (ruling plan#1984), so every side's list is loaded in ONE
+    # statement rather than one per offered leg.
+    transfer_legs.preload_side_records(leg.transfer for leg in legs)
+    for leg in legs:
         amount = leg_price(leg, basis)
         if amount is None:
             unpriceable.append((RowKind.LEG, leg.transfer.id))

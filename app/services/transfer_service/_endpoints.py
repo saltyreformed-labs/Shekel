@@ -313,16 +313,21 @@ def _apply_endpoint_move(
         )
     )
     days = _moved_days(moving)
-    for leg, account in moving:
-        if leg.record is not None and leg.account_id != account.id:
+    # Each side's record as the act FOUND it, read once before the first
+    # flush: a leg reads its record live off the transfer's list (ruling
+    # plan#1984), and a read after the accounts are assigned that had to load
+    # the list would autoflush the move before step 3 lands the records.
+    records = tuple(leg.record for leg, _account in moving)
+    for (leg, account), record in zip(moving, records):
+        if record is not None and leg.account_id != account.id:
             status_seam.free_moving_side_record(
-                leg.record, transfer.user_id, press,
+                record, transfer.user_id, press,
             )
     transfer.from_account = endpoints.from_account
     transfer.to_account = endpoints.to_account
-    for (leg, account), day in zip(moving, days):
-        if leg.record is not None and leg.account_id != account.id:
-            status_seam.land_moved_side_record(leg.record, account, day)
+    for (leg, account), record, day in zip(moving, records, days):
+        if record is not None and leg.account_id != account.id:
+            status_seam.land_moved_side_record(record, account, day)
 
 
 def _moved_days(

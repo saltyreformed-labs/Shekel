@@ -44,7 +44,7 @@ from app.services.transaction_service import (
     retained_amount,
     retained_amounts_by_key,
 )
-from app.services.transfer_legs import PlanItem, parent_of
+from app.services.transfer_legs import PlanItem, parent_of, transfer_side_leg
 from app.utils.digit_strings import integer_arg
 
 
@@ -216,9 +216,8 @@ def transfer_budgets(xfer: Transfer) -> "dict[int, Decimal]":
     the two settlement figures -- so bundling them would hand the quick-edit
     swap two figures it does not display.  Until plan step
     ``balance:X-bi-6-4d-2`` that producer also took the legs' records (its
-    caller's ``covering_movements_by_leg`` load), a load the quick edit would
-    have paid for too; both figures are the transfer's since, and it takes
-    none.
+    caller's load of them), a load the quick edit would have paid for too;
+    both figures are the transfer's since, and it takes none.
     The popover shows all three and calls both; so does the transfers page's
     CELL since leaf ``X-bi-6-1`` closed finding **N-303** (it showed the plan
     over a figure just corrected, because it was handed neither map).  *A
@@ -450,29 +449,31 @@ class TransferSideBox:
 
 
 def transfer_side_boxes(
-    xfer: Transfer, records: dict,
+    xfer: Transfer,
 ) -> "tuple[TransferSideBox, TransferSideBox]":
     """Return the popover's two date boxes, from-side then to-side.
 
     Each side's day is read off its leg's RECORD -- the payment record the
     status seam's Transfer arm writes for that side (plan step
-    ``balance:X-bi-6-4d-2``) -- in the caller's ONE load (ledger row
+    ``balance:X-bi-6-4d-2``), read off the transfer's list for that side
+    (:attr:`~app.services.transfer_legs.TransferLeg.record`, ruling
+    **plan#1984**), which the caller pre-loads in ONE statement for every
+    reader of its request (``transfer_legs.preload_side_records``, ledger row
     **BAL-530**).  The ONE producer both the popover's render
     and the PATCH's grading read, so what a box was prefilled with and what
     its submission is graded against cannot part.
 
     Args:
         xfer: The transfer.
-        records: ``covering_movements_by_leg([xfer.id])``.
 
     Returns:
         The two boxes.
     """
     days = {}
-    for account_id in (xfer.from_account_id, xfer.to_account_id):
-        record = records.get((xfer.id, account_id))
-        days[account_id] = (
-            None if record is None else recorded_settle_day(record)
+    for is_income in (False, True):
+        leg = transfer_side_leg(xfer, is_income=is_income)
+        days[leg.account_id] = (
+            None if leg.record is None else recorded_settle_day(leg.record)
         )
     boxes = []
     for field, account, other in (
@@ -733,7 +734,8 @@ def render_transaction_cell(item: PlanItem, **extra: Any) -> str:
     (:attr:`~app.services.transfer_legs.TransferLeg.purchases`).  The
     transfer doors hand it the side
     :func:`~app.services.transfer_legs.grid_transfer_leg` builds after the
-    act, record included, because the act may have just written that record
+    act, its record pre-loaded and read live off the transfer, because the
+    act may have just written that record
     (``routes/transfers/_helpers._render_leg_surface``).
     ``render_transfer_leg_cell`` was this function spelled again for a leg,
     with its own amounts producer and a hand-passed empty ``entry_sums``,

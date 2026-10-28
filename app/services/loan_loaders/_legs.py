@@ -274,7 +274,7 @@ def settled_income_legs(
             today: a settled leg is worth the figure its transfer stores
             (:func:`~app.services.row_valuation.settled_contribution` of
             its parent), a column of the parent this loads, and dated from its record,
-            which the join attaches, or from the parent's own columns.
+            which the grid loader pre-loads, or from the parent's own columns.
 
     Returns:
         Every settled payment's leg, ascending by ``(pay_period.start_date,

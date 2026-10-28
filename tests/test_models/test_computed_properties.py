@@ -203,10 +203,12 @@ class TestTransactionEffectiveAmount:
             leg = TransferLeg(
                 transfer=xfer, account_id=seed_user["account"].id,
                 is_income=False,
-                record=db.session.query(TransactionEntry).filter(
-                    TransactionEntry.expense_transfer_id == xfer.id,
-                ).one(),
             )
+            # Read off the transfer's list (ruling plan#1984), checked by its
+            # own SQL rather than handed to the leg.
+            assert leg.record is db.session.query(TransactionEntry).filter(
+                TransactionEntry.expense_transfer_id == xfer.id,
+            ).one()
             assert leg.is_deleted and leg.status.is_settled and leg.covering_movements
 
             assert settled_contribution(parent_of(leg)) == Decimal("0")

@@ -347,7 +347,7 @@ def touched_transfers_clause(cash_flow: CashFlowSet):
 def set_transfer_legs(
     cash_flow: CashFlowSet, transfers: Iterable[Transfer],
 ) -> list[TransferLeg]:
-    """Return the legs the set draws for *transfers*, records attached.
+    """Return the legs the set draws for *transfers*, their records pre-loaded.
 
     :func:`~app.services.transfer_legs.grid_transfer_legs` under the set's
     own rule: one leg per account :func:`leg_accounts_shown` names for each

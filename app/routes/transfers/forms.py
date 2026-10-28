@@ -150,11 +150,13 @@ def render_full_edit(xfer, leg_account_id, *, page_refusal):
     periods = period_move_options(
         calendar_for(current_user.id), xfer.pay_period_id,
     )
-    # The legs' records, loaded ONCE for both of their readers below -- the
+    # The sides' records, loaded ONCE for both of their readers below -- the
     # two day boxes and the withdrawal caption (ledger row **BAL-530**: the
-    # figures and the caption each loaded them).  The figures read none
-    # since plan step ``balance:X-bi-6-4d-2``: both are the transfer's.
-    records = transfer_legs.covering_movements_by_leg([xfer.id])
+    # figures and the caption each loaded them) -- into the transfer's own
+    # lists, which each side's record is read off (ruling **plan#1984**).
+    # The figures read none since plan step ``balance:X-bi-6-4d-2``: both are
+    # the transfer's.
+    transfer_legs.preload_side_records((xfer,))
     # What the pair RECORDED and what a re-settle would RE-BOOK (plan step
     # X-au-c3), through the one helper, so the popover opened from the
     # transfers page and the one opened from a grid leg's cell cannot show
@@ -171,7 +173,7 @@ def render_full_edit(xfer, leg_account_id, *, page_refusal):
         # One date box per side (ruling **R-BAL108**), each prefilled with
         # its side's OWN day or left empty for a side borrowing the other's
         # (ruling **R-BAL164**) -- the same producer the PATCH grades by.
-        side_boxes=transfer_side_boxes(xfer, records),
+        side_boxes=transfer_side_boxes(xfer),
         # The settle-day corrections' bounds -- ``max`` from ruling R-EJ,
         # ``min`` from ruling R-EL.  The USER's today via ``display_today()``,
         # never the process's UTC day: the input must not refuse a day
@@ -188,7 +190,7 @@ def render_full_edit(xfer, leg_account_id, *, page_refusal):
         # **What a $0.00 Actual would WITHDRAW** (plan step
         # ``credit_card:CC-5-4a-3``, ruling **R-CC59**): the caption under
         # the Actual box, read through the same twin the seam's write uses.
-        payment_withdraws=_payment_withdrawal(records),
+        payment_withdraws=_payment_withdrawal(xfer),
     )
 
 
@@ -233,8 +235,8 @@ def redraw_full_edit(xfer_id, facts):
     )
 
 
-def _payment_withdrawal(records):
-    """Return what taking BOTH legs' payments out of their matches would withdraw.
+def _payment_withdrawal(xfer):
+    """Return what taking BOTH sides' payments out of their matches would withdraw.
 
     The read twin of the seam's write on a transfer's ``$0.00`` figure: a
     close of nothing keeps no record on either side, so the seam takes every
@@ -243,19 +245,27 @@ def _payment_withdrawal(records):
     **R-CC54**).  An act names ONE side's record -- a member is held to its
     movement's account, and the sides are on two -- so the two sides' acts
     are disjoint and one read over both records is what that call
-    withdraws.  The records are the popover's ONE load of them
-    (``transfer_legs.covering_movements_by_leg``), which its day boxes read
-    too (ledger row **BAL-530**, closed at plan step
+    withdraws.  Each side's record is read off its leg as the seam's write
+    reads it (``status_seam._side._withdraw_sides``), from the popover's ONE
+    load of them (``transfer_legs.preload_side_records``), which its day
+    boxes read too (ledger row **BAL-530**, closed at plan step
     ``balance:X-bi-6-4c-3``: this read made a second call of that join).
 
     Args:
-        records: The legs' records, ``{(transfer id, account id): movement}``.
+        xfer: The transfer, its sides' records pre-loaded.
 
     Returns:
         A :class:`~app.services.match_withdrawal.MatchWithdrawal`, or
-        ``None`` when neither leg holds a payment.
+        ``None`` when neither side holds a payment.
     """
-    movements = list(records.values())
+    movements = [
+        leg.record
+        for leg in (
+            transfer_legs.transfer_side_leg(xfer, is_income=False),
+            transfer_legs.transfer_side_leg(xfer, is_income=True),
+        )
+        if leg.record is not None
+    ]
     if not movements:
         return None
     return match_withdrawal.pending_for_movements(movements)

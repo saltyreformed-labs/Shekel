@@ -4892,6 +4892,36 @@ def transfer_side_record(db_session, transfer_id, account_id):
     )
 
 
+def side_records_by_key(xfer):
+    """Return ``{(transfer id, account id): record}`` for each side of *xfer* holding one.
+
+    The map ``transfer_legs.covering_movements_by_leg`` answered until ruling
+    **plan#1984** deleted it, built from what replaced it: each side's leg
+    reads its record off the transfer's list for that side
+    (``TransferLeg.record``), both lists pre-loaded in one statement
+    (``transfer_legs.preload_side_records``).  The cases that asserted that
+    map assert it unchanged through this, keyed by the side's ``cell_key``,
+    which is the record's account (a record's account IS its side's
+    endpoint, by the side keys).
+
+    Args:
+        xfer: The transfer, loaded.
+
+    Returns:
+        The map, holding a key only for a side that holds a record.
+    """
+    # pylint: disable=import-outside-toplevel -- same lazy-app-import
+    # convention every helper in this module follows.
+    from app.services import transfer_legs
+
+    transfer_legs.preload_side_records((xfer,))
+    sides = (
+        transfer_legs.transfer_side_leg(xfer, is_income=False),
+        transfer_legs.transfer_side_leg(xfer, is_income=True),
+    )
+    return {leg.cell_key: leg.record for leg in sides if leg.record is not None}
+
+
 def transfer_side_figure(db_session, transfer_id, account_id):
     """Return what a transfer's side on *account_id* RECORDS, or ``None``.
 

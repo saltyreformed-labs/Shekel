@@ -896,10 +896,12 @@ class TestTheWalkSeesOnlyItsOwnRows:
         db.session.expire_all()
         leg = TransferLeg(
             transfer=xfer, account_id=account.id, is_income=False,
-            record=db.session.query(TransactionEntry).filter(
-                TransactionEntry.expense_transfer_id == xfer.id,
-            ).one(),
         )
+        # Read off the transfer's list (ruling plan#1984), checked by its own
+        # SQL rather than handed to the leg.
+        assert leg.record is db.session.query(TransactionEntry).filter(
+            TransactionEntry.expense_transfer_id == xfer.id,
+        ).one()
 
         assert leg.is_deleted is True
         assert covered_cash_leg(leg, leg.account_id) == Decimal("0.00")

@@ -9,7 +9,6 @@ from app.models.transfer import Transfer
 from app.services.cash_ledger import settled_cash_facts
 from app.services.transfer_legs import (
     TransferLeg,
-    covering_movements_by_leg,
     movement_parent,
     recorded_transfer_legs,
     transfer_family_movements,
@@ -19,6 +18,7 @@ from tests._test_helpers import (
     create_settled_cash_transaction,
     create_settled_transfer,
     create_transfer,
+    side_records_by_key,
 )
 
 from ._helpers import _AMOUNT, _savings
@@ -125,7 +125,7 @@ class TestTheWritersParentIsTheLeg:
             )
             db.session.commit()
             [row_movement] = row.entries
-            out_movement = covering_movements_by_leg([settled.id])[
+            out_movement = side_records_by_key(settled)[
                 (settled.id, checking.id)
             ]
 
@@ -133,7 +133,6 @@ class TestTheWritersParentIsTheLeg:
             leg = movement_parent(out_movement)
             assert leg == TransferLeg(
                 transfer=settled, account_id=checking.id, is_income=False,
-                record=out_movement,
             )
             assert leg.record is out_movement
             assert leg.user_id == seed_user["user"].id

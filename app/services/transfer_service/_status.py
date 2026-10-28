@@ -81,11 +81,13 @@ from app.utils.dates import display_today
 
 
 def _side_legs(transfer: Transfer) -> "tuple[TransferLeg, TransferLeg]":
-    """Return the transfer's ``(expense, income)`` legs, each with its record as it stands.
+    """Return the transfer's ``(expense, income)`` legs, each reading its record as it stands.
 
-    Read FRESH by each writer below, never cached for the act: the writer's
-    input is the record as it is at the write, and a record an earlier write
-    of the same request created is absent from a value read before it.
+    A leg reads its side's record LIVE, off the transfer's list for that side
+    (ruling **plan#1984**), so a record an earlier write of the same request
+    appended is what the writer reads, and no leg built before a write can
+    hold a stale one.  Until then the record was a field this filled by a
+    query per side, and each writer below had to read the legs afresh.
     """
     return (
         transfer_side_leg(transfer, is_income=False),

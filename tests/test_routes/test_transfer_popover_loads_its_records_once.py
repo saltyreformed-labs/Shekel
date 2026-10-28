@@ -6,8 +6,10 @@ withdrawal caption, and read them for the figures too until plan step
 ``balance:X-bi-6-4d-2`` made both figures the transfer's own.  Until
 ``X-bi-6-4c-3`` the figures and the caption each called
 ``transfer_legs.covering_movements_by_leg``, so one render ran the join twice;
-the route now loads the records once and hands the same dict to every reader
-(``routes/transfers/forms.get_full_edit``).
+the route now loads the records once for every reader
+(``routes/transfers/forms.get_full_edit``) -- since ruling **plan#1984** into
+the transfer's own side lists (``transfer_legs.preload_side_records``), which
+each side's record is read off, where it built a map beside them.
 
 The loader is reached through two names -- the package attribute the route
 calls and ``_records``' internal calls (the grid's leg builders) -- so the spy
@@ -56,19 +58,19 @@ def test_the_popover_loads_the_legs_records_once(
         )
         db.session.commit()
 
-        real = _records.covering_movements_by_leg
+        real = _records.preload_side_records
         loads = []
 
-        def counting(transfer_ids):
+        def counting(transfers):
             """Record one load, then run the real join."""
-            ids = list(transfer_ids)
-            loads.append(ids)
-            return real(ids)
+            transfers = list(transfers)
+            loads.append([transfer.id for transfer in transfers])
+            return real(transfers)
 
         with mock.patch.object(
-            transfer_legs, "covering_movements_by_leg", counting,
+            transfer_legs, "preload_side_records", counting,
         ), mock.patch.object(
-            _records, "covering_movements_by_leg", counting,
+            _records, "preload_side_records", counting,
         ):
             response = auth_client.get(f"/transfers/{xfer.id}/full-edit")
 

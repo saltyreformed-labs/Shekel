@@ -3986,9 +3986,7 @@ def settle_cash_row(
             txn,
             SettleDay(day=settled_on, basis=SettledDayBasisEnum.ENTERED),
         )
-        sync_covering_movement(
-            txn, was_settled=True, now_settled=True, settlement=None,
-        )
+        sync_covering_movement(txn, now_settled=True, settlement=None)
     posting_service.sync_transaction_postings(txn)
     return txn
 
@@ -5298,9 +5296,7 @@ def cover_bare_settled_row(db_session, txn, amount, submitted=None):
             amount=Decimal(str(submitted)),
             source=MovementFigureSourceEnum.TYPED,
         )
-    sync_covering_movement(
-        txn, was_settled=False, now_settled=True, settlement=settlement,
-    )
+    sync_covering_movement(txn, now_settled=True, settlement=settlement)
     db_session.flush()
 
 

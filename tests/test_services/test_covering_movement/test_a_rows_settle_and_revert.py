@@ -1,9 +1,12 @@
 """A row's covering movement through its settle and revert: the write, the balance it is, the
-un-date and re-date, the seam's own guarantee, the row's counter and the zero settlement.
+un-date and re-date, the seam's own guarantee, the move that reads no record, the row's counter
+and the zero settlement.
 """
 
 from datetime import timedelta
 from decimal import Decimal
+
+from sqlalchemy import inspect
 
 from app import ref_cache
 from app.enums import MovementFigureSourceEnum, SettledDayBasisEnum, StatusEnum
@@ -507,6 +510,80 @@ class TestTheBareSeamUnDatesAndKeeps:
             assert survivor.reconciled_by_id is None
             assert survivor.amount == Decimal("150.00")
             assert survivor.figure_source_id == _source(MovementFigureSourceEnum.TYPED)
+
+
+class TestAMoveOutsideTheBandReadsNoRecord:
+    """A move with neither end in the settled band reads no covering movement.
+
+    Which moves keep a payment record in step is
+    ``balance_predicates.touches_settled_band``: the seam asks it before it
+    assigns the status and calls the covering arm only for a move it answers
+    True for, as the transfer's status writer asks it before it loads the
+    sides' records (``test_no_path_reads_a_sides_record_alone``'s cancel
+    case, plan#2138).  Each case holds a bill a revert left a kept movement
+    under, so the arm would have a record to read.  Graded at the bare seam,
+    because a transaction's door loads the row's entries for its ledger
+    reconcile whatever the seam reads.  Measured at plan#2139: calling the
+    arm for every move fails both cases, and the predicate answering True
+    for a cancel fails the cancel case and the transfer's together.
+    """
+
+    @staticmethod
+    def _reverted_bill(seed_user, period):
+        """A bill settled at a typed ``$150.00`` and reverted: un-dated, kept, unloaded."""
+        txn = _bill(seed_user, period)
+        _settle(txn, submitted=typed(Decimal("150.00")))
+        db.session.flush()
+        _revert(txn)
+        db.session.flush()
+        db.session.expire_all()
+        return txn
+
+    @staticmethod
+    def _assert_kept_as_it_was(row):
+        """The movement the revert kept: un-dated, its typed figure standing."""
+        kept = _only_movement(row)
+        assert kept.settled_on is None
+        assert kept.settled_day_basis_id is None
+        assert kept.amount == Decimal("150.00")
+        assert kept.figure_source_id == _source(MovementFigureSourceEnum.TYPED)
+
+    def test_a_cancel_reads_none_of_the_rows_entries(
+        self, app, seed_user, seed_periods,
+    ):
+        """Projected -> Cancelled leaves the row's entries unloaded and its kept movement as it was."""
+        with app.app_context():
+            row = self._reverted_bill(seed_user, seed_periods[0])
+
+            status_seam.apply_status_change(
+                row, ref_cache.status_id(StatusEnum.CANCELLED),
+            )
+
+            assert row.status_id == ref_cache.status_id(StatusEnum.CANCELLED)
+            assert "entries" in inspect(row).unloaded
+            db.session.flush()
+            self._assert_kept_as_it_was(row)
+
+    def test_a_restore_reads_none_of_the_rows_entries(
+        self, app, seed_user, seed_periods,
+    ):
+        """Cancelled -> Projected leaves the row's entries unloaded and its kept movement as it was."""
+        with app.app_context():
+            row = self._reverted_bill(seed_user, seed_periods[0])
+            status_seam.apply_status_change(
+                row, ref_cache.status_id(StatusEnum.CANCELLED),
+            )
+            db.session.flush()
+            db.session.expire_all()
+
+            status_seam.apply_status_change(
+                row, ref_cache.status_id(StatusEnum.PROJECTED),
+            )
+
+            assert row.status_id == ref_cache.status_id(StatusEnum.PROJECTED)
+            assert "entries" in inspect(row).unloaded
+            db.session.flush()
+            self._assert_kept_as_it_was(row)
 
 
 class TestARecordThatMovesMarksItsRow:

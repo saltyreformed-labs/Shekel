@@ -710,7 +710,7 @@ class TestDataConsistency:
             sync_covering_movement,
         )
         sync_covering_movement(
-            txn, was_settled=True, now_settled=True,
+            txn, now_settled=True,
             settlement=Settlement(
                 amount=Decimal("148.32"),
                 source=MovementFigureSourceEnum.RESOLVED,

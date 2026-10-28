@@ -284,11 +284,13 @@ def touches_settled_band(row, new_status_id: int) -> bool:
     A move with neither end in the band -- the cancel of a Projected item,
     the restore of a Cancelled one -- moves no record, so its act reads
     none.  The transfer seam's arm returns before its first read on such a
-    move (``status_seam._side.sync_side_records``), and the transfer's status
+    move (``status_seam._side.sync_side_records``), the transfer's status
     writer loads the two sides' records only for a move this answers True
     for (``transfer_service._status.apply_status_to_all_three``, ruling
-    **plan#2136**: a record is fetched only where something reads it), so
-    the two ask this one predicate rather than each spelling it.
+    **plan#2136**: a record is fetched only where something reads it), and
+    a row's seam calls its covering arm only for such a move
+    (``status_seam._seam.apply_status_change``, plan#2139), so the three
+    ask this one predicate rather than each spelling it.
     Polymorphic over both status-bearing models for the reason
     :func:`enters_settled_band` states.
 

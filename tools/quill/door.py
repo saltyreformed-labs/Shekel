@@ -25,7 +25,8 @@ Each name, and who reads it:
   step is a drop its leaves inherit, never copied onto them).
 - ``owner`` and ``OWNED``: ``tools/release._cards``, for the groups a finding a release
   names is under, its owner's: the one step it is blocked by, never a parent (ruling
-  ``balance:R-BAL395``), by quill's one spelling of a finding's or a ruling's owner.
+  ``balance:R-BAL395``), by quill's one spelling of a finding's, a ruling's or a question's
+  owner.
 - ``SHIPPABLE``: ``tools/release._cards``, which refuses a marker naming a card of a
   kind no commit ships (a ruling, a question, a card of no type), by quill's one list
   of the kinds a commit ships.

@@ -5,9 +5,10 @@ command (R-BAL186), and nothing written over one an earlier run filed -- ruling
 and no leaf filed under a step a branch has claimed, or one with a task still open.  A
 task (ruling ``balance:R-BAL386``) is filed under the piece of work it is part of, and
 carries no arc label; a finding and a ruling are blocked by their owner step, never its
-sub-issues (``R-BAL395``); a leaf is filed in its split step's milestone while that step
-holds one, which it then gives up (:func:`_leaf_milestone`).  ``quill.py``'s module docstring is
-the command's usage.
+sub-issues (``R-BAL395``), and so is a question given ``--owner``, the step it is asked for,
+which its ruling keeps (:func:`_carried_owner`, plan#1861's item 10); a leaf is filed in its
+split step's milestone while that step holds one, which it then gives up
+(:func:`_leaf_milestone`).  ``quill.py``'s module docstring is the command's usage.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
 that module past the 1,000 lines ``too-many-lines`` allows (it has been ``quill.py``
@@ -39,6 +40,7 @@ from tools.quill._state import (
     leaf_placement,
     leaves,
     leaves_below,
+    owner,
     release_hint,
     withdrawn_filing,
 )
@@ -145,8 +147,8 @@ class _Filing:
     """What ``file`` writes, and what it read to write it.
 
     ``draft``: the card.  ``parent``: the card it is linked to, read by number -- a
-    finding's or ruling's owner, which it is blocked by (``R-BAL395``), or the step or piece
-    of work a step or task is a sub-issue of; None for a top-level card.  ``cards``: every
+    finding's, ruling's or question's owner, which it is blocked by (``R-BAL395``), or the step
+    or piece of work a step or task is a sub-issue of; None for a top-level card.  ``cards``: every
     card a decision over that parent reads (:func:`with_closure`: the cards linked under it among
     them, each read by number); ``reads``: the one read of git (:func:`_git.read`) decided
     over -- what shipped (:attr:`shipped`), which tasks are done, and every claim, by card
@@ -180,9 +182,12 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
     way ``next`` reads a step (:func:`_state.is_live`), never the card's open
     state alone, which is display.  A task's parent is a piece of work whose own filing
     has finished, never a step split into smaller steps: no change ships one, so no task
-    under it is ever done.
+    under it is ever done.  A ruling converted from a question that names no ``--owner``
+    takes the question's (:func:`_carried_owner`).
     """
-    parent_number = getattr(args, "owner", None) or getattr(args, "parent", None)
+    question = _one(tracker, args.from_question) if getattr(args, "from_question", None) else None
+    parent_number = (getattr(args, "owner", None) or getattr(args, "parent", None)
+                     or _carried_owner(question))
     parent = _one(tracker, parent_number) if parent_number else None
     if args.kind == "step" and parent is not None and filing_unfinished(parent):
         raise Refused(f"{_label(parent)}'s own filing has not finished (R-BAL202): finish it "
@@ -191,11 +196,11 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
     if args.kind == TASK and filing_unfinished(parent):
         raise Refused(f"{_label(parent)}'s own filing has not finished (R-BAL202): finish it "
                       "with the same `quill file` command first, then file its tasks")
-    owner, cards, reads = None, {}, _NOTHING_READ
+    held_by, cards, reads = None, {}, _NOTHING_READ
     if parent is not None:
         reads = _git.read(root)
         cards = with_closure(tracker, {parent.number: parent})
-        owner = _owner(parent, cards, reads.shipped.cards)
+        held_by = _owner(parent, cards, reads.shipped.cards)
     if args.kind == TASK and is_container(parent, cards, reads.shipped.cards):
         raise Refused(f"{_label(parent)} is split into smaller steps (R-BAL177): a task is a "
                       "piece of one of them, so file it under that one")
@@ -204,20 +209,32 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
         body = _read(args.body_file)
     elif args.kind == "finding":
         body = args.text
-    elif args.from_question:
-        card = _one(tracker, args.from_question)
-        text, versions = tracker.edits(card.number)
-        asked = _Asked(card, text, any(version.editor == tracker.app_login
-                                       and in_ruling_shape(version.body)
-                                       for version in versions[1:]))
+    elif question is not None:
+        text, versions = tracker.edits(question.number)
+        asked = _Asked(question, text, any(version.editor == tracker.app_login
+                                           and in_ruling_shape(version.body)
+                                           for version in versions[1:]))
         body = _converted_body(asked, _read(args.answer_file))
     else:
         body = ruling_body(_read(args.question_file), _read(args.answer_file))
     arc = () if args.kind == TASK else (args.arc,)
     labels = tuple(dict.fromkeys((*arc, *(getattr(args, "label", None) or ()))))
-    return _Filing(Draft(args.kind, args.title, body, labels, owner), parent, cards, reads,
+    return _Filing(Draft(args.kind, args.title, body, labels, held_by), parent, cards, reads,
                    asked, _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
                    if args.kind == "step" and parent is not None else _NO_MILESTONE)
+
+
+def _carried_owner(question: Card | None) -> int | None:
+    """The owner a ruling converted from ``question`` (``--from-question``) takes when no
+    ``--owner`` names one (plan#1861's item 10): the one step the question is blocked by
+    (:func:`_state.owner`, R-BAL395), so its ruling, the same card, keeps the link.  None with
+    no question.  Refused, before anything is written, when the question names no one owner."""
+    if question is None:
+        return None
+    if (number := owner(question)) is None:
+        raise Refused(f"{_label(question)} names no one owner step for its ruling to keep "
+                      "(R-BAL395): name the step the ruling is for with --owner plan#S")
+    return number
 
 
 def _owner(parent: Card, cards: dict[int, Card], shipped: frozenset[int]) -> Owner:
@@ -322,10 +339,11 @@ def _refuse_relabel(card: Card, draft: Draft) -> None:
 def _refuse_rehoming(card: Card, kind: str, parent: Card | None) -> None:
     """Refuse to file ``card`` as a ``kind`` under ``parent`` (None: at the top level) when it
     is a sub-issue of another card, in the tracker or outside it -- or, filed as a finding or
-    ruling, a sub-issue of any card, or blocked by any card but ``parent``, its owner
-    (``R-BAL395``): re-homing a card is a person's call."""
-    if kind in OWNED:
-        _refuse_reowning(card, parent)
+    ruling, or as a question that names an owner, a sub-issue of any card, or blocked by any
+    card but ``parent``, its owner (``R-BAL395``): re-homing a card is a person's call.  A
+    question filed with no owner says nothing of one, so a link a person gave it stands."""
+    if kind in OWNED and parent is not None:
+        _refuse_reowning(card, kind, parent)
         return
     if outside := _outside_parent(card):
         raise Refused(f"{_label(card)} is a sub-issue of {outside}, outside the tracker: "
@@ -336,31 +354,33 @@ def _refuse_rehoming(card: Card, kind: str, parent: Card | None) -> None:
                       "re-homing a card is done by hand")
 
 
-def _refuse_reowning(card: Card, owner: Card) -> None:
-    """Refuse to file ``card``, a finding or ruling, for ``owner`` when a link of it says
-    otherwise: a sub-issue of any card, which the parent's progress would count, or blocked
-    by any card but ``owner`` (``R-BAL395``), in the tracker or outside it.  Re-homing is a
-    person's call, made by hand -- for a finding blocked by one other card of the tracker,
-    with ``quill hand`` (step plan#1772), which hands it to the owner this filing names."""
+def _refuse_reowning(card: Card, kind: str, to: Card) -> None:
+    """Refuse to file ``card`` as a ``kind`` -- a finding or ruling, or a question that names
+    an owner -- for ``to``, its owner, when a link of it says otherwise: a sub-issue of any
+    card, which the parent's progress would count, or blocked by any card but ``to``
+    (``R-BAL395``), in the tracker or outside it.  Re-homing is a person's call, made by hand
+    -- for a finding blocked by one other card of the tracker, with ``quill hand`` (step
+    plan#1772), which hands it to the owner this filing names."""
     outside = {what: [f"{link.issue}, outside the tracker" for link in card.outside
                       if link.what == what] for what in ("parent", "blocker")}
+    owned = "a question that names an owner" if kind == "question" else "a finding or ruling"
     if under := ([f"plan#{card.parent}"] if card.parent is not None else []) + outside["parent"]:
-        raise Refused(f"{_label(card)} is a sub-issue of {under[0]}, but a finding or ruling is "
-                      f"blocked by its owner, plan#{owner.number}, and is no card's sub-issue "
+        raise Refused(f"{_label(card)} is a sub-issue of {under[0]}, but {owned} is "
+                      f"blocked by its owner, plan#{to.number}, and is no card's sub-issue "
                       "(R-BAL395): re-homing a card is done by hand")
-    blockers = [number for number in card.blocked_by if number != owner.number]
+    blockers = [number for number in card.blocked_by if number != to.number]
     if others := [f"plan#{number}" for number in blockers] + outside["blocker"]:
-        how = (f"`quill hand plan#{card.number} --to plan#{owner.number}` re-homes it"
+        how = (f"`quill hand plan#{card.number} --to plan#{to.number}` re-homes it"
                if card.kind == "finding" and len(others) == 1 and blockers else
                "re-homing a card is done by hand")
         raise Refused(f"{_label(card)} is blocked by {', '.join(others)}, not only by "
-                      f"plan#{owner.number}, the owner this filing names (R-BAL395): {how}")
+                      f"plan#{to.number}, the owner this filing names (R-BAL395): {how}")
 
 
 def _attach(tracker: Tracker, card: Card, kind: str, parent: Card | None) -> None:
     """Link ``card``, filed as a ``kind``, to ``parent`` (None: no card), unless it already
-    is: a finding or ruling blocked by it, its owner (``R-BAL395``), any other kind its
-    sub-issue; the caller has already refused a card linked otherwise."""
+    is: a finding, ruling or question blocked by it, its owner (``R-BAL395``), any other kind
+    its sub-issue; the caller has already refused a card linked otherwise."""
     if parent is None:
         return
     if kind in OWNED and parent.number in card.blocked_by:
@@ -473,8 +493,8 @@ def _filed_already(card: Card, kind: str, parent: Card | None) -> int:
     and a person may have moved or edited it since; or it shipped in git and was closed
     still marked, its filing stopped at its last write, which decides nothing now
     (:func:`_state.withdrawn_filing`).  Refused when it sits at the top level and this
-    filing names ``parent`` -- for a ``kind`` that is a finding or ruling, when no card
-    blocks it (``R-BAL395``): re-homing a card is a person's call (one linked otherwise the
+    filing names ``parent`` -- for a ``kind`` that is a finding, ruling or question, when no
+    card blocks it (``R-BAL395``): re-homing a card is a person's call (one linked otherwise the
     caller has already refused, :func:`_refuse_rehoming`)."""
     if kind in OWNED and parent is not None and parent.number not in card.blocked_by:
         raise Refused(f"{_label(card)} has this kind, title and text, and its filing finished "
@@ -602,12 +622,12 @@ def finishing_filings(tracker: Tracker, root: Path, card: Card, cards: dict[int,
     write, for what that filing refuses."""
     held = tracker.cards(card.task_children) if card.task_children else {}
     filed = {task.title.strip() for task in held.values() if not filing_unfinished(task)}
-    owner = _owner(card, cards, reads.shipped.cards)
+    held_by = _owner(card, cards, reads.shipped.cards)
     planned = []
     for title, body in _tasks.finishing(card.number):
         if title in filed:
             continue
-        filing = _Filing(Draft(TASK, title, body, (), owner), card, cards, reads, None,
+        filing = _Filing(Draft(TASK, title, body, (), held_by), card, cards, reads, None,
                          _NO_MILESTONE)
         if problems := violations(filing.draft):
             raise Refused(f"{title!r} not filed:\n  " + "\n  ".join(problems))
@@ -698,13 +718,14 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
     print(f"  unmarked: plan#{card.number}'s filing is finished")
 
 
-def _convert_question(args, tracker: Tracker, draft: Draft, owner: Card, asked: _Asked) -> int:
+def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _Asked) -> int:
     """An answered question becomes its ruling: one card, so the question is never copied.
 
     Each write is skipped when it already landed, so the same command finishes a
     conversion a failure cut short (R-BAL186): a card already typed a ruling but
     still open, with this answer, is one.  Its parent is checked before anything
-    is written.
+    is written.  ``to`` is its owner: the step ``--owner`` names, or the one the question was
+    asked for (:func:`_carried_owner`), whose link the ruling keeps.
     """
     question = asked.card
     if not question.is_open or question.kind not in ("question", "ruling"):
@@ -714,7 +735,7 @@ def _convert_question(args, tracker: Tracker, draft: Draft, owner: Card, asked: 
                       "the `quill file` command that filed it first, then convert it")
     if args.arc not in question.labels:
         raise Refused(f"{_label(question)} is not in the {args.arc} arc; pass its own --arc")
-    _refuse_rehoming(question, "ruling", owner)
+    _refuse_rehoming(question, "ruling", to)
     if question.kind == "ruling":
         print(f"finishing {_label(question)}: its conversion into a ruling was cut short "
               "(R-BAL186)")
@@ -727,7 +748,7 @@ def _convert_question(args, tracker: Tracker, draft: Draft, owner: Card, asked: 
     if draft.title.strip() != question.title.strip():
         tracker.retitle(question.number, draft.title)
         print(f"  retitled {draft.title!r}")
-    _attach(tracker, question, "ruling", owner)
+    _attach(tracker, question, "ruling", to)
     if question.board_item is not None:
         tracker.board.remove(question.board_item)
         print("  board: taken off it (a ruling is not in the order)")

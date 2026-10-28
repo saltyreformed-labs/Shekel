@@ -541,9 +541,9 @@ class CardReader:
 
     def blocking(self, number: int) -> tuple[Child, ...]:
         """The cards of this tracker that card ``number`` blocks, each with its type and state
-        as they stand (:func:`_queries.blocking`): a step's are the findings and rulings it
-        owns (ruling ``balance:R-BAL395``), beside any card waiting on it.  An issue outside
-        the tracker is no card, and is passed over.
+        as they stand (:func:`_queries.blocking`): a step's are the findings, rulings and
+        questions it owns (ruling ``balance:R-BAL395``), beside any card waiting on it.  An
+        issue outside the tracker is no card, and is passed over.
 
         Raises:
             TrackerError: When GitHub answers the card as null, or cut the list short.

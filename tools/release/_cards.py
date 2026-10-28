@@ -378,9 +378,9 @@ def _below_each(
 ) -> dict[int, tuple[tuple[int, str | None], ...]]:
     """What stands below each card of ``closure``, as ``(number, kind)``, for
     :func:`_none_hung`: its sub-issues and, for each group's own card and each step below a
-    group that is a step, each finding and ruling it blocks, its owner's link (R-BAL395: a
-    finding or a ruling is no sub-issue of the step that owns it, so a step hung under one
-    is below the group all the same; R395's review, its F1), by that step's blocking read
+    group that is a step, each finding, ruling and question it blocks, its owner's link
+    (R-BAL395: none is a sub-issue of the step that owns it, so a step hung under one is
+    below the group all the same; R395's review, its F1), by that step's blocking read
     (``Tracker.blocking``), once each."""
     below = {number: tuple((child.number, child.kind) for child in card.children)
              for number, card in closure.items()}

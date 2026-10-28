@@ -1,7 +1,7 @@
 """The ``quill show`` command (:func:`cmd_show`): a card's facts, among them the title of
-each card linked to it and, for a step, each finding and ruling it owns (ruling
-``balance:R-BAL395``); then its text, its comments and the code repository's history for
-it.
+each card linked to it and, for a step, each finding, ruling and question it owns (ruling
+``balance:R-BAL395``, plan#1861's item 10); then its text, its comments and the code
+repository's history for it.
 
 Split out of the command module, which the list of the findings and rulings a step owns
 would take past the 1,000 lines ``too-many-lines`` allows.
@@ -96,9 +96,9 @@ def _link_lines(card: Card, cards: dict[int, Card], reads: _git.Reads, listed: d
     a step linked under it that is no leaf of it saying so (:func:`_state.never_split`, as
     ``next`` reads it, over ``cards``), a task whether git says it is done and, the one in
     progress, that it is (``tasks``: those done, those in progress) --
-    then each blocker, a finding's or a ruling's owner named so (its one blocker,
-    :func:`_state.owner`, R-BAL395, as ``sync``'s report reads it), then each finding and
-    ruling ``listed`` holds whose owner is ``card``, which it owns."""
+    then each blocker, a finding's, a ruling's or a question's owner named so (its one
+    blocker, :func:`_state.owner`, R-BAL395, as ``sync``'s report reads it), then each
+    finding, ruling and question ``listed`` holds whose owner is ``card``, which it owns."""
     stale = set(never_split(card, cards, reads.shipped.cards))
     done, begun = tasks
     lines = [f"  child: plan#{child.number} ({child.kind}, "
@@ -146,8 +146,8 @@ def _steps_below(tracker: Tracker, card: Card) -> dict[int, Card]:
 
 
 def _owned(tracker: Tracker, card: Card) -> set[int]:
-    """The findings and rulings a step owns (ruling ``balance:R-BAL395``: each is blocked by
-    its owner step), found by the step's own blocking read
+    """The findings, rulings and questions a step owns (ruling ``balance:R-BAL395``: each is
+    blocked by its owner step), found by the step's own blocking read
     (:meth:`_tracker.Tracker.blocking`), which only a step's ``show`` makes: no other kind
     owns a card.  Found only: :func:`_listed` reads each by its number, and that read
     decides whether ``card`` is its owner (:func:`_link_lines`), as ``sync``'s listings
@@ -171,9 +171,9 @@ def _listed(tracker: Tracker, card: Card, read: dict[int, Card],
 
 def cmd_show(args, tracker: Tracker, root: Path) -> int:
     """A card -- the title of each card linked below it, blocking it or, for a step, each
-    finding and ruling it owns (R-BAL395), among its facts -- then its text, its comments
-    oldest first, and the code repository's history for it: each commit on ``dev`` or
-    ``main`` that added, changed or deleted its ship marker (:func:`_git.history`), newest
+    finding, ruling and question it owns (R-BAL395), among its facts -- then its text, its
+    comments oldest first, and the code repository's history for it: each commit on ``dev``
+    or ``main`` that added, changed or deleted its ship marker (:func:`_git.history`), newest
     first."""
     number = _resolve_reference(tracker, args.card)
     card = _one(tracker, number)

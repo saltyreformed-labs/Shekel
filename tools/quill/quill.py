@@ -49,6 +49,9 @@ says when sync is behind.  ``watch`` runs every minute from the same clone, neve
 since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
 :mod:`_watch`).  ``answer`` answers the developer's comments on a card, and ``next``
 names each claimed card holding one no answer has followed (plan#1822, :mod:`_comments`).
+``pr`` opens a card's pull request into ``dev``, its text naming the card so the card links it,
+and ``file question --owner`` links a question to the step it is asked for, a link its ruling
+keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -58,9 +61,11 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill show plan#N | OLD-ID
     python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC [--parent plan#P]
     python -m tools.quill.quill file finding --arc ARC --title NAME --owner plan#S --text SENTENCE
-    python -m tools.quill.quill file ruling --arc ARC --title NAME --owner plan#S
-                                (--question-file Q | --from-question plan#Q) --answer-file A
+    python -m tools.quill.quill file ruling --arc ARC --title NAME
+                                (--owner plan#S --question-file Q | [--owner plan#S]
+                                 --from-question plan#Q) --answer-file A
     python -m tools.quill.quill file question --arc ARC --title NAME --body-file QUESTION
+                                             [--owner plan#S]
     python -m tools.quill.quill file task --parent plan#N --title NAME --body-file PIECE
                                          [--before plan#T]
     python -m tools.quill.quill start plan#T
@@ -75,6 +80,7 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill drop plan#N --why REASON
     python -m tools.quill.quill sync [--dry-run]
     python -m tools.quill.quill watch [--dry-run]
+    python -m tools.quill.quill pr plan#N --title TITLE --body-file TEXT
     python -m tools.quill.quill spec-history plan#N [--since BRANCH_OR_DATE]
     python -m tools.quill.quill spec-revert plan#N --to EDIT_ID
     python -m tools.quill.quill export --to DIR
@@ -110,7 +116,7 @@ import requests
 
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
-from tools.quill import _comments, _filing, _findings, _git, _status, _sync, _tasks, _watch
+from tools.quill import _comments, _filing, _findings, _git, _pr, _status, _sync, _tasks, _watch
 from tools.quill._command import (
     Refused,
     _label,
@@ -833,7 +839,8 @@ def _file_parser(commands) -> None:
     finding.add_argument("--owner", type=card_number, required=True, help="its owner step")
     finding.add_argument("--text", required=True, help="one sentence, at most 400 characters")
     ruling = sub.add_parser("ruling", parents=[common], help="the developer's decision")
-    ruling.add_argument("--owner", type=card_number, required=True, help="its owner step")
+    ruling.add_argument("--owner", type=card_number,
+                        help="its owner step; from a question that names one, that one")
     asked = ruling.add_mutually_exclusive_group(required=True)
     asked.add_argument("--question-file", help="his question, word for word")
     asked.add_argument("--from-question", type=card_number,
@@ -841,6 +848,8 @@ def _file_parser(commands) -> None:
     ruling.add_argument("--answer-file", required=True, help="his answer, word for word")
     question = sub.add_parser("question", parents=[common], help="for the developer to answer")
     question.add_argument("--body-file", required=True, help="the question")
+    question.add_argument("--owner", type=card_number,
+                          help="the step it is asked for, if one, which its ruling keeps")
     task = sub.add_parser(TASK, help="a piece of one step or finding: a commit in its card's "
                                      "pull request (its arc is its card's)")
     task.add_argument("--parent", type=card_number, required=True,
@@ -850,6 +859,27 @@ def _file_parser(commands) -> None:
     task.add_argument("--before", type=card_number,
                       help="the open task under the same card it is built before; else it goes "
                            "above the card's finishing tasks")
+
+
+def _text_parser(commands) -> None:
+    """``edit``, ``comment``, ``answer`` and ``pr``, and their arguments: each names a card and
+    a file holding the text it writes."""
+    edit = commands.add_parser("edit", help="rewrite a card's title or text (never a ruling's)")
+    edit.add_argument("card", type=card_number)
+    edit.add_argument("--title", help="its new short name (R-BAL178, R-BAL180)")
+    edit.add_argument("--body-file", help="a file holding its new text")
+    comment = commands.add_parser("comment", help="add a comment to a card")
+    comment.add_argument("card", type=card_number)
+    comment.add_argument("--body-file", required=True, help="a file holding the comment")
+    answer = commands.add_parser("answer", help="answer a card's comments no answer has "
+                                                "followed, quoting and mentioning each author")
+    answer.add_argument("card", type=card_number)
+    answer.add_argument("--body-file", required=True, help="a file holding what was done")
+    pull = commands.add_parser("pr", help="open a card's pull request into dev from card/N, "
+                                          "linked to its card")
+    pull.add_argument("card", type=card_number)
+    pull.add_argument("--title", required=True, help="the pull request's title")
+    pull.add_argument("--body-file", required=True, help="a file holding what it changes")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -867,17 +897,7 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("show", help="a card, its comments and its git history").add_argument(
         "card")
     _file_parser(commands)
-    edit = commands.add_parser("edit", help="rewrite a card's title or text (never a ruling's)")
-    edit.add_argument("card", type=card_number)
-    edit.add_argument("--title", help="its new short name (R-BAL178, R-BAL180)")
-    edit.add_argument("--body-file", help="a file holding its new text")
-    comment = commands.add_parser("comment", help="add a comment to a card")
-    comment.add_argument("card", type=card_number)
-    comment.add_argument("--body-file", required=True, help="a file holding the comment")
-    answer = commands.add_parser("answer", help="answer a card's comments no answer has "
-                                                "followed, quoting and mentioning each author")
-    answer.add_argument("card", type=card_number)
-    answer.add_argument("--body-file", required=True, help="a file holding what was done")
+    _text_parser(commands)
     block = commands.add_parser("block", help="record a blocked-by edge")
     block.add_argument("card", type=card_number)
     block.add_argument("--by", type=card_number, required=True)
@@ -932,12 +952,13 @@ COMMANDS: dict[str, Callable[..., int]] = {
 
 #: The commands handed how to reach the tracker, ``connect``, in place of a tracker: each
 #: connects only once it has something to read or write there.  ``watch`` runs every minute,
-#: and most minutes ask git alone (:mod:`_watch`).
-CONNECTS_LATE: dict[str, Callable[..., int]] = {"watch": _watch.cmd_watch}
+#: and most minutes ask git alone (:mod:`_watch`); ``pr`` writes the code repository and reads
+#: nothing of the tracker (:mod:`_pr`).
+CONNECTS_LATE: dict[str, Callable[..., int]] = {"watch": _watch.cmd_watch, "pr": _pr.cmd_pr}
 
 #: What a command's failed call raises: exit status 2 (:func:`exit_status`).
 FAILURES = (GitHubError, TrackerError, GitError, requests.RequestException, OSError,
-            CredentialsError)
+            CredentialsError, _pr.PullRequestError)
 
 
 def main(argv: list[str] | None = None, connect: Callable[[], Tracker] = CONNECT,

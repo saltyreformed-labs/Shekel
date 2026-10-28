@@ -69,11 +69,12 @@ does every leaf under it.
 
 **A finding or a ruling names its owner step by GitHub's "blocked by" link to it**
 (ruling ``balance:R-BAL395``, :data:`OWNED`), never as its sub-issue, so a step's
-progress counts only its pieces: its one blocker is its owner.  A finding's owner is a step
-a branch builds (:func:`can_own`; plan#1784, "One owner, always a leaf"), never one split
-into smaller steps, so some claim's pull request owes it (CI's landing check refuses that
-pull request while it does, ``landing``'s rule 7), and an open finding whose owner is not
-one such step is reported (:func:`_owner_lost`).
+progress counts only its pieces: its one blocker is its owner.  A question may name one the
+same way, the step it is asked for, which the ruling it becomes keeps (plan#1861's item 10).
+A finding's owner is a step a branch builds (:func:`can_own`; plan#1784, "One owner, always
+a leaf"), never one split into smaller steps, so some claim's pull request owes it (CI's
+landing check refuses that pull request while it does, ``landing``'s rule 7), and an open
+finding whose owner is not one such step is reported (:func:`_owner_lost`).
 
 **A task is a piece of one step or finding** (ruling ``balance:R-BAL386``): a sub-issue of
 type ``task`` under that card, a commit inside its one pull request, never offered or
@@ -117,14 +118,15 @@ STALE_CLAIM = timedelta(days=3)
 SHIPPABLE = ("step", "finding")
 #: The kinds that name their owner step by GitHub's "blocked by" link to it, never as its
 #: sub-issue, which its progress would count (ruling ``balance:R-BAL395``): the step is
-#: the one card each is blocked by.
-OWNED = ("finding", "ruling")
+#: the one card each is blocked by.  A finding and a ruling always name one; a question names
+#: the step it is asked for, when it has one (plan#1861's item 10).
+OWNED = ("finding", "ruling", "question")
 
 
 def leaves(card: BareCard, cards: Mapping[int, BareCard],
            shipped: Iterable[int]) -> tuple[int, ...]:
     """The steps ``card`` splits into, the one spelling: each step linked under it
-    (:attr:`_tracker.Card.step_children`; the findings and rulings it owns are no
+    (:attr:`_tracker.Card.step_children`; the findings, rulings and questions it owns are no
     sub-issues of it, R-BAL395) but one dropped before its filing finished -- CLOSED while still
     marked, and :func:`dropped` (not shipped by git's answer).
 
@@ -266,7 +268,7 @@ def above(card: BareCard, cards: Mapping[int, BareCard]) -> Iterator[BareCard]:
 def missing(cards: Mapping[int, BareCard]) -> set[int]:
     """Cards the decisions below would read that ``cards`` does not hold yet:
     blockers, parents, and every step linked under a card, each read to decide whether
-    it is a leaf (:func:`leaves`; the findings and rulings a card owns decide
+    it is a leaf (:func:`leaves`; the findings, rulings and questions a card owns decide
     nothing)."""
     wanted = set()
     for card in cards.values():
@@ -939,11 +941,12 @@ def sync_unsplits(cards: Mapping[int, Card], shipped: Iterable[int], plan: SyncP
 
 
 def owner(card: BareCard) -> int | None:
-    """A finding's or a ruling's owner (ruling ``balance:R-BAL395``, :data:`OWNED`), the one
-    spelling: the card of the tracker it is blocked by, when nothing else blocks it, in the
-    tracker or outside it.  None for a card of another kind, and for one blocked by no card
-    of the tracker, by an issue outside it, or by more than one, which names no one owner.
-    Whether that card is a step, and live, is the reader's to ask (:func:`_owner_lost`)."""
+    """A finding's, a ruling's or a question's owner (ruling ``balance:R-BAL395``,
+    :data:`OWNED`), the one spelling: the card of the tracker it is blocked by, when nothing
+    else blocks it, in the tracker or outside it.  None for a card of another kind, and for
+    one blocked by no card of the tracker (a question asked of no step among them), by an
+    issue outside it, or by more than one, which names no one owner.  Whether that card is a
+    step, and live, is the reader's to ask (:func:`_owner_lost`)."""
     if card.kind not in OWNED or len(card.blocked_by) != 1 or outside_blockers(card):
         return None
     return card.blocked_by[0]

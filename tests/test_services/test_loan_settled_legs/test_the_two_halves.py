@@ -112,8 +112,11 @@ class TestTheSettledHalfComplementsThePlanHalf:
         **The reverted member is the boundary of "its money moved"** (ruling
         **R-BAL140**): the revert KEEPS its records and releases their days
         (ruling **R-BAL61**), so records EXIST and none is DATED; the plan
-        emits a leg for a side with no dated movement (ruling **R-BAL79**),
-        and the settled half, the plan half's complement, does not hold it.
+        emits a leg for it because its transfer is Projected (the status
+        alone since plan step ``balance:X-bi-6-5``'s third leaf; ruling
+        **R-BAL79** also asked for a side with no dated movement until
+        then), and the settled half, the plan half's complement, does not
+        hold it.
         It is a NEW member at plan step ``balance:X-bi-6-4d-2``: no member
         stood in that state before.
 

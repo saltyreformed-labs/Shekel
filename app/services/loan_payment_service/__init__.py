@@ -86,8 +86,9 @@ then) and whose PROJECTED half is the parent rows in ``budget.transfers`` as
 derived legs
 (:func:`app.services.loan_loaders.projected_income_legs`; ruling **R-BAL13**,
 Transfer Invariant 5 as restated at that step), plus the loan's own params,
-rate history and escrow lines.  No amount is read off a transfer for a
-payment that has settled.  The paragraph above predicted that "the next name
+rate history and escrow lines.  A payment that has settled is worth the
+figure its transfer stores, never a figure read off its record (which holds
+none).  The paragraph above predicted that "the next name
 added here is the one that could make it false again", and it was: this is
 that sentence being kept honest rather than kept.
 

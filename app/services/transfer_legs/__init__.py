@@ -169,7 +169,9 @@ movements it resolves through :func:`movement_parent_loads` where it spelled
 that chain inline.  The loan walk's refusal of an un-dated settle
 (``loan_ledger._visible.payment_visible_on``) stopped reaching a movement
 through a shadow at that leaf too: it named the shadow's ``transaction_id``
-and names the transfer now, as its owner finds it in the app.
+and then the transfer, until plan step ``balance:X-bi-6-5``'s third leaf
+deleted it, the status-band rule refusing a settled side's un-dated record
+at commit.
 **The last readers that reached a transfer's movement themselves moved at
 plan step ``balance:X-bi-6-4d-2``**, with the join: the integrity sweep's one
 raw-SQL leg join (``scripts/_integrity_core.TRANSFER_LEG_RECORDS_JOIN``,

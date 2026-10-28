@@ -154,7 +154,7 @@ def offerable_transfer_legs(
 def _still_planned_legs(
     account_id: int, options: tuple, *filters,
 ) -> list[TransferLeg]:
-    """Return the legs on *account_id* of live, still-Projected transfers, per side.
+    """Return the legs on *account_id* of live, still-Projected transfers.
 
     The ONE statement of "this transfer's leg on this account is still
     planned" for :func:`planned_transfer_legs` and

@@ -1,6 +1,7 @@
-"""What every ``quill`` command shares: its refusal, its reads of the tracker, and how it
-names a card, on its command line (:func:`card_number`) and in what it prints
-(:func:`_label`).  What a command reads of git is :func:`_git.read`, once.
+"""What every ``quill`` command shares: its reads of the tracker, and how it names a card, on
+its command line (:func:`card_number`) and in what it prints (:func:`_label`).  What a command
+reads of git is :func:`_git.read`, once; how it ends, refused or failed, is :mod:`_exits`'s,
+which ``lane`` and the commit hook share too.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
 that module past the 1,000 lines ``too-many-lines`` allows (it has been ``quill.py``
@@ -17,15 +18,12 @@ from pathlib import Path
 from typing import Protocol
 
 from tools.quill._arcs import ArcCard
+from tools.quill._exits import Refused
 from tools.quill._state import filing_unfinished, missing
 from tools.quill._tracker import BareCard, Card, Tracker, TrackerError
 from tools.quill.setup_tracker import IN_ORDER, TASK
 
 _CARD_REF = re.compile(r"(?:plan#|#)?([1-9][0-9]*)")
-
-
-class Refused(Exception):
-    """A command that will not run as asked; its message says why."""
 
 
 def card_number(text: str) -> int:
@@ -75,8 +73,9 @@ def with_closure[CardT: BareCard](tracker: _ReadsCards[CardT],
 def on_board(kind: str | None, parent: Card | None) -> bool:
     """Whether a card of ``kind`` under ``parent`` (None: at the top level) belongs on the
     board: a step or question, in the developer's order (:data:`setup_tracker.IN_ORDER`), and a
-    task under a step the board holds, which nests under it in the Plan view and is in no order
-    (rulings plan#1814, plan#1842).  The ONE rule, which the filing (``_filing._finish``) and
+    task under a step the board holds, which nests under it in the Plan view, outside the
+    board's order, in its card's order of its tasks (rulings plan#1814, plan#1842, plan#1868).
+    The ONE rule, which the filing (``_filing._finish``) and
     ``quill sync`` (:func:`_tasks.put_on_board`) both read.  A task under a finding, or under a
     step off the board, stays off: it would stand alone among the steps as a row of its own
     (plan#1810's call D5, its review's N6), and goes on once its step does."""

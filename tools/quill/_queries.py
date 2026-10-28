@@ -15,6 +15,7 @@ are sent through.
 from __future__ import annotations
 
 from tools.quill._arcs import LABELS_AND_ARC
+from tools.quill._board_fields import GITHUB_STATUS_FIELD
 from tools.quill.setup_tracker import FILING, LINKED_REPOSITORIES, Place
 
 #: What a card says of itself and its links, read first: its labels and its arc among them, the
@@ -79,6 +80,11 @@ def marked_cards(place: Place) -> str:
 
 #: What quill reads of a comment (:func:`_tracker._comment`).
 COMMENT_FIELDS = "author { login } createdAt body"
+#: What a read of many cards by number reads of each card's comments
+#: (:meth:`_tracker.Tracker.comments_of`, ruling plan#1931): their first page, a page as
+#: :func:`comments` reads one, and whether another follows, which is then read whole that way.
+COMMENT_PAGE_FIELDS = ("number comments(first: 100) { pageInfo { hasNextPage } nodes { %s } }"
+                       % COMMENT_FIELDS)
 
 
 #: The board's cards in their positions, each with its issue type, a page at a time
@@ -89,6 +95,18 @@ BOARD_ORDER = """query($id: ID!, $after: String) { node(id: $id) { ... on Projec
     pageInfo { hasNextPage endCursor }
     nodes { id content { ... on Issue {
       number issueType { name } repository { nameWithOwner } } } } } } } }"""
+
+
+#: The board's Status field, with its id and its options' ids, and each item with the Status
+#: it holds, a page at a time (:meth:`_tracker.Board.statuses`, rulings plan#1873, plan#1905):
+#: its own read, so no recording of :data:`BOARD_ORDER` changes.
+BOARD_STATUS = """query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {
+  field(name: "%s") { ... on ProjectV2SingleSelectField { id options { id name } } }
+  items(first: 100, after: $after) {
+    pageInfo { hasNextPage endCursor }
+    nodes { id content { ... on Issue { number repository { nameWithOwner } } }
+      fieldValueByName(name: "%s") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
+  } } }""" % (GITHUB_STATUS_FIELD, GITHUB_STATUS_FIELD)
 
 
 #: What quill reads of one saved version of a card's text or a comment's.  GitHub keeps
@@ -112,8 +130,8 @@ def edits(place: Place) -> str:
 
 def blocking(place: Place) -> str:
     """The read of the cards one card blocks, each with its state and type (ruling
-    ``balance:R-BAL395``: a step's are the findings and rulings it owns, beside any card
-    waiting on it).  Its own read, never a field of every card's: only ``quill show``, a
+    ``balance:R-BAL395``: a step's are the findings, rulings and questions it owns, beside
+    any card waiting on it).  Its own read, never a field of every card's: only ``quill show``, a
     ruling's filing run again, the release tool (``tools/release/_cards.py``, R-BAL395's
     groups), and the doors that keep a finding's one owner
     (``_findings.owned``: ``quill drop``, the split, and CI's landing check, which reads it

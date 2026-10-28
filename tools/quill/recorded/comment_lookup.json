@@ -1,0 +1,112 @@
+{
+ "scratch": {
+  "numbers": [
+   244,
+   245,
+   246,
+   247,
+   248,
+   249
+  ],
+  "ids": [
+   6071091810,
+   6071091885,
+   6071091964,
+   6071092048,
+   6071092113,
+   6071092187
+  ],
+  "nodes": [
+   "I_kwDOVSOvzs8AAAABad2CYg",
+   "I_kwDOVSOvzs8AAAABad2C_A",
+   "I_kwDOVSOvzs8AAAABad2CrQ",
+   "I_kwDOVSOvzs8AAAABad2D2w",
+   "I_kwDOVSOvzs8AAAABad2DUA",
+   "I_kwDOVSOvzs8AAAABad2DkQ"
+  ],
+  "items": [],
+  "board": "PVT_kwDOFB5GWc4BoEsZ",
+  "place": [
+   "saltyreformed-labs",
+   "plan-views-demo",
+   "Plan views demo"
+  ]
+ },
+ "exchanges": [
+  {
+   "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c244: issue(number: 244) { number comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } createdAt body } } } c245: issue(number: 245) { number comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } createdAt body } } } c246: issue(number: 246) { number comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } createdAt body } } } c99999: issue(number: 99999) { number comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } createdAt body } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "c244": {
+       "number": 244,
+       "comments": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+         {
+          "author": {
+           "login": "SaltyReformed"
+          },
+          "createdAt": "2026-10-28T01:58:40Z",
+          "body": "A comment the recorder posts on step S."
+         }
+        ]
+       }
+      },
+      "c245": {
+       "number": 245,
+       "comments": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": [
+         {
+          "author": {
+           "login": "SaltyReformed"
+          },
+          "createdAt": "2026-10-28T01:58:41Z",
+          "body": "A comment the recorder posts on task T."
+         }
+        ]
+       }
+      },
+      "c246": {
+       "number": 246,
+       "comments": {
+        "pageInfo": {
+         "hasNextPage": false
+        },
+        "nodes": []
+       }
+      },
+      "c99999": null
+     }
+    },
+    "errors": [
+     {
+      "type": "NOT_FOUND",
+      "path": [
+       "repository",
+       "c99999"
+      ],
+      "locations": [
+       {
+        "line": 1,
+        "column": 460
+       }
+      ],
+      "message": "Could not resolve to an Issue with the number of 99999."
+     }
+    ]
+   }
+  }
+ ]
+}

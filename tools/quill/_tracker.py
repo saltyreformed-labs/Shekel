@@ -45,7 +45,7 @@ command.  A write cannot reach another tracker's cards or board:
 link cross repositories in one organization (Shekel itself joins it at X-cx's
 L5); read by number alone, such a link would name the tracker's card of that
 number instead.  So every link and every board item is asked which repository
-it names (:func:`_is_tracker_issue`, the one test), and a card keeps its
+it names (:func:`setup_tracker.is_tracker_issue`, the one test), and a card keeps its
 outside links apart (:attr:`Card.outside`) for the plan to report.
 
 **A card can be read without the board** (:class:`CardReader`), by a token that may read
@@ -57,7 +57,7 @@ reader that reads each card with its board item, a :class:`Card`.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import overload
@@ -87,6 +87,7 @@ from tools.quill.setup_tracker import (
     Place,
     another_app,
     find_board,
+    is_tracker_issue,
     linked,
 )
 
@@ -119,6 +120,13 @@ BOARD_TOP = ("mutation($p: ID!, $i: ID!) { updateProjectV2ItemPosition(input: "
              "{projectId: $p, itemId: $i}) { clientMutationId } }")
 BOARD_AFTER = ("mutation($p: ID!, $i: ID!, $a: ID!) { updateProjectV2ItemPosition(input: "
                "{projectId: $p, itemId: $i, afterId: $a}) { clientMutationId } }")
+#: The Status writes (rulings plan#1873, plan#1905): ``$f`` is the board's Status field,
+#: ``$o`` the option an item is set to; the clear leaves the item holding none.
+BOARD_STATUS_SET = ("mutation($p: ID!, $i: ID!, $f: ID!, $o: String!) { "
+                    "updateProjectV2ItemFieldValue(input: {projectId: $p, itemId: $i, "
+                    "fieldId: $f, value: {singleSelectOptionId: $o}}) { clientMutationId } }")
+BOARD_STATUS_CLEAR = ("mutation($p: ID!, $i: ID!, $f: ID!) { clearProjectV2ItemFieldValue("
+                      "input: {projectId: $p, itemId: $i, fieldId: $f}) { clientMutationId } }")
 
 
 @dataclass(frozen=True)
@@ -205,6 +213,19 @@ class Card(BareCard):
 
 
 @dataclass(frozen=True)
+class Statuses:
+    """The board's Status column as one read holds it (:meth:`Board.statuses`): ``field``, the
+    node id of its single-select field named Status, None when it has none (GitHub's was
+    renamed); ``options``, each of that field's option ids by its name; and ``held``, each
+    card the board holds, by number, with its board item and the Status it holds (None for
+    none)."""
+
+    field: str | None
+    options: Mapping[str, str]
+    held: Mapping[int, tuple[str, str | None]]
+
+
+@dataclass(frozen=True)
 class Edit:
     """One saved version of a card's body, in full."""
 
@@ -259,13 +280,6 @@ def milestone_nodes(github: GitHub, place: Place) -> list[dict]:
                  lambda answer: answer["repository"]["milestones"], "the milestones")[0]
 
 
-def _is_tracker_issue(node: dict, place: Place) -> bool:
-    """Whether a link or a board item's content names an issue of ``place``'s tracker: the
-    one test, for a parent, a sub-issue, a blocker and the board alike, on the whole
-    ``owner/name`` token."""
-    return (node.get("repository") or {}).get("nameWithOwner") == place.full_name
-
-
 def filed_labels(labels: Iterable[str], arc: str | None) -> list[str]:
     """The labels a create sends for a card filed in ``arc`` (None: a task, which holds no
     arc) beside ``labels``: those, its arc's label as display of its Arc
@@ -303,7 +317,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
     links += [(child, "sub-issue") for child in counted(node["subIssues"], "sub-issues", number)]
     links += [(blocker, "blocker")
               for blocker in counted(node["blockedBy"], "blockers", number)]
-    inside = [(link, what) for link, what in links if _is_tracker_issue(link, place)]
+    inside = [(link, what) for link, what in links if is_tracker_issue(link, place)]
     labels, arc = labels_and_arc(node)
     facts = {
         "number": number,
@@ -324,7 +338,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
         "closed_by_tool": not is_open and last_actor == app_login,
         "touched_by_hand": bool(events) and last_actor != app_login,
         "outside": tuple(_outside(link, what) for link, what in links
-                         if not _is_tracker_issue(link, place)),
+                         if not is_tracker_issue(link, place)),
     }
     if board_id is None:
         return BareCard(**facts)
@@ -389,8 +403,9 @@ def in_order(held: Iterable[tuple[int, str, str | None]]) -> list[tuple[int, str
 
 class Board:
     """``place``'s board: the steps and questions in the developer's drag order (R-BAL177),
-    and each step's tasks, which nest under it in the Plan view and are in no order (ruling
-    plan#1814).  :meth:`order` is that order, read by each item's issue type, so no reader
+    and each step's tasks, which nest under it in the Plan view outside that order (ruling
+    plan#1814), in their card's order of them (:meth:`Tracker.place_child`, plan#1868).
+    :meth:`order` is that order, read by each item's issue type, so no reader
     of it meets a task.
 
     ``sleep`` waits out the board's lag; tests pass one that does not wait.
@@ -418,12 +433,33 @@ class Board:
                          lambda answer: answer["node"]["items"], "the board's order")
         return [(item["content"]["number"], item["id"],
                  (item["content"]["issueType"] or {}).get("name")) for item in items
-                if _is_tracker_issue(item["content"] or {}, self.location)]
+                if is_tracker_issue(item["content"] or {}, self.location)]
 
     def order(self) -> list[tuple[int, str]]:
         """The board's cards in the developer's drag order, its steps and questions alone
         (:func:`in_order`): ``(card number, board item id)``."""
         return in_order(self.held())
+
+    def statuses(self) -> Statuses:
+        """The board's Status field and every card it holds with the Status it holds, read a
+        page at a time (:data:`_queries.BOARD_STATUS`).  An item that is no issue of the
+        tracker is no card, and is passed over, as :meth:`held` passes it over."""
+        items, last = paged(partial(self.github.graphql, _queries.BOARD_STATUS, id=self.board_id),
+                            lambda answer: answer["node"]["items"], "the board's Status")
+        field = last["node"]["field"] or {}
+        return Statuses(
+            field.get("id"), {option["name"]: option["id"] for option in field.get("options", ())},
+            {item["content"]["number"]: (item["id"], (item["fieldValueByName"] or {}).get("name"))
+             for item in items if is_tracker_issue(item["content"] or {}, self.location)})
+
+    def set_status(self, item: str, field: str, option: str | None) -> None:
+        """Set board item ``item``'s Status, the field ``field``, to the option whose id is
+        ``option``, or with None clear it: the one write of it, quill's display of git
+        (``_status``)."""
+        if option is None:
+            self._write(BOARD_STATUS_CLEAR, i=item, f=field)
+        else:
+            self._write(BOARD_STATUS_SET, i=item, f=field, o=option)
 
     def add(self, card: Card) -> str:
         """Put a card on the board (GitHub adds it at the bottom); its board item id."""
@@ -489,9 +525,9 @@ class CardReader:
 
     def blocking(self, number: int) -> tuple[Child, ...]:
         """The cards of this tracker that card ``number`` blocks, each with its type and state
-        as they stand (:func:`_queries.blocking`): a step's are the findings and rulings it
-        owns (ruling ``balance:R-BAL395``), beside any card waiting on it.  An issue outside
-        the tracker is no card, and is passed over.
+        as they stand (:func:`_queries.blocking`): a step's are the findings, rulings and
+        questions it owns (ruling ``balance:R-BAL395``), beside any card waiting on it.  An
+        issue outside the tracker is no card, and is passed over.
 
         Raises:
             TrackerError: When GitHub answers the card as null, or cut the list short.
@@ -504,7 +540,7 @@ class CardReader:
         return tuple(
             Child(node["number"], (node["issueType"] or {}).get("name"), node["state"] == "OPEN")
             for node in counted(issue["blocking"], "cards it blocks", number)
-            if _is_tracker_issue(node, self.place))
+            if is_tracker_issue(node, self.place))
 
     def _lookup[T](self, numbers: Iterable[int], card_fields: str,
                    card: Callable[[dict], T]) -> dict[int, T]:
@@ -538,16 +574,18 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
     """A tracker as the App sees it: its cards, each with its board item, and its
     :class:`Board`.
 
-    Pylint: ``too-many-public-methods`` (25/20, measured at plan#1811, whose arc-label pass
-    reads every card's labels and Arc, puts its arc labels back and sets a missing Arc from
-    its one arc label (ruling plan#1856); 22 at plan#1772, which
-    moved the read of what a card blocks down to :class:`CardReader`, where CI's landing
+    Pylint: ``too-many-public-methods`` (27/20, measured at plan#1861's merge of plan#1811:
+    plan#1811's arc-label pass reads every card's labels and Arc, puts its arc labels back
+    and sets a missing Arc from its one arc label (ruling plan#1856), and plan#1861 reads many
+    cards' comments in one request and places a task in its card's order; 22 at plan#1772,
+    which moved the read of what a card blocks down to :class:`CardReader`, where CI's landing
     check reads it) --
     ``connect``, then **one method per read or write quill makes of the tracker**
     (most one request; this module is the one place it speaks to GitHub), the
     board's own writes already apart in :class:`Board`: among them the filing
     mark's read and its removal (R-BAL202), a leaf's unlink (R-BAL205), ``show``'s
-    read of a card's comments, and ``quill file step --parent``'s read of the
+    read of a card's comments and ``next``'s of many cards' (ruling plan#1931),
+    and ``quill file step --parent``'s read of the
     milestones a split step and its leaves are in and its move of a card's
     milestone (the split step's to its leaf, and back when the leaf is dropped
     unfinished; X-cx's S3a).  The claims' three reads and writes and the read of a
@@ -663,6 +701,22 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         given)."""
         nodes = comment_nodes(self.github, self.place, number)
         return [_comment(node) for node in connection_nodes({"nodes": nodes}, "comments", number)]
+
+    def comments_of(self, numbers: Iterable[int]) -> dict[int, list[Comment]]:
+        """Every comment on each card numbered ``numbers``, oldest first, by number (ruling
+        plan#1931): each card's first page of them in the one walk of a read by number,
+        :data:`_LOOKUP_BATCH` cards a request (:meth:`_lookup`,
+        :data:`_queries.COMMENT_PAGE_FIELDS`), and a card whose first page says another
+        follows read again whole, page by page (:meth:`comments`).  One that does not exist is
+        absent from the answer, as :meth:`cards` passes it over; a list of comments, or a
+        comment in it, GitHub answered as null is :func:`connection_nodes`' refusal."""
+        found = {}
+        for number, node in self._lookup(numbers, _queries.COMMENT_PAGE_FIELDS,
+                                         lambda node: node).items():
+            page = connection_nodes(node["comments"], "comments", number)
+            found[number] = (self.comments(number) if node["comments"]["pageInfo"]["hasNextPage"]
+                             else [_comment(comment) for comment in page])
+        return found
 
     def find_titles(self, text: str) -> list[tuple[int, str]]:
         """Cards whose title holds ``text`` (GitHub's search: words, not characters), read
@@ -870,6 +924,13 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         """Make ``child`` a sub-issue of ``parent``."""
         self.github.rest("POST", f"{self.place.path}/issues/{parent}/sub_issues",
                          {"sub_issue_id": child.id})
+
+    def place_child(self, parent: int, child: Card, before: Card) -> None:
+        """Move ``child``, a sub-issue of ``parent``, to just above ``before``, another of its
+        sub-issues, in ``parent``'s order of them: the order a parent's read lists them in
+        (``subIssues``), and its board nests them in (ruling plan#1868)."""
+        self.github.rest("PATCH", f"{self.place.path}/issues/{parent}/sub_issues/priority",
+                         {"sub_issue_id": child.id, "before_id": before.id})
 
     def remove_child(self, parent: int, child: Card) -> None:
         """Unlink ``child`` from ``parent``, whose sub-issue it is."""

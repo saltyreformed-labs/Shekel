@@ -20,8 +20,9 @@ Nothing here calls GitHub.
 
 What git says -- a card shipped, a card claimed, a task done -- is never faked:
 :func:`ship`, :func:`unship` and :func:`claim` write the ship markers and claims (ruling
-``balance:R-BAL359``), and :func:`finish`, :func:`unfinish`, :func:`piece` and
-:func:`unpiece` the task files (ruling ``balance:R-BAL386``), to the ``code`` fixture's bare
+``balance:R-BAL359``), :func:`finish`, :func:`unfinish`, :func:`piece` and
+:func:`unpiece` the task files (ruling ``balance:R-BAL386``), and :func:`named` a commit naming
+its task (ruling plan#1872), to the ``code`` fixture's bare
 ``origin`` (``conftest.py``), which every command then reads as it reads the real one.
 """
 from __future__ import annotations
@@ -35,23 +36,32 @@ from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
 from tools.quill._arcs import ArcCard
+from tools.quill._board_fields import STATUS_OPTIONS
 from tools.quill._command import on_board as goes_on_board
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Card, Child, Comment, Edit, filed_labels, in_order
+from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, filed_labels, in_order
 from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
 
 
 class FakeBoard:
     """The board in memory: card numbers in their positions, each card's kind read from the
-    tracker's ``cards``; its writes go to the tracker's log."""
+    tracker's ``cards``, and each card's Status; its moves go to the tracker's log, and its
+    Status writes to :attr:`status_writes`, apart, as ``sync`` writes every card's Status
+    (``_status``), so the tracker's log stays what each test of a card's writes reads."""
 
     def __init__(self, writes, cards):
         """An empty board logging into ``writes``, reading kinds from ``cards``; it shows each
-        placement at once."""
+        placement at once.  Its Status field holds every option quill writes
+        (:data:`_board_fields.STATUS_OPTIONS`), each id ``OPT_<name>``: a test sets
+        :attr:`status_field` to a field lacking one, or to none."""
         self.items: list[int] = []
         self.writes = writes
         self.cards = cards
         self.lagging = False
+        self.status: dict[int, str] = {}
+        self.status_field: tuple[str | None, dict[str, str]] = (
+            "PVTSSF_status", {name: f"OPT_{name}" for name in STATUS_OPTIONS})
+        self.status_writes: list[tuple[int, str | None]] = []
 
     def held(self):
         """Every card on the board, in its positions: ``(card number, item id, kind)``."""
@@ -77,6 +87,7 @@ class FakeBoard:
         number = int(item.removeprefix("PVTI_"))
         self.writes.append(("board_remove", number))
         self.items.remove(number)
+        self.status.pop(number, None)
 
     def place(self, item, after):
         """Move an item to just after ``after`` (the top when None); whether the board
@@ -88,15 +99,35 @@ class FakeBoard:
         self.items.insert(index, number)
         return not self.lagging
 
+    def statuses(self):
+        """The Status field and every card on the board with the Status it holds."""
+        field, options = self.status_field
+        return Statuses(field, dict(options),
+                        {number: (f"PVTI_{number}", self.status.get(number))
+                         for number in self.items})
+
+    def set_status(self, item, field, option):
+        """Set a card's Status to the option whose id is ``option``, or with None clear it; a
+        field or an option the board does not hold is a write the tool must never send."""
+        held, options = self.status_field
+        assert field == held, f"no Status field {field!r} to write"
+        number = int(item.removeprefix("PVTI_"))
+        name = None if option is None else {i: n for n, i in options.items()}[option]
+        self.status_writes.append((number, name))
+        if name is None:
+            self.status.pop(number, None)
+        else:
+            self.status[number] = name
 
 
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (27/20, measured at plan#1811) -- it
-    stands in for :class:`_tracker.Tracker`, so it has each of that class's 25
+    Pylint: ``too-many-public-methods`` (29/20, measured at plan#1861's merge of plan#1811) --
+    it stands in for :class:`_tracker.Tracker`, so it has each of that class's 27
     reads and writes but ``connect`` (its own disable says why there are so many),
-    and ``add`` and ``add_task``, which put a card or a task in.
+    ``blocking``, which that class takes from :class:`_tracker.CardReader`, and ``add``
+    and ``add_task``, which put a card or a task in.
     ``too-many-instance-attributes`` (8/7) -- **one per kind
     of fact it keeps**: seven a command reads back (cards, bodies, saved
     versions, comments, the board, the milestones that exist, and each card's
@@ -212,6 +243,11 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         error (:meth:`_refuse_unfiled`)."""
         self._refuse_unfiled(number)
         return list(self.notes.get(number, []))
+
+    def comments_of(self, numbers):
+        """The comments of each card that exists among ``numbers``, oldest first, as the read of
+        many cards by number answers them: one nobody filed is absent."""
+        return {n: list(self.notes.get(n, [])) for n in numbers if n in self.cards_by_number}
 
     def _refuse_unfiled(self, number):
         """GitHub's NOT_FOUND error, which the strict read raises
@@ -337,6 +373,17 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         held = self.cards_by_number[parent]
         self._set(parent, children=(*held.children, Child(child.number, child.kind, True)))
         self._set(child.number, parent=parent)
+
+    def place_child(self, parent, child, before):
+        """Move ``child``, a sub-issue of ``parent``, to just above ``before``, another, in
+        ``parent``'s order of them; the same move sent again changes nothing
+        (``recorded/priority.json``)."""
+        self.writes.append(("place_child", parent, child.number, before.number))
+        held = self.cards_by_number[parent].children
+        moved = next(c for c in held if c.number == child.number)
+        rest = [c for c in held if c.number != child.number]
+        at = next(i for i, c in enumerate(rest) if c.number == before.number)
+        self._set(parent, children=(*rest[:at], moved, *rest[at:]))
 
     def remove_child(self, parent, child):
         """Unlink ``child`` from ``parent``.  One that is no sub-issue of ``parent`` -- a read
@@ -480,6 +527,22 @@ def piece(root, card, *numbers):
         _git.task_file(number): f"done {_git.instant(CLAIMED)}\n" for number in numbers})
 
 
+def named(root, card, task):
+    """Push onto ``card/<card>`` a commit naming ``task`` by its trailer ``Task: plan#<task>``
+    (ruling plan#1872), as a commit of its piece names it, writing no task file and no
+    ``plan/doing`` file, so it begins nothing (ruling plan#2009); its sha."""
+    return _onto_claim(root, card, f"work\n\n{_git.task_trailer(task)}",
+                       {f"work-{task}.txt": "work\n"})
+
+
+def begun(root, card, task):
+    """Push onto ``card/<card>`` the start of ``task``, as ``quill start`` in another clone
+    writes it (ruling plan#2009): a commit writing ``plan/doing/<card>`` to name it, carrying
+    its trailer ``Task: plan#<task>``; its sha."""
+    return _onto_claim(root, card, f"start plan#{task}\n\n{_git.task_trailer(task)}",
+                       {_git.doing_file(card): f"plan#{task}\n"})
+
+
 def unpiece(root, card, *numbers):
     """Push onto ``card/<card>`` a commit deleting the file of each task in ``numbers``, as a
     revert of the commit finishing the piece does on the branch; its sha."""
@@ -490,9 +553,21 @@ def claim(root, number, when=CLAIMED):
     """Claim card ``number`` on ``origin`` as a session in another clone would
     (:func:`_git.claim` on the ``dev`` ``origin`` holds, from :func:`scratch.elsewhere`):
     ``root`` learns of it only through a read of its own, and its HEAD and branches are left
-    as they were; the claim's sha."""
+    as they were; the claim's sha.  Its git alone: the finishing tasks ``quill claim`` files
+    (ruling plan#1875) are the tracker's, which a test adds where it reads them."""
     return _git.claim(elsewhere(root), number, tracking(DEV), when)
 
+
+
+def two_tasks():
+    """A tracker holding step 1 and its two tasks, 2 ("piece a") then 3 ("piece b"): the card
+    whose pieces the tests of ``quill start``, a drop of a task begun and the commit hook
+    begin, end and drop."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add_task(2, 1, title="piece a")
+    tracker.add_task(3, 1, title="piece b")
+    return tracker
 
 
 def leaf_filing(tmp_path, title, parent="plan#1"):

@@ -55,8 +55,9 @@ its links -- answered null or cut short is a :class:`TrackerError` (:func:`count
 **A failure names the read it cut short** (plan#1809 item 3): each read quill's commands, CI's
 landing check and the release tool make runs inside :func:`reading`, which notes what it was
 reading, the page or the batch, on the error that ends it, and every printer of a failure
-prints it as :func:`described` writes it, one line.  (``setup_tracker``, the developer's own
-check of the tracker's configuration, prints it so too, without naming its reads.)
+prints it as :func:`_exits.described` writes it, one line.  (``setup_tracker``, the
+developer's own check of the tracker's configuration, prints it so too, without naming its
+reads.)
 
 Nothing in this module reads or writes the code repository.  Its tests feed it
 recorded responses and never call GitHub.
@@ -423,26 +424,13 @@ def _refusal(method: str, url: str, response, cut_off: int, read: bool) -> str:
 def reading(what: str) -> Iterator[None]:
     """Name the read the block makes: a :class:`GitHubError` or a ``requests`` failure
     raised inside it carries the note ``while reading <what>`` (``what`` naming the page or
-    the batch where there are several), which :func:`described` prints, and is raised on
-    unchanged, so every ``except`` that catches it still does."""
+    the batch where there are several), which :func:`_exits.described` prints, and is raised
+    on unchanged, so every ``except`` that catches it still does."""
     try:
         yield
     except (GitHubError, requests.RequestException) as error:
         error.add_note(f"while reading {what}")
         raise
-
-
-def described(error: BaseException) -> str:
-    """A failure as ONE line: its message, then what was being read when it ended (each
-    note :func:`reading` added), each run of whitespace one space.  One line, because a
-    scheduled run's failure is pushed with that run's last fifteen log lines
-    (``/opt/docker/scripts/notify-failure.sh``), and GitHub's 504 page, which its answer
-    text carries, took twenty as quill printed it (its sync at 14:04 2026-10-26, the page
-    cut at 500 characters), pushing the failure itself out.  The line is a run's last only
-    if what it printed before reached the log first: off a terminal Python buffers stdout,
-    where a command's lines go, and not stderr, where this one goes, so the scheduled sync
-    runs with ``PYTHONUNBUFFERED=1`` (its unit, ``shekel-plan-sync.service``)."""
-    return " ".join("; ".join([str(error), *getattr(error, "__notes__", ())]).split())
 
 
 def paged(read: Callable[..., dict], connection: Callable[[dict], dict],

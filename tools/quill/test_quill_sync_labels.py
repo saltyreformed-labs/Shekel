@@ -15,6 +15,13 @@ def _back(number, kind, arc, remove, add):
     return "put " + _BACK.format(number, kind, arc, number) + f"removing {remove}, adding {add}\n"
 
 
+def _todo(tracker, *numbers):
+    """The board shows each card of ``numbers`` Todo already, the Status ``sync`` writes of a
+    card open, unclaimed and not done (ruling plan#1873, ``_status``), so a run prints the
+    label pass alone."""
+    tracker.board.status.update(dict.fromkeys(numbers, "Todo"))
+
+
 def test_sync_puts_each_cards_arc_labels_back_to_display_its_arc(code, capsys):
     """A label a person swapped, removed or added beside the right one is put back from the
     Arc, and a task's stray arc label removed; every other label is kept, and a card whose arc
@@ -26,6 +33,7 @@ def test_sync_puts_each_cards_arc_labels_back_to_display_its_arc(code, capsys):
     tracker.add(3, labels=("balance", "moves-money"))
     tracker.add(4, labels=("balance", "recurrence"))
     tracker.add_task(5, 3, labels=("balance",))
+    _todo(tracker, 1, 3, 4, 5)
     lines = [_back(1, "step", "balance", ["recurrence"], ["balance"]),
              _back(2, "question", "salary", [], ["salary"]),
              _back(4, "step", "balance", ["recurrence"], []),
@@ -58,6 +66,7 @@ def test_a_card_whose_arc_no_label_can_fix_is_reported_and_left_as_it_is(code, c
     tracker.add(2, "ruling", labels=(), arc=None, on_board=False, is_open=False,
                 state_reason="COMPLETED", closed_by_tool=True)
     tracker.add_task(3, 1, arc="balance")
+    _todo(tracker, 1, 3)
     assert run(tracker, code, "sync") == 1
     assert capsys.readouterr().out == (
         "REPORT: plan#1 [step, no arc] card 1 holds no Arc, its arc's one home (R-BAL349), so "
@@ -80,6 +89,7 @@ def test_a_card_older_quill_filed_with_its_arc_label_alone_is_given_that_arc(cod
     tracker.add(1, labels=("recurrence", "moves-money"), arc=None)
     tracker.add(2, "ruling", labels=("salary",), arc=None, on_board=False, is_open=False,
                 state_reason="COMPLETED", closed_by_tool=True)
+    _todo(tracker, 1)
     lines = ("set plan#1 [step, no arc] card 1's Arc to 'recurrence', the one arc label it "
              "carries (ruling plan#1856)\n"
              "set plan#2 [ruling, no arc] card 2's Arc to 'salary', the one arc label it "
@@ -103,6 +113,7 @@ def test_a_card_holding_an_arc_none_of_quills_is_reported_and_never_relabelled(c
     settle (plan#1811's review, L1): it is a REPORT, and the card is left as it is."""
     tracker = FakeTracker()
     tracker.add(1, labels=("balance",), arc="tracker")
+    _todo(tracker, 1)
     assert run(tracker, code, "sync") == 1
     assert capsys.readouterr().out == (
         "REPORT: plan#1 [step, tracker] card 1 holds the Arc 'tracker', none of quill's arcs "

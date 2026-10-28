@@ -478,6 +478,23 @@ def test_only_a_card_number_under_card_is_a_claim_and_merged_work_is_none(repo):
     assert list(_git.read(repo).claims) == [10]
 
 
+def test_origin_tips_lists_dev_main_and_each_card_branch_in_one_listing(repo):
+    """``quill watch``'s one listing (plan#1861 item 7): ``dev``, ``main`` and each
+    ``card/N``, by its name on ``origin``, with its tip; a branch whose name only ENDS like
+    one of them (``ls-remote`` matches a pattern's tail), ``card/x``, ``card/007`` and any
+    other branch are passed over; and ``on_origin`` reads the same claims from it as from a
+    listing of its own."""
+    base = _origin(repo)
+    for branch in ("card/x", "card/007", "feat/y", "x/refs/heads/dev", "old/main"):
+        _push(repo, base, branch)
+    live = _git.claim(repo, 10, _git.tracking(_git.DEV), _MON)
+    dev = _files(repo, base, "dev moved", {"work": "x\n"})
+    _push(repo, dev, "dev")
+    tips = _git.origin_tips(repo)
+    assert tips == {"dev": dev, "main": base, "card/10": live}
+    assert _git.on_origin(repo, tips) == _git.on_origin(repo) == {10: live}
+
+
 def test_a_claim_tip_without_its_marker_reads_no_claim_instant(repo):
     """A ``card/N`` someone pushed by hand, holding no marker for N, is still a claim (origin
     holds the branch), with no instant to report."""

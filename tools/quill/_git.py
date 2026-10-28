@@ -26,6 +26,19 @@ task file only for a task under that claim's card.  A task file is read as a mar
 longer done.  Which change may write one is the markers' write rule, judged in the same walk
 (``tools/quill/landing.py``).
 
+**A task is IN PROGRESS while its card's branch holds the file ``plan/doing/N`` naming it and
+not the task's own done file** (rulings plan#1872, plan#2009; :func:`doing_file`,
+:func:`in_progress`): the branch's state, not its history, so a merge, a rebase or a
+cherry-pick of another card's work brings that card's file, which this one never reads, and
+two copies of one branch that began different tasks meet as a conflict on the one file.
+``quill start`` begins a piece with a commit writing the file (:func:`start`), and the commit
+that writes the task's done file ends it, done; ``quill drop`` of a task begun ends it dropped
+instead, with a commit deleting the file (:func:`drop`, ruling plan#1900).  A commit names the
+piece it builds by the trailer ``Task: plan#T`` (:func:`task_trailer`, read by
+:func:`stamps`), which ``start`` and ``drop`` write and the commit hook stamps on each commit
+of the piece (``tools/quill/commit_hook.py``): a record CI's landing check reads, which
+decides nothing of what is in progress.
+
 **A claim is the branch ``card/N`` on ``origin``** (:func:`card_branch`) whose tip neither
 ``dev`` nor ``main`` holds (:func:`claims`).  ``quill claim`` makes it (:func:`claim`): a
 commit adding the card's marker, pushed CREATE-ONLY with a lease on the branch's absence, so
@@ -42,8 +55,9 @@ of ``dev``, ``main`` and each of them, each by its name into its tracking ref
 
 Every call starts git through :mod:`tools.ci.gitcmd`, so ``root`` alone decides which
 repository is read or written.  Nothing here writes the repository but :func:`fetch`'s
-tracking refs, :func:`claim`'s objects, push and local branch, and :func:`release`'s two
-pushes.
+tracking refs, :func:`claim`'s objects, push and local branch, :func:`start`'s and
+:func:`drop`'s commit, the branch each moves, its push, and the index entry and the file in the
+working tree of the ``plan/doing`` file it writes, and :func:`release`'s two pushes.
 """
 from __future__ import annotations
 
@@ -59,6 +73,9 @@ from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, run,
 MARKERS = "plan/ships"
 #: The directory holding every task's done file, one file per task (R-BAL386).
 TASKS = "plan/tasks"
+#: The directory holding the file naming each card's task in progress, one file per card
+#: (ruling plan#2009).
+DOING = "plan/doing"
 #: A claim's branch is this and the card's number (:func:`card_branch`).
 CARD_BRANCH = "card/"
 #: Where a released claim's work is kept (:func:`release`).
@@ -67,6 +84,10 @@ RELEASED = "released/"
 _NUMBER = re.compile(r"[1-9][0-9]*")
 #: What a marker's line says, and what :func:`claims` reads back from it.
 _CLAIMED = "claimed "
+#: The trailer by which a commit names the task it builds, ``Task: plan#T`` (ruling plan#1872).
+TASK_TRAILER = "Task"
+#: A task as :data:`TASK_TRAILER`'s value names it.
+_TASK_NAMED = re.compile(r"plan#([1-9][0-9]*)")
 
 
 @dataclass(frozen=True)
@@ -74,14 +95,17 @@ class Claim:
     """A card a session is building: ``sha``, the tip of the branch ``card/<card>`` on
     ``origin``; ``committed``, when that tip was committed (ISO 8601, with its offset); and
     ``claimed``, the instant the card's marker at that tip says it was claimed, None when the
-    tip holds no marker for it; and ``tasks``, each task whose done file the claim's own
-    commits wrote (:func:`own_tasks`), whatever card the tracker says it is under."""
+    tip holds no marker for it; ``tasks``, each task whose done file the claim's own
+    commits wrote (:func:`own_tasks`), whatever card the tracker says it is under; and
+    ``in_progress``, the task its tip says is in progress (:func:`in_progress`), None when
+    none is."""
 
     card: int
     sha: str
     committed: str
     claimed: str | None
     tasks: frozenset[int]
+    in_progress: int | None
 
     @property
     def branch(self) -> str:
@@ -114,8 +138,8 @@ class Entry:
 
 @dataclass(frozen=True)
 class MarkerChange:
-    """One change a commit made to an entry under :data:`MARKERS`, or :data:`TASKS` where the
-    walk names it (:func:`marker_changes`):
+    """One change a commit made to an entry under :data:`MARKERS`, or another directory the
+    walk names (:func:`marker_changes`):
     the commit's ``sha`` and ``subject``, the ``entry`` it changed, and the blob that entry
     held before the change (``was``, None where it held none), which a delete's ``entry``
     no longer names."""
@@ -128,12 +152,24 @@ class MarkerChange:
 
 @dataclass(frozen=True)
 class Took:
-    """One commit of a branch's own line through which it took a marker's or a task file's
-    blob in (``sha``), and the next commit of that line that changed that file again
-    (``until``), None while the branch still holds it (:func:`landings`)."""
+    """One commit of a branch's own line through which it took a record's blob in (``sha``),
+    and the next commit of that line that changed that file again (``until``), None while the
+    branch still holds it (:func:`landings`)."""
 
     sha: str
     until: str | None
+
+
+@dataclass(frozen=True)
+class Stamp:
+    """One of a claim's own commits as its trailers name tasks (:func:`stamps`): its ``sha``,
+    ``parents`` and ``subject``, and ``tasks``, each task its trailers ``Task: plan#T`` name
+    (:func:`task_trailer`), in the order the message holds them."""
+
+    sha: str
+    parents: tuple[str, ...]
+    subject: str
+    tasks: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -179,6 +215,12 @@ def task_file(number: int) -> str:
     return f"{TASKS}/{number}"
 
 
+def doing_file(number: int) -> str:
+    """``plan/doing/<number>``: the one file naming card ``number``'s task in progress, on its
+    branch (ruling plan#2009; :func:`in_progress`)."""
+    return f"{DOING}/{number}"
+
+
 def _numbered(path: str, directory: str) -> int | None:
     """The number the path ``path`` names as a file directly under ``directory``
     (``<directory>/<number>``); None for any other path, under ``directory`` or not: a name
@@ -197,6 +239,28 @@ def task_of(path: str) -> int | None:
     """The task whose done file the path ``path`` names (``plan/tasks/<number>``,
     :func:`task_file`); None for any other path (:func:`_numbered`)."""
     return _numbered(path, TASKS)
+
+
+def task_named(value: str) -> int | None:
+    """The task a :data:`TASK_TRAILER` trailer's value names, ``plan#<number>`` (the space
+    around it aside); None for a value naming none.  The ONE reading of that value:
+    :func:`stamps` reads a claim's commits by it, and the commit hook a message
+    (``tools/quill/commit_hook.py``)."""
+    found = _TASK_NAMED.fullmatch(value.strip())
+    return int(found.group(1)) if found else None
+
+
+def doing_named(root: Path, blob: str) -> int | None:
+    """The task a ``plan/doing`` file holding ``blob`` names (:func:`task_named`): the ONE
+    reading of its line, :func:`in_progress`'s and CI's (``tools/quill/_doing.py``)."""
+    return task_named(git(root, "cat-file", "blob", blob))
+
+
+def task_trailer(task: int) -> str:
+    """The trailer by which a commit names task ``task``, ``Task: plan#<task>`` (ruling
+    plan#1872): :func:`start`'s commit carries it, and the commit hook stamps it on each
+    commit of the piece (``tools/quill/commit_hook.py``)."""
+    return f"{TASK_TRAILER}: plan#{task}"
 
 
 def claimed_card(branch: str) -> int | None:
@@ -234,17 +298,34 @@ def instant(when: datetime) -> str:
     return when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def on_origin(root: Path) -> dict[int, str]:
-    """Every ``card/<number>`` branch ``origin`` holds, by card, with its tip: asked of
+#: The two integration branches as ``origin`` names them (``refs/heads/<name>``).
+INTEGRATION = tuple(name.removeprefix("origin/") for name in (DEV, MAIN))
+
+
+def origin_tips(root: Path) -> dict[str, str]:
+    """Each branch quill reads that ``origin`` holds -- ``dev``, ``main`` and every
+    ``card/<number>`` -- by its name there, with its tip: ONE ``git ls-remote``, asked of
     ``origin``, not of this clone's tracking refs.  A branch under ``card/`` named by no card
-    number is not a claim and is passed over."""
+    number is not a claim and is passed over.  :func:`on_origin` reads its claims from it, and
+    ``quill watch`` compares it with the tips it saw last (``tools/quill/_watch.py``)."""
     found = {}
-    for line in git(root, "ls-remote", "origin", f"refs/heads/{CARD_BRANCH}*").splitlines():
+    out = git(root, "ls-remote", "origin", f"refs/heads/{CARD_BRANCH}*",
+              *(f"refs/heads/{name}" for name in INTEGRATION))
+    for line in out.splitlines():
         sha, _, ref = line.partition("\t")
-        number = claimed_card(ref.removeprefix("refs/heads/"))
-        if ref.startswith("refs/heads/") and number is not None:
-            found[number] = sha
+        branch = ref.removeprefix("refs/heads/")
+        if ref.startswith("refs/heads/") and (branch in INTEGRATION
+                                              or claimed_card(branch) is not None):
+            found[branch] = sha
     return found
+
+
+def on_origin(root: Path, tips: dict[str, str] | None = None) -> dict[int, str]:
+    """Every ``card/<number>`` branch ``origin`` holds, by card, with its tip: those
+    :func:`origin_tips` lists, or ``tips``, one such listing already read."""
+    listed = origin_tips(root) if tips is None else tips
+    return {number: sha for branch, sha in listed.items()
+            if (number := claimed_card(branch)) is not None}
 
 
 def fetch(root: Path, cards: Iterable[int] = ()) -> None:
@@ -359,11 +440,11 @@ def lines_in(root: Path, tree: str,
     """Each card whose marker the tree ``tree`` holds (a commit names its own tree), with
     that marker's line (its blob): every file under :data:`MARKERS` whose name is a card
     number; and the path of each other entry there -- a name that is no number, a file in a
-    directory below it, or :data:`MARKERS` itself a file.  Named :data:`TASKS` as
-    ``directory``, each task whose done file it holds, and every other entry there, alike.
-    The ONE reading of a tree's markers and task files: :func:`markers_in` names its cards,
-    :func:`tasks_in` its tasks, and CI's landing check compares the lines two merges hold
-    (``tools/quill/landing.py``, rule 8).
+    directory below it, or :data:`MARKERS` itself a file.  Named :data:`TASKS` or :data:`DOING`
+    as ``directory``, each task whose done file, or card whose file naming its task in
+    progress, it holds, and every other entry there, alike.  The ONE reading of a tree's
+    records: :func:`markers_in` names its cards, :func:`tasks_in` its tasks, and CI's landing
+    check compares the lines two merges hold (rule 8) and names each card's ``plan/doing`` file.
 
     Raises:
         GitError: When git cannot read ``tree``.
@@ -472,6 +553,56 @@ def own_tasks(root: Path, tip: str) -> frozenset[int]:
                      if all(held.get(number) != blob for held in grew_from))
 
 
+def _named(values: str) -> tuple[int, ...]:
+    """Each task the trailer values ``values``, one a line, name (:func:`task_named`)."""
+    return tuple(number for line in values.splitlines()
+                 if (number := task_named(line)) is not None)
+
+
+def stamps(root: Path, tip: str) -> list[Stamp]:
+    """Each of the claim at ``tip``'s own commits, with the tasks its trailers name
+    (:class:`Stamp`): those neither ``dev`` nor ``main`` holds, as :func:`own_tasks` reads
+    them, newest first (git's ``--topo-order``: a commit before each it grew from).  Git
+    matches each key in any case, and a value naming no card (``plan#<number>``) names
+    nothing (:func:`task_named`).  The ONE reading of what a claim's commits name, which CI's
+    landing check reads for each of a card's commits naming no task under it
+    (``tools/quill/_stamps.py``); what is in progress is the branch's file, never these
+    (:func:`in_progress`).
+
+    Raises:
+        GitError: When git cannot read ``tip``.
+    """
+    out = git(root, "log", "--topo-order",
+              f"--format=%x01%H%x02%P%x02%(trailers:key={TASK_TRAILER},valueonly)%x02%s",
+              tip, "--not", *TIPS)
+    found = []
+    for record in out.split("\x01")[1:]:
+        sha, parents, named, subject = record.split("\x02", 3)
+        found.append(Stamp(sha, tuple(parents.split()), subject.rstrip("\n"), _named(named)))
+    return found
+
+
+def in_progress(root: Path, tip: str, number: int) -> int | None:
+    """The task card ``number``'s branch at ``tip`` has in progress (rulings plan#1872,
+    plan#2009): the one its file ``plan/doing/<number>`` names (:func:`doing_file`, one line
+    ``plan#T``, :func:`doing_named`), while ``tip`` holds no done file for it
+    (:func:`task_file`); None when it holds neither, or that file names no task.  Only card
+    ``number``'s own file is read, so another card's, which a merge, a rebase or a
+    cherry-pick of its work brings, puts nothing in progress here.  The ONE reading of which
+    piece is in progress, from git alone, local refs and no network: ``quill start`` asks it
+    of ``HEAD`` before it begins a piece, ``quill drop`` before it drops a task, the commit
+    hook before every commit on a card's branch, and :func:`claims` of each claim's tip,
+    which ``show``, ``sync``, ``note`` and a filing's placing read.
+
+    Raises:
+        GitError: When git cannot read ``tip``.
+    """
+    if (blob := blob_at(root, tip, doing_file(number))) is None:
+        return None
+    task = doing_named(root, blob)
+    return None if task is None or blob_at(root, tip, task_file(task)) is not None else task
+
+
 def claims(root: Path, cards: Iterable[int]) -> dict[int, Claim]:
     """The claims among the ``card/N`` branches :func:`fetch` just brought for ``cards``: each
     whose tip neither ``dev`` nor ``main`` holds.  One whose tip they hold is merged work
@@ -483,16 +614,17 @@ def claims(root: Path, cards: Iterable[int]) -> dict[int, Claim]:
             continue
         committed = git(root, "log", "-1", "--format=%cI", tip).strip()
         found[number] = Claim(number, tip, committed, _claimed_at(root, tip, number),
-                              own_tasks(root, tip))
+                              own_tasks(root, tip), in_progress(root, tip, number))
     return found
 
 
-def read(root: Path) -> Reads:
+def read(root: Path, tips: dict[str, str] | None = None) -> Reads:
     """What a command reads of git, once: the claim branches ``origin`` lists
-    (:func:`on_origin`), ONE fetch of ``dev``, ``main`` and each of them (:func:`fetch`),
-    then what shipped (:func:`shipped`), every claim (:func:`claims`) and every listed
-    branch that is none, merged."""
-    listed = on_origin(root)
+    (:func:`on_origin`; from ``tips``, :func:`origin_tips`'s listing, when one was read
+    already), ONE fetch of ``dev``, ``main`` and each of them (:func:`fetch`), then what
+    shipped (:func:`shipped`), every claim (:func:`claims`) and every listed branch that is
+    none, merged."""
+    listed = on_origin(root, tips)
     fetch(root, listed)
     found = claims(root, listed)
     merged = {number: git(root, "rev-parse", f"refs/remotes/origin/{card_branch(number)}").strip()
@@ -539,7 +671,7 @@ def marker_changes(root: Path, refs: tuple[str, ...] = TIPS, *, first_parent: bo
                    directories: tuple[str, ...] = (MARKERS,)) -> list[MarkerChange]:
     """Every change a commit of ``refs``' history (``dev``'s and ``main``'s unless named) made
     to an entry under :data:`MARKERS`, or under each of ``directories`` when named (CI's
-    landing check names :data:`TASKS` beside it, R-BAL386), newest first
+    landing check names :data:`TASKS`, R-BAL386, and :data:`DOING`), newest first
     (:class:`MarkerChange`); with
     ``first_parent``, of each ref's OWN line alone, its first-parent history, the states the
     branch itself was in; with ``no_merges``, of each commit that is no merge alone (one
@@ -615,7 +747,7 @@ def ever_marked(root: Path) -> frozenset[int]:
 def landings(root: Path, ref: str, directories: tuple[str, ...] = (MARKERS,)
              ) -> dict[tuple[str, str], tuple[Took, ...]]:
     """Each blob the branch ``ref`` itself ever held at an entry under :data:`MARKERS` (or
-    under each of ``directories`` when named: CI's write rule names :data:`TASKS` too), as
+    under each of ``directories`` when named: CI names :data:`TASKS` and :data:`DOING` too), as
     ``(path, blob)``, with every commit of its OWN line (its first-parent history, the states
     the branch itself was in) through which it took that blob in, newest first, each beside
     the next commit of the line that changed that entry again (:class:`Took`), all read from
@@ -653,20 +785,29 @@ def has_branch(root: Path, name: str) -> bool:
     return done.returncode == 0
 
 
-def _put(root: Path, tree: str | None, path: list[str], blob: str) -> str:
+def _put(root: Path, tree: str | None, path: list[str], blob: str | None) -> str | None:
     """The tree ``tree`` (None: an empty one) with the file at ``path`` (its names, outermost
-    first) holding ``blob`` and every other entry as it was, written by ``git mktree``."""
+    first) holding ``blob``, or with ``blob`` None gone, and every other entry as it was,
+    written by ``git mktree``; None for a tree left with no entry, which its parent then
+    drops, as git holds no empty directory."""
     lines = git(root, "ls-tree", "-z", tree).split("\0") if tree else []
     entries = {line.partition("\t")[2]: line for line in lines if line}
     name, *below = path
     if below:
         held = entries.get(name)
         if held is not None and held.split(" ")[1] != "tree":
-            raise GitError(f"{name} is a file where {MARKERS} needs a directory")
-        inner = held.split(" ")[2].partition("\t")[0] if held else None
-        entries[name] = f"040000 tree {_put(root, inner, below, blob)}\t{name}"
+            raise GitError(f"{name} is a file where {'/'.join(path)} needs a directory")
+        inner = _put(root, held.split(" ")[2].partition("\t")[0] if held else None, below,
+                     blob)
+        entries[name] = f"040000 tree {inner}\t{name}"
+        if inner is None:
+            del entries[name]
+    elif blob is None:
+        entries.pop(name, None)
     else:
         entries[name] = f"100644 blob {blob}\t{name}"
+    if not entries:
+        return None
     return git(root, "mktree", "-z", stdin="".join(f"{line}\0" for line in entries.values())
                ).strip()
 
@@ -723,6 +864,80 @@ def check_out(root: Path, number: int, sha: str) -> str | None:
     git(root, "branch", "--no-track", branch, sha)
     done = run(root, "switch", "--quiet", branch)
     return None if done.returncode == 0 else done.stderr.strip()
+
+
+def push(root: Path, number: int) -> None:
+    """Push the local branch ``card/<number>`` to ``origin``'s branch of that name, never
+    forced: made, moved forward or already there.
+
+    Raises:
+        GitError: When the push is refused (``origin``'s branch holds work this one does not)
+            or fails.
+    """
+    ref = f"refs/heads/{card_branch(number)}"
+    flag, summary = _pushed(root, "origin", f"{ref}:{ref}")
+    if flag not in (" ", "*", "="):
+        raise GitError(f"the push of {card_branch(number)} answered {flag} {summary}: the "
+                       f"commits stand on the local branch; bring in what origin's holds, then "
+                       f"push it")
+
+
+def _mark(root: Path, number: int, paragraphs: list[str], what: str, doing: int | None) -> str:
+    """A commit on card ``number``'s local branch ``card/<number>``, its message
+    ``paragraphs``, whose one change is its file ``plan/doing/<number>`` (:func:`doing_file`)
+    naming task ``doing``, ``plan#<doing>``, or with ``doing`` None deleted, made from objects
+    alone -- no index, no hook -- the branch moved to it only from the tip it was made on (its
+    reflog saying ``what``), then that one path of the index and the working tree brought to
+    the commit's (``git restore``), so the next commit keeps the file as this one left it,
+    and the branch pushed (:func:`push`); its sha.  Every other path of the index and the
+    working tree is left as it was.  The one way :func:`start` and :func:`drop` write.
+
+    Raises:
+        GitError: When the branch moved while the commit was made, or the push is refused or
+            fails, the commit then standing on the local branch.
+    """
+    ref = f"refs/heads/{card_branch(number)}"
+    tip = git(root, "rev-parse", "--verify", ref).strip()
+    blob = (None if doing is None else
+            git(root, "hash-object", "-w", "--stdin", stdin=f"plan#{doing}\n").strip())
+    tree = _put(root, git(root, "rev-parse", f"{tip}^{{tree}}").strip(),
+                doing_file(number).split("/"), blob)
+    sha = git(root, "commit-tree", str(tree), "-p", tip,
+              *(arg for paragraph in paragraphs for arg in ("-m", paragraph))).strip()
+    git(root, "update-ref", "-m", what, ref, sha, tip)
+    git(root, "restore", f"--source={sha}", "--staged", "--worktree", "--",
+        doing_file(number))
+    push(root, number)
+    return sha
+
+
+def start(root: Path, number: int, task: int, title: str) -> str:
+    """Begin task ``task`` on card ``number``'s local branch ``card/<number>`` (rulings
+    plan#1872, plan#2009): a commit on its tip, ``start plan#<task>: <title>``, carrying the
+    trailer ``Task: plan#<task>`` (:func:`task_trailer`) and writing ``plan/doing/<number>``
+    to name the task, made and pushed by :func:`_mark` (no hook: the commit hook refuses a
+    commit while no piece is begun, which this one begins); its sha.
+
+    Raises:
+        GitError: As :func:`_mark` does.
+    """
+    return _mark(root, number, [f"start plan#{task}: {title}", task_trailer(task)],
+                 f"quill start plan#{task}", task)
+
+
+def drop(root: Path, number: int, task: int, title: str, why: str) -> str:
+    """Record the drop of task ``task``, begun on card ``number``'s local branch
+    ``card/<number>`` (rulings plan#1900, plan#2009): a commit on its tip, ``drop plan#<task>:
+    <title>``, saying ``why``, carrying the trailer ``Task: plan#<task>`` (it is the commit
+    that ends the piece) and deleting ``plan/doing/<number>``, made and pushed by
+    :func:`_mark`; its sha.  Thereafter no task is in progress there (:func:`in_progress`)
+    until ``quill start`` begins one.
+
+    Raises:
+        GitError: As :func:`_mark` does.
+    """
+    return _mark(root, number, [f"drop plan#{task}: {title}", why, task_trailer(task)],
+                 f"quill drop plan#{task}", None)
 
 
 def release(root: Path, number: int, tip: str, when: datetime) -> str:

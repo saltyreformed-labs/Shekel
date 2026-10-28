@@ -559,7 +559,7 @@ class TestAcceptingALeg:
         ]
 
 
-class TestTheParentDecidesADriftedSide:
+class TestASettledTransferHoldingNoDatedRecordOffersNothing:
     """The PARENT decides a side (ruling **R-JM**; R-BAL80).
 
     The first state is DECLARED: the status-band rule refuses it at commit
@@ -570,8 +570,7 @@ class TestTheParentDecidesADriftedSide:
     the leg arm offered the side once, as its movement (ruling **R-BAL79**,
     per side); it went with that per-side test at plan step
     ``balance:X-bi-6-5``'s third leaf (developer answer 2026-10-27, "Delete
-    all 6"), the band rule's own case refusing the state.  The class's name
-    is its history.
+    all 6"), the band rule's own case refusing the state.
     """
 
     def test_a_settled_transfer_over_an_undated_kept_record_offers_nothing(

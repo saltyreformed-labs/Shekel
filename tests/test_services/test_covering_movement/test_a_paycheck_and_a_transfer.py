@@ -436,7 +436,7 @@ class TestATransferIsCoveredOnBothLegs:
 class TestATransfersMovementsFollowItsLifecycle:
     """Soft delete, restore, hard delete and the endpoint move (R-BAL46)."""
 
-    def test_a_soft_deleted_transfer_keeps_its_movements_worth_nothing_and_restore_revives_them(
+    def test_a_soft_delete_takes_both_movements_off_and_restore_brings_back_a_plan(
         self, app, seed_user, seed_periods,
     ):
         """A soft delete takes both $500.00 movements off; a restore brings back a plan.
@@ -447,8 +447,7 @@ class TestATransfersMovementsFollowItsLifecycle:
         **credit_card:R-CC75**) and sets the Paid transfer back to Projected
         (ruling **R-BAL246**, "Back as a plan, now", developer 2026-10-09).
         So the restore returns a plan holding no movement, and neither
-        account reads a settled fact either side of it.  The name is kept as
-        history.
+        account reads a settled fact either side of it.
         """
         with app.app_context():
             xfer, expense, income = _settled_pair(seed_user, seed_periods[0])
@@ -466,7 +465,7 @@ class TestATransfersMovementsFollowItsLifecycle:
                 assert leg.record is None
                 assert settled_cash_facts(leg.account_id, leg.scenario_id) == []
 
-    def test_a_reverted_then_soft_deleted_then_restored_transfer_keeps_both_survivors(
+    def test_a_reverted_transfers_kept_records_leave_with_its_delete(
         self, app, seed_user, seed_periods,
     ):
         """A reverted transfer's kept un-dated records leave with its delete.
@@ -479,8 +478,7 @@ class TestATransfersMovementsFollowItsLifecycle:
         record either side holds off the books (ruling
         **credit_card:R-CC75**).  The transfer was Projected already, so it
         stays Projected (ruling **R-BAL246** sets back only a settled one) and
-        the restore returns a plan holding no record.  The name is kept as
-        history.
+        the restore returns a plan holding no record.
         """
         with app.app_context():
             xfer, _, _ = _settled_pair(seed_user, seed_periods[0])

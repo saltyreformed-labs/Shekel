@@ -4,7 +4,7 @@ neither half of the cash fold.
 
 The part's docstring named the two status drifts it pinned, drift A counted once and drift B by
 neither, until plan step ``balance:X-bi-6-4d-2`` deleted drift A's four cases (ruling
-**R-BAL313**); :class:`TestAStatusDriftIsCountedOnce` says what is left.
+**R-BAL313**); :class:`TestATransferClosedAtZeroIsCountedByNeitherHalf` says what is left.
 """
 
 from datetime import timedelta
@@ -393,7 +393,7 @@ class TestTheContributionFeedsReadTheParent:
             }
 
 
-class TestAStatusDriftIsCountedOnce:
+class TestATransferClosedAtZeroIsCountedByNeitherHalf:
     """A transfer settled with no record on either side is counted by neither half.
 
     The class pinned the two status drifts between a transfer and its
@@ -408,7 +408,7 @@ class TestAStatusDriftIsCountedOnce:
     B, the parent settled alone, is the one case left, and it is no drift
     any more: a settled transfer whose sides hold no record is the shape the
     status-band rule admits for a transfer closed at zero
-    (``side_band_infrastructure``).  The class's name is its history.  The
+    (``side_band_infrastructure``).  The
     loan walk counts the same state once, as a ``$0.00`` payment (ruling
     **R-BAL140**), in ``test_loan_settled_legs/test_the_two_halves.py``.
     """

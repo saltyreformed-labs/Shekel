@@ -62,7 +62,7 @@ class TestDeleteTransfer:
       (:meth:`test_hard_delete_soft_deleted_transfer_succeeds`, a planned
       transfer hidden first; a PAID one hidden and then removed is
       ``test_transfer_posting_lifecycle.py``'s ``TestDeleteAndRestore`` case
-      ``test_hard_delete_of_a_soft_deleted_pair_finds_the_ledger_at_zero``).
+      ``test_hard_delete_after_soft_delete_writes_no_more_entries``).
     - Someone else's transfer, live or already hidden: not found, on either
       delete, and re-read after a COMMIT still there and still live or
       still hidden (:meth:`test_wrong_user_rejected`,

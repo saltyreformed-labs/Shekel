@@ -125,7 +125,7 @@ went with the shadows (ruling **R-BAL313**).  Drift B without its shadows is
 a settled transfer whose sides hold no record, the zero close the
 status-band rule admits; it still folds ``$0.00`` on both sides and is still
 pinned there, on each
-(``TestAStatusDriftIsCountedOnce``'s
+(``TestATransferClosedAtZeroIsCountedByNeitherHalf``'s
 ``test_a_settled_transfer_with_no_side_record_is_counted_by_neither``).
 
 **The books row has no loan analog because a loan has no books to open.**  Its

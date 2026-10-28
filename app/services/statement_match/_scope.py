@@ -433,7 +433,7 @@ class ReviewScope:
         # filtering the candidate scan on ``scenario_id``.
         #
         # A foreign-scenario row is REPORTED rather than raised in this
-        # package: ``_valuation.transaction_price`` catches ``AmountUnresolvable`` and
+        # package: ``_settle_price.settle_price`` catches ``AmountUnresolvable`` and
         # the row leaves the candidate set into ``unpriceable``, which the
         # screen counts.  Unreachable today, and NOT the same answer the
         # reconcile panel gives -- said here because a first draft of this

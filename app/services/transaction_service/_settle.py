@@ -71,54 +71,62 @@ from ._row_rules import reject_unsettleable, settles_from_entries
 logger = logging.getLogger(__name__)
 
 
-def fixed_settle_amount(txn: Transaction) -> "Decimal | None":
-    """Return what a settle books from the row's OWN RECORDS, or ``None``.
+def fixed_settle_amount(parent: PlanParent) -> "Decimal | None":
+    """Return what a settle books from the parent's OWN RECORDS, or ``None``.
 
     **The pure prefix of :func:`settle_amount`**, and the sibling in shape of
     :func:`app.services.row_valuation.fixed_contribution`: the arms that answer
     before any producer is consulted, so a caller that only wants those arms
     does not run the paycheck engine to find out there was nothing to run it
-    for.  ``None`` means neither arm applies and the row's amount must be
+    for.  ``None`` means neither arm applies and the parent's amount must be
     RESOLVED, which is what :func:`settle_amount` goes on to do.
 
     Two arms, in this order:
 
       * a row whose figure comes from its PURCHASES books their sum
         (:func:`settles_from_entries`, ruling **R-FF**) -- and it takes
-        precedence, because such a row honours no correction at all;
-      * a row still holding a ``corrected`` record books THAT
+        precedence, because such a row honours no correction at all.  A
+        transfer holds no purchase (``Transfer.purchases``), so it never
+        takes this arm;
+      * a parent still holding a ``corrected`` record books THAT
         (:func:`~app.services.status_seam.honoured_correction`, plan step
-        X-au-c3).  A revert keeps what moved, so a row the user reverted in
-        order to edit re-books the figure they read off their statement.
+        X-au-c3): a row's off its covering movement, a transfer's off its
+        one stored figure.  A revert keeps what moved, so a parent the user
+        reverted in order to edit re-books the figure they read off their
+        statement.
 
-    **It is published because a SCREEN needs the second arm** (developer,
-    2026-08-17).  A reverted row is worth its PLAN -- that is what the balance
-    counts and what the grid shows -- while a re-settle books its retained
-    correction, so the two numbers genuinely differ and the second one was
-    visible on no surface but the reconcile panel.  The developer's rule is that
-    whatever will be booked against the account is shown wherever the row is
-    shown; :func:`retained_amounts_by_key` is that map, and it is built
-    from THIS function rather than from a second reading of the same columns, so
-    what a screen promises and what a tick books cannot drift.
+    **The second arm is what a SCREEN needed** (developer, 2026-08-17).  A
+    reverted row is worth its PLAN -- that is what the balance counts and what
+    the grid shows -- while a re-settle books its retained correction, so the
+    two numbers genuinely differ and the second one was visible on no surface
+    but the reconcile panel.  The developer's rule is that whatever will be
+    booked against the account is shown wherever the row is shown;
+    :func:`retained_amounts_by_key` is that map, and it asks
+    :func:`~app.services.status_seam.honoured_correction`, this function's
+    second arm, rather than a second reading of the same columns, so what a
+    screen promises and what a tick books cannot drift (it skips the first
+    arm on purpose: :func:`retained_amounts_by_key` says why).
 
     Pure and cheap: a status test and a read of the row's ``entries`` (its
     purchases for the first arm, its covering movement for the second, since
-    plan step ``balance:X-bi-4b-1``).  No producer runs, so a whole grid costs
-    no paycheck engine, and every batch caller loads the entries once.
+    plan step ``balance:X-bi-4b-1``), or of the transfer's own columns.  No
+    producer runs, so a whole grid costs no paycheck engine, and every batch
+    caller loads the entries once.
 
     Args:
-        txn: The row being priced.
+        parent: The row or transfer being priced (ruling **plan#1983**).
 
     Returns:
-        The figure the row's own records answer, or ``None`` when they do not.
+        The figure the parent's own records answer, or ``None`` when they do
+        not.
     """
-    if settles_from_entries(txn):
+    if settles_from_entries(parent):
         # The PURCHASES, never the family (ruling R-BAL68): this prices the
         # row BEFORE the seam runs, and a reverted manual close's kept
         # movement is still on the row then -- the seam withdraws it when
         # the ``purchases`` record lands.
-        return purchases_total(txn.purchases)
-    return honoured_correction(txn)
+        return purchases_total(parent.purchases)
+    return honoured_correction(parent)
 
 
 def retained_amounts_by_key(
@@ -202,8 +210,8 @@ def retained_amount(parent: PlanParent) -> "Decimal | None":
     return honoured_correction(parent)
 
 
-def settle_amount(txn: Transaction, basis: AmountBasis) -> Decimal:
-    """Return what settling *txn* would BOOK, absent a caller-supplied actual.
+def settle_amount(parent: PlanParent, basis: AmountBasis) -> Decimal:
+    """Return what settling *parent* would BOOK, absent a caller-supplied actual.
 
     **The ONE valuation act 1 of :func:`settle_transaction` uses**, published
     because the reconcile panel must show the figure a tick will book.  A panel
@@ -212,6 +220,17 @@ def settle_amount(txn: Transaction, basis: AmountBasis) -> Decimal:
     X-aq the verb genuinely books something else for a salary row.  The verb
     CALLS this rather than re-branching, so there is no shape in which the
     displayed figure and the booked one can drift.
+
+    **A transfer is priced here too, by the same three rules** (ruling
+    **plan#1983**, "price the parent, draw the side"): refuse a deleted one,
+    honour a retained correction, else what it is worth.
+    ``transfer_service._settle.settle`` books this for the pair, and the
+    reconcile panel and the statement matcher offer each leg at its
+    transfer's answer.  ``transfer_service.leg_settle_amount`` was its twin
+    until that ruling's settle fold, the same three rules spelled over a leg,
+    with a refusal of its own and a third spelling inside the transfer's
+    settle; nothing a tick offers and nothing it books can part across the
+    two tables now.
 
     It is a PURE read: nothing here mutates, so the panel calls it per offered
     row and the verb calls it again at the settle.
@@ -235,23 +254,26 @@ def settle_amount(txn: Transaction, basis: AmountBasis) -> Decimal:
     so in a line.
 
     Args:
-        txn: The row about to be offered or settled, still Projected.
+        parent: The row or transfer about to be offered or settled, still
+            Projected (``transfer_legs.parent_of`` of an offered leg).
         basis: The read pass's
             :class:`~app.services.cash_ledger.AmountBasis`.  It must be built
-            for THIS row's owner and scenario;
-            :func:`~app.services.cash_ledger.resolve_transaction_amount`
-            REFUSES a foreign one rather than answering from another
-            scenario's salary profiles and another scenario's loans.
+            for THIS parent's owner and scenario; the amount model REFUSES a
+            foreign one rather than answering from another scenario's salary
+            profiles and another scenario's loans.
 
     Returns:
-        ``sum(entries)`` when :func:`settles_from_entries`, else what the row
-        is WORTH against the amount model (``cash_ledger.contribution_of``).
+        ``sum(purchases)`` when :func:`settles_from_entries`, else a retained
+        correction where one stands, else what the parent is WORTH against
+        the amount model (``cash_ledger.contribution_of``).
 
     Raises:
-        ValidationError: On a row no door may settle
-            (:func:`reject_unsettleable`).  A deleted row's value is nothing,
-            and answering for one here would publish a figure
-            :func:`settle_transaction` refuses to book.
+        ValidationError: On a parent no door may settle
+            (:func:`reject_unsettleable`).  A deleted parent's value is
+            nothing, and answering for one here would publish a figure the
+            settle verbs refuse to book.
+        AmountUnresolvable: From the amount model, for a parent whose rule
+            cannot price it.  A refusal is never a fallback.
 
     **The MANUAL branch was two figures until plan step X-au-d**, resolved
     together by a ``_manual_branch_figures`` helper: what the settle books, and
@@ -262,31 +284,36 @@ def settle_amount(txn: Transaction, basis: AmountBasis) -> Decimal:
     supersede and nothing to reconcile; the branch is the valuation alone, and
     ``contribution_of`` resolves that derivation directly.
     """
-    reject_unsettleable(txn)
-    fixed = fixed_settle_amount(txn)
+    reject_unsettleable(parent)
+    fixed = fixed_settle_amount(parent)
     if fixed is not None:
         return fixed
-    return contribution_of(txn, basis)
+    return contribution_of(parent, basis)
 
 
-def _is_correction(
-    txn: Transaction, submitted: "StatedFigure | None", booked: Decimal,
+def is_correction(
+    parent: PlanParent, submitted: "StatedFigure | None", booked: Decimal,
 ) -> bool:
     """Return whether *submitted* is a STATED figure this settle would BOOK.
 
-    **The verb's own act-1b decision, and it is finding N-231's fix.**  Three
-    doors may hand a settle a figure and only some of them are corrections: a
-    row whose amount is DERIVED from its entries ignores one outright
-    (:func:`settles_from_entries`), and a figure equal to what the row would
-    book anyway is the panel's own prefill coming back untouched.
+    **The settle verbs' own act-1b decision, and it is finding N-231's fix.**
+    Several doors may hand a settle a figure and only some of them are
+    corrections: a row whose amount is DERIVED from its entries ignores one
+    outright (:func:`settles_from_entries`), and a figure equal to what the
+    parent would book anyway is the panel's own prefill coming back untouched.
 
-    **It was PUBLIC until the developer's 2026-08-17 ruling**, so the reconcile
-    writer could ask what the settle would count.  It asked BEFORE the settle
-    and re-resolved the row's amount to make its comparison, which meant one
-    ticked row paid for the derivation twice and the count was a second answer
-    to a question the write had already decided.  :func:`settle_transaction`
-    RETURNS that answer now -- the shape ``transfer_service._settle.settle``
-    already had -- so the rule has one caller and needs no door.
+    **The two settle verbs ask it, each inside its own act, and nothing asks
+    it beside a verb.**  It was public until the developer's 2026-08-17
+    ruling so the reconcile writer could ask what the settle would count; it
+    asked BEFORE the settle and re-resolved the row's amount to make its
+    comparison, which meant one ticked row paid for the derivation twice and
+    the count was a second answer to a question the write had already decided.
+    :func:`settle_transaction` RETURNS that answer now -- the shape
+    ``transfer_service._settle.settle`` already had -- so no writer asks it.
+    It is published again, for a different caller, by ruling **plan#1983**'s
+    settle fold: ``transfer_service._settle.settle`` asked the same echo rule
+    in its own words (``submitted.amount != booked``), one rule spelled once
+    per table, and asks this now with the figure it already resolved.
 
     **What it replaced was a reading of the COLUMN, and that over-reported by
     construction.**  ``reconcile_service`` counted rows whose ``actual_amount``
@@ -298,12 +325,12 @@ def _is_correction(
     **R-FB**'s production measurement ("11 of 93 settled bills carry a
     hand-typed correction") is made of exactly this signal.
 
-    **It is asked BEFORE the settle**, because :func:`settle_transaction`
-    mutates the very figures it compares: the seam writes the settlement record
-    and flips the status, and a row's own valuation answers from that record
-    once it has settled (``row_valuation.fixed_contribution``).  The comparison
-    is exact rather than approximate -- ``booked`` is :func:`settle_amount`'s
-    own answer, which is the same expression the panel prefilled from.
+    **It is asked BEFORE the settle**, because a settle verb mutates the very
+    figures it compares: the seam writes the settlement record and flips the
+    status, and a parent's own valuation answers from that record once it has
+    settled (``row_valuation.fixed_contribution``).  The comparison is exact
+    rather than approximate -- ``booked`` is :func:`settle_amount`'s own
+    answer, which is the same expression the panel prefilled from.
 
     **The three-shape argument this paragraph used to make is GONE with its
     subject** (plan step X-au-d).  It reasoned about a cache refresh running
@@ -312,7 +339,9 @@ def _is_correction(
     one figure and one moment.
 
     Args:
-        txn: The row about to settle, still in its pre-settle status.
+        parent: The row or transfer about to settle, still in its pre-settle
+            status.  A transfer holds no purchase, so for one this is the echo
+            rule alone.
         submitted: The figure a caller stated and who wrote it, or ``None``
             when nobody stated one.
         booked: What this settle would book absent a correction, resolved once
@@ -324,7 +353,7 @@ def _is_correction(
     """
     return (
         submitted is not None
-        and not settles_from_entries(txn)
+        and not settles_from_entries(parent)
         and submitted.amount != booked
     )
 
@@ -499,7 +528,7 @@ def settle_transaction(
         writer counts (finding **N-231**).  **Answered by the act itself since
         the developer's 2026-08-17 ruling**, which is the shape
         ``transfer_service._settle.settle`` already had one table over: the
-        caller used to ask :func:`_is_correction` separately, which re-resolved
+        caller used to ask :func:`is_correction` separately, which re-resolved
         the row's amount to make its comparison, so one ticked row paid for the
         paycheck engine twice and the count could in principle disagree with
         the write.  Asked by the verb, the two cannot differ and the figure is
@@ -609,8 +638,8 @@ def settle_transaction(
         settle_from_entries(txn, settle_day=settle_day, press=press)
     else:
         # The correction DECISION.  The echo rule -- a figure equal to what the row
-        # would book anyway is not a correction -- is :func:`_is_correction`'s,
-        # asked HERE and nowhere else (finding **N-231**): the reconcile
+        # would book anyway is not a correction -- is :func:`is_correction`'s,
+        # asked by the verb and by no caller beside it (finding **N-231**): the reconcile
         # writer's telemetry reads this verb's RETURN rather than asking the
         # predicate a second time, which is the developer's 2026-08-17 ruling
         # and what closed finding **N-258**.  Writing an echoed figure would
@@ -654,7 +683,7 @@ def settle_transaction(
         # X-au-c3), so the conditional could only ever choose between a value
         # and itself.  One rule, asked once.
         booked = settle_amount(txn, basis)
-        correction = submitted if _is_correction(txn, submitted, booked) else None
+        correction = submitted if is_correction(txn, submitted, booked) else None
         # Acts 1 and 2 in ONE call: what moved, who wrote it, and the day.
         # The record is written by the seam rather than here so the covering
         # movement keeps the ONE writer ``settled_on`` has (finding **N-185**'s

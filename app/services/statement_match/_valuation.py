@@ -34,19 +34,18 @@ the fold and the ledger book for a movement, over its parent -- a row, or
 the transfer LEG the movement is the record of; a Projected row -- and an
 UN-DATED covering movement, a reverted row's kept record that a match
 re-settles through the row's door -- is worth ``cash_ledger.cash_leg_of``
-over what its own settle verb says it would book (:func:`transaction_price`),
-and a still-planned leg over what the TRANSFER's would
-(:func:`~._leg_valuation.leg_price`, ``transfer_service.leg_settle_amount``).  A matcher that
+over what its own settle verb says it would book, and a still-planned leg
+over what the TRANSFER's would: one price for both,
+:func:`~._settle_price.settle_price`, the item's PARENT's
+``transaction_service.settle_amount`` (ruling **plan#1983**).  A matcher that
 computed its own figure could offer a line against a number no door would
 book.
 
 **No site here reaches a transfer through its shadow row** (leaf
 ``balance:X-bi-6-4c-1``, ruling **R-BAL106**): a leg arrives as a
 ``transfer_legs.TransferLeg`` from the offer set's leg loaders, and every
-figure is asked of the leg (``transfer_service``'s leg-shaped price, whose
-interval body is the one shadow reach, and the cash ledger's producers, which
-take a leg as a row).  ``X-bi-6-4d`` moves those bodies once, and nothing here
-changes.
+figure is asked of the leg's transfer (:func:`~._settle_price.settle_price`)
+or of the leg (the cash ledger's producers, which take a leg as a row).
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): reads only, plain
 data in, frozen dataclasses out, no Flask import, no clock read.
@@ -59,7 +58,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.enums import SettledDayBasisEnum
-from app.exceptions import AmountUnresolvable
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
@@ -73,98 +71,11 @@ from ._leg_valuation import (
     leg_candidate,
     repriced_leg,
 )
+from ._settle_price import settle_price
 from ._subjects import CandidateRow, HeldElsewhere, RowKind
 
 if TYPE_CHECKING:  # pragma: no cover -- annotations only
     from app.services.pay_calendar import PayCalendar
-
-
-def transaction_price(
-    txn: Transaction, basis: "cash_ledger.AmountBasis",
-) -> "Decimal | None":
-    """Return what settling the PROJECTED *txn* would book, signed, or ``None``.
-
-    The one branch in this function, and it is the verb's own partition rather
-    than a money rule of its own:
-
-    * a row that settles from its purchases
-      (``transaction_service.settles_from_entries``, the verb's own
-      predicate) is worth ``0`` to the offer: the bank line it could be is one
-      of its purchases, each a candidate of its own (ruling **R-BAL78**);
-    * any other row is worth what settling it would book,
-      ``transaction_service.settle_amount``, signed by
-      :func:`~app.services.cash_ledger.cash_leg_of`.  A retained STATED
-      record (a reverted row's kept figure, ruling **R-BAL61**) is honoured
-      there, so a kept movement's candidate is priced at what its re-settle
-      books and not at a stale column.
-
-    **It prices a ROW, never a transfer's shadow** (leaf
-    ``balance:X-bi-6-4c-1``): until that leaf a shadow was offered as a
-    TRANSACTION and priced here through ``transfer_service.settle_amount``;
-    both row arms now exclude shadows in SQL and a still-planned transfer is
-    its LEG, priced by :func:`~._leg_valuation.leg_price`.
-
-    **It prices a PROJECTED row only** (plan step ``credit_card:CC-5-4a-1``,
-    ruling **R-CC43**).  Through ``CC-5-3`` it carried a settled arm --
-    ``status_seam.covered_cash_leg`` on the screen's account (rulings
-    **R-BAL81**, **R-CC40**) -- because a settled row was the candidate and
-    its movement the price.  The movement is the candidate now
-    (:func:`settlement_candidate` reads it directly), so a settled row has no
-    price as a row and this function is not asked for one:
-    :func:`~._candidates._transaction_candidates` scopes on ``Projected`` and
-    :func:`repriced` declines a row that has since settled.  Two callers, one
-    for the offer and one for the re-price, and the un-dated arm of
-    :func:`settlement_candidate` is the third -- a reverted row's kept
-    movement re-settles through the row's door, so it is worth what that door
-    would book.
-
-    **``settle_amount`` cannot refuse a row this module's scope admits**, and
-    that is why there is no guard against one here.  It refuses exactly a
-    soft-deleted row and a transfer's shadow;
-    :func:`~._candidates._transaction_candidates` excludes the first through
-    ``balance_contributing_clause`` and the second by
-    ``transfer_id IS NULL``.  A ``try`` around it would be a guard nothing
-    could ever observe, which this project has twice measured as worse than
-    none.
-
-    **``AmountUnresolvable`` is a different thing and is REPORTED rather than
-    swallowed or raised.**  It means the amount model had no rule for the row
-    -- latent today, because every production row still owns its figure, and
-    live from the first per-kind cutover (plan steps ``balance:X-au-d`` on).  A
-    matcher cannot offer a row it cannot price without guessing, so the row
-    leaves the candidate set; but a reader that dropped it silently would hide
-    a broken row, and one that raised would make the whole review screen
-    unreachable for one bad row with no in-app repair -- which is finding
-    **N-302**'s shape.  :class:`~._subjects.Candidates` carries the count instead
-    and the screen says so.
-
-    Args:
-        txn: The Projected row to price, with ``entries`` loaded.
-        basis: The PASS's
-            :class:`~app.services.cash_ledger.AmountBasis`, built once by
-            :meth:`~._scope.ReviewScope.build` and threaded (plan step
-            X-au-j).  Every offered row built its own until then, which finding
-            **N-309** measured at **609 salary-pricing and 609 loan-pricing
-            constructions** over 825 candidates and `4.7 s` to render -- and
-            ``amount_basis``'s own docstring had already named calling the
-            derivations per row as finding **N-228**.  The same reason the
-            calendar is a parameter one tier up, and the same shape a balance
-            pass threads its ``BalanceContext`` for.
-
-    Returns:
-        Its signed cash effect on the account its settle books on, or ``None``
-        when the amount model cannot answer for it.
-    """
-    if transaction_service.settles_from_entries(txn):
-        # Its purchases ARE the figure (ruling **R-BAL78**) and each is a
-        # candidate of its own, so the row is worth nothing to the offer.
-        return Decimal("0")
-    try:
-        return cash_ledger.cash_leg_of(
-            txn, transaction_service.settle_amount(txn, basis),
-        )
-    except AmountUnresolvable:
-        return None
 
 
 def _day_basis(row) -> SettledDayBasisEnum | None:
@@ -358,7 +269,8 @@ def transaction_candidate(
         calendar: The pass's
             :class:`~app.services.pay_calendar.PayCalendar`, which the row's
             window is read from.
-        amount: Its signed cash effect, already resolved by :func:`transaction_price` --
+        amount: Its signed cash effect, already resolved by
+            :func:`~._settle_price.settle_price` --
             taken rather than computed here because the caller has to tell an
             UNPRICEABLE row (reported) from a zero-valued one (not offerable),
             and a constructor returning ``None`` for both could not.
@@ -420,7 +332,8 @@ def settlement_price(
     * an UN-DATED one is a REVERTED row's kept record (ruling **R-BAL61**,
       retained where the money moved by ruling **R-CC42**), and a match
       re-settles that row through its own door, so it is worth what the door
-      would book: :func:`transaction_price`, which honours a kept STATED figure and
+      would book: :func:`~._settle_price.settle_price`, which honours a kept
+      STATED figure and
       re-prices a ``resolved`` one -- not the movement's stored column,
       which for a ``resolved`` record is the figure of a plan the owner may
       have edited since.
@@ -435,7 +348,7 @@ def settlement_price(
     """
     if entry.settled_on is not None:
         return cash_ledger.movement_cash_leg(entry.transaction, entry)
-    return transaction_price(entry.transaction, basis)
+    return settle_price(entry.transaction, basis)
 
 
 def row_is_offered_here(txn: Transaction, account_id: int) -> bool:
@@ -601,7 +514,8 @@ def held_elsewhere_of(
     :func:`settlement_price` of that payment -- the price the payment's OWN
     account's screen offers it at (:func:`settlement_candidate`), so the two
     screens state one figure from one function: for a kept, un-dated
-    payment, :func:`transaction_price`, which re-prices a ``resolved`` record
+    payment, :func:`~._settle_price.settle_price`, which re-prices a
+    ``resolved`` record
     and honours a stated one -- exactly what Paid records.  On a DATED
     payment under a Projected row, a drift no door writes, it is the
     movement's own figure, which is what the card's screen offers; Paid
@@ -850,7 +764,7 @@ def _repriced_transaction(
     txn = db.session.get(Transaction, row.row_id)
     if txn is None or txn.status.is_settled:
         return None
-    amount = transaction_price(txn, basis)
+    amount = settle_price(txn, basis)
     if amount is None:
         return None
     return transaction_candidate(txn, calendar, amount)

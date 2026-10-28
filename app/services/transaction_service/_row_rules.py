@@ -23,7 +23,10 @@ re-asks the same question anyway.  :func:`repays_tracked_purchases` decides
 which repair a withdrawn box should name.  The fifth,
 :func:`reject_unsettleable`, is the settle doors' shared guard -- the one
 refusal here that RAISES rather than returning its sentence, because no screen
-asks it.
+asks it.  Those two are asked of a PARENT, a row or a transfer, since ruling
+**plan#1983**'s settle fold: what a settle books is one question about a
+parent (:func:`~._settle.settle_amount`), so its branch predicate and its
+guard are too.
 
 Boundary discipline (``CLAUDE.md`` Architecture): ORM rows in, a bool or a
 raise out; no Flask import, no writes.  **Two arms READ.**  Since plan step
@@ -42,11 +45,12 @@ from app.extensions import db
 from app.models.transaction import Transaction
 from app.services.definition_delete import is_last_row_of_its_definition
 from app.services.status_seam import deleted_row_payment_refusal
+from app.services.transfer_legs import PlanParent
 from app.utils.archive_helpers import template_has_standing_rule
 from app.utils.hidden_row import HiddenRow
 
 
-def settles_from_entries(txn: Transaction) -> bool:
+def settles_from_entries(parent: PlanParent) -> bool:
     """Return whether a settle DERIVES this row's amount from its entries.
 
     **The verb's own branch predicate, published** -- because three things ask
@@ -94,14 +98,21 @@ def settles_from_entries(txn: Transaction) -> bool:
     reader rather than hand-rolled here).  ``tracks_purchases`` is the ONE
     accessor for a ROW's kind (rulings **R-JQ**, **R-BAL85**).
 
+    **Asked of a parent, a row or a transfer** (ruling **plan#1983**): what a
+    settle books is one question about a parent (:func:`~._settle.settle_amount`),
+    and a transfer answers it as a row does, through its ``purchases``, which
+    are none (``Transfer.purchases``: a side's movement is a record, never a
+    purchase).  So a transfer never takes this branch, and no caller tells the
+    two tables apart to ask it.
+
     Args:
-        txn: The row.  Reads the ``entries`` relationship through
-            ``purchases``.
+        parent: The row or transfer.  A row reads its ``entries``
+            relationship through ``purchases``; a transfer reads nothing.
 
     Returns:
         True when a settle takes the ``sum(purchases)`` branch.
     """
-    return bool(txn.purchases)
+    return bool(parent.purchases)
 
 
 def repays_card_spend(txn: Transaction) -> bool:
@@ -286,8 +297,8 @@ def deletion_refusal(
     )
 
 
-def reject_unsettleable(txn: Transaction) -> None:
-    """Refuse a row NO settle door may touch -- the rule stated once.
+def reject_unsettleable(parent: PlanParent) -> None:
+    """Refuse a row or transfer NO settle door may touch -- the rule stated once.
 
     **It was two refusals in one statement, because they were the same kind of
     rule and they had drifted apart** (finding **N-233**).  Every public settle surface
@@ -339,13 +350,26 @@ def reject_unsettleable(txn: Transaction) -> None:
     read is guarded the same way, so a call refused here writes none of a
     caller's staged state.
 
+    **A TRANSFER is refused by the same rule and in the same words** (ruling
+    **plan#1983**): a deleted parent takes no money, whichever table it is
+    in.  ``transfer_service._settle`` held a twin, ``_reject_unsettleable``,
+    until that ruling's settle fold, which named the transfer by its id --
+    the one thing ruling **R-CC98** says a user is never shown.  The seam's
+    sentence already names a transfer (:meth:`~app.utils.hidden_row
+    .HiddenRow.of`, by its from-side's label), the words its Transfer arm
+    refuses a deleted transfer's record with
+    (``status_seam.reject_settlement_on_a_deleted_row``).  The transfer
+    door answers a deleted transfer "not found" first
+    (``transfer_service._validation._get_transfer_or_raise``), so only a
+    service caller that skipped it reaches this, as for a row.
+
     Args:
-        txn: The row to check.  Reads ``is_deleted``.
+        parent: The row or transfer to check.  Reads ``is_deleted``.
 
     Raises:
-        ValidationError: When *txn* is soft-deleted.
+        ValidationError: When *parent* is soft-deleted.
     """
     with db.session.no_autoflush:
-        is_deleted = txn.is_deleted
+        is_deleted = parent.is_deleted
     if is_deleted:
-        raise ValidationError(deleted_row_payment_refusal(HiddenRow.of(txn)))
+        raise ValidationError(deleted_row_payment_refusal(HiddenRow.of(parent)))

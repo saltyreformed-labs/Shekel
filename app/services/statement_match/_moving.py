@@ -92,7 +92,7 @@ def _apply_day(
       every row with a kept payment elsewhere: one holding no purchase is
       withheld (``_candidates._transaction_candidates``, the reconcile
       panel's own clause), and one holding purchases is worth ``0.00`` to
-      the offer (``_valuation.transaction_price``: its purchases are the
+      the offer (``_settle_price.settle_price``: its purchases are the
       candidates) and is never offered as a row.  So the seam's default
       (``status_seam.tender_account_id_of``: the kept payment's account, else
       the row's) IS this account for every member an accept can reach, and

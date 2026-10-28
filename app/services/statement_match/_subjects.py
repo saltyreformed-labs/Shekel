@@ -56,7 +56,8 @@ class RowKind(enum.Enum):
     **A LEG is one side of a still-planned TRANSFER, on the screen's
     account** (leaf ``balance:X-bi-6-4c-1``, rulings **R-BAL87**,
     **R-BAL159**): its figure is what settling the transfer would book on
-    this account (``transfer_service.leg_settle_amount``), its clock is the
+    this account (its transfer's ``transaction_service.settle_amount``,
+    :func:`~._settle_price.settle_price`), its clock is the
     transfer's paycheck, and its door is the transfer's
     (``settle_transfer``).  It is keyed by the TRANSFER's id, not by the
     hidden shadow row the transfer service wrote on this account until plan

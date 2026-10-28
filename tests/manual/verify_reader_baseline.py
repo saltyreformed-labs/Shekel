@@ -74,12 +74,12 @@ from app.services import (
     retirement_projection,
     savings_dashboard_service,
     spending_report_service,
-    transfer_service,
+    transaction_service,
 )
 from app.services.cash_ledger import derived_amount_basis
 from app.services.balance_at import BalanceContext
 from app.services.investment_dashboard_service import compute_dashboard_data
-from app.services.transfer_legs import leg_of
+from app.services.transfer_legs import leg_of, parent_of
 from app.utils.balance_predicates import is_projected_clause
 from tests._test_helpers import all_periods
 
@@ -390,9 +390,9 @@ def _loans(user_id, scenario_id, accounts):
 def _transfer_settle(scenario_id):
     """What a settle would BOOK on both legs of every projected transfer.
 
-    ``transfer_service.leg_settle_amount`` is a pure read and the reconcile
-    panel calls it per offered leg, so both legs of every live projected
-    transfer are asked, keyed ``<transfer id>:<account id>`` (the leg's
+    ``transaction_service.settle_amount`` of the leg's transfer is a pure read
+    and the reconcile panel calls it per offered leg, so both legs of every
+    live projected transfer are asked, keyed ``<transfer id>:<account id>`` (the leg's
     ``cell_key``) -- which is also the widest possible exercise of the one-row
     basis plan step X-au-c2 gave it.
 
@@ -405,6 +405,12 @@ def _transfer_settle(scenario_id):
     :510 there), so on that base this one call IS the deleted path and on the
     leaf it is the re-bodied one: the arm compares the two, it does not ask
     one producer twice.
+
+    **It asks ``transaction_service.settle_amount(parent_of(leg), basis)``
+    since ruling plan#1983's settle fold** deleted ``leg_settle_amount``, the
+    same three rules spelled over a leg; on a base before that fold the base's
+    copy of this harness asks the deleted function, so the arm again compares
+    the two.
     """
     transfers = (
         db.session.query(Transfer)
@@ -421,7 +427,7 @@ def _transfer_settle(scenario_id):
         for account_id in (transfer.from_account_id, transfer.to_account_id):
             key = f"{transfer.id}:{account_id}"
             out[key] = _guard(
-                f"leg_settle_amount:{key}",
+                f"settle_amount:{key}",
                 lambda t=transfer, a=account_id: _leg_settle_amount(t, a),
             )
     return out
@@ -430,8 +436,8 @@ def _transfer_settle(scenario_id):
 def _leg_settle_amount(transfer, account_id):
     """What settling *transfer* would book on its leg on *account_id*."""
     leg = leg_of(transfer, account_id)
-    return _money(transfer_service.leg_settle_amount(
-        leg, derived_amount_basis(leg.user_id, leg.scenario_id),
+    return _money(transaction_service.settle_amount(
+        parent_of(leg), derived_amount_basis(leg.user_id, leg.scenario_id),
     ))
 
 

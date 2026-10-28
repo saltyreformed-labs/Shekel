@@ -128,9 +128,11 @@ def offerable_transfer_legs(
     parent that is not Projected is not emitted, and a Projected parent's
     side is.  Since plan
     step ``balance:X-bi-6-4d-2`` the leg is priced and ticked off the parent
-    and the side's record alone (``transfer_service.leg_settle_amount``,
-    ``record_leg_clearing``), so no shadow's status or soft-delete reaches the
-    offer.  ``tests/test_services/test_reconcile_transfer_legs.py`` pins the
+    and the side's record alone (priced at its transfer's
+    ``transaction_service.settle_amount`` since ruling **plan#1983**, cleared
+    through ``transfer_service.record_leg_clearing``), so no shadow's status
+    or soft-delete reaches the offer.
+    ``tests/test_services/test_reconcile_transfer_legs.py`` pins the
     parent-side direction here.
 
     Args:

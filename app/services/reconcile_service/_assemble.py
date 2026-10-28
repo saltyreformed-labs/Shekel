@@ -424,7 +424,7 @@ def outstanding_set(statement: _rows.Statement) -> OutstandingSet:
     # for not filtering the offer set on ``scenario_id``.
     #
     # **A foreign-scenario row would RAISE out of this panel**, where the
-    # review pass one package over reports it instead (``_valuation.transaction_price``
+    # review pass one package over reports it instead (``_settle_price.settle_price``
     # catches ``AmountUnresolvable`` and drops the row into ``unpriceable``).
     # The two passes answer it differently on purpose and neither is reachable
     # today; stated so the next reader does not assume symmetry.

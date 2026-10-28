@@ -511,9 +511,10 @@ def honoured_correction(parent: "PlanParent") -> Optional[Decimal]:
     it"**, asked by :func:`settle_amount` -- what the reconcile panel OFFERS --
     and by :func:`settle_transaction` -- what a tick BOOKS -- so the two cannot
     answer differently (plan step X-au-c3, developer 2026-08-17).  It is
-    asked of a PARENT (ruling **plan#1983**): a row, or a transfer, which
-    ``transfer_service._settle.leg_settle_amount`` offers a leg at and
-    ``transaction_service.retained_amounts_by_key`` draws on a leg's cell.
+    asked of a PARENT (ruling **plan#1983**): a row, or a transfer, whose
+    :func:`settle_amount` both settle verbs book and the offers show a leg
+    at, and which ``transaction_service.retained_amounts_by_key`` draws on a
+    leg's cell.
 
     A revert releases the ASSERTION and keeps what moved
     (``status_seam.apply_status_change``), so a row the user reverted in order

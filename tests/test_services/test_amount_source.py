@@ -68,7 +68,7 @@ from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import (
     income_service, pay_list_service, status_seam, template_amount_service,
-    transfer_legs,
+    transaction_service, transfer_legs,
 )
 from app.services.amount_ownership import declare_derived, state_own_amount
 from app.services.cash_ledger import (
@@ -123,7 +123,6 @@ from app.services.cash_flow_set import PlanItems
 from app.routes.grid._items import build_amount_maps
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import parent_of
-from app.services.transfer_service import _settle as transfer_settle
 
 
 # The definition's price history, and the row dates that select from it.  TWO
@@ -1947,7 +1946,9 @@ class TestTheBasisIsOneDerivationPerReadPass:
         The control is unchanged in kind and stronger in reach -- it now spans
         two packages rather than two callers of one method: what the screen
         publishes (``amounts_by_key``) and what a tick would book
-        (``transfer_service.leg_settle_amount``) must be the same figure.
+        (``transaction_service.settle_amount`` of the leg's transfer, the one
+        composition since ruling plan#1983's settle fold deleted
+        ``transfer_service.leg_settle_amount``) must be the same figure.
         Both are asked of the checking-side LEG since plan step
         ``balance:X-bi-6-4d-2``, which prices a leg off its transfer and its
         side's record and deleted ``settle_amount(shadow)``; they were asked
@@ -1964,7 +1965,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
         leg = transfer_legs.leg_of(xfer, xfer.from_account_id)
 
         displayed = amounts_by_key([leg], basis)[leg.cell_key]
-        booked = transfer_settle.leg_settle_amount(leg, basis)
+        booked = transaction_service.settle_amount(parent_of(leg), basis)
 
         assert booked == displayed == Decimal("1499.10")
 

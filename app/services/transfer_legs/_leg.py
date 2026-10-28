@@ -346,12 +346,14 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
 
     @property
     def purchases(self) -> tuple[()]:
-        """``()``: a leg holds no purchase.
+        """``()``: a leg holds no purchase, because its transfer holds none.
 
         What ``Transaction.purchases`` answers for a plan row -- what a person
         recorded against it, less the status seam's covering movement --
         asked of a leg, which has nothing recorded against it but its
-        :attr:`record`.  It is asked because the entry-sums builder
+        :attr:`record`.  Read off the parent (``Transfer.purchases``), the
+        one statement of that fact, as every money fact of a leg is.  It is
+        asked because the entry-sums builder
         (``entry_service.build_entry_sums_dict``) sums whatever purchases an
         item holds without asking :attr:`tracks_purchases`, so one cell
         renderer and one card renderer draw a row and a leg through the one
@@ -359,7 +361,7 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
         ``routes._mobile_card.render_mobile_card``, ruling **plan#1983**),
         where each leg renderer passed an empty map by hand until then.
         """
-        return ()
+        return self.transfer.purchases
 
     @property
     def covering_movements(self) -> tuple[TransactionEntry, ...]:

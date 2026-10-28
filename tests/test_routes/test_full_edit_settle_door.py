@@ -942,7 +942,7 @@ class TestWhatAReSettleBooksIsWhatTheOfferSHOWED:
     That broke two things at once, and the second is worse than the drift.  The
     figure a tick booked was one the screen had never shown; and because a
     submitted figure counts as a correction only when it DIFFERS from the offer
-    (``transaction_service._settle._is_correction``), no input the user could
+    (``transaction_service.is_correction``), no input the user could
     give meant "book the plan".  ``status_seam.honoured_correction`` answers
     both sides now, so the offer equals the booking and any other number is a
     genuine correction.

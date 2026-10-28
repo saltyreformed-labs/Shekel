@@ -500,8 +500,14 @@ def _entry_checking_impact(entries, estimated_amount: Decimal) -> Decimal:
     return max(estimated_amount - spent, Decimal("0"))
 
 
-def _entry_aware_amount(txn, basis: AmountBasis) -> Decimal:
-    """Compute the checking-balance impact for a single expense transaction.
+def _entry_aware_amount(txn: PlanParent, basis: AmountBasis) -> Decimal:
+    """Compute the checking-balance impact of one still-planned expense parent.
+
+    The parent is a row, or the transfer a cash-fold expense leg is priced as
+    (ruling **plan#1983**, ``sum_projected``).  The reservation below is a
+    row's: a transfer holds no purchase (``Transfer.purchases``), so it takes
+    the empty-purchases arm and is worth :func:`contribution_of`, its resolved
+    amount.
 
     For projected expenses with entries (loaded eagerly or lazy-loaded on
     demand), the row is worth its UNSPENT BUDGET -- the plan less every
@@ -563,7 +569,8 @@ def _entry_aware_amount(txn, basis: AmountBasis) -> Decimal:
     :func:`app.services.cash_ledger._facts._unwindowed_contributing_rows`,
     which issues ``selectinload(Transaction.entries)`` for both halves
     of the event stream, so this function never sees an unloaded
-    relationship from a routed caller.  The remaining
+    relationship from a routed caller.  A TRANSFER answers ``purchases``
+    itself, with ``()``, as a row answers it.  The remaining
     ``getattr(txn, "purchases", ())`` access below covers two safe cases:
 
       * **Not-yet-routed ORM callers** (savings/accounts/calendar/
@@ -646,10 +653,10 @@ def _entry_aware_amount(txn, basis: AmountBasis) -> Decimal:
             whose ``entries`` relationship may be eager-loaded (canonical
             producer), unloaded (transitional caller; lazy-loads on demand),
             or absent (test fake); or a still-projected transfer, the parent
-            of a cash-fold leg, which carries no ``purchases`` (a transfer is
-            never an envelope: ``TransferLeg.tracks_purchases`` is ``False``),
-            so the ``getattr`` default answers it and it is worth
-            :func:`contribution_of`, its resolved amount.
+            of a cash-fold leg, whose ``purchases`` are ``()``
+            (``Transfer.purchases``: a side's movement is a record, never a
+            purchase), so it is worth :func:`contribution_of`, its resolved
+            amount.
         basis: The account's :class:`~._amount_source.AmountBasis` -- the amount
             basis every arm prices through.  It carried the account's
             :class:`~._clearing.StatementCoverage` beside it until plan step
@@ -663,7 +670,9 @@ def _entry_aware_amount(txn, basis: AmountBasis) -> Decimal:
     """
     # ``getattr`` with a default of ``()`` handles both unloaded ORM
     # relationships (the derivation lazy-loads ``entries`` via the session)
-    # and non-ORM fakes (no attribute defined).  The empty-tuple default
+    # and non-ORM fakes (no attribute defined).  A transfer answers
+    # ``purchases`` with ``()`` of its own (``Transfer.purchases``), not by
+    # the default.  The empty-tuple default
     # passes the falsy check below, mirroring the original empty-list
     # short-circuit and keeping non-ORM tests stable.
     entries = getattr(txn, "purchases", ())

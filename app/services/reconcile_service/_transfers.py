@@ -27,9 +27,10 @@ shadows): a
 :class:`~app.services.transfer_legs.TransferLeg` from
 ``transfer_legs.offerable_transfer_legs``, keyed by
 ``transfer_legs.cell_key`` -- ``(transfer id, account id)``, ruling
-**R-BAL87** -- priced and cleared through the leg-shaped doors
-``transfer_service.leg_settle_amount`` / ``record_leg_clearing``, and ticked
-under its own form fields (ruling **R-BAL145**, :class:`~._offers.TickForm`).
+**R-BAL87** -- priced at its transfer's ``transaction_service.settle_amount``
+(ruling **plan#1983**: a leg is offered at its parent's answer) and cleared
+through the leg-shaped door ``transfer_service.record_leg_clearing``, and
+ticked under its own form fields (ruling **R-BAL145**, :class:`~._offers.TickForm`).
 Until then it offered the transfer's SHADOW row on this account, keyed by the
 shadow's id in one map with the transaction arm's rows, which only the
 table's partition on ``transfer_id`` kept from colliding.  So this arm reached
@@ -59,9 +60,10 @@ section heading (:attr:`~app.services.reconcile_service.OfferKind.section_note`)
 
 **Nothing here decides what a tick BOOKS, which status the rows take, or
 whether a submitted figure is a CORRECTION.**  All three are the transfer
-service's.  What a tick will book is published as
-``transfer_service.leg_settle_amount`` so the panel can render it; whether a figure
-was a human's is the VERB's own answer, returned by the settle rather than
+service's.  What a tick will book is ``transaction_service.settle_amount`` of
+the leg's transfer, the one composition the transfer's settle books through
+(ruling **plan#1983**), so the panel can render it; whether a figure was a
+human's is the VERB's own answer, returned by the settle rather than
 asked of a predicate beforehand.  The loan-payment FREEZE the step
 specification names is inside both: an auto-derived loan payment books its live
 payment-date figure rather than the creation-time escrow its estimate carries,
@@ -82,7 +84,7 @@ Architecture (``CLAUDE.md``):
 from sqlalchemy.orm import selectinload
 
 from app.models.transfer import Transfer
-from app.services import transfer_legs, transfer_service
+from app.services import transaction_service, transfer_legs, transfer_service
 from app.services.cash_ledger import AmountBasis
 from app.services.match_press import Press
 from app.services.reconcile_service import _rows
@@ -300,8 +302,9 @@ def outstanding_transfers(
 
     **Every leg is offered** (ruling **R-BAL235**, developer 2026-10-08,
     "Offer and settle it", retiring **R-BAL148**'s warning): a leg is priced
-    off its transfer and its side's record (``transfer_service.
-    leg_settle_amount``), never its twin rows, so a transfer whose twin was
+    off its transfer (``transaction_service.settle_amount`` of
+    ``transfer_legs.parent_of(leg)``, ruling **plan#1983**), never its twin
+    rows, so a transfer whose twin was
     deleted behind the app's back is priced and ticked like any other.  The
     warning the panel printed for one went with the refusal it caught (plan
     step ``balance:X-bi-6-4d-2``).
@@ -316,7 +319,9 @@ def outstanding_transfers(
         offer = OutstandingTransaction(
             key=leg.cell_key,
             attributed_on=_rows.attributed_on(statement, leg.transfer),
-            amount=transfer_service.leg_settle_amount(leg, basis),
+            amount=transaction_service.settle_amount(
+                transfer_legs.parent_of(leg), basis,
+            ),
             # Always the whole figure: a leg can hold no PURCHASE (its one
             # possible entry is the seam's covering movement, written when it
             # settles and kept un-dated across a revert), so there is no card

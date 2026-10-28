@@ -553,6 +553,23 @@ class Transfer(
         """
         return self.__settled_figure_source_id
 
+    @property
+    def purchases(self) -> tuple[()]:
+        """``()``: a transfer holds no purchase.
+
+        What ``Transaction.purchases`` answers for a plan row -- what a person
+        recorded against it, less the status seam's covering movement --
+        asked of the other parent (ruling **plan#1983**, "price the parent,
+        draw the side").  A movement filed under a transfer is a side's
+        RECORD (``ck_transaction_entries_side_link_is_a_record``), never a
+        purchase, so the answer is the schema's.  It is asked by the rules
+        that price a parent whatever its table: whether a settle books a
+        parent's purchases (``transaction_service.settles_from_entries``) and
+        what the plan reserves for them (``cash_ledger._entry_aware_amount``);
+        a side's ``purchases`` reads it off its transfer.
+        """
+        return ()
+
     @DerivedFlag
     def recurs(self):
         """True when this transfer's definition has a recurrence rule.

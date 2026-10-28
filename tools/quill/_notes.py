@@ -60,7 +60,7 @@ def resumed(card: Card, held: Mapping[int, BareCard], reads: _git.Reads) -> int:
     that git does not say is done (:func:`_state.done_tasks`), else ``card`` itself.  ``held``
     holds each task under it, read by number; ``reads`` is what this command read of git."""
     tasks = [number for number in card.task_children if number in held]
-    begun = in_progress(held, reads.claims)
+    begun = in_progress(reads.claims)
     done = done_tasks(held, reads.shipped.tasks, reads.claims)
     return next((number for number in tasks if number in begun),
                 next((number for number in tasks

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools.ci import scratch
+from tools.ci import gitcmd, scratch
 from tools.ci.scratch import commit_files, point_dev, point_main, run
 from tools.quill import _git
 
@@ -165,87 +165,98 @@ def test_a_claim_names_no_task_file_it_took_in_from_dev_or_main(code):
     assert _git.claims(root, [8])[8].tasks == {50, 52}
 
 
-def test_a_claims_own_commits_name_their_tasks_by_their_trailer(code):
-    """Ruling plan#1872: a commit names the task it builds by ``Task: plan#T``, its key read in
-    any case; a value that names no card (``plan#<number>``) names nothing, and a commit dev or
-    main holds is no commit of the claim, so a task it names is not the claim's."""
-    root, base = code
-    landed = commit_files(root, base, "card 3's piece\n\nTask: plan#40", {"a.py": "a\n"})
-    point_dev(root, landed)
-    claimed = commit_files(root, landed, "claim plan#8",
-                           {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
-    one = commit_files(root, claimed, "piece one\n\nTask: plan#41", {"b.py": "b\n"})
-    two = commit_files(root, one, "piece two\n\ntask: plan#42", {"c.py": "c\n"})
-    tip = commit_files(root, two, "loose\n\nTask: 43\nTask: plan#044", {"d.py": "d\n"})
-    assert _git.begun_tasks(root, tip) == {41, 42}
+def _doing(card, task):
+    """``{plan/doing/<card>: plan#<task>}``, card ``card``'s file naming its task in progress
+    as ``quill start`` writes it; with ``task`` None, its delete, as ``quill drop`` makes it."""
+    return {_git.doing_file(card): None if task is None else f"plan#{task}\n"}
 
 
-def test_a_task_is_in_progress_until_the_claims_tip_holds_its_file(code):
-    """Ruling plan#1872: a task a commit of the claim names is in progress until the tip holds
-    its file, written in the commit that ends its piece; the claim reads it so, and a task
-    named by no commit of the claim is in progress nowhere, its file or none."""
+def _claimed(root, base, card=8):
+    """Card ``card``'s claim on ``base``: a commit adding its marker; its sha."""
+    return commit_files(root, base, f"claim plan#{card}",
+                        {_git.marker(card): "claimed 2026-10-24T08:00:00Z\n"})
+
+
+def test_a_task_is_in_progress_while_its_cards_file_names_it_and_its_file_is_not_there(code):
+    """Ruling plan#2009: the task card 8's file ``plan/doing/8`` names is in progress until the
+    tip holds its done file, written in the commit that ends its piece; the claim reads it so.
+    A tip holding no such file, or one naming no task, has none in progress, and a commit's
+    ``Task`` trailer alone begins nothing."""
     root, base = code
-    claimed = commit_files(root, base, "claim plan#8",
-                           {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
-    begun = commit_files(root, claimed, "start plan#41\n\nTask: plan#41", {})
+    claimed = _claimed(root, base)
+    assert _git.in_progress(root, claimed, 8) is None
+    named = commit_files(root, claimed, "work\n\nTask: plan#41", {"a.py": "a\n"})
+    assert _git.in_progress(root, named, 8) is None
+    begun = commit_files(root, claimed, "start plan#41\n\nTask: plan#41", _doing(8, 41))
     ended = commit_files(root, begun, "piece one, its file\n\nTask: plan#41",
                          {"b.py": "b\n", **_done(41)})
-    assert _git.in_progress(root, begun) == {41}
-    assert _git.in_progress(root, ended) == frozenset()
-    tip = commit_files(root, ended, "start plan#42\n\nTask: plan#42", _done(43))
+    assert _git.in_progress(root, begun, 8) == 41
+    assert _git.in_progress(root, ended, 8) is None
+    loose = commit_files(root, ended, "by hand", {_git.doing_file(8): "41\n"})
+    assert _git.in_progress(root, loose, 8) is None
+    tip = commit_files(root, ended, "start plan#42\n\nTask: plan#42", {**_doing(8, 42),
+                                                                       **_done(43)})
     run(root, "update-ref", f"refs/remotes/origin/{_git.card_branch(8)}", tip)
     held = _git.claims(root, [8])[8]
-    assert held.in_progress == {42}
+    assert held.in_progress == 42
     assert held.tasks == {41, 43}
 
 
-def test_a_drop_ends_a_task_begun_until_a_commit_names_it_again(code):
-    """Ruling plan#1900: a commit recording a task's drop (``Dropped: plan#T``) ends it as its
-    file would, without marking it done: beside its name in one commit (as ``quill drop``
-    writes it) or in a commit of its own, the drop wins; a commit naming it after the drop
-    begins it again; and another task's drop leaves it as it was."""
+def test_a_drop_deletes_the_file_so_none_is_in_progress_until_a_start(code):
+    """Ruling plan#2009: a drop deletes the card's file, so no task is in progress and none is
+    marked done; a start after it begins one again."""
     root, base = code
-    claimed = commit_files(root, base, "claim plan#8",
-                           {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
-    begun = commit_files(root, claimed, "start plan#41\n\nTask: plan#41", {})
-    dropped = commit_files(root, begun,
-                           "drop plan#41: one\n\nsplit\n\nTask: plan#41\nDropped: plan#41", {})
-    assert _git.in_progress(root, begun) == {41}
-    assert _git.in_progress(root, dropped) == frozenset()
+    begun = commit_files(root, _claimed(root, base), "start plan#41", _doing(8, 41))
+    dropped = commit_files(root, begun, "drop plan#41: one\n\nsplit\n\nTask: plan#41",
+                           _doing(8, None))
+    assert _git.in_progress(root, dropped, 8) is None
     assert _git.tasks_in(root, dropped)[0] == frozenset()
-    again = commit_files(root, dropped, "start plan#41\n\nTask: plan#41", {})
-    assert _git.in_progress(root, again) == {41}
-    other = commit_files(root, again, "drop plan#42\n\ndropped: plan#42", {})
-    assert _git.in_progress(root, other) == {41}
-    alone = commit_files(root, other, "dropped by hand\n\nDropped: plan#41", {})
-    assert _git.begun_tasks(root, alone) == frozenset()
+    again = commit_files(root, dropped, "start plan#41", _doing(8, 41))
+    assert _git.in_progress(root, again, 8) == 41
 
 
-def test_a_drop_is_read_before_the_start_it_ends_whatever_the_clocks_say(code, monkeypatch):
-    """Each task's newest record decides by the history, never by commit dates: a drop whose
-    clock ran behind, on one line of a merge, is read before the start it grew from, though
-    the other line, dated later, also holds that start (git's ``--topo-order``)."""
+def test_another_cards_work_merged_or_rebased_in_puts_nothing_in_progress(code):
+    """Plan#1991's case: card 1's claim merges card 5's branch, which began task 5, and later
+    takes it in again by a rebase onto it; card 1's tip holds ``plan/doing/5``, which card 1
+    never reads, so its own task in progress, or none, is as its own file says."""
     root, base = code
-    claimed = commit_files(root, base, "claim plan#8",
-                           {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
-    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-24T10:00:00Z")
-    begun = commit_files(root, claimed, "start plan#41\n\nTask: plan#41", {})
-    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-24T12:00:00Z")
-    other = commit_files(root, begun, "other work", {"o.py": "o\n"})
-    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-24T09:00:00Z")
-    dropped = commit_files(root, begun, "drop plan#41\n\nTask: plan#41\nDropped: plan#41", {})
-    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-10-24T13:00:00Z")
-    tip = run(root, "commit-tree", run(root, "merge-tree", "--write-tree", other, dropped),
-              "-p", other, "-p", dropped, "-m", "merge")
-    assert _git.in_progress(root, tip) == frozenset()
+    five = commit_files(root, _claimed(root, base, 5), "start plan#55", _doing(5, 55))
+    one = _claimed(root, base, 1)
+    merged = run(root, "commit-tree", run(root, "merge-tree", "--write-tree", one, five),
+                 "-p", one, "-p", five, "-m", "Merge card/5 into card/1")
+    assert _git.in_progress(root, merged, 5) == 55
+    assert _git.in_progress(root, merged, 1) is None
+    begun = commit_files(root, merged, "start plan#12", _doing(1, 12))
+    assert _git.in_progress(root, begun, 1) == 12
+    rebased = commit_files(root, five, "claim plan#1, rebased onto card/5",
+                           {_git.marker(1): "claimed 2026-10-24T08:00:00Z\n"})
+    assert _git.in_progress(root, rebased, 1) is None
+
+
+def test_two_copies_of_a_branch_that_began_different_tasks_conflict_on_its_file(code):
+    """Ruling plan#2009: two copies of card 8's branch, each beginning another task, cannot
+    merge without a conflict on ``plan/doing/8``, which git reports, so neither task is read
+    as in progress beside the other; two that began the same task merge clean, naming it."""
+    root, base = code
+    claimed = _claimed(root, base)
+    one = commit_files(root, claimed, "start plan#41", _doing(8, 41))
+    other = commit_files(root, claimed, "start plan#42", _doing(8, 42))
+    same = commit_files(root, claimed, "start plan#41 elsewhere\n\nTask: plan#41",
+                        _doing(8, 41))
+    conflicted = gitcmd.run(root, *scratch.ISOLATED, "merge-tree", "--write-tree",
+                            "--name-only", one, other)
+    assert conflicted.returncode == 1
+    assert conflicted.stdout.split("\n\n")[0].splitlines()[1:] == [_git.doing_file(8)]
+    tree = run(root, "merge-tree", "--write-tree", one, same)
+    assert run(root, "cat-file", "blob", f"{tree}:{_git.doing_file(8)}") == "plan#41"
 
 
 def test_a_claims_own_commits_are_read_with_what_their_trailers_name(code):
     """``stamps``, the one reading of a claim's commits' trailers (ruling plan#1872): each of
     its own commits, a merge first, ahead of the commits it grew from, with its parents, its
-    subject, the tasks its ``Task`` trailers name and those its ``Dropped`` trailers name, each
-    key in any case and in the message's order, a value naming no card left out; and no commit
-    dev or main holds, whatever it names."""
+    subject and the tasks its ``Task`` trailers name, each key in any case and in the message's
+    order, a value naming no card left out; and no commit dev or main holds, whatever it
+    names."""
     root, base = code
     landed = commit_files(root, base, "card 3's piece\n\nTask: plan#40", {"a.py": "a\n"})
     point_dev(root, landed)
@@ -253,13 +264,13 @@ def test_a_claims_own_commits_are_read_with_what_their_trailers_name(code):
                            {_git.marker(8): "claimed 2026-10-24T08:00:00Z\n"})
     one = commit_files(root, claimed, "piece one\n\nTask: plan#42\ntask: plan#41\nTask: 43",
                        {"b.py": "b\n"})
-    side = commit_files(root, claimed, "a drop\n\nTask: plan#41\nDROPPED: plan#41", {})
+    side = commit_files(root, claimed, "a drop\n\nTASK: plan#41", {})
     tip = run(root, "commit-tree", run(root, "merge-tree", "--write-tree", one, side),
               "-p", one, "-p", side, "-m", "merge the drop")
     found = _git.stamps(root, tip)
-    assert (found[0], found[-1].sha) == (_git.Stamp(tip, (one, side), "merge the drop", (), ()),
+    assert (found[0], found[-1].sha) == (_git.Stamp(tip, (one, side), "merge the drop", ()),
                                          claimed)
     assert {stamp.sha: stamp for stamp in found} == {
-        tip: found[0], claimed: _git.Stamp(claimed, (landed,), "claim plan#8", (), ()),
-        one: _git.Stamp(one, (claimed,), "piece one", (42, 41), ()),
-        side: _git.Stamp(side, (claimed,), "a drop", (41,), (41,))}
+        tip: found[0], claimed: _git.Stamp(claimed, (landed,), "claim plan#8", ()),
+        one: _git.Stamp(one, (claimed,), "piece one", (42, 41)),
+        side: _git.Stamp(side, (claimed,), "a drop", (41,))}

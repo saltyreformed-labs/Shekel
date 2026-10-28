@@ -19,7 +19,7 @@ from tools.ci.gitcmd import run as _git_run
 from tools.ci.scratch import run as _run
 from tools.quill import _git, commit_hook
 from tools.quill._exits import Refused
-from tools.quill._fake import run, two_tasks
+from tools.quill._fake import begun, claim, run, two_tasks
 from tools.quill.commit_hook import judge
 
 #: Card 1's branch, as ``quill claim plan#1`` checks it out.
@@ -62,22 +62,20 @@ def _commit(code, message, *paths):
 # -- the rule ----------------------------------------------------------------------
 
 def test_judge_stamps_the_one_task_in_progress_on_a_message_naming_none():
-    """One task in progress and a message with text naming none: that task is stamped."""
-    assert judge(BRANCH, frozenset({2}), [], True) == 2
+    """A task in progress and a message with text naming none: that task is stamped."""
+    assert judge(BRANCH, 2, [], True) == 2
 
 
 def test_judge_passes_a_message_naming_a_task_in_progress_as_it_is():
-    """A message naming the task in progress, or one of several in progress, is left as it
-    is, once named or twice."""
-    assert judge(BRANCH, frozenset({2}), ["plan#2"], True) is None
-    assert judge(BRANCH, frozenset({2, 3}), ["plan#3", " plan#3 "], True) is None
+    """A message naming the task in progress is left as it is, once named or twice."""
+    assert judge(BRANCH, 2, ["plan#2"], True) is None
+    assert judge(BRANCH, 3, ["plan#3", " plan#3 "], True) is None
 
 
 def test_judge_stamps_nothing_on_a_message_whose_editor_is_still_to_open():
-    """A message with no text yet is left as it is while any task is in progress, one or
-    several: ``commit-msg`` judges what the editor leaves."""
-    assert judge(BRANCH, frozenset({2}), [], False) is None
-    assert judge(BRANCH, frozenset({2, 3}), [], False) is None
+    """A message with no text yet is left as it is while a task is in progress:
+    ``commit-msg`` judges what the editor leaves."""
+    assert judge(BRANCH, 2, [], False) is None
 
 
 def test_judge_refuses_a_commit_while_no_task_is_in_progress():
@@ -85,7 +83,7 @@ def test_judge_refuses_a_commit_while_no_task_is_in_progress():
     not, and the refusal says how to begin one and how to amend a piece's last commit."""
     for values, has_text in (([], True), ([], False), (["plan#2"], True)):
         with pytest.raises(Refused) as refused:
-            judge(BRANCH, frozenset(), values, has_text)
+            judge(BRANCH, None, values, has_text)
         assert str(refused.value) == (
             "no task of plan#1 is in progress on card/1, so this commit is no piece's: begin "
             "the next with `python -m tools.quill.quill start plan#T` (`quill show plan#1` "
@@ -96,38 +94,25 @@ def test_judge_refuses_a_commit_while_no_task_is_in_progress():
 def test_judge_refuses_a_value_that_names_no_task():
     """A ``Task`` trailer whose value is no task's name is refused, whatever else is named."""
     with pytest.raises(Refused) as refused:
-        judge(BRANCH, frozenset({2}), ["plan#2", "1879"], True)
+        judge(BRANCH, 2, ["plan#2", "1879"], True)
     assert str(refused.value) == ("its trailer `Task: 1879` names no task: a task is named "
                                   "`Task: plan#<number>`")
 
 
 def test_judge_refuses_a_message_naming_two_tasks():
-    """A commit is one piece's, so two tasks named are refused, both in progress or not."""
+    """A commit is one piece's, so two tasks named are refused, one of them in progress."""
     with pytest.raises(Refused) as refused:
-        judge(BRANCH, frozenset({2, 3}), ["plan#3", "plan#2"], True)
+        judge(BRANCH, 2, ["plan#3", "plan#2"], True)
     assert str(refused.value) == "its message names plan#2 and plan#3: a commit is one piece's"
 
 
 def test_judge_refuses_a_message_naming_a_task_not_in_progress():
-    """A task named that is not in progress is refused, naming the one, or the several,
-    that are."""
+    """A task named that is not in progress is refused, naming the one that is."""
     with pytest.raises(Refused) as refused:
-        judge(BRANCH, frozenset({2}), ["plan#3"], True)
+        judge(BRANCH, 2, ["plan#3"], True)
     assert str(refused.value) == (
         "its message names plan#3, which is not in progress on card/1, and plan#2 is: a commit "
         "is the piece's it builds, begun by `quill start` and not finished")
-    with pytest.raises(Refused) as refused:
-        judge(BRANCH, frozenset({2, 3, 4}), ["plan#5"], True)
-    assert "and plan#2, plan#3 and plan#4 are: a commit" in str(refused.value)
-
-
-def test_judge_refuses_a_message_naming_none_of_several_in_progress():
-    """Several tasks in progress and a message with text naming none: which is not known."""
-    with pytest.raises(Refused) as refused:
-        judge(BRANCH, frozenset({3, 2}), [], True)
-    assert str(refused.value) == (
-        "plan#2 and plan#3 are each in progress on card/1, named by its commits with no file "
-        "at its tip: name the one this commit builds in its message, `Task: plan#T`")
 
 
 # -- the hook over git ---------------------------------------------------------------
@@ -186,20 +171,44 @@ def test_the_hook_reads_a_message_as_git_keeps_it(code, tmp_path):
     assert text.endswith(VERBOSE.split(">8", 1)[1])
 
 
-def test_two_in_progress_take_a_message_naming_one_of_them(code, tmp_path, capsys):
-    """A revert of a finished piece's file begins it again beside the piece in progress: a
-    message naming neither is refused, and one naming either passes as it is."""
+def test_a_reverted_piece_is_in_progress_again_only_while_the_cards_file_names_it(
+        code, tmp_path):
+    """Ruling plan#2009: one task is in progress at most, the one the card's file names.  A
+    revert of a finished piece's done file makes it in progress again while the file still
+    names it; once the next piece has begun, the file names that one, which the hook stamps,
+    and the reverted piece is not started."""
     tracker = _claimed_with_tasks(code)
     assert run(tracker, code, "start", "plan#2") == 0
     assert run(tracker, code, "task-file", "plan#2") == 0
     _commit(code, "piece a's end\n\nTask: plan#2", _git.task_file(2))
+    ended = _run(code, "rev-parse", "HEAD")
+    _run(code, "rm", "--quiet", _git.task_file(2))
+    _commit(code, "Revert piece a's end")
+    assert _git.in_progress(code, "HEAD", 1) == 2
+    _run(code, "reset", "--quiet", "--hard", ended)
     assert run(tracker, code, "start", "plan#3") == 0
     _run(code, "rm", "--quiet", _git.task_file(2))
     _commit(code, "Revert piece a's end\n\nTask: plan#3")
-    assert _git.in_progress(code, "HEAD") == {2, 3}
-    assert _judged(code, tmp_path, "more\n") == (1, "more\n")
-    assert "refused: plan#2 and plan#3 are each in progress on card/1" in capsys.readouterr().err
-    assert _judged(code, tmp_path, "redo\n\nTask: plan#2\n") == (0, "redo\n\nTask: plan#2\n")
+    assert _git.in_progress(code, "HEAD", 1) == 3
+    assert _judged(code, tmp_path, "more\n") == (0, "more\n\nTask: plan#3\n")
+
+
+def test_another_cards_branch_merged_in_begins_nothing_here(code, tmp_path, capsys):
+    """Plan#1991's case: card/1 merges card 5's branch, on which task 55 is begun.  Card 1's
+    hook stamps none of card 5's tasks, refusing the commit while no task of card 1 is in
+    progress, and ``quill start`` begins card 1's next task, which the hook then stamps."""
+    tracker = _claimed_with_tasks(code)
+    claim(code, 5)
+    begun(code, 5, 55)
+    _run(code, "fetch", "--quiet", "origin", "+refs/heads/card/5:refs/remotes/origin/card/5")
+    _run(code, "merge", "--quiet", "--no-edit", "refs/remotes/origin/card/5")
+    assert _git.in_progress(code, "HEAD", 5) == 55
+    assert _git.in_progress(code, "HEAD", 1) is None
+    capsys.readouterr()
+    assert _judged(code, tmp_path, "work\n") == (1, "work\n")
+    assert "refused: no task of plan#1 is in progress on card/1" in capsys.readouterr().err
+    assert run(tracker, code, "start", "plan#2") == 0
+    assert _judged(code, tmp_path, "work\n") == (0, "work\n\nTask: plan#2\n")
 
 
 def test_the_hook_leaves_a_merge_a_detached_head_and_another_branch_alone(code, tmp_path):

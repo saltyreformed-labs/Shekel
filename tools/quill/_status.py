@@ -63,7 +63,7 @@ def progress(cards: Mapping[int, BareCard], reads: _git.Reads) -> Progress:
     """:class:`Progress` from one read of git (``reads``), each task read by ``cards``."""
     return Progress(frozenset(reads.shipped.cards), frozenset(reads.claims),
                     done_tasks(cards, reads.shipped.tasks, reads.claims),
-                    in_progress(cards, reads.claims))
+                    in_progress(reads.claims))
 
 
 def wanted(card: BareCard, cards: Mapping[int, BareCard], git: Progress) -> str | None:

@@ -75,7 +75,7 @@ def _claim(number, committed="2026-10-04T11:00:00+00:00", claimed="2026-10-04T11
     """The branch ``card/<number>``, claimed and last committed an hour before NOW: its tip's
     committer date as git prints it (ISO, with its offset), its marker's instant in UTC; no
     task file at its tip, and no task in progress."""
-    return Claim(number, f"sha{number}", committed, claimed, frozenset(), frozenset())
+    return Claim(number, f"sha{number}", committed, claimed, frozenset(), None)
 
 
 def test_shipped_in_git_is_resolved_whatever_the_card_shows():

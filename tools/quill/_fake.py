@@ -499,9 +499,18 @@ def piece(root, card, *numbers):
 
 def named(root, card, task):
     """Push onto ``card/<card>`` a commit naming ``task`` by its trailer ``Task: plan#<task>``
-    (ruling plan#1872), as a commit of its piece names it, writing no task file; its sha."""
+    (ruling plan#1872), as a commit of its piece names it, writing no task file and no
+    ``plan/doing`` file, so it begins nothing (ruling plan#2009); its sha."""
     return _onto_claim(root, card, f"work\n\n{_git.task_trailer(task)}",
                        {f"work-{task}.txt": "work\n"})
+
+
+def begun(root, card, task):
+    """Push onto ``card/<card>`` the start of ``task``, as ``quill start`` in another clone
+    writes it (ruling plan#2009): a commit writing ``plan/doing/<card>`` to name it, carrying
+    its trailer ``Task: plan#<task>``; its sha."""
+    return _onto_claim(root, card, f"start plan#{task}\n\n{_git.task_trailer(task)}",
+                       {_git.doing_file(card): f"plan#{task}\n"})
 
 
 def unpiece(root, card, *numbers):

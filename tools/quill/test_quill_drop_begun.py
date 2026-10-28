@@ -1,5 +1,6 @@
-"""``quill drop`` of a task begun (ruling plan#1900): the drop recorded in git on its card's
-branch before the tracker's close, so the piece is in progress no longer and the next
+"""``quill drop`` of a task begun (rulings plan#1900, plan#2009): the drop recorded in git on
+its card's branch, a commit deleting the card's file ``plan/doing/N``, before the tracker's
+close, so the piece is in progress no longer and the next
 begins; refused, writing nothing, off that branch; finished by the same command after a
 push it cut short; and a task closed on the web while begun says how its drop is recorded.
 Over the in-memory tracker (:class:`_fake.FakeTracker`) and the ``code`` fixture's real git.
@@ -35,10 +36,10 @@ def _on_origin(code):
 
 def test_a_begun_task_dropped_is_dropped_in_git_first_and_the_next_begins(code, tmp_path,
                                                                            capsys):
-    """The drop is one empty commit on the branch, naming the task and recording its drop,
-    saying why, pushed, before the tracker's comment and close; the task is in progress no
-    longer, the next starts, and the commit hook stamps the next; reopened and started
-    again, the dropped one is in progress again."""
+    """The drop is one commit on the branch, naming the task and deleting the card's file,
+    from the index and the working tree too, saying why, pushed, before the tracker's comment
+    and close; the task is in progress no longer, the next starts, and the commit hook stamps
+    the next; reopened and started again, the dropped one is in progress again."""
     tracker = _begun(code)
     begun = _tip(code)
     writes = list(tracker.writes)
@@ -47,9 +48,11 @@ def test_a_begun_task_dropped_is_dropped_in_git_first_and_the_next_begins(code, 
     dropped = _tip(code)
     assert _run(code, "rev-parse", f"{dropped}^") == begun
     assert _run(code, "log", "-1", "--format=%B", dropped) == (
-        "drop plan#2: piece a\n\nsplit differently\n\nTask: plan#2\nDropped: plan#2")
-    assert _run(code, "rev-parse", f"{dropped}^{{tree}}") == _run(code, "rev-parse",
-                                                                   f"{begun}^{{tree}}")
+        "drop plan#2: piece a\n\nsplit differently\n\nTask: plan#2")
+    assert _run(code, "diff-tree", "--no-commit-id", "--name-status", "-r", dropped) == (
+        f"D\t{_git.doing_file(1)}")
+    assert _run(code, "status", "--porcelain") == ""
+    assert not (code / _git.doing_file(1)).exists()
     assert _on_origin(code) == dropped
     assert tracker.writes[len(writes):] == [("comment", 2, "Dropped: split differently"),
                                             ("close", 2, "not_planned")]
@@ -57,7 +60,7 @@ def test_a_begun_task_dropped_is_dropped_in_git_first_and_the_next_begins(code, 
     assert (f"  recorded its drop on card/1: {dropped[:12]}, pushed; it is in progress no "
             "longer (ruling plan#1900)\n") in out
     assert out.index("recorded its drop") < out.index("dropped plan#2")
-    assert _git.in_progress(code, "HEAD") == frozenset()
+    assert _git.in_progress(code, "HEAD", 1) is None
     assert run(tracker, code, "start", "plan#3") == 0
     message = tmp_path / "MESSAGE"
     message.write_text("work\n")
@@ -68,7 +71,7 @@ def test_a_begun_task_dropped_is_dropped_in_git_first_and_the_next_begins(code, 
     _run(code, "add", _git.task_file(3))
     _run(code, "commit", "--quiet", "-m", "piece b's end\n\nTask: plan#3")
     assert run(tracker, code, "start", "plan#2") == 0
-    assert _git.in_progress(code, "HEAD") == {2}
+    assert _git.in_progress(code, "HEAD", 1) == 2
 
 
 def test_a_task_never_begun_is_dropped_with_nothing_written_to_git(code):
@@ -78,7 +81,7 @@ def test_a_task_never_begun_is_dropped_with_nothing_written_to_git(code):
     assert run(tracker, code, "drop", "plan#3", "--why", "not needed") == 0
     assert _tip(code) == tip == _on_origin(code)
     assert tracker.cards([3])[3].state_reason == "NOT_PLANNED"
-    assert _git.in_progress(code, "HEAD") == {2}
+    assert _git.in_progress(code, "HEAD", 1) == 2
 
 
 def test_a_begun_task_dropped_off_its_branch_is_refused_writing_nothing(code, capsys):

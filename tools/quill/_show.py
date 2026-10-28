@@ -63,7 +63,7 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
     order, so the read lags a write (``_tracker``'s doctrine), and it says so."""
     claim = reads.claims.get(card.number)
     done = done_tasks({**listed, card.number: card}, reads.shipped.tasks, reads.claims)
-    begun = in_progress({**listed, card.number: card}, reads.claims)
+    begun = in_progress(reads.claims)
     order = [n for n, _ in tracker.board.order()]
     state = "open" if card.is_open else f"closed ({card.state_reason})"
     ship = (f"done (git): {_YES[card.number in done]}\n"

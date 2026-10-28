@@ -9,7 +9,7 @@ repository (the ``code`` fixture, ``conftest.py``).  Nothing here calls GitHub.
 from __future__ import annotations
 
 from tools.quill._comments import ANSWER_MARK
-from tools.quill._fake import FakeTracker, claim, named, piece, run, two_tasks
+from tools.quill._fake import FakeTracker, begun, claim, piece, run, two_tasks
 from tools.quill._notes import NOTE_CAP, NOTE_MARK
 from tools.quill._tracker import Comment
 from tools.quill.setup_tracker import APP_LOGIN
@@ -40,7 +40,7 @@ def test_the_note_lands_on_the_task_in_progress_and_prints_its_prompt(code, caps
     mark, and the prompt names plan#3."""
     tracker = two_tasks()
     claim(code, 1)
-    named(code, 1, 3)
+    begun(code, 1, 3)
     number, out = _noted(tracker, code, capsys, tmp_path, "\n  Not measured: the deploy.\n")
     assert number == 3
     assert tracker.notes[3][-1].body == f"Not measured: the deploy.\n\n{NOTE_MARK}\n"

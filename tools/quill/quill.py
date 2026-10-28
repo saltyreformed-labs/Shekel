@@ -619,7 +619,7 @@ def _refuse_drop(card: Card, cards: dict[int, Card], reads: _git.Reads) -> None:
     in git, so the refusal says how its drop is recorded there (ruling plan#1900)."""
     if not card.is_open:
         claim = reads.claims.get(card.parent) if card.kind == TASK else None
-        if claim is not None and card.number in claim.in_progress:
+        if claim is not None and card.number == claim.in_progress:
             raise Refused(f"{_label(card)} is already closed, and git still says it is in "
                           f"progress on {claim.branch}: reopen it on the web, then drop it "
                           f"here with {claim.branch} checked out, which records its drop in git "

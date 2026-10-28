@@ -29,7 +29,7 @@ from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
 from tools.quill._command import _label, _one, on_board, with_cards
 from tools.quill._exits import Refused
-from tools.quill._state import done_tasks, drop_takes, dropped, names_no_task
+from tools.quill._state import done_tasks, drop_takes, dropped
 from tools.quill._tracker import BareCard, Card, CardReader, Tracker
 from tools.quill.setup_tracker import TASK
 
@@ -96,15 +96,13 @@ def _on_its_branch(tracker: Tracker, number: int, root: Path, what: str,
     return task, branch
 
 
-def in_progress(cards: Mapping[int, BareCard],
-                claims: Mapping[int, _git.Claim]) -> frozenset[int]:
-    """Each task among ``cards`` in progress (ruling plan#1872): the live claim (``claims``) of
-    the card the tracker says it is under has begun it and not finished it
-    (:attr:`_git.Claim.in_progress`).  One a claim names that is under another card, or is no
-    task, is in progress nowhere (:func:`_state.names_no_task`), as its file there would mark
-    nothing done (:func:`_state.done_tasks`).  ``show`` reads it, and :func:`place`."""
-    return frozenset(number for claim in claims.values() for number in claim.in_progress
-                     if names_no_task(number, cards, claim.card) is None)
+def in_progress(claims: Mapping[int, _git.Claim]) -> frozenset[int]:
+    """Each task in progress (rulings plan#1872, plan#2009): the one each live claim
+    (``claims``) says is, by its card's file at its tip (:attr:`_git.Claim.in_progress`, the
+    one reading), which only that card's ``quill start`` writes.  ``show``, ``sync``'s Status,
+    ``note`` and :func:`place` read it."""
+    return frozenset(claim.in_progress for claim in claims.values()
+                     if claim.in_progress is not None)
 
 
 def place(tracker: Tracker, task: Card, parent: Card, before: Card | None,
@@ -131,8 +129,7 @@ def place(tracker: Tracker, task: Card, parent: Card, before: Card | None,
         tasks = [child.number for child in parent.children
                  if child.kind == TASK and child.is_open and child.number != task.number]
         held = tracker.cards(tasks) if tasks else {}
-        begun = (done_tasks(held, reads.shipped.tasks, reads.claims)
-                 | in_progress(held, reads.claims))
+        begun = done_tasks(held, reads.shipped.tasks, reads.claims) | in_progress(reads.claims)
         before = next((held[number] for number in tasks if number in held
                        and number not in begun and finishing_rank(held[number].title) > rank),
                       None)
@@ -147,28 +144,29 @@ def place(tracker: Tracker, task: Card, parent: Card, before: Card | None,
 
 
 def cmd_start(args, tracker: Tracker, root: Path) -> int:
-    """Begin task ``plan#T`` (ruling plan#1872): an empty commit naming it on its card's
-    branch, pushed (:func:`_git.start`), so it is in progress (:func:`_git.in_progress`) and
-    each commit until the one that writes its file is a commit of its piece.  Begun on the
-    branch checked out, ``card/<its card>``, while no other task of that card is in progress
-    there, and while ``origin`` holds that branch, the card's claim, which the push moves
-    forward and never makes.  Refused, with nothing written, for what ``task-file`` refuses
-    (:func:`_on_its_branch`), a task whose file the branch holds (it is done), another task
-    of the card in progress, and a claim ``origin`` no longer holds.  Run again for a task
-    begun already, it pushes the branch: a start whose push failed is finished so."""
+    """Begin task ``plan#T`` (rulings plan#1872, plan#2009): a commit on its card's branch
+    writing the card's file ``plan/doing/N`` to name it, pushed (:func:`_git.start`), so it is
+    in progress (:func:`_git.in_progress`) and each commit until the one that writes its done
+    file is a commit of its piece.  Begun on the branch checked out, ``card/<its card>``,
+    while no other task of that card is in progress there, and while ``origin`` holds that
+    branch, the card's claim, which the push moves forward and never makes.  Refused, with
+    nothing written, for what ``task-file`` refuses (:func:`_on_its_branch`), a task whose
+    file the branch holds (it is done), another task of the card in progress, and a claim
+    ``origin`` no longer holds.  Run again for a task begun already, it pushes the branch: a
+    start whose push failed is finished so."""
     task, branch = _on_its_branch(tracker, args.task, root, "its start", "begin a dropped piece")
     if _git.blob_at(root, "HEAD", _git.task_file(task.number)) is not None:
         raise Refused(f"{_label(task)} is done: {branch} holds {_git.task_file(task.number)}")
-    begun = _git.in_progress(root, "HEAD")
-    if others := sorted(begun - {task.number}):
-        raise Refused(f"plan#{others[0]} is in progress on {branch}: finish it first, its file "
-                      f"(`quill task-file plan#{others[0]}`) in the commit that ends it, then "
-                      f"start plan#{task.number}; or drop it (`quill drop plan#{others[0]} --why "
+    begun = _git.in_progress(root, "HEAD", task.parent)
+    if begun not in (None, task.number):
+        raise Refused(f"plan#{begun} is in progress on {branch}: finish it first, its file "
+                      f"(`quill task-file plan#{begun}`) in the commit that ends it, then "
+                      f"start plan#{task.number}; or drop it (`quill drop plan#{begun} --why "
                       f"REASON`), which records its drop on {branch}")
     if task.parent not in _git.on_origin(root):
         raise Refused(f"origin holds no {branch}, so plan#{task.parent} is claimed by no one: "
                       f"`quill claim plan#{task.parent}` claims it")
-    if task.number in begun:
+    if begun == task.number:
         _git.push(root, task.parent)
         print(f"{_label(task)} is begun on {branch} already: pushed {branch}")
         return 0
@@ -180,22 +178,23 @@ def cmd_start(args, tracker: Tracker, root: Path) -> int:
 
 def record_drop(tracker: Tracker, task: Card, root: Path, why: str, reads: _git.Reads) -> None:
     """Record in git the drop of ``task`` while its card's claim has begun it and not finished
-    it (ruling plan#1900): ``quill drop``'s first write, before the tracker's, so the piece is
-    in progress no longer for ``quill start``, ``show`` and the commit hook, which read git
-    alone (:func:`_git.in_progress`).  Begun is read where the drop is recorded: on
-    ``origin``'s claim (``reads``) and, with its card's branch checked out, at ``HEAD``, which
-    may hold a start not yet pushed.  Recorded on that branch checked out, and refused, with
-    nothing written, anywhere else (:func:`_on_its_branch`): an empty commit naming the task
-    dropped, saying ``why``, pushed (:func:`_git.drop`); or, its drop recorded at ``HEAD`` and
-    not yet on ``origin`` (a push a failure cut short), the branch pushed.  A task never begun,
-    or done, or under no card, writes nothing to git."""
+    it (rulings plan#1900, plan#2009): ``quill drop``'s first write, before the tracker's, so
+    the piece is in progress no longer for ``quill start``, ``show`` and the commit hook,
+    which read its card's file in git alone (:func:`_git.in_progress`).  Begun is read where
+    the drop is recorded: on ``origin``'s claim (``reads``) and, with its card's branch
+    checked out, at ``HEAD``, which may hold a start not yet pushed.  Recorded on that branch
+    checked out, and refused, with nothing written, anywhere else (:func:`_on_its_branch`): a
+    commit naming the task and deleting that file, saying ``why``, pushed (:func:`_git.drop`);
+    or, its drop recorded at ``HEAD`` and not yet on ``origin`` (a push a failure cut short),
+    the branch pushed.  A task never begun, or done, or under no card, writes nothing to
+    git."""
     if task.parent is None:
         return
     claim = reads.claims.get(task.parent)
     branch = _git.card_branch(task.parent)
     at_head = (_git.checked_out(root) == branch
-               and task.number in _git.in_progress(root, "HEAD"))
-    if not at_head and (claim is None or task.number not in claim.in_progress):
+               and _git.in_progress(root, "HEAD", task.parent) == task.number)
+    if not at_head and (claim is None or claim.in_progress != task.number):
         return
     _on_its_branch(tracker, task.number, root, "its drop", "drop a dropped piece")
     if at_head:

@@ -13,7 +13,7 @@ from tools.ci.gitcmd import MAIN, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git, _watch, quill
-from tools.quill._fake import FailOnce, FakeTracker, claim, finish, named, piece, run, ship, unship
+from tools.quill._fake import FailOnce, FakeTracker, begun, claim, finish, piece, run, ship, unship
 
 #: The line a pass prints for a card shown as ``status`` that showed ``was``.
 SHOWN = "show {label} as {status} in the board's Status (it showed {was})\n"
@@ -37,7 +37,7 @@ def _watched(code, capsys):
     tracker.add_task(6, 5)
     tracker.add(7)
     claim(code, 1)
-    named(code, 1, 2)
+    begun(code, 1, 2)
     assert run(tracker, code, "watch") == 0
     capsys.readouterr()
     return tracker
@@ -60,7 +60,7 @@ def test_a_first_pass_decides_over_every_card_as_sync_and_saves_the_tips(code, c
     tracker.add(7, is_open=False, state_reason="NOT_PLANNED", touched_by_hand=True)
     tracker.board.items.append(7)
     claim(code, 1)
-    named(code, 1, 2)
+    begun(code, 1, 2)
     ship(code, 5)
     capsys.readouterr()
     assert run(tracker, code, "watch") == 0
@@ -99,7 +99,7 @@ def test_a_pass_lists_origin_once(code, capsys, monkeypatch):
         return real(root, *args, **kwargs)
 
     monkeypatch.setattr(_git, "git", counting)
-    named(code, 1, 3)
+    begun(code, 1, 3)
     assert run(tracker, code, "watch") == 0
     assert run(tracker, code, "watch") == 0
     assert len(listings) == 2
@@ -212,7 +212,7 @@ def test_a_card_a_decision_reads_is_decided_with_its_own_claim(code, capsys):
     assert tracker.cards_by_number[21].closed_by_tool
     tracker.cards_by_number[1] = replace(tracker.cards_by_number[1], blocked_by=(20,))
     writes = len(tracker.writes)
-    named(code, 1, 3)
+    begun(code, 1, 3)
     capsys.readouterr()
     assert run(tracker, code, "watch") == 0
     assert not tracker.writes[writes:] and not tracker.cards_by_number[21].is_open
@@ -260,7 +260,7 @@ def test_a_report_about_a_card_it_decides_is_printed_and_exits_zero(code, capsys
     assert run(tracker, code, "watch") == 0
     tracker.cards_by_number[2] = replace(tracker.cards_by_number[2], is_open=True,
                                          closed_by_tool=False, touched_by_hand=True)
-    named(code, 1, 3)
+    begun(code, 1, 3)
     capsys.readouterr()
     assert run(tracker, code, "watch") == 0
     assert "REPORT: task plan#2 is done in git" in capsys.readouterr().out
@@ -281,17 +281,20 @@ def test_a_tip_of_dev_or_main_not_saved_is_a_pass_over_every_card(code, capsys, 
 
 
 def test_a_pass_names_nothing_of_a_task_file_outside_the_cards_it_decides(code, capsys):
-    """Task 6's file is on ``dev``, and a later pass decides only card 1, whose branch moved:
-    it reads no line of task 6's, nor names its file as one marking nothing done."""
+    """Task 6's file is on ``dev``, and a later pass decides only card 1, whose branch moved
+    by the start of task 3, which ends task 2's time in progress (one at a time, ruling
+    plan#2009): it reads no line of task 6's, nor names its file as one marking nothing
+    done."""
     tracker = _watched(code, capsys)
     finish(code, 6)
     assert run(tracker, code, "watch") == 0
     capsys.readouterr()
     tip = _git.on_origin(code)[1]
-    moved = named(code, 1, 3)
+    moved = begun(code, 1, 3)
     assert run(tracker, code, "watch") == 0
     assert capsys.readouterr().out == (
         f"card/1 moved: {tip[:12]} -> {moved[:12]}\n"
+        + SHOWN.format(label="plan#2 [task, no arc] card 2", status="Todo", was="In Progress")
         + SHOWN.format(label="plan#3 [task, no arc] card 3", status="In Progress", was="Todo"))
 
 

@@ -1,6 +1,7 @@
-"""The ``quill start`` command (ruling plan#1872): a task begun by an empty commit naming it on
-its card's branch, pushed, and in progress until the commit writing its file; and ``show``
-saying which task is in progress.  Over the in-memory tracker (:class:`_fake.FakeTracker`) and
+"""The ``quill start`` command (rulings plan#1872, plan#2009): a task begun by a commit naming
+it on its card's branch and writing the card's file ``plan/doing/N`` to name it, pushed, and in
+progress until the commit writing its done file; and ``show`` saying which task is in
+progress.  Over the in-memory tracker (:class:`_fake.FakeTracker`) and
 the ``code`` fixture's real git, every commit, push and read made as git makes it.
 """
 from __future__ import annotations
@@ -31,11 +32,14 @@ def _commit_its_file(tracker, code, task):
     _run(code, "commit", "--quiet", "-m", f"piece's end\n\nTask: plan#{task}")
 
 
-def test_start_begins_a_piece_with_one_empty_commit_naming_it_and_pushes_it(code, capsys):
+def test_start_begins_a_piece_with_one_commit_writing_its_cards_file_and_pushes_it(code,
+                                                                                  capsys):
     """One commit on the branch's tip, ``start plan#T: <title>`` with the trailer naming T,
-    holding the tip's own tree; the branch pushed; the index and working tree left as they
-    were; nothing written to the tracker (the claim filed plan#1's finishing tasks, ruling
-    plan#1875); and the task in progress."""
+    whose one change writes ``plan/doing/1`` naming T; the branch pushed; that file in the
+    index and the working tree as the commit holds it, every other path of them left as it
+    was (a file staged stays staged), so the next commit keeps the file; nothing written to
+    the tracker (the claim filed plan#1's finishing tasks, ruling plan#1875); and the task in
+    progress."""
     tracker = two_tasks()
     assert run(tracker, code, "claim", "plan#1") == 0
     writes = list(tracker.writes)
@@ -47,12 +51,14 @@ def test_start_begins_a_piece_with_one_empty_commit_naming_it_and_pushes_it(code
     begun = _tip(code)
     assert _run(code, "rev-parse", f"{begun}^") == claimed
     assert _run(code, "log", "-1", "--format=%B", begun) == "start plan#2: piece a\n\nTask: plan#2"
-    assert _run(code, "rev-parse", f"{begun}^{{tree}}") == _run(code, "rev-parse",
-                                                                 f"{claimed}^{{tree}}")
+    assert _run(code, "diff-tree", "--no-commit-id", "--name-only", "-r", begun) == (
+        _git.doing_file(1))
+    assert _run(code, "cat-file", "blob", f"{begun}:{_git.doing_file(1)}") == "plan#2"
     assert _on_origin(code) == begun
-    assert _run(code, "diff", "--cached", "--name-only") == "staged.txt"
+    assert _run(code, "status", "--porcelain") == "A  staged.txt"
+    assert (code / _git.doing_file(1)).read_text(encoding="utf-8") == "plan#2\n"
     assert tracker.writes == writes
-    assert _git.in_progress(code, "HEAD") == {2}
+    assert _git.in_progress(code, "HEAD", 1) == 2
     assert (f"started plan#2 [task, no arc] piece a: {begun[:12]} on card/1, pushed; each commit "
             "until the one writing its file (`quill task-file plan#2`) is a commit of this piece"
             ) in capsys.readouterr().out
@@ -89,9 +95,9 @@ def test_start_refuses_a_second_task_until_the_first_ends_and_a_task_done(code, 
             ) in capsys.readouterr().err
     assert _tip(code) == begun
     _commit_its_file(tracker, code, 2)
-    assert _git.in_progress(code, "HEAD") == frozenset()
+    assert _git.in_progress(code, "HEAD", 1) is None
     assert run(tracker, code, "start", "plan#3") == 0
-    assert _git.in_progress(code, "HEAD") == {3}
+    assert _git.in_progress(code, "HEAD", 1) == 3
     ended = _tip(code)
     capsys.readouterr()
     assert run(tracker, code, "start", "plan#2") == 1
@@ -149,7 +155,8 @@ def test_a_start_whose_push_is_refused_stands_on_the_local_branch(code, capsys):
 
 def test_show_names_the_task_in_progress(code, capsys):
     """A card lists its tasks in its order and says which is in progress; the task says so of
-    itself.  A task a commit on another card's branch names is in progress nowhere."""
+    itself.  A task a commit on another card's branch names by its trailer alone is in progress
+    nowhere: only its card's file begins it (ruling plan#2009)."""
     tracker = two_tasks()
     tracker.add(5)
     claim(code, 5)

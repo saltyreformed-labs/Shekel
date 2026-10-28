@@ -2,15 +2,15 @@
 while no piece is begun (ruling plan#1872; plan#1861's spec, item 4).
 
 **A commit on ``card/N`` names its task** by the trailer ``Task: plan#T``
-(:func:`_git.task_trailer`), T a task in progress on the branch by quill's one reading of it
-(:func:`_git.in_progress` at ``HEAD``, from local git and no network): begun by ``quill
-start``, its file not at the tip.  So the commit that adds T's file is T's, and the next is
-refused until ``quill start`` begins the next piece.  As each commit's message is written,
-the hook (:func:`judge`):
+(:func:`_git.task_trailer`), T the task in progress on the branch by quill's one reading of it
+(:func:`_git.in_progress` at ``HEAD``, from local git and no network): the one the branch's
+file ``plan/doing/N`` names, which ``quill start`` wrote, while ``HEAD`` holds no done file
+for it (ruling plan#2009).  So the commit that adds T's file is T's, and the next is refused
+until ``quill start`` begins the next piece.  As each commit's message is written, the hook
+(:func:`judge`):
 
-- stamps the trailer on a message naming no task while one task is in progress;
-- passes a message naming one task in progress as it is: while several are (a revert of a
-  finished piece's file begins it again beside the one in progress), the message names which;
+- stamps the trailer on a message naming no task while a task is in progress;
+- passes a message naming the task in progress as it is;
 - refuses a commit while no task is in progress, and a message naming a task not in
   progress, two tasks, or a value that is no task's name (``plan#T``), each saying why;
 - leaves alone a merge (git's ``MERGE_HEAD``, there however the merge is concluded: one
@@ -68,19 +68,19 @@ def _listed(tasks: Iterable[int]) -> str:
     return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
-def judge(branch: str, begun: frozenset[int], values: list[str], has_text: bool) -> int | None:
+def judge(branch: str, begun: int | None, values: list[str], has_text: bool) -> int | None:
     """The task to stamp on a commit on ``branch`` (``card/N``), or None when its message is
-    to be left as it is: ``begun``, the tasks in progress there (:func:`_git.in_progress`);
-    ``values``, each value of its message's ``Task`` trailers; ``has_text``, whether it holds
-    text yet (:func:`_has_text`).  The module's rule, from these alone.
+    to be left as it is: ``begun``, the task in progress there (:func:`_git.in_progress`),
+    None when none is; ``values``, each value of its message's ``Task`` trailers;
+    ``has_text``, whether it holds text yet (:func:`_has_text`).  The module's rule, from
+    these alone.
 
     Raises:
-        Refused: When no task is in progress; when a value names no task, two tasks are
-            named, or the one named is not in progress; and when several are in progress and a
-            message with text names none.
+        Refused: When no task is in progress; and when a value names no task, two tasks are
+            named, or the one named is not in progress.
     """
     card = _git.claimed_card(branch)
-    if not begun:
+    if begun is None:
         raise Refused(f"no task of plan#{card} is in progress on {branch}, so this commit is no "
                       f"piece's: begin the next with `python -m tools.quill.quill start plan#T` "
                       f"(`quill show plan#{card}` lists its tasks in order), then commit.  To "
@@ -92,17 +92,13 @@ def judge(branch: str, begun: frozenset[int], values: list[str], has_text: bool)
     named = {_git.task_named(value) for value in values}
     if len(named) > 1:
         raise Refused(f"its message names {_listed(named)}: a commit is one piece's")
-    if named and (task := named.pop()) not in begun:
+    if named and (task := named.pop()) != begun:
         raise Refused(f"its message names plan#{task}, which is not in progress on {branch}, "
-                      f"and {_listed(begun)} {'is' if len(begun) == 1 else 'are'}: a commit is "
-                      "the piece's it builds, begun by `quill start` and not finished")
+                      f"and plan#{begun} is: a commit is the piece's it builds, begun by `quill "
+                      "start` and not finished")
     if values or not has_text:
         return None
-    if len(begun) > 1:
-        raise Refused(f"{_listed(begun)} are each in progress on {branch}, named by its commits "
-                      "with no file at its tip: name the one this commit builds in its message, "
-                      f"`{_git.TASK_TRAILER}: plan#T`")
-    return next(iter(begun))
+    return begun
 
 
 def _merging(root: Path) -> bool:
@@ -148,9 +144,10 @@ def stamp(root: Path, message: Path) -> None:
         OSError: When the file cannot be read or written.
     """
     branch = _git.checked_out(root)
-    if branch is None or _git.claimed_card(branch) is None or _merging(root):
+    card = None if branch is None else _git.claimed_card(branch)
+    if branch is None or card is None or _merging(root):
         return
-    task = judge(branch, _git.in_progress(root, "HEAD"), _values(root, message),
+    task = judge(branch, _git.in_progress(root, "HEAD", card), _values(root, message),
                  _has_text(root, message.read_text(encoding="utf-8")))
     if task is not None:
         git(root, "interpret-trailers", "--in-place", "--where", "end", "--if-missing", "add",

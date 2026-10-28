@@ -15,7 +15,7 @@ import yaml
 
 from tools.ci.arcs import REPO
 from tools.ci.scratch import commit_files, run
-from tools.quill import _stamps, commit_hook
+from tools.quill import _git, _stamps, commit_hook
 from tools.quill._git import marker, task_file
 from tools.quill._histories import MON, TUE, Lookup, card_node, judging, merge, never, reader
 from tools.quill._histories import start, tracker, verdict
@@ -60,8 +60,10 @@ def _claimed(root, on):
 
 
 def _begun(root, on):
-    """Task 12 begun on ``on``, as ``quill start`` begins it: an empty commit naming it."""
-    return commit_files(root, on, "start plan#12: a piece\n\nTask: plan#12", {})
+    """Task 12 begun on ``on``, as ``quill start`` begins it on ``card/7``: a commit naming it
+    and writing card 7's file ``plan/doing/7`` to name it (ruling plan#2009)."""
+    return commit_files(root, on, "start plan#12: a piece\n\nTask: plan#12",
+                        {_git.doing_file(7): "plan#12\n"})
 
 
 def _ended(root, on):

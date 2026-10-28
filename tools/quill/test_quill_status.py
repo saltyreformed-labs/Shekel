@@ -4,7 +4,7 @@ none under ``--dry-run``, and none at all while the field lacks an option it wri
 in-memory tracker (:class:`_fake.FakeTracker`) and the ``code`` fixture's real git."""
 from __future__ import annotations
 
-from tools.quill._fake import FakeTracker, claim, named, piece, run, ship
+from tools.quill._fake import FakeTracker, begun, claim, piece, run, ship
 
 #: The line sync prints for a card shown as ``status`` that showed ``was``.
 SHOWN = "{verb}show {label} as {status} in the board's Status (it showed {was})\n"
@@ -24,7 +24,7 @@ def _plan(code):
     tracker.add(7, is_open=False, state_reason="NOT_PLANNED", touched_by_hand=True)
     tracker.board.items.append(7)
     claim(code, 1)
-    named(code, 1, 2)
+    begun(code, 1, 2)
     piece(code, 1, 3)
     ship(code, 5)
     return tracker

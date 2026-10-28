@@ -6,7 +6,7 @@ GitHub keeping, and the ``code`` fixture's real git.
 """
 from __future__ import annotations
 
-from tools.quill._fake import FailOnce, FakeTracker, claim, named, piece, run
+from tools.quill._fake import FailOnce, FakeTracker, begun, claim, piece, run
 from tools.quill._tasks import FINISHING
 
 (REVIEW, _), (LAND, _) = FINISHING
@@ -65,7 +65,7 @@ def test_a_fix_filed_while_the_review_is_in_progress_goes_above_the_suite(tmp_pa
     claim(code, 1)
     assert run(tracker, code, *_filing(tmp_path)) == 0
     assert _order(tracker) == [2, 5, 3, 4]
-    named(code, 1, 3)
+    begun(code, 1, 3)
     assert run(tracker, code, *_filing(tmp_path, "the review's fix")) == 0
     assert _order(tracker) == [2, 5, 3, 6, 4]
 
@@ -86,7 +86,7 @@ def test_a_task_filed_while_the_suite_is_in_progress_stays_last(tmp_path, code, 
     begin, so the new task stays where its link put it."""
     tracker = _card(review_done=True)
     claim(code, 1)
-    named(code, 1, 4)
+    begun(code, 1, 4)
     assert run(tracker, code, *_filing(tmp_path, "the suite's fix")) == 0
     assert _order(tracker) == [2, 3, 4, 5]
     assert "  in plan#1's order: last, no finishing task still to begin\n" in (

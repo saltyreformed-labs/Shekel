@@ -43,6 +43,7 @@ from app.services.entry_service._removals import (
     purchase_controls,
 )
 from app.services.pay_calendar import DerivedPeriod
+from app.services.transfer_legs import PlanItem
 from app.utils.entry_partition import partition_entries
 from app.utils.money import percent_complete
 
@@ -226,7 +227,7 @@ def build_entry_sums_dict(
 
 
 def build_entry_lists_dict(
-    transactions: list,
+    transactions: "list[PlanItem]",
     budgets: dict[int, Decimal],
     periods: "dict[int, DerivedPeriod]",
     cash_flow: CashFlowSet | None,
@@ -250,6 +251,16 @@ def build_entry_lists_dict(
     guard for
     whether to render the inline entries section.  Non-tracking
     transactions are silently skipped.
+
+    **The filter comes FIRST, before any other question is asked of an item**
+    (finding plan#2050), so a caller hands this every item it draws, rows and
+    transfer sides alike.  The controls read below asked its question of every
+    item and the filter ran after it: a transfer side, which tracks no
+    purchase and has no ``id`` of its own, could not be handed in, and a bill
+    that tracks none spent a place in the payback query on a list nobody
+    draws.  Each purchase's controls are answered alone
+    (:func:`~app.services.match_withdrawal.pending_for_each`), so narrowing
+    the read to the envelopes changes no envelope's answer.
 
     Expects ``entries`` and ``template`` eager-loaded on the
     Transaction objects.  **It was PURE from plan step X-f3b** (ruling
@@ -287,10 +298,12 @@ def build_entry_lists_dict(
     :func:`entry_list_view` exists to make unrepresentable.
 
     Args:
-        transactions: List of Transaction objects with ``entries`` and
-            ``template`` accessible.
-        budgets: ``{transaction_id: Decimal}`` covering every row in
-            *transactions* (see :func:`build_entry_sums_dict`), forwarded to
+        transactions: The plan items a screen draws, rows and transfer
+            sides alike (:data:`~app.services.transfer_legs.PlanItem`); a
+            purchase-tracking row's ``entries`` and ``template`` accessible.
+        budgets: ``{transaction_id: Decimal}`` covering every
+            purchase-tracking row in *transactions* (see
+            :func:`build_entry_sums_dict`), forwarded to
             :func:`entry_list_view`.
         periods: ``{budget.pay_periods.id: DerivedPeriod}`` covering every
             paycheck the *transactions* are filed in.  Indexed with ``[]`` for
@@ -328,7 +341,8 @@ def build_entry_lists_dict(
             from one physical line cannot be attributed to either map, let
             alone to a table.  Named by adversarial review, 2026-08-31.
     """
-    controls = purchase_controls(transactions, viewer_id)
+    envelopes = [txn for txn in transactions if txn.tracks_purchases]
+    controls = purchase_controls(envelopes, viewer_id)
     return {
         txn.id: entry_list_view(
             txn.purchases,
@@ -337,8 +351,7 @@ def build_entry_lists_dict(
             purchase_accounts(cash_flow, txn),
             controls[txn.id],
         )
-        for txn in transactions
-        if txn.tracks_purchases
+        for txn in envelopes
     }
 
 

@@ -23,7 +23,7 @@ class TestCarryForwardShadowTransactions:
     rows, they read those too.
     """
 
-    def test_sets_is_override_on_a_recurring_definitions_transfer_and_shadows(
+    def test_sets_is_override_on_a_recurring_definitions_transfer(
         self, app, db, seed_user, seed_periods
     ):
         """Carry forward flags a RECURRING definition's transfer.
@@ -78,7 +78,7 @@ class TestCarryForwardShadowTransactions:
             assert xfer.pay_period_id == seed_periods[1].id
             assert xfer.is_override is False
 
-    def test_ignores_done_shadows(
+    def test_ignores_a_paid_transfer(
         self, app, db, seed_user, seed_periods
     ):
         """A Paid transfer is not carried forward."""
@@ -99,7 +99,7 @@ class TestCarryForwardShadowTransactions:
             db.session.refresh(xfer)
             assert xfer.pay_period_id == seed_periods[0].id
 
-    def test_ignores_cancelled_shadows(
+    def test_ignores_a_cancelled_transfer(
         self, app, db, seed_user, seed_periods
     ):
         """A Cancelled transfer is not carried forward."""
@@ -120,7 +120,7 @@ class TestCarryForwardShadowTransactions:
             db.session.refresh(xfer)
             assert xfer.pay_period_id == seed_periods[0].id
 
-    def test_ignores_soft_deleted_shadows(
+    def test_ignores_a_soft_deleted_transfer(
         self, app, db, seed_user, seed_periods
     ):
         """A soft-deleted transfer is not carried forward."""
@@ -138,7 +138,7 @@ class TestCarryForwardShadowTransactions:
 
             assert count == 0
 
-    def test_mixed_regular_and_shadow(
+    def test_mixed_regular_and_transfer(
         self, app, db, seed_user, seed_periods
     ):
         """Mixed period: 2 regular + 1 transfer + 1 done regular."""
@@ -218,7 +218,7 @@ class TestCarryForwardShadowTransactions:
             assert xfer1.pay_period_id == seed_periods[1].id
             assert xfer2.pay_period_id == seed_periods[1].id
 
-    def test_only_shadows_in_period(
+    def test_only_a_transfer_in_period(
         self, app, db, seed_user, seed_periods
     ):
         """A period holding only a transfer (no regular row) carries it forward."""

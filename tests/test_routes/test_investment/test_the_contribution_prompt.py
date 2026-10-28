@@ -196,7 +196,7 @@ class TestContributionPrompt:
         # second fetch by id would re-assert what the line above says.
         assert tpl.recurrence_rule.transfer_template_id == tpl.id
 
-    def test_create_transfer_generates_shadows(
+    def test_create_transfer_generates_a_transfer_in_every_period(
         self, auth_client, seed_user, db, seed_periods_today,
     ):
         """After creation: a live transfer INTO the account in every pay period.
@@ -218,7 +218,6 @@ class TestContributionPrompt:
         income type carrying a ``transfer_id`` -- and a transfer is one row
         since that step (ruling **R-BAL258**), so none can be stored: the
         income side is the transfer's to-side, read off ``budget.transfers``.
-        The name is the twin era's, kept so the node id is the baseline's.
 
         **The fan-out's WINDOW is pinned as today's behaviour, not as a
         ruling that it is right.**  The route starts its every-period cadence

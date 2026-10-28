@@ -197,7 +197,7 @@ class TestACoverageWithdrawalIsAccepted:
                 self._LAST_PAYDAY, self._LAST_COVERED, 9,
             )
 
-    def test_a_stranded_TRANSFER_keeps_both_shadows_and_its_settle_day(
+    def test_a_stranded_TRANSFER_keeps_its_settle_day_on_both_sides(
         self, app, db, seed_user, seed_periods,
     ):
         """The transfer and its two sides' day survive a truncate that strands them.

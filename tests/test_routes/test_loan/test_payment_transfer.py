@@ -179,7 +179,7 @@ class TestTransferPrompt:
         html = resp.data.decode()
         assert "No recurring payment" not in html
 
-    def test_create_transfer_generates_shadow_transactions(
+    def test_create_transfer_generates_a_payment_for_every_installment(
         self, auth_client, seed_user, db, seed_periods,
     ):
         """After creation: a live payment INTO the loan for every installment.
@@ -200,8 +200,7 @@ class TestTransferPrompt:
         rows on the loan account -- a ``budget.transactions`` row of income
         type carrying a ``transfer_id`` -- and a transfer is one row since
         that step (ruling **R-BAL258**), so none can be stored: the income
-        side is the transfer's to-side, read off ``budget.transfers``.  The
-        name is the twin era's, kept so the node id is the baseline's.
+        side is the transfer's to-side, read off ``budget.transfers``.
 
         **The window is the loan's contract, a decided rule.**  The route
         seats its cadence at the loan's first contractual installment

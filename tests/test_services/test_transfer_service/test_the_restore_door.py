@@ -79,7 +79,7 @@ class TestRestoreTransfer:
     draws it, and the amount case priced both shadow rows (none of those
     reads ran after that step's create door: each case failed at its
     plant).  The restored transfer's amount is
-    :meth:`test_restores_transfer_and_shadows`'s, and what a side shows of
+    :meth:`test_restores_transfer_and_its_leg_in_both_plans`'s, and what a side shows of
     it ``test_transfer_legs/test_what_a_side_shows.py``'s ``TestBothSidesShowTheTransfer``.  Each
     state the side reads asked is asked elsewhere, failing under a mutant
     gated on that state and side (measured at that checkpoint), with one
@@ -104,7 +104,7 @@ class TestRestoreTransfer:
     on the income side.
     """
 
-    def test_restores_transfer_and_shadows(self, app, transfer_data):
+    def test_restores_transfer_and_its_leg_in_both_plans(self, app, transfer_data):
         """A hidden planned transfer comes back unhidden, unchanged, and in both plans.
 
         The restore un-hides the row and returns it; its amount ($250.00, as
@@ -117,8 +117,7 @@ class TestRestoreTransfer:
         (measured at plan step ``balance:X-bi-6-4d-2``'s checkpoint
         2e-2b-2b).  Until that checkpoint it read the object in the session
         and asked the transfer's two shadow rows for their delete flags
-        (ruling R-BAL290 part 1).  The name is kept: ruling R-BAL273 names
-        it.
+        (ruling R-BAL290 part 1).
         """
         with app.app_context():
             td = transfer_data

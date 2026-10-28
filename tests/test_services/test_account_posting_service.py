@@ -176,7 +176,7 @@ def _origin_day(account):
     so a fixture offsetting from ``created_at`` by one day landed on the
     opening's OWN day and silently graded the opposite case.  Measured on two
     tests here: ``test_a_settle_on_an_earlier_day_is_inside_the_opening`` and
-    ``test_transfer_attribution_uses_income_shadow_day`` both stopped
+    ``test_transfer_attribution_uses_the_walked_sides_settle_day`` both stopped
     testing the strictly-earlier arm their docstrings name.  Offsetting from
     the day the rule reads makes the fixture say what it means.
     """
@@ -693,7 +693,7 @@ class TestWalkAccountLedger:
                 "its still-Projected parent has no link to read instead"
             )
 
-    def test_transfer_attribution_uses_income_shadow_day(
+    def test_transfer_attribution_uses_the_walked_sides_settle_day(
         self, app, db, seed_user,
     ):
         """A transfer is attributed by its walked side's settled civil day.

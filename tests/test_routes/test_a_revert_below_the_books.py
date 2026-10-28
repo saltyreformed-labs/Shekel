@@ -173,7 +173,7 @@ class TestATransactionsRevert:
 class TestATransfersRevert:
     """The transfer's own status door refuses it before either side is written."""
 
-    def test_a_paid_transfer_on_its_books_stays_paid_with_both_shadows(
+    def test_a_paid_transfer_on_its_books_stays_paid_with_both_sides_dated(
         self, app, auth_client, seed_user, seed_periods,
     ):
         """Atomic: the transfer keeps its status and both sides their settle day.
@@ -181,7 +181,7 @@ class TestATransfersRevert:
         The transfer's status is the one status and each side's day is its
         payment RECORD's since plan step ``balance:X-bi-6-4d-2``; it read both
         shadows' status and day until then (ruling R-BAL167 class 1, plan step
-        balance:X-bi-6-4d-2).  The name is kept as history.
+        balance:X-bi-6-4d-2).
         """
         with app.app_context():
             savings = _account_opened_early(seed_user, name="Revert savings")
@@ -224,7 +224,7 @@ class TestADeletedTransferIsNotAPlan:
     R-BAL246), and the books' revert refusal does not reach it, because a
     hidden row sits in no balance.  Measured before the ruling: the set-back
     through the transfer's one status door was REFUSED with the sentence
-    :meth:`TestATransfersRevert.test_a_paid_transfer_on_its_books_stays_paid_with_both_shadows`
+    :meth:`TestATransfersRevert.test_a_paid_transfer_on_its_books_stays_paid_with_both_sides_dated`
     pins, which would have refused a delete that went through.  Where the
     hidden plan could come back, the unarchive asks the books again and
     leaves it deleted, naming it.

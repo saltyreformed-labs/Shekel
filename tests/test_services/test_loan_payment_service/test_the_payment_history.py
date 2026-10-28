@@ -49,7 +49,7 @@ class TestGetPaymentHistory:
             )
             assert result == []
 
-    def test_returns_income_shadows_only(
+    def test_returns_a_transfer_into_the_loan_as_one_payment(
         self, app, db, seed_user, seed_periods,
     ):
         """A transfer into the loan is ONE payment, its income side's.
@@ -70,7 +70,7 @@ class TestGetPaymentHistory:
             assert len(result) == 1
             assert result[0].amount == Decimal("1500.00")
 
-    def test_excludes_non_shadow_transactions(
+    def test_excludes_non_transfer_transactions(
         self, app, db, seed_user, seed_periods,
     ):
         """Regular (non-transfer) income transactions are excluded.
@@ -289,7 +289,7 @@ class TestGetPaymentHistory:
             assert len(result) == 1
             assert result[0].dates.period_start == seed_periods[2].start_date
 
-    def test_settled_on_is_the_shadows_own_stored_day_not_its_pay_period(
+    def test_settled_on_is_the_payments_own_stored_day_not_its_pay_period(
         self, app, db, seed_user, seed_periods,
     ):
         """``settled_on`` is the day the CASH moved, read off the payment's record.
@@ -319,7 +319,7 @@ class TestGetPaymentHistory:
             assert result[0].dates.period_start == period.start_date
             assert result[0].dates.is_confirmed is True
 
-    def test_a_projected_shadow_carries_no_settle_day(
+    def test_a_projected_payment_carries_no_settle_day(
         self, app, db, seed_user, seed_periods,
     ):
         """A payment that has not happened has no day, and is not confirmed.
@@ -508,7 +508,7 @@ class TestTheFeedPricesADerivedRow:
     twin over a leg, :func:`~app.services.row_valuation.leg_settled_contribution`.
     """
 
-    def test_a_derived_shadow_resolves_through_the_amount_model(
+    def test_a_derived_payment_resolves_through_the_amount_model(
         self, app, db, seed_user, seed_periods,
     ):
         """A payment storing no figure is priced through the amount model: $1,500.00.

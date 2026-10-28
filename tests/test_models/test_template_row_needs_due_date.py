@@ -269,7 +269,7 @@ class TestATransactionOfADefinitionIsDated:
             db.session.add(txn)
             _flush_refused_by(_ONE_LINK_CONSTRAINT)
 
-    def test_an_undated_transfer_shadow_is_accepted(
+    def test_an_undated_cc_payback_is_accepted(
         self, app, db, seed_user, seed_periods,
     ):
         """The control against over-refusal: a row priced by the row it repays may carry no date.

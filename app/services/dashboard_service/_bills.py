@@ -32,7 +32,6 @@ from app.services.cash_flow_set import (
 from app.services.entry_service import compute_entry_sums, compute_remaining
 from app.services.transfer_legs import (
     PlanItem,
-    TransferLeg,
     cell_key,
     expense_legs,
 )
@@ -161,10 +160,12 @@ def txn_to_bill_dict(
     and every question below is one both shapes answer -- a leg reads its
     ``name``, ``due_date``, ``pay_period``, ``category`` and
     ``tracks_purchases`` off its parent, the last as ``False`` -- so there
-    is no branch here on which it is.  Two keys are identity: ``id`` is
+    is no branch here on which it is.  The key ``id`` is its identity,
     :func:`~app.services.transfer_legs.cell_key` (a row's id, a leg's
-    ``(transfer id, account id)``), and ``is_transfer`` says the item is a
-    leg where it used to say the row carried a ``transfer_id``.
+    ``(transfer id, account id)``).  No key says which shape the item is:
+    ``is_transfer`` did, read by no template or app code, until plan step
+    ``balance:X-bi-6-5``'s fourth leaf deleted it (finding plan#2016,
+    ruling **plan#2094**).
 
     Expects txn.template and txn.entries to be accessible -- callers
     dealing with collections should eager-load them via selectinload
@@ -229,7 +230,6 @@ def txn_to_bill_dict(
         "period_start_date": txn.pay_period.start_date,
         "category_group": txn.category.group_name if txn.category else None,
         "category_item": txn.category.item_name if txn.category else None,
-        "is_transfer": isinstance(txn, TransferLeg),
         "days_until_due": days_until,
     }
     bill.update(_entry_progress_fields(txn, budget))

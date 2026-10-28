@@ -41,11 +41,15 @@ them now if this session has not. Then hold the work to this brief:
    that is), build it, and finish it with its file, `quill task-file plan#T`, in its last commit.
    Re-plan on the card, never in a file: a piece added or split is filed where it is built
    (`--before`), and one not wanted is dropped (`quill drop plan#T --why REASON`). A claim made
-   before its tree held the commit hook, which it takes in by a merge of `dev`, files its
-   remaining pieces and starts the next before its next commit; CI holds only its commits made
-   after (plan#1861, items 5 and 12). A multi-leaf step spans sessions: stop at a piece's end
-   rather than pushing on degraded, and run `/handoff`. Suggest a decomposition whenever it would
-   help.
+   before its tree held the commit hook takes it in by a merge of `dev`, never a rebase onto it:
+   a rebase remakes every older commit on a tree holding the hook, and CI then refuses each that
+   names no task. It then runs `quill claim plan#N` again on its branch, which files its two
+   finishing tasks where they are missing, files its remaining pieces, and starts the next before
+   its next commit; CI holds only its commits made after (plan#1861, items 5 and 12). A commit CI
+   refuses is put right by rewording it, which rewrites the branch from it on, so its push is
+   forced with a lease (CI's refusal says how). A multi-leaf step spans sessions: stop at a
+   piece's end rather than pushing on degraded, and run `/handoff`. Suggest a decomposition
+   whenever it would help.
 5. **Adversarial review before commit.** A neutral fresh subagent reviews the design and the diff;
    it grades the fix's own claims about itself hardest. Findings are fixed or reported, never waved
    through. A card's spec is its body in the tracker, and an edit to it counts the moment it is

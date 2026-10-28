@@ -143,7 +143,9 @@ Then, line by line:
   lane wrote: card N's is `~/projects/shekel-handoffs/kits/plan-N/`, and a migration's is the kit
   of the card whose pull request added it, the merge on `dev`'s first-parent line that brought the
   file naming its branch `card/N` (ruling plan#1980); a kit written before that ruling is named by
-  its lane's handoff file. Append each directory found to `current.sh` as `KITS="<dir> <dir> ..."`.
+  its lane's handoff file, `~/projects/shekel-handoffs/HANDOFF-<lane>.md`, or, once the lane
+  posted its first note, the same file under `~/projects/shekel-handoffs/archive/` (`/handoff`
+  moves it there). Append each directory found to `current.sh` as `KITS="<dir> <dir> ..."`.
   For each with no kit, re-run with `--unrehearsed plan#N` or `--unrehearsed <revision>`; `plan`
   then refuses the release for it.
 - A refusal naming a card the tracker does not hold, a card that is no work, or an entry under

@@ -21,8 +21,12 @@ it (:func:`_work`):
 - a commit whose tree does not hold the hook's code (:data:`HOOK`), which pre-commit's entry
   runs from the working tree (``.venv/bin/python -m tools.quill.commit_hook``), so no hook
   stamped it: a branch claimed before the hook landed is held from the commits made once it
-  takes the hook in (the spec's item 12).  A tree holding the code is held whatever its
-  pre-commit configuration says, so a hook taken out of it fails closed.
+  takes the hook in by a merge of ``dev`` (the spec's item 12).  A rebase onto ``dev`` instead
+  gives every older commit a tree holding the code, so each is held.  A tree holding the code
+  is held whatever its pre-commit configuration says, so a hook taken out of it fails closed.
+
+A refused commit is put right by rewording it, which rewrites the claim from it on, so the push
+that follows is forced, with a lease on the tip ``origin`` holds (:func:`_rewritten`).
 
 The tracker is read only for a card a commit names that the reads before this one did not
 bring: none while each names a task under N, which the open-task arm reads.
@@ -73,6 +77,14 @@ def _work(root: Path, head: str, card: int) -> list[_git.Stamp]:
             and _git.blob_at(root, stamp.sha, HOOK) is not None]
 
 
+def _rewritten(branch: str) -> str:
+    """How a reworded commit reaches ``branch``, the claim the module refuses it on: the
+    reword rewrites the claim from that commit on, so the push is forced, with a lease."""
+    return (f"which rewrites {branch} from that commit on, then push the rewrite with a lease "
+            f"on origin's tip (`git push --force-with-lease=refs/heads/{branch}:<its tip> "
+            f"origin HEAD:refs/heads/{branch}`)")
+
+
 def unnamed(reader: CardReader, root: Path, head: str, card: BareCard,
             held: dict[int, BareCard]) -> list[str]:
     """One sentence for each commit of the claim at ``head`` held to naming its task
@@ -97,10 +109,10 @@ def unnamed(reader: CardReader, root: Path, head: str, card: BareCard,
                 f"{commit}: {branch} brings it, and it names no task, though its tree holds the "
                 f"commit hook, which stamps each commit of {branch} with the task under "
                 f"plan#{card.number} in progress (`{_git.TASK_TRAILER}: plan#T`): reword it to "
-                f"name the task it builds, then push {branch} again")
+                f"name the task it builds, {_rewritten(branch)}")
         reasons += [f"{commit}: {branch} brings it, naming plan#{number}, but {why}, so it "
                     f"builds no piece of plan#{card.number}: reword it to name the task under "
-                    f"plan#{card.number} it builds, then push {branch} again"
+                    f"plan#{card.number} it builds, {_rewritten(branch)}"
                     for number in dict.fromkeys(stamp.tasks)
                     if (why := names_no_task(number, held, card.number))]
     return reasons

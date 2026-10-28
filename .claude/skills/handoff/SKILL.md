@@ -2,7 +2,8 @@
 name: handoff
 description: >
   A lane's stop at a boundary: commit and push what is clean, write the stop's note (only
-  what git and the card cannot say), have the handoff-checker agent grade it against git,
+  what git and the card cannot say), have the handoff-checker agent grade it against git and
+  the card,
   post it with `quill note` on the task the next session starts, refresh the memory hook,
   then alert Josh with the line to paste, `Resume plan#T`. Invoke at every leaf boundary
   and at every forced stop.
@@ -63,7 +64,9 @@ cannot say, each in a line or two:
 2. Every worktree, branch and database clone this session made, a review subagent's worktree and
    its `worktree-agent-*` branch included, and everything else it made outside git (a file on the
    host, a scratch card on a throwaway board): removed, or listed with its state and who removes
-   it.
+   it. And each thing the note this session resumed from (`quill show plan#T`, T the task its
+   prompt named) listed as left standing: carried forward the same way, removed or listed again,
+   since `quill show` prints only the newest note and no later session reads an older one.
 3. What was not measured, and, at a stop mid-piece, what of the piece in progress is not built.
 4. Traps: what the next session must not do (edit a file a peer's open card changes, say), and
    what this session learned the hard way or its review found recurring.
@@ -83,10 +86,14 @@ Spawn the `handoff-checker` agent: a fresh agent by that name, never a fork, and
 isolated agent's `git -C` into any other worktree (measured 2026-10-14). Give it the note's path,
 the worktree's path, the card (`plan#N`), each task this session finished (`plan#T`), and the list
 of every worktree, branch and database clone this session made, taken from the session's own tool
-results. Its report opens with the worktree, its toplevel and its HEAD; a report without them is
-VOID: run it once more, and a second VOID is a failed check. PASS ends the check. A list: fix each
-item, then run it ONCE more; a second list is a failed check, and its items go in the note's last
-lines, so the next session reads them.
+results. Give it the card too, and the note this session resumed from: the checker runs no quill
+command, so save `quill show plan#N` and, when the session's prompt was `Resume plan#T`, `quill
+show plan#T` each to a file in the scratchpad and give it their paths. Its report opens with the
+worktree, its toplevel and its HEAD; a report without them is VOID: run it once more, and a second
+VOID is a failed check. PASS ends the check. A list: fix each item, then run it ONCE more; a second
+list is a failed check, and its items go in the note's last lines, so the next session reads them.
+When they would take the note past 2,000 characters, cut its other lines first, then each item to
+its number and what differs.
 
 ## 5. Post the note
 
@@ -100,6 +107,11 @@ progress, else the first open one in N's order that git does not say is done, el
 characters and a card `origin` holds no claim of. A note is never edited: the next stop posts its
 own, and `quill show plan#T` prints only the newest in full.
 
+Once the card's pull request has landed, `origin` holds no claim of it, so `quill note` refuses
+and no session resumes the card. Then nothing is posted: remove what the session and the note it
+resumed from left standing, say in the session's last output what could not be removed and the
+check's items, and the memory hook (step 6) and the alert (step 7) say the card landed.
+
 A lane that kept a handoff file before plan#1861 moves it into the archive once its first note is
 posted, so no session follows its stale section 0:
 `mv ~/projects/shekel-handoffs/HANDOFF-<lane>.md ~/projects/shekel-handoffs/archive/`.
@@ -108,7 +120,8 @@ posted, so no session follows its stale section 0:
 
 The lane's memory file (`~/.claude/projects/-home-josh-projects-Shekel/memory/project_*.md`) names
 its card and the prompt step 5 printed, `Resume plan#T`, copied from that line, in its `hook:`
-line, never a handoff file. Then regenerate the index:
+line (or that the card landed, when step 5 posted nothing), never a handoff file. Then regenerate
+the index:
 
 ```bash
 python3 ~/.claude/projects/-home-josh-projects-Shekel/build_memory_index.py; echo "exit=$?"
@@ -126,8 +139,9 @@ prompt step 5 printed:
 ```
 
 - A forced stop mid-piece reads `stopped mid-leaf`; an unpushed branch reads `not pushed`; a
-  failed check reads `CHECK FAILED`. Why goes in the session's output, never in the line, which
-  stays under PushNotification's 200 characters.
+  failed check reads `CHECK FAILED`; a stop after the card's pull request landed ends
+  `plan#N landed` in place of `/clear, then: Resume plan#T`. Why goes in the session's output,
+  never in the line, which stays under PushNotification's 200 characters.
 - Send it with PushNotification, then put the same line FIRST, in bold, in the session's last
   output, followed by why it is not pushed and the failed check's items, if any: the tool skips
   the push while Josh's terminal is active, and the output line reaches him either way.

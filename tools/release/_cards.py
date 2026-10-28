@@ -438,8 +438,8 @@ def _none_hung(tracker: Tracker, groups: Mapping[int, Collection[int]],
     production holds could be dropped unseen.  Every card below each group in ``groups``
     (every group the read holds, touched by the release or not), of any kind and in any
     state, is read for it: ``listed`` holds what stands below each card the read holds, as
-    ``(number, kind)`` (its sub-issues and, for a step below a group, the findings and
-    rulings it owns: :func:`_below_each`), and ``kinds`` each one's kind; the rest are read
+    ``(number, kind)`` (its sub-issues and, for a step below a group, the findings, rulings
+    and questions it owns: :func:`_below_each`), and ``kinds`` each one's kind; the rest are read
     from ``tracker`` here, in rounds, each card once, by their sub-issues.
 
     Raises:

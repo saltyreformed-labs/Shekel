@@ -72,12 +72,18 @@ def _ended(root, on):
                         {"end.py": "end\n", task_file(12): f"done {MON}\n"})
 
 
+#: How every refusal here ends: a reword rewrites card/7, so its push is forced, with a lease.
+_REWRITTEN = ("which rewrites card/7 from that commit on, then push the rewrite with a lease on "
+              "origin's tip (`git push --force-with-lease=refs/heads/card/7:<its tip> origin "
+              "HEAD:refs/heads/card/7`)")
+
+
 def _unnamed(sha, subject):
     """The refusal of card/7's commit ``sha``, whose subject is ``subject``, naming no task."""
     return (f"REFUSED -- commit {sha[:12]} ({subject}): card/7 brings it, and it names no task, "
             "though its tree holds the commit hook, which stamps each commit of card/7 with the "
             "task under plan#7 in progress (`Task: plan#T`): reword it to name the task it "
-            "builds, then push card/7 again")
+            "builds, " + _REWRITTEN)
 
 
 def test_a_claim_whose_every_commit_names_a_task_under_its_card_lands(check, code):
@@ -109,7 +115,7 @@ def test_a_commit_of_the_claim_naming_no_task_is_refused(check, code, base):
         f"REFUSED -- commit {loose[:12]} (made with the hook skipped): card/7 brings it, and it "
         "names no task, though its tree holds the commit hook, which stamps each commit of "
         "card/7 with the task under plan#7 in progress (`Task: plan#T`): reword it to name the "
-        "task it builds, then push card/7 again",
+        "task it builds, " + _REWRITTEN,
         verdict("card/7", 1, 1, base=base, tasks=1)]
 
 
@@ -132,7 +138,7 @@ def test_a_commit_naming_a_card_that_is_no_task_under_the_claims_card_is_refused
     assert out.splitlines() == [
         f"REFUSED -- commit {wrong[:12]} (another card's piece): card/7 brings it, naming "
         f"plan#{named}, but {why}, so it builds no piece of plan#7: reword it to name the task "
-        "under plan#7 it builds, then push card/7 again",
+        "under plan#7 it builds, " + _REWRITTEN,
         verdict("card/7", 1, 1, tasks=1)]
     assert github.asked == [[7, 12], [named]]
 
@@ -151,7 +157,7 @@ def test_a_commit_naming_its_task_then_another_cards_is_refused_for_the_other(ch
     assert (status, out.splitlines()) == (1, [
         f"REFUSED -- commit {both[:12]} (two pieces at once): card/7 brings it, naming plan#21, "
         "but task plan#21 is under plan#9, not plan#7, so it builds no piece of plan#7: reword "
-        "it to name the task under plan#7 it builds, then push card/7 again",
+        "it to name the task under plan#7 it builds, " + _REWRITTEN,
         verdict("card/7", 1, 1, tasks=1)])
     assert github.asked == [[7, 12], [21]]
 
@@ -180,6 +186,21 @@ def test_a_claim_made_before_the_hook_is_held_from_the_commits_made_once_it_take
     status, out, _ = check(onto, _ended(root, after), "card/7", github=_cards())
     assert (status, out.splitlines()) == (1, [_unnamed(after, "work after the hook"),
                                               verdict("card/7", 1, 1, tasks=1)])
+
+
+def test_a_claim_made_before_the_hook_that_rebases_onto_dev_is_held_from_its_first_commit(
+        check, code):
+    """The same claim REBASED onto dev, which took the hook in, rather than merging it: its
+    claim commit and its work before the hook are made again on a tree holding the hook, so
+    that work, naming no task, is refused too (``_stamps``'s module docstring)."""
+    root, base = code
+    onto = _hooked(root, base)
+    before = commit_files(root, _claimed(root, onto), "work before the hook", {"a.py": "a\n"})
+    after = commit_files(root, _begun(root, before), "work after the hook", {"b.py": "b\n"})
+    status, out, _ = check(onto, _ended(root, after), "card/7", github=_cards())
+    assert (status, out.splitlines()) == (1, [_unnamed(before, "work before the hook"),
+                                              _unnamed(after, "work after the hook"),
+                                              verdict("card/7", 1, 2, tasks=1)])
 
 
 def test_work_a_claim_was_made_on_is_not_held_and_work_after_it_is(check, code):

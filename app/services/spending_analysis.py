@@ -85,6 +85,7 @@ from app.services.transfer_legs import (
     PlanParent,
     TransferLeg,
     expense_legs,
+    preload_side_records,
 )
 from app.utils.amount_relationships import transfer_pricing_load_options
 from app.utils.balance_predicates import settled_status_ids
@@ -253,11 +254,10 @@ def query_settled_expenses(
         .all()
     )
     # pylint: enable=duplicate-code
-    legs = expense_legs(set_transfer_legs_in_periods(
+    return _settled_items(rows, set_transfer_legs_in_periods(
         cash_flow, scenario_id, period_ids,
         Transfer.status_id.in_(settled_status_ids()),
     ))
-    return PlanItems.of(rows, legs)
 
 
 def query_settled_expenses_in_span(
@@ -351,7 +351,35 @@ def query_settled_expenses_in_span(
         .order_by(Transfer.id)
         .all()
     )
-    return PlanItems.of(rows, expense_legs(set_transfer_legs(cash_flow, transfers)))
+    return _settled_items(rows, set_transfer_legs(cash_flow, transfers))
+
+
+def _settled_items(rows: list[Transaction], legs: list[TransferLeg]) -> PlanItems:
+    """Return *rows* and the expense half of *legs* as the window's items, every record loaded.
+
+    Where the report's two settled loaders (:func:`query_settled_expenses`,
+    :func:`query_settled_expenses_in_span`) meet.  The timeliness metric
+    (:func:`payment_timeliness_from_txns`) reads every settled item's RECORD:
+    a row's through its ``entries``, which each loader's query loads
+    (``selectinload``), and a leg's off its transfer's side list, loaded here
+    for every leg in ONE statement
+    (``transfer_legs.preload_side_records``, ruling **plan#2136**), where it
+    would otherwise cost a query per leg.  The grid's leg loader loaded them
+    for every reader until that ruling, the grid, the dashboard and the
+    calendar included, which read none.
+
+    Args:
+        rows: The window's settled expense rows, ``entries`` loaded.
+        legs: The legs the set draws for the window's settled transfers,
+            either side.
+
+    Returns:
+        The :class:`~app.services.cash_flow_set.PlanItems`: *rows*, then the
+        EXPENSE legs (:func:`~app.services.transfer_legs.expense_legs`).
+    """
+    spent = expense_legs(legs)
+    preload_side_records(leg.transfer for leg in spent)
+    return PlanItems.of(rows, spent)
 
 
 def resolved_actual_amount(parent: PlanParent, basis: AmountBasis) -> Decimal:

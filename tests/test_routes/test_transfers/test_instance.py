@@ -723,7 +723,7 @@ class TestTransferInstance:
 
             db.session.refresh(xfer)
             for account_id in (xfer.from_account_id, xfer.to_account_id):
-                leg = transfer_legs.grid_transfer_leg(xfer, account_id)
+                leg = transfer_legs.leg_of(xfer, account_id)
                 assert settled_contribution(parent_of(leg)) == Decimal("0")
 
     def test_update_other_users_transfer(self, app, auth_client, seed_user):

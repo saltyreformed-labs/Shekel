@@ -19,7 +19,6 @@ from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.services.transfer_legs import (
     TransferLeg,
-    grid_transfer_leg,
     leg_label,
     leg_of,
     transfer_side_leg,
@@ -181,7 +180,7 @@ class TestBothSidesShowTheTransfer:
 
         Each side is read through two of the doors to a leg: by SIDE
         (``transfer_side_leg``, how the transfer service reads one) and by
-        ACCOUNT (``grid_transfer_leg``, through ``leg_of``, how the grid and
+        ACCOUNT (``leg_of``, how the grid and
         the fold reach one), and its amount through ``amounts_by_key``,
         the producer the grid prices a leg's cell with.
         """
@@ -290,10 +289,10 @@ class TestBothSidesShowTheTransfer:
                         transfer_side_leg(row, is_income=True), basis,
                     ),
                     "expense by account": _shown(
-                        grid_transfer_leg(row, row.from_account_id), basis,
+                        leg_of(row, row.from_account_id), basis,
                     ),
                     "income by account": _shown(
-                        grid_transfer_leg(row, row.to_account_id), basis,
+                        leg_of(row, row.to_account_id), basis,
                     ),
                 }
                 for label, row in rows.items()
@@ -482,7 +481,7 @@ class TestALegsDisplayProjections:
         the input come first at each read: the row is linked and recurs, and
         it is Projected with no side carrying a record before the settle, and
         every side carries one after it.  Each side is read through two
-        doors: by ACCOUNT (``grid_transfer_leg``, the grid's) and by SIDE
+        doors: by ACCOUNT (``leg_of``, the grid's) and by SIDE
         (``transfer_side_leg``, the transfer service's).  It asks
         ``template_id`` and ``recurs`` alone; where a saved side's label is
         graded, the label case says.

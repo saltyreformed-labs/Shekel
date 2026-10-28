@@ -43,7 +43,7 @@ from app.services.pay_calendar import PayCalendar
 from app.utils.dates import display_today
 from app.services.cash_ledger import derived_amount_basis, resolve_amount
 from app.services.row_valuation import settled_contribution
-from app.services.transfer_legs import grid_transfer_leg, parent_of
+from app.services.transfer_legs import leg_of, parent_of
 from app.services.spending_report_service import (
     Comparison,
     SpendingWindow,
@@ -1708,8 +1708,8 @@ class TestATransferIsALegOfItsParent:
             basis = derived_amount_basis(
                 seed_user["user"].id, seed_user["scenario"].id,
             )
-            settled_leg = grid_transfer_leg(settled, checking.id)
-            planned_leg = grid_transfer_leg(planned, checking.id)
+            settled_leg = leg_of(settled, checking.id)
+            planned_leg = leg_of(planned, checking.id)
 
             assert settled_contribution(parent_of(settled_leg)) == Decimal("240.00")
             assert resolve_amount(parent_of(settled_leg), basis) == Decimal("250.00")
@@ -2498,7 +2498,7 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
             )
             db.session.commit()
 
-            expense_leg = grid_transfer_leg(xfer, seed_user["account"].id)
+            expense_leg = leg_of(xfer, seed_user["account"].id)
 
             surprises = _build_surprises(
                 [expense_leg],

@@ -55,9 +55,11 @@ this step exists to stop reading.
 and its cell's doors are the transfer's own routes.  A leg answers one more
 thing: its RECORD, the covering movement the status seam wrote when the
 transfer settled (:attr:`~TransferLeg.record`), read off the transfer's list
-for that side since ruling **plan#1984** -- the grid's loader pre-loads the
-lists of every leg it draws (:func:`preload_side_records`), the fold's plan
-half reads none.
+for that side since ruling **plan#1984** -- a loader whose readers read
+records pre-loads them in one statement (:func:`preload_side_records`; both
+sides of one transfer, :func:`transfer_sides`), and one whose readers read
+none loads none: the grid's draws legs and reads no record, nor does the
+fold's plan half (ruling **plan#2136**).
 **R-BAL87's text says "its dated covering movement"; the record here is
 that movement dated OR kept un-dated across a revert** (ruling **R-BAL61**),
 one word wider than the ruling's, because a side's list holds its record
@@ -244,7 +246,6 @@ from app.services.transfer_legs._leg import (
     transfer_side_leg,
 )
 from app.services.transfer_legs._records import (
-    grid_transfer_leg,
     grid_transfer_legs,
     held_transfer_entries,
     movement_parent,
@@ -257,6 +258,7 @@ from app.services.transfer_legs._records import (
     transfer_family_movements,
     transfer_holds_a_movement,
     transfer_movement_rows,
+    transfer_sides,
     transfers_holding_records,
 )
 
@@ -268,7 +270,6 @@ __all__ = [
     "TransferLeg",
     "cell_key",
     "expense_legs",
-    "grid_transfer_leg",
     "grid_transfer_legs",
     "held_transfer_entries",
     "is_leg_key",
@@ -288,5 +289,6 @@ __all__ = [
     "transfer_holds_a_movement",
     "transfer_movement_rows",
     "transfer_side_leg",
+    "transfer_sides",
     "transfers_holding_records",
 ]

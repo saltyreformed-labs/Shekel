@@ -65,7 +65,7 @@ from app.services.match_press import Press
 from app.services.planned_rows_books import reject_revert_below_the_books
 from app.services.settle_day import recorded_settle_day
 from app.services.state_machine import verify_transition
-from app.services.transfer_legs import TransferLeg, transfer_side_leg
+from app.services.transfer_legs import TransferLeg, transfer_sides
 from app.services.transfer_service._side_days import (
     NO_DAYS,
     PairDays,
@@ -77,21 +77,6 @@ from app.utils.balance_predicates import (
     settled_status_ids,
 )
 from app.utils.dates import display_today
-
-
-def _side_legs(transfer: Transfer) -> "tuple[TransferLeg, TransferLeg]":
-    """Return the transfer's ``(expense, income)`` legs, each reading its record as it stands.
-
-    A leg reads its side's record LIVE, off the transfer's list for that side
-    (ruling **plan#1984**), so a record an earlier write of the same request
-    appended is what the writer reads, and no leg built before a write can
-    hold a stale one.  Until then the record was a field this filled by a
-    query per side, and each writer below had to read the legs afresh.
-    """
-    return (
-        transfer_side_leg(transfer, is_income=False),
-        transfer_side_leg(transfer, is_income=True),
-    )
 
 
 def _resolved_days(
@@ -116,7 +101,7 @@ def _resolved_days(
 
     Args:
         legs: The ``(expense, income)`` legs with their records
-            (:func:`_side_legs`).
+            (``transfer_legs.transfer_sides``).
         stated: What the act states, already admitted by its verb.
         fallback_day: The day both sides share when neither holds a day of
             its own (:func:`_fallback_day`).
@@ -341,7 +326,10 @@ def apply_status_to_all_three(
     # **R-PC97**).
     reject_revert_below_the_books(transfer, new_status_id)
     reject_stated_days_without_settle(new_status_id, stated)
-    legs = _side_legs(transfer)
+    # Both sides' records in ONE statement (ruling plan#2136), each read LIVE
+    # off the transfer's list for its side (ruling plan#1984), so a record an
+    # earlier write of the same request appended is what this act reads.
+    legs = transfer_sides(transfer)
     reject_stated_day_on_a_zero_close(legs, stated, settlement)
     # Each SIDE's day, resolved before either side is written; out of the
     # band the arm un-dates both, so nothing is resolved there.

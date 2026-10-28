@@ -117,7 +117,7 @@ from app.utils.balance_predicates import (
     is_projected_clause,
 )
 
-from ._leg_valuation import leg_candidate, leg_loads, leg_price
+from ._leg_valuation import leg_candidate, leg_price, offered_legs
 from ._subjects import CandidateRow, Candidates, HeldElsewhere, RowKind
 from ._valuation import (
     held_elsewhere_of,
@@ -662,13 +662,7 @@ def _leg_candidates(
     """
     candidates = []
     unpriceable = []
-    legs = transfer_legs.offerable_transfer_legs(
-        account_id, calendar.user_id, period_ids, options=leg_loads(),
-    )
-    # Each candidate states its leg's day (``leg_candidate``), read off the
-    # side's record (ruling plan#1984), so every side's list is loaded in ONE
-    # statement rather than one per offered leg.
-    transfer_legs.preload_side_records(leg.transfer for leg in legs)
+    legs = offered_legs(account_id, calendar.user_id, period_ids)
     for leg in legs:
         amount = leg_price(leg, basis)
         if amount is None:

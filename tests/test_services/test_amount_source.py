@@ -1961,7 +1961,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
         xfer = _loan_payment(seed_user, derive=True)
         db.session.commit()
         basis = _basis_for(seed_user)
-        leg = transfer_legs.grid_transfer_leg(xfer, xfer.from_account_id)
+        leg = transfer_legs.leg_of(xfer, xfer.from_account_id)
 
         displayed = amounts_by_key([leg], basis)[leg.cell_key]
         booked = transfer_settle.leg_settle_amount(leg, basis)

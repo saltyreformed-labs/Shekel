@@ -10,7 +10,8 @@ subject joined it (ruling **balance:R-IR**: the session that breaks a module
 splits it, by SUBJECT); the seam is the KIND.  What a leg is worth
 (:func:`leg_price`), what it is called (:func:`leg_candidate_label`), the one
 construction the offer set and the re-price share (:func:`leg_candidate`) and
-the re-price's LEG arm (:func:`repriced_leg`) live here.  Which side is a LEG
+the re-price's LEG arm (:func:`repriced_leg`), and the one loader both
+read their legs through (:func:`offered_legs`), live here.  Which side is a LEG
 is the loader's (``transfer_legs.offerable_transfer_legs``: its transfer
 Projected, whose sides hold no dated record by the status-band rule); a
 side whose money has moved is its dated record, a SETTLEMENT (ruling
@@ -69,8 +70,8 @@ def leg_price(
     to count.
 
     Args:
-        leg: The still-planned leg, its transfer loaded with
-            :func:`leg_loads`.
+        leg: The still-planned leg, its transfer loaded by
+            :func:`offered_legs`.
         basis: The PASS's :class:`~app.services.cash_ledger.AmountBasis`,
             threaded for :func:`~._valuation.transaction_price`'s reason.
 
@@ -86,19 +87,43 @@ def leg_price(
         return None
 
 
-def leg_loads() -> tuple:
-    """Return the loader options a LEG candidate reads, rooted at ``Transfer``.
+def offered_legs(
+    account_id: int,
+    owner_id: int,
+    period_ids,
+    *,
+    transfer_ids=None,
+) -> list[TransferLeg]:
+    """Return the still-planned legs on *account_id* a statement could settle, loaded to offer.
 
-    What :func:`leg_price` walks (the amount model's chain,
-    ``amount_relationships.transfer_pricing_load_options``); the endpoints the
-    label composes from and the status ride the transfer row itself
-    (``lazy="joined"``).  Stated once for the offer set's arm and the
-    re-price, so the two cannot load different chains.
+    The LEG arm's ONE loader, for the offer set
+    (``_candidates._leg_candidates``) and the re-price (:func:`repriced_leg`),
+    so the two cannot load differently: ``transfer_legs.offerable_transfer_legs``
+    with what a candidate reads.  That is what :func:`leg_price` walks (the
+    amount model's chain,
+    ``amount_relationships.transfer_pricing_load_options``; the endpoints the
+    label composes from and the status ride the transfer row itself,
+    ``lazy="joined"``), and each side's record, which :func:`leg_candidate`
+    reads for the leg's day: every leg's loaded in ONE statement
+    (``transfer_legs.preload_side_records``, ruling **plan#2136**), where the
+    re-price read its leg's by a query of its own until then.
+
+    Args:
+        account_id: The cash account the statement is for.
+        owner_id: The owner whose transfers may be offered.
+        period_ids: The pay-period ids an offer may be filed in.
+        transfer_ids: The re-price's narrowing to the transfer a row names;
+            ``None`` (the offer set) means every transfer in scope.
 
     Returns:
-        A tuple of loader options.
+        One leg per offerable transfer, unordered, its sides' records loaded.
     """
-    return transfer_pricing_load_options()
+    legs = transfer_legs.offerable_transfer_legs(
+        account_id, owner_id, period_ids,
+        options=transfer_pricing_load_options(), transfer_ids=transfer_ids,
+    )
+    transfer_legs.preload_side_records(leg.transfer for leg in legs)
+    return legs
 
 
 def leg_candidate_label(leg: TransferLeg) -> str:
@@ -196,9 +221,9 @@ def repriced_leg(
     ``None`` and the act naming it is refused as stale -- the scope asked
     again rather than a subset of it restated here.
     """
-    legs = transfer_legs.offerable_transfer_legs(
+    legs = offered_legs(
         account_id, calendar.user_id, calendar.saved_by_id().keys(),
-        options=leg_loads(), transfer_ids=(row.row_id,),
+        transfer_ids=(row.row_id,),
     )
     if not legs:
         return None

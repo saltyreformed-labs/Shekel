@@ -46,7 +46,7 @@ from app.models.transfer import Transfer
 from app.services import status_seam
 from app.services.match_press import Press
 from app.services.settle_day import recorded_settle_day
-from app.services.transfer_legs import TransferLeg, transfer_side_leg
+from app.services.transfer_legs import TransferLeg, transfer_sides
 from app.services.transfer_service._side_days import (
     NO_DAYS,
     PairDays,
@@ -299,13 +299,10 @@ def _apply_endpoint_move(
     """
     if not endpoints.vacated:
         return
+    # Both sides' records in ONE statement (ruling plan#2136).
     moving = tuple(
-        (leg, account)
-        for leg, account in zip(
-            (
-                transfer_side_leg(transfer, is_income=False),
-                transfer_side_leg(transfer, is_income=True),
-            ),
+        zip(
+            transfer_sides(transfer),
             (endpoints.from_account, endpoints.to_account),
         )
     )

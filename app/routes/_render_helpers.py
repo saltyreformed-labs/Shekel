@@ -733,10 +733,10 @@ def render_transaction_cell(item: PlanItem, **extra: Any) -> str:
     A side's ``entry_sums`` is empty because a side holds no purchase
     (:attr:`~app.services.transfer_legs.TransferLeg.purchases`).  The
     transfer doors hand it the side
-    :func:`~app.services.transfer_legs.grid_transfer_leg` builds after the
-    act, its record pre-loaded and read live off the transfer, because the
-    act may have just written that record
-    (``routes/transfers/_helpers._render_leg_surface``).
+    :func:`~app.services.transfer_legs.leg_of` builds after the act, because
+    the act may have just moved it
+    (``routes/transfers/_helpers._render_leg_surface``); nothing here reads
+    its record (ruling **plan#2136**).
     ``render_transfer_leg_cell`` was this function spelled again for a leg,
     with its own amounts producer and a hand-passed empty ``entry_sums``,
     until that ruling.

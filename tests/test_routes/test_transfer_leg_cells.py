@@ -413,7 +413,7 @@ class TestTheTransferDoorsServeTheLeg:
         from app.models.transaction import Transaction
         from app.models.transfer import Transfer
         from app.routes._mobile_card import render_mobile_card
-        from app.services.transfer_legs import grid_transfer_leg
+        from app.services.transfer_legs import leg_of
         from tests._test_helpers import one_off_row_of
 
         with app.app_context():
@@ -446,7 +446,7 @@ class TestTheTransferDoorsServeTheLeg:
                     card_prefix="tp", can_edit=True,
                 )
                 leg_card = render_mobile_card(
-                    grid_transfer_leg(
+                    leg_of(
                         db.session.get(Transfer, xfer_id), checking_id,
                     ),
                     card_prefix="tp", can_edit=True,

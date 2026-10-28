@@ -36,8 +36,8 @@ from app.services.transaction_service import retained_amounts_by_key
 from app.services.transfer_legs import (
     TransferLeg,
     cell_key,
-    grid_transfer_leg,
     grid_transfer_legs,
+    leg_of,
     parent_of,
     preload_side_records,
 )
@@ -81,8 +81,8 @@ def _closed_at_zero(seed_user, session, period):
     )
     session.commit()
     return closed, [
-        grid_transfer_leg(closed, checking.id),
-        grid_transfer_leg(closed, savings.id),
+        leg_of(closed, checking.id),
+        leg_of(closed, savings.id),
     ]
 
 
@@ -174,9 +174,17 @@ class TestALegsRecordIsItsCoveringMovement:
 
             assert side_records_by_key(settled) == {}
 
-    def test_grid_transfer_leg_loads_one_leg_with_its_record(
+    def test_leg_of_builds_one_leg_that_reads_its_record(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
+        """One leg built from its ACCOUNT reads the movement on that account, dated.
+
+        Named ``test_grid_transfer_leg_loads_one_leg_with_its_record`` until
+        ruling **plan#2136** deleted ``grid_transfer_leg``, which pre-loaded
+        both sides' records for a leg's fragment that reads none; its
+        assertions are unchanged over ``leg_of``, whose leg reads the record
+        off its transfer's list.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = _savings(seed_user)
@@ -186,7 +194,7 @@ class TestALegsRecordIsItsCoveringMovement:
             )
             db.session.commit()
 
-            leg = grid_transfer_leg(settled, savings.id)
+            leg = leg_of(settled, savings.id)
 
             assert leg == TransferLeg(
                 transfer=settled, account_id=savings.id, is_income=True,
@@ -298,7 +306,7 @@ class TestTheLegMapProducers:
                 amount=_AMOUNT,
             )
             db.session.commit()
-            leg = grid_transfer_leg(transfer, checking.id)
+            leg = leg_of(transfer, checking.id)
             key = leg.cell_key
 
             assert amounts_by_key(
@@ -329,8 +337,8 @@ class TestTheLegMapProducers:
             )
             db.session.commit()
             legs = [
-                grid_transfer_leg(settled, checking.id),
-                grid_transfer_leg(settled, savings.id),
+                leg_of(settled, checking.id),
+                leg_of(settled, savings.id),
             ]
 
             assert settled_amounts_by_key(legs) == {
@@ -400,8 +408,8 @@ class TestTheLegMapProducers:
                 )
             db.session.commit()
 
-            typed_leg = grid_transfer_leg(typed, checking.id)
-            resolved_leg = grid_transfer_leg(resolved, checking.id)
+            typed_leg = leg_of(typed, checking.id)
+            resolved_leg = leg_of(resolved, checking.id)
 
             assert typed_leg.record is not None and typed_leg.record.settled_on is None
             assert retained_amounts_by_key([typed_leg, resolved_leg]) == {
@@ -436,7 +444,7 @@ class TestTheLegContributionTwins:
                 amount=_AMOUNT,
             )
             db.session.commit()
-            leg = grid_transfer_leg(transfer, checking.id)
+            leg = leg_of(transfer, checking.id)
             basis = basis_for(checking, seed_user["scenario"])
 
             assert settled_figure(parent_of(leg)) is None
@@ -465,7 +473,7 @@ class TestTheLegContributionTwins:
                 settled_on=date(2026, 2, 3),
             )
             db.session.commit()
-            leg = grid_transfer_leg(settled, checking.id)
+            leg = leg_of(settled, checking.id)
             basis = basis_for(checking, seed_user["scenario"])
 
             assert settled_figure(parent_of(leg)) == Decimal("240.00")
@@ -504,7 +512,7 @@ class TestTheLegContributionTwins:
                 seed_user, checking, savings, seed_periods[2],
             )
             db.session.commit()
-            leg = grid_transfer_leg(cancelled, checking.id)
+            leg = leg_of(cancelled, checking.id)
 
             assert settled_figure(parent_of(leg)) is None
             assert fixed_contribution(parent_of(leg)) == Decimal("0")
@@ -539,7 +547,7 @@ class TestALegsSettleDayAndTimeliness:
                 due_date=date(2026, 2, 6),
             )
             db.session.commit()
-            leg = grid_transfer_leg(settled, checking.id)
+            leg = leg_of(settled, checking.id)
             side_day = transfer_side_settle_day(
                 db.session, settled.id, checking.id,
             ).day
@@ -564,8 +572,8 @@ class TestALegsSettleDayAndTimeliness:
                 amount=_AMOUNT, settled_on=date(2026, 2, 17),
             )
             db.session.commit()
-            planned_leg = grid_transfer_leg(planned, checking.id)
-            undated_leg = grid_transfer_leg(undated, checking.id)
+            planned_leg = leg_of(planned, checking.id)
+            undated_leg = leg_of(undated, checking.id)
 
             assert planned_leg.settled_on is None
             assert planned_leg.days_paid_before_due is None

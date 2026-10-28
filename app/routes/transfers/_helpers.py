@@ -30,7 +30,7 @@ from app.routes._render_helpers import (
     render_transaction_cell,
     render_transfer_cell,
 )
-from app.services.transfer_legs import grid_transfer_leg
+from app.services.transfer_legs import leg_of
 from app.utils.digit_strings import parse_row_id
 from app.utils.error_fragments import designed_error
 
@@ -261,10 +261,11 @@ def _resolve_leg_request(xfer) -> "_LegRequest | None":
 def _render_leg_surface(xfer, leg: _LegRequest, **extra):
     """Render the leg's cell or card, whichever the request came from.
 
-    The leg is built here, record included
-    (:func:`~app.services.transfer_legs.grid_transfer_leg`), rather than
-    kept from before the act, because the act may have just written that
-    record (a settle does).  It is drawn by the renderers a row's door draws
+    The leg is built here (:func:`~app.services.transfer_legs.leg_of`)
+    rather than kept from before the act, because the act may have just
+    moved it (a settle does).  Its record is not loaded: neither renderer
+    reads one (ruling **plan#2136**; it was pre-loaded until then, a
+    statement per fragment that nothing read).  It is drawn by the renderers a row's door draws
     a row with (ruling **plan#1983**):
     :func:`~app.routes._mobile_card.render_mobile_card` for the card, which
     takes only the refusal of *extra*, as a row's card does, and
@@ -281,7 +282,7 @@ def _render_leg_surface(xfer, leg: _LegRequest, **extra):
     Returns:
         Rendered HTML string.
     """
-    side = grid_transfer_leg(xfer, leg.account_id)
+    side = leg_of(xfer, leg.account_id)
     if leg.target.render_mode == "mobile_card":
         return render_mobile_card(
             side, card_prefix=leg.target.card_prefix,

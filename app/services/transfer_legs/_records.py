@@ -11,8 +11,8 @@ which transfer and which side.  Every loader in this package that asks the
 join lives here -- the settled half's
 :func:`transfer_movement_rows` / :func:`recorded_transfer_legs`, the posting
 writer's :func:`transfer_family_movements`, the pre-load of many sides'
-records (:func:`preload_side_records`, which the grid's
-:func:`grid_transfer_leg` / :func:`grid_transfer_legs` call), the recurrence
+records (:func:`preload_side_records`, which :func:`transfer_sides` calls for
+one transfer's two), the recurrence
 engine's :func:`transfers_holding_records`, and every door's
 "this transfer holds a payment" (:func:`transfer_holds_a_movement` /
 :func:`held_transfer_entries`) -- beside :func:`movement_parent`, the join's
@@ -422,10 +422,22 @@ def preload_side_records(transfers: Iterable[Transfer]) -> None:
 
     ONE statement where SQLAlchemy's ``selectinload`` over the two
     relationships is two, and it takes transfers the caller has ALREADY
-    loaded, which a loader option cannot: the grid's window and the loan's
-    settled payments are loaded by their readers' own queries.  It replaced
-    ``covering_movements_by_leg``, a ``{(transfer id, account id): record}``
-    map built beside the transfer's own lists, statement for statement.
+    loaded, which a loader option cannot: the Spending report's settled items
+    and the loan's settled payments are loaded by their readers' own queries.
+    It replaced ``covering_movements_by_leg``, a ``{(transfer id, account
+    id): record}`` map built beside the transfer's own lists, statement for
+    statement.
+
+    **Called by a reader that READS records, and by no other** (ruling
+    **plan#2136**): the Spending report's settled items
+    (``spending_analysis``), the loan's settled payments
+    (``loan_loaders.settled_income_legs``), statement match's still-planned
+    offers (``statement_match._leg_valuation.offered_legs``), the transfer
+    popover and its PATCH (``routes/transfers``) and, for one transfer's two
+    sides, :func:`transfer_sides`.  A loader whose readers read none -- the
+    grid's :func:`grid_transfer_legs` -- loads none, where it spent this
+    statement on every grid, dashboard, pulse and calendar render until that
+    ruling.
 
     Args:
         transfers: The parents whose sides' records are about to be read.
@@ -660,41 +672,55 @@ def parent_entries(movement: TransactionEntry) -> list[TransactionEntry]:
     return side_movements(transfer, is_income=is_income)
 
 
-def grid_transfer_leg(transfer: Transfer, account_id: int) -> TransferLeg:
-    """Return ONE leg for a grid fragment, both sides' records pre-loaded.
+def transfer_sides(transfer: Transfer) -> "tuple[TransferLeg, TransferLeg]":
+    """Return *transfer*'s ``(expense, income)`` legs, both sides' records loaded in ONE statement.
 
-    What a transfer door renders back into a leg's cell (leaf
-    ``X-bi-6-1``): :func:`grid_transfer_legs` over one transfer and one
-    side, stated separately so the fragment renderers name what they load.
+    The transfer writer's view of the pair (ruling **plan#2136**): every act
+    that reads both sides' records -- the status applier's seam pass
+    (``transfer_service._status``, behind Mark Paid, a settle, a revert, a
+    cancel and statement match's accept) and the endpoint move
+    (``transfer_service._endpoints``) -- builds them here, so the two lists
+    load together (:func:`preload_side_records`) where each side's lazy read
+    was a query of its own.  A list the session already holds is left as it
+    is, so an act that runs after another in the same request reads what that
+    one wrote.
 
     Args:
-        transfer: The parent.
-        account_id: The account the leg is on.
+        transfer: The parent transfer.
 
     Returns:
-        The leg, its record readable without a further query.
-
-    Raises:
-        ValueError: When *account_id* is neither endpoint (from
-            :func:`leg_of`).
+        ``(expense leg, income leg)``, each built by
+        :func:`transfer_side_leg`.
     """
     preload_side_records((transfer,))
-    return leg_of(transfer, account_id)
+    return (
+        transfer_side_leg(transfer, is_income=False),
+        transfer_side_leg(transfer, is_income=True),
+    )
 
 
 def grid_transfer_legs(
     transfers: Iterable[Transfer], shown_accounts,
 ) -> list[TransferLeg]:
-    """Return the legs a grid draws for *transfers*, their records pre-loaded.
+    """Return the legs a grid draws for *transfers*, their records NOT loaded.
 
     The grid-window loader (leaf ``X-bi-6-1``, ruling **R-BAL87**): for each
     transfer, one :class:`TransferLeg` per account *shown_accounts* names for
-    it, every side's record loaded by ONE :func:`preload_side_records`.
-    Which accounts are shown is the
+    it.  Which accounts are shown is the
     caller's rule -- :func:`app.services.cash_flow_set.leg_accounts_shown`
     for the paycheck grid, where a transfer between two members shows once
     from the balance line's side (ruling **R-CC23**) -- taken as a function
     so this loader states no set of its own.
+
+    **It loads no record, because the grid reads none** (ruling
+    **plan#2136**): the grid, the dashboard's bills and pulse, the calendar
+    and a leg's fragments draw a leg off its transfer, and the only records
+    they meet are the cash fold's, which fills its own
+    (:func:`recorded_transfer_legs`).  It pre-loaded every side's list until
+    that ruling, one statement per render that nothing read.  Its two callers
+    whose readers DO read a record pre-load them themselves: the Spending
+    report's settled items (``spending_analysis``) and the loan's settled
+    payments (``loan_loaders.settled_income_legs``).
 
     Args:
         transfers: The parents in the window, loaded by the caller with the
@@ -705,8 +731,6 @@ def grid_transfer_legs(
     Returns:
         The legs, in transfer order then side order; ``[]`` for no transfers.
     """
-    transfers = list(transfers)
-    preload_side_records(transfers)
     return [
         leg_of(transfer, account_id)
         for transfer in transfers

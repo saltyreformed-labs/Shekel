@@ -271,7 +271,7 @@ class TestAFigureCorrection:
                 .first()
             )
             transfer_service.record_leg_clearing(
-                transfer_legs.grid_transfer_leg(xfer, xfer.from_account_id),
+                transfer_legs.leg_of(xfer, xfer.from_account_id),
                 anchor.id,
             )
             db.session.commit()

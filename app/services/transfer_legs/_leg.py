@@ -576,8 +576,10 @@ def transfer_side_leg(transfer: Transfer, *, is_income: bool) -> TransferLeg:
     grid, the fold's plan half), :func:`recorded_transfer_legs` and
     :func:`movement_parent` from a MOVEMENT whose link names its side
     (:func:`_leg_is_income`), and the transfer service from the side ITSELF
-    (``transfer_service._status._side_legs``, ``_endpoints``,
-    ``_settle.record_leg_clearing``, since leaf ``X-bi-6-4d-1``).  Either way
+    (``_settle.record_leg_clearing`` since leaf ``X-bi-6-4d-1``, and the
+    status applier and the endpoint move through
+    :func:`~._records.transfer_sides`, which loads both sides' records first,
+    since ruling **plan#2136**).  Either way
     the account is the endpoint on that side, so
     ``ck_transfers_different_accounts`` keeps the pair ``(transfer,
     account)`` a leg's identity (:attr:`TransferLeg.cell_key`).

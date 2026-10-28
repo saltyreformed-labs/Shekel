@@ -135,8 +135,8 @@ def render_mobile_card(
     Args:
         item: The row or transfer side just acted on, with a row's
             ``entries`` and ``template`` accessible.  A transfer door hands
-            the side :func:`~app.services.transfer_legs.grid_transfer_leg`
-            builds after the act, record included.
+            the side :func:`~app.services.transfer_legs.leg_of` builds after
+            the act; a card reads no side's record (ruling **plan#2136**).
         card_prefix: The per-tab id namespace the requesting card used
             (``"tp"`` for This Period and the companion view; ``""`` for
             prefix-less direct renders).  Drives the wrapper id so the

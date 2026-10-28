@@ -347,14 +347,17 @@ def touched_transfers_clause(cash_flow: CashFlowSet):
 def set_transfer_legs(
     cash_flow: CashFlowSet, transfers: Iterable[Transfer],
 ) -> list[TransferLeg]:
-    """Return the legs the set draws for *transfers*, their records pre-loaded.
+    """Return the legs the set draws for *transfers*, their records not loaded.
 
     :func:`~app.services.transfer_legs.grid_transfer_legs` under the set's
     own rule: one leg per account :func:`leg_accounts_shown` names for each
     transfer.  The leaf's loader takes the rule as a function so that it
     states no set of its own; this is where the set supplies it, ONCE, for
     every reader (leaf ``X-bi-6-1b``) -- the period-windowed ones through
-    :func:`set_transfer_legs_in_periods`, the rest with their own query.
+    :func:`set_transfer_legs_in_periods`, the rest with their own query.  A
+    reader that reads the legs' records pre-loads them itself (the Spending
+    report's settled items, ruling **plan#2136**); the grid, the dashboard and
+    the calendar read none.
 
     Args:
         cash_flow: The set.

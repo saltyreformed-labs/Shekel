@@ -79,7 +79,7 @@ from app.services import (
 from app.services.cash_ledger import derived_amount_basis
 from app.services.balance_at import BalanceContext
 from app.services.investment_dashboard_service import compute_dashboard_data
-from app.services.transfer_legs import grid_transfer_leg
+from app.services.transfer_legs import leg_of
 from app.utils.balance_predicates import is_projected_clause
 from tests._test_helpers import all_periods
 
@@ -429,7 +429,7 @@ def _transfer_settle(scenario_id):
 
 def _leg_settle_amount(transfer, account_id):
     """What settling *transfer* would book on its leg on *account_id*."""
-    leg = grid_transfer_leg(transfer, account_id)
+    leg = leg_of(transfer, account_id)
     return _money(transfer_service.leg_settle_amount(
         leg, derived_amount_basis(leg.user_id, leg.scenario_id),
     ))

@@ -83,10 +83,8 @@ def test_a_review_filed_under_a_card_whose_suite_stands_goes_above_it(code):
     assert _order(tracker) == [3, 2]
 
 
-def test_a_reclaim_finds_them_filed_whatever_their_text_and_state(code, capsys):
-    """Released and claimed again, plan#1 files none: its review done (closed by the tool) or
-    dropped, and its tasks titled as the constant but with another text, as plan#1885 and
-    plan#1886 were filed by hand."""
+def test_a_reclaim_finds_them_filed_whatever_their_state(code, capsys):
+    """Released and claimed again, plan#1 files none: its review done (closed by the tool)."""
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, "claim", "plan#1") == 0
@@ -98,11 +96,18 @@ def test_a_reclaim_finds_them_filed_whatever_their_text_and_state(code, capsys):
     assert tracker.writes == writes
     assert "\n  its finishing tasks are filed already (ruling plan#1875)\n" in (
         capsys.readouterr().out)
+
+
+def test_a_claim_finds_them_filed_by_hand_whatever_their_text_and_state(code):
+    """Filed by hand before the claim, as plan#1885 and plan#1886 were, titled as the constant
+    but the review dropped and the suite and pull request with another text: the claim files
+    none.  A test of its own, on a repository of its own, so plan#1 is released at most once
+    per test: ``_git.release`` names the branch it keeps to the second, so a second release
+    in the first one's second, of another tip, is refused (plan#1982)."""
     by_hand = FakeTracker()
     by_hand.add(1)
     by_hand.add_task(2, 1, title=REVIEW, is_open=False, state_reason="NOT_PLANNED")
     by_hand.add_task(3, 1, title=LAND, body="Run the suite, then open the pull request.")
-    _released(tracker, code)
     assert run(by_hand, code, "claim", "plan#1") == 0
     assert not by_hand.writes
 

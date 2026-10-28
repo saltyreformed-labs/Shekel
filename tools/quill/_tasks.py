@@ -148,7 +148,9 @@ def _holds_its_claim(root: Path, card: int, tip: str, then: str) -> None:
     claim holds: ``tip``, the claim's tip, fetched, is not in ``HEAD``'s history, the branch
     behind the claim or diverged from it.  What such a branch says is done and in progress
     is not the claim's, and its push would be refused, so the write is refused before it
-    reads either; ``then`` says what to run once the branch holds that work."""
+    acts on either; ``then`` says what to run once the branch holds that work.  ``quill
+    start`` (:func:`cmd_start`) and ``quill drop`` (:func:`record_drop`) each ask it before
+    their commit or push."""
     if not is_ancestor(root, tip, "HEAD"):
         branch = _git.card_branch(card)
         raise Refused(f"origin's {branch} holds work {branch} here does not (its tip "
@@ -200,11 +202,11 @@ def record_drop(tracker: Tracker, task: Card, root: Path, why: str, reads: _git.
     which read its card's file in git alone (:func:`_git.in_progress`).  Begun is read where
     the drop is recorded: on ``origin``'s claim (``reads``) and, with its card's branch
     checked out, at ``HEAD``, which may hold a start not yet pushed.  Recorded on that branch
-    checked out, and refused, with nothing written, anywhere else (:func:`_on_its_branch`): a
-    commit naming the task and deleting that file, saying ``why``, pushed (:func:`_git.drop`);
-    or, its drop recorded at ``HEAD`` and not yet on ``origin`` (a push a failure cut short),
-    the branch pushed.  A task never begun, or done, or under no card, writes nothing to
-    git."""
+    checked out, and refused, with nothing written, anywhere else (:func:`_on_its_branch`),
+    and while it lacks work the claim holds (:func:`_holds_its_claim`): a commit naming the
+    task and deleting that file, saying ``why``, pushed (:func:`_git.drop`); or, its drop
+    recorded at ``HEAD`` and not yet on ``origin`` (a push a failure cut short), the branch
+    pushed.  A task never begun, or done, or under no card, writes nothing to git."""
     if task.parent is None:
         return
     claim = reads.claims.get(task.parent)
@@ -214,6 +216,8 @@ def record_drop(tracker: Tracker, task: Card, root: Path, why: str, reads: _git.
     if not at_head and (claim is None or claim.in_progress != task.number):
         return
     _on_its_branch(tracker, task.number, root, "its drop", "drop a dropped piece")
+    if claim is not None:
+        _holds_its_claim(root, task.parent, claim.sha, f"drop plan#{task.number}")
     if at_head:
         sha = _git.drop(root, task.parent, task.number, task.title, why)
         print(f"  recorded its drop on {branch}: {sha[:12]}, pushed; it is in progress no "

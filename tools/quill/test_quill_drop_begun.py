@@ -1,14 +1,16 @@
 """``quill drop`` of a task begun (rulings plan#1900, plan#2009): the drop recorded in git on
 its card's branch, a commit deleting the card's file ``plan/doing/N``, before the tracker's
 close, so the piece is in progress no longer and the next
-begins; refused, writing nothing, off that branch; finished by the same command after a
-push it cut short; and a task closed on the web while begun says how its drop is recorded.
+begins; refused, writing nothing, off that branch and on one behind its claim or diverged from
+it; finished by the same command after a push it cut short; and a task closed on the web
+while begun says how its drop is recorded.
 Over the in-memory tracker (:class:`_fake.FakeTracker`) and the ``code`` fixture's real git.
 """
 from __future__ import annotations
 
 from tools.ci.scratch import run as _run
 from tools.quill import _git, commit_hook
+from tools.quill._fake import begun as _begun_elsewhere
 from tools.quill._fake import piece, run, two_tasks
 
 #: Card 1's branch, as ``quill claim plan#1`` checks it out.
@@ -100,12 +102,76 @@ def test_a_begun_task_dropped_off_its_branch_is_refused_writing_nothing(code, ca
     assert _tip(code) == tip == _on_origin(code)
 
 
-def test_a_drop_whose_push_failed_is_finished_by_the_same_command(code, capsys):
-    """``origin``'s branch holding work this one does not, the drop's push is refused and
+def test_a_drop_on_a_branch_behind_origins_claim_is_refused_writing_nothing(code, capsys):
+    """Another clone began plan#2 on ``origin``'s ``card/1``, so the branch here, the claim
+    alone, is behind it: the drop, which would push that behind branch, is refused, writing
+    nothing to git or the tracker; and so is the drop of a task the branch here says is
+    begun, once ``origin`` finished it and began the next, whose drop commit would be
+    refused at its push.  Once that work is brought in, the drop is recorded and pushed."""
+    tracker = two_tasks()
+    assert run(tracker, code, "claim", "plan#1") == 0
+    here, there = _tip(code), _begun_elsewhere(code, 1, 2)
+    writes = list(tracker.writes)
+    capsys.readouterr()
+    assert run(tracker, code, "drop", "plan#2", "--why", "split differently") == 1
+    assert (f"refused: origin's card/1 holds work card/1 here does not (its tip {there[:12]}), "
+            "so what is in progress on it is not read here: bring that work in first (`git "
+            "merge origin/card/1`), then drop plan#2\n") in capsys.readouterr().err
+    assert (tracker.writes, _tip(code), _on_origin(code)) == (writes, here, there)
+    _run(code, "merge", "--quiet", "--ff-only", f"origin/{BRANCH}")
+    here = _tip(code)
+    piece(code, 1, 2)
+    there = _begun_elsewhere(code, 1, 3)
+    assert run(tracker, code, "drop", "plan#2", "--why", "split differently") == 1
+    assert (f"its tip {there[:12]}), so what is in progress on it is not read here"
+            in capsys.readouterr().err)
+    assert (tracker.writes, _tip(code), _on_origin(code)) == (writes, here, there)
+    _run(code, "merge", "--quiet", "--ff-only", f"origin/{BRANCH}")
+    assert run(tracker, code, "drop", "plan#3", "--why", "split differently") == 0
+    assert _run(code, "log", "-1", "--format=%s", BRANCH) == "drop plan#3: piece b"
+    assert _on_origin(code) == _tip(code)
+    assert _git.in_progress(code, "HEAD", 1) is None
+
+
+def test_a_drop_on_a_branch_diverged_from_origins_claim_is_refused_writing_nothing(code,
+                                                                                  capsys):
+    """The branch here holds a commit of plan#2's piece ``origin``'s claim does not, and the
+    claim one it does not: the drop is refused before any write, so no drop commit stands
+    unpushed; once the claim's work is merged in, the drop is recorded and pushed."""
+    tracker = _begun(code)
+    there = piece(code, 1, 9)
+    _run(code, "commit", "--quiet", "--allow-empty", "-m", "work\n\nTask: plan#2")
+    here = _tip(code)
+    writes = list(tracker.writes)
+    capsys.readouterr()
+    assert run(tracker, code, "drop", "plan#2", "--why", "split differently") == 1
+    assert (f"refused: origin's card/1 holds work card/1 here does not (its tip {there[:12]})"
+            in capsys.readouterr().err)
+    assert (tracker.writes, _tip(code), _on_origin(code)) == (writes, here, there)
+    _run(code, "merge", "--quiet", "--no-edit", f"origin/{BRANCH}")
+    merged = _tip(code)
+    assert run(tracker, code, "drop", "plan#2", "--why", "split differently") == 0
+    assert _run(code, "rev-parse", f"{BRANCH}^") == merged
+    assert _on_origin(code) == _tip(code)
+    assert tracker.writes[len(writes):] == [("comment", 2, "Dropped: split differently"),
+                                            ("close", 2, "not_planned")]
+
+
+def test_a_drop_whose_push_failed_is_finished_by_the_same_command(code, capsys, monkeypatch):
+    """``origin``'s branch moving on after the drop read it, the drop's push is refused and
     nothing is written to the tracker; once that work is brought in, the same command pushes
     the drop recorded already, commits nothing more, and drops the task."""
     tracker = _begun(code)
-    piece(code, 1, 9)
+    read, moved = _git.read, []
+
+    def read_then_move(root, tips=None):
+        """The drop's read of git, then, once, another clone's push onto ``card/1``."""
+        reads = read(root, tips)
+        if not moved:
+            moved.append(piece(code, 1, 9))
+        return reads
+
+    monkeypatch.setattr(_git, "read", read_then_move)
     writes = list(tracker.writes)
     capsys.readouterr()
     assert run(tracker, code, "drop", "plan#2", "--why", "split differently") == 2

@@ -89,11 +89,13 @@ SCRATCH = "[L2 measurement] scratch"
 #: What stands in a recording for a string it may not keep.
 REDACTED = "[redacted: not a scratch card]"
 #: The keys whose strings are kept whichever card they belong to: none holds a
-#: card's text.
+#: card's text.  ``issue_field_name`` and ``data_type`` are an issue field's name and type in
+#: REST's answer to a create that writes one (plan#1811), which reads its Arc by that name
+#: (``_arcs.arc_answered``).
 _KEPT = frozenset({
-    "__typename", "authoredDate", "createdAt", "date", "editedAt", "endCursor",
-    "fullDatabaseId", "full_name", "id", "login", "merged_at", "message", "name",
-    "nameWithOwner", "node_id", "path", "ref", "repository_url", "sha", "state",
+    "__typename", "authoredDate", "createdAt", "data_type", "date", "editedAt", "endCursor",
+    "fullDatabaseId", "full_name", "id", "issue_field_name", "login", "merged_at", "message",
+    "name", "nameWithOwner", "node_id", "path", "ref", "repository_url", "sha", "state",
     "stateReason", "state_reason", "type",
 })
 #: The keys under which an object with no number is its enclosing card's own content: its
@@ -117,6 +119,11 @@ _STRING_OR_IGNORED = re.compile(
 #: The bodies quill PATCHes an issue with: retype, retitle, a new body, close, reopen.
 _PATCHES = frozenset(frozenset(keys) for keys in (
     {"type"}, {"title"}, {"body"}, {"state", "state_reason"}, {"state"}))
+#: The bodies quill files a card with (``_tracker.Tracker.create``): a task's, and a card's
+#: holding its Arc, which writes the issue field in the same call (plan#1811).
+_CREATES = frozenset(frozenset(keys) for keys in (
+    {"title", "body", "type", "labels"},
+    {"title", "body", "type", "labels", "issue_field_values"}))
 
 
 def _repo_url(place: Place) -> str:
@@ -179,7 +186,7 @@ _Allows = Callable[[re.Match, dict, Scratch], bool]
 _ROUTES: tuple[tuple[str, re.Pattern, _Allows], ...] = tuple(
     (method, re.compile(path), allows) for method, path, allows in (
         ("POST", r"/issues",
-         lambda _m, body, _s: set(body) == {"title", "body", "type", "labels"}
+         lambda _m, body, _s: frozenset(body) in _CREATES
          and str(body["title"]).startswith(SCRATCH)),
         ("PATCH", r"/issues/([0-9]+)",
          lambda m, body, s: int(m[1]) in s.numbers and frozenset(body) in _PATCHES

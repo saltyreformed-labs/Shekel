@@ -1,16 +1,16 @@
 {
  "scratch": {
   "numbers": [
-   243
+   260
   ],
   "ids": [
-   6069253136
+   6079939814
   ],
   "nodes": [
-   "I_kwDOVSOvzs8AAAABacF0EA"
+   "I_kwDOVSOvzs8AAAABamSE5g"
   ],
   "items": [
-   "PVTI_lADOFB5GWc4BoEsZzhECVM4"
+   "PVTI_lADOFB5GWc4BoEsZzhEM1OQ"
   ],
   "board": "PVT_kwDOFB5GWc4BoEsZ",
   "place": [
@@ -22,26 +22,67 @@
  "exchanges": [
   {
    "method": "POST",
+   "url": "https://api.github.com/graphql",
+   "body": {
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issueFields(first: 100) { totalCount nodes {\n    ... on IssueFieldSingleSelect { fullDatabaseId name } } } } }",
+    "variables": {}
+   },
+   "status": 200,
+   "answer": {
+    "data": {
+     "repository": {
+      "issueFields": {
+       "totalCount": 5,
+       "nodes": [
+        {
+         "fullDatabaseId": "47847921",
+         "name": "Priority"
+        },
+        {},
+        {},
+        {
+         "fullDatabaseId": "47847924",
+         "name": "Effort"
+        },
+        {
+         "fullDatabaseId": "48771436",
+         "name": "Arc"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "method": "POST",
    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues",
    "body": {
     "title": "[L2 measurement] scratch: a card whose Status quill writes",
     "body": "Scratch for plan#1881's recording; closed when it ends.",
     "type": "step",
     "labels": [
+     "balance",
      "filing"
+    ],
+    "issue_field_values": [
+     {
+      "field_id": 48771436,
+      "value": "balance"
+     }
     ]
    },
    "status": 201,
    "answer": {
-    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243",
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260",
     "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
-    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243/labels{/name}",
-    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243/comments",
-    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243/events",
-    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/243",
-    "id": 6069253136,
-    "node_id": "I_kwDOVSOvzs8AAAABacF0EA",
-    "number": 243,
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/260",
+    "id": 6079939814,
+    "node_id": "I_kwDOVSOvzs8AAAABamSE5g",
+    "number": 260,
     "title": "[L2 measurement] scratch: a card whose Status quill writes",
     "user": {
      "login": "SaltyReformed",
@@ -66,6 +107,17 @@
     },
     "labels": [
      {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     },
+     {
       "id": 12780874739,
       "node_id": "LA_kwDOVSOvzs8AAAAC-cyr8w",
       "url": "[redacted: not a scratch card]",
@@ -82,12 +134,25 @@
     "assignees": [],
     "milestone": null,
     "comments": 0,
-    "created_at": "2026-10-27T23:03:36Z",
-    "updated_at": "2026-10-27T23:03:36Z",
+    "created_at": "2026-10-28T13:30:39Z",
+    "updated_at": "2026-10-28T13:30:39Z",
     "closed_at": null,
     "assignee": null,
     "author_association": "MEMBER",
-    "issue_field_values": [],
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAOZn-Q",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
     "type": {
      "id": 891387282,
      "node_id": "IT_kwDOFB5GWc41IX2S",
@@ -124,7 +189,7 @@
      "rocket": 0,
      "eyes": 0
     },
-    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243/timeline",
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260/timeline",
     "performed_via_github_app": null,
     "state_reason": null,
     "pinned_comment": null
@@ -132,26 +197,38 @@
   },
   {
    "method": "DELETE",
-   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243/labels/filing",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260/labels/filing",
    "body": null,
    "status": 200,
-   "answer": []
+   "answer": [
+    {
+     "id": 12780871728,
+     "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+     "url": "[redacted: not a scratch card]",
+     "name": "balance",
+     "color": "[redacted: not a scratch card]",
+     "default": false,
+     "description": "[redacted: not a scratch card]",
+     "archived_at": null,
+     "archived_by": null
+    }
+   ]
   },
   {
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c243: issue(number: 243) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c260: issue(number: 260) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
     "variables": {}
    },
    "status": 200,
    "answer": {
     "data": {
      "repository": {
-      "c243": {
-       "id": "I_kwDOVSOvzs8AAAABacF0EA",
-       "number": 243,
-       "fullDatabaseId": "6069253136",
+      "c260": {
+       "id": "I_kwDOVSOvzs8AAAABamSE5g",
+       "number": 260,
+       "fullDatabaseId": "6079939814",
        "title": "[L2 measurement] scratch: a card whose Status quill writes",
        "state": "OPEN",
        "stateReason": null,
@@ -159,8 +236,23 @@
         "name": "step"
        },
        "labels": {
-        "totalCount": 0,
-        "nodes": []
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance"
+         }
+        ]
+       },
+       "issueFieldValues": {
+        "totalCount": 1,
+        "nodes": [
+         {
+          "name": "balance",
+          "field": {
+           "name": "Arc"
+          }
+         }
+        ]
        },
        "parent": null,
        "subIssues": {
@@ -190,7 +282,7 @@
     "query": "mutation($p: ID!, $c: ID!) { addProjectV2ItemById(input: {projectId: $p, contentId: $c}) { item { id } } }",
     "variables": {
      "p": "PVT_kwDOFB5GWc4BoEsZ",
-     "c": "I_kwDOVSOvzs8AAAABacF0EA"
+     "c": "I_kwDOVSOvzs8AAAABamSE5g"
     }
    },
    "status": 200,
@@ -198,7 +290,7 @@
     "data": {
      "addProjectV2ItemById": {
       "item": {
-       "id": "PVTI_lADOFB5GWc4BoEsZzhECVM4"
+       "id": "PVTI_lADOFB5GWc4BoEsZzhEM1OQ"
       }
      }
     }
@@ -855,7 +947,7 @@
       "items": {
        "pageInfo": {
         "hasNextPage": false,
-        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwNDA4MTYzMjY1MzA2Mc4RAlTO"
+        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwNDA4MTYzMjY1MzA2Mc4RDNTk"
        },
        "nodes": [
         {
@@ -1433,9 +1525,9 @@
          }
         },
         {
-         "id": "PVTI_lADOFB5GWc4BoEsZzhECVM4",
+         "id": "PVTI_lADOFB5GWc4BoEsZzhEM1OQ",
          "content": {
-          "number": 243,
+          "number": 260,
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1455,7 +1547,7 @@
     "query": "mutation($p: ID!, $i: ID!, $f: ID!, $o: String!) { updateProjectV2ItemFieldValue(input: {projectId: $p, itemId: $i, fieldId: $f, value: {singleSelectOptionId: $o}}) { clientMutationId } }",
     "variables": {
      "p": "PVT_kwDOFB5GWc4BoEsZ",
-     "i": "PVTI_lADOFB5GWc4BoEsZzhECVM4",
+     "i": "PVTI_lADOFB5GWc4BoEsZzhEM1OQ",
      "f": "PVTSSF_lADOFB5GWc4BoEsZzhmmbTg",
      "o": "47fc9ee4"
     }
@@ -1503,7 +1595,7 @@
       "items": {
        "pageInfo": {
         "hasNextPage": false,
-        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwNDA4MTYzMjY1MzA2Mc4RAlTO"
+        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwNDA4MTYzMjY1MzA2Mc4RDNTk"
        },
        "nodes": [
         {
@@ -2081,9 +2173,9 @@
          }
         },
         {
-         "id": "PVTI_lADOFB5GWc4BoEsZzhECVM4",
+         "id": "PVTI_lADOFB5GWc4BoEsZzhEM1OQ",
          "content": {
-          "number": 243,
+          "number": 260,
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -2105,7 +2197,7 @@
     "query": "mutation($p: ID!, $i: ID!, $f: ID!, $o: String!) { updateProjectV2ItemFieldValue(input: {projectId: $p, itemId: $i, fieldId: $f, value: {singleSelectOptionId: $o}}) { clientMutationId } }",
     "variables": {
      "p": "PVT_kwDOFB5GWc4BoEsZ",
-     "i": "PVTI_lADOFB5GWc4BoEsZzhECVM4",
+     "i": "PVTI_lADOFB5GWc4BoEsZzhEM1OQ",
      "f": "PVTSSF_lADOFB5GWc4BoEsZzhmmbTg",
      "o": "98236657"
     }
@@ -2153,7 +2245,7 @@
       "items": {
        "pageInfo": {
         "hasNextPage": false,
-        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwNDA4MTYzMjY1MzA2Mc4RAlTO"
+        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwNDA4MTYzMjY1MzA2Mc4RDNTk"
        },
        "nodes": [
         {
@@ -2731,9 +2823,9 @@
          }
         },
         {
-         "id": "PVTI_lADOFB5GWc4BoEsZzhECVM4",
+         "id": "PVTI_lADOFB5GWc4BoEsZzhEM1OQ",
          "content": {
-          "number": 243,
+          "number": 260,
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -2755,7 +2847,7 @@
     "query": "mutation($p: ID!, $i: ID!, $f: ID!) { clearProjectV2ItemFieldValue(input: {projectId: $p, itemId: $i, fieldId: $f}) { clientMutationId } }",
     "variables": {
      "p": "PVT_kwDOFB5GWc4BoEsZ",
-     "i": "PVTI_lADOFB5GWc4BoEsZzhECVM4",
+     "i": "PVTI_lADOFB5GWc4BoEsZzhEM1OQ",
      "f": "PVTSSF_lADOFB5GWc4BoEsZzhmmbTg"
     }
    },
@@ -2802,7 +2894,7 @@
       "items": {
        "pageInfo": {
         "hasNextPage": false,
-        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwNDA4MTYzMjY1MzA2Mc4RAlTO"
+        "endCursor": "Y3Vyc29yOnYyOpK5MDAwMDAwMDAuMDIwNDA4MTYzMjY1MzA2Mc4RDNTk"
        },
        "nodes": [
         {
@@ -3380,9 +3472,9 @@
          }
         },
         {
-         "id": "PVTI_lADOFB5GWc4BoEsZzhECVM4",
+         "id": "PVTI_lADOFB5GWc4BoEsZzhEM1OQ",
          "content": {
-          "number": 243,
+          "number": 260,
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -3402,7 +3494,7 @@
     "query": "mutation($p: ID!, $i: ID!) { deleteProjectV2Item(input: {projectId: $p, itemId: $i}) { deletedItemId } }",
     "variables": {
      "p": "PVT_kwDOFB5GWc4BoEsZ",
-     "i": "PVTI_lADOFB5GWc4BoEsZzhECVM4"
+     "i": "PVTI_lADOFB5GWc4BoEsZzhEM1OQ"
     }
    },
    "status": 200,
@@ -3416,22 +3508,22 @@
   },
   {
    "method": "PATCH",
-   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260",
    "body": {
     "state": "closed",
     "state_reason": "not_planned"
    },
    "status": 200,
    "answer": {
-    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243",
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260",
     "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
-    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243/labels{/name}",
-    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243/comments",
-    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243/events",
-    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/243",
-    "id": 6069253136,
-    "node_id": "I_kwDOVSOvzs8AAAABacF0EA",
-    "number": 243,
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/260",
+    "id": 6079939814,
+    "node_id": "I_kwDOVSOvzs8AAAABamSE5g",
+    "number": 260,
     "title": "[L2 measurement] scratch: a card whose Status quill writes",
     "user": {
      "login": "SaltyReformed",
@@ -3454,18 +3546,43 @@
      "user_view_type": "[redacted: not a scratch card]",
      "site_admin": false
     },
-    "labels": [],
+    "labels": [
+     {
+      "id": 12780871728,
+      "node_id": "LA_kwDOVSOvzs8AAAAC-cygMA",
+      "url": "[redacted: not a scratch card]",
+      "name": "balance",
+      "color": "[redacted: not a scratch card]",
+      "default": false,
+      "description": "[redacted: not a scratch card]",
+      "archived_at": null,
+      "archived_by": null
+     }
+    ],
     "state": "closed",
     "locked": false,
     "assignees": [],
     "milestone": null,
     "comments": 0,
-    "created_at": "2026-10-27T23:03:36Z",
-    "updated_at": "2026-10-27T23:03:51Z",
-    "closed_at": "2026-10-27T23:03:51Z",
+    "created_at": "2026-10-28T13:30:39Z",
+    "updated_at": "2026-10-28T13:30:55Z",
+    "closed_at": "2026-10-28T13:30:55Z",
     "assignee": null,
     "author_association": "MEMBER",
-    "issue_field_values": [],
+    "issue_field_values": [
+     {
+      "issue_field_id": 48771436,
+      "node_id": "IFSSV_kgDOAOZn-Q",
+      "data_type": "single_select",
+      "issue_field_name": "Arc",
+      "value": 85383809,
+      "single_select_option": {
+       "id": 85383809,
+       "name": "balance",
+       "color": "[redacted: not a scratch card]"
+      }
+     }
+    ],
     "type": {
      "id": 891387282,
      "node_id": "IT_kwDOFB5GWc41IX2S",
@@ -3522,7 +3639,7 @@
      "rocket": 0,
      "eyes": 0
     },
-    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/243/timeline",
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/260/timeline",
     "performed_via_github_app": null,
     "state_reason": "not_planned",
     "pinned_comment": null

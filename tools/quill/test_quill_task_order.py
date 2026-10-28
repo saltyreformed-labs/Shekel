@@ -44,8 +44,9 @@ def test_a_task_is_placed_above_the_cards_finishing_tasks(tmp_path, code, capsys
     tracker = _card()
     assert run(tracker, code, *_filing(tmp_path)) == 0
     assert _order(tracker) == [2, 5, 3, 4]
-    assert tracker.writes == [("create", 5, "task", "piece b", ("filing",)), ("add_child", 1, 5),
-                              ("place_child", 1, 5, 3), ("board_add", 5), ("unmark", 5)]
+    assert tracker.writes == [("create", 5, "task", "piece b", ("filing",), None),
+                              ("add_child", 1, 5), ("place_child", 1, 5, 3), ("board_add", 5),
+                              ("unmark", 5)]
     assert "  in plan#1's order: placed above plan#3\n" in capsys.readouterr().out
 
 

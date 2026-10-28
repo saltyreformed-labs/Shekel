@@ -293,7 +293,7 @@ class FicaConfig(UserScopedMixin, CreatedAtMixin, db.Model):
         return f"<FicaConfig year={self.tax_year}>"
 
 
-class StateChildDeduction(UserScopedMixin, CreatedAtMixin, db.Model):
+class StateChildDeduction(CreatedAtMixin, db.Model):
     """State per-child deduction tier (AGI-tiered, per filing status).
 
     Taxes slice T-P5 (finding 2): the NC child deduction (N.C.G.S.
@@ -355,6 +355,20 @@ class StateChildDeduction(UserScopedMixin, CreatedAtMixin, db.Model):
     # deliberate: the top tier ("Over $X", deduction $0) has no upper bound.
     agi_max = db.Column(db.Numeric(12, 2))
     deduction_per_child = db.Column(db.Numeric(12, 2), nullable=False)
+    # Declared here rather than taken from UserScopedMixin, whose key takes
+    # PostgreSQL's default name: migration b7f3a2c1d4e5 named this one, and
+    # production holds that name (plan#1858).  Last of the class's own
+    # columns, where the mixin's rendered, so the models emit the table's
+    # columns in the order they did.
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey(
+            "auth.users.id",
+            name="fk_state_child_deductions_user_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
 
     # Relationships
     filing_status = db.relationship("FilingStatus", lazy="joined")

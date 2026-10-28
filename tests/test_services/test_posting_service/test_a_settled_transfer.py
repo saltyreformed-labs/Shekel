@@ -76,8 +76,6 @@ class TestSyncSettlePostsBalancedEntry:
             # Header metadata, each side linking ITS covering movement.
             for entry, account in ((from_entry, checking), (to_entry, savings)):
                 movement = _covering_movement_of_side(transfer.id, account.id)
-                assert entry.transfer_id is None
-                assert entry.transaction_id is None
                 assert entry.transaction_entry_id == movement.id
                 assert entry.user_id == seed_user["user"].id
                 assert entry.scenario_id == _scenario_id(seed_user)

@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from tools.quill._arcs import arc_answered
 from tools.quill._fake import Sent
 from tools.quill._recorded import (
     REDACTED,
@@ -46,6 +47,24 @@ def test_a_recording_never_keeps_a_token():
     with pytest.raises(ValueError, match="token"):
         recorder.save("never-written")
     assert not (RECORDINGS / "never-written.json").exists()
+
+
+def test_a_create_s_answer_keeps_the_name_and_type_of_each_field_value_it_wrote():
+    """plan#1811: a card is filed holding its Arc, and the create reads its Arc back from
+    REST's answer by the field's name (``_arcs.arc_answered``); a field's name and type are no
+    card's text, so a recording keeps them, and the replayed create reads the Arc it wrote.
+    The answer's shape is GitHub's to the status recording's create, 2026-10-28."""
+    answer = {"number": 11, "title": f"{SCRATCH} card", "issue_field_values": [
+        {"issue_field_id": 48771436, "node_id": "IFSSV_1", "data_type": "single_select",
+         "issue_field_name": "Arc", "value": 85383809,
+         "single_select_option": {"id": 85383809, "name": "balance", "color": "blue"}}]}
+    kept = redacted([{"method": "POST", "url": _ISSUES, "status": 201, "answer": answer,
+                      "body": {"title": f"{SCRATCH} card", "body": "b", "type": "step",
+                               "labels": ["balance"], "issue_field_values": [
+                                   {"field_id": 48771436, "value": "balance"}]}}],
+                    _scratch(11))[0]["answer"]["issue_field_values"]
+    assert arc_answered(kept) == "balance"
+    assert (kept[0]["data_type"], kept[0]["issue_field_name"]) == ("single_select", "Arc")
 
 
 def test_a_recording_keeps_a_scratch_cards_text_and_redacts_every_other_cards():
@@ -253,6 +272,10 @@ _REFS = f"https://api.github.com/repos/{TRACKER}/git/refs"
     ("PATCH", f"https://api.github.com/repos/{TRACKER}-other/issues/11", {"body": "anything"}),
     ("POST", _ISSUES, {"title": f"{SCRATCH} new", "body": "b", "type": "step",
                        "labels": ["balance"], "assignees": ["x"]}),
+    ("POST", _ISSUES, {"title": f"{SCRATCH} new", "body": "b", "type": "step",
+                       "labels": ["balance"], "issue_field_values": [], "milestone": 1}),
+    ("POST", _ISSUES, {"title": "Real title", "body": "b", "type": "step",
+                       "labels": ["balance"], "issue_field_values": []}),
     ("PATCH", f"{_ISSUES}/11", {"body": "b", "milestone": 1}),
     ("PATCH", f"{_ISSUES}/11", {"title": f"{SCRATCH} renamed", "body": "b"}),
     ("POST", f"{_ISSUES}/11/dependencies/blocked_by", {"issue_id": 911, "x": 1}),
@@ -290,6 +313,9 @@ def test_a_write_that_is_not_a_known_write_to_a_scratch_card_is_refused(method, 
 @pytest.mark.parametrize(("method", "url", "body"), [
     ("POST", _ISSUES, {"title": f"{SCRATCH} new", "body": "b", "type": "step",
                        "labels": ["balance"]}),
+    ("POST", _ISSUES, {"title": f"{SCRATCH} new", "body": "b", "type": "step",
+                       "labels": ["balance"],
+                       "issue_field_values": [{"field_id": 1, "value": "balance"}]}),
     ("PATCH", f"{_ISSUES}/11", {"title": f"{SCRATCH} renamed"}),
     ("PATCH", f"{_ISSUES}/11", {"state": "closed", "state_reason": "not_planned"}),
     ("POST", f"{_ISSUES}/11/sub_issues", {"sub_issue_id": 911}),
@@ -361,8 +387,9 @@ def test_a_create_github_refused_counts_nothing_as_scratch():
 #: Every recording in ``recorded/``, and whether it read the real cards (it must then hold a
 #: redacted title on a card node): ``tracker.json`` and ``export.json`` read them;
 #: ``label_missing.json`` read only its scratch card, and ``blocking.json``, ``show.json``,
-#: ``status.json`` and ``comment_lookup.json`` only their scratch cards on the throwaway
-#: ``plan-views-demo`` (R-BAL395, plan#1925; ``show.json``'s and ``status.json``'s board reads
+#: ``status.json``, ``priority.json`` and ``comment_lookup.json`` only their scratch cards on the
+#: throwaway ``plan-views-demo`` (R-BAL395, plan#1925; ``show.json``'s and ``status.json``'s
+#: board reads
 #: hold item numbers, no title).  A recording added or removed must be named here (the next
 #: test).
 RECORDINGS_READ_REAL_CARDS = {"blocking": False, "comment_lookup": False, "comments": False,

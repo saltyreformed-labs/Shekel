@@ -920,7 +920,7 @@ class TestPulseStillDue:
             )
             assert result["still_due"]["current_period"] == Decimal("150.00")
 
-    def test_transfer_out_shadow_included(
+    def test_projected_transfer_out_included_in_still_due(
         self, app, seed_user, seed_periods, db,
     ):
         """A projected transfer out of checking IS counted in still-due (B4b).
@@ -963,7 +963,7 @@ class TestPulseStillDue:
             result = dashboard_service.compute_pulse_section(
                 dashboard_section(seed_user["user"].id),
             )
-            # The transfer-out shadow is the only obligation: $400.00.
+            # The transfer out is the only obligation: $400.00.
             assert result["still_due"]["current_period"] == Decimal("400.00")
 
     def test_current_and_next_period_separated(
@@ -1232,7 +1232,7 @@ class TestTheBillsAreLegsReadOffTheParent:
             due_date=due_date,
         )
 
-    def test_the_loader_answers_own_rows_and_expense_legs_and_no_shadow(
+    def test_the_loader_answers_own_rows_and_expense_legs(
         self, app, seed_user, seed_periods, db,
     ):
         with app.app_context():

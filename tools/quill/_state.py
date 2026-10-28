@@ -452,7 +452,7 @@ def next_step(order: Iterable[int], cards: Mapping[int, Card], shipped: Iterable
     shipped = set(shipped)
 
     def fits(card: Card) -> bool:
-        return workable(card, cards, shipped, claims) and (arc is None or arc in card.labels)
+        return workable(card, cards, shipped, claims) and (arc is None or card.arc == arc)
 
     first = next((cards[n] for n in order if n in cards and fits(cards[n])), None)
     placed = set(order)

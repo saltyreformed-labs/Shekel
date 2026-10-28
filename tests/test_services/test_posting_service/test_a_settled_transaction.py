@@ -75,8 +75,6 @@ class TestTransactionSettlePostsBalancedEntry:
             # / period.
             [movement] = txn.covering_movements
             assert entry.transaction_entry_id == movement.id
-            assert entry.transaction_id is None
-            assert entry.transfer_id is None
             assert entry.user_id == seed_user["user"].id
             assert entry.scenario_id == _scenario_id(seed_user)
             assert entry.pay_period_id == period.id
@@ -460,7 +458,7 @@ class TestTransactionReversal:
             status_seam.apply_status_change(
                 txn, ref_cache.status_id(StatusEnum.PROJECTED),
             )
-            [reversal] = posting_service.sync_transaction_postings(txn)
+            [_reversal] = posting_service.sync_transaction_postings(txn)
             _db.session.commit()
 
             assert _ledger_total(groceries_ledger) == Decimal("0.00")

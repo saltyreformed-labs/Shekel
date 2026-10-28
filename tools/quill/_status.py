@@ -14,7 +14,7 @@ Only quill writes it: ``quill sync`` reads every card's Status on the board, dec
 writes each that differs, a person's edit put back (:func:`sync_statuses`, ruling plan#1905),
 and ``quill watch`` does the same for each card a moved branch names (its ``scope``,
 :mod:`_watch`); ``--dry-run`` prints each write unmade.  Its options are set on the web, and
-``setup_tracker`` checks them: while the field lacks one of :data:`setup_tracker.STATUS_OPTIONS`,
+``setup_tracker`` checks them: while the field lacks one of :data:`_board_fields.STATUS_OPTIONS`,
 sync reports it and writes no card's Status at all (ruling plan#1906), so no card is shown a
 state the board cannot hold.  An item ``sync``'s own put-on added this run that the board's
 read lags is written by the next run (``_tracker`` measured the board lagging an add).
@@ -28,20 +28,20 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 
 from tools.quill import _git
-from tools.quill._command import _label, with_cards, with_closure
-from tools.quill._state import SHIPPABLE, container_shown, done_tasks, dropped, is_container
-from tools.quill._tasks import in_progress
-from tools.quill._tracker import BareCard, Card, Statuses, Tracker
-from tools.quill.setup_tracker import (
+from tools.quill._board_fields import (
     DONE,
     DROPPED,
     GITHUB_STATUS_FIELD,
     IN_PROGRESS,
     STATUS_OPTIONS,
-    TASK,
     TODO,
     lacking,
 )
+from tools.quill._command import _label, with_cards, with_closure
+from tools.quill._state import SHIPPABLE, container_shown, done_tasks, dropped, is_container
+from tools.quill._tasks import in_progress
+from tools.quill._tracker import BareCard, Card, Statuses, Tracker
+from tools.quill.setup_tracker import TASK
 
 #: What a split step shows, by the state the tool shows it in (:func:`_state.container_shown`).
 _CONTAINER = {None: TODO, "COMPLETED": DONE, "NOT_PLANNED": DROPPED}
@@ -108,8 +108,8 @@ def status_writes(statuses: Statuses, cards: Mapping[int, BareCard], reads: _git
 
 def unwritable(statuses: Statuses) -> str | None:
     """Why no card's Status can be written, as a REPORT line: the board has no single-select
-    field named Status, or that field lacks one of :data:`setup_tracker.STATUS_OPTIONS`
-    (:func:`setup_tracker.lacking`, ruling plan#1906); None when every one can be."""
+    field named Status, or that field lacks one of :data:`_board_fields.STATUS_OPTIONS`
+    (:func:`_board_fields.lacking`, ruling plan#1906); None when every one can be."""
     if statuses.field is None:
         return (f"the board has no single-select field named {GITHUB_STATUS_FIELD!r} (GitHub's "
                 "built-in one was renamed), so no card's Status is written: rename it back "

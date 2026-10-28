@@ -507,20 +507,18 @@ def leg_settled_contribution(leg) -> Decimal:
     docstring asserting it, and a leg handed to a settled-only reader outside
     its scope fails loud instead of publishing its PLAN as money that moved.
 
-    **A leg has SETTLED when its parent has, OR when its own money has moved**
-    (plan step balance:X-bi-6-4b, ruling **R-BAL140**).  The loan and
-    contribution readers read the settled half of
-    :func:`app.services.loan_loaders.income_legs`, whose membership is the
-    plan half's exact complement: a still-Projected transfer whose side
-    carries a DATED covering movement -- a status drift no door writes -- is a
-    payment that happened, and it is worth the figure its transfer stores, as
-    the cash fold already counts that movement
-    (``cash_ledger.movement_cash_leg``).  The
-    Spending report narrows to settled parents in SQL and the savings metric
-    to DATED records (plan step ``balance:X-bi-6-4d-2``, finding
-    **BAL-534**: equal, since a side's record is dated exactly while its
-    transfer is settled), so that arm never reaches them.  A leg that is neither is still refused:
-    its money has not moved and there is nothing recorded to answer with.
+    **A leg has SETTLED when its parent has.**  The loan and contribution
+    readers read the settled half of
+    :func:`app.services.loan_loaders.income_legs`, the Spending report
+    narrows to settled parents in SQL and the savings metric to DATED records
+    (plan step ``balance:X-bi-6-4d-2``, finding **BAL-534**: equal, since a
+    side's record is dated exactly while its transfer is settled).  From plan
+    step balance:X-bi-6-4b (ruling **R-BAL140**) a still-Projected transfer
+    whose side carried a DATED covering movement settled here too, worth the
+    figure its transfer stores, until plan step balance:X-bi-6-5's third
+    leaf: the status-band rule (:mod:`app.side_band_infrastructure`) refuses
+    that state at commit.  A leg whose parent has not settled is refused: its
+    money has not moved and there is nothing recorded to answer with.
 
     Args:
         leg: The :class:`~app.services.transfer_legs.TransferLeg`, its
@@ -532,12 +530,10 @@ def leg_settled_contribution(leg) -> Decimal:
         moved (``0.00`` for a close of nothing, ruling **R-BAL365**).
 
     Raises:
-        AmountUnresolvable: When the parent has NOT settled and the leg's
-            money has not moved, so the leg recorded nothing.
+        AmountUnresolvable: When the parent has NOT settled, so the leg
+            recorded nothing.
     """
     fixed = leg_fixed_contribution(leg)
-    if fixed is None and leg.settled_on is not None:
-        fixed = leg.transfer.settled_figure
     if fixed is None:
         raise AmountUnresolvable(
             f"Transfer {leg.transfer.id}'s leg on account {leg.account_id} "

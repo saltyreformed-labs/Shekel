@@ -22,12 +22,13 @@ decides over sync's whole set (:func:`_sync.every_card`) and the Status of every
 holds.
 
 It is a pass of sync's producer over fewer cards, never a second producer.  The 3-hourly
-``quill sync`` stays: it is the pass that sees a tracker edit no push makes, puts a task on the
-board (:func:`_tasks.put_on_board`), undoes a split a leaf closed while being filed, and names
-each entry under ``plan/ships`` or ``plan/tasks`` that is no card's.  It prints a REPORT line
-as ``sync`` does, and exits 0 on it: a REPORT is logged here and alerts from the 3-hourly sync
-only (ruling plan#1907), so every other exit status is a failure its unit alerts on, a crash's
-too (Python exits 1 on an exception no door catches).
+``quill sync`` stays: it is the pass that sees a tracker edit no push makes, puts each card's
+arc labels back to display its Arc over a read of every card (:func:`_relabel.put_back`), puts
+a task on the board (:func:`_tasks.put_on_board`), undoes a split a leaf closed while being
+filed, and names each entry under ``plan/ships`` or ``plan/tasks`` that is no card's.  It
+prints a REPORT line as ``sync`` does, and exits 0 on it: a REPORT is logged here and alerts
+from the 3-hourly sync only (ruling plan#1907), so every other exit status is a failure its
+unit alerts on, a crash's too (Python exits 1 on an exception no door catches).
 """
 from __future__ import annotations
 

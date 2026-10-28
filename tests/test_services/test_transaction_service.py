@@ -1157,6 +1157,26 @@ class TestApplyRequestedStatusTheDoorVerb:
                 seed_user["account"].id, seed_user["scenario"].id,
             ) == Decimal("-100.00")
 
+    @staticmethod
+    def _ledger_entry_ids(user_id):
+        """Return the ids of every journal entry the owner's ledger holds, ascending.
+
+        The ledger is append-only, so a write of any kind -- a leg for this
+        row, its movement, or anything else -- adds an id, and the same list
+        before and after a call is the whole of "it posted nothing".  These
+        cases read the row's own ``transaction_id`` link until plan step
+        ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted it; that
+        read had found nothing since plan step ``balance:X-bi-4a``, when a
+        row's money moved onto its movements, so it graded nothing.
+        """
+        return [
+            entry_id for (entry_id,) in (
+                db.session.query(JournalEntry.id)
+                .filter(JournalEntry.user_id == user_id)
+                .order_by(JournalEntry.id)
+            )
+        ]
+
     def test_a_cancel_leaves_the_ledger_flat(
         self, app, db, seed_user, seed_periods,
     ):
@@ -1170,6 +1190,7 @@ class TestApplyRequestedStatusTheDoorVerb:
         """
         with app.app_context():
             txn = self._plain_row(seed_user, seed_periods[0])
+            ledger_before = self._ledger_entry_ids(seed_user["user"].id)
 
             transaction_service.apply_requested_status(
                 txn, ref_cache.status_id(StatusEnum.CANCELLED),
@@ -1177,10 +1198,7 @@ class TestApplyRequestedStatusTheDoorVerb:
 
             assert txn.status_id == ref_cache.status_id(StatusEnum.CANCELLED)
             assert txn.settled_on is None
-            assert (
-                db.session.query(JournalEntry)
-                .filter_by(transaction_id=txn.id).count() == 0
-            )
+            assert self._ledger_entry_ids(seed_user["user"].id) == ledger_before
 
     def test_an_illegal_transition_raises_and_posts_nothing(
         self, app, db, seed_user, seed_periods,
@@ -1195,6 +1213,7 @@ class TestApplyRequestedStatusTheDoorVerb:
         """
         with app.app_context():
             txn = self._plain_row(seed_user, seed_periods[0])
+            ledger_before = self._ledger_entry_ids(seed_user["user"].id)
             transaction_service.apply_requested_status(
                 txn, ref_cache.status_id(StatusEnum.CANCELLED),
             )
@@ -1206,10 +1225,7 @@ class TestApplyRequestedStatusTheDoorVerb:
 
             assert "transition" in str(exc.value)
             assert txn.status_id == ref_cache.status_id(StatusEnum.CANCELLED)
-            assert (
-                db.session.query(JournalEntry)
-                .filter_by(transaction_id=txn.id).count() == 0
-            )
+            assert self._ledger_entry_ids(seed_user["user"].id) == ledger_before
 
 
 class TestARevertKeepsWhatMovedAndReleasesTheAssertion:
@@ -1711,9 +1727,11 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             txn = self._settled_row(seed_user, seed_periods[0])
             # The LEDGER before, from the journal rather than from the row --
             # see the archive test for why the row-tier reader is not an oracle.
-            ledger_before = net_posted_by_day(
-                JournalEntry.transaction_id == txn.id,
-            )
+            # The row's FAMILY, its movements' entries: it read the row's own
+            # ``transaction_id`` link until card plan#1845 deleted it, which
+            # had found nothing since plan step ``balance:X-bi-4a``.
+            ledger_before = net_posted_by_day(family_journal_filter(txn))
+            assert ledger_before == {txn.settled_on: Decimal("100.00")}
 
             with pytest.raises(ValidationError) as exc:
                 transaction_service.apply_requested_status(
@@ -1724,9 +1742,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             assert "has nothing to record" in str(exc.value)
             assert txn.status_id == ref_cache.status_id(StatusEnum.DONE)
             assert settled_figure(txn) == Decimal("100.00")
-            assert net_posted_by_day(
-                JournalEntry.transaction_id == txn.id,
-            ) == ledger_before, (
+            assert net_posted_by_day(family_journal_filter(txn)) == ledger_before, (
                 "a refused request posted to the ledger anyway"
             )
 

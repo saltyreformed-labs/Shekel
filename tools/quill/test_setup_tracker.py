@@ -8,7 +8,7 @@ from functools import partial
 import pytest
 
 from tools.ci.arcs import ARCS
-from tools.quill import setup_tracker
+from tools.quill import _board_fields, setup_tracker
 from tools.quill._github import GitHubError, app_credentials, app_jwt
 from tools.quill.setup_tracker import (
     APP_PERMISSIONS,
@@ -272,12 +272,12 @@ def test_the_app_may_hold_exactly_its_declared_permissions():
 
 #: Each board field by id; Status holds the options quill writes (rulings plan#1873, plan#1906).
 _FIELDS = {
-    "F1": {"id": "F1", "name": "Title", "dataType": "TITLE"},
-    "F2": {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT",
-           "options": [{"name": name} for name in setup_tracker.STATUS_OPTIONS]},
-    "F3": {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE"},
-    "F4": {"id": "F4", "name": "Rank", "dataType": "NUMBER"},
-    "F6": {"id": "F6", "name": "Labels", "dataType": "LABELS"},
+    "F1": {"id": "F1", "name": "Title", "dataType": "TITLE", "isIssueField": False},
+    "F2": {"id": "F2", "name": "Status", "dataType": "SINGLE_SELECT", "isIssueField": False,
+           "options": [{"name": name} for name in _board_fields.STATUS_OPTIONS]},
+    "F3": {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE", "isIssueField": False},
+    "F4": {"id": "F4", "name": "Rank", "dataType": "NUMBER", "isIssueField": False},
+    "F6": {"id": "F6", "name": "Labels", "dataType": "LABELS", "isIssueField": False},
 }
 
 
@@ -300,10 +300,11 @@ def _project(cards=0, public=False, linked=True, views=(("View 1", "", 0),)):
         "repositories": {"totalCount": int(linked), "nodes": [
             {"nameWithOwner": setup_tracker.PLAN.full_name}] if linked else []},
         "fields": {"nodes": [
-            {"id": "F1", "name": "Title", "dataType": "TITLE"},
+            {"id": "F1", "name": "Title", "dataType": "TITLE", "isIssueField": False},
             dict(_FIELDS["F2"]),
-            {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE"},
-            {"id": "F4", "name": "Rank", "dataType": "NUMBER"},
+            {"id": "F3", "name": "Parent issue", "dataType": "PARENT_ISSUE",
+             "isIssueField": False},
+            {"id": "F4", "name": "Rank", "dataType": "NUMBER", "isIssueField": False},
             {},
         ]},
         "workflows": {"nodes": [
@@ -493,7 +494,8 @@ def test_status_is_shown_holding_exactly_its_four_options_and_a_custom_select_is
         "plan#1873, plan#1906): correct them in the board's settings, at "
         "https://github.com/orgs/o/projects/1/settings"]
     project = _as_declared()
-    project["fields"]["nodes"].append({"id": "F5", "name": "Tier", "dataType": "SINGLE_SELECT"})
+    project["fields"]["nodes"].append({"id": "F5", "name": "Tier", "dataType": "SINGLE_SELECT",
+                                       "isIssueField": False})
     assert setup_tracker.board_differences(project) == ["the board stores a field, 'Tier'"]
 
 

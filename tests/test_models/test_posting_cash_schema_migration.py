@@ -13,6 +13,13 @@ is_fallback`` is ``uq_ledger_accounts_owner_bucket (user_id, class_id, kind_id)
 WHERE is_owner_bucket``, and ``ck_ledger_accounts_fallback_shape`` is
 ``ck_ledger_accounts_owner_bucket_shape``; the catalog assertions below read
 the HEAD names, and the downgrade-source check reads this migration's own.
+Its journal-entry objects -- ``transaction_id``, its partial index
+``idx_journal_entries_transaction`` and its key
+``fk_journal_entries_transaction_id`` -- are GONE at HEAD: migration
+``1712c506ee99`` (plan step ``balance:X-bi-6-5``'s second leaf, card plan#1845)
+dropped them, and its own suite proves the drop, so the catalog assertions
+below read only the ledger-account objects and the downgrade-source check
+still names all of them.
 
 The migration is already at HEAD when these tests run (the template builder
 upgraded it base->head), so the per-worker DB shows the post-migration
@@ -104,23 +111,8 @@ class TestMigratedColumns:
                 f"is_owner_bucket must default false; found default {row[2]!r}"
             )
 
-    def test_transaction_id_column(self, app, db):
-        """``journal_entries.transaction_id`` is a nullable integer at HEAD."""
-        with app.app_context():
-            row = db.session.execute(text(
-                "SELECT data_type, is_nullable "
-                "FROM information_schema.columns "
-                "WHERE table_schema = 'budget' "
-                "  AND table_name = 'journal_entries' "
-                "  AND column_name = 'transaction_id'"
-            )).fetchone()
-            assert row is not None, "transaction_id column missing at HEAD"
-            assert row[0] == "integer"
-            assert row[1] == "YES"
-
-
 class TestMigratedIndexes:
-    """The three new partial indexes exist with the model's exact predicates.
+    """The two ledger-account partial indexes exist with the model's exact predicates.
 
     The ``pg_indexes.indexdef`` carries the full CREATE INDEX text, including
     the partial ``WHERE`` predicate, so a wrong predicate (which would change
@@ -167,17 +159,8 @@ class TestMigratedIndexes:
                 "category-delete collision"
             )
 
-    def test_transaction_partial_index(self, app, db):
-        """``idx_journal_entries_transaction`` is partial on the back-link."""
-        with app.app_context():
-            ddl = self._indexdef(db, "idx_journal_entries_transaction")
-            assert ddl is not None, "idx_journal_entries_transaction missing"
-            assert "transaction_id" in ddl
-            assert "transaction_id IS NOT NULL" in ddl
-
-
 class TestMigratedConstraints:
-    """The partition CHECK and the two SET-NULL FKs exist as declared."""
+    """The two ledger-account CHECKs and the category SET-NULL FK exist as declared."""
 
     def test_account_or_category_check(self, app, db):
         """The exclusive-link CHECK is present with the model's predicate."""
@@ -222,19 +205,6 @@ class TestMigratedConstraints:
                 "fk_ledger_accounts_category_id must be SET NULL (confdeltype "
                 f"'n'); found {deltype!r}"
             )
-
-    def test_transaction_fk_is_set_null(self, app, db):
-        """``fk_journal_entries_transaction_id`` is ON DELETE SET NULL."""
-        with app.app_context():
-            deltype = db.session.execute(text(
-                "SELECT confdeltype FROM pg_constraint "
-                "WHERE conname = 'fk_journal_entries_transaction_id'"
-            )).scalar()
-            assert deltype == "n", (
-                "fk_journal_entries_transaction_id must be SET NULL "
-                f"(confdeltype 'n'); found {deltype!r}"
-            )
-
 
 class TestDowngradeReversible:
     """downgrade() is a real revert, not a bare pass.

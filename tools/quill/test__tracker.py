@@ -8,12 +8,14 @@ redacts every other card's text); ``recorded/label_missing.json`` was kept the
 same evening, before the mark's label existed; ``recorded/comments.json`` was kept
 2026-10-06 20:23 EDT, after the App's rename, on scratch cards #28-#30;
 ``recorded/blocking.json`` was kept 2026-10-24 on the throwaway ``plan-views-demo``
-(R-BAL395), on scratch cards #220-#222, ``recorded/status.json`` 2026-10-27 there, on its
-board, on scratch card #243, and ``recorded/show.json`` 2026-10-27 21:58 EDT there, on
-scratch cards #244-#249, with the developer's own token (plan#1925, ruling plan#1950; the
-first show recording's #223-#228 were deleted after it on 2026-10-24, so it could not be made
-again on them; ``recorded/comment_lookup.json``, kept with it, is replayed in
-``test__tracker_comment_lookup.py``).
+(R-BAL395), on scratch cards #220-#222, ``recorded/status.json`` and ``recorded/priority.json``
+2026-10-28 09:30 EDT there, on scratch cards #260 (on its board) and #261-#263, each deleted
+after, and ``recorded/show.json`` 2026-10-28 09:05 EDT there, on
+scratch cards #250-#255, with the developer's own token (plan#1925, ruling plan#1950, made
+again for plan#1861's merge of plan#1811, whose read of a card asks its Arc; the earlier show
+recordings' #223-#228 and #244-#249 were each deleted after it, so it could not be made again
+on them; ``recorded/comment_lookup.json``, kept with the second on #244-#249 and reading no
+card's fields, is replayed in ``test__tracker_comment_lookup.py``).
 These tests replay them (``_recorded.Replay``), which answers only a request
 it recorded, in the order recorded.  Nothing here calls GitHub.  A query whose
 text changes no longer matches its recording: re-record it, never edit an
@@ -22,7 +24,12 @@ to another repository, a pending release) starts from a recorded answer and
 changes the one field it is about, and says so.  The recorder's own guard and
 redaction are graded in ``test__recorded.py``.  The claims' exchanges were deleted
 from the recordings at X-cx's M1, when a claim left the tracker to become the code
-repository's branch ``card/N`` (ruling ``balance:R-BAL359``).
+repository's branch ``card/N`` (ruling ``balance:R-BAL359``).  Every create here files a card
+as quill filed one when these were kept, before plan#1811 gave a card its Arc
+(:func:`_before_the_arc`), so its request is the one recorded, but the status and priority
+recordings', kept after it, which file a step holding its Arc as quill files one now (each
+made again for plan#1861's merge of plan#1811, ruling plan#1950); ``test__tracker_arc.py``
+grades the create that writes the Arc.
 """
 from __future__ import annotations
 
@@ -31,6 +38,7 @@ import copy
 import pytest
 
 from tools.quill import quill
+from tools.quill._draft import Draft
 from tools.quill._fake import Sent
 from tools.quill._github import GitHub, GitHubError
 from tools.quill._recorded import (
@@ -65,6 +73,12 @@ FILED_ID = 5705455461
 #: A GraphQL lookup of a repository that does not exist (review cp3 L-c).
 MISSING_REPOSITORY = ('query { repository(owner: "saltyreformed-labs", name: '
                       '"no-such-repository") { c1: issue(number: 1) { number } } }')
+
+
+def _before_the_arc(kind, title, body, labels=("balance",)):
+    """A card as quill filed one before plan#1811: its arc as its label alone, among
+    ``labels``, and no Arc, which sends no field value and reads no field's id."""
+    return Draft(kind, title, body, labels, None)
 
 
 @pytest.fixture(name="recorded")
@@ -148,9 +162,9 @@ def _replay_filed_card(tracker):
     a second parent, changed every way, closed, reopened, then closed as completed, again as
     NOT planned and again as completed: GitHub changes the reason of a closed card either
     way (sync re-closes a split step as its leaves change, R-BAL187, R-BAL190)."""
-    number = tracker.create("finding", f"{SCRATCH} finding, filed by the recorder (delete me)",
-                            "The recorder files this card to record GitHub's answers.",
-                            ["balance"])
+    number = tracker.create(_before_the_arc(
+        "finding", f"{SCRATCH} finding, filed by the recorder (delete me)",
+        "The recorder files this card to record GitHub's answers."))
     assert number == 22
     card = tracker.cards([number])[number]
     assert (card.kind, card.labels, card.id) == ("finding", ("balance", FILING), FILED_ID)
@@ -204,9 +218,9 @@ def _replay_marked_step(tracker):
     just after the create and just after the unmark (cp5 LOW 3: each showed the write at
     that first read; one sample, the delay not timed), and unmarked again: GitHub answers
     404 "Label does not exist" for a mark the card lacks."""
-    split = tracker.create("step", f"{SCRATCH} step S, split by the recorder (delete me)",
-                           "The recorder files this step to record the filing mark.",
-                           ["balance"])
+    split = tracker.create(_before_the_arc(
+        "step", f"{SCRATCH} step S, split by the recorder (delete me)",
+        "The recorder files this step to record the filing mark."))
     assert split == 23
     assert tracker.cards([split])[split].labels == ("balance", FILING)
     assert split in tracker.marked() and split in tracker.open_cards()
@@ -225,16 +239,16 @@ def _replay_unfinished_leaf_and_ruling(tracker, split, split_item):
     into S's place, S off the board) and its ruling R likewise (created marked, linked,
     closed as completed): the listing of marked cards holds the open L and the CLOSED R,
     each still an unfinished filing (R-BAL206), and not S, whose filing finished."""
-    leaf = tracker.create("step", f"{SCRATCH} leaf L of step S, by the recorder (delete me)",
-                          "The recorder files this leaf; its filing stops before its unmark.",
-                          ["balance"])
+    leaf = tracker.create(_before_the_arc(
+        "step", f"{SCRATCH} leaf L of step S, by the recorder (delete me)",
+        "The recorder files this leaf; its filing stops before its unmark."))
     tracker.add_child(split, tracker.cards([leaf])[leaf])
     item = tracker.board.add(tracker.cards([leaf])[leaf])
     assert tracker.board.place(item, split_item)
     tracker.board.remove(split_item)
-    ruling = tracker.create("ruling", f"{SCRATCH} ruling R of step S, by the recorder (delete me)",
-                            "The recorder files this ruling; its filing stops before its unmark.",
-                            ["balance"])
+    ruling = tracker.create(_before_the_arc(
+        "ruling", f"{SCRATCH} ruling R of step S, by the recorder (delete me)",
+        "The recorder files this ruling; its filing stops before its unmark."))
     tracker.add_child(split, tracker.cards([ruling])[ruling])
     tracker.close(ruling, "completed")
     marked = tracker.marked()
@@ -306,9 +320,9 @@ def test_a_create_naming_a_label_the_tracker_lacks_makes_the_label():
     github = GitHub("token", replay)
     tracker = Tracker(github, Board(github, PLAN, recording("label_missing")["scratch"]["board"]),
                       APP)
-    number = tracker.create("finding", f"{SCRATCH} finding filed before the filing label "
-                            "exists (delete me)", "The recorder files this card to record "
-                            "GitHub's answer to a label it lacks.", ["balance"])
+    number = tracker.create(_before_the_arc(
+        "finding", f"{SCRATCH} finding filed before the filing label exists (delete me)",
+        "The recorder files this card to record GitHub's answer to a label it lacks."))
     assert tracker.cards([number])[number].labels == ("balance", FILING)
     tracker.unmark(number)
     assert tracker.cards([number])[number].labels == ("balance",)
@@ -343,10 +357,10 @@ def test_a_type_github_dropped_is_refused_not_trusted():
     filed = _recorded_answer("POST", "/shekel-plan/issues")
     assert filed["type"]["name"] == "finding"
     assert Tracker(_Answers(filed), Board(None, PLAN, "B"), APP).create(
-        "finding", "t", "b", ["balance"]) == filed["number"]
+        _before_the_arc("finding", "t", "b")) == filed["number"]
     tracker = Tracker(_Answers({**filed, "type": None}), Board(None, PLAN, "B"), APP)
     with pytest.raises(TrackerError, match="not .*'finding'"):
-        tracker.create("finding", "t", "b", ["balance"])
+        tracker.create(_before_the_arc("finding", "t", "b"))
 
 
 def test_a_mark_github_dropped_is_refused_not_trusted():
@@ -359,7 +373,7 @@ def test_a_mark_github_dropped_is_refused_not_trusted():
     dropped = {**filed, "labels": [l for l in filed["labels"] if l["name"] != FILING]}
     tracker = Tracker(_Answers(dropped), Board(None, PLAN, "B"), APP)
     with pytest.raises(TrackerError):
-        tracker.create("finding", "t", "b", ["balance"])
+        tracker.create(_before_the_arc("finding", "t", "b"))
 
 
 class _Echo:
@@ -384,7 +398,7 @@ def test_the_mark_is_sent_and_read_back_whatever_the_labels_sort_beside_it():
     answer, its labels made the ones sent."""
     github = _Echo(_recorded_answer("POST", "/shekel-plan/issues"))
     tracker = Tracker(github, Board(None, PLAN, "B"), APP)
-    number = tracker.create("finding", "t", "b", ["salary", "moves-money"])
+    number = tracker.create(_before_the_arc("finding", "t", "b", ("salary", "moves-money")))
     assert number == github.answer["number"]
     assert sorted(github.sent[0]["labels"]) == [FILING, "moves-money", "salary"]
 
@@ -632,21 +646,20 @@ def test_an_unlink_of_a_card_not_linked_is_refused_and_a_closed_parent_is_not_wh
     assert replay.unused() == 0
 
 
-def test_a_sub_issue_is_placed_above_another_in_its_parents_order():
-    """Recorded 2026-10-27 on scratch plan#1887-#1889 (plan#1877, ruling plan#1868): a parent's
-    read lists its sub-issues in the order they were linked; ``place_child`` moves the second
-    above the first, and the read lists it so; the same move sent again is answered 200 and
-    changes nothing, so a filing run again may send it again."""
-    replay = Replay("priority")
-    github = GitHub("token", replay)
-    tracker = Tracker(github, Board(github, PLAN, recording("priority")["scratch"]["board"]),
-                      "shekel-quill")
-    parent = tracker.create("step", f"{SCRATCH}: a parent whose sub-issues are reordered",
-                            "Scratch for plan#1877's recording; closed when it ends.", [])
-    first = tracker.create("task", f"{SCRATCH}: the first sub-issue linked",
-                           "Scratch for plan#1877's recording.", [])
-    second = tracker.create("task", f"{SCRATCH}: the second sub-issue linked",
-                            "Scratch for plan#1877's recording.", [])
+def _priority_round(tracker):
+    """Every call ``recorded/priority.json`` holds, in its order: the recording session ran this
+    once against GitHub, and the test replays it.  A step filed holding its Arc and two tasks
+    holding none, as quill files each (``_tracker.Tracker.create``), each unmarked; both tasks
+    linked under the step; the second placed above the first, then the same move sent again;
+    the three closed.  The three cards' numbers, the step's order of its sub-issues as read
+    after the links, each move and the closes, and the three cards as read last."""
+    parent = tracker.create(Draft("step", f"{SCRATCH}: a parent whose sub-issues are reordered",
+                                  "Scratch for plan#1877's recording; closed when it ends.", (),
+                                  "balance"))
+    first = tracker.create(Draft("task", f"{SCRATCH}: the first sub-issue linked",
+                                 "Scratch for plan#1877's recording.", (), None))
+    second = tracker.create(Draft("task", f"{SCRATCH}: the second sub-issue linked",
+                                  "Scratch for plan#1877's recording.", (), None))
     numbers = [parent, first, second]
     for number in numbers:
         tracker.unmark(number)
@@ -657,15 +670,31 @@ def test_a_sub_issue_is_placed_above_another_in_its_parents_order():
     cards = tracker.cards(numbers)
     tracker.add_child(parent, cards[first])
     tracker.add_child(parent, cards[second])
-    assert order() == [first, second]
-    tracker.place_child(parent, cards[second], cards[first])
-    assert order() == [second, first]
-    tracker.place_child(parent, cards[second], cards[first])
-    assert order() == [second, first]
+    orders = [order()]
+    for _ in range(2):
+        tracker.place_child(parent, cards[second], cards[first])
+        orders.append(order())
     for number in numbers:
         tracker.close(number, "not_planned")
-    assert order() == [second, first]
-    assert not any(card.is_open for card in tracker.cards(numbers).values())
+    orders.append(order())
+    return (parent, first, second), orders, tracker.cards(numbers)
+
+
+def test_a_sub_issue_is_placed_above_another_in_its_parents_order():
+    """Recorded 2026-10-28 on scratch plan-views-demo #261-#263, each deleted after, with the
+    developer's own token (plan#1877, ruling plan#1868; made again for plan#1861's merge of
+    plan#1811, ruling plan#1950): a parent's read lists its sub-issues in the order they were
+    linked; ``place_child`` moves the second above the first, and the read lists it so; the
+    same move sent again is answered 200 and changes nothing, so a filing run again may send it
+    again.  The step was filed holding its Arc, and every read of it holds it."""
+    replay = Replay("priority")
+    scratch = Scratch.from_json(recording("priority")["scratch"])
+    github = GitHub("token", replay)
+    tracker = Tracker(github, Board(github, scratch.place, scratch.board), QUILL)
+    (parent, first, second), orders, end = _priority_round(tracker)
+    assert orders == [[first, second], [second, first], [second, first], [second, first]]
+    assert [(end[number].arc, end[number].is_open) for number in (parent, first, second)] == [
+        ("balance", False), (None, False), (None, False)]
     assert replay.unused() == 0
 
 
@@ -676,8 +705,9 @@ def _status_round(tracker, sleep):
     none (the board lags a write, :func:`_tracker.read_until`); its Status set to In Progress,
     then to Done, then cleared, each read back the same way; the card taken off the board and
     closed.  The card, its item, and the read that showed each state, by that state."""
-    number = tracker.create("step", f"{SCRATCH}: a card whose Status quill writes",
-                            "Scratch for plan#1881's recording; closed when it ends.", [])
+    number = tracker.create(Draft("step", f"{SCRATCH}: a card whose Status quill writes",
+                                  "Scratch for plan#1881's recording; closed when it ends.", (),
+                                  "balance"))
     tracker.unmark(number)
     item = tracker.board.add(tracker.cards([number])[number])
 
@@ -701,8 +731,9 @@ def _status_round(tracker, sleep):
 
 
 def test_the_boards_status_is_read_set_and_cleared_on_a_card_it_holds():
-    """Recorded 2026-10-27 19:03 EDT on scratch #243 of the throwaway plan-views-demo, its board
-    "Plan views demo" (``recorded/status.json``, rulings plan#1873, plan#1905), with the
+    """Recorded 2026-10-28 09:30 EDT on scratch #260 of the throwaway plan-views-demo, its board
+    "Plan views demo" (``recorded/status.json``, rulings plan#1873, plan#1905), deleted after
+    (made again for plan#1861's merge of plan#1811, ruling plan#1950), with the
     developer's own token, as ``show.json`` was: ``statuses`` reads the board's Status field by
     name, with its options' ids, and every card it holds with the Status it holds, the demo's
     own 48 among them.  The first read after the add did not yet hold the card and the next one
@@ -717,7 +748,7 @@ def test_the_boards_status_is_read_set_and_cleared_on_a_card_it_holds():
     assert added.field.startswith("PVTSSF_")
     assert dict(added.options) == {"Todo": "f75ad846", "In Progress": "47fc9ee4",
                                    "Done": "98236657"}
-    assert number == 243 and len(added.held) == 49
+    assert number == 260 and len(added.held) == 49
     assert sorted(status or "none" for held, (_, status) in added.held.items()
                   if held != number) == ["Done"] * 7 + ["In Progress"] * 2 + ["Todo"] * 38 + [
                       "none"]
@@ -832,11 +863,11 @@ def test_edits_are_read_page_by_page_and_the_text_is_the_last_pages():
         node["id"] for node in sorted(nodes, key=lambda node: node["editedAt"])]
 
 
-#: The scratch cards the show recording filed on the throwaway plan-views-demo, 2026-10-27
+#: The scratch cards the show recording filed on the throwaway plan-views-demo, 2026-10-28
 #: (R-BAL395, plan#1925, ruling plan#1950), each deleted after: step SS with the task ST under
 #: it, the finding SF and the ruling SR it owns (each blocked by it), the step SB blocking it
 #: and the step SW waiting on it; the developer commented on SS and on ST.
-SS, ST, SF, SR, SB, SW = 244, 245, 246, 247, 248, 249
+SS, ST, SF, SR, SB, SW = 250, 251, 252, 253, 254, 255
 
 
 def _show_line(name, kind):
@@ -846,7 +877,7 @@ def _show_line(name, kind):
 
 def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_comments(
         code, capsys):
-    """The ``quill show`` of a step and of the finding it owns, recorded 2026-10-27 21:58 EDT
+    """The ``quill show`` of a step and of the finding it owns, recorded 2026-10-28 09:05 EDT
     on the throwaway plan-views-demo (``recorded/show.json``, R-BAL395, plan#1925), replayed:
     every read show makes of the tracker, in its order, answered as GitHub answered it, and
     nothing written.  The step: by number; its blocking read, which lists the finding, the
@@ -878,7 +909,7 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
         "\n"
         "THROWAWAY recording of quill show, card S; deleted after.\n"
         "\n"
-        "== comment, 2026-10-28T01:58:40Z by SaltyReformed\n"
+        "== comment, 2026-10-28T13:05:38Z by SaltyReformed\n"
         "A comment the recorder posts on step S.\n"
         "\n"
         f"no commit on origin/dev or origin/main adds, changes or deletes plan/ships/{SS}\n")

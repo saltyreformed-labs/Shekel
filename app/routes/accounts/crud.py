@@ -769,7 +769,8 @@ def hard_delete_account(account_id):
     # Guard 5: posting-ledger history (Build-Order Step 2).  A settled
     # transfer wrote balanced journal entries onto this account's linked
     # ledger account; they are immutable history that survives a transfer
-    # delete (``journal_entries.transfer_id`` SET NULL), so the account can
+    # delete (it removes the transfer's movements, which SET-NULLs their
+    # entries' ``journal_entries.transaction_entry_id``), so the account can
     # still hold posting legs after its transactions are gone (e.g. its ad-hoc
     # transfer was hard-deleted).  The check spans every KIND the account
     # carries, which is what covers an anchor correction re-pointed between

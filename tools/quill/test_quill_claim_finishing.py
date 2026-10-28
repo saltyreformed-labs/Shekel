@@ -20,9 +20,9 @@ from tools.quill.setup_tracker import FILING, TASK
 
 #: What a claim of step 1, on the board, writes when it files both finishing tasks as plan#2
 #: and plan#3: each created marked, linked under it, put on the board under it, unmarked.
-FILES_BOTH = [("create", 2, "task", REVIEW, ("filing",)), ("add_child", 1, 2),
+FILES_BOTH = [("create", 2, "task", REVIEW, ("filing",), None), ("add_child", 1, 2),
               ("board_add", 2), ("unmark", 2),
-              ("create", 3, "task", LAND, ("filing",)), ("add_child", 1, 3),
+              ("create", 3, "task", LAND, ("filing",), None), ("add_child", 1, 3),
               ("board_add", 3), ("unmark", 3)]
 
 
@@ -82,8 +82,9 @@ def test_a_review_filed_under_a_card_whose_suite_stands_goes_above_it(code):
     tracker.add(1)
     tracker.add_task(2, 1, title=LAND)
     assert run(tracker, code, "claim", "plan#1") == 0
-    assert tracker.writes == [("create", 3, "task", REVIEW, ("filing",)), ("add_child", 1, 3),
-                              ("place_child", 1, 3, 2), ("board_add", 3), ("unmark", 3)]
+    assert tracker.writes == [("create", 3, "task", REVIEW, ("filing",), None),
+                              ("add_child", 1, 3), ("place_child", 1, 3, 2), ("board_add", 3),
+                              ("unmark", 3)]
     assert _order(tracker) == [3, 2]
 
 
@@ -126,7 +127,7 @@ def test_a_claim_cut_short_is_finished_by_the_same_command_where_its_branch_is(c
     AnswerLostOnce(tracker, "create")
     assert run(tracker, code, "claim", "plan#1") == 2
     sha = _git.on_origin(code)[1]
-    assert tracker.writes == [("create", 2, "task", REVIEW, ("filing",))]
+    assert tracker.writes == [("create", 2, "task", REVIEW, ("filing",), None)]
     capsys.readouterr()
     assert run(tracker, code, "claim", "plan#1") == 0
     assert tracker.writes == FILES_BOTH
@@ -148,7 +149,7 @@ def test_a_claim_cut_short_under_an_earlier_text_files_the_task_anew(code):
     (``_tasks.FINISHING``)."""
     tracker = FakeTracker()
     tracker.add(1)
-    earlier = tracker.create("task", LAND, "An earlier text.", ())
+    earlier = tracker.create(Draft(TASK, LAND, "An earlier text.", (), None))
     tracker.add_child(1, tracker.cards_by_number[earlier])
     assert run(tracker, code, "claim", "plan#1") == 0
     assert _order(tracker) == [3, earlier, 4]
@@ -212,7 +213,7 @@ def test_each_finishing_task_passes_the_check_under_live_work(kind):
     filing makes passes it, so the claim never grades them again
     (``_filing.finishing_filings``)."""
     for title, body in finishing(1):
-        assert not violations(Draft(TASK, title, body, (), Owner(kind, True, False)))
+        assert not violations(Draft(TASK, title, body, (), None, Owner(kind, True, False)))
 
 
 def test_a_released_claims_finishing_tasks_are_dropped_before_its_step_splits(code, tmp_path,

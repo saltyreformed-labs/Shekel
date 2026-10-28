@@ -49,6 +49,14 @@ parent and both shadows -- is snapshotted whole into
 ``system.pre_origination_purge`` as ``jsonb``, so ``downgrade`` restores the
 exact pre-migration state rather than re-deriving it.
 
+**A missing snapshot is read as an empty one** (finding BAL-627, card
+plan#1778): the downgrade restores nothing and finishes.  A database built at
+head by ``scripts/init_database.py`` (``create_all``, then a stamp) never ran
+this upgrade and holds no snapshot table, and the downgrade died there with
+``UndefinedTable`` -- the shape ``82f7b7ed4332``'s downgrade already reads this
+way.  It cannot tell that database from one that ran the upgrade and lost the
+table since, so its line says only that no snapshot table was found.
+
 Review: developer, 2026-07-19 (ruling: "C9 should clean up the problem that it
 causes").
 
@@ -108,6 +116,12 @@ _SNAPSHOT_SHADOWS = sa.text("""
 """)
 _DELETE_TRANSFER = sa.text(
     "DELETE FROM budget.transfers WHERE id = :transfer_id"
+)
+
+# Whether the snapshot is missing: a database built at head by
+# ``scripts/init_database.py`` never ran the upgrade that creates it.
+_SNAPSHOT_ABSENT = sa.text(
+    "SELECT to_regclass('system.pre_origination_purge') IS NULL"
 )
 
 
@@ -213,8 +227,17 @@ def downgrade():
     The restored rows keep their original ids, which is what makes the
     shadows' ``transfer_id`` and the transfers' own identity survive the round
     trip; the sequences are already past them, so no id is reissued.
+
+    With no snapshot table there is nothing to restore and nothing to drop
+    (the module docstring).
     """
     bind = op.get_bind()
+    if bind.execute(_SNAPSHOT_ABSENT).scalar_one():
+        print(
+            "Pre-origination loan payments restored: 0 (no snapshot table "
+            "was found)"
+        )
+        return
     for kind, table in (
         ("transfer", "budget.transfers"),
         ("transaction", "budget.transactions"),

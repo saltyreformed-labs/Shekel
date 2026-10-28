@@ -112,7 +112,7 @@ class TestTransactionNameRows:
             )
             assert "Car Repair" in th_labels
 
-    def test_grid_shadow_transactions_get_own_rows(
+    def test_grid_transfer_gets_own_row(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
         """A transfer produces its own grid row with its leg's name in the header.

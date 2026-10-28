@@ -35,7 +35,7 @@ def test_a_question_given_an_owner_is_blocked_by_it_and_stays_in_the_order(code,
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, *_question(tmp_path, "--owner", "plan#1")) == 0
-    assert tracker.writes == [("create", 2, "question", "Day", ("balance", FILING)),
+    assert tracker.writes == [("create", 2, "question", "Day", ("balance", FILING), "balance"),
                               ("block", 2, 1), ("board_add", 2), ("unmark", 2)]
     question = tracker.cards_by_number[2]
     assert (question.parent, question.blocked_by) == (None, (1,))
@@ -49,7 +49,7 @@ def test_a_question_with_no_owner_is_linked_to_no_card(code, tmp_path):
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, *_question(tmp_path)) == 0
-    assert tracker.writes == [("create", 2, "question", "Day", ("balance", FILING)),
+    assert tracker.writes == [("create", 2, "question", "Day", ("balance", FILING), "balance"),
                               ("board_add", 2), ("unmark", 2)]
     assert tracker.cards_by_number[2].blocked_by == ()
 

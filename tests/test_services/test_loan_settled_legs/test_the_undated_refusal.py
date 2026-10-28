@@ -1,163 +1,43 @@
-"""A settled payment whose record carries no day is refused and named, never dated by a guess, and
-the repair the refusal points to works through the app: the days typed into the transfer's
-popover date each side.
+"""The days typed into a loan payment's popover date each side, and the loan walk reads them.
+
+The module graded the loan walk's refusal of a settled payment whose record carries no day (ruling
+**R-BAL147**) and the repair that refusal pointed to, until plan step ``balance:X-bi-6-5``'s third
+leaf deleted the refusal: the status-band rule refuses that state at commit, and its own test is
+``tests/test_models/test_a_transfer_side_s_record_follows_its_status.py``'s
+``test_an_undated_record_under_a_paid_transfer_is_refused``.  Its two cases went with it (developer
+answer 2026-10-27, "Delete all 6"); the repair's three are left, and the module's name is its
+history.
 """
 
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
 from app import ref_cache
 from app.enums import StatusEnum
-from app.exceptions import UndatedSettleError
 from app.extensions import db
 from app.models.transfer import Transfer
-from app.services.loan_ledger import _visible
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.transfer_legs import transfer_side_leg
 from app.utils.dates import display_today
-from tests._test_helpers import (
-    create_savings_account,
-    create_settled_transfer,
-    create_transfer,
-    refused_by_database_rule,
-)
+from tests._test_helpers import create_settled_transfer
 
 from ._helpers import (
     _DUE,
     _PERIOD,
     _CLOSED_ON,
     _loan,
-    _SETTLED_UNDATED,
-    _stage_an_undated_loan_side,
 )
-
-
-class TestASettledPaymentWithAnUndatedRecordFailsLoud:
-    """A settled transfer whose record carries no day is REFUSED, never dated by a guess."""
-
-    def test_a_paid_transfer_over_a_reverted_twin_refuses_and_names_the_transfer(
-        self, app, db, seed_user, seed_periods,
-    ):  # pylint: disable=unused-argument
-        """Drift B over a kept movement: the walk refuses, naming the TRANSFER.
-
-        The transfer says Paid, and the record its leg carries -- the kept
-        covering movement -- carries no day.  Read off the transfer, that is
-        the broken settled-without-a-day state the refusal exists for: a day
-        guessed here would put money on a day nothing recorded, and the
-        R-BAL139 installment day is for a payment that moved NOTHING, not
-        for one whose movement lost its day.  The refusal names the payment as
-        its owner finds it in the app -- the transfer's own name (its
-        popover's title) and its two accounts, the figure, the paycheck and
-        the due date -- with the
-        transfer's and the movement's ids, because ruling R-BAL147's "you fix
-        the row through the app" is the TRANSFER once the movement re-parents.
-        It named the row the movement hangs off, the twin, whose own status is
-        Projected, until leaf balance:X-bi-6-4d-1 (a re-expression under
-        R-BAL167 class 1).  Until plan step balance:X-bi-6-4b the twin's
-        status kept this payment out of the loan entirely.
-
-        Two unrelated transfers are built FIRST, which is how this case made
-        the transfer's and the movement's ids differ while each table counted
-        from 1 in a fresh database; a message naming the twin's id where the
-        movement's belongs passed the leaf's first version of this case.  The
-        test database now numbers each table from a range of its own (ruling
-        ``balance:R-BAL356``), so the two ids differ without the decoys.  The
-        twin's id joined the check until plan step ``balance:X-bi-6-4d-2``
-        made a transfer one row
-        (ruling **R-BAL258**; ruling **R-BAL167** class 4, through the
-        helper :func:`_stage_an_undated_loan_side`).
-
-        **Staged inside the save since plan step ``balance:X-bi-6-4d-2``**
-        (ruling **R-BAL167** class 2): the movement is the loan side's record
-        on the transfer (ruling **R-BAL88**), and the status-band rule
-        refuses a settled transfer holding an un-dated one at COMMIT, so the
-        state exists only inside the save that writes it -- where the walk is
-        asked, and refuses, as before -- and the commit is then asserted
-        refused.
-        """
-        with app.app_context():
-            loan = _loan(seed_user)
-            decoy = create_savings_account(
-                seed_user, db.session, "Decoy Savings", Decimal("0.00"),
-            )
-            for amount in ("10.00", "20.00"):
-                create_transfer(
-                    seed_user, db.session, seed_user["account"], decoy,
-                    seed_periods[_PERIOD], amount=Decimal(amount),
-                )
-            db.session.commit()
-            transfer = create_settled_transfer(
-                seed_user, db.session, seed_user["account"], loan,
-                seed_periods[_PERIOD], amount=Decimal("1000.00"),
-                settled_on=_CLOSED_ON, due_date=_DUE,
-            )
-            db.session.commit()
-            movement = _stage_an_undated_loan_side(transfer, loan)
-            assert transfer.id != movement.id, (
-                "the two ids must differ for the message to grade which one "
-                f"it names: transfer {transfer.id}, movement {movement.id}"
-            )
-
-            with pytest.raises(UndatedSettleError) as refused:
-                walk_loan_ledger(loan.id, seed_user["scenario"].id)
-            message = str(refused.value)
-            assert message.startswith(
-                f"The loan-side payment (movement {movement.id}) of transfer "
-                f"{transfer.id} \"{transfer.name}\" (Checking to Settled Leg "
-                f"Loan, $1,000.00 in the paycheck of "
-                f"{seed_periods[_PERIOD].start_date}, due {_DUE}) is in a "
-                "settled status but carries no settled_on"
-            ), message
-            assert transfer.name == "Checking to Settled Leg Loan", (
-                "the create door's default name, the popover's title"
-            )
-            assert "\"Money moved on\" box" in message, message
-            transfer_id = transfer.id
-
-            with refused_by_database_rule(_SETTLED_UNDATED) as caught:
-                db.session.commit()
-            db.session.rollback()
-            assert f"transfer {transfer_id} " in str(caught.value)
-
-    def test_a_dated_payment_never_builds_the_refusals_words(
-        self, app, db, seed_user, seed_periods, monkeypatch,
-    ):  # pylint: disable=unused-argument
-        """The walk over a payment WITH its day never composes the refusal's subject.
-
-        The subject reads the transfer's relationships, and the walk asks
-        ``payment_visible_on`` for every settled payment it folds, so it is
-        built only when the refusal fires
-        (:func:`~app.utils.balance_predicates.require_settled_day`).  The
-        builder is replaced by one that fails the case if called.
-        """
-        def never(_leg):
-            raise AssertionError("the refusal's subject was built on a dated payment")
-
-        monkeypatch.setattr(_visible, "_undated_payment_subject", never)
-        with app.app_context():
-            loan = _loan(seed_user)
-            create_settled_transfer(
-                seed_user, db.session, seed_user["account"], loan,
-                seed_periods[_PERIOD], amount=Decimal("1000.00"),
-                settled_on=_CLOSED_ON, due_date=_DUE,
-            )
-            db.session.commit()
-
-            [outcome] = walk_loan_ledger(
-                loan.id, seed_user["scenario"].id,
-            ).settled_splits
-            assert outcome.visible_on == _CLOSED_ON
 
 
 class TestTheRefusalsRepairWorksThroughTheApp:
     """The loan reads the days typed into the transfer's popover, through its own door.
 
-    ``_visible._UNDATED_PAYMENT_CAUSE`` tells the reader of the log to type
-    each account's day into that account's "Money moved on" box, and that a
-    revert then Mark Paid would date the payment to the day of the click.
-    What those doors do to a loan payment is graded here: the PATCH posts the
+    Each account's day typed into that account's "Money moved on" box dates
+    that side, and a revert then Mark Paid dates the payment to the day of
+    the click: the repair the loan walk's refusal of an un-dated settled
+    record told the reader of the log to make, until plan step
+    ``balance:X-bi-6-5``'s third leaf deleted that refusal.  What those doors
+    do to a loan payment is graded here: the PATCH posts the
     popover's two day boxes as that door's own route tests do, and the loan
     walk reads the day each box states.  ``_CLOSED_ON`` (03-05) is the day
     the transfer was marked paid; the suite's frozen clock is the day of the
@@ -170,8 +50,7 @@ class TestTheRefusalsRepairWorksThroughTheApp:
     commit, and a request reads only what is committed, so no request can
     meet it (developer answer 2026-10-09, "Rewrite from a Paid start": the
     broken-state setup and its error check dropped, every checked day
-    unchanged).  The refusal's message is graded inside the save that stages
-    the state, in :class:`TestASettledPaymentWithAnUndatedRecordFailsLoud`.
+    unchanged).
 
     **What Checking's day does when only the loan's box is typed is not the
     message's claim and is not asserted**: today Checking's guessed day

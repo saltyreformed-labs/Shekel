@@ -23,8 +23,15 @@ record, or a record on one side only (ruling **R-BAL147**'s
 ``UndatedSettleError``).  Until this rule the readers carried branches for
 both, and the transfer service carried their repairs (``drifted_sides_only``
 with ledger row **BAL-578**, the restore's status repair); the repairs went
-with this rule, and the readers' branches are plan step ``X-bi-6-5``'s to
-delete (finding **BAL-527**).
+with this rule, and the readers' branches with plan step ``X-bi-6-5``'s
+third leaf.  The rule grades a transaction only at COMMIT, and one act
+stages each state before it commits: the transfer writer
+(``transfer_service._status.apply_status_to_all_three``) writes both
+records, then the status, so a settle holds dated records under a transfer
+not yet settled and a revert holds un-dated records under one still settled,
+for the span between.  No reader those branches sat in runs in that span --
+it reads each record's books and, for a close at zero, reverses what the
+records posted, and walks no plan, no loan settled half and no loan.
 
 **The figure arm** (:data:`FIGURE_ARM`; plan step ``balance:X-bi-6-4d-2``'s
 4d-4 half, rulings **R-BAL365**, **R-BAL366**) ties the transfer's ONE settled

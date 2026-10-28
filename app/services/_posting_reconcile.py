@@ -76,7 +76,8 @@ _ZERO_MONEY = Decimal("0.00")
 # period, never the source row's current period"
 # (:mod:`app.services.posting_service`).  The other two reconciles in this
 # ledger obey it structurally by carrying the period in their key --
-# ``posting_service._posted_by_period`` for a transaction / transfer and
+# ``_posting_write.posted_by_period`` for a movement (a transaction's and a
+# transfer's own sources too, until plan#1845 deleted them) and
 # the loan payment split's own reader (folded into :func:`posted_correction_legs`
 # at ``balance:X-bi-6-3``), both ``(pay_period_id, entry_date)``.  This one did not: it read
 # the posted side keyed ``(source_kind_id, entry_date)`` with no period, so
@@ -464,8 +465,8 @@ def emit_correction_entry(
 
     The one definition of a sourceless correction's journal header, shared by
     the loan and account anchor reconciles and the loan payment split (plan
-    step ``balance:X-bi-6-3``, ruling **R-BAL102**): ``transfer_id``,
-    ``transaction_id`` and ``transaction_entry_id`` all NULL (a correction is
+    step ``balance:X-bi-6-3``, ruling **R-BAL102**): ``transaction_entry_id``,
+    the one row link an entry carries since plan#1845, NULL (a correction is
     a derivation and links no row; ``source_kind_id`` disambiguates it), and
     described from its source kind (:func:`_correction_description`).  Writes
     the balanced *legs* through the shared balanced-write path.  Flushes; does
@@ -500,8 +501,6 @@ def emit_correction_entry(
         pay_period_id=pay_period_id,
         entry_date=entry_date,
         source_kind_id=source_kind_id,
-        transfer_id=None,
-        transaction_id=None,
         transaction_entry_id=None,
         description=_correction_description(source_kind_id, entry_date),
     )

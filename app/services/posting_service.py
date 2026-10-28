@@ -57,11 +57,12 @@ period, owner and gate the transfer's), and they post through the same
 movement writer every purchase and covering movement posts through
 (:mod:`app.services._posting_purchases`, the counter leg dispatched by the
 parent's shape) -- :func:`sync_transfer_postings` is the pair's door, not a
-second writer.  The one-entry ``transfer`` source is LEGACY: the deploy's
-first resync reverses whatever it posted, once, and every later sync leaves
-it at zero (the shape ``balance:X-bi-4a`` gave the transaction source); its
-arm is the leaf :mod:`app.services._posting_legacy`, which ``X-bi-6-5``
-deletes whole with the source.  The amount is the transfer's
+second writer.  The one-entry ``transfer`` source was LEGACY from that step:
+the deploy's first resync reversed whatever it posted, once (the shape
+``balance:X-bi-4a`` gave the transaction source), and plan step
+``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted its arm, the leaf
+``_posting_legacy``, and the transaction source's, with every entry either
+had posted (ruling plan#1867).  The amount is the transfer's
 settled figure (``Transfer.settled_figure``), never ``transfers.amount``: a
 side's record holds no figure, and ``cash_ledger.movement_cash_leg`` is the
 one producer of each side's signed cash.
@@ -71,7 +72,6 @@ import logging
 
 from sqlalchemy.orm import selectinload
 
-from app.enums import PostingSourceEnum
 from app.extensions import db
 from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
@@ -79,24 +79,14 @@ from app.models.transfer import Transfer
 from app.services import posting_reads
 from app.services.posting_reads import PostingError
 from app.services.transfer_legs import (
-    dated_leg_exists_clause,
     movement_parent,
     transfer_family_movements,
 )
 from app.services.user_write_lock import lock_every_user_writes
-from app.services._posting_legacy import (
-    legacy_transfer_entry_exists_clause,
-    reverse_legacy_transfer_entry,
-    transfers_holding_a_legacy_net,
-)
 from app.services._posting_purchases import (
     emit_purchase_deltas,
     posted_purchase_exists_clause,
     purchase_posts,
-)
-from app.services._posting_write import (
-    _MAX_DESCRIPTION_LENGTH,
-    emit_typed_source_deltas,
 )
 from app.utils.balance_predicates import settled_status_ids
 
@@ -182,9 +172,8 @@ def sync_transfer_postings(xfer: Transfer) -> list[JournalEntry]:
     writer (:func:`~app.services._posting_purchases.emit_purchase_deltas`,
     keyed by ``transaction_entry_id`` and dated by the movement's own
     ``settled_on``), exactly as a bill's covering movement or an envelope's
-    purchase does; what this door adds is reaching both sides from the parent,
-    reversing the LEGACY one-entry shape, and healing both endpoints' anchor
-    corrections.
+    purchase does; what this door adds is reaching both sides from the parent
+    and healing both endpoints' anchor corrections.
 
     **It takes no ``settled`` flag, and that is the point.**  Through
     ``X-bi-6-1b`` this was told whether to post or reverse, because the ONE
@@ -211,18 +200,12 @@ def sync_transfer_postings(xfer: Transfer) -> list[JournalEntry]:
     :func:`reverse_transfer_postings_before_delete` -- the teardown twin the
     transaction side has had since plan step X-f3b, for the same reason.
 
-    **The legacy arm.**  Whatever the one-entry ``transfer`` source posted for
-    *xfer* is reconciled to ZERO here, at its own ``(period, entry date)``, on
-    every call
-    (:func:`~app.services._posting_legacy.reverse_legacy_transfer_entry`, in
-    the leaf that holds the one-entry shape until ``X-bi-6-5``): the deploy's
-    first resync after this step reverses every production legacy entry once
-    (19 transfers on the 2026-09-22 17:06 dump), and every later sync finds
-    nothing to do.  The reversal and the two per-movement
-    entries land on the same day for every one of them (measured on the
-    2026-09-20 restore: every movement's day equals its old entry's), so each
-    real account's net per day is unchanged and the loan checked-projection
-    assert holds through the move.
+    **The legacy arm is gone.**  From plan step ``balance:X-bi-6-3`` until
+    plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845) this door
+    also reconciled the one-entry ``transfer`` source to zero on every call;
+    the deploy's first resync reversed every production legacy entry once (19
+    transfers on the 2026-09-22 17:06 dump), and plan#1845's migration deleted
+    those entries, every one at zero on its own key (ruling plan#1867).
 
     **It reads every record the transfer's two sides hold**
     (:func:`app.services.transfer_legs.transfer_family_movements`), each
@@ -241,8 +224,8 @@ def sync_transfer_postings(xfer: Transfer) -> list[JournalEntry]:
 
     Returns:
         The new delta :class:`~app.models.journal_entry.JournalEntry` list --
-        any legacy reversal and the per-movement entries, in emission order --
-        or ``[]`` when the ledger is already at target (an idempotent no-op).
+        the per-movement entries, in emission order -- or ``[]`` when the
+        ledger is already at target (an idempotent no-op).
 
     Raises:
         PostingError: If a movement's account has no linked ledger account.
@@ -266,8 +249,7 @@ def reverse_transfer_postings_before_delete(xfer: Transfer) -> None:
     reversing first leaves each posted entry and its reversal a net-zero pair.
     A hidden transfer holds none, so the idempotent hard delete of an already
     soft-deleted one (``delete_transfer(allow_deleted=True)``) finds nothing
-    to reverse.  It reverses each record (``posted=False``), plus the legacy
-    one-entry source.
+    to reverse.  It reverses each record (``posted=False``).
 
     Idempotent no-op for a transfer that never posted.  Flushes but does not
     commit (the caller owns the transaction).
@@ -285,15 +267,15 @@ def _never_posts(_leg, _movement) -> bool:
 
 
 def _reconcile_transfer_family(xfer: Transfer, posts) -> "list[JournalEntry]":
-    """Reconcile every movement of *xfer*'s family, plus the legacy source.
+    """Reconcile every movement of *xfer*'s family.
 
     The one body :func:`sync_transfer_postings` and
     :func:`reverse_transfer_postings_before_delete` share; they differ in
     nothing but *posts* -- the movement's own rule for the sync, ``False`` for
     the teardown -- so the two doors cannot drift on which movements a
-    transfer's family holds or on the legacy arm and the self-heal that
-    follow.  The transfer twin of the loop in :func:`sync_transaction_postings`
-    / :func:`reverse_postings_before_delete`, which walk ``txn.entries`` the
+    transfer's family holds or on the self-heal that follows.  The transfer
+    twin of the loop in :func:`sync_transaction_postings` /
+    :func:`reverse_postings_before_delete`, which walk ``txn.entries`` the
     same way.
 
     Args:
@@ -322,7 +304,7 @@ def _rebook_transfer_family(xfer: Transfer, posts) -> "tuple[list[JournalEntry],
     ``X-bi-6-4a``), so no line here reads a shadow row.
     """
     family = transfer_family_movements(xfer)
-    entries = reverse_legacy_transfer_entry(xfer)
+    entries: list[JournalEntry] = []
     for movement, leg in family:
         entries.extend(
             emit_purchase_deltas(movement, leg, posted=posts(leg, movement))
@@ -336,9 +318,10 @@ def _transfer_family_accounts(xfer: Transfer, movements) -> tuple:
     """Return every real account a transfer family's legs can touch.
 
     The transfer twin of :func:`_family_accounts`: both endpoints (the legacy
-    entry's legs; the shadows' too, until ``X-bi-6-4d-2`` deleted them) and
-    each movement's own account (its leg lands there, ruling **R-BAL75**; one
-    with the endpoint until the settle door takes a tender of its own).
+    entry's legs landed there until plan#1845 deleted that shape, the shadows'
+    until ``X-bi-6-4d-2`` deleted them) and each movement's own account (its
+    leg lands there, ruling **R-BAL75**; one with the endpoint until the
+    settle door takes a tender of its own).
     Deduplicated, first-seen order, so the self-heal visits an account once.
     """
     seen: dict[int, None] = {
@@ -367,11 +350,12 @@ def sync_transaction_postings(txn: Transaction) -> list[JournalEntry]:
     by ruling **R-FM**'s identity and, for a ``purchases``-basis envelope,
     the envelope's UN-DATED purchases on the close day.  Those are movements
     in flight now: they post when they are dated, on their own day, and the
-    close books nothing.  So the TRANSACTION source's target is empty on
-    every row, and what :func:`_emit_transaction_deltas` still does is
-    reverse whatever that source posted before this step -- a legacy leg the
-    deploy resync (:func:`resync_all_cash_postings`) brings to zero once and
-    a repeat sync leaves at zero.  The cash walk reads the same family
+    close books nothing.  So the row books nothing: the TRANSACTION source
+    it booked under stopped posting at that step, and plan step
+    ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted that source
+    with the arm that reversed what it had posted, its migration every entry
+    the source wrote, each pair at zero on its own key (ruling plan#1867).
+    The cash walk reads the same family
     (``cash_ledger.settled_cash_facts``: every dated movement, on the
     movement's own account, ruling **R-BAL75**), so the two cannot price
     one movement two ways.
@@ -389,10 +373,10 @@ def sync_transaction_postings(txn: Transaction) -> list[JournalEntry]:
     had zero callers since plan step X-au-c3 and is deleted (ledger row
     **BAL-507**).
 
-    **Reconciles over the accounts, periods, AND entry dates the transaction
-    has ALREADY posted to**, read from the ledger by ``transaction_id``
-    (:func:`~app.services._posting_write.posted_by_period`), unioned with the
-    target -- NOT a single fixed pair.  This is what makes a
+    **Reconciles over the accounts, periods, AND entry dates each movement
+    has ALREADY posted to**, read from the ledger by its
+    ``transaction_entry_id`` (:func:`~app.services._posting_write.posted_by_period`),
+    unioned with the target -- NOT a single fixed pair.  This is what makes a
     revert-and-recategorize correct (the reversal lands on the OLD category
     -- the one in the ledger -- not the new ``txn.category_id``; plan Section
     2.8 CRITICAL), and what makes a revert-and-MOVE correct (the reversal
@@ -463,7 +447,7 @@ def _rebook_transaction_family(txn: Transaction) -> "list[JournalEntry]":
     for every row before its one anchor re-check (ruling **R-BAL103**).
     Returns the emitted deltas, ``[]`` at target.
     """
-    entries = _emit_transaction_deltas(txn)
+    entries: list[JournalEntry] = []
     for purchase in txn.entries:
         parent = movement_parent(purchase)
         entries.extend(
@@ -492,45 +476,6 @@ def _family_accounts(txn: Transaction) -> tuple:
     for movement in txn.entries:
         seen.setdefault(movement.account_id, None)
     return tuple(seen)
-
-
-def _emit_transaction_deltas(txn: Transaction) -> "list[JournalEntry]":
-    """Bring the TRANSACTION source's postings for *txn* to zero.
-
-    :func:`sync_transaction_postings`' first half, split out so its movement
-    arm and the teardown door (:func:`reverse_postings_before_delete`) compose
-    the same two halves without either running the anchor self-heal twice.
-
-    **The target is EMPTY, always** (plan step ``balance:X-bi-4a``, ruling
-    **R-BAL80**): a plan row books nothing of its own, so the only work here
-    is reversing what this source posted before that step -- an envelope's
-    close booking its un-dated purchases, a settled row from before the
-    covering movement existed -- read back from the ledger by
-    ``transaction_id``, once, on the deploy resync.  A row this source never
-    touched, or one already brought to zero, emits nothing.
-
-    Args:
-        txn: The transaction, never a transfer shadow since plan step
-            ``balance:X-bi-6-4d-2`` deleted them (the sync skipped a shadow's
-            TRANSACTION source from its first version to ``X-bi-6-3``, its
-            target empty after: 0 such entries on the 2026-09-22 17:06
-            production dump).  The kind a reversal would stamp is the ROW's
-            type since leaf ``X-bi-6-4a`` (``transfer`` before, when the
-            dispatch read the shadow's column); with nothing ever posted to
-            this source for a shadow, no entry can carry either.
-
-    Returns:
-        The emitted reversal entries; ``[]`` when the ledger holds nothing
-        for this source.
-    """
-    return emit_typed_source_deltas(
-        txn,
-        targets={},
-        source=PostingSourceEnum.TRANSACTION,
-        description=txn.name[:_MAX_DESCRIPTION_LENGTH],
-        log_label=f"transaction {txn.id} (own leg: none)",
-        transaction_id=txn.id,
-    )
 
 
 def reverse_purchase_postings_before_delete(entry) -> None:
@@ -569,19 +514,20 @@ def reverse_postings_before_delete(txn: Transaction) -> None:
     """Reverse a transaction's ledger postings before the row is deleted.
 
     The delete-side reconcile every transaction-delete path runs FIRST, while
-    ``txn.id`` still exists: it brings the row's WHOLE posted family -- its own
-    cash leg and every one of its purchases' -- to zero, emitting a balanced
-    reversal entry for whatever the ledger currently holds.  Running it before
-    the delete is load-bearing for a HARD delete: ``journal_entries``'
-    ``transaction_id`` and ``transaction_entry_id`` are both ``ON DELETE SET
-    NULL`` (and a row's ``transaction_entries`` are deleted just before it, by
-    the one removal act -- their keys are NO ACTION since migration
-    ``c4a4e7d1b9f2``), so once the
-    rows are gone the links are severed and the original legs would be stranded
-    on their ledger accounts with no offsetting reversal -- breaking per-account
-    reconciliation.  Reversing first leaves each original entry and its reversal
-    as an immutable net-zero pair (their links SET-NULL together on the delete),
-    so every ledger account still nets correctly.  The transaction analog of
+    ``txn.id`` still exists: it brings the row's WHOLE posted family -- every
+    one of its movements' legs -- to zero, emitting a balanced reversal entry
+    for whatever the ledger currently holds.  Running it before the delete is
+    load-bearing for a HARD delete: ``journal_entries.transaction_entry_id`` is
+    ``ON DELETE SET NULL`` (and a row's ``transaction_entries`` are deleted
+    just before it, by the one removal act -- their keys are NO ACTION since
+    migration ``c4a4e7d1b9f2``), so once the movements are gone the links are
+    severed and the original legs would be stranded on their ledger accounts
+    with no offsetting reversal -- breaking per-account reconciliation.
+    Reversing first leaves each original entry and its reversal as an
+    immutable net-zero pair (their links SET-NULL together on the delete), so
+    every ledger account still nets correctly.  The row's OWN cash leg was a
+    second link here until plan step ``balance:X-bi-6-5``'s second leaf (card
+    plan#1845) deleted that source with its ``transaction_id``.  The transaction analog of
     :func:`reverse_transfer_postings_before_delete`, which
     ``transfer_service.delete_transfer`` runs first for the same reason.  No
     transfer shadow reaches here since plan step ``balance:X-bi-6-4d-2``
@@ -611,11 +557,11 @@ def reverse_postings_before_delete(txn: Transaction) -> None:
 
     Args:
         txn: The transaction about to be deleted (soft or hard).  Must still be
-            flushed (``txn.id`` set) so the reversal entries can link by
-            ``transaction_id`` / ``transaction_entry_id`` and read the
-            already-posted legs back.
+            flushed (``txn.id`` set) so its movements' reversal entries can
+            link by ``transaction_entry_id`` and read the already-posted legs
+            back.
     """
-    entries = _emit_transaction_deltas(txn)
+    entries: list[JournalEntry] = []
     for purchase in txn.entries:
         entries.extend(
             emit_purchase_deltas(
@@ -640,14 +586,13 @@ def _hold_for_the_re_check(held: dict, scenario_id: int, accounts, entries) -> N
 def _skip_reasons(skipped: "dict[int, str]") -> str:
     """Return the resync's skipped transfers and each one's reason, as one line.
 
-    Shared by the skip warning and the ruling **R-BAL104** refusal, so the
-    two tell the operator the same thing.  *skipped* maps a transfer id to
-    the ``PostingError`` message its family raised; it is empty when the
-    pass skipped nothing, and a refusal can still find a holder then, which
-    the refusal measures rather than rules out.
+    The skip warning's reason clause.  *skipped* maps a transfer id to the
+    ``PostingError`` message its family raised, and is never empty here: the
+    warning is logged only when the pass skipped something.  It was shared
+    with ruling **R-BAL104**'s refusal, which could fire with nothing skipped,
+    until plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845)
+    deleted the refusal with the legacy entries it asked about.
     """
-    if not skipped:
-        return "No transfer was skipped this pass."
     return "Why: " + "; ".join(
         f"transfer {transfer_id}: {reason.rstrip('.')}"
         for transfer_id, reason in skipped.items()
@@ -682,52 +627,43 @@ def resync_all_cash_postings() -> tuple[int, int]:
     This walks every source back through the SAME go-forward sync, so a
     re-dated entry is identical to a freshly posted one by construction; there
     is no second implementation of the rule and no SQL restatement of it,
-    which is the property this whole arc exists to hold.  **Since plan step
-    ``balance:X-bi-4a`` it is also what brings the TRANSACTION source to
-    zero** (ruling **R-BAL80**): a plan row posts nothing of its own, so the
-    legs that source wrote before this step -- an envelope's close booking
-    its un-dated purchases on the close day -- are reversed on the first
-    deploy of this tree and left at zero after, by the same reconcile.  **And
-    since plan step ``balance:X-bi-6-3`` it is what RE-BOOKS every settled
-    transfer into its ruled shape** (rulings **R-BAL45**, **R-BAL98**): the
-    one-entry ``transfer`` source is reversed to zero and the two per-movement
-    entries are posted against the owner's transit account, by
-    :func:`sync_transfer_postings`' re-book half -- the code every settle runs,
-    so the re-book is the go-forward posting by construction and no SQL
-    restates it.  The first deploy of that tree logs every settled transfer
-    as changed (19 on the 2026-09-22 17:06 production dump); every later one
-    logs zero.
+    which is the property this whole arc exists to hold.  **It is also how
+    two source shapes were retired**: the first deploy after plan step
+    ``balance:X-bi-4a`` reversed the TRANSACTION source to zero (ruling
+    **R-BAL80**: a plan row posts nothing of its own), and the first after
+    ``balance:X-bi-6-3`` RE-BOOKED every settled transfer into its ruled shape
+    (rulings **R-BAL45**, **R-BAL98**: the one-entry ``transfer`` source
+    reversed to zero, the two per-movement entries posted against the owner's
+    transit account, 19 transfers on the 2026-09-22 17:06 production dump) --
+    each through the code every settle runs, so no SQL restated it.  Plan
+    step ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted both
+    retired arms, and its migration every entry they had reversed (ruling
+    plan#1867).
 
     **It re-books EVERY source first and re-checks the anchor corrections
     ONCE, after both arms** (ruling **R-BAL103**, developer 2026-09-22).  The
     per-source doors re-check at once, right for one settle and wrong for a
-    batch: a transfer not yet reached still holds its legacy one-entry
-    posting, which the account walk does not read (the ``transfer_id IS
-    NULL`` exclusion ``X-bi-6-5`` deletes), so a walk inside the loop books a
-    true-up for money only waiting its turn and that transfer's own re-check
-    reverses it -- both permanent in an append-only ledger, 40 of the 97
-    entries the first 6-3 deploy wrote on its rehearsal over the 2026-09-22
-    production dump.  So both arms run the doors' re-book halves
+    batch: a source not yet reached still holds what it posted before this
+    pass, so a walk inside the loop books a true-up for money only waiting its
+    turn and that source's own re-check reverses it -- both permanent in an
+    append-only ledger, 40 of the 97 entries the first 6-3 deploy wrote on its
+    rehearsal over the 2026-09-22 production dump, where the waiting money
+    was the legacy one-entry transfer postings.  So both arms run the doors'
+    re-book halves
     (:func:`_rebook_transaction_family`, :func:`_rebook_transfer_family`) and
     the one re-check per scenario (one owner's; the self-heal takes no lock,
     and this function took every owner's at its start) reads the finished
     ledger.  The union's earliest day can only make the re-check run where
     one source alone would skip it.
 
-    **Until ``X-bi-6-5`` it REFUSES to finish while any transfer still holds a
-    nonzero legacy net** (ruling **R-BAL104**, amended by **R-BAL105**): a
-    family it skips (below) keeps its legacy posting, which the account walk
-    cannot see, so a later true-up would book a wrong correction.  After the
-    transfer loop, before the one re-check, it asks
-    :func:`~app.services._posting_legacy.transfers_holding_a_legacy_net` and
-    raises naming every holder, the skipped transfers and why each was
-    skipped; ``scripts/init_database.py`` exits before its one commit.  Since
-    plan step ``balance:X-cv`` that commit covers the release's migrations
-    too, so the refusal rolls them back with it and ``deploy/shekel-deploy.sh``
-    re-pins the previous image on its own -- the manual dump restore ruling
-    **R-BAL105** accepted until then is gone
-    (``transfers_holding_a_legacy_net``'s docstring has the argument and the
-    gate).
+    **From plan step ``balance:X-bi-6-3`` it REFUSED to finish while any
+    transfer still held a nonzero legacy net** (ruling **R-BAL104**, amended
+    by **R-BAL105**): a family it skipped kept its legacy posting, which the
+    account walk could not see, so a later true-up would have booked a wrong
+    correction.  Plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845)
+    deleted the refusal: its migration deleted every legacy entry, each pair
+    at zero on its own key, so there is no money left the walk cannot see
+    (ruling plan#1867).
 
     It stays wired on every deploy rather than being deleted after one run, for
     the same reason its two siblings are: reconcile-to-target makes it a no-op
@@ -750,10 +686,9 @@ def resync_all_cash_postings() -> tuple[int, int]:
     :func:`_rebook_transfer_family`, so whichever runs first leaves the other at
     target.  **Its transfer half is total over the family the ledger holds
     for the same reason its transaction half is** (below): it walks every
-    live transfer that is settled OR holds a dated record on either side,
-    PLUS every transfer -- live or not -- the legacy one-entry source ever
-    posted for, and hands each to the pair's door, which reads each
-    movement's own state and brings the legacy source to zero.
+    live transfer that is settled -- a side's record is dated, and so posts,
+    only while its transfer is (the status-band rule) -- and hands each to
+    the pair's door, which reads each movement's own state.
 
     Flushes but does NOT commit -- the caller owns the transaction boundary
     (``scripts.init_database.initialise_database``, whose ONE commit covers the
@@ -813,10 +748,8 @@ def resync_all_cash_postings() -> tuple[int, int]:
         pass actually re-posted, for the deploy log.
 
     Raises:
-        PostingError: If, after the transfer loop, any transfer still holds a
-            nonzero legacy one-entry posting on some ``(period, date)``
-            (ruling **R-BAL104**); if a ROW's family cannot post (the
-            transaction arm does not skip); or if the one anchor re-check
+        PostingError: If a ROW's family cannot post (the transaction arm
+            does not skip), or if the one anchor re-check
             refuses an account (anchor history with no linked ledger, or a
             posted net whose source it cannot resolve).  In every case the
             caller's transaction must not commit.
@@ -855,12 +788,13 @@ def resync_all_cash_postings() -> tuple[int, int]:
             # against a still-PROJECTED envelope is real cash that left the bank,
             # and without it that envelope's legs would be maintained by
             # per-mutation calls and by nothing else -- the exact gap this
-            # function exists to close for transactions.  The first arm is
-            # what reaches every row the TRANSACTION source ever posted for
-            # (a row posted its own leg only while settled), so the resync
-            # after plan step ``balance:X-bi-4a`` brings that source to zero.
-            # It is an EXISTS rather than a join so a row with several posted
-            # purchases is walked once.
+            # function exists to close for transactions.  The first arm
+            # reached every row the TRANSACTION source ever posted for (a row
+            # posted its own leg only while settled), so the resync after plan
+            # step ``balance:X-bi-4a`` brought that source to zero; plan#1845
+            # deleted that source, and the arm still walks every settled
+            # row's family.  It is an EXISTS rather than a join so a row with
+            # several posted purchases is walked once.
             db.or_(
                 Transaction.status_id.in_(settled_ids),
                 posted_purchase_exists_clause(),
@@ -884,32 +818,21 @@ def resync_all_cash_postings() -> tuple[int, int]:
     transfers = (
         db.session.query(Transfer)
         .filter(
-            db.or_(
-                # LIVE and SETTLED, or live and holding a dated record on
-                # either side (plan step ``balance:X-bi-6-3``, ruling
-                # **R-BAL101**; by the side links since ``X-bi-6-4d-2``) --
-                # the transaction arm's totality argument: this reaches every
-                # transfer that could hold a leg today.
-                db.and_(
-                    Transfer.is_deleted.is_(False),
-                    db.or_(
-                        Transfer.status_id.in_(settled_ids),
-                        dated_leg_exists_clause(),
-                    ),
-                ),
-                # Or carrying ANY entry of the legacy one-entry ``transfer``
-                # source, live or not: a reverted or soft-deleted transfer
-                # whose pre-E1a settle / reversal pair straddles two dates
-                # nets zero in total and not per date (the E1a review's H2
-                # residue), and the loan lineage probe stopped reading that
-                # source when it re-keyed onto the movement -- so the legacy
-                # arm of the pair's door is what brings every such pair to
-                # zero per (period, date), and this disjunct is what makes it
-                # reach every transfer the legacy source ever posted for.
-                # After the first deploy it walks the same rows as no-ops
-                # (the leaf-1 adversarial review of that step, finding 5).
-                legacy_transfer_entry_exists_clause(),
-            ),
+            # LIVE and SETTLED (plan step ``balance:X-bi-6-3``, ruling
+            # **R-BAL101**) -- the transaction arm's totality argument: this
+            # reaches every transfer that could hold a leg today, since a
+            # side's record posts only while dated
+            # (``_posting_purchases.purchase_posts``) and is dated only while
+            # its transfer is settled (the status-band rule,
+            # ``app.side_band_infrastructure``).  It reached a live transfer
+            # holding a dated record on either side too, whatever its
+            # status, until plan step ``balance:X-bi-6-5``'s third leaf
+            # deleted that disjunct, which the band rule left reaching
+            # nothing more.  Another reached every transfer, live or not,
+            # the legacy one-entry source ever posted for, until plan#1845
+            # deleted that source and its entries.
+            Transfer.is_deleted.is_(False),
+            Transfer.status_id.in_(settled_ids),
         )
         .order_by(Transfer.id)
         .all()
@@ -925,17 +848,13 @@ def resync_all_cash_postings() -> tuple[int, int]:
     # (``scripts/init_database.py``): one repairable row would make the app
     # unbootable for every user, and the operator could not even reach the
     # screen that shows which row it was.  Skipping keeps the failure loud in
-    # the log and bounded to the family that caused it -- EXCEPT while the
-    # skipped family still holds a LEGACY net (ruling **R-BAL104**, developer
-    # 2026-09-22): the account walk cannot see that money, so the resync
-    # refuses after this loop (below) until the pairing is repaired.  The
-    # skip holds for every other family.
+    # the log and bounded to the family that caused it.
     #
     # **Skipped WHOLE, under a SAVEPOINT** (the leaf-1 adversarial review of
     # plan step ``balance:X-bi-6-3``, finding 1).  The pair's door writes in
-    # sequence -- the legacy reversal, then one side, then the other -- and a
-    # refusal on the second side would otherwise leave the first side and the
-    # reversal committed by the deploy: the from-account debited into transit
+    # sequence -- one side, then the other -- and a refusal on the second side
+    # would otherwise leave the first side committed by the deploy: the
+    # from-account debited into transit
     # with nothing arriving, a trial balance that still closes, and no reader
     # to trip.  The one-entry door resolved every input before its first
     # write, so its skip was clean by construction; a per-movement door has no
@@ -944,7 +863,7 @@ def resync_all_cash_postings() -> tuple[int, int]:
     transfers_changed = 0
     # Transfer id -> why its family could not post: the door's own message
     # (which names the account whose pairing is broken) is the operator's
-    # only pointer to the repair, so it is carried to the log and the refusal.
+    # only pointer to the repair, so it is carried to the log.
     skipped: dict[int, str] = {}
     for xfer in transfers:
         try:
@@ -956,24 +875,6 @@ def resync_all_cash_postings() -> tuple[int, int]:
         if entries:
             transfers_changed += 1
             _hold_for_the_re_check(held, xfer.scenario_id, accounts, entries)
-    # **Until X-bi-6-5 a legacy net left standing refuses the whole resync**
-    # (ruling **R-BAL104**; the docstring says why).  Asked BEFORE the one
-    # re-check, so no true-up is ever computed against a walk that cannot
-    # see the net, and the refusal names the root cause rather than whatever
-    # the re-check would trip on next.
-    legacy_holders = transfers_holding_a_legacy_net()
-    if legacy_holders:
-        raise PostingError(
-            f"Cash posting resync refused (ruling R-BAL104): transfer(s) "
-            f"{legacy_holders} still hold a nonzero legacy one-entry "
-            f"posting, which the account walk cannot see (skipped this "
-            f"pass: {list(skipped)}).  {_skip_reasons(skipped)}  Repair "
-            "each skipped transfer's movement-account ledger pairing before "
-            "deploying again; a holder that was NOT skipped is a re-book "
-            "defect, not a pairing: do not deploy.  Nothing this deploy did "
-            "is committed, its migrations included (plan step X-cv): the "
-            "stamp is unmoved, so shekel-deploy re-pins the previous image."
-        )
     # The ONE anchor re-check, after every source is re-booked (ruling
     # **R-BAL103**; the docstring says why).  Outside the per-transfer
     # SAVEPOINT on purpose: the walk refuses only for the ACCOUNT

@@ -405,11 +405,7 @@ class TestPerEntryAndTrialBalance:
             # ``transfer_id``).
             assert (
                 _db.session.query(JournalEntry)
-                .filter(_db.or_(
-                    JournalEntry.transfer_id.isnot(None),
-                    JournalEntry.transaction_id.isnot(None),
-                    JournalEntry.transaction_entry_id.isnot(None),
-                ))
+                .filter(JournalEntry.transaction_entry_id.isnot(None))
                 .count()
             ) == 4
             assert _entries_violating_balance() == []

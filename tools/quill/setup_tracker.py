@@ -26,7 +26,7 @@ reported for a person to settle, so a re-run never destroys anyone's work.
 
 **One home per fact (rule 14) is why the board stores no field.**  A card's
 order is the board's own drag order (``items(orderBy: {field: POSITION})``),
-its kind is its issue type, its arc one label, whether it shipped is git's
+its kind is its issue type, its arc its issue field Arc, whether it shipped is git's
 answer (its ship marker ``plan/ships/N``, ruling ``balance:R-BAL359``).  A
 field holding any of those would be a second home, so every custom field that
 stores a value is a difference.  GitHub's built-in ``Status`` field is the one stored
@@ -34,12 +34,10 @@ field the board keeps, and no second home: ``quill sync`` writes it from git on 
 board holds, as it writes a card's open or closed state, and puts back any other value
 (``_status``; rulings plan#1873, plan#1905 and plan#1906, reversing the ruling of 2026-10-03
 that kept it unused).  So this module checks the field alone: it holds exactly
-:data:`STATUS_OPTIONS`, the plan view shows it, and no board item that is no card holds a
-value.  Its options are set on the web: GitHub refuses to delete it ("Only custom fields can
-be deleted.") and silently ignored an update emptying its choices (both measured 2026-10-03).
-Every automation stays off, and matters twice over: "Auto-close issue" would close a card
-when its Status became Done, which quill writes -- a third way to close a card, beside git
-and the developer's own hand.
+:data:`_board_fields.STATUS_OPTIONS`, set on the web, the plan view shows it, and no board item
+that is no card holds a value.  Every automation stays off, and matters twice over:
+"Auto-close issue" would close a card when its Status became Done, which quill writes -- a
+third way to close a card, beside git and the developer's own hand.
 **Nor may an automation put a card on the board** (ruling ``balance:R-BAL177``):
 the board holds the steps and questions in the developer's order, and each step's tasks
 nested under it outside that order, in its card's order of its tasks (rulings plan#1814,
@@ -63,7 +61,12 @@ rulings ``balance:R-BAL348``, ``R-BAL354``, and the developer's word of 2026-10-
 single select of the arcs, which a card's arc moves into after the cutover, its matching
 label then kept as display; and GitHub's four defaults, Priority, Effort, Start date and
 Target date, which the developer keeps, empty for now.  Any other is a difference, deleted
-on the web.
+on the web.  The board lists each one it shows as a field of its own, which GitHub marks
+``isIssueField``: its value is the issue's, so the board stores nothing for it (finding
+plan#1839, measured 2026-10-27), and it is no stored field.  **Every card's arc labels display
+its Arc** (R-BAL354, views_spec s.6): each card the rule ``quill sync``'s label pass reports
+and writes by finds anything for is a difference (:func:`check_card_arcs`), read as sync reads
+them.
 
 Usage, from the repository root::
 
@@ -82,12 +85,23 @@ from urllib.parse import quote
 import requests
 
 from tools.ci.arcs import ARCS
+from tools.quill._arcs import ARC_FIELD, arc_verdict, card_arcs
+from tools.quill._board_fields import (
+    GITHUB_STATUS_FIELD,
+    STATUS_OPTIONS,
+    hidden,
+    is_github_status,
+    status_column,
+    status_field_differences,
+    stores_values,
+)
 from tools.quill._exits import described
 from tools.quill._github import (
     APP_DIR,
     CredentialsError,
     GitHub,
     GitHubError,
+    TrackerError,
     app_credentials,
     app_installation,
     app_jwt,
@@ -134,14 +148,14 @@ REHEARSAL = Place("saltyreformed-labs", "shekel-plan-rehearsal", "Shekel plan re
 #: :data:`PLAN`'s names, which this module's checks configure.
 ORG, REPO, PROJECT_TITLE = PLAN.owner, PLAN.name, PLAN.board_title
 
-#: The four kinds of card: each carries one arc label, and ``check.violations`` holds
-#: each to its kind's rules.
+#: The four kinds of card: each holds one arc, its issue field :data:`_arcs.ARC_FIELD`, its
+#: arc label display (R-BAL354), and ``check.violations`` holds each to its kind's rules.
 CARD_TYPES = ("step", "finding", "ruling", "question")
 #: A piece of one step or finding, a commit inside its card's one pull request (ruling
-#: ``balance:R-BAL386``): a sub-issue of that card, which carries no arc label (its arc is its
-#: card's), and is done when its file ``plan/tasks/N`` is in git.  A task under a step the board
-#: holds is on it too, nested under that step in the Plan view, outside the board's order, in
-#: its card's order of its tasks (rulings plan#1814, plan#1842, plan#1868).
+#: ``balance:R-BAL386``): a sub-issue of that card, which holds no Arc and no arc label (its
+#: arc is its card's), and is done when its file ``plan/tasks/N`` is in git.  A task under a
+#: step the board holds is on it too, nested under that step in the Plan view, outside the
+#: board's order, in its card's order of its tasks (rulings plan#1814, plan#1842, plan#1868).
 TASK = "task"
 #: The kinds of card in the developer's drag order (R-BAL177), the order every reader of the
 #: board reads (``_tracker.Board.order``): a task on the board is in none.
@@ -165,7 +179,8 @@ class IssueField:
 
 
 #: The organization's issue fields, by name (rulings ``balance:R-BAL348``, ``R-BAL354``).
-#: Arc is a single select whose options are the arcs, :data:`tools.ci.arcs.ARCS`.  GitHub
+#: Arc (:data:`_arcs.ARC_FIELD`) is a single select whose options are the arcs,
+#: :data:`tools.ci.arcs.ARCS`.  GitHub
 #: makes four more when issue fields are switched on, Priority, Effort, Start date and Target
 #: date.  R-BAL348 ruled them deleted, a click on the web that was never made, and on
 #: 2026-10-25 the developer kept them ("I want to use those fields even if they are empty for
@@ -174,7 +189,7 @@ class IssueField:
 #: scope, so the developer changes them on the web and this module checks them; any other
 #: field is a difference.
 ISSUE_FIELDS = {
-    "Arc": IssueField("SINGLE_SELECT", ARCS, "the arcs"),
+    ARC_FIELD: IssueField("SINGLE_SELECT", ARCS, "the arcs"),
     "Priority": IssueField("SINGLE_SELECT", ("Urgent", "High", "Medium", "Low")),
     "Start date": IssueField("DATE"),
     "Target date": IssueField("DATE"),
@@ -258,21 +273,6 @@ APP_LOGIN = "shekel-quill"
 #: What quill reads of the repositories a board is linked to (:func:`linked`).
 LINKED_REPOSITORIES = "repositories(first: 100) { totalCount nodes { nameWithOwner } }"
 
-#: A board field of one of these types STORES a value per card; every other
-#: type (title, labels, parent issue, sub-issue progress, ...) shows a fact
-#: the card itself holds.
-STORED_FIELD_TYPES = frozenset(
-    {"TEXT", "SINGLE_SELECT", "MULTI_SELECT", "NUMBER", "DATE", "ITERATION"}
-)
-
-#: GitHub's built-in field, the one stored field GitHub will not let a board
-#: lose (see the module docstring), and the one the board keeps: quill writes it.
-GITHUB_STATUS_FIELD = "Status"
-#: The options Status holds, as quill writes them (rulings plan#1873, plan#1906): GitHub's
-#: three, named as GitHub names them, and Dropped, which the developer adds on the web.
-TODO, IN_PROGRESS, DONE, DROPPED = "Todo", "In Progress", "Done", "Dropped"
-STATUS_OPTIONS = (TODO, IN_PROGRESS, DONE, DROPPED)
-
 #: The board's view: the open cards, unsorted, so it shows the drag order.
 VIEW_NAME = "Plan"
 VIEW_FILTER = "is:open"
@@ -288,13 +288,13 @@ GITHUB_DEFAULT_VIEW = "View 1"
 _PROJECT_FIELDS = """
   id number title public url
   """ + LINKED_REPOSITORIES + """
-  fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType }
+  fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType isIssueField }
     ... on ProjectV2SingleSelectField { options { name } } } }
   workflows(first: 50) { nodes { name enabled } }
   views(first: 20) { nodes {
     id number name filter layout sortByFields(first: 1) { totalCount }
     groupByFields(first: 1) { totalCount } verticalGroupByFields(first: 1) { totalCount }
-    fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType } } }
+    fields(first: 50) { nodes { ... on ProjectV2FieldCommon { id name dataType isIssueField } } }
   } }
   items(first: 1, archivedStates: [ARCHIVED, NOT_ARCHIVED]) { totalCount }
 """
@@ -476,38 +476,10 @@ def is_tracker_issue(node: dict, place: Place) -> bool:
     return (node.get("repository") or {}).get("nameWithOwner") == place.full_name
 
 
-def stores_values(board_field: dict) -> bool:
-    """Whether a board field holds a value per card."""
-    return bool(board_field) and board_field["dataType"] in STORED_FIELD_TYPES
-
-
-def is_github_status(board_field: dict) -> bool:
-    """Whether a field is GitHub's built-in Status, which no board can delete."""
-    return (board_field["name"], board_field["dataType"]) == (GITHUB_STATUS_FIELD, "SINGLE_SELECT")
-
-
-def _hidden(board_field: dict) -> bool:
-    """Whether the plan view hides a board field: one storing a value, but Status."""
-    return stores_values(board_field) and not is_github_status(board_field)
-
-
-def lacking(options: Iterable[str]) -> list[str]:
-    """The options of :data:`STATUS_OPTIONS` a Status field holding ``options`` (their names)
-    lacks: the one reading, for this module's check and ``quill sync``'s, which writes no
-    card's Status while one is lacking (ruling plan#1906)."""
-    held = set(options)
-    return [option for option in STATUS_OPTIONS if option not in held]
-
-
 def _parent_column(fields: list[dict]) -> dict | None:
     """The Parent issue field (:data:`VIEW_PARENT_COLUMN`) among a board's or a view's
     ``fields``, or None."""
     return next((f for f in fields if f and f["dataType"] == VIEW_PARENT_COLUMN), None)
-
-
-def _status_column(fields: list[dict]) -> dict | None:
-    """GitHub's Status field among a board's or a view's ``fields``, or None."""
-    return next((f for f in fields if f and is_github_status(f)), None)
 
 
 def _plan_views(project: dict) -> list[dict]:
@@ -556,22 +528,6 @@ def archived_differences(items: list[dict]) -> list[str]:
             for item in items if item["isArchived"]]
 
 
-def _status_field_differences(project: dict) -> list[str]:
-    """How a board's Status field differs: renamed, or holding not exactly the options."""
-    status = _status_column(project["fields"]["nodes"])
-    if status is None:
-        return [f"no single-select field is named {GITHUB_STATUS_FIELD!r}: GitHub's built-in "
-                "one was renamed, so quill can write no card's Status -- rename it back"]
-    held = [option["name"] for option in status["options"]]
-    if sorted(held) == sorted(STATUS_OPTIONS):
-        return []
-    missing = lacking(held)
-    return [f"the board's {GITHUB_STATUS_FIELD} holds the options {held}, not exactly "
-            f"{list(STATUS_OPTIONS)} (rulings plan#1873, plan#1906)"
-            + (f", so quill writes no card's Status until it holds {missing}" if missing else "")
-            + f": correct them in the board's settings, at {project['url']}/settings"]
-
-
 def board_differences(project: dict) -> list[str]:
     """Each way a board's configuration differs from this file (its cards aside)."""
     differences = []
@@ -589,9 +545,9 @@ def board_differences(project: dict) -> list[str]:
     differences += [
         f"the board stores a field, {board_field['name']!r}"
         for board_field in project["fields"]["nodes"]
-        if _hidden(board_field)
+        if hidden(board_field)
     ]
-    differences += _status_field_differences(project)
+    differences += status_field_differences(project)
     differences += [
         f"the board automation {workflow['name']!r} is on, and none may be: switch it off at "
         f"{project['url']}/workflows"
@@ -607,7 +563,7 @@ def board_differences(project: dict) -> list[str]:
         if _parent_column(view["fields"]["nodes"]) is None:
             differences.append(f"the {VIEW_NAME!r} view does not show the Parent issue column, "
                                "where a leaf names the step it splits")
-        if _status_column(view["fields"]["nodes"]) is None:
+        if status_column(view["fields"]["nodes"]) is None:
             differences.append(f"the {VIEW_NAME!r} view does not show the {GITHUB_STATUS_FIELD} "
                                "column, where quill shows each card's progress (ruling "
                                "plan#1873)")
@@ -616,7 +572,7 @@ def board_differences(project: dict) -> list[str]:
                 f"the {VIEW_NAME!r} view is sorted, which hides the drag order: remove its "
                 f"sort at {project['url']}"
             )
-        shown = [f["name"] for f in view["fields"]["nodes"] if _hidden(f)]
+        shown = [f["name"] for f in view["fields"]["nodes"] if hidden(f)]
         if shown:
             differences.append(f"the {VIEW_NAME!r} view shows stored fields {shown}")
         if view["layout"] != "TABLE_LAYOUT":
@@ -744,6 +700,33 @@ def check_issue_fields(github: GitHub, report: Report) -> None:
                   f"{', '.join(map(repr, ISSUE_FIELDS))}")
 
 
+def check_card_arcs(github: GitHub, report: Report) -> None:
+    """Check every card's arc labels against its Arc (ruling ``balance:R-BAL354``, views_spec
+    s.6) over the read and by the rule ``quill sync``'s label pass makes
+    (:func:`_arcs.card_arcs`, :func:`_arcs.arc_verdict`): each card it finds anything for is
+    a difference, named as sync names it: the Arc sync sets from its one arc label (ruling
+    plan#1856), what a person must fix in its Arc, which sync reports, or the arc labels sync
+    puts back."""
+    cards = card_arcs(github, ORG, REPO)
+    differ = 0
+    for card in cards:
+        verdict = arc_verdict(card, card.kind == TASK)
+        if verdict.fill:
+            report.differs(f"card {REPO}#{card.number} holds no Arc: sync sets it to "
+                           f"{verdict.fill!r}, the one arc label it carries (ruling plan#1856)")
+        elif verdict.fault:
+            report.differs(f"card {REPO}#{card.number} {verdict.fault}")
+        elif verdict.add or verdict.remove:
+            report.differs(f"card {REPO}#{card.number}'s arc labels do not display its Arc "
+                           f"{card.arc!r}: it lacks {list(verdict.add)} and holds "
+                           f"{list(verdict.remove)}")
+        else:
+            continue
+        differ += 1
+    if not differ:
+        report.ok(f"every card's arc labels display its Arc ({len(cards)} cards)")
+
+
 def _project(github: GitHub, project_id: str) -> dict:
     """One board, read by its id (a fresh board can lag in the organization's list)."""
     return github.graphql(_PROJECT, id=project_id)["node"]
@@ -807,14 +790,14 @@ def _apply_to_view(github: GitHub, project: dict, report: Report) -> None:
 
 def _set_view_columns(github: GitHub, project: dict, report: Report) -> None:
     """Give the plan view its columns in one write: every stored field but Status hidden
-    (:func:`_hidden`), its other columns kept, and the board's Parent issue field
+    (:func:`_board_fields.hidden`), its other columns kept, and the board's Parent issue field
     (:data:`VIEW_PARENT_COLUMN`) and Status shown."""
     board = project["fields"]["nodes"]
     for view in _plan_views(project):
         visible = [f for f in view["fields"]["nodes"] if f]
-        hide = [f["name"] for f in visible if _hidden(f)]
+        hide = [f["name"] for f in visible if hidden(f)]
         show = [(name, column) for name, find in (("Parent issue", _parent_column),
-                                                  (GITHUB_STATUS_FIELD, _status_column))
+                                                  (GITHUB_STATUS_FIELD, status_column))
                 if (column := find(board)) is not None and find(visible) is None]
         if not (hide or show):
             continue
@@ -823,7 +806,7 @@ def _set_view_columns(github: GitHub, project: dict, report: Report) -> None:
             "configuration: {visibleFieldIds: $fields}}) { clientMutationId } }",
             id=view["id"],
             fields=[f["id"] for f in [*visible, *(column for _, column in show)]
-                    if not _hidden(f)],
+                    if not hidden(f)],
         )
         if hide:
             report.made(f"hid {hide} from the {VIEW_NAME!r} view")
@@ -979,11 +962,12 @@ def main(argv: list[str] | None = None) -> int:
         repository = check_repository(github, apply, report)
         if repository is not None:
             check_labels(github, apply, report)
+            check_card_arcs(github, report)
         check_issue_types(github, report)
         check_issue_fields(github, report)
         check_board(github, repository, apply, report)
         check_app(report)
-    except (GitHubError, requests.RequestException) as error:
+    except (GitHubError, TrackerError, requests.RequestException) as error:
         print("\n".join(report.lines))
         print(f"failed: {described(error)}", file=sys.stderr)
         return 2

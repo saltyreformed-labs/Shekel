@@ -35,10 +35,12 @@ from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
+from tools.quill._arcs import ArcCard
+from tools.quill._board_fields import STATUS_OPTIONS
 from tools.quill._command import on_board as goes_on_board
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, in_order
-from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, STATUS_OPTIONS, unmarked
+from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, filed_labels, in_order
+from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
 
 
 class FakeBoard:
@@ -50,7 +52,7 @@ class FakeBoard:
     def __init__(self, writes, cards):
         """An empty board logging into ``writes``, reading kinds from ``cards``; it shows each
         placement at once.  Its Status field holds every option quill writes
-        (:data:`setup_tracker.STATUS_OPTIONS`), each id ``OPT_<name>``: a test sets
+        (:data:`_board_fields.STATUS_OPTIONS`), each id ``OPT_<name>``: a test sets
         :attr:`status_field` to a field lacking one, or to none."""
         self.items: list[int] = []
         self.writes = writes
@@ -121,8 +123,8 @@ class FakeBoard:
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (26/20, measured at plan#1925) -- it
-    stands in for :class:`_tracker.Tracker`, so it has each of that class's 24
+    Pylint: ``too-many-public-methods`` (29/20, measured at plan#1861's merge of plan#1811) --
+    it stands in for :class:`_tracker.Tracker`, so it has each of that class's 27
     reads and writes but ``connect`` (its own disable says why there are so many),
     ``blocking``, which that class takes from :class:`_tracker.CardReader`, and ``add``
     and ``add_task``, which put a card or a task in.
@@ -151,10 +153,12 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
 
     def add(self, number, kind="step", body="", on_board=True, **fields):
         """Put a card in the tracker (open, unclaimed, and by default on the board's bottom when
-        quill would put it there, :func:`_command.on_board`)."""
+        quill would put it there, :func:`_command.on_board`), by default in the balance arc, its
+        Arc and its label, but a task, which holds neither (R-BAL386)."""
         values = {"number": number, "id": 1000 + number, "node_id": f"I_{number}",
                   "title": f"card {number}", "kind": kind, "labels": ("balance",),
-                  "is_open": True, "state_reason": None, "parent": None, "children": (),
+                  "arc": None if kind == TASK else "balance", "is_open": True,
+                  "state_reason": None, "parent": None, "children": (),
                   "blocked_by": (), "board_item": None, "closed_by_tool": False,
                   "touched_by_hand": False, "outside": (), **fields}
         self.cards_by_number[number] = Card(**values)
@@ -170,7 +174,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         ``parent``, which lists it, as GitHub links one; open and carrying no label by
         default, and on the board under a step the board holds (:func:`_command.on_board`)
         unless ``on_board=False`` says it was filed off the board."""
-        task = self.add(number, "task", labels=(), parent=parent, **fields)
+        task = self.add(number, "task", parent=parent, **{"labels": (), **fields})
         held = self.cards_by_number[parent]
         self._set(parent, children=(*held.children, Child(number, "task", task.is_open)))
         return task
@@ -203,6 +207,12 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     def cards(self, numbers):
         """The cards that exist among ``numbers``."""
         return {n: self._view(n) for n in numbers if n in self.cards_by_number}
+
+    def card_arcs(self):
+        """Every card, open and closed, as the every-card listing reads it: its type, title,
+        labels and Arc (:class:`_arcs.ArcCard`), in card order."""
+        return [ArcCard(n, c.kind, c.title, c.labels, c.arc)
+                for n, c in sorted(self.cards_by_number.items())]
 
     def milestones_of(self, numbers):
         """The milestone each card that exists among ``numbers`` is in, None for none."""
@@ -257,18 +267,20 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         return [(n, c.title) for n, c in self.cards_by_number.items() if text in c.title]
 
     # -- writes
-    def create(self, kind, title, body, labels, milestone=None):
-        """File a card at the next number, marked :data:`setup_tracker.FILING` beside
-        ``labels``, as :meth:`_tracker.Tracker.create` files every card, in ``milestone``
-        when one is given.  One the tracker lacks is a write the tool must never send, so it
-        fails loudly rather than guess GitHub's answer."""
+    def create(self, card, milestone=None):
+        """File ``card`` (a ``check.Draft``) at the next number holding its Arc (a task none),
+        marked :data:`setup_tracker.FILING` beside its labels and its arc label, by the labels
+        :meth:`_tracker.Tracker.create` sends (:func:`_tracker.filed_labels`), in
+        ``milestone`` when one is given.  One the tracker lacks is a write the tool must never
+        send, so it fails loudly rather than guess GitHub's answer."""
         number = max(self.cards_by_number, default=0) + 1
-        labels = tuple(sorted({*labels, FILING}))
+        labels = tuple(filed_labels(card.labels, card.arc))
         assert milestone is None or milestone in self.milestones, (
             f"no milestone #{milestone} to file plan#{number} in")
-        self.writes.append(("create", number, kind, title, labels)
+        self.writes.append(("create", number, card.kind, card.title, labels, card.arc)
                            + (() if milestone is None else (milestone,)))
-        self.add(number, kind, body, on_board=False, title=title, labels=labels)
+        self.add(number, card.kind, card.body, on_board=False, title=card.title, labels=labels,
+                 arc=card.arc)
         if milestone is not None:
             self.milestone_of[number] = milestone
         return number
@@ -331,6 +343,24 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
                                    '{"message":"Label does not exist"}')
         self.writes.append(("unmark", number))
         self._set(number, labels=unmarked(labels))
+
+    def set_arc(self, number, arc):
+        """Set a card's Arc, its other facts kept."""
+        self.writes.append(("set_arc", number, arc))
+        self._set(number, arc=arc)
+
+    def relabel(self, number, add, remove):
+        """Add the labels ``add`` to a card and remove ``remove``, its other labels kept.  A
+        removal of one it does not carry is answered as GitHub answers a mark's
+        (:meth:`unmark`), 404 "Label does not exist", and nothing is written."""
+        add, remove = tuple(add), tuple(remove)
+        labels = self.cards_by_number[number].labels
+        if lacked := [label for label in remove if label not in labels]:
+            raise GitHubError(404, f'DELETE .../issues/{number}/labels/{lacked[0]} -> 404: '
+                                   '{"message":"Label does not exist"}')
+        self.writes.append(("relabel", number, add, remove))
+        self._set(number, labels=tuple(label for label in labels if label not in remove)
+                  + tuple(label for label in add if label not in labels))
 
     def add_child(self, parent, child):
         """Make ``child`` a sub-issue of ``parent``; the tool never re-parents a card, in the

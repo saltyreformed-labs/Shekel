@@ -3,10 +3,10 @@ the report that holds every write back while the field cannot hold an answer
 (``_status.unwritable``): pure decisions over cards the in-memory tracker builds."""
 from __future__ import annotations
 
+from tools.quill._board_fields import STATUS_OPTIONS
 from tools.quill._fake import FakeTracker
 from tools.quill._status import Progress, unwritable, wanted
 from tools.quill._tracker import Child, Statuses
-from tools.quill.setup_tracker import STATUS_OPTIONS
 
 #: A card the tool closed as not planned (``quill drop``), one a person closed, and one the tool
 #: closed as completed: the display of git, which a revert can leave unshipped.

@@ -132,7 +132,11 @@ class User(UserMixin, TimestampMixin, db.Model):
     )
     linked_owner_id = db.Column(
         db.Integer,
-        db.ForeignKey("auth.users.id", ondelete="SET NULL"),
+        # Named as migration b961beb0edf6 named it, which production holds
+        # (plan#1858).
+        db.ForeignKey(
+            "auth.users.id", name="fk_users_linked_owner", ondelete="SET NULL",
+        ),
     )
     # Security-event "was this you?" notification state (audit
     # finding F-091 / commit C-16 of the 2026-04-15 security

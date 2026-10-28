@@ -127,11 +127,13 @@ from tools.quill import (
     _git,
     _notes,
     _pr,
+    _relabel,
     _status,
     _sync,
     _tasks,
     _watch,
 )
+from tools.quill._arcs import other_labels
 from tools.quill._command import (
     _label,
     _one,
@@ -393,7 +395,7 @@ def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
     (:meth:`_tracker.Tracker.retitle`, :meth:`_tracker.Tracker.set_body`), after the check
     ``file`` runs on what it writes: :func:`check.violations`, grading the parts written
     -- a title (R-BAL180), a finding's one sentence (R-BAL136) -- and the card's type and
-    arc label, which every written card keeps.  Refused, with nothing written: with
+    Arc, which every written card keeps.  Refused, with nothing written: with
     nothing to write, before any card is read; for the card itself
     (:func:`_card_refusal`), before ``--body-file`` is read; and for its new text
     (:func:`_text_refusal`).  Each part is written only when it differs from the card's
@@ -411,7 +413,8 @@ def cmd_edit(args, tracker: Tracker, _root: Path) -> int:
         if why := _text_refusal(card, args.body_file, body):
             raise Refused(why)
     written = {part for part, new in ((TITLE, args.title), (BODY, body)) if new is not None}
-    draft = Draft(card.kind, card.title if args.title is None else args.title, body, card.labels)
+    draft = Draft(card.kind, card.title if args.title is None else args.title, body,
+                  other_labels(card.labels), card.arc)
     if problems := violations(draft, written):
         raise Refused("not edited:\n  " + "\n  ".join(problems))
     number = card.number
@@ -741,10 +744,13 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     :func:`_sync.write_states`), then undo each split a leaf closed while still being filed is
     linked under (R-BAL205, :func:`_undo_splits`): after every state write and every REPORT and
     HISTORY line, so a failed undo costs none of them; run again, it finishes the undo.  Then
-    put on the board each task whose step is on it and that is not (ruling plan#1842,
-    :func:`_tasks.put_on_board`), and last write the board's Status of every card it holds
-    from git (rulings plan#1873, plan#1905, :func:`_status.sync_statuses`): display of the
-    plan, so a failed write costs nothing above it; run again, it makes the writes still owed.
+    put each card's arc labels back to display its Arc, over a read of every card (R-BAL354,
+    :func:`_relabel.put_back`), reporting each card whose Arc no label can fix; put on the
+    board each task whose step is on it and that is not (ruling plan#1842,
+    :func:`_tasks.put_on_board`); and last write the board's Status of every card it holds
+    from git (rulings plan#1873, plan#1905, :func:`_status.sync_statuses`).  Each is display
+    of the plan, so a failed write in one costs nothing above it; run again, it makes the
+    writes still owed.
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold
@@ -762,10 +768,11 @@ def cmd_sync(args, tracker: Tracker, root: Path) -> int:
     for line in reads.shipped.history:
         print(f"HISTORY: {line}")
     _undo_splits(tracker, decided.cards, shipped, changes, args.dry_run)
+    reports = _relabel.put_back(tracker, args.dry_run)
     _tasks.put_on_board(tracker, decided.cards, args.dry_run)
     for line in (shown := _status.sync_statuses(tracker, decided.cards, reads, args.dry_run)):
         print(f"REPORT: {line}")
-    return 1 if changes.reports or shown else 0
+    return 1 if changes.reports or reports or shown else 0
 
 
 # -- spec-history, spec-revert ------------------------------------------------------

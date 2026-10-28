@@ -255,7 +255,9 @@ class TestARefusalCommitsNothing:
             "s": uncorrected_payment["scenario"],
             "p": uncorrected_payment["period"],
             "d": uncorrected_payment["day"],
-            "src": ref_cache.posting_source_id(PostingSourceEnum.TRANSFER),
+            "src": ref_cache.posting_source_id(
+                PostingSourceEnum.TRANSFER_MOVEMENT,
+            ),
         }
         checking_ledger = ledger_accounts_for_account(
             db.session, seed_user["account"].id,

@@ -4,11 +4,13 @@ plan#1931), against the GitHub answer RECORDED for it.
 ``recorded/comment_lookup.json`` was kept 2026-10-27 21:58 EDT on the throwaway
 ``plan-views-demo``, with the developer's own token, by the session that kept
 ``recorded/show.json`` there, on the same scratch cards #244-#249, each deleted after
-(plan#1925, ruling plan#1950): one read of the comments of the step, its task, the finding and
-a number nobody filed.  These tests replay it (``_recorded.Replay``), and a test that needs an
-answer no scratch card can give (a hundred comments, a null) starts from the recorded answer
-and changes the one field it is about, and says so.  Split out of ``test__tracker.py``, which
-these would take past the 1,000 lines ``too-many-lines`` allows.  Nothing here calls GitHub.
+(plan#1925, ruling plan#1950; ``show.json`` was made again on #250-#255 for plan#1861's merge
+of plan#1811, and this, which reads no card's fields, was kept as it was): one read of the
+comments of the step, its task, the finding and a number nobody filed.  These tests replay it
+(``_recorded.Replay``), and a test that needs an answer no scratch card can give (a hundred
+comments, a null) starts from the recorded answer and changes the one field it is about, and
+says so.  Split out of ``test__tracker.py``, which these would take past the 1,000 lines
+``too-many-lines`` allows.  Nothing here calls GitHub.
 """
 from __future__ import annotations
 
@@ -22,8 +24,9 @@ from tools.quill._tracker import Board, Comment, Tracker, TrackerError
 from tools.quill.setup_tracker import APP_LOGIN, PLAN
 
 #: The scratch cards the recording reads: the step S, the task T under it, each holding the
-#: developer's one comment, and the finding F, holding none (``test__tracker.py``'s SS, ST
-#: and SF, the show recording's).
+#: developer's one comment, and the finding F, holding none (the step, task and finding of the
+#: show recording kept beside it; ``test__tracker.py``'s SS, ST and SF are theirs in the one
+#: made again).
 S, T, F = 244, 245, 246
 #: A number nobody filed on plan-views-demo, which the recording asks for.
 NOBODY = 99999
@@ -106,7 +109,7 @@ def test_a_card_whose_first_page_says_more_follow_is_read_again_whole():
 def test_comments_github_answers_as_null_are_refused(card, change, message):
     """From the recorded answer, a card's list of comments made null, and one comment in a
     card's list made null: each is refused as the read of one card refuses it
-    (``_tracker.connection_nodes``), never read as none or as a comment with no author."""
+    (``_github.connection_nodes``), never read as none or as a comment with no author."""
     data = _answer()["data"]
     change(data["repository"][f"c{card}"])
     with pytest.raises(TrackerError, match=message):

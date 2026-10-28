@@ -46,13 +46,14 @@ class TestPreviewCarryForwardDiscreteAndTransfer:
             assert preview.envelope_count == 0
             assert preview.transfer_count == 0
 
-    def test_transfer_plan_dedupes_shadows(
+    def test_a_transfer_is_one_unblocked_transfer_plan(
         self, app, db, seed_user, seed_periods,
     ):
-        """A transfer's two shadows produce ONE transfer plan, not two.
+        """A transfer is ONE transfer plan, unblocked, and counted once.
 
-        Mirrors the de-duplication carry_forward_unpaid does in the
-        shadow loop.
+        It asserted the preview de-duplicated the transfer's two shadows into
+        one plan, as ``carry_forward_unpaid``'s shadow loop did, until plan
+        step ``balance:X-bi-6-4c-2`` walked the transfers themselves.
         """
         with app.app_context():
             _create_transfer_in_period(seed_user, seed_periods, 0)

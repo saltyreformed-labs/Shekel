@@ -26,8 +26,9 @@ plan Section 6:
   2. **Per counter account (category / fallback / orphan).**  For each non-linked
      (Income/Expense) ledger account CA, ``SUM(postings on CA)`` equals the
      negation of the signed effects of the transactions whose legs CURRENTLY
-     reside on CA -- identified by the ``journal_entries.transaction_id``
-     **linkage**, NOT by ``category_id`` matching.  The linkage formulation is
+     reside on CA -- identified by the **linkage** (each leg's movement,
+     ``journal_entries.transaction_entry_id``, resolved to its parent row by
+     ``transaction_entries.transaction_id``), NOT by ``category_id`` matching.  The linkage formulation is
      load-bearing for an **orphan** (a deleted category's former ledger account):
      the transactions that posted to it now read ``category_id IS NULL`` -- so a
      ``category_id`` match could no longer find them, while the

@@ -4,11 +4,13 @@ command (R-BAL186), and nothing written over one an earlier run filed -- ruling
 ``balance:R-BAL202``'s mark, its leaf rule (R-BAL204) and ruling closes (R-BAL206) --
 and no leaf filed under a step a branch has claimed, or one with a task still open.  A
 task (ruling ``balance:R-BAL386``) is filed under the piece of work it is part of, and
-carries no arc label; a finding and a ruling are blocked by their owner step, never its
-sub-issues (``R-BAL395``), and so is a question given ``--owner``, the step it is asked for,
-which its ruling keeps (:func:`_carried_owner`, plan#1861's item 10); a leaf is filed in its
-split step's milestone while that step holds one, which it then gives up
-(:func:`_leaf_milestone`).  ``quill.py``'s module docstring is the command's usage.
+holds no Arc and no arc label; every other card is born holding its Arc, its arc's one home,
+and its arc label beside as display (rulings ``R-BAL349``, ``R-BAL354``); a finding and a
+ruling are blocked by their owner step, never its sub-issues (``R-BAL395``), and so is a
+question given ``--owner``, the step it is asked for, which its ruling keeps
+(:func:`_carried_owner`, plan#1861's item 10); a leaf is filed in its split step's milestone
+while that step holds one, which it then gives up (:func:`_leaf_milestone`).  ``quill.py``'s
+module docstring is the command's usage.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
 that module past the 1,000 lines ``too-many-lines`` allows (it has been ``quill.py``
@@ -20,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tools.quill import _findings, _git, _tasks
+from tools.quill._arcs import other_labels
 from tools.quill._command import (
     _label,
     _one,
@@ -217,10 +220,10 @@ def _filing_for(args, tracker: Tracker, root: Path) -> _Filing:
         body = _converted_body(asked, _read(args.answer_file))
     else:
         body = ruling_body(_read(args.question_file), _read(args.answer_file))
-    arc = () if args.kind == TASK else (args.arc,)
-    labels = tuple(dict.fromkeys((*arc, *(getattr(args, "label", None) or ()))))
-    return _Filing(Draft(args.kind, args.title, body, labels, held_by), parent, cards, reads,
-                   asked, _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
+    labels = tuple(dict.fromkeys(getattr(args, "label", None) or ()))
+    arc = None if args.kind == TASK else args.arc
+    return _Filing(Draft(args.kind, args.title, body, labels, arc, held_by), parent, cards,
+                   reads, asked, _leaf_milestone(tracker, parent, cards, reads.shipped.cards)
                    if args.kind == "step" and parent is not None else _NO_MILESTONE)
 
 
@@ -238,7 +241,7 @@ def _carried_owner(question: Card | None) -> int | None:
 
 
 def _owner(parent: Card, cards: dict[int, Card], shipped: frozenset[int]) -> Owner:
-    """``parent`` as the check reads a card's owner (:class:`check.Owner`): its kind, whether it
+    """``parent`` as the check reads a card's owner (:class:`_draft.Owner`): its kind, whether it
     is still work (:func:`_state.is_live`) and whether it is split into smaller steps
     (:func:`_state.is_container`), from git (``shipped``) and the cards (``cards``)."""
     return Owner(parent.kind, is_live(parent.number, cards, shipped),
@@ -328,9 +331,16 @@ def _same_filing(tracker: Tracker, draft: Draft, parent: Card | None) -> Card | 
 
 
 def _refuse_relabel(card: Card, draft: Draft) -> None:
-    """Refuse a card with ``draft``'s kind, title and text whose labels, the filing mark
-    aside, are not ``draft``'s: relabelling is a person's call."""
-    labels = sorted(unmarked(card.labels))
+    """Refuse a card with ``draft``'s kind, title and text whose Arc is not ``draft``'s, or
+    whose labels, the filing mark and its arc labels aside, are not: changing either is a
+    person's call.  Its arc labels are display of its Arc, which ``sync`` puts back
+    (R-BAL354), so a person's change of one decides nothing here.  A task's draft holds no
+    Arc (R-BAL386), so one a person set on it is cleared, not set."""
+    if card.arc != draft.arc:
+        remedy = "clear its Arc" if draft.arc is None else "set its Arc"
+        raise Refused(f"{_label(card)} has this kind, title and text but holds the Arc "
+                      f"{card.arc!r}, not {draft.arc!r}: {remedy} by hand")
+    labels = sorted(other_labels(unmarked(card.labels)))
     if labels != sorted(draft.labels):
         raise Refused(f"{_label(card)} has this kind, title and text but the labels "
                       f"{labels}, not {sorted(draft.labels)}: relabel it by hand")
@@ -591,7 +601,7 @@ def _write(tracker: Tracker, filing: _Filing, earlier: Card | None,
     ``before`` when the filing names one."""
     card = earlier
     if card is None:
-        card = _created(filing.draft.kind, tracker, filing.draft, filing.milestone)
+        card = _created(tracker, filing.draft, filing.milestone)
     else:
         print(f"finishing {_label(card)}: its filing has not finished (it is still marked "
               f"{FILING!r}), so this command finishes it rather than filing another (R-BAL186, "
@@ -629,7 +639,7 @@ def finishing_filings(tracker: Tracker, root: Path, card: Card, cards: dict[int,
     for title, body in _tasks.finishing(card.number):
         if title in filed:
             continue
-        filing = _Filing(Draft(TASK, title, body, (), held_by), card, cards, reads, None,
+        filing = _Filing(Draft(TASK, title, body, (), None, held_by), card, cards, reads, None,
                          _NO_MILESTONE)
         earlier = _standing(tracker, filing, root)
         if earlier is not None and not filing_unfinished(earlier):
@@ -654,13 +664,12 @@ def file_finishing(tracker: Tracker, card: Card, planned: list[Finishing]) -> No
         _write(tracker, item.filing, item.earlier, None)
 
 
-def _created(kind: str, tracker: Tracker, draft: Draft, milestone: _LeafMilestone) -> Card:
+def _created(tracker: Tracker, draft: Draft, milestone: _LeafMilestone) -> Card:
     """A new card filed from ``draft``, marked in the call that creates it (R-BAL202), and a
     leaf in its split step's milestone, while that step holds one, in that call too
     (:func:`_leaf_milestone`), as read back; a card that cannot be read back yet is a
     failed call, not a refusal: it was filed."""
-    number = tracker.create(kind, draft.title, draft.body, draft.labels,
-                            milestone=milestone.leaf)
+    number = tracker.create(draft, milestone=milestone.leaf)
     print(f"filed plan#{number}")
     if milestone.leaf is not None:
         print(f"  in milestone #{milestone.leaf}, its split step's")
@@ -733,7 +742,10 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
     if filing_unfinished(question):
         raise Refused(f"{_label(question)}'s filing has not finished (R-BAL202): finish it with "
                       "the `quill file` command that filed it first, then convert it")
-    if args.arc not in question.labels:
+    if question.arc is None:
+        raise Refused(f"{_label(question)} holds no Arc, its arc's one home (R-BAL349): set its "
+                      "Arc on the web, then convert it")
+    if question.arc != args.arc:
         raise Refused(f"{_label(question)} is not in the {args.arc} arc; pass its own --arc")
     _refuse_rehoming(question, "ruling", to)
     if question.kind == "ruling":

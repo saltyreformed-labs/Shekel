@@ -1,28 +1,28 @@
 {
  "scratch": {
   "numbers": [
-   244,
-   245,
-   246,
-   247,
-   248,
-   249
+   250,
+   251,
+   252,
+   253,
+   254,
+   255
   ],
   "ids": [
-   6071091810,
-   6071091885,
-   6071091964,
-   6071092048,
-   6071092113,
-   6071092187
+   6079501827,
+   6079501978,
+   6079502177,
+   6079502395,
+   6079502545,
+   6079502704
   ],
   "nodes": [
-   "I_kwDOVSOvzs8AAAABad2CYg",
-   "I_kwDOVSOvzs8AAAABad2C_A",
-   "I_kwDOVSOvzs8AAAABad2CrQ",
-   "I_kwDOVSOvzs8AAAABad2D2w",
-   "I_kwDOVSOvzs8AAAABad2DUA",
-   "I_kwDOVSOvzs8AAAABad2DkQ"
+   "I_kwDOVSOvzs8AAAABal3WAw",
+   "I_kwDOVSOvzs8AAAABal3Wmg",
+   "I_kwDOVSOvzs8AAAABal3XYQ",
+   "I_kwDOVSOvzs8AAAABal3Y0Q",
+   "I_kwDOVSOvzs8AAAABal3YOw",
+   "I_kwDOVSOvzs8AAAABal3ZcA"
   ],
   "items": [],
   "board": "PVT_kwDOFB5GWc4BoEsZ",
@@ -37,17 +37,17 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c244: issue(number: 244) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c250: issue(number: 250) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
     "variables": {}
    },
    "status": 200,
    "answer": {
     "data": {
      "repository": {
-      "c244": {
-       "id": "I_kwDOVSOvzs8AAAABad2CYg",
-       "number": 244,
-       "fullDatabaseId": "6071091810",
+      "c250": {
+       "id": "I_kwDOVSOvzs8AAAABal3WAw",
+       "number": 250,
+       "fullDatabaseId": "6079501827",
        "title": "[L2 measurement] scratch show S (step), plan#1925",
        "state": "OPEN",
        "stateReason": null,
@@ -58,12 +58,16 @@
         "totalCount": 0,
         "nodes": []
        },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
        "parent": null,
        "subIssues": {
         "totalCount": 1,
         "nodes": [
          {
-          "number": 245,
+          "number": 251,
           "state": "OPEN",
           "issueType": {
            "name": "task"
@@ -78,7 +82,7 @@
         "totalCount": 1,
         "nodes": [
          {
-          "number": 248,
+          "number": 254,
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -103,7 +107,7 @@
    "body": {
     "query": "query($number: Int!) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number\n    blocking(first: 100) { totalCount nodes {\n      number state issueType { name } repository { nameWithOwner } } } } } }",
     "variables": {
-     "number": 244
+     "number": 250
     }
    },
    "status": 200,
@@ -111,12 +115,12 @@
     "data": {
      "repository": {
       "issue": {
-       "number": 244,
+       "number": 250,
        "blocking": {
         "totalCount": 3,
         "nodes": [
          {
-          "number": 249,
+          "number": 255,
           "state": "OPEN",
           "issueType": {
            "name": "step"
@@ -126,7 +130,7 @@
           }
          },
          {
-          "number": 247,
+          "number": 253,
           "state": "CLOSED",
           "issueType": {
            "name": "ruling"
@@ -136,7 +140,7 @@
           }
          },
          {
-          "number": 246,
+          "number": 252,
           "state": "OPEN",
           "issueType": {
            "name": "finding"
@@ -156,17 +160,17 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c245: issue(number: 245) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c246: issue(number: 246) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c247: issue(number: 247) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c248: issue(number: 248) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c251: issue(number: 251) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c252: issue(number: 252) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c253: issue(number: 253) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } c254: issue(number: 254) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
     "variables": {}
    },
    "status": 200,
    "answer": {
     "data": {
      "repository": {
-      "c245": {
-       "id": "I_kwDOVSOvzs8AAAABad2CrQ",
-       "number": 245,
-       "fullDatabaseId": "6071091885",
+      "c251": {
+       "id": "I_kwDOVSOvzs8AAAABal3Wmg",
+       "number": 251,
+       "fullDatabaseId": "6079501978",
        "title": "[L2 measurement] scratch show T (task), plan#1925",
        "state": "OPEN",
        "stateReason": null,
@@ -177,8 +181,12 @@
         "totalCount": 0,
         "nodes": []
        },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
        "parent": {
-        "number": 244,
+        "number": 250,
         "repository": {
          "nameWithOwner": "saltyreformed-labs/plan-views-demo"
         }
@@ -199,10 +207,10 @@
         "nodes": []
        }
       },
-      "c246": {
-       "id": "I_kwDOVSOvzs8AAAABad2C_A",
-       "number": 246,
-       "fullDatabaseId": "6071091964",
+      "c252": {
+       "id": "I_kwDOVSOvzs8AAAABal3XYQ",
+       "number": 252,
+       "fullDatabaseId": "6079502177",
        "title": "[L2 measurement] scratch show F (finding), plan#1925",
        "state": "OPEN",
        "stateReason": null,
@@ -210,6 +218,10 @@
         "name": "finding"
        },
        "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
         "totalCount": 0,
         "nodes": []
        },
@@ -222,7 +234,7 @@
         "totalCount": 1,
         "nodes": [
          {
-          "number": 244,
+          "number": 250,
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -237,10 +249,10 @@
         "nodes": []
        }
       },
-      "c247": {
-       "id": "I_kwDOVSOvzs8AAAABad2DUA",
-       "number": 247,
-       "fullDatabaseId": "6071092048",
+      "c253": {
+       "id": "I_kwDOVSOvzs8AAAABal3YOw",
+       "number": 253,
+       "fullDatabaseId": "6079502395",
        "title": "[L2 measurement] scratch show R (ruling), plan#1925",
        "state": "CLOSED",
        "stateReason": "COMPLETED",
@@ -248,6 +260,10 @@
         "name": "ruling"
        },
        "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
         "totalCount": 0,
         "nodes": []
        },
@@ -260,7 +276,7 @@
         "totalCount": 1,
         "nodes": [
          {
-          "number": 244,
+          "number": 250,
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -282,10 +298,10 @@
         ]
        }
       },
-      "c248": {
-       "id": "I_kwDOVSOvzs8AAAABad2DkQ",
-       "number": 248,
-       "fullDatabaseId": "6071092113",
+      "c254": {
+       "id": "I_kwDOVSOvzs8AAAABal3Y0Q",
+       "number": 254,
+       "fullDatabaseId": "6079502545",
        "title": "[L2 measurement] scratch show B (step), plan#1925",
        "state": "OPEN",
        "stateReason": null,
@@ -293,6 +309,10 @@
         "name": "step"
        },
        "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
         "totalCount": 0,
         "nodes": []
        },
@@ -923,15 +943,15 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c245: issue(number: 245) { number comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } createdAt body } } } } }",
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c251: issue(number: 251) { number comments(first: 100) { pageInfo { hasNextPage } nodes { author { login } createdAt body } } } } }",
     "variables": {}
    },
    "status": 200,
    "answer": {
     "data": {
      "repository": {
-      "c245": {
-       "number": 245,
+      "c251": {
+       "number": 251,
        "comments": {
         "pageInfo": {
          "hasNextPage": false
@@ -941,7 +961,7 @@
           "author": {
            "login": "SaltyReformed"
           },
-          "createdAt": "2026-10-28T01:58:41Z",
+          "createdAt": "2026-10-28T13:05:39Z",
           "body": "A comment the recorder posts on task T."
          }
         ]
@@ -953,19 +973,19 @@
   },
   {
    "method": "GET",
-   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/244",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/250",
    "body": null,
    "status": 200,
    "answer": {
-    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/244",
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/250",
     "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
-    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/244/labels{/name}",
-    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/244/comments",
-    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/244/events",
-    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/244",
-    "id": 6071091810,
-    "node_id": "I_kwDOVSOvzs8AAAABad2CYg",
-    "number": 244,
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/250/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/250/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/250/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/250",
+    "id": 6079501827,
+    "node_id": "I_kwDOVSOvzs8AAAABal3WAw",
+    "number": 250,
     "title": "[L2 measurement] scratch show S (step), plan#1925",
     "user": {
      "login": "SaltyReformed",
@@ -994,8 +1014,8 @@
     "assignees": [],
     "milestone": null,
     "comments": 1,
-    "created_at": "2026-10-28T01:58:33Z",
-    "updated_at": "2026-10-28T01:58:40Z",
+    "created_at": "2026-10-28T13:05:29Z",
+    "updated_at": "2026-10-28T13:05:38Z",
     "closed_at": null,
     "assignee": null,
     "author_association": "MEMBER",
@@ -1036,7 +1056,7 @@
      "rocket": 0,
      "eyes": 0
     },
-    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/244/timeline",
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/250/timeline",
     "performed_via_github_app": null,
     "state_reason": null,
     "pinned_comment": null
@@ -1048,7 +1068,7 @@
    "body": {
     "query": "query($number: Int!, $after: String) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number\n    comments(first: 100, after: $after) {\n      pageInfo { hasNextPage endCursor }\n      nodes { author { login } createdAt body } } } } }",
     "variables": {
-     "number": 244,
+     "number": 250,
      "after": null
     }
    },
@@ -1057,18 +1077,18 @@
     "data": {
      "repository": {
       "issue": {
-       "number": 244,
+       "number": 250,
        "comments": {
         "pageInfo": {
          "hasNextPage": false,
-         "endCursor": "Y3Vyc29yOnYyOpHPAAAAAYD2ga8="
+         "endCursor": "Y3Vyc29yOnYyOpHPAAAAAYGgbew="
         },
         "nodes": [
          {
           "author": {
            "login": "SaltyReformed"
           },
-          "createdAt": "2026-10-28T01:58:40Z",
+          "createdAt": "2026-10-28T13:05:38Z",
           "body": "A comment the recorder posts on step S."
          }
         ]
@@ -1082,17 +1102,17 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c246: issue(number: 246) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c252: issue(number: 252) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
     "variables": {}
    },
    "status": 200,
    "answer": {
     "data": {
      "repository": {
-      "c246": {
-       "id": "I_kwDOVSOvzs8AAAABad2C_A",
-       "number": 246,
-       "fullDatabaseId": "6071091964",
+      "c252": {
+       "id": "I_kwDOVSOvzs8AAAABal3XYQ",
+       "number": 252,
+       "fullDatabaseId": "6079502177",
        "title": "[L2 measurement] scratch show F (finding), plan#1925",
        "state": "OPEN",
        "stateReason": null,
@@ -1100,6 +1120,10 @@
         "name": "finding"
        },
        "labels": {
+        "totalCount": 0,
+        "nodes": []
+       },
+       "issueFieldValues": {
         "totalCount": 0,
         "nodes": []
        },
@@ -1112,7 +1136,7 @@
         "totalCount": 1,
         "nodes": [
          {
-          "number": 244,
+          "number": 250,
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1135,17 +1159,17 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c244: issue(number: 244) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
+    "query": "query { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") { c250: issue(number: 250) { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n } } }",
     "variables": {}
    },
    "status": 200,
    "answer": {
     "data": {
      "repository": {
-      "c244": {
-       "id": "I_kwDOVSOvzs8AAAABad2CYg",
-       "number": 244,
-       "fullDatabaseId": "6071091810",
+      "c250": {
+       "id": "I_kwDOVSOvzs8AAAABal3WAw",
+       "number": 250,
+       "fullDatabaseId": "6079501827",
        "title": "[L2 measurement] scratch show S (step), plan#1925",
        "state": "OPEN",
        "stateReason": null,
@@ -1156,12 +1180,16 @@
         "totalCount": 0,
         "nodes": []
        },
+       "issueFieldValues": {
+        "totalCount": 0,
+        "nodes": []
+       },
        "parent": null,
        "subIssues": {
         "totalCount": 1,
         "nodes": [
          {
-          "number": 245,
+          "number": 251,
           "state": "OPEN",
           "issueType": {
            "name": "task"
@@ -1176,7 +1204,7 @@
         "totalCount": 1,
         "nodes": [
          {
-          "number": 248,
+          "number": 254,
           "repository": {
            "nameWithOwner": "saltyreformed-labs/plan-views-demo"
           }
@@ -1799,19 +1827,19 @@
   },
   {
    "method": "GET",
-   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/246",
+   "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/252",
    "body": null,
    "status": 200,
    "answer": {
-    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/246",
+    "url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/252",
     "repository_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo",
-    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/246/labels{/name}",
-    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/246/comments",
-    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/246/events",
-    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/246",
-    "id": 6071091964,
-    "node_id": "I_kwDOVSOvzs8AAAABad2C_A",
-    "number": 246,
+    "labels_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/252/labels{/name}",
+    "comments_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/252/comments",
+    "events_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/252/events",
+    "html_url": "https://github.com/saltyreformed-labs/plan-views-demo/issues/252",
+    "id": 6079502177,
+    "node_id": "I_kwDOVSOvzs8AAAABal3XYQ",
+    "number": 252,
     "title": "[L2 measurement] scratch show F (finding), plan#1925",
     "user": {
      "login": "SaltyReformed",
@@ -1840,8 +1868,8 @@
     "assignees": [],
     "milestone": null,
     "comments": 0,
-    "created_at": "2026-10-28T01:58:34Z",
-    "updated_at": "2026-10-28T01:58:34Z",
+    "created_at": "2026-10-28T13:05:31Z",
+    "updated_at": "2026-10-28T13:05:31Z",
     "closed_at": null,
     "assignee": null,
     "author_association": "MEMBER",
@@ -1882,7 +1910,7 @@
      "rocket": 0,
      "eyes": 0
     },
-    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/246/timeline",
+    "timeline_url": "https://api.github.com/repos/saltyreformed-labs/plan-views-demo/issues/252/timeline",
     "performed_via_github_app": null,
     "state_reason": null,
     "pinned_comment": null
@@ -1894,7 +1922,7 @@
    "body": {
     "query": "query($number: Int!, $after: String) { repository(owner: \"saltyreformed-labs\", name: \"plan-views-demo\") {\n  issue(number: $number) { number\n    comments(first: 100, after: $after) {\n      pageInfo { hasNextPage endCursor }\n      nodes { author { login } createdAt body } } } } }",
     "variables": {
-     "number": 246,
+     "number": 252,
      "after": null
     }
    },
@@ -1903,7 +1931,7 @@
     "data": {
      "repository": {
       "issue": {
-       "number": 246,
+       "number": 252,
        "comments": {
         "pageInfo": {
          "hasNextPage": false,

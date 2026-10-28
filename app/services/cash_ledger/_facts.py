@@ -421,13 +421,15 @@ def planned_cash_rows(
     :func:`app.services.transfer_legs.planned_transfer_legs` over
     ``budget.transfers``: one :class:`~app.services.transfer_legs.TransferLeg`
     per live still-projected transfer the account is on either side of, worth
-    the parent's resolved amount -- **and only for a side whose DATED
-    movement does not yet exist** (ruling **R-BAL79**, plan step
-    ``balance:X-bi-4a``): the settled twin reads a settled leg as its side's
-    covering movement, which hangs off the transfer by a side link since plan
-    step ``balance:X-bi-6-4d-2``, so the movement, not the parent's status, is
-    what decides which relation a leg is in, and a leg cannot be counted by
-    both halves.  Where a shadow had drifted from its parent on period, due
+    the parent's resolved amount.  The settled twin reads a settled leg as its
+    side's DATED covering movement, which hangs off the transfer by a side
+    link since plan step ``balance:X-bi-6-4d-2``, and a still-Projected
+    transfer's sides hold no dated movement (the status-band rule,
+    :mod:`app.side_band_infrastructure`), so a leg cannot be counted by both
+    halves.  From plan step ``balance:X-bi-4a`` until plan step
+    ``balance:X-bi-6-5``'s third leaf the plan half also skipped a side whose
+    dated movement existed (ruling **R-BAL79**), the state that rule now
+    refuses at commit.  Where a shadow had drifted from its parent on period, due
     date, deletion or scenario the plan followed the PARENT, which is ruling
     **R-JA**'s direction; with the shadows gone the parent is the only row.
 
@@ -478,8 +480,8 @@ def planned_cash_rows(
         Every still-Projected contributing row of the account's OWN, with
         ``entries`` populated, followed by one
         :class:`~app.services.transfer_legs.TransferLeg` per live
-        still-projected transfer the account is on whose leg here is not yet
-        a dated movement, its parent's pricing relationships populated,
+        still-projected transfer the account is on, its parent's pricing
+        relationships populated,
         followed by one
         :class:`~app.services.cash_ledger._events.InFlightMovement` per
         un-dated purchase on the account.  Unordered: the fold groups them by

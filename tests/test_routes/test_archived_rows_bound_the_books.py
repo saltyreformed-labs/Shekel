@@ -336,7 +336,7 @@ class TestARowTheBooksHavePassedStaysDeleted:
                 for row_id in (first.id, second.id)
             )
 
-    def test_a_transfer_stays_deleted_with_both_shadows(
+    def test_a_transfer_stays_deleted_and_the_notice_names_the_books_that_bind(
         self, app, auth_client, seed_user, seed_periods,
     ):
         """The transfer twin: the later of its two books binds, and the notice names it.

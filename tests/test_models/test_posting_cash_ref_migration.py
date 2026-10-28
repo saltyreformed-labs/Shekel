@@ -12,11 +12,13 @@ upgraded it base->head), so the per-worker DB shows the post-migration
 state.  These tests assert, without re-executing DML in the worker:
 
   * the migration is correctly chained (revision / down_revision);
-  * this migration's own contribution is present in the live tables
-    (``income`` / ``expense`` kinds, ``transaction`` source) -- the Step-2
-    ``transfer`` rows are asserted by f5037400dc5e's own test, and the
-    cumulative inline-seed coverage for every enum member lives in
-    ``test_posting_ref_seed_parity.py``;
+  * this migration's own surviving contribution is present in the live
+    tables (the ``income`` / ``expense`` kinds) -- the Step-2 ``transfer``
+    kind is asserted by f5037400dc5e's own test, and the cumulative
+    inline-seed coverage for every enum member lives in
+    ``test_posting_ref_seed_parity.py``.  Its ``transaction`` source is GONE
+    at HEAD: migration ``1712c506ee99`` (plan step ``balance:X-bi-6-5``'s
+    second leaf, card plan#1845) deleted it, and its own suite proves that;
   * the ``downgrade`` is not a bare pass -- it deletes exactly the three
     rows the ``upgrade`` adds.
 
@@ -95,16 +97,6 @@ class TestMigratedState:
                 )).fetchall()
             }
             assert {"income", "expense"} <= kinds, kinds
-
-    def test_transaction_posting_source_present(self, app, db):
-        """The ``transaction`` source is seeded at HEAD."""
-        with app.app_context():
-            sources = {
-                row[0] for row in db.session.execute(text(
-                    "SELECT name FROM ref.posting_sources"
-                )).fetchall()
-            }
-            assert "transaction" in sources, sources
 
 
 class TestDowngradeReversible:

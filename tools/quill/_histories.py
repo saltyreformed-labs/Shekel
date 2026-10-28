@@ -53,13 +53,15 @@ def _issue(number):
 
 def card_node(number, kind="step", parent=None, labels=("balance",), blocked_by=()):
     """Open card ``number``'s node as GitHub answers the card-only reader (no board items),
-    never closed or reopened, blocked by the cards numbered ``blocked_by``, its sub-issues
-    left for :func:`tracker` to fill from the cards naming it their parent."""
+    never closed or reopened, holding no issue field value (the landing check reads no arc),
+    blocked by the cards numbered ``blocked_by``, its sub-issues left for :func:`tracker` to
+    fill from the cards naming it their parent."""
     return {
         "id": f"I_{number}", "number": number, "fullDatabaseId": str(1000 + number),
         "title": f"card {number}", "state": "OPEN", "stateReason": None,
         "issueType": {"name": kind} if kind else None,
         "labels": {"totalCount": len(labels), "nodes": [{"name": name} for name in labels]},
+        "issueFieldValues": {"totalCount": 0, "nodes": []},
         "parent": _issue(parent) if parent else None,
         "subIssues": {"totalCount": 0, "nodes": []},
         "blockedBy": {"totalCount": len(blocked_by), "nodes": [_issue(n) for n in blocked_by]},

@@ -150,7 +150,7 @@ class TestRevertAndMoveReconciles:
         leaving P's
         entry and its reversal straddling two periods, where truncating F
         CASCADE-deletes half the pair and permanently strands the other
-        (``transaction_id`` SET NULL, unhealable).  Under the R2 attribution
+        (its link SET NULL, unhealable).  Under the R2 attribution
         rule the reversal lands in P: P's entries net to zero per ledger
         account, F carries exactly the re-settled -50/+50, and the whole
         sweep ties after every step.
@@ -340,8 +340,8 @@ class TestAPostedPurchaseReconcilesUnderAnUnsettledParent:
     is the finding it was added for: no test here creates a ``settled_on`` on a
     purchase, so both sweep assertions could go on passing while the ledger held
     legs neither of them could account for -- a linked total no ``effective``
-    figure contains, and a counter leg carrying ``transaction_id = NULL`` that
-    the hard-delete branch would have called a failed reversal.
+    figure contains, and a counter leg naming no parent row that the
+    hard-delete branch would have called a failed reversal.
     """
 
     def test_a_projected_envelopes_posted_purchase_reconciles_both_sweeps(
@@ -408,13 +408,6 @@ class TestAPostedPurchaseReconcilesUnderAnUnsettledParent:
             assert _ledger_account_sum(
                 groceries_counter, scenario_id,
             ) == Decimal("40.00")
-            # The parent booked nothing of its own -- otherwise the $40.00
-            # above could be its cash leg rather than the purchase's.
-            assert (
-                _db.session.query(JournalEntry)
-                .filter_by(transaction_id=txn.id)
-                .count()
-            ) == 0
             assert (
                 _db.session.query(JournalEntry)
                 .filter_by(transaction_entry_id=entry.id)
@@ -590,7 +583,7 @@ class TestASettledEnvelopesUndatedPurchasePostsNothing:
 
 
 # ---------------------------------------------------------------------------
-# Hard delete: SET-NULL'd legs reconcile via the transaction_id-NULL branch
+# Hard delete: SET-NULL'd legs reconcile via the no-parent-row branch
 # ---------------------------------------------------------------------------
 
 
@@ -604,10 +597,10 @@ class TestHardDeletedTransactionReconcilesAtZero:
 
         Arithmetic: a $50 Groceries expense posts -50 / +50.  Deleting the ad-hoc
         (template-less) row hard-deletes it: the route reverses the postings FIRST
-        (a -50 / +50 reversal), then the row is removed and
-        ``journal_entries.transaction_id`` SET-NULLs on BOTH the original and the
-        reversal (the immutable legs survive, append-only).  The Groceries-Expense
-        counter therefore nets to zero across a ``transaction_id IS NULL`` group --
+        (a -50 / +50 reversal), then the row is removed with its movement and
+        ``journal_entries.transaction_entry_id`` SET-NULLs on BOTH the original
+        and the reversal (the immutable legs survive, append-only).  The
+        Groceries-Expense counter therefore nets to zero across a no-parent-row group --
         the exact branch of the counter sweep that asserts a hard-deleted
         transaction's legs were reversed, not stranded.  This is the route-driven
         production path (``delete_transaction`` ->
@@ -639,19 +632,14 @@ class TestHardDeletedTransactionReconcilesAtZero:
                 f"/transactions/{txn_id}",
             ).status_code == 200
 
-            # The row is gone; both legs' transaction_id SET-NULLed; the counter
-            # nets to zero across the NULL-linkage group.
+            # The row is gone with its movement, whose entries' link is
+            # SET-NULLed; the counter nets to zero across the NULL-linkage group.
             assert db.session.get(Transaction, txn_id) is None
-            assert (
-                _db.session.query(JournalEntry)
-                .filter_by(transaction_id=txn_id)
-                .count()
-            ) == 0
             assert _ledger_account_sum(
                 groceries_counter, scenario_id,
             ) == Decimal("0.00")
             assert _independent_ledger_sum(
                 checking.id, scenario_id,
             ) == Decimal("1000.00")
-            # Drives the transaction_id-NULL branch of the counter sweep.
+            # Drives the no-parent-row branch of the counter sweep.
             _assert_full_reconciliation(scenario_id)

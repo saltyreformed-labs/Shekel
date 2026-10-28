@@ -67,7 +67,7 @@
    "method": "POST",
    "url": "https://api.github.com/graphql",
    "body": {
-    "query": "query($after: String) { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") {\n  issues(first: 25, after: $after, states: [OPEN, CLOSED]) {\n    pageInfo { hasNextPage endCursor } nodes { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n body author { login } createdAt closedAt\n      milestone { number }\n      userContentEdits(first: 100) {\n        totalCount pageInfo { hasNextPage endCursor } nodes { id editedAt editor { login } diff } }\n      comments(first: 100) {\n        totalCount pageInfo { hasNextPage endCursor } nodes { id author { login } createdAt body lastEditedAt } } } } } }",
+    "query": "query($after: String) { repository(owner: \"saltyreformed-labs\", name: \"shekel-plan\") {\n  issues(first: 25, after: $after, states: [OPEN, CLOSED]) {\n    pageInfo { hasNextPage endCursor } nodes { \n  id number fullDatabaseId title state stateReason\n  issueType { name }\n  labels(first: 100) { totalCount nodes { name } }\n  issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {\n    name field { ... on IssueFieldSingleSelect { name } } } } }\n  parent { number repository { nameWithOwner } }\n  subIssues(first: 100) { totalCount nodes {\n    number state issueType { name } repository { nameWithOwner } } }\n  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }\n  projectItems(first: 100) { totalCount nodes { id project { id } } }\n  timelineItems(itemTypes: [CLOSED_EVENT, REOPENED_EVENT], last: 1) { nodes {\n    __typename\n    ... on ClosedEvent { actor { login } }\n    ... on ReopenedEvent { actor { login } } } }\n body author { login } createdAt closedAt\n      milestone { number }\n      userContentEdits(first: 100) {\n        totalCount pageInfo { hasNextPage endCursor } nodes { id editedAt editor { login } diff } }\n      comments(first: 100) {\n        totalCount pageInfo { hasNextPage endCursor } nodes { id author { login } createdAt body lastEditedAt } } } } } }",
     "variables": {
      "after": null
     }
@@ -99,6 +99,10 @@
             "name": "balance"
            }
           ]
+         },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
          },
          "parent": null,
          "subIssues": {
@@ -302,6 +306,10 @@
            }
           ]
          },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
+         },
          "parent": {
           "number": 1,
           "repository": {
@@ -448,6 +456,10 @@
            }
           ]
          },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
+         },
          "parent": {
           "number": 1,
           "repository": {
@@ -517,6 +529,10 @@
             "name": "balance"
            }
           ]
+         },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
          },
          "parent": {
           "number": 1,
@@ -605,6 +621,10 @@
            }
           ]
          },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
+         },
          "parent": {
           "number": 1,
           "repository": {
@@ -692,6 +712,10 @@
            }
           ]
          },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
+         },
          "parent": {
           "number": 1,
           "repository": {
@@ -778,6 +802,10 @@
             "name": "balance"
            }
           ]
+         },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
          },
          "parent": {
           "number": 1,
@@ -921,6 +949,10 @@
            }
           ]
          },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
+         },
          "parent": {
           "number": 1,
           "repository": {
@@ -1039,6 +1071,10 @@
            }
           ]
          },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
+         },
          "parent": {
           "number": 1,
           "repository": {
@@ -1108,6 +1144,10 @@
             "name": "balance"
            }
           ]
+         },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
          },
          "parent": {
           "number": 1,
@@ -1185,6 +1225,10 @@
             "name": "balance"
            }
           ]
+         },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
          },
          "parent": {
           "number": 1,
@@ -1272,6 +1316,10 @@
             "name": "balance"
            }
           ]
+         },
+         "issueFieldValues": {
+          "totalCount": 0,
+          "nodes": []
          },
          "parent": {
           "number": 1,

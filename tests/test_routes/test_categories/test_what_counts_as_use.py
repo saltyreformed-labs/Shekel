@@ -576,7 +576,7 @@ class TestATransferAnswersForItsOwnCategoryAndAccounts:
                 TransferTemplate, template_id,
             ).category_id == category_id
 
-    def test_a_transfers_category_counts_without_its_shadows(
+    def test_a_category_only_a_transfer_carries_is_in_use_even_once_hidden(
         self, app, db, seed_user,
     ):
         """The Transfer arm answers for a category only a transfer carries.
@@ -647,7 +647,7 @@ class TestATransferAnswersForItsOwnCategoryAndAccounts:
     @pytest.mark.parametrize(
         "status", [StatusEnum.PROJECTED, StatusEnum.CANCELLED, StatusEnum.DONE],
     )
-    def test_a_live_transfer_is_its_accounts_history_without_its_shadows(
+    def test_a_live_transfer_is_its_accounts_history_until_hidden_whatever_its_status(
         self, app, seed_user, status,
     ):
         """BAL-539: both endpoints hold history while the transfer is live, whatever its status.

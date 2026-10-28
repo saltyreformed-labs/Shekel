@@ -1210,7 +1210,7 @@ class TestShadowContributionBoundary:
             .employer_contribution_type_id(EmployerContributionTypeEnum.NONE),
         )
 
-    def test_settled_shadow_is_priced_at_its_realized_actual(
+    def test_settled_contribution_is_priced_at_its_realized_actual(
         self, app, db, seed_user, seed_periods,
     ):
         """estimated $500 / actual $400 -> the record carries $400.
@@ -1426,10 +1426,10 @@ class TestShadowContributionBoundary:
             # zero-carrying record would have made this $200.
             assert result.periodic_contribution == Decimal("400")
 
-    def test_projected_shadow_is_not_confirmed(
+    def test_projected_contribution_is_not_confirmed(
         self, app, db, seed_user, seed_periods,
     ):
-        """A still-Projected shadow is priced but NOT confirmed.
+        """A still-Projected contribution is priced but NOT confirmed.
 
         The ``status.is_settled -> ContributionRecord.is_confirmed`` mapping
         moved to this boundary at plan step X-au-c2, and an adversarial review

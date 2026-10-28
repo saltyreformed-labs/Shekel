@@ -112,8 +112,11 @@ class TestTheSettledHalfComplementsThePlanHalf:
         **The reverted member is the boundary of "its money moved"** (ruling
         **R-BAL140**): the revert KEEPS its records and releases their days
         (ruling **R-BAL61**), so records EXIST and none is DATED; the plan
-        emits a leg for a side with no dated movement (ruling **R-BAL79**),
-        and the settled half, the plan half's complement, does not hold it.
+        emits a leg for it because its transfer is Projected (the status
+        alone since plan step ``balance:X-bi-6-5``'s third leaf; ruling
+        **R-BAL79** also asked for a side with no dated movement until
+        then), and the settled half, the plan half's complement, does not
+        hold it.
         It is a NEW member at plan step ``balance:X-bi-6-4d-2``: no member
         stood in that state before.
 
@@ -126,8 +129,9 @@ class TestTheSettledHalfComplementsThePlanHalf:
         Cancelled through the door, its records kept un-dated -- is what
         stands, excluded as before); and un-dating the last member's loan
         side under its Paid parent (the band again; rolled back, Paid and
-        dated, settled as it was -- its walk's refusal is
-        :class:`TestASettledPaymentWithAnUndatedRecordFailsLoud`'s).
+        dated, settled as it was -- the walk's refusal of it was graded
+        beside this file until plan step ``balance:X-bi-6-5``'s third leaf
+        deleted that refusal).
 
         **Four members left at plan step ``balance:X-bi-6-4d-2``**, where a
         transfer became one row (ruling **R-BAL258**).  Three planted the

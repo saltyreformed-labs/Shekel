@@ -77,7 +77,6 @@ integer IDs from ``ref_cache``. The status display string is never
 consulted; the C2-8 test asserts this property mechanically against the
 module source.
 """
-from collections.abc import Callable
 from datetime import date
 
 from sqlalchemy import and_
@@ -335,17 +334,6 @@ def delete_returns_to_plan(row, *, took_off: bool) -> bool:
     return took_off and row.status_id in settled_status_ids()
 
 
-#: Why a settled ROW can carry no day, and the repair: :func:`settled_day`'s
-#: cause sentence for :func:`require_settled_day`.
-_ROW_UNDATED_CAUSE = (
-    "Every settled row is given one by status_seam.apply_status_change (the "
-    "single status write door) and by migration a3f7c8e21b64's backfill, so "
-    "this row was written by neither -- most likely a bulk query.update() on "
-    "status_id, or a fixture constructing the row with a settled status "
-    "directly.  Route the write through the seam"
-)
-
-
 def settled_day(transaction_id: int, settled_on: date | None) -> date:
     """Return the civil day a SETTLED transaction's money moved, or refuse.
 
@@ -387,12 +375,14 @@ def settled_day(transaction_id: int, settled_on: date | None) -> date:
     constructs ``Transaction(status_id=<paid>)`` directly never passes the seam.
     Both produce exactly this row, and both should fail where they are written.
 
-    **Its refusal is :func:`require_settled_day`'s since leaf
-    balance:X-bi-6-4d-1**, the one refusal of a missing settle day, which the
-    loan walk reaches too for a settled transfer's loan-side record
-    (:func:`app.services.loan_ledger.payment_visible_on`).  This binds a ROW's
-    subject and cause to it, and the refusal's text is byte-identical to the
-    one this function spelled itself until then.
+    **It spells its refusal itself again since plan step
+    balance:X-bi-6-5's third leaf.**  From leaf balance:X-bi-6-4d-1 the
+    refusal was ``require_settled_day``'s, a frame shared with the loan
+    walk's refusal of a settled transfer's un-dated loan-side record
+    (``loan_ledger.payment_visible_on``).  The status-band rule refuses that
+    record at commit (:mod:`app.side_band_infrastructure`), so the leaf
+    deleted the walk's refusal, and with one holder left the frame folded
+    back here, its text byte-identical.
 
     Args:
         transaction_id: The row's id, named in the refusal so a broken row is
@@ -410,53 +400,17 @@ def settled_day(transaction_id: int, settled_on: date | None) -> date:
             reading a row it believes is settled, so a missing day is a broken
             invariant rather than an empty value.
     """
-    return require_settled_day(
-        settled_on,
-        subject=lambda: f"Transaction {transaction_id}",
-        cause=_ROW_UNDATED_CAUSE,
-    )
-
-
-def require_settled_day(
-    settled_on: date | None, *, subject: Callable[[], str], cause: str,
-) -> date:
-    """Return a settled holder's stored day, or REFUSE: the one refusal of a missing day.
-
-    **One rule with two holders, stated once** (leaf balance:X-bi-6-4d-1,
-    rule 14).  "A settled holder's missing settle day is refused, never
-    defaulted" is ruling R-EC's (plan step X-f1), and two holders ask it: a
-    ROW, whose day is its own ``settled_on`` (:func:`settled_day`, its
-    binding), and a settled TRANSFER's loan-side payment, whose day is its
-    covering movement's (:func:`app.services.loan_ledger.payment_visible_on`).
-    Both run the same test, raise the same error, for the same reason; they
-    differ only in WHAT is named and WHY it can happen, so those two are the
-    arguments and the sentence frame is here.  Each caller has already decided
-    its holder is settled; this answers only "the day, or refuse".
-
-    **The subject is built only when refusing**, because naming a transfer's
-    payment in words reads its relationships, and the loan walk asks this for
-    every settled payment it folds.  The happy path calls nothing.
-
-    Args:
-        settled_on: The holder's stored day, ``None`` when it carries none.
-        subject: Returns the words naming the holder, e.g.
-            ``"Transaction 4242"``; called once, and only on the refusal.
-        cause: Why such a holder can exist and how to repair it, ending
-            without a full stop: the frame continues it with "; there is
-            deliberately no fallback day ...".
-
-    Returns:
-        *settled_on*, when it is a day.
-
-    Raises:
-        UndatedSettleError: When *settled_on* is ``None``.
-    """
     if settled_on is None:
         raise UndatedSettleError(
-            f"{subject()} is in a settled status but carries no settled_on, "
-            "so the day its money moved is unknown.  "
-            f"{cause}; there is deliberately no fallback day, because "
-            "inventing one would place real money on a day nothing recorded."
+            f"Transaction {transaction_id} is in a settled status but carries "
+            "no settled_on, so the day its money moved is unknown.  Every "
+            "settled row is given one by status_seam.apply_status_change (the "
+            "single status write door) and by migration a3f7c8e21b64's "
+            "backfill, so this row was written by neither -- most likely a "
+            "bulk query.update() on status_id, or a fixture constructing the "
+            "row with a settled status directly.  Route the write through the "
+            "seam; there is deliberately no fallback day, because inventing "
+            "one would place real money on a day nothing recorded."
         )
     return settled_on
 

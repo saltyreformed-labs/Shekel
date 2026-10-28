@@ -110,7 +110,7 @@ class TestDueDateAndSettleDayShadows:
 
             assert _reread(xfer.id).due_date == date(2026, 2, 1)
 
-    def test_a_settle_day_correction_lands_on_both_shadows(
+    def test_a_settle_day_correction_lands_on_both_sides(
         self, app, db, transfer_data,
     ):
         """A day corrected on ONE side reaches both sides: the other borrows it.
@@ -125,8 +125,7 @@ class TestDueDateAndSettleDayShadows:
         entry under that side's own covering movement's day, so the two land
         together.  Each side's day is its RECORD's since plan step
         ``balance:X-bi-6-4d-2``; the shadows carried it until then (ruling
-        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The name is kept
-        as history.
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             td = transfer_data

@@ -272,7 +272,7 @@ class TestAKeptMovementIsNotAPurchase:
                 envelope.id, seed_user["user"].id,
             ) == []
 
-    def test_an_endpoint_move_carries_a_projected_shadows_survivor(
+    def test_an_endpoint_move_carries_a_projected_transfer_sides_survivor(
         self, app, seed_user, seed_periods,
     ):
         """Ruling R-BAL72: the movement's account is assigned on every side, settled or not.

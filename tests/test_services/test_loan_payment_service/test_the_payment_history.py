@@ -10,9 +10,8 @@ import pytest
 
 from app import ref_cache
 from app.enums import StatusEnum, TxnTypeEnum
-from app.exceptions import AmountUnresolvable, UndatedSettleError
+from app.exceptions import AmountUnresolvable
 from app.extensions import db
-from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.utils.balance_predicates import settled_status_ids
 from tests._test_helpers import (
@@ -20,7 +19,6 @@ from tests._test_helpers import (
     loan_params_for,
     make_transfer_template,
     one_off_row_of,
-    refused_by_database_rule,
     typed,
 )
 from app.services.cash_ledger import derived_amount_basis
@@ -51,7 +49,7 @@ class TestGetPaymentHistory:
             )
             assert result == []
 
-    def test_returns_income_shadows_only(
+    def test_returns_a_transfer_into_the_loan_as_one_payment(
         self, app, db, seed_user, seed_periods,
     ):
         """A transfer into the loan is ONE payment, its income side's.
@@ -72,7 +70,7 @@ class TestGetPaymentHistory:
             assert len(result) == 1
             assert result[0].amount == Decimal("1500.00")
 
-    def test_excludes_non_shadow_transactions(
+    def test_excludes_non_transfer_transactions(
         self, app, db, seed_user, seed_periods,
     ):
         """Regular (non-transfer) income transactions are excluded.
@@ -291,7 +289,7 @@ class TestGetPaymentHistory:
             assert len(result) == 1
             assert result[0].dates.period_start == seed_periods[2].start_date
 
-    def test_settled_on_is_the_shadows_own_stored_day_not_its_pay_period(
+    def test_settled_on_is_the_payments_own_stored_day_not_its_pay_period(
         self, app, db, seed_user, seed_periods,
     ):
         """``settled_on`` is the day the CASH moved, read off the payment's record.
@@ -321,7 +319,7 @@ class TestGetPaymentHistory:
             assert result[0].dates.period_start == period.start_date
             assert result[0].dates.is_confirmed is True
 
-    def test_a_projected_shadow_carries_no_settle_day(
+    def test_a_projected_payment_carries_no_settle_day(
         self, app, db, seed_user, seed_periods,
     ):
         """A payment that has not happened has no day, and is not confirmed.
@@ -344,65 +342,6 @@ class TestGetPaymentHistory:
             assert len(result) == 1
             assert result[0].dates.settled_on is None
             assert result[0].dates.is_confirmed is False
-
-    def test_a_settled_shadow_with_no_day_is_refused_not_dated(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """A broken settled-iff-dated payment FAILS LOUD rather than being guessed.
-
-        The state is reachable only by bypassing the status seam -- here a bulk
-        ``query.update``, the shape finding N-65 measured 41 of in the suite.
-        The resolver's cut now reads this day, so inventing one would place a
-        real payment on a day nothing recorded; the loan walk refuses instead
-        (:func:`app.services.loan_ledger.payment_visible_on`, naming the
-        transfer since leaf balance:X-bi-6-4d-1; the shared row accessor
-        :func:`app.utils.balance_predicates.settled_day` refused for it until
-        then).
-
-        **The payment is settled through the door, so its transfer and its
-        covering movement are VALID, and the bulk update then releases only the
-        movement's day pair** -- the day a settled payment's leg reads since
-        plan step balance:X-bi-6-4b -- so it is broken in exactly ONE way, the
-        missing day, and this grades the refusal it names.  *Re-expressed under
-        rule 5 (developer approval, 2026-09-24): it bulk-updated the income
-        SHADOW's status to Paid under a still-Projected transfer, which the
-        loan no longer reads -- that state is a status drift the plan half
-        counts once (ruling R-BAL140).*
-
-        **The state is UNSTORABLE since plan step balance:X-bi-6-4d-2**: the
-        band rule (``app.side_band_infrastructure``) refuses, at COMMIT, a
-        settled transfer whose side holds an un-dated record.  So the
-        un-dating is STAGED inside the save, the walk is asked there, and the
-        commit is then refused and rolled back (ruling R-BAL167 class 2, plan
-        step balance:X-bi-6-4d-2).  The walk's refusal branch stays graded
-        here until plan step X-bi-6-5 deletes it (finding BAL-527).
-        """
-        with app.app_context():
-            loan = _create_loan_account(seed_user)
-            _create_transfer_to_loan(
-                seed_user, loan, seed_periods[2], Decimal("1500.00"),
-                status_enum=StatusEnum.DONE,
-                settled_on=seed_periods[2].start_date,
-            )
-            db.session.commit()
-
-            # Staged, never committed: the bulk UPDATE runs in the open
-            # transaction, and the band rule is checked at COMMIT.
-            db.session.query(TransactionEntry).filter(
-                TransactionEntry.account_id == loan.id,
-            ).update(
-                {"settled_on": None, "settled_day_basis_id": None},
-                synchronize_session=False,
-            )
-
-            with pytest.raises(UndatedSettleError):
-                get_payment_history(
-                    loan.id, _basis(seed_user), loan_params_for(db.session, loan.id),
-                )
-
-            with refused_by_database_rule("is settled but its sides hold"):
-                db.session.commit()
-            db.session.rollback()
 
     def test_ordered_by_pay_period_date(
         self, app, db, seed_user, seed_periods,
@@ -569,7 +508,7 @@ class TestTheFeedPricesADerivedRow:
     twin over a leg, :func:`~app.services.row_valuation.leg_settled_contribution`.
     """
 
-    def test_a_derived_shadow_resolves_through_the_amount_model(
+    def test_a_derived_payment_resolves_through_the_amount_model(
         self, app, db, seed_user, seed_periods,
     ):
         """A payment storing no figure is priced through the amount model: $1,500.00.

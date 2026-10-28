@@ -279,7 +279,7 @@ class TestTransferSettleDayEditDoor:
                 "owner's own day"
             )
 
-    def test_correcting_the_day_moves_both_shadows_and_the_ledger(
+    def test_correcting_the_day_moves_both_sides_and_the_ledger(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
         """PATCHing both sides' day boxes re-dates the pair and its postings (R-ED).

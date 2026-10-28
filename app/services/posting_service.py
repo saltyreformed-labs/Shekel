@@ -79,7 +79,6 @@ from app.models.transfer import Transfer
 from app.services import posting_reads
 from app.services.posting_reads import PostingError
 from app.services.transfer_legs import (
-    dated_leg_exists_clause,
     movement_parent,
     transfer_family_movements,
 )
@@ -687,9 +686,9 @@ def resync_all_cash_postings() -> tuple[int, int]:
     :func:`_rebook_transfer_family`, so whichever runs first leaves the other at
     target.  **Its transfer half is total over the family the ledger holds
     for the same reason its transaction half is** (below): it walks every
-    live transfer that is settled OR holds a dated record on either side,
-    and hands each to the pair's door, which reads each movement's own
-    state.
+    live transfer that is settled -- a side's record is dated, and so posts,
+    only while its transfer is (the status-band rule) -- and hands each to
+    the pair's door, which reads each movement's own state.
 
     Flushes but does NOT commit -- the caller owns the transaction boundary
     (``scripts.init_database.initialise_database``, whose ONE commit covers the
@@ -819,18 +818,21 @@ def resync_all_cash_postings() -> tuple[int, int]:
     transfers = (
         db.session.query(Transfer)
         .filter(
-            # LIVE and SETTLED, or live and holding a dated record on either
-            # side (plan step ``balance:X-bi-6-3``, ruling **R-BAL101**; by
-            # the side links since ``X-bi-6-4d-2``) -- the transaction arm's
-            # totality argument: this reaches every transfer that could hold
-            # a leg today.  A second disjunct reached every transfer, live or
-            # not, the legacy one-entry source ever posted for, until
-            # plan#1845 deleted that source and its entries.
+            # LIVE and SETTLED (plan step ``balance:X-bi-6-3``, ruling
+            # **R-BAL101**) -- the transaction arm's totality argument: this
+            # reaches every transfer that could hold a leg today, since a
+            # side's record posts only while dated
+            # (``_posting_purchases.purchase_posts``) and is dated only while
+            # its transfer is settled (the status-band rule,
+            # ``app.side_band_infrastructure``).  It reached a live transfer
+            # holding a dated record on either side too, whatever its
+            # status, until plan step ``balance:X-bi-6-5``'s third leaf
+            # deleted that disjunct, which the band rule left reaching
+            # nothing more.  Another reached every transfer, live or not,
+            # the legacy one-entry source ever posted for, until plan#1845
+            # deleted that source and its entries.
             Transfer.is_deleted.is_(False),
-            db.or_(
-                Transfer.status_id.in_(settled_ids),
-                dated_leg_exists_clause(),
-            ),
+            Transfer.status_id.in_(settled_ids),
         )
         .order_by(Transfer.id)
         .all()

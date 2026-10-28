@@ -418,7 +418,7 @@ class TestEveryDoorThatRemovesARowWithdrawsItsMatches:
 
         assert line.id not in _matched_line_ids(seed_user)
 
-    def test_deleting_a_transfer_frees_both_shadows_lines(
+    def test_deleting_a_transfer_frees_the_line_its_side_matched(
         self, app, db, seed_user,
     ):
         """A transfer's two legs move together, and so do their matches.
@@ -862,7 +862,7 @@ class TestARowThatIsHalfOfSomethingElseRefusesTheDelete:
     # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
     # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``).
     # That arm was reachable by no row, and it went at that step.  A
-    # transfer's own delete is ``test_deleting_a_transfer_frees_both_shadows_lines`` in
+    # transfer's own delete is ``test_deleting_a_transfer_frees_the_line_its_side_matched`` in
     # :class:`TestEveryDoorThatRemovesARowWithdrawsItsMatches`.
 
     def test_a_CC_payback_is_refused_and_names_Undo_CC(

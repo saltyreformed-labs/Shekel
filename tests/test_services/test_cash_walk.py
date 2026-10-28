@@ -701,14 +701,17 @@ class TestSourceFactValuation:
             account, scenario, transaction_id=txn.id,
         ) == purchase_fact.delta
 
-    def test_a_transfer_shadow_participates_like_any_other_row(
+    def test_a_settled_transfer_out_reduces_the_walk_like_any_other_row(
         self, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """Transfer Invariant 5: transfers reach the walk as their shadow rows.
+        """Transfer Invariant 5: a settled transfer reaches the walk as its side's record.
 
-        A $300.00 transfer out of Checking is an ordinary settled expense row to
-        this walk, exactly as it is to the projection engine -- neither queries
-        ``Transfer``.  Hand-computed: 1000 - 300 = 700.00.
+        A $300.00 transfer out of Checking is one dated fact on Checking: its
+        from-side's record, valued at the transfer's figure
+        (:func:`~app.services.cash_ledger.settled_cash_facts`), exactly as a
+        settled expense's movement is.  Hand-computed: 1000 - 300 = 700.00.
+        It said the walk read the transfer's shadow rows and never queried
+        ``Transfer``, which leaf ``balance:X-bi-6-4a`` made false.
         """
         account, scenario = seed_user["account"], seed_user["scenario"]
         period = seed_periods[0]

@@ -386,7 +386,7 @@ class TestItOffersNothingTheDoorWouldREFUSE:
         # model.  See ``_near._FIGURE_ADMITTED``.
         assert set(undecided) == set()
 
-    def test_a_TRANSFER_SHADOW_is_not_offered(self):
+    def test_a_TRANSFER_LEG_is_not_offered(self):
         """A transfer's two halves move its ONE figure, so neither is corrected alone.
 
         Correcting one means correcting the TRANSFER, which is not this door,
@@ -452,7 +452,7 @@ class TestTheCorrectableAccessorItself:
             1, "-25.00", states_own_figure=False,
         ).figure_is_correctable is False
 
-    def test_a_TRANSFER_SHADOW_is_not(self):
+    def test_a_TRANSFER_LEG_is_not(self):
         """A transfer's two halves move its ONE figure, so neither is correctable."""
         assert _row(
             1, "-25.00", transfer_id=77, kind=RowKind.LEG,

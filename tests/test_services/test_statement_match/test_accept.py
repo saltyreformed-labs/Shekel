@@ -1083,7 +1083,7 @@ class TestATransferShadowIsMatchedThroughItsService:
             .one_or_none()
         )
 
-    def test_a_projected_shadow_settles_through_the_transfer_service(
+    def test_a_projected_transfer_settles_through_the_transfer_service(
         self, app, db, seed_user,
     ):
         """One call settles the transfer and dates both its sides' records.
@@ -1110,7 +1110,7 @@ class TestATransferShadowIsMatchedThroughItsService:
             db, transfer, transfer.to_account_id,
         ).settled_on is not None
 
-    def test_a_settled_shadows_day_is_CORRECTED(self, app, db, seed_user):
+    def test_a_settled_transfer_sides_day_is_CORRECTED(self, app, db, seed_user):
         """The majority case on real data, and the one a settle verb cannot do.
 
         ``transfer_service.settle_transfer`` is an idempotent no-op on a
@@ -1218,15 +1218,16 @@ class TestATransferShadowIsMatchedThroughItsService:
         ) == an_observed_day(bank_day)
         assert recorded_settle_day(far_side) == typed_day
 
-    def test_a_shadow_whose_PARENT_is_gone_is_not_matchable(
+    def test_a_soft_deleted_TRANSFER_is_not_matchable(
         self, app, db, seed_user,
     ):
         """Not money this account owes, and pricing one asks about a gone row.
 
-        Unreachable through today's doors -- ``delete_transfer(soft=True)``
-        marks the transfer AND both shadows, and production carries 0 of these
-        -- so this plants the state directly.  A scope that is correct only
-        because every writer keeps a convention is a contract nobody can see.
+        The delete flag is set on the transfer directly rather than through
+        ``delete_transfer(soft=True)``, so the flag is the only thing that
+        differs from a live transfer.  It planted a live shadow under a
+        hidden transfer, a state no door wrote, until plan step
+        ``balance:X-bi-6-4d-2`` made a transfer one row (ruling **R-BAL258**).
         """
         from app.models.transfer import Transfer  # local: this test only
 

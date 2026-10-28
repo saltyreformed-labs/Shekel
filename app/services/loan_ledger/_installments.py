@@ -210,10 +210,6 @@ def payment_installments(
         parent transfer id)``; ``[]`` when the loan has no payment history.
 
     Raises:
-        UndatedSettleError: When a settled payment's record carries no
-            ``settled_on`` -- raised by :func:`._visible.payment_visible_on`,
-            because dating a settled payment by a fallback would put real money
-            on a day nothing recorded.
         ValueError: Propagated from
             :func:`app.services.loan_loaders.income_legs` for a transfer
             whose status it cannot place.  Named here because this function widened

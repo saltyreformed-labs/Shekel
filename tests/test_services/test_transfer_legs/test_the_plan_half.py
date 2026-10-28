@@ -412,7 +412,7 @@ class TestAStatusDriftIsCountedOnce:
     **R-BAL140**), in ``test_loan_settled_legs/test_the_two_halves.py``.
     """
 
-    def test_a_projected_shadow_under_a_settled_parent_is_counted_by_neither(
+    def test_a_settled_transfer_with_no_side_record_is_counted_by_neither(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
         """Settled with no record on either side, the $250.00 transfer moves nothing.
@@ -440,8 +440,7 @@ class TestAStatusDriftIsCountedOnce:
         ``test_loan_settled_legs/``.  Until that step its
         shadows stayed Projected under the settled parent, a status drift no
         door wrote; a transfer is one row since (ruling **R-BAL258**), and
-        the state is the status-band rule's zero close.  The name is the
-        test's history.
+        the state is the status-band rule's zero close.
         """
         with app.app_context():
             checking = seed_user["account"]

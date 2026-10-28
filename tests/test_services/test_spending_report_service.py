@@ -1588,6 +1588,13 @@ class TestATransferIsALegOfItsParent:
     def test_both_loaders_answer_own_rows_and_settled_expense_legs(
         self, app, seed_user, seed_periods, db,
     ):
+        """$100.00 Rent and three transfers: settled out, planned out, settled in.
+
+        Both settled-spend loaders (by period and by span) answer Rent as the
+        one row and the settled $250.00 checking -> Savings transfer as its
+        one expense leg; the planned $75.00 one is not settled and the
+        settled $60.00 one INTO checking is income here, so neither is spend.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = create_savings_account(
@@ -1676,6 +1683,14 @@ class TestATransferIsALegOfItsParent:
     def test_the_kernels_route_a_leg_to_its_producers(
         self, app, seed_user, seed_periods, db,
     ):
+        """A settled $250.00 transfer that moved $240.00 and a planned $75.00 one.
+
+        Each is read through its checking leg's parent.  The settled one
+        contributes its $240.00 record against its $250.00 plan and reads
+        back $240.00 spent; the planned one reads back its $75.00 plan (zero
+        variance), and ``settled_contribution`` refuses it: it recorded
+        nothing.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = create_savings_account(

@@ -722,7 +722,6 @@ from app.models.user import User, UserSettings
 # storage-tier NOT NULL constraint directly use raw SQL inserts.
 from app.models.scenario import Scenario
 from app.models.category import Category
-from app.models.pay_period import PayPeriod
 from app.models.salary_profile import SalaryProfile
 from app.models.savings_goal import SavingsGoal
 from app.models.transfer_template import TransferTemplate

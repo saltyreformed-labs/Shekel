@@ -1235,6 +1235,11 @@ class TestTheBillsAreLegsReadOffTheParent:
     def test_the_loader_answers_own_rows_and_expense_legs(
         self, app, seed_user, seed_periods, db,
     ):
+        """$300.00 Rent and a $400.00 checking -> Sweep Target transfer, one period.
+
+        The unpaid loader answers Rent as the one row and the transfer as its
+        one EXPENSE leg on checking, and ``items`` is the rows then the legs.
+        """
         with app.app_context():
             checking = seed_user["account"]
             period = seed_periods[_CURRENT_IDX]
@@ -1270,6 +1275,12 @@ class TestTheBillsAreLegsReadOffTheParent:
     def test_a_leg_bill_is_keyed_by_the_pair_and_named_from_its_endpoints(
         self, app, seed_user, seed_periods, db,
     ):
+        """A $400.00 transfer to Sweep Target due 2026-03-24 is one due-soon bill.
+
+        Keyed by its ``(transfer id, account id)`` pair, named from its
+        endpoints ("Transfer to Sweep Target"), priced at its $400.00 plan
+        with no tracked base, and counted in the period's $400.00 still due.
+        """
         with app.app_context():
             checking = seed_user["account"]
             period = seed_periods[_CURRENT_IDX]

@@ -387,11 +387,13 @@ def get_year_overview(
 def _contributions(items: PlanItems, balance_ctx: BalanceContext) -> dict:
     """Return ``{cell_key: what the item is WORTH}`` over a build's items.
 
-    The row producer's answer merged with its leg twin's (leaf
-    ``balance:X-bi-6-1b``), keyed by :func:`~app.services.transfer_legs
-    .cell_key` -- an ``int`` and a tuple cannot collide, so one dict serves
-    both shapes and the day fold indexes it with one expression.  Both halves
-    read the pass's ONE basis (plan step X-au-c2b).
+    ONE :func:`~app.services.cash_ledger.contributions_by_key` call over
+    every item, keyed by :func:`~app.services.transfer_legs.cell_key` and
+    valued by each item's parent (ruling **plan#1983**) -- an ``int`` and a
+    tuple cannot collide, so one dict serves both shapes and the day fold
+    indexes it with one expression.  It merged a row map with its leg twin's
+    (leaf ``balance:X-bi-6-1b``) until that ruling.  It reads the pass's ONE
+    basis (plan step X-au-c2b).
 
     Args:
         items: The build's :class:`~app.services.cash_flow_set.PlanItems`.
@@ -400,11 +402,9 @@ def _contributions(items: PlanItems, balance_ctx: BalanceContext) -> dict:
     Returns:
         The map, covering every item.
     """
-    basis = balance_ctx.amounts()
-    return {
-        **cash_ledger.contributions_by_id(items.rows, basis),
-        **cash_ledger.leg_contributions_by_key(items.legs, basis),
-    }
+    return cash_ledger.contributions_by_key(
+        items.items, balance_ctx.amounts(),
+    )
 
 
 def _query_transactions_for_range(

@@ -7,7 +7,7 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import StatusEnum
 from app.services import loan_ledger, transfer_service
-from app.services.cash_ledger import derived_amount_basis, leg_amounts_by_key
+from app.services.cash_ledger import amounts_by_key, derived_amount_basis
 from app.services.transfer_legs import leg_of
 from tests._test_helpers import transfer_amount, transfer_side_figure
 from tests.test_integration.test_transfer_settle_freeze import _derived_loan_transfer
@@ -28,10 +28,10 @@ def _both_legs(xfer):
     """Return *xfer*'s two legs, from-side first, as the grid would draw them.
 
     :func:`~app.services.transfer_legs.leg_of` on each endpoint: the value a
-    surface prices with :func:`~app.services.cash_ledger.leg_amounts_by_key`,
+    surface prices with :func:`~app.services.cash_ledger.amounts_by_key`,
     which is how a leg is read since plan step ``balance:X-bi-6-1`` (ruling
     **R-BAL87**).  These cases priced the two shadow ROWS with
-    ``amounts_by_id`` until plan step ``balance:X-bi-6-4d-2`` stopped the
+    ``amounts_by_key`` until plan step ``balance:X-bi-6-4d-2`` stopped the
     shadows being born (ruling **R-BAL167** class 1).
     """
     return [leg_of(xfer, xfer.from_account_id), leg_of(xfer, xfer.to_account_id)]
@@ -63,8 +63,8 @@ class TestALoanPaymentsLegsReadTheLoan:
 
         **The legs are the transfer's since plan step balance:X-bi-6-4d-2**
         (ruling **R-BAL167** class 1): both are priced through
-        ``leg_amounts_by_key``, where the two shadow rows were priced through
-        ``amounts_by_id``, and the per-leg "stores nothing" check went with the
+        ``amounts_by_key`` as their parent, as the two shadow rows were priced
+        by the same batch over their own ids, and the per-leg "stores nothing" check went with the
         rows -- the one row left is asserted storing nothing above it.
         """
         with app.app_context():
@@ -77,7 +77,7 @@ class TestALoanPaymentsLegsReadTheLoan:
             assert template_amount_service.amount_as_of(
                 xfer.template, xfer.due_date,
             ) == Decimal("1.00")
-            priced = leg_amounts_by_key(_both_legs(xfer), basis)
+            priced = amounts_by_key(_both_legs(xfer), basis)
             assert len(priced) == 2
             assert set(priced.values()) == {_CONTRACT}
 
@@ -153,8 +153,8 @@ class TestAnOwnerTypedFigureShowsBeforeItSettles:
         every day between the edit and the settle.
 
         What the grid publishes for a transfer's legs is asked here: it was
-        ``amounts_by_id`` over the shadow rows (ruling **R-Q**), and since
-        plan step ``balance:X-bi-6-1`` it is ``leg_amounts_by_key`` over the
+        ``amounts_by_key`` over the shadow rows (ruling **R-Q**), and since
+        plan step ``balance:X-bi-6-1`` it is ``amounts_by_key`` over the
         legs (``routes/grid/_items.py``); this case asked the first until plan
         step balance:X-bi-6-4d-2 stopped the shadows being born (ruling
         R-BAL167 class 1).
@@ -164,7 +164,7 @@ class TestAnOwnerTypedFigureShowsBeforeItSettles:
             basis = derived_amount_basis(
                 seed_user["user"].id, seed_user["scenario"].id,
             )
-            assert set(leg_amounts_by_key(_both_legs(xfer), basis).values()) == {
+            assert set(amounts_by_key(_both_legs(xfer), basis).values()) == {
                 _CONTRACT,
             }
 
@@ -177,7 +177,7 @@ class TestAnOwnerTypedFigureShowsBeforeItSettles:
             fresh = derived_amount_basis(
                 seed_user["user"].id, seed_user["scenario"].id,
             )
-            shown = leg_amounts_by_key(_both_legs(_reread(xfer.id)), fresh)
+            shown = amounts_by_key(_both_legs(_reread(xfer.id)), fresh)
             assert len(shown) == 2
             assert set(shown.values()) == {_TYPED}
 

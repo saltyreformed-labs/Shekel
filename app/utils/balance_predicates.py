@@ -415,7 +415,7 @@ def settled_day(transaction_id: int, settled_on: date | None) -> date:
     return settled_on
 
 
-def status_contributes_to_balance(txn) -> bool:
+def status_contributes_to_balance(txn: Transaction | Transfer) -> bool:
     """Return True iff *txn*'s status alone permits balance contribution.
 
     The status-only half of :func:`is_balance_contributing`: returns
@@ -434,10 +434,10 @@ def status_contributes_to_balance(txn) -> bool:
     of the rule.
 
     Args:
-        txn: any object with a ``status`` attribute that, when not
-            ``None``, carries an ``excludes_from_balance`` boolean.
-            ``Transaction`` and the ``FakeContribTransaction`` test
-            duck-types both satisfy this; ``is_deleted`` is NOT
+        txn: A ``Transaction`` or a ``Transfer`` (or the
+            ``FakeContribTransaction`` test duck-type): any object with a
+            ``status`` attribute that, when not ``None``, carries an
+            ``excludes_from_balance`` boolean.  ``is_deleted`` is NOT
             consulted.
 
     Returns:
@@ -450,7 +450,7 @@ def status_contributes_to_balance(txn) -> bool:
     return not (txn.status is not None and txn.status.excludes_from_balance)
 
 
-def is_balance_contributing(txn: Transaction) -> bool:
+def is_balance_contributing(txn: Transaction | Transfer) -> bool:
     """Return True iff *txn* contributes its effective amount to a balance.
 
     Mirrors the gate in ``row_valuation.fixed_contribution`` exactly: a
@@ -461,10 +461,16 @@ def is_balance_contributing(txn: Transaction) -> bool:
     loop and any consumer that wants to ask "should this row's amount
     be summed" cannot drift apart from the valuation rule.
 
+    **It takes a ``Transaction`` OR a ``Transfer``**, as :func:`is_projected`
+    does: ``row_valuation.fixed_contribution`` asks it of a plan item's
+    PARENT (ruling **plan#1983**), which is a transfer for a transfer leg,
+    and both tables carry ``is_deleted`` and a ``status`` into
+    ``ref.statuses``.
+
     Args:
-        txn: a ``Transaction`` instance. Both ``is_deleted`` and the
-            ``status`` relationship are expected to be loaded;
-            ``Transaction.status`` is declared ``lazy="joined"`` so a
+        txn: a ``Transaction`` or ``Transfer`` instance. Both ``is_deleted``
+            and the ``status`` relationship are expected to be loaded;
+            ``status`` is declared ``lazy="joined"`` on both models so a
             standard ORM load satisfies this without explicit
             ``selectinload``.
 

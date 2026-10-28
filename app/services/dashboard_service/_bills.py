@@ -185,7 +185,7 @@ def txn_to_bill_dict(
     for a row whose amount is DERIVED -- such a row stores no figure, and
     resolving a paycheck needs the owner's whole pay-period set, which no
     per-row property can hold.  The caller resolves the whole row set
-    ONCE through :func:`app.services.cash_ledger.contributions_by_id` and
+    ONCE through :func:`app.services.cash_ledger.contributions_by_key` and
     indexes it here, so the paycheck engine runs once per read pass
     rather than once per bill (finding **N-228**).
 
@@ -193,13 +193,13 @@ def txn_to_bill_dict(
         txn: The row or transfer leg to convert.
         today: The reference date used to compute days_until_due.
         contribution: What this row contributes, from the caller's
-            :func:`~app.services.cash_ledger.contributions_by_id` map --
+            :func:`~app.services.cash_ledger.contributions_by_key` map --
             ``0`` for a row that contributes nothing, the entered
             figure a SETTLED row RECORDED as moved, else the row's resolved
             amount.  Read only for a non-entry-tracked row; an envelope
             answers on its E-21 budget base instead.
         budget: What the row's amount RESOLVES to, from the caller's
-            :func:`~app.services.cash_ledger.amounts_by_id` map -- the E-21
+            :func:`~app.services.cash_ledger.amounts_by_key` map -- the E-21
             declared base.  An ARGUMENT rather than a read of
             ``txn.estimated_amount`` since plan step X-au-c2b, for the reason
             the contribution beside it is one: under the amount model a derived

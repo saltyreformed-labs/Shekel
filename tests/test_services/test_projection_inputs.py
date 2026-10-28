@@ -1087,7 +1087,7 @@ class TestShadowContributionBoundary:
 
     ``load_transfer_contributions_for_account(s)`` became the one place a
     contribution's dollar is decided at plan step X-au-c2: it prices the whole
-    row set through :func:`app.services.cash_ledger.contributions_by_id` and
+    row set through :func:`app.services.cash_ledger.contributions_by_key` and
     hands :mod:`app.services.investment_projection` frozen
     :class:`~app.services.investment_projection.PricedContribution` records.
 

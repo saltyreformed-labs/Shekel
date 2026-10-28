@@ -74,7 +74,7 @@ class PricedContribution:
             (:func:`app.services.row_valuation.settled_contribution` of the
             transfer), else
             what the transfer resolves to
-            (:func:`app.services.cash_ledger.planned_leg_contribution`).
+            (:func:`app.services.cash_ledger.resolve_amount`).
         is_confirmed: Whether the contribution actually happened, as opposed
             to being still projected: WHICH half of
             :func:`app.services.loan_loaders.income_legs` the leg came from.

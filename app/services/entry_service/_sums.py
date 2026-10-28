@@ -179,7 +179,7 @@ def build_entry_sums_dict(
     derived row stores none, so that read would meet a ``None`` in a
     subtraction on a live screen at the first per-kind cutover.  The caller
     resolves its whole row set ONCE through
-    :func:`~app.services.cash_ledger.amounts_by_id` and hands the map down, so
+    :func:`~app.services.cash_ledger.amounts_by_key` and hands the map down, so
     the cell's numerator, its denominator and the balance row beside it are one
     figure rather than three reads that agree by luck.
 
@@ -191,7 +191,7 @@ def build_entry_sums_dict(
         transactions: List of Transaction objects with entries accessible.
         budgets: ``{transaction_id: Decimal}`` covering every row in
             *transactions*, from the caller's one
-            :func:`~app.services.cash_ledger.amounts_by_id` call.  Indexed with
+            :func:`~app.services.cash_ledger.amounts_by_key` call.  Indexed with
             ``[]``: a row missing from it is a caller that priced a different
             set, and a default here would be a fabricated budget.
 
@@ -409,7 +409,7 @@ def entry_list_view(
             derivation.
         budget: What the row's amount RESOLVES to -- the E-21 declared base the
             remaining figure is computed against
-            (:func:`~app.services.cash_ledger.amounts_by_id`).  An argument
+            (:func:`~app.services.cash_ledger.amounts_by_key`).  An argument
             rather than a read of ``txn.estimated_amount`` since plan step
             X-au-c2b: a derived row stores no figure in that column.
         period: The paycheck the entries' row is FILED in, as the owner's pay
@@ -533,7 +533,7 @@ def compute_remaining(
     and renaming it is the point rather than tidying: a parameter named after a
     COLUMN invites the next caller to pass that column, and under the amount
     model a derived row's is ``NULL``.  Every caller now passes what the row's
-    amount RESOLVES to (:func:`~app.services.cash_ledger.amounts_by_id`), so
+    amount RESOLVES to (:func:`~app.services.cash_ledger.amounts_by_key`), so
     the row's amount cell, its remaining and its over-budget flag share one
     declared base by construction.
 

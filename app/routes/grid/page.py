@@ -741,7 +741,7 @@ def index():
     )
     grid_view, anchor = _build_grid_view(ctx.cash_flow, ctx.balance_ctx)
     # The ONE map every cell on this page reads its amount from, built by the
-    # ONE rule every OTHER surface reads it by (``amounts_by_id``): what the
+    # ONE rule every OTHER surface reads it by (``amounts_by_key``): what the
     # row's amount RESOLVES to (ruling R-Q).  It reads the pass's own basis, so
     # the cell and the balance row beside it cannot price one row two ways.
     #

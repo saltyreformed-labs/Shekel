@@ -51,8 +51,8 @@ from tests._test_helpers import (
 from app.services import salary_profile_service, status_seam, template_amount_service
 from app.services.cash_ledger import (
     derived_amount_basis,
-    amounts_by_id,
-    contributions_by_id,
+    amounts_by_key,
+    contributions_by_key,
 )
 from app.utils.dates import display_today
 
@@ -194,9 +194,9 @@ class TestArchivingFreezesWhatItWasPricing:
             ]
             db.session.commit()
             basis = derived_amount_basis(seed_user["user"].id, seed_user["scenario"].id)
-            before = amounts_by_id(rows, basis)
+            before = amounts_by_key(rows, basis)
             before_total = sum(
-                contributions_by_id(rows, basis).values(),
+                contributions_by_key(rows, basis).values(),
             )
             assert all(
                 figure > _VESTIGIAL for figure in before.values()
@@ -208,7 +208,7 @@ class TestArchivingFreezesWhatItWasPricing:
                 seed_user["user"].id, seed_user["scenario"].id,
             )
             assert sum(
-                contributions_by_id(rows, after_basis).values(),
+                contributions_by_key(rows, after_basis).values(),
             ) == before_total
             for row in rows:
                 db.session.refresh(row)
@@ -294,8 +294,8 @@ class TestArchivingFreezesWhatItWasPricing:
             cover_bare_settled_row(db.session, settled, Decimal("4000.00"))
             db.session.commit()
             basis = derived_amount_basis(seed_user["user"].id, seed_user["scenario"].id)
-            planned = amounts_by_id([settled], basis)[settled.id]
-            recorded = sum(contributions_by_id([settled], basis).values())
+            planned = amounts_by_key([settled], basis)[settled.id]
+            recorded = sum(contributions_by_key([settled], basis).values())
 
             _archive(auth_client, profile)
             db.session.refresh(settled)
@@ -308,7 +308,7 @@ class TestArchivingFreezesWhatItWasPricing:
                 Decimal("4000.00"), MovementFigureSourceEnum.RESOLVED,
             )
             assert sum(
-                contributions_by_id(
+                contributions_by_key(
                     [settled],
                     derived_amount_basis(
                         seed_user["user"].id, seed_user["scenario"].id,
@@ -510,7 +510,7 @@ class TestTheArchiveRouteFreezes:
             ]
             db.session.commit()
             basis = derived_amount_basis(seed_user["user"].id, seed_user["scenario"].id)
-            before = amounts_by_id(rows, basis)
+            before = amounts_by_key(rows, basis)
 
             response = auth_client.post(
                 f"/salary/{profile.id}/delete", follow_redirects=True,

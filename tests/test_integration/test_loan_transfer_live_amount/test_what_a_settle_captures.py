@@ -176,9 +176,9 @@ def test_nothing_after_the_settle_moves_what_a_loan_payment_paid(
       P&I + escrow + extra sum) and when the settings door redirects
       without saving it;
     * the valuation the calendar's day cells index for a transfer leg
-      (``cash_ledger.leg_contributions_by_key``), asked of the PAID Feb 1
+      (``cash_ledger.contributions_by_key``), asked of the PAID Feb 1
       payment's leg on the loan, still reads 1,499.10: it fails when
-      ``leg_contribution_of`` stops asking the record first
+      ``contribution_of`` stops asking the record first
       (``fixed_contribution`` of the leg's parent skipped) and reads the
       plan's 1,599.10;
     * the repeat click is answered 200: it fails when the transfer
@@ -198,7 +198,7 @@ def test_nothing_after_the_settle_moves_what_a_loan_payment_paid(
     The third check grades that shared valuation, not the calendar's use
     of it: the calendar draws the checking side's leg, and a swap at its
     call site (``calendar_service._contributions`` asking
-    ``leg_amounts_by_key``) shows the paid payment there at 1,599.10 with
+    ``amounts_by_key``) shows the paid payment there at 1,599.10 with
     this case green.  ``test_calendar_service``'s
     ``test_a_settled_leg_is_a_paid_cell_worth_its_record`` catches that
     swap.  The dashboard's bills load only transfers still projected, so a
@@ -208,7 +208,7 @@ def test_nothing_after_the_settle_moves_what_a_loan_payment_paid(
     figure the grid's paid cell reads (``settled_amounts_by_key``)
     right after the plan change, which none of the one-point mutations
     measured moves (each reads only the money that moved); the PAID
-    payment's own planned figure (``leg_amounts_by_key``, the grid's budget
+    payment's own planned figure (``amounts_by_key``, the grid's budget
     map), which reads 1,599.10 beside its 1,499.10 record and is an open
     question of its own, not settled here; and the first guard itself
     (``enters_settled_band`` skipped, so a repeat click runs the settle act
@@ -255,7 +255,7 @@ def test_nothing_after_the_settle_moves_what_a_loan_payment_paid(
         ] == Decimal("1599.10")
         # The valuation the calendar's day cells index still reads the paid
         # Feb 1 payment at what it paid, not at its plan's 1,599.10.
-        assert cash_ledger.leg_contributions_by_key(
+        assert cash_ledger.contributions_by_key(
             [_side_leg(paid_id, loan.id)],
             cash_ledger.derived_amount_basis(
                 seed_user["user"].id, seed_user["scenario"].id,

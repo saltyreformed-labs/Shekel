@@ -22,9 +22,9 @@ from app.services.cash_flow_set import (
     touched_transfers_clause,
 )
 from app.services.cash_ledger import (
-    leg_amounts_by_key,
-    leg_contribution_of,
-    leg_contributions_by_key,
+    amounts_by_key,
+    contribution_of,
+    contributions_by_key,
     settled_amounts_by_key,
 )
 from app.services.row_valuation import (
@@ -292,7 +292,7 @@ class TestTheLegMapProducers:
             leg = grid_transfer_leg(transfer, checking.id)
             key = leg.cell_key
 
-            assert leg_amounts_by_key(
+            assert amounts_by_key(
                 [leg], basis_for(checking, seed_user["scenario"]),
             ) == {key: _AMOUNT}
             assert settled_amounts_by_key([leg]) == {key: None}
@@ -329,9 +329,9 @@ class TestTheLegMapProducers:
                 (settled.id, savings.id): Decimal("240.00"),
             }
             # What the amount IS is the PLAN, unconditionally -- the budget
-            # map's rule (``amounts_by_id``, ruling E-21) -- so the cell can
+            # map's rule (``amounts_by_key``, ruling E-21) -- so the cell can
             # strike the estimate through beside the record.
-            assert leg_amounts_by_key(legs, basis_for(checking, seed_user["scenario"])) == {
+            assert amounts_by_key(legs, basis_for(checking, seed_user["scenario"])) == {
                 (settled.id, checking.id): _AMOUNT,
                 (settled.id, savings.id): _AMOUNT,
             }
@@ -409,9 +409,9 @@ class TestTheLegContributionTwins:
 
     ``settled_figure`` / ``fixed_contribution`` / ``settled_contribution``
     asked of a leg's parent (ruling **plan#1983**; leaf X-bi-6-1b's leg twins
-    of them until then), and ``leg_contribution_of`` /
-    ``leg_contributions_by_key`` beside
-    ``contribution_of`` / ``contributions_by_id``, over the four states a
+    of them until then), and ``contribution_of`` / ``contributions_by_key``
+    of a leg's parent (the same ruling; ``contribution_of`` /
+    ``contributions_by_key`` until then), over the four states a
     display leg can be in: planned, settled with a movement, settled with none
     (the $0.00 record), and excluded.
     """
@@ -432,8 +432,8 @@ class TestTheLegContributionTwins:
 
             assert settled_figure(parent_of(leg)) is None
             assert fixed_contribution(parent_of(leg)) is None
-            assert leg_contribution_of(leg, basis) == _AMOUNT
-            assert leg_contributions_by_key([leg], basis) == {leg.cell_key: _AMOUNT}
+            assert contribution_of(parent_of(leg), basis) == _AMOUNT
+            assert contributions_by_key([leg], basis) == {leg.cell_key: _AMOUNT}
             with pytest.raises(AmountUnresolvable):
                 settled_contribution(parent_of(leg))
 
@@ -462,8 +462,8 @@ class TestTheLegContributionTwins:
             assert settled_figure(parent_of(leg)) == Decimal("240.00")
             assert fixed_contribution(parent_of(leg)) == Decimal("240.00")
             assert settled_contribution(parent_of(leg)) == Decimal("240.00")
-            assert leg_contribution_of(leg, basis) == Decimal("240.00")
-            assert leg_amounts_by_key([leg], basis) == {leg.cell_key: _AMOUNT}
+            assert contribution_of(parent_of(leg), basis) == Decimal("240.00")
+            assert amounts_by_key([leg], basis) == {leg.cell_key: _AMOUNT}
 
     def test_a_settled_leg_with_no_movement_is_the_zero_record(
         self, app, db, seed_user, seed_periods,
@@ -482,7 +482,7 @@ class TestTheLegContributionTwins:
             for leg in legs:
                 assert settled_figure(parent_of(leg)) == Decimal("0")
                 assert settled_contribution(parent_of(leg)) == Decimal("0")
-                assert leg_contribution_of(leg, basis) == Decimal("0")
+                assert contribution_of(parent_of(leg), basis) == Decimal("0")
 
     def test_an_excluded_leg_is_worth_zero_whatever_it_remembers(
         self, app, db, seed_user, seed_periods,
@@ -500,8 +500,8 @@ class TestTheLegContributionTwins:
             assert settled_figure(parent_of(leg)) is None
             assert fixed_contribution(parent_of(leg)) == Decimal("0")
             assert settled_contribution(parent_of(leg)) == Decimal("0")
-            assert leg_contribution_of(
-                leg, basis_for(checking, seed_user["scenario"]),
+            assert contribution_of(
+                parent_of(leg), basis_for(checking, seed_user["scenario"]),
             ) == Decimal("0")
 
 

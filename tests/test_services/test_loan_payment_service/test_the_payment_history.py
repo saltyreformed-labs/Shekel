@@ -519,7 +519,7 @@ class TestTheFeedPricesADerivedRow:
         would answer a STORED ``$1,500.00`` and pass, where on a payment
         storing none only the amount model can answer -- and the feed's
         projected half resolves it from its definition through
-        :func:`~app.services.cash_ledger.planned_leg_contribution`, at the
+        :func:`~app.services.cash_ledger.resolve_amount`, at the
         $1,500.00 the definition states.
 
         It declared the LOAN-side income shadow derived and asserted the feed

@@ -182,7 +182,7 @@ class TestBothSidesShowTheTransfer:
         Each side is read through two of the doors to a leg: by SIDE
         (``transfer_side_leg``, how the transfer service reads one) and by
         ACCOUNT (``grid_transfer_leg``, through ``leg_of``, how the grid and
-        the fold reach one), and its amount through ``leg_amounts_by_key``,
+        the fold reach one), and its amount through ``amounts_by_key``,
         the producer the grid prices a leg's cell with.
         """
         with app.app_context():

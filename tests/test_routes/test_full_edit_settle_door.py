@@ -118,7 +118,7 @@ def _full_edit_save(auth_client, txn, status_id, **overrides):
     **The amount it posts is the one the popover RENDERS, which is the amount
     model's answer and not the raw column** (plan step balance:X-cf).  The
     template's box reads ``budgets[txn.id]`` --
-    :func:`~app.services.cash_ledger.amounts_by_id`, the resolved figure --
+    :func:`~app.services.cash_ledger.amounts_by_key`, the resolved figure --
     and a GENERATED row stores no figure of its own, so the column is ``None``
     there and a payload built from it posts the string ``"None"``, which the
     schema refuses with a 422 before the settle runs.  Every fixture this

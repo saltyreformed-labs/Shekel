@@ -22,7 +22,7 @@ The PAYMENTS come in two tiers:
   plan step **balance:X-bi-6a**, ruling **R-BAL13** -- a projected payment is
   derived from its parent transfer, not read off a shadow row), each at what
   the amount model resolves the PARENT to
-  (:func:`app.services.cash_ledger.planned_leg_contribution`, the SAME cash the
+  (:func:`app.services.cash_ledger.resolve_amount`, the SAME cash the
   checking side shows leaving).  A record is the evidence a payment will
   happen; where the record's due date has already passed but it has not
   settled, it is clamped forward to ``as_of + 1d`` -- "a plan cannot have
@@ -177,13 +177,13 @@ from app.services import escrow_calculator, loan_loaders
 from app.services.loan_ledger import LoanCalendar
 from app.services.cash_ledger import (
     AmountBasis,
-    planned_leg_contribution,
+    resolve_amount,
     transfer_pricing_load_options,
 )
 from app.services.installment_calendar import installment_dates, installment_of
 from app.services.loan_loaders import loan_payment_due_date
 from app.services.rate_period_engine import due_after_anchor, period_for_date
-from app.services.transfer_legs import TransferLeg
+from app.services.transfer_legs import TransferLeg, parent_of
 from app.utils.dates import add_months
 from app.utils.money import round_money
 
@@ -259,7 +259,7 @@ def _planned_from_legs(
     (plan step **balance:X-bi-6a**, ruling **R-BAL13**) -- becomes a
     :class:`PlannedPayment` at what a SCREEN would show for it, which is what
     the amount model RESOLVES the parent to
-    (:func:`~app.services.cash_ledger.planned_leg_contribution`).  It was
+    (:func:`~app.services.cash_ledger.resolve_amount` of the leg's parent).  It was
     ``_planned_from_shadows`` until that step, taking the projected shadow rows
     and a map priced over their ids; a shadow's answer was its parent's (rule
     5), so the figure is the same and the walk is one row shorter.
@@ -279,7 +279,7 @@ def _planned_from_legs(
     top -- was ``display_amounts_by_id``, extracted at X-au-c2b so one
     composition lived in one place rather than at two call sites (finding
     **N-224**'s shape).  Both cutovers have since deleted the override term
-    itself, so that function collapsed onto ``amounts_by_id`` and the merge has
+    itself, so that function collapsed onto ``amounts_by_key`` and the merge has
     no second half left to get wrong.
 
     **The cycle a much older draft blamed is DELETED and was never the
@@ -388,7 +388,7 @@ def _planned_from_legs(
         planned.append(PlannedPayment(
             due_date=due,
             effective_date=max(due, clamp_floor),
-            cash=planned_leg_contribution(leg, basis),
+            cash=resolve_amount(parent_of(leg), basis),
             is_estimated=False,
         ))
     return planned

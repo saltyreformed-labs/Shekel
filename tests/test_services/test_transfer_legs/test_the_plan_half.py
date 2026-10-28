@@ -16,11 +16,12 @@ from app.models.settled_figure import SettledFigure
 from app.models.transfer import Transfer
 from app.services.balance_at._asset_contributions import _recorded_contributions
 from app.services.balance_at._cash_fold import assembled_fold
-from app.services.cash_ledger import planned_cash_rows, planned_leg_contribution, sum_projected
+from app.services.cash_ledger import planned_cash_rows, resolve_amount, sum_projected
 from app.services.recorded_contributions import load_transfer_contributions_for_account
 from app.services.transfer_legs import (
     TransferLeg,
     leg_of,
+    parent_of,
     planned_transfer_legs,
 )
 from app.services.transfer_service import delete_transfer
@@ -281,8 +282,8 @@ class TestSumProjectedOverLegs:
             )
 
             assert (income, expense) == (_AMOUNT, _AMOUNT)
-            assert planned_leg_contribution(
-                leg_of(transfer, savings.id), basis,
+            assert resolve_amount(
+                parent_of(leg_of(transfer, savings.id)), basis,
             ) == _AMOUNT
 
     def test_a_leg_of_a_parent_that_is_not_projected_is_skipped(

@@ -32,8 +32,7 @@ from app.services.cash_flow_set import (
     set_transfer_legs_in_periods,
 )
 from app.services.cash_ledger import (
-    amounts_by_id,
-    leg_amounts_by_key,
+    amounts_by_key,
     settled_amounts_by_key,
 )
 from app.services.transaction_service import (
@@ -131,12 +130,12 @@ class GridAmountMaps(NamedTuple):
 def build_amount_maps(items: PlanItems, basis) -> GridAmountMaps:
     """Build the three amount maps over the rows AND the legs.
 
-    The ``settled`` map is ONE call over every item, each valued by its
-    parent (ruling **plan#1983**); ``budgets`` and ``retained`` are each
-    their row producer's answer merged with its leg producer's -- the twins
-    ``cash_ledger`` and ``transaction_service`` publish side by side -- so a
-    leg's cell and a row's read one context key each.  The keys cannot
-    collide (an ``int`` and a tuple), which is what lets one dict hold both.
+    The ``budgets`` and ``settled`` maps are ONE call each over every item,
+    each item valued by its parent (ruling **plan#1983**); ``retained`` is
+    still its row producer's answer merged with its leg twin's, the pair
+    ``transaction_service`` publishes side by side -- so a leg's cell and a
+    row's read one context key each.  The keys cannot collide (an ``int``
+    and a tuple), which is what lets one dict hold both.
 
     Args:
         items: The page's :class:`~app.services.cash_flow_set.PlanItems`.
@@ -146,10 +145,7 @@ def build_amount_maps(items: PlanItems, basis) -> GridAmountMaps:
         The :class:`GridAmountMaps` for this render.
     """
     return GridAmountMaps(
-        budgets={
-            **amounts_by_id(items.rows, basis),
-            **leg_amounts_by_key(items.legs, basis),
-        },
+        budgets=amounts_by_key(items.items, basis),
         settled=settled_amounts_by_key(items.items),
         retained={
             **retained_settle_amounts_by_id(items.rows),

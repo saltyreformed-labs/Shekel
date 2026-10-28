@@ -20,7 +20,8 @@ from decimal import Decimal
 
 from app.services import spending_analysis
 from app.services.cash_flow_set import PlanItems
-from app.services.transfer_legs import PlanItem
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import PlanItem, parent_of
 from app.utils.money import ZERO
 
 from ._types import (
@@ -369,7 +370,14 @@ def _spent_total(txns: list[PlanItem]) -> Decimal:
             ``balance:X-bi-6-1b``.
 
     Returns:
-        The sum of :func:`~app.services.spending_analysis.recorded_spend`
-        over ``txns``.
+        The sum of what each item's parent RECORDED as having moved
+        (:func:`~app.services.row_valuation.settled_contribution`, ruling
+        **plan#1983**: a leg's is its transfer's) over ``txns``.
+
+    Raises:
+        AmountUnresolvable: An item has not settled, which no loader here can
+            hand it (both filter to the settled statuses in SQL).
     """
-    return sum((spending_analysis.recorded_spend(txn) for txn in txns), ZERO)
+    return sum(
+        (settled_contribution(parent_of(txn)) for txn in txns), ZERO,
+    )

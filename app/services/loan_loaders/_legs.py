@@ -357,7 +357,7 @@ def projected_income_legs(
     not a payment and is not returned.
 
     Carries no period bound and NO cash: the plan builder resolves each leg's
-    cash (:func:`app.services.cash_ledger.planned_leg_contribution` over the
+    cash (:func:`app.services.cash_ledger.resolve_amount` over the
     parent), its due date (:func:`loan_payment_due_date`, which takes a leg)
     and its escrow as the plan is assembled.
 

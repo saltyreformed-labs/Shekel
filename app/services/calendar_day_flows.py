@@ -119,8 +119,8 @@ def build_day_entry(
     Args:
         txn: The row or leg to convert.
         amount: What the item is WORTH, from the build's one
-            :func:`~app.services.cash_ledger.contributions_by_id` call (a
-            leg's from its twin, ``leg_contributions_by_key``).
+            :func:`~app.services.cash_ledger.contributions_by_key` call,
+            a leg valued by its parent transfer (ruling **plan#1983**).
             It replaced ``txn.effective_amount`` at plan step X-au-c2: that
             model property could not answer for a row whose amount is DERIVED,
             because such a row stores no figure and resolving one needs a
@@ -187,7 +187,7 @@ def fold_income_expense(
     **The expense leg took ``abs()`` until plan step
     ``bank_import:X-gj-2b-3``, and that was a MONEY DEFECT.**
     :attr:`DayEntry.amount` is
-    :func:`~app.services.cash_ledger.contributions_by_id`'s answer, which for a
+    :func:`~app.services.cash_ledger.contributions_by_key`'s answer, which for a
     settled envelope is the sum of its entries -- NEGATIVE for one whose
     refunds exceeded its purchases, since ruling **bank_import:R-II** relaxed
     ``ck_transaction_entries_positive_amount`` to ``amount <> 0``.  ``abs()``

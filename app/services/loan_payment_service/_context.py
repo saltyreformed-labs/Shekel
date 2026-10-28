@@ -32,7 +32,7 @@ from app.services import escrow_calculator
 from app.services.amortization_engine import PaymentRecord, RateChangeRecord
 from app.services.cash_ledger import (
     AmountBasis,
-    planned_leg_contribution,
+    resolve_amount,
     transfer_pricing_load_options,
 )
 from app.services.loan_ledger import payment_installments
@@ -258,12 +258,12 @@ def get_payment_history(
     without reaching the amount model; a
     projected leg is worth its
     parent's resolved amount,
-    :func:`~app.services.cash_ledger.planned_leg_contribution`.  WHICH half an
+    :func:`~app.services.cash_ledger.resolve_amount`.  WHICH half an
     installment is in is its dates' to say
     (:attr:`~app.services.amortization_engine.PaymentDates.is_confirmed`,
     true exactly for the producer's settled half), never a re-reading of the
-    status column.  NOT :func:`~app.services.cash_ledger.leg_contribution_of`
-    over both: it prices a leg whose parent has not settled at its plan,
+    status column.  NOT :func:`~app.services.cash_ledger.contribution_of`
+    of the parent over both: it prices a parent that has not settled at its plan,
     where the settled accessor refuses one, so a leg misplaced in the settled
     half would be priced in silence.  (It was a live case from plan step
     balance:X-bi-6-4b, ruling **R-BAL140**: a still-Projected transfer whose
@@ -277,7 +277,7 @@ def get_payment_history(
     neither** (finding **N-432**).  The rows, their order and their three dates
     are :func:`app.services.loan_ledger.payment_installments`; the figures are
     :func:`~app.services.row_valuation.settled_contribution` and
-    :func:`~app.services.cash_ledger.planned_leg_contribution`, one per half.
+    :func:`~app.services.cash_ledger.resolve_amount`, one per half.
     What is left here is the pairing.  Splitting it that way is what lets a
     consumer that needs only the chronology -- the schedule replay, which
     reads three dates and no amount
@@ -309,11 +309,11 @@ def get_payment_history(
     while this call stood -- not because anything was circular, but because one
     reader had never been routed.  The bound was deleted rather than worked
     around: this asked
-    :func:`~app.services.cash_ledger.contributions_by_id`, which answers a
+    :func:`~app.services.cash_ledger.contributions_by_key`, which answers a
     derived row from its producer and an OWN row from the plan column that
     accessor then read.  Since plan step balance:X-bi-6a that question is the
     projected half's alone, asked of each leg's parent through
-    :func:`~app.services.cash_ledger.planned_leg_contribution`.
+    :func:`~app.services.cash_ledger.resolve_amount`.
 
     **It is BYTE-IDENTICAL on every row that exists today, and that is a
     measurement rather than an expectation.**  Both accessors gate on
@@ -330,7 +330,7 @@ def get_payment_history(
     statement again and the leaf is private to it (``_amount_source
     ._own_figure``).  The unsettled row this paragraph turns on no longer has
     two answers to compare: the accessor REFUSES it and only
-    ``contributions_by_id`` answers.*  Measured against production 2026-09-01 (stamp
+    ``contributions_by_key`` answers.*  Measured against production 2026-09-01 (stamp
     ``a4c6f1d92b73``): **all 58 loan-side income shadows** -- 29 Mortgage, 29
     Van Loan -- and all 175 transfers carry ``amount_source_id IS NULL``, so
     every row in this feed takes that arm.  What changes is only what a row the
@@ -350,7 +350,7 @@ def get_payment_history(
 
     **It asked the BATCH over the settled half until plan step
     balance:X-bi-6-4b**, because every other reader of a ROW set took
-    ``contributions_by_id`` and a figure could not then differ by which caller
+    ``contributions_by_key`` and a figure could not then differ by which caller
     asked.  The settled half is legs since, valued by the ONE per-leg accessor
     every leg reader asks (the Spending report's, the savings metric's), and
     the projected half has been per leg since X-bi-6a; what stops 29 projected
@@ -464,7 +464,7 @@ def get_payment_history(
             amount=(
                 settled_contribution(parent_of(installment.source))
                 if installment.dates.is_confirmed
-                else planned_leg_contribution(installment.source, basis)
+                else resolve_amount(parent_of(installment.source), basis)
             ),
         )
         for installment in installments

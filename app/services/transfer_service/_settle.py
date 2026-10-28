@@ -72,8 +72,8 @@ from app.exceptions import ValidationError
 from app.models.transfer import Transfer
 from app.services.cash_ledger import (
     AmountBasis,
+    contribution_of,
     derived_amount_basis,
-    leg_contribution_of,
 )
 from app.services.match_press import Press
 from app.services.stated_figure import StatedFigure
@@ -83,7 +83,7 @@ from app.services.status_seam import (
     honoured_figure,
     recorded_leg_settlement,
 )
-from app.services.transfer_legs import TransferLeg, transfer_side_leg
+from app.services.transfer_legs import TransferLeg, parent_of, transfer_side_leg
 from app.services.transfer_service._side_days import PairDays
 from app.services.transfer_service._status import apply_status_to_all_three
 from app.services.transfer_service._validation import TransferRows
@@ -126,8 +126,8 @@ def _reject_unsettleable(transfer: Transfer) -> None:
 # It published ``LoanPricing.live_cash`` under a name -- *the live payment-date
 # figure a settle FREEZES* -- because a loan-payment shadow STORED a
 # creation-time estimate that the settle had to supersede.  A transfer has no
-# shadow now, and a transfer leg is priced by the amount model,
-# so :func:`~app.services.cash_ledger.leg_contribution_of` answers the same number
+# shadow now, and a transfer is priced by the amount model,
+# so :func:`~app.services.cash_ledger.contribution_of` answers the same number
 # for a derive-mode payment (its installment's P&I + escrow + extra), for a
 # manual one (its definition's price + extra) and for a plain transfer (its
 # parent's), and there is nothing left to freeze OVER.
@@ -136,9 +136,9 @@ def _reject_unsettleable(transfer: Transfer) -> None:
 # is worth stating because it was load-bearing: it made the capture ONE-SHOT,
 # so a ``done -> done`` replay from a stale tab could not rewrite a recorded
 # figure with a later derivation.  What holds that now is
-# :func:`~app.services.row_valuation.fixed_contribution` of the leg's parent,
-# asked FIRST inside :func:`~app.services.cash_ledger.leg_contribution_of` -- a
-# settled leg answers
+# :func:`~app.services.row_valuation.fixed_contribution` of the transfer,
+# asked FIRST inside :func:`~app.services.cash_ledger.contribution_of` -- a
+# settled transfer answers
 # from its transfer's settled figure and never reaches a producer -- plus
 # :func:`settle` running only on the way INTO the settled band.  Two
 # independent reasons
@@ -162,9 +162,9 @@ def settle(
 
     Two acts, in this order, and the order is the rule:
 
-    1. **The figure, decided but not yet written.**  What the expense LEG is
-       worth (:func:`~app.services.cash_ledger.leg_contribution_of`, the
-       parent's resolved amount) is asked ONCE, before anything moves -- after
+    1. **The figure, decided but not yet written.**  What the TRANSFER is
+       worth (:func:`~app.services.cash_ledger.contribution_of`, its
+       resolved amount) is asked ONCE, before anything moves -- after
        the status flip it would answer from the settled figure this act is
        about to write.  A RETAINED correction
        (:func:`~app.services.status_seam.honoured_figure` over the transfer's
@@ -277,12 +277,13 @@ def settle(
     basis = derived_amount_basis(
         rows.transfer.user_id, rows.transfer.scenario_id,
     )
-    # Off the expense LEG -- its transfer, never its side's record -- never a
-    # twin row (plan step ``balance:X-bi-6-4d-2``): a twin's status is no
-    # longer kept, and a twin left saying Paid under a reverted transfer would
-    # price at the sum of its empty entries, ``$0.00``, and a ``$0.00`` settle
-    # takes the sides' records off the books.
-    resolved = leg_contribution_of(rows.expense_leg, basis)
+    # Off the TRANSFER, the parent both legs are priced as (ruling
+    # plan#1983) -- never its side's record, never a twin row (plan step
+    # ``balance:X-bi-6-4d-2``): a twin's status is no longer kept, and a twin
+    # left saying Paid under a reverted transfer would price at the sum of its
+    # empty entries, ``$0.00``, and a ``$0.00`` settle takes the sides'
+    # records off the books.
+    resolved = contribution_of(rows.transfer, basis)
     # A RETAINED correction outranks the derivation, through the same published
     # rule :func:`leg_settle_amount` offers from, so the pair's offer and its
     # booking are one expression (plan step X-au-c3).  The record is the
@@ -366,9 +367,9 @@ def leg_settle_amount(leg: TransferLeg, basis: AmountBasis) -> Decimal:
       re-read through ``transfer_legs.transfer_side_leg``) -- a draft honoured
       it only at the WRITE, so the panel offered the plan and the settle
       booked the human's figure;
-    * else what the leg is worth
-      (:func:`~app.services.cash_ledger.leg_contribution_of`): ``0`` for a
-      parent that does not contribute, else the parent's resolved amount.
+    * else what the leg's parent is worth
+      (:func:`~app.services.cash_ledger.contribution_of`): ``0`` for a
+      parent that does not contribute, else its resolved amount.
 
     It was asked of the leg's TWIN ROW through plan step
     ``balance:X-bi-6-4d-2`` (``settle_amount(shadow)``, through a
@@ -400,7 +401,7 @@ def leg_settle_amount(leg: TransferLeg, basis: AmountBasis) -> Decimal:
     held = honoured_figure(recorded_leg_settlement(leg))
     if held is not None:
         return held
-    return leg_contribution_of(leg, basis)
+    return contribution_of(parent_of(leg), basis)
 
 
 def record_leg_clearing(leg: TransferLeg, anchor_id: int) -> None:

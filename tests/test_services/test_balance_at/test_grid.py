@@ -755,7 +755,7 @@ class TestTheViewIsBuiltOnOneAmountModel:
 
     There is no map to hand back now: a derived row stores no figure, so there
     is nothing for a recompute to be laid over and both the cells and the fold
-    ask ``cash_ledger.amounts_by_id`` over the pass's own basis.  The field the
+    ask ``cash_ledger.amounts_by_key`` over the pass's own basis.  The field the
     old case asserted (``GridBalanceView.amount_overrides``) was carried to NO
     consumer at all -- an AST and grep census over ``app/``, ``app/templates``
     and ``app/static`` found zero reads, and the case's own docstring claimed
@@ -792,7 +792,7 @@ class TestTheViewIsBuiltOnOneAmountModel:
             db.session.commit()
 
             view = balance_at.grid_balance_view(CashFlowSet.single(account), bctx)
-            budgets = cash_ledger.amounts_by_id([income_txn], bctx.amounts())
+            budgets = cash_ledger.amounts_by_key([income_txn], bctx.amounts())
 
             assert income_txn.estimated_amount is None
             assert budgets[income_txn.id] == Decimal("1500.00")

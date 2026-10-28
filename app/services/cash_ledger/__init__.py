@@ -63,7 +63,7 @@ names the loan TERM primitives (``loan_loaders``, ``loan_resolver``,
 ``escrow_calculator``, ``recurring_transfer_query``), none of which names it --
 and the loan READING tier may import this package, which plan step X-au-g-2c-1
 SPENT: ``loan_payment_service.get_payment_history`` prices its feed through
-:func:`contributions_by_id` rather than through
+:func:`contributions_by_key` rather than through
 ``row_valuation.settled_contribution``.  ``balance_at._plan._planned_from_shadows``
 -- the SECOND unrouted reader, which a census at that step found where the
 finding had named one -- went through in the same commit, so no reader of an
@@ -222,8 +222,8 @@ from ._amount_rule import (
 )
 from ._definition_cash import DefinitionRow, definition_cash
 from ._amount_source import (
-    amounts_by_id,
-    leg_amounts_by_key,
+    amounts_by_key,
+    resolve_amount,
     resolve_transaction_amount,
     resolve_transfer_amount,
 )
@@ -231,10 +231,7 @@ from ._amounts import (
     ReconciledThrough,
     contributed_amount,
     contribution_of,
-    contributions_by_id,
-    leg_contribution_of,
-    leg_contributions_by_key,
-    planned_leg_contribution,
+    contributions_by_key,
     settled_contribution,
 )
 from ._cash_leg import (
@@ -315,16 +312,13 @@ __all__ = [
     "definition_cash",
     "is_loan_payment_definition",
     "transfer_amount_rule",
-    "amounts_by_id",
-    "leg_amounts_by_key",
+    "amounts_by_key",
     "account_opening_fact",
     "cash_anchor_facts",
     "coverage_for",
     "contributed_amount",
     "contribution_of",
-    "contributions_by_id",
-    "leg_contribution_of",
-    "leg_contributions_by_key",
+    "contributions_by_key",
     "credit_entry_sum",
     "dated_deltas",
     "earliest_assertion_day",
@@ -338,9 +332,9 @@ __all__ = [
     "off_statement_sum",
     "settled_contribution",
     "planned_cash_rows",
-    "planned_leg_contribution",
     "posted_purchase_sum",
     "reconciled_through",
+    "resolve_amount",
     "resolve_anchor",
     "resolve_transaction_amount",
     "resolve_transfer_amount",

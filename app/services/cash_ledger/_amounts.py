@@ -16,12 +16,17 @@ composition in one function and it took over from
 ``Transaction.effective_amount`` at plan step X-au-c2: a model property could not
 resolve a derived amount -- it is a pure in-memory read, and a paycheck's
 derivation needs the owner's whole pay-period set -- so the figure arrives as an
-ARGUMENT a caller cannot forget.  :func:`contributions_by_id` is the batch a
-reader with a row set uses, and
+ARGUMENT a caller cannot forget.  :func:`contributions_by_key` is the batch a
+reader with an item set uses, and
 :func:`~app.services.row_valuation.settled_contribution` is the cheap accessor
-for a reader whose rows have all SETTLED.  The BUDGET twin
-of the first two is :func:`._amount_source.amounts_by_id`, which answers what a
-row's amount IS rather than what it is worth (ruling E-21, plan step X-au-c2b).
+for a reader whose items have all SETTLED.  The BUDGET sibling
+of the batch is :func:`._amount_source.amounts_by_key`, which answers what an
+item's amount IS rather than what it is worth (ruling E-21, plan step X-au-c2b).
+**Every valuation here is a question about a PARENT** (ruling **plan#1983**):
+a plan row is its own parent and a transfer leg's is its transfer
+(:func:`~app.services.transfer_legs.parent_of`), so a leg is worth what its
+transfer is and the leg twins this module carried (``leg_contribution_of``,
+``leg_contributions_by_key``, ``planned_leg_contribution``) are deleted.
 *The cheap accessor had a budget twin too -- ``owned_amount`` -- and plan step
 X-bu DELETED it: a public accessor answering "what is this row's plan" from the
 ``estimated_amount`` column is a second spelling of what
@@ -72,14 +77,14 @@ callers ask now is the resolver directly.
 
 Two rule families live here, split by the question they answer.
 
-What a row is worth while it is still PROJECTED -- a reservation, money not yet
-gone -- is :func:`contribution_of` for an ordinary row and
-:func:`_entry_aware_amount` for one carrying purchases, the second being the
-envelope reservation rather than a second amount rule.  What a still-projected
-TRANSFER is worth to one of its two accounts is :func:`planned_leg_contribution`
-over the parent's derived leg (plan step **X-bi-6a**, ruling **R-BAL13**):
-the same figure rule 5 answered for the shadow row that leg replaced, read
-from the parent without the shadow in between.
+What a parent is worth while it is still PROJECTED -- a reservation, money not
+yet gone -- is :func:`contribution_of` for an ordinary row or a transfer and
+:func:`_entry_aware_amount` for a row carrying purchases, the second being the
+envelope reservation rather than a second amount rule.  A still-projected
+TRANSFER is worth to each of its two accounts what :func:`contribution_of` of
+the transfer answers, its resolved amount (plan step **X-bi-6a**, ruling
+**R-BAL13**: the same figure rule 5 answered for the shadow row a leg
+replaced, read from the parent without the shadow in between).
 
 What money that really MOVED is worth is the other, and it is deliberately
 neither of the above:
@@ -118,6 +123,7 @@ in, ``Decimal`` out; no Flask import, no writes.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -134,12 +140,17 @@ from app.services.row_valuation import (  # pylint: disable=unused-import
 )
 from app.utils.balance_predicates import is_projected
 
-from app.services.transfer_legs import TransferLeg, parent_of
+from app.services.transfer_legs import (
+    PlanItem,
+    PlanParent,
+    cell_key,
+    parent_of,
+)
 
 from ._amount_source import (
     AmountBasis,
+    resolve_amount,
     resolve_transaction_amount,
-    resolve_transfer_amount,
 )
 
 
@@ -293,7 +304,7 @@ def contributed_amount(txn, resolved: Decimal) -> Decimal:
     Taking the figure as an ARGUMENT is what a caller cannot forget.  A property
     is free to read and answers whatever it can; this signature does not exist
     without a resolved figure, and the only way to get one for a row set is
-    :func:`contributions_by_id`, which builds the basis the resolver requires.
+    :func:`contributions_by_key`, which takes the basis the resolver requires.
 
     Args:
         txn: The row being valued.
@@ -308,173 +319,100 @@ def contributed_amount(txn, resolved: Decimal) -> Decimal:
     return resolved if fixed is None else fixed
 
 
-def contributions_by_id(rows, basis: AmountBasis) -> dict[int, Decimal]:
-    """Return ``{transaction_id: what the row contributes}`` for *rows*.
+def contributions_by_key(
+    items: Iterable[PlanItem], basis: AmountBasis,
+) -> "dict[int | tuple[int, int], Decimal]":
+    """Return ``{cell_key(item): what its parent contributes}`` for *items*.
 
-    **The BATCH valuation every reader that can see a still-projected row uses**
-    (plan step X-au-c2).  It values each row through
-    :func:`~app.services.row_valuation.fixed_contribution`, resolving only the
-    rows that reach the amount model at all -- so the paycheck engine runs once
-    per read pass rather than once per row (finding **N-228**).
+    **The BATCH valuation every reader that can see a still-projected item
+    uses** (plan step X-au-c2), keyed by the side and valued by its parent
+    (ruling **plan#1983**): a row by its id and its own worth, a transfer leg
+    by its ``(transfer id, account id)`` and its transfer's, so the one
+    ``contributions`` map the dashboard's bills and the calendar's day cells
+    index holds rows and legs side by side.  ``contributions_by_id`` and its
+    leg twin ``leg_contributions_by_key`` (leaf ``X-bi-6-1b``) were the two
+    halves of it until that ruling.  It values each parent through
+    :func:`contribution_of`, resolving only the parents that reach the amount
+    model at all -- so the paycheck engine runs once per read pass rather than
+    once per row (finding **N-228**).
 
     **It TAKES the basis rather than building one** (plan step X-au-c2b).  A
     basis is pinned to an owner and a scenario, not to a row set, so a caller
-    that also needs the budget map (:func:`~._amount_source.amounts_by_id`)
+    that also needs the budget map (:func:`~._amount_source.amounts_by_key`)
     asks both against ONE -- which is how a single request stopped running the
     paycheck engine once per row set (findings **N-268**, **N-269**).  A caller with a
     read pass passes ``ctx.amounts()``; one without builds its own with
     :func:`~._amount_basis.derived_amount_basis`, the interim that goes site
     by site as each producer takes its pass.
 
-    That ordering is the point rather than an optimisation: an excluded row is
-    worth ``$0.00`` and its derived amount has no producer to answer it, so a
-    valuation that resolved first and gated afterwards would 500 on a row nobody
-    is counting.
-
-    Every id in *rows* appears in the result, so a caller indexes it with ``[]``
-    and a row it forgot to price raises a ``KeyError`` where it is read.  There
-    is deliberately no ``.get(id, default)`` shape: a default here is a
-    fabricated figure in a money path.
+    Every key in *items* appears in the result, so a caller indexes it with
+    ``[]`` and an item it forgot to price raises a ``KeyError`` where it is
+    read.  There is deliberately no ``.get(key, default)`` shape: a default
+    here is a fabricated figure in a money path.
 
     Args:
-        rows: The loaded rows to value.  They may span accounts -- the basis is
-            keyed on the owner, not on one account -- but every one must belong
-            to *basis*'s owner and scenario.
+        items: The loaded rows and transfer legs to value, the legs' parents
+            loaded with
+            :func:`~app.utils.amount_relationships.transfer_pricing_load_options`.
+            They may span accounts -- the basis is keyed on the owner, not on
+            one account -- but every one must belong to *basis*'s owner and
+            scenario.
         basis: The read pass's :class:`~._amount_source.AmountBasis`.
 
     Returns:
-        ``{transaction_id: Decimal}`` covering every row.
+        ``{cell_key: Decimal}`` covering every item; a row's key is its id.
+        A leg's value is a magnitude; its ``is_income`` says which way it
+        moves the account.
 
     Raises:
-        AmountUnresolvable: From the resolver, for a row whose rule cannot
+        AmountUnresolvable: From the resolver, for a parent whose rule cannot
             answer.  A refusal is never a fallback (see
             :mod:`app.services.cash_ledger._amount_source`).
         UnsupportedStateError: From the resolver, for a salary-linked row
             whose profile is in a state the tax law does not list (plan step
             salary:X-at-3).
     """
-    return {row.id: contribution_of(row, basis) for row in rows}
+    return {
+        cell_key(item): contribution_of(parent_of(item), basis)
+        for item in items
+    }
 
 
-def contribution_of(txn, basis: AmountBasis) -> Decimal:
-    """Value one row against *basis*, resolving it only if it needs resolving.
+def contribution_of(parent: PlanParent, basis: AmountBasis) -> Decimal:
+    """Value one parent against *basis*, resolving it only if it must.
 
-    The per-row body of :func:`contributions_by_id`, split out so the gate and
-    the resolve are one expression rather than a comprehension with a
-    conditional in it.
+    The per-parent body of :func:`contributions_by_key`, and the ONE
+    valuation of a plan row or a transfer (ruling **plan#1983**): what the
+    parent is worth WITHOUT a producer -- ``0`` for one that does not
+    contribute, the figure it RECORDED once it has settled
+    (:func:`~app.services.row_valuation.fixed_contribution`) -- else its
+    resolved amount (:func:`~._amount_source.resolve_amount`).
 
-    Args:
-        txn: The row being valued.
-        basis: The basis :func:`contributions_by_id` built over its whole set.
-
-    Returns:
-        What the row contributes.
-    """
-    fixed = fixed_contribution(txn)
-    if fixed is not None:
-        return fixed
-    return resolve_transaction_amount(txn, basis)
-
-
-def leg_contributions_by_key(
-    legs, basis: AmountBasis,
-) -> dict[tuple[int, int], Decimal]:
-    """Return ``{leg.cell_key: what the leg contributes}`` for transfer legs.
-
-    :func:`contributions_by_id`'s twin for a display reader's transfer legs
-    (leaf ``X-bi-6-1b``), keyed by
-    :attr:`~app.services.transfer_legs.TransferLeg.cell_key` so the one
-    ``contributions`` map the dashboard's bills and the calendar's day cells
-    index holds rows and legs side by side.  One :func:`leg_contribution_of`
-    per leg, exactly as its sibling is one :func:`contribution_of` per row;
-    every key in *legs* appears, so a caller indexes it with ``[]``.
+    That ordering is the point rather than an optimisation: an excluded row is
+    worth ``$0.00`` and its derived amount has no producer to answer it, so a
+    valuation that resolved first and gated afterwards would 500 on a row
+    nobody is counting.  A transfer leg is valued as its transfer, so both
+    legs of one transfer read one figure; ``leg_contribution_of`` restated
+    these two steps over a leg's parent (leaf ``X-bi-6-1b``) until that
+    ruling, and ``planned_leg_contribution`` restated the second alone for
+    the cash fold's legs, which are never settled (plan step **X-bi-6a**).
 
     Args:
-        legs: The :class:`~app.services.transfer_legs.TransferLeg` values a
-            surface is about to render, records loaded, their parents loaded
-            with :func:`~app.utils.amount_relationships.transfer_pricing_load_options`.
+        parent: The plan row or transfer being valued
+            (:func:`~app.services.transfer_legs.parent_of` of a leg).
         basis: The read pass's :class:`~._amount_source.AmountBasis`.
 
     Returns:
-        ``{(transfer_id, account_id): Decimal}`` covering every leg.
+        What the parent contributes, as a magnitude.
 
     Raises:
-        AmountUnresolvable: From the resolver, for a parent whose rule cannot
+        AmountUnresolvable: From the resolver, when the parent's rule cannot
             answer.  A refusal is never a fallback.
     """
-    return {leg.cell_key: leg_contribution_of(leg, basis) for leg in legs}
-
-
-def leg_contribution_of(leg: TransferLeg, basis: AmountBasis) -> Decimal:
-    """Value one leg against *basis*, resolving its parent only if it must.
-
-    :func:`contribution_of`'s twin over a transfer leg (leaf ``X-bi-6-1b``),
-    the same two steps in the same order: what the leg is worth WITHOUT a
-    producer -- ``0`` for a parent that does not contribute, the figure its
-    transfer stores once it has settled
-    (:func:`~app.services.row_valuation.fixed_contribution` of its parent) --
-    else the
-    parent's resolved amount through :func:`planned_leg_contribution`, the
-    ONE plan-half producer the cash fold prices a leg with.  A settled
-    display leg therefore reads its transfer's stored figure, where the
-    fold's legs are never settled; on a still-planned leg the two answers
-    are one call.
-
-    Args:
-        leg: The :class:`~app.services.transfer_legs.TransferLeg`.
-        basis: The read pass's :class:`~._amount_source.AmountBasis`.
-
-    Returns:
-        What the leg contributes to the account it is on, as a magnitude;
-        ``leg.is_income`` says which way it moves the account.
-    """
-    fixed = fixed_contribution(parent_of(leg))
+    fixed = fixed_contribution(parent)
     if fixed is not None:
         return fixed
-    return planned_leg_contribution(leg, basis)
-
-
-def planned_leg_contribution(
-    leg: TransferLeg, basis: AmountBasis,
-) -> Decimal:
-    """Return what one leg of a still-projected transfer is worth to its account.
-
-    The plan-half valuation of a transfer (plan step **X-bi-6a**, ruling
-    **R-BAL13**), and the ONE spelling of it: the cash fold's reduction
-    (:func:`._flows.sum_projected`), the loan forward plan's PLANNED tier, the
-    amortization feed and both investment contribution feeds all price a leg
-    here.  It is the parent's resolved amount -- rule 1, rule 3 or rule 4 by
-    :func:`~._amount_source.resolve_transfer_amount` -- which is exactly what
-    amount rule 5 answered for the shadow row the leg replaced, with the
-    shadow taken out of the walk.
-
-    **It composes NOTHING, and the difference from :func:`contribution_of` is
-    the whole design.**  A transaction's worth composes its amount with a
-    settlement record, an excluded status and an envelope's purchases; a leg
-    has none of those.  It is a PLAN by construction -- the loader admits only
-    live still-Projected parents -- so there is no record to prefer, and a
-    transfer carries no purchases, so there is no reservation to hold back.
-    What a SETTLED transfer moved is the one figure it stores
-    (:attr:`~app.models.transfer.Transfer.settled_figure`): the cash fold
-    books it per side on that side's dated record
-    (:func:`._cash_leg.movement_cash_leg`), and a display leg reads it
-    through :func:`~app.services.row_valuation.fixed_contribution` of its
-    parent -- never here.
-
-    Args:
-        leg: The :class:`~app.services.transfer_legs.TransferLeg`.
-        basis: The read pass's :class:`~._amount_source.AmountBasis`; only a
-            derive-mode loan payment's parent reads it.
-
-    Returns:
-        The parent transfer's resolved amount, as a magnitude; the leg's
-        ``is_income`` says which way it moves the account.
-
-    Raises:
-        AmountUnresolvable: When the parent's own rule cannot answer.  A
-            refusal is never a fallback (see :mod:`._amount_source`).
-    """
-    return resolve_transfer_amount(leg.transfer, basis)
+    return resolve_amount(parent, basis)
 
 
 def _entry_checking_impact(entries, estimated_amount: Decimal) -> Decimal:
@@ -704,10 +642,14 @@ def _entry_aware_amount(txn, basis: AmountBasis) -> Decimal:
     two arms of this function cannot come to price one row two ways.
 
     Args:
-        txn: A Transaction object.  The ``entries`` relationship may
-            be eager-loaded (canonical producer), unloaded
-            (transitional caller; lazy-loads on demand), or absent
-            (test fake).
+        txn: The parent being valued (ruling **plan#1983**): a Transaction,
+            whose ``entries`` relationship may be eager-loaded (canonical
+            producer), unloaded (transitional caller; lazy-loads on demand),
+            or absent (test fake); or a still-projected transfer, the parent
+            of a cash-fold leg, which carries no ``purchases`` (a transfer is
+            never an envelope: ``TransferLeg.tracks_purchases`` is ``False``),
+            so the ``getattr`` default answers it and it is worth
+            :func:`contribution_of`, its resolved amount.
         basis: The account's :class:`~._amount_source.AmountBasis` -- the amount
             basis every arm prices through.  It carried the account's
             :class:`~._clearing.StatementCoverage` beside it until plan step

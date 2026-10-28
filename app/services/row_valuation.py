@@ -55,7 +55,7 @@ service to price a row.  What that package names now are loan TERM primitives
 ``recurring_transfer_query`` -- none of which names ``cash_ledger``, so the
 loan READING stack is free to import it, and plan step X-au-g-2c SPENT that
 freedom: ``loan_payment_service.get_payment_history`` prices its feed through
-``cash_ledger.contributions_by_id`` now, not through the accessor below.
+``cash_ledger.contributions_by_key`` now, not through the accessor below.
 
 **So this module's split is no longer FORCED, and saying so is the point of
 keeping the history.  What survives is the SEAM; its ADDRESS is now
@@ -258,7 +258,7 @@ def settled_amounts_by_key(
     transfer read the same figure.  ``settled_amounts_by_id`` and its leg
     twin ``leg_settled_amounts_by_key`` (leaf ``X-bi-6-1``) were the two
     halves of it until that ruling.  It is the sibling of
-    :func:`~app.services.cash_ledger.amounts_by_id`
+    :func:`~app.services.cash_ledger.amounts_by_key`
     rather than a second spelling of it: that map answers what a row's amount
     IS -- its plan -- and this one answers what its money DID.  A screen shows
     the second where there is one and the first otherwise, which is the same
@@ -444,7 +444,7 @@ def settled_contribution(parent: PlanParent) -> Decimal:
     it is a reason and not a list.**  Two readers were once not settled-only --
     ``loan_payment_service.get_payment_history`` (finding **N-266**(a)) and
     ``balance_at._plan._planned_from_shadows`` -- and plan step X-au-g-2c-1
-    routed both onto :func:`~app.services.cash_ledger.contributions_by_id`,
+    routed both onto :func:`~app.services.cash_ledger.contributions_by_key`,
     which is where a reader that may see a PROJECTED row still belongs.  The
     two drafts of that paragraph were wrong in opposite directions, one claiming
     every caller was settled-only while a survivor stood and the next still

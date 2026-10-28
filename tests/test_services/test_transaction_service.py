@@ -40,7 +40,7 @@ from app.services import posting_service, status_seam, transaction_service
 from app.services.transaction_service import _settle
 from app.services.row_valuation import settled_contribution, settled_figure
 from app.services.cash_ledger import (
-    amounts_by_id,
+    amounts_by_key,
     derived_amount_basis,
     resolve_transaction_amount,
 )
@@ -870,7 +870,7 @@ class TestASettleBooksTheFreshestFigure:
             # An adversarial review of this step found the docstring claiming
             # this and nothing grading it -- ``estimated_amount is None`` says
             # the column is empty, not that the derivation still answers.
-            assert amounts_by_id(
+            assert amounts_by_key(
                 [txn], derived_amount_basis(txn.account.user_id, txn.scenario_id),
             )[txn.id] == Decimal("4000.00")
 

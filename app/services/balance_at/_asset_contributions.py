@@ -37,7 +37,7 @@ from app.services import growth_engine
 from app.services.cash_ledger import (
     AmountBasis,
     ReconciledThrough,
-    planned_leg_contribution,
+    resolve_amount,
     transfer_pricing_load_options,
 )
 from app.services.account_projection import (
@@ -181,7 +181,7 @@ def _recorded_contributions(
     PROJECTED is read by
     :func:`~app.services.loan_loaders.projected_income_legs` and worth what
     the parent resolves to
-    (:func:`~app.services.cash_ledger.planned_leg_contribution`).  The settled
+    (:func:`~app.services.cash_ledger.resolve_amount`).  The settled
     half was the income-shadow row, read from ``budget.transactions``, from
     plan step balance:X-bi-6a until then.  Both file under their transfer's
     period, the one the fold lands them in.
@@ -236,7 +236,7 @@ def _recorded_contributions(
     ):
         totals[leg.pay_period_id] = (
             totals.get(leg.pay_period_id, _ZERO)
-            + planned_leg_contribution(leg, basis)
+            + resolve_amount(parent_of(leg), basis)
         )
     return totals
 

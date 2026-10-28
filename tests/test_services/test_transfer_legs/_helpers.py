@@ -14,7 +14,7 @@ from app.models.ref import Status
 from app.models.amount_ownership import AmountOwnership
 from app.models.transfer import Transfer
 from app.services.balance_at._cash_fold import assembled_fold, balances_at
-from app.services.cash_ledger import leg_amounts_by_key
+from app.services.cash_ledger import amounts_by_key
 from app.services.transfer_legs import grid_transfer_leg, transfer_side_leg
 from app.services.transfer_service import (
     TransferSpec,
@@ -69,7 +69,7 @@ def _shown(leg, basis):
     return {
         "account_id": leg.account_id,
         "is_income": leg.is_income,
-        "amount": leg_amounts_by_key([leg], basis)[leg.cell_key],
+        "amount": amounts_by_key([leg], basis)[leg.cell_key],
         "status_id": leg.status_id,
         "status": leg.status,
         "pay_period_id": leg.pay_period_id,

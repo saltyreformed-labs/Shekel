@@ -43,7 +43,7 @@ is the only place it runs.
 none can be stored: ``ck_transactions_names_no_transfer`` refused one (ruling
 **R-BAL258**) until plan step balance:X-bi-6-5 dropped the column a shadow
 named its transfer by.  So a case that priced a shadow asks the TRANSFER, or
-prices its legs through ``leg_amounts_by_key`` -- each leg worth
+prices its legs through ``amounts_by_key`` -- each leg worth
 ``resolve_transfer_amount`` on its parent (**R-BAL13**), which is what rule 5
 answered for the shadow -- with its figures unchanged (ruling **R-BAL167**
 class 1).  Rule 5 itself -- a twin's dispatch to its parent and its refusal of
@@ -76,12 +76,11 @@ from app.services.cash_ledger import (
     DefinitionRow,
     derived_amount_basis,
     amount_rule,
-    amounts_by_id,
-    contributions_by_id,
+    amounts_by_key,
+    contribution_of,
+    contributions_by_key,
     definition_cash,
     is_loan_payment_definition,
-    leg_amounts_by_key,
-    leg_contribution_of,
     resolve_transaction_amount,
     resolve_transfer_amount,
 )
@@ -123,6 +122,7 @@ from app.services.balance_at import BalanceContext
 from app.services.cash_flow_set import PlanItems
 from app.routes.grid._items import build_amount_maps
 from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 from app.services.transfer_service import _settle as transfer_settle
 
 
@@ -300,7 +300,7 @@ def _legs_of(xfer):
     which returned one of the two shadow ROWS and went with its last caller at
     plan step balance:X-bi-6-4d-2, where no shadow is born (ruling
     **R-BAL167** class 4): a leg is read off its transfer, and
-    ``leg_amounts_by_key`` prices it.
+    ``amounts_by_key`` prices it.
     """
     return [
         transfer_legs.leg_of(xfer, xfer.from_account_id),
@@ -457,7 +457,7 @@ def _declare_loan_payment_derived(xfer):
     prices every shadow income row on the loan account through
     ``row_valuation.settled_contribution``, which REFUSES a row whose plan is
     derived.  Plan step **X-au-g-2c-1** routed that reader through
-    ``cash_ledger.contributions_by_id``, closing finding **N-266**(a) and making
+    ``cash_ledger.contributions_by_key``, closing finding **N-266**(a) and making
     the scope a CHOICE; **X-au-g-2c-2** then made it not a choice either, by
     declaring every transfer shadow derived on live rows.  A fixture that
     declared one leg would now be building a pair the application cannot
@@ -927,7 +927,7 @@ class TestWhatEachRuleAnswers:
         **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_transfer_shadow_answers_its_parents_RULE_not_either_column``;
         ruling **R-BAL167** class 1).  No shadow is born, so the expense side
-        is its LEG, priced by ``leg_amounts_by_key``; the shadow's empty column
+        is its LEG, priced by ``amounts_by_key``; the shadow's empty column
         went with the shadow, and the parent's empty column stands.
         """
         savings = create_savings_account(
@@ -938,7 +938,7 @@ class TestWhatEachRuleAnswers:
         )
         expense_leg, _income_leg = _legs_of(xfer)
         assert xfer.amount is None
-        assert leg_amounts_by_key([expense_leg], _basis_for(seed_user)) == {
+        assert amounts_by_key([expense_leg], _basis_for(seed_user)) == {
             expense_leg.cell_key: _OLD_PRICE,
         }
 
@@ -955,7 +955,7 @@ class TestWhatEachRuleAnswers:
         **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_both_shadows_of_one_transfer_answer_the_same_figure``; ruling
         **R-BAL167** class 1).  The two legs are read off one transfer and
-        priced by ``leg_amounts_by_key``, one ``resolve_transfer_amount`` on
+        priced by ``amounts_by_key``, one ``resolve_transfer_amount`` on
         that transfer each, so they cannot answer two figures: what is
         asserted is that BOTH sides are priced, each at the parent's rule.
         """
@@ -965,7 +965,7 @@ class TestWhatEachRuleAnswers:
         xfer, _ = _generated_transfer(
             seed_user, seed_periods[_PAYCHECK_UNDER_OLD_PRICE], savings,
         )
-        assert leg_amounts_by_key(_legs_of(xfer), _basis_for(seed_user)) == {
+        assert amounts_by_key(_legs_of(xfer), _basis_for(seed_user)) == {
             (xfer.id, seed_user["account"].id): _OLD_PRICE,
             (xfer.id, savings.id): _OLD_PRICE,
         }
@@ -982,7 +982,7 @@ class TestWhatEachRuleAnswers:
         **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_shadow_of_an_adhoc_transfer_answers_the_parents_own_figure``;
         ruling **R-BAL167** class 1): the expense side is its leg, priced by
-        ``leg_amounts_by_key``, where the expense shadow was declared derived
+        ``amounts_by_key``, where the expense shadow was declared derived
         and resolved.
         """
         savings = create_savings_account(
@@ -994,7 +994,7 @@ class TestWhatEachRuleAnswers:
         )
         expense_leg, _income_leg = _legs_of(xfer)
         assert xfer.amount_source_id is None
-        assert leg_amounts_by_key([expense_leg], _basis_for(seed_user)) == {
+        assert amounts_by_key([expense_leg], _basis_for(seed_user)) == {
             expense_leg.cell_key: Decimal("75.00"),
         }
 
@@ -1575,9 +1575,9 @@ class TestTheBatchTier:
 
         **The map is the GRID's merged budgets map since plan step
         balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1).  The loan
-        payment's two shadow rows sat in ``amounts_by_id`` beside the
+        payment's two shadow rows sat in ``amounts_by_key`` beside the
         paychecks; no shadow is born, and a screen holds a transfer's LEGS in
-        the same map by ``leg.cell_key`` (``leg_amounts_by_key``, since plan
+        the same map by ``leg.cell_key`` (``amounts_by_key``, since plan
         step ``balance:X-bi-6-1``).  The case asks the GRID's merge,
         ``build_amount_maps``, rather than restating it here.  It is not the
         only spelling: the dashboard pulse builds the same rows-plus-legs map
@@ -1684,7 +1684,7 @@ class TestTheRulesDoNotReadTheColumnTheyReplace:
         **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_a_shadows_answer_ignores_both_its_own_column_and_its_parents``;
         ruling **R-BAL167** class 1).  The expense side is its LEG, priced by
-        ``leg_amounts_by_key``; the parent's rival ``$2,424.24`` and the
+        ``amounts_by_key``; the parent's rival ``$2,424.24`` and the
         re-price to ``$199.00`` stand, and the shadow's own rival
         ``$4,242.42`` went with the shadow, which has no column to hold it.
         """
@@ -1702,7 +1702,7 @@ class TestTheRulesDoNotReadTheColumnTheyReplace:
             # the act would release the declaration and the test would grade
             # an OWN row.
             write_past_the_amount_seam(xfer, Decimal("2424.24"))
-            assert leg_amounts_by_key([expense_leg], basis) == {
+            assert amounts_by_key([expense_leg], basis) == {
                 expense_leg.cell_key: _OLD_PRICE,
             }
             write_past_the_amount_seam(xfer, None)
@@ -1710,7 +1710,7 @@ class TestTheRulesDoNotReadTheColumnTheyReplace:
             template, Decimal("199.00"), effective_on=_PRICE_ROSE_ON,
         )
         db.session.flush()
-        assert leg_amounts_by_key([expense_leg], basis) == {
+        assert amounts_by_key([expense_leg], basis) == {
             expense_leg.cell_key: Decimal("199.00"),
         }
 
@@ -1794,7 +1794,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
 
         def _price():
             built["basis"] = derived_amount_basis(user_id, scenario_id)
-            return amounts_by_id([row], built["basis"])
+            return amounts_by_key([row], built["basis"])
 
         _answer, statements = capture_sql_statements(_price)
 
@@ -1845,7 +1845,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
         # DERIVED, not owning: an OWN paycheck is answered by rule 1 off its own
         # column and touches no projection at all, so the first ask would issue
         # no statement and this control would measure nothing (plan step
-        # X-au-d, where the map became ``amounts_by_id``).
+        # X-au-d, where the map became ``amounts_by_key``).
         first = _template_row(
             seed_periods[0], template,
         )
@@ -1857,10 +1857,10 @@ class TestTheBasisIsOneDerivationPerReadPass:
         _touch(first, second)
 
         _first, first_statements = capture_sql_statements(
-            lambda: amounts_by_id([first], basis),
+            lambda: amounts_by_key([first], basis),
         )
         _second, second_statements = capture_sql_statements(
-            lambda: amounts_by_id([second], basis),
+            lambda: amounts_by_key([second], basis),
         )
 
         assert first_statements, "the first ask must resolve the projection"
@@ -1897,7 +1897,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
         **Renamed and re-expressed at plan step balance:X-bi-6-4d-2** (it was
         ``test_the_loan_resolve_runs_ONCE_however_many_shadows_ask``; ruling
         **R-BAL167** class 1).  The two asks are the payment's two LEGS, each
-        priced by ``leg_amounts_by_key``, where they were its two shadow rows
+        priced by ``amounts_by_key``, where they were its two shadow rows
         priced by the resolver.  Both legs hold ONE transfer, so the second
         cannot re-read it.  What the empty second count can see is a
         STATEMENT: a loan resolved again, or any explicit query.  The
@@ -1913,10 +1913,10 @@ class TestTheBasisIsOneDerivationPerReadPass:
         first, second = _legs_of(xfer)
 
         _first, first_statements = capture_sql_statements(
-            lambda: leg_amounts_by_key([first], basis)[first.cell_key],
+            lambda: amounts_by_key([first], basis)[first.cell_key],
         )
         _second, second_statements = capture_sql_statements(
-            lambda: leg_amounts_by_key([second], basis)[second.cell_key],
+            lambda: amounts_by_key([second], basis)[second.cell_key],
         )
 
         assert first_statements, "the first ask must resolve the loan"
@@ -1946,12 +1946,12 @@ class TestTheBasisIsOneDerivationPerReadPass:
 
         The control is unchanged in kind and stronger in reach -- it now spans
         two packages rather than two callers of one method: what the screen
-        publishes (``leg_amounts_by_key``) and what a tick would book
+        publishes (``amounts_by_key``) and what a tick would book
         (``transfer_service.leg_settle_amount``) must be the same figure.
         Both are asked of the checking-side LEG since plan step
         ``balance:X-bi-6-4d-2``, which prices a leg off its transfer and its
         side's record and deleted ``settle_amount(shadow)``; they were asked
-        of the checking-side twin row until then (``amounts_by_id``,
+        of the checking-side twin row until then (``amounts_by_key``,
         ``settle_amount``), and the figure is unchanged (ruling R-BAL167
         class 1, plan step balance:X-bi-6-4d-2).
         """
@@ -1963,7 +1963,7 @@ class TestTheBasisIsOneDerivationPerReadPass:
         basis = _basis_for(seed_user)
         leg = transfer_legs.grid_transfer_leg(xfer, xfer.from_account_id)
 
-        displayed = leg_amounts_by_key([leg], basis)[leg.cell_key]
+        displayed = amounts_by_key([leg], basis)[leg.cell_key]
         booked = transfer_settle.leg_settle_amount(leg, basis)
 
         assert booked == displayed == Decimal("1499.10")
@@ -2019,8 +2019,8 @@ class TestABudgetIsNotAContribution:
         db.session.flush()
         basis = _basis_for(seed_user)
 
-        assert amounts_by_id([txn], basis) == {txn.id: Decimal("400.00")}
-        assert contributions_by_id([txn], basis) == {txn.id: Decimal("0")}
+        assert amounts_by_key([txn], basis) == {txn.id: Decimal("400.00")}
+        assert contributions_by_key([txn], basis) == {txn.id: Decimal("0")}
 
     def test_an_entered_actual_does_not_move_the_budget(
         self, app, db, seed_user, seed_periods,
@@ -2052,7 +2052,7 @@ class TestABudgetIsNotAContribution:
 
         assert resolve_transaction_amount(txn, basis) == Decimal("60.00")
         assert settled_contribution(txn) == Decimal("81.40")
-        assert amounts_by_id([txn], basis) == {txn.id: Decimal("60.00")}
+        assert amounts_by_key([txn], basis) == {txn.id: Decimal("60.00")}
 
     def test_a_derived_rows_budget_is_ANSWERED_rather_than_refused(
         self, app, db, seed_user, seed_periods,
@@ -2092,7 +2092,7 @@ class TestABudgetIsNotAContribution:
         txn = _template_row(seed_periods[0], template)
 
         assert txn.estimated_amount is None
-        assert amounts_by_id(
+        assert amounts_by_key(
             [txn], _basis_for(seed_user),
         ) == {txn.id: _OLD_PRICE}
 
@@ -2130,7 +2130,7 @@ class TestThePinsAreTheContractNow:
     def test_the_batch_refuses_the_same_way(
         self, app, db, seed_user, seed_periods,
     ):
-        """``amounts_by_id`` inherits it: no row is priced past the pins.
+        """``amounts_by_key`` inherits it: no row is priced past the pins.
 
         The batch has no status gate above the resolve, so it is the surface a
         cross-scenario row reaches first on a page that loads every status.
@@ -2142,11 +2142,11 @@ class TestThePinsAreTheContractNow:
         )
 
         with pytest.raises(AmountUnresolvable, match="prices scenario"):
-            amounts_by_id([txn], foreign)
+            amounts_by_key([txn], foreign)
 
 
 class TestOneRowHasOneDisplayedFigure:
-    """Every surface shows a row's amount by ONE rule (``amounts_by_id``).
+    """Every surface shows a row's amount by ONE rule (``amounts_by_key``).
 
     An adversarial review found that rule written twice and differently: the
     grid merged the seam's live-override map over its resolved one, while every
@@ -2178,7 +2178,7 @@ class TestOneRowHasOneDisplayedFigure:
         )
         basis = _basis_for(seed_user)
 
-        displayed = amounts_by_id([paycheck], basis)[paycheck.id]
+        displayed = amounts_by_key([paycheck], basis)[paycheck.id]
 
         assert paycheck.estimated_amount is None
         assert displayed > Decimal("0")
@@ -2199,7 +2199,7 @@ class TestOneRowHasOneDisplayedFigure:
         )
         basis = _basis_for(seed_user)
 
-        assert amounts_by_id([paycheck], basis) == {
+        assert amounts_by_key([paycheck], basis) == {
             paycheck.id: Decimal(_NOT_AN_ANSWER),
         }
 
@@ -2211,7 +2211,7 @@ class TestOneRowHasOneDisplayedFigure:
         db.session.flush()
         basis = _basis_for(seed_user)
 
-        assert amounts_by_id([txn], basis) == {txn.id: Decimal("1200.00")}
+        assert amounts_by_key([txn], basis) == {txn.id: Decimal("1200.00")}
 
 
 class TestPricingReadsNoSTATUS:
@@ -2283,7 +2283,7 @@ class TestPricingReadsNoSTATUS:
         **Asked of the TRANSFER and its checking-side LEG since plan step
         balance:X-bi-6-4d-2** (ruling **R-BAL167** class 1): the status is the
         transfer's, its price is ``resolve_transfer_amount``'s and the leg's
-        contribution is ``leg_contribution_of``'s, where all three were the
+        contribution is ``contribution_of``'s, where all three were the
         checking-side shadow's.  No door moves a transfer to Credit -- the
         state machine's transfer workflow has no Credit edge -- so, as on the
         shadow, the status is written directly; the database holds it, since
@@ -2301,7 +2301,7 @@ class TestPricingReadsNoSTATUS:
         expense_leg, _income_leg = _legs_of(xfer)
 
         assert resolve_transfer_amount(xfer, basis) == Decimal("1499.10")
-        assert leg_contribution_of(expense_leg, basis) == Decimal("0")
+        assert contribution_of(parent_of(expense_leg), basis) == Decimal("0")
 
 
 #: Every producer that answers "what day is it" without being told.  Matched by

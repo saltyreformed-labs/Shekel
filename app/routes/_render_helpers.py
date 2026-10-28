@@ -29,8 +29,7 @@ from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services.cash_ledger import (
     derived_amount_basis,
-    amounts_by_id,
-    leg_amounts_by_key,
+    amounts_by_key,
     resolve_transfer_amount,
     settled_amounts_by_key,
 )
@@ -86,7 +85,7 @@ class RenderAmounts:
 
     Attributes:
         budgets: ``{transaction_id: what the row's amount IS}`` --
-            :func:`~app.services.cash_ledger.amounts_by_id`.
+            :func:`~app.services.cash_ledger.amounts_by_key`.
         settled: ``{transaction_id: what its money DID}``, ``None`` per row that
             has not settled --
             :func:`~app.services.cash_ledger.settled_amounts_by_key`, the SAME
@@ -119,7 +118,7 @@ def fragment_amounts(txn: Transaction) -> RenderAmounts:
     cell would render an empty string where a figure belongs.
 
     **It answers by the same rule the pages do** --
-    :func:`~app.services.cash_ledger.amounts_by_id`, the resolved amount
+    :func:`~app.services.cash_ledger.amounts_by_key`, the resolved amount
     superseded by a live recompute.  An adversarial review found that rule
     written twice and differently: the grid merged the seam's override map over
     its resolved one while every fragment published the resolved map ALONE under
@@ -165,7 +164,7 @@ def fragment_amounts(txn: Transaction) -> RenderAmounts:
     # and the cost is one derivation rather than one per row.
     basis = derived_amount_basis(txn.account.user_id, txn.scenario_id)
     return RenderAmounts(
-        budgets=amounts_by_id([txn], basis),
+        budgets=amounts_by_key([txn], basis),
         settled=settled_amounts_by_key([txn]),
         retained=retained_settle_amounts_by_id([txn]),
     )
@@ -224,7 +223,7 @@ def transfer_budgets(xfer: Transfer) -> "dict[int, Decimal]":
     resolves nothing until a rule asks it -- and only a DERIVE-mode loan
     payment reaches the loan.  The one batch surface -- the grid, which since leaf ``X-bi-6-1``
     draws a transfer's LEGS off the parent -- prices them through
-    :func:`~app.services.cash_ledger.leg_amounts_by_key` with the page's
+    :func:`~app.services.cash_ledger.amounts_by_key` with the page's
     own basis (``routes/grid/_items.build_amount_maps``), the same resolver
     this calls; every parent-transfer render site here is a one-row HTMX
     swap.
@@ -846,7 +845,7 @@ def leg_fragment_amounts(leg: TransferLeg) -> LegRenderAmounts:
     """
     xfer = leg.transfer
     return LegRenderAmounts(
-        budgets=leg_amounts_by_key(
+        budgets=amounts_by_key(
             [leg], derived_amount_basis(xfer.user_id, xfer.scenario_id),
         ),
         settled=settled_amounts_by_key([leg]),

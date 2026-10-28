@@ -250,24 +250,18 @@ def compute_pulse_section(
     # claimed this set "makes no query at all, every row being an expense": the
     # salary half indeed answers nothing, but the legs are priced off their
     # parents (a loan payment's through rule 4), so the LOAN half is asked
-    # and resolves its config map.  Each map is the row producer's answer
-    # merged with its leg twin's, keyed by ``cell_key`` -- an ``int`` and a
-    # tuple cannot collide, so one dict serves both shapes (leaf X-bi-6-1's
-    # shape, ``routes/grid/_items.build_amount_maps``).
-    contributions = {
-        **cash_ledger.contributions_by_id(unpaid.rows, balance_ctx.amounts()),
-        **cash_ledger.leg_contributions_by_key(
-            unpaid.legs, balance_ctx.amounts(),
-        ),
-    }
+    # and resolves its config map.  Each map is ONE call over every item,
+    # keyed by ``cell_key`` and valued by the item's parent (ruling
+    # plan#1983) -- an ``int`` and a tuple cannot collide, so one dict serves
+    # both shapes (``routes/grid/_items.build_amount_maps``).
+    contributions = cash_ledger.contributions_by_key(
+        unpaid.items, balance_ctx.amounts(),
+    )
     # The second question the same items must answer, off the SAME basis (plan
     # step X-au-c2b): what an envelope's BUDGET is, which ruling E-21 fixes on
     # the row's own amount unconditionally -- never the entered actual, never
     # status-dependent -- so a contribution cannot stand in for it.
-    budgets = {
-        **cash_ledger.amounts_by_id(unpaid.rows, balance_ctx.amounts()),
-        **cash_ledger.leg_amounts_by_key(unpaid.legs, balance_ctx.amounts()),
-    }
+    budgets = cash_ledger.amounts_by_key(unpaid.items, balance_ctx.amounts())
 
     due_soon = _due_soon(
         unpaid.items, contributions, budgets, current_period, balance_ctx.as_of,
@@ -446,7 +440,7 @@ def _anchor_is_stale(
     owned now share the pass's day.  ``BalanceContext.amounts()`` still reads
     ``date.today()`` for its loan half, which is finding **N-40** and plan step
     **X-i2**, and this region reaches it through
-    :func:`~app.services.cash_ledger.contributions_by_id`.  That read is
+    :func:`~app.services.cash_ledger.contributions_by_key`.  That read is
     disclosed on the memo rather than fixed here, because X-i2 MOVES MONEY.  It was a bare
     ``date.today()`` here -- one of three this region resolved for itself,
     beside the street's "Today" marker and the due-soon list's days-until-due
@@ -702,13 +696,13 @@ def _still_due(
             ``pay_period_id``.
         contributions: ``{cell_key: Decimal}`` over exactly those items,
             from the caller's one :func:`~app.services.cash_ledger
-            .contributions_by_id` call merged with its leg twin's, and
+            .contributions_by_key` call, and
             shared with :func:`_due_soon`.  Indexed with ``[]``: an item
             missing from it is a caller that priced a different set, and a
             default here would be a fabricated figure in a total.
         budgets: ``{cell_key: Decimal}`` over the same items, from the
-            caller's one :func:`~app.services.cash_ledger.amounts_by_id` call
-            merged the same way -- the E-21 base an entry-tracked row's
+            caller's one :func:`~app.services.cash_ledger.amounts_by_key`
+            call -- the E-21 base an entry-tracked row's
             remaining is computed against.  Indexed with ``[]`` for the
             reason the contributions are.
         current_period: The period containing today.
@@ -773,13 +767,13 @@ def _row_still_due(
             canonical load loads them), or a transfer's expense leg, which
             tracks no purchases and so contributes what it is worth.
         contribution: What this row contributes, from the caller's one
-            :func:`~app.services.cash_ledger.contributions_by_id` call --
+            :func:`~app.services.cash_ledger.contributions_by_key` call --
             the replacement for ``txn.effective_amount``, which could not
             answer for a row whose amount is DERIVED (plan step X-au-c2).
             Read only for a non-tracked row; an envelope answers on its
             E-21 budget base instead.
         budget: The row's resolved amount -- the E-21 base, from the caller's
-            one :func:`~app.services.cash_ledger.amounts_by_id` call.  Read
+            one :func:`~app.services.cash_ledger.amounts_by_key` call.  Read
             only for an entry-tracked row.  An ARGUMENT rather than a read of
             ``txn.estimated_amount`` since plan step X-au-c2b: a derived row
             stores no figure in that column.
@@ -870,7 +864,7 @@ def _due_soon(
             the still-due totals' concern, not the due-soon list's.
         contributions: ``{cell_key: Decimal}`` over exactly those items,
             from the caller's one :func:`~app.services.cash_ledger
-            .contributions_by_id` call merged with its leg twin's, and
+            .contributions_by_key` call, and
             shared with :func:`_still_due`, so a bill's amount cell and the
             still-due total it feeds price the item ONCE.
         budgets: ``{cell_key: Decimal}`` over the same items, shared the

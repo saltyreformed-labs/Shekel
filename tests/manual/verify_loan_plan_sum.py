@@ -103,9 +103,20 @@ Nothing it prints carries an id a door's own write assigned, for the reason
 ``verify_generation_pass.py`` states: PostgreSQL does not roll a sequence
 back, so an id-bearing dump reads as a difference between two runs of
 identical code.  The posting targets name rows the clone already holds (a
-pay period, a ledger account, a reference kind), which no run re-assigns.  Every door opens a nested transaction and
-``Session.rollback()`` afterwards discards the whole outer transaction with
-it, so the database is unchanged and no door sees another's writes.
+pay period, a ledger account, a reference kind), which no run re-assigns.
+
+**Each door runs alone, and a refused door ends nothing** (finding
+plan#1859).  Each opens a savepoint and ``Session.rollback()`` afterwards
+discards the whole outer transaction with it, on every path, so the database
+is unchanged and no door sees another's writes.  A door the app REFUSES (a
+:class:`~app.exceptions.ShekelError`) prints ``# DOOR n REFUSED`` with the
+refusal and the run goes on; the exit code is how many doors were refused,
+so 0 means every door graded.  Each door picks the row it writes by its own
+stated rule, never a pinned date or row id (only the two loans and the Van's
+definition are pinned, by ids stable on every production clone), so a
+same-day clone always holds a subject the door can take: DOOR 4 took the
+first Van row due after ``AS_OF`` whatever its status, which production had
+since settled and bank-matched, and the delete door refused it.
 
 **The clone must be STAMPED and it must be production's**: ``occurs_on`` is
 what answers an occurrence, and a clone whose loan rows carry NULL there reads
@@ -122,15 +133,17 @@ Usage::
 on ``sys.path``, not the working directory.
 """
 
+import sys
 from datetime import date, timedelta
 from decimal import Decimal
 
-from app import create_app
+from app import create_app, ref_cache
 from app.models.account import Account
 from app.models.pay_period import PayPeriod
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
-from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
+from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum, StatusEnum
+from app.exceptions import ShekelError
 from app.extensions import db
 from app.services import balance_at, template_amount_service, transfer_service
 from app.services.balance_at import BalanceContext
@@ -406,8 +419,6 @@ def _period_containing(day):
 
 def _adhoc_projected(account_id, period, amount, due):
     """Create a projected ad-hoc transfer of *amount* into *account_id*."""
-    from app import ref_cache  # pylint: disable=import-outside-toplevel
-    from app.enums import StatusEnum  # pylint: disable=import-outside-toplevel
     from app.models.amount_ownership import AmountOwnership  # pylint: disable=import-outside-toplevel
     from app.services.scenario_resolver import get_baseline_scenario  # pylint: disable=import-outside-toplevel
 
@@ -433,8 +444,307 @@ def _adhoc_projected(account_id, period, amount, due):
     )
 
 
+def _next_projected_van():
+    """Return the Van's next live PROJECTED installment due after ``AS_OF``.
+
+    DOORS 2 and 4 both take this subject.  It is chosen from the data rather
+    than pinned to a date or an id, so every same-day clone has one the doors
+    can take: the 2026-09-22 installment DOOR 2 was pinned to is Paid on the
+    2026-09-24 and 2026-09-25 clones, and DOOR 4's first-row-after-``AS_OF``
+    pick (finding plan#1859) took that same row, Paid and bank-matched on the
+    2026-10-28 clone, which the delete door refuses.
+    """
+    return (
+        db.session.query(Transfer)
+        .filter(
+            Transfer.transfer_template_id == VAN_TEMPLATE_ID,
+            Transfer.status_id == ref_cache.status_id(StatusEnum.PROJECTED),
+            Transfer.is_deleted.is_(False),
+            Transfer.due_date > AS_OF,
+        )
+        .order_by(Transfer.due_date)
+        .first()
+    )
+
+
+def _door_1():
+    """DOOR 1: a $500 every-paycheck sweep into the Mortgage (D47)."""
+    mortgage_payment = (
+        db.session.query(TransferTemplate)
+        .filter_by(to_account_id=MORTGAGE_ACCOUNT_ID, is_active=True)
+        .order_by(TransferTemplate.id)
+        .first()
+    )
+    sweep = TransferTemplate(
+        user_id=USER_ID,
+        from_account_id=mortgage_payment.from_account_id,
+        to_account_id=MORTGAGE_ACCOUNT_ID,
+        name="Sweep into the Mortgage (planted)",
+        default_amount=Decimal("500.00"),
+        is_active=True,
+    )
+    db.session.add(sweep)
+    db.session.flush()
+    # The id tie-break is ascending, so a sweep authored FIRST wins the
+    # old tier's pick; forced below the payment's id, the reachable order.
+    lowest_free = db.session.execute(
+        db.text("SELECT min(id) - 1 FROM budget.transfer_templates")
+    ).scalar()
+    db.session.execute(
+        db.text(
+            "UPDATE budget.transfer_templates SET id = :low WHERE id = :new"
+        ),
+        {"low": lowest_free, "new": sweep.id},
+    )
+    db.session.expire_all()
+    sweep = (
+        db.session.query(TransferTemplate)
+        .filter_by(name="Sweep into the Mortgage (planted)")
+        .one()
+    )
+    template_amount_service.set_amount(
+        sweep, Decimal("500.00"), effective_on=date(2026, 1, 1),
+    )
+    author_rule(
+        RecurrenceSpec(
+            user_id=USER_ID,
+            interval_n=1,
+            unit=RecurrenceUnitEnum.PERIOD,
+            placement=PeriodPlacementEnum.CONTAINING_DATE,
+            starts_on=AS_OF,
+            nominal_day=None,
+        ),
+        calendar_for(USER_ID),
+        sweep,
+    )
+    db.session.flush()
+    print(
+        f"# DOOR 1 planted sweep id below the payment's: "
+        f"{sweep.id} < {mortgage_payment.id}; starts_on="
+        f"{sweep.recurrence_rule.starts_on}"
+    )
+    ctx1 = BalanceContext.build(USER_ID, AS_OF)
+    _plan_lines("D1", _loan(MORTGAGE_ACCOUNT_ID), ctx1, months=12)
+
+
+def _door_2():
+    """DOOR 2: the reset door's hole (D46).
+
+    Read three days after the Van's next PROJECTED installment, whose period
+    has then started: the row ``reset_pay_periods`` wipes before it
+    repopulates (a reset refuses outright while any row is settled, so a
+    settled installment is never the shape).  Hard-deleted (rows CASCADE from
+    the period), so no tombstone answers it.
+    """
+    projected_id = ref_cache.status_id(StatusEnum.PROJECTED)
+    as_of_2 = _next_projected_van().due_date + timedelta(days=3)
+    started = (
+        db.session.query(PayPeriod.id)
+        .filter(PayPeriod.user_id == USER_ID, PayPeriod.start_date <= as_of_2)
+        .all()
+    )
+    started_ids = [row[0] for row in started]
+    wiped = (
+        db.session.query(Transfer)
+        .filter(
+            Transfer.transfer_template_id == VAN_TEMPLATE_ID,
+            Transfer.pay_period_id.in_(started_ids),
+            Transfer.status_id == projected_id,
+            Transfer.is_deleted.is_(False),
+            Transfer.due_date > AS_OF,
+            Transfer.due_date <= as_of_2,
+        )
+        .all()
+    )
+    print(
+        f"# DOOR 2 as_of={as_of_2}; wiping {len(wiped)} Van rows in "
+        "started periods: "
+        + ", ".join(sorted(str(row.occurs_on) for row in wiped))
+    )
+    # Each row goes alone: it took its two shadow rows first until plan
+    # step balance:X-bi-6-4d-2 deleted the shadows, and plan step
+    # balance:X-bi-6-5 dropped the column they named it by.
+    for row in wiped:
+        db.session.delete(row)
+    db.session.flush()
+    ctx2 = BalanceContext.build(USER_ID, as_of_2)
+    _plan_lines("D2", _loan(VAN_ACCOUNT_ID), ctx2, months=12)
+
+
+def _door_3():
+    """DOOR 3: an ad-hoc extra past the horizon (occurrence identity)."""
+    last = _last_saved_period()
+    extra_due = add_months(date(last.start_date.year, last.start_date.month, 10), 1)
+    print(f"# DOOR 3 last saved period starts {last.start_date}; extra due {extra_due}")
+    _adhoc_projected(VAN_ACCOUNT_ID, last, Decimal("2000.00"), extra_due)
+    db.session.flush()
+    ctx3 = BalanceContext.build(USER_ID, AS_OF)
+    _plan_lines("D3", _loan(VAN_ACCOUNT_ID), ctx3, months=12)
+
+
+def _door_4():
+    """DOOR 4: the Van's next projected installment soft-deleted (D53)."""
+    next_row = _next_projected_van()
+    print(f"# DOOR 4 soft-deleting the Van row due {next_row.due_date}")
+    transfer_service.delete_transfer(next_row.id, USER_ID, soft=True)
+    db.session.flush()
+    ctx4 = BalanceContext.build(USER_ID, AS_OF)
+    _plan_lines("D4", _loan(VAN_ACCOUNT_ID), ctx4, months=12)
+
+
+def _door_5():
+    """DOOR 5: a projected extra in a seeded month (D54)."""
+    settled = _confirmed_legs(VAN_ACCOUNT_ID)
+    latest = max(settled, key=lambda shadow: shadow.due_date)
+    # Five days after the settled installment, inside its own month, so
+    # the extra lands in the slot the seed charged.
+    extra_due = latest.due_date + (date(2026, 1, 6) - date(2026, 1, 1))
+    print(
+        f"# DOOR 5 latest settled Van installment due {latest.due_date}; "
+        f"extra due {extra_due}"
+    )
+    _adhoc_projected(
+        VAN_ACCOUNT_ID, _period_containing(extra_due), Decimal("300.00"),
+        extra_due,
+    )
+    db.session.flush()
+    ctx5 = BalanceContext.build(USER_ID, AS_OF)
+    _plan_lines("D5", _loan(VAN_ACCOUNT_ID), ctx5, months=12)
+
+
+def _door_6():
+    """DOOR 6: a DELINQUENT loan, two Van installments reverted.
+
+    Two installments skipped with their rows still PROJECTED behind a later
+    SETTLED payment (the shape recurrence:R16-c-1's adversarial review
+    measured its first cut moving, +$2.54: the plan's charges for the skipped
+    months must walk charge / catch-up / charge / catch-up behind the facts,
+    never both charges first).  The two settled Van installments before the
+    latest settled one are REVERTED to projected through the status door.
+    """
+    settled6 = sorted(
+        _confirmed_legs(VAN_ACCOUNT_ID), key=lambda shadow: shadow.due_date,
+    )
+    skipped = settled6[-3:-1]
+    print(
+        "# DOOR 6 reverting the Van installments due "
+        + ", ".join(str(shadow.due_date) for shadow in skipped)
+        + f" to projected behind the settled {settled6[-1].due_date}"
+    )
+    for shadow in skipped:
+        transfer_service.update_transfer(
+            shadow.transfer.id, USER_ID,
+            status_id=ref_cache.status_id(StatusEnum.PROJECTED),
+        )
+    db.session.flush()
+    ctx6 = BalanceContext.build(USER_ID, AS_OF)
+    _plan_lines("D6", _loan(VAN_ACCOUNT_ID), ctx6, months=12)
+
+
+def _door_7():
+    """DOOR 7: the same shape on the MORTGAGE, two catch-ups.
+
+    Its latest assertion (2026-05-22) leaves FOUR settled installments behind
+    the latest one, so TWO skipped months (07-01, 08-01) stand behind the
+    settled 09-01 -- the two-catch-up shape the Van cannot hold (its
+    2026-06-23 true-up leaves one installment before its latest settled).  One
+    catch-up was identical even under the first cut's clamp; two is where it
+    parted.
+    """
+    settled7 = sorted(
+        _confirmed_legs(MORTGAGE_ACCOUNT_ID),
+        key=lambda shadow: shadow.due_date,
+    )
+    skipped7 = settled7[-3:-1]
+    print(
+        "# DOOR 7 reverting the Mortgage installments due "
+        + ", ".join(str(shadow.due_date) for shadow in skipped7)
+        + f" to projected behind the settled {settled7[-1].due_date}"
+    )
+    for shadow in skipped7:
+        transfer_service.update_transfer(
+            shadow.transfer.id, USER_ID,
+            status_id=ref_cache.status_id(StatusEnum.PROJECTED),
+        )
+    db.session.flush()
+    ctx7 = BalanceContext.build(USER_ID, AS_OF)
+    _plan_lines("D7", _loan(MORTGAGE_ACCOUNT_ID), ctx7, months=12)
+
+
+def _door_8():
+    """DOOR 8: a SETTLED payment due OFF the contractual day (R-R108, R-R109).
+
+    The Van's latest settled payment is re-dated from its contractual 22nd to
+    the 10th of the next month through the transfer door: inside the same
+    installment's interval, so the charge it clears, its split and its settled
+    day are unchanged, and only what the loan page names it by can move.
+    """
+    latest8 = max(
+        _confirmed_legs(VAN_ACCOUNT_ID), key=lambda shadow: shadow.due_date,
+    )
+    off_day = add_months(
+        date(latest8.due_date.year, latest8.due_date.month, 10), 1,
+    )
+    print(
+        f"# DOOR 8 re-dating the settled Van installment due "
+        f"{latest8.due_date} to {off_day}"
+    )
+    transfer_service.update_transfer(
+        latest8.transfer.id, USER_ID, due_date=off_day,
+    )
+    db.session.flush()
+    ctx8 = BalanceContext.build(USER_ID, AS_OF)
+    _plan_lines("D8", _loan(VAN_ACCOUNT_ID), ctx8, months=12)
+
+
+#: The planted doors in run order, each run by :func:`_run_door`.
+DOORS = (
+    ("DOOR 1", _door_1),
+    ("DOOR 2", _door_2),
+    ("DOOR 3", _door_3),
+    ("DOOR 4", _door_4),
+    ("DOOR 5", _door_5),
+    ("DOOR 6", _door_6),
+    ("DOOR 7", _door_7),
+    ("DOOR 8", _door_8),
+)
+
+
+def _run_door(name, door):
+    """Run one door in a savepoint of its own, then discard everything it wrote.
+
+    A door the app REFUSES (any :class:`~app.exceptions.ShekelError`, the
+    service layer's refusals) is reported by name with its refusal, and the
+    run goes on to the next door.  Anything else is a defect in the harness or
+    the code under test and ends the run.  ``Session.rollback()`` discards the
+    outer transaction with the savepoint on every path, so no door sees
+    another's writes and the clone is unchanged.
+
+    Args:
+        name: The door's label, printed with a refusal.
+        door: The door's function.
+
+    Returns:
+        True when the app refused the door, else False.
+    """
+    db.session.begin_nested()
+    try:
+        door()
+    except ShekelError as exc:
+        print(f"# {name} REFUSED {type(exc).__name__}: {exc}")
+        return True
+    finally:
+        db.session.rollback()
+    return False
+
+
 def main():
-    """Print the baseline, the TODAY read and the eight doors."""
+    """Print the baseline, the TODAY read and the eight doors.
+
+    Returns:
+        How many doors the app refused, the run's exit code: 0 when every
+        door graded.
+    """
     app = create_app()
     with app.app_context():
         print(f"# as_of={AS_OF}")
@@ -449,254 +759,10 @@ def main():
         for account_id in (MORTGAGE_ACCOUNT_ID, VAN_ACCOUNT_ID):
             _plan_lines("TODAY", _loan(account_id), ctx_today)
 
-        # --- DOOR 1: a $500 every-paycheck sweep into the Mortgage (D47) ---
-        db.session.begin_nested()
-        mortgage_payment = (
-            db.session.query(TransferTemplate)
-            .filter_by(to_account_id=MORTGAGE_ACCOUNT_ID, is_active=True)
-            .order_by(TransferTemplate.id)
-            .first()
-        )
-        sweep = TransferTemplate(
-            user_id=USER_ID,
-            from_account_id=mortgage_payment.from_account_id,
-            to_account_id=MORTGAGE_ACCOUNT_ID,
-            name="Sweep into the Mortgage (planted)",
-            default_amount=Decimal("500.00"),
-            is_active=True,
-        )
-        db.session.add(sweep)
-        db.session.flush()
-        # The id tie-break is ascending, so a sweep authored FIRST wins the
-        # old tier's pick; forced below the payment's id, the reachable order.
-        lowest_free = db.session.execute(
-            db.text("SELECT min(id) - 1 FROM budget.transfer_templates")
-        ).scalar()
-        db.session.execute(
-            db.text(
-                "UPDATE budget.transfer_templates SET id = :low WHERE id = :new"
-            ),
-            {"low": lowest_free, "new": sweep.id},
-        )
-        db.session.expire_all()
-        sweep = (
-            db.session.query(TransferTemplate)
-            .filter_by(name="Sweep into the Mortgage (planted)")
-            .one()
-        )
-        template_amount_service.set_amount(
-            sweep, Decimal("500.00"), effective_on=date(2026, 1, 1),
-        )
-        author_rule(
-            RecurrenceSpec(
-                user_id=USER_ID,
-                interval_n=1,
-                unit=RecurrenceUnitEnum.PERIOD,
-                placement=PeriodPlacementEnum.CONTAINING_DATE,
-                starts_on=AS_OF,
-                nominal_day=None,
-            ),
-            calendar_for(USER_ID),
-            sweep,
-        )
-        db.session.flush()
-        print(
-            f"# DOOR 1 planted sweep id below the payment's: "
-            f"{sweep.id} < {mortgage_payment.id}; starts_on="
-            f"{sweep.recurrence_rule.starts_on}"
-        )
-        ctx1 = BalanceContext.build(USER_ID, AS_OF)
-        _plan_lines("D1", _loan(MORTGAGE_ACCOUNT_ID), ctx1, months=12)
-        db.session.rollback()
-
-        # --- DOOR 2: the reset door's hole (D46) ---------------------------
-        # Read three days after the Van's next PROJECTED installment, whose
-        # period has then started: the row ``reset_pay_periods`` wipes before
-        # it repopulates (a reset refuses outright while any row is settled,
-        # so a settled installment is never the shape).  Hard-deleted (rows
-        # CASCADE from the period), so no tombstone answers it.  Chosen from
-        # the data rather than pinned to a date: the 2026-09-22 installment it
-        # was pinned to is Paid on the 2026-09-24 and 2026-09-25 clones.
-        db.session.begin_nested()
-        from app import ref_cache  # pylint: disable=import-outside-toplevel
-        from app.enums import StatusEnum  # pylint: disable=import-outside-toplevel
-        projected_id = ref_cache.status_id(StatusEnum.PROJECTED)
-        next_projected = (
-            db.session.query(Transfer)
-            .filter(
-                Transfer.transfer_template_id == VAN_TEMPLATE_ID,
-                Transfer.status_id == projected_id,
-                Transfer.is_deleted.is_(False),
-                Transfer.due_date > AS_OF,
-            )
-            .order_by(Transfer.due_date)
-            .first()
-        )
-        as_of_2 = next_projected.due_date + timedelta(days=3)
-        started = (
-            db.session.query(PayPeriod.id)
-            .filter(PayPeriod.user_id == USER_ID, PayPeriod.start_date <= as_of_2)
-            .all()
-        )
-        started_ids = [row[0] for row in started]
-        wiped = (
-            db.session.query(Transfer)
-            .filter(
-                Transfer.transfer_template_id == VAN_TEMPLATE_ID,
-                Transfer.pay_period_id.in_(started_ids),
-                Transfer.status_id == projected_id,
-                Transfer.is_deleted.is_(False),
-                Transfer.due_date > AS_OF,
-                Transfer.due_date <= as_of_2,
-            )
-            .all()
-        )
-        print(
-            f"# DOOR 2 as_of={as_of_2}; wiping {len(wiped)} Van rows in "
-            "started periods: "
-            + ", ".join(sorted(str(row.occurs_on) for row in wiped))
-        )
-        # Each row goes alone: it took its two shadow rows first until plan
-        # step balance:X-bi-6-4d-2 deleted the shadows, and plan step
-        # balance:X-bi-6-5 dropped the column they named it by.
-        for row in wiped:
-            db.session.delete(row)
-        db.session.flush()
-        ctx2 = BalanceContext.build(USER_ID, as_of_2)
-        _plan_lines("D2", _loan(VAN_ACCOUNT_ID), ctx2, months=12)
-        db.session.rollback()
-
-        # --- DOOR 3: an ad-hoc extra past the horizon (occurrence identity)
-        db.session.begin_nested()
-        last = _last_saved_period()
-        extra_due = add_months(date(last.start_date.year, last.start_date.month, 10), 1)
-        print(f"# DOOR 3 last saved period starts {last.start_date}; extra due {extra_due}")
-        _adhoc_projected(VAN_ACCOUNT_ID, last, Decimal("2000.00"), extra_due)
-        db.session.flush()
-        ctx3 = BalanceContext.build(USER_ID, AS_OF)
-        _plan_lines("D3", _loan(VAN_ACCOUNT_ID), ctx3, months=12)
-        db.session.rollback()
-
-        # --- DOOR 4: the next projected installment soft-deleted (D53) ------
-        db.session.begin_nested()
-        next_row = (
-            db.session.query(Transfer)
-            .filter(
-                Transfer.transfer_template_id == VAN_TEMPLATE_ID,
-                Transfer.due_date > AS_OF,
-            )
-            .order_by(Transfer.due_date)
-            .first()
-        )
-        print(f"# DOOR 4 soft-deleting the Van row due {next_row.due_date}")
-        transfer_service.delete_transfer(next_row.id, USER_ID, soft=True)
-        db.session.flush()
-        ctx4 = BalanceContext.build(USER_ID, AS_OF)
-        _plan_lines("D4", _loan(VAN_ACCOUNT_ID), ctx4, months=12)
-        db.session.rollback()
-
-        # --- DOOR 5: a projected extra in a seeded month (D54) -------------
-        db.session.begin_nested()
-        settled = _confirmed_legs(VAN_ACCOUNT_ID)
-        latest = max(settled, key=lambda shadow: shadow.due_date)
-        # Five days after the settled installment, inside its own month, so
-        # the extra lands in the slot the seed charged.
-        extra_due = latest.due_date + (date(2026, 1, 6) - date(2026, 1, 1))
-        print(
-            f"# DOOR 5 latest settled Van installment due {latest.due_date}; "
-            f"extra due {extra_due}"
-        )
-        _adhoc_projected(
-            VAN_ACCOUNT_ID, _period_containing(extra_due), Decimal("300.00"),
-            extra_due,
-        )
-        db.session.flush()
-        ctx5 = BalanceContext.build(USER_ID, AS_OF)
-        _plan_lines("D5", _loan(VAN_ACCOUNT_ID), ctx5, months=12)
-        db.session.rollback()
-
-        # --- DOOR 6: a DELINQUENT loan -- two installments skipped with
-        # their rows still PROJECTED behind a later SETTLED payment (the shape
-        # recurrence:R16-c-1's adversarial review measured its first cut
-        # moving, +$2.54: the plan's charges for the skipped months must walk
-        # charge / catch-up / charge / catch-up behind the facts, never both
-        # charges first).  The two settled Van installments before the latest
-        # settled one are REVERTED to projected through the status door.
-        db.session.begin_nested()
-        settled6 = sorted(
-            _confirmed_legs(VAN_ACCOUNT_ID), key=lambda shadow: shadow.due_date,
-        )
-        skipped = settled6[-3:-1]
-        print(
-            "# DOOR 6 reverting the Van installments due "
-            + ", ".join(str(shadow.due_date) for shadow in skipped)
-            + f" to projected behind the settled {settled6[-1].due_date}"
-        )
-        for shadow in skipped:
-            transfer_service.update_transfer(
-                shadow.transfer.id, USER_ID,
-                status_id=ref_cache.status_id(StatusEnum.PROJECTED),
-            )
-        db.session.flush()
-        ctx6 = BalanceContext.build(USER_ID, AS_OF)
-        _plan_lines("D6", _loan(VAN_ACCOUNT_ID), ctx6, months=12)
-        db.session.rollback()
-
-        # --- DOOR 7: the same shape on the MORTGAGE, whose latest assertion
-        # (2026-05-22) leaves FOUR settled installments behind the latest one,
-        # so TWO skipped months (07-01, 08-01) stand behind the settled 09-01
-        # -- the two-catch-up shape the Van cannot hold (its 2026-06-23
-        # true-up leaves one installment before its latest settled).  One
-        # catch-up was identical even under the first cut's clamp; two is
-        # where it parted.
-        db.session.begin_nested()
-        settled7 = sorted(
-            _confirmed_legs(MORTGAGE_ACCOUNT_ID),
-            key=lambda shadow: shadow.due_date,
-        )
-        skipped7 = settled7[-3:-1]
-        print(
-            "# DOOR 7 reverting the Mortgage installments due "
-            + ", ".join(str(shadow.due_date) for shadow in skipped7)
-            + f" to projected behind the settled {settled7[-1].due_date}"
-        )
-        for shadow in skipped7:
-            transfer_service.update_transfer(
-                shadow.transfer.id, USER_ID,
-                status_id=ref_cache.status_id(StatusEnum.PROJECTED),
-            )
-        db.session.flush()
-        ctx7 = BalanceContext.build(USER_ID, AS_OF)
-        _plan_lines("D7", _loan(MORTGAGE_ACCOUNT_ID), ctx7, months=12)
-        db.session.rollback()
-
-        # --- DOOR 8: a SETTLED payment due OFF the contractual day (R-R108,
-        # R-R109).  The Van's latest settled payment is re-dated from its
-        # contractual 22nd to the 10th of the next month through the transfer
-        # door: inside the same installment's interval, so the charge it
-        # clears, its split and its settled day are unchanged, and only what
-        # the loan page names it by can move.
-        db.session.begin_nested()
-        latest8 = max(
-            _confirmed_legs(VAN_ACCOUNT_ID), key=lambda shadow: shadow.due_date,
-        )
-        off_day = add_months(
-            date(latest8.due_date.year, latest8.due_date.month, 10), 1,
-        )
-        print(
-            f"# DOOR 8 re-dating the settled Van installment due "
-            f"{latest8.due_date} to {off_day}"
-        )
-        transfer_service.update_transfer(
-            latest8.transfer.id, USER_ID, due_date=off_day,
-        )
-        db.session.flush()
-        ctx8 = BalanceContext.build(USER_ID, AS_OF)
-        _plan_lines("D8", _loan(VAN_ACCOUNT_ID), ctx8, months=12)
-        db.session.rollback()
-
-        print("# rolled back")
+        refused = [name for name, door in DOORS if _run_door(name, door)]
+        print(f"# rolled back; {len(refused)} door(s) refused: {', '.join(refused)}")
+    return len(refused)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,7 +1,7 @@
-"""What every ``quill`` command shares: its refusal and its exit status (:func:`exit_status`,
-which ``lane`` and the commit hook share too), its reads of the tracker, and how it names a
-card, on its command line (:func:`card_number`) and in what it prints (:func:`_label`).  What
-a command reads of git is :func:`_git.read`, once.
+"""What every ``quill`` command shares: its reads of the tracker, and how it names a card, on
+its command line (:func:`card_number`) and in what it prints (:func:`_label`).  What a command
+reads of git is :func:`_git.read`, once; how it ends, refused or failed, is :mod:`_exits`'s,
+which ``lane`` and the commit hook share too.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
 that module past the 1,000 lines ``too-many-lines`` allows (it has been ``quill.py``
@@ -13,39 +13,17 @@ from __future__ import annotations
 
 import argparse
 import re
-import sys
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Protocol
 
 from tools.ci.arcs import ARCS
-from tools.quill._github import described
+from tools.quill._exits import Refused
 from tools.quill._state import filing_unfinished, missing
 from tools.quill._tracker import BareCard, Card, Tracker, TrackerError
 from tools.quill.setup_tracker import IN_ORDER, TASK
 
 _CARD_REF = re.compile(r"(?:plan#|#)?([1-9][0-9]*)")
-
-
-class Refused(Exception):
-    """A command that will not run as asked; its message says why."""
-
-
-def exit_status(act: Callable[[], int], failures: tuple[type[Exception], ...]) -> int:
-    """The exit status of a door that runs ``act``, as each door's docstring states it: what
-    ``act`` returns; 1 when it is refused (:class:`Refused`), printed ``refused: <why>``; and 2
-    when it fails with one of ``failures``, printed ``failed: <the failure>`` on one line
-    (:func:`_github.described`); each printed on standard error.  The ONE spelling of those
-    two statuses: the ``quill`` command, ``lane`` and the commit hook each run their work
-    through it, each naming the failures its work can meet."""
-    try:
-        return act()
-    except Refused as refused:
-        print(f"refused: {refused}", file=sys.stderr)
-        return 1
-    except failures as error:
-        print(f"failed: {described(error)}", file=sys.stderr)
-        return 2
 
 
 def card_number(text: str) -> int:

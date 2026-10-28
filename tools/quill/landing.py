@@ -209,7 +209,8 @@ from tools.ci.arcs import REPO
 from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, tracking
 from tools.quill import _findings, _git, _production, _stamps, _tasks
 from tools.quill._command import with_closure
-from tools.quill._github import GitHub, GitHubError, described, reading
+from tools.quill._exits import described
+from tools.quill._github import GitHub, GitHubError, reading
 from tools.quill._state import filing_ended, filing_unfinished, names_no_task, no_work
 from tools.quill._tracker import BareCard, CardReader, TrackerError
 from tools.quill.setup_tracker import PLAN

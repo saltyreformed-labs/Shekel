@@ -162,9 +162,16 @@ repos:
       # `git commit --no-verify` does not skip, and commit-msg judges what the
       # editor leaves.  pre-commit passes the message file; always_run makes a
       # file it did not pass a failure (exit 2), never a skip.
+      # It runs the checkout's own interpreter, `.venv/bin/python`, never
+      # `python` off PATH, for the reason the pip tools below run theirs: a
+      # shell without the venv active would run the host's, and no stage gets
+      # past this hook (measured 2026-10-28: the host's python failed every
+      # commit, "No module named 'cryptography'"; plan#1990).  And the hook
+      # imports the standard library alone (its test runs it under
+      # `python -S`), so no installed package can fail a commit.
       - id: quill-task
         name: a commit on card/N names its task in progress (quill start)
-        entry: python -m tools.quill.commit_hook
+        entry: .venv/bin/python -m tools.quill.commit_hook
         language: system
         stages: [prepare-commit-msg, commit-msg]
         always_run: true

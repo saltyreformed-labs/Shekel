@@ -260,6 +260,6 @@ def test_the_hooks_code_is_the_module_pre_commits_entry_runs():
     config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
     hook = next(hook for repo in config["repos"] for hook in repo["hooks"]
                 if hook["id"] == "quill-task")
-    assert hook["entry"] == f"python -m {commit_hook.__name__}"
+    assert hook["entry"] == f".venv/bin/python -m {commit_hook.__name__}"
     assert _stamps.HOOK == "tools/quill/commit_hook.py"
     assert (REPO / _stamps.HOOK).is_file()

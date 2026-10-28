@@ -25,7 +25,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from tools.quill._command import Refused, _label, _one, _read
+from tools.quill._command import _label, _one, _read
+from tools.quill._exits import Refused
 from tools.quill._git import Claim
 from tools.quill._state import holder
 from tools.quill._tracker import Card, Comment, Tracker

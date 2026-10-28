@@ -133,15 +133,14 @@ from tools.quill import (
     _watch,
 )
 from tools.quill._command import (
-    Refused,
     _label,
     _one,
     _read,
     _unfinished,
     card_number,
-    exit_status,
     with_closure,
 )
+from tools.quill._exits import Refused, exit_status
 from tools.quill._export import cmd_export
 from tools.quill._filing import cmd_file
 from tools.quill._github import CredentialsError, GitHubError

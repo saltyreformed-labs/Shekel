@@ -82,6 +82,7 @@ from urllib.parse import quote
 import requests
 
 from tools.ci.arcs import ARCS
+from tools.quill._exits import described
 from tools.quill._github import (
     APP_DIR,
     CredentialsError,
@@ -90,7 +91,6 @@ from tools.quill._github import (
     app_credentials,
     app_installation,
     app_jwt,
-    described,
     installation_token,
     user_token,
 )

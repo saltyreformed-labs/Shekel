@@ -38,7 +38,8 @@ from pathlib import Path
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import DEV, GitError, git, tracking
 from tools.quill import _git
-from tools.quill._command import Refused, card_number, exit_status
+from tools.quill._command import card_number
+from tools.quill._exits import Refused, exit_status
 
 #: What every lane's worktree directory is named with, before the lane's name.
 PREFIX = "shekel-"
@@ -150,7 +151,7 @@ def _open(root: Path, name: str, card: int | None,
 
 def main(argv: list[str] | None = None, root: Path | None = None,
          launch: Callable[[Path, list[str], Path], None] = start) -> int:
-    """Start one lane; its exit status, should ``launch`` return (:func:`_command.exit_status`)."""
+    """Start one lane; its exit status, should ``launch`` return (:func:`_exits.exit_status`)."""
     args = parser().parse_args(argv)
     return exit_status(lambda: _open(root or REPO, args.name, args.card, launch),
                        (GitError, OSError))

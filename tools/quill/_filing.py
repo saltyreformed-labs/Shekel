@@ -21,7 +21,6 @@ from pathlib import Path
 
 from tools.quill import _findings, _git, _tasks
 from tools.quill._command import (
-    Refused,
     _label,
     _one,
     _outside_parent,
@@ -29,6 +28,7 @@ from tools.quill._command import (
     on_board,
     with_closure,
 )
+from tools.quill._exits import Refused
 from tools.quill._state import (
     OWNED,
     done_tasks,

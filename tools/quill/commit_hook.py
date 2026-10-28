@@ -34,10 +34,13 @@ The repository is the one git runs the hook in, from the top of its working tree
 the variables git exports to a hook (``GIT_DIR``, ``GIT_INDEX_FILE``) bind none of them; only
 refs and their commits are read (``HEAD``, ``MERGE_HEAD``, and ``dev``'s and ``main``'s
 remote-tracking branches, as fetched last), and the message, never the index being committed.
+Nothing it imports reads the tracker or needs an installed package: its refusal and exit
+status are :mod:`_exits`'s, not ``_command``'s, whose reads of the tracker load ``requests``
+and ``cryptography`` (plan#1990), and its test runs it under ``python -S``.
 
-Usage, as pre-commit runs it (its hook ``quill-task``)::
+Usage, as pre-commit runs it (its hook ``quill-task``, with the checkout's own interpreter)::
 
-    python -m tools.quill.commit_hook <message file>
+    .venv/bin/python -m tools.quill.commit_hook <message file>
 
 Exit status: 0 passed, stamped or left alone; 1 refused, the message left as it was; 2 git or
 the message file failed, or the command line names not one message file.
@@ -51,7 +54,7 @@ from pathlib import Path
 
 from tools.ci.gitcmd import GitError, git, run
 from tools.quill import _git
-from tools.quill._command import Refused, exit_status
+from tools.quill._exits import Refused, exit_status
 
 #: The line below which git drops a commit's message, the diff ``git commit -v`` shows there
 #: (``Do not modify or remove the line above``), after the comment string, of any length.
@@ -156,7 +159,7 @@ def stamp(root: Path, message: Path) -> None:
 
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     """Judge the commit whose message file the command line names, in ``root`` (the working
-    directory unless named); exit as the module says (:func:`_command.exit_status`)."""
+    directory unless named); exit as the module says (:func:`_exits.exit_status`)."""
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 1:
         print("usage: python -m tools.quill.commit_hook <message file> (pre-commit names the "

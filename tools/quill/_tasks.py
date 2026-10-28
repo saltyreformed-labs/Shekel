@@ -27,7 +27,8 @@ from pathlib import Path
 
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
-from tools.quill._command import Refused, _label, _one, on_board, with_cards
+from tools.quill._command import _label, _one, on_board, with_cards
+from tools.quill._exits import Refused
 from tools.quill._state import done_tasks, drop_takes, dropped, names_no_task
 from tools.quill._tracker import BareCard, Card, CardReader, Tracker
 from tools.quill.setup_tracker import TASK

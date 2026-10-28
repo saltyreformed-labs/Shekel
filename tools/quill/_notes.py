@@ -20,7 +20,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from tools.quill import _git
-from tools.quill._command import Refused, _label, _one, _read
+from tools.quill._command import _label, _one, _read
+from tools.quill._exits import Refused
 from tools.quill._state import done_tasks
 from tools.quill._tasks import in_progress
 from tools.quill._tracker import BareCard, Card, Comment, Tracker

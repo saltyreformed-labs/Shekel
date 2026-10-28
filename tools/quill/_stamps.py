@@ -19,10 +19,10 @@ it (:func:`_work`):
   which was made on no ``card/N``.  Where several such commits are, those no other grew from
   bound the claim, so a commit later rewriting the marker alone frees nothing made before it;
 - a commit whose tree does not hold the hook's code (:data:`HOOK`), which pre-commit's entry
-  runs from the working tree (``python -m tools.quill.commit_hook``), so no hook stamped it: a
-  branch claimed before the hook landed is held from the commits made once it takes the hook
-  in (the spec's item 12).  A tree holding the code is held whatever its pre-commit
-  configuration says, so a hook taken out of it fails closed.
+  runs from the working tree (``.venv/bin/python -m tools.quill.commit_hook``), so no hook
+  stamped it: a branch claimed before the hook landed is held from the commits made once it
+  takes the hook in (the spec's item 12).  A tree holding the code is held whatever its
+  pre-commit configuration says, so a hook taken out of it fails closed.
 
 The tracker is read only for a card a commit names that the reads before this one did not
 bring: none while each names a task under N, which the open-task arm reads.
@@ -36,8 +36,8 @@ from tools.quill import _git, commit_hook
 from tools.quill._state import names_no_task
 from tools.quill._tracker import BareCard, CardReader
 
-#: The hook's code as a tree holds it: the module pre-commit's entry runs (``python -m
-#: tools.quill.commit_hook``), at the path Python reads that name from in the working tree.
+#: The hook's code as a tree holds it: the module pre-commit's entry runs (``.venv/bin/python
+#: -m tools.quill.commit_hook``), at the path Python reads that name from in the working tree.
 HOOK = f"{commit_hook.__name__.replace('.', '/')}.py"
 
 

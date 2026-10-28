@@ -14,8 +14,9 @@ from pathlib import Path
 
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
-from tools.quill._command import Refused, _label, _one, _outside_parent, card_number
+from tools.quill._command import _label, _one, _outside_parent, card_number
 from tools.quill._comments import byline, unanswered
+from tools.quill._exits import Refused
 from tools.quill._notes import superseded
 from tools.quill._state import OWNED, done_tasks, filing_unfinished, holder, never_split, owner
 from tools.quill._tasks import in_progress

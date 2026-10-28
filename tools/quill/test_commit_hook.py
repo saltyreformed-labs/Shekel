@@ -3,10 +3,11 @@ the task in progress, refused while none is, and a merge, a detached ``HEAD`` an
 branch left alone.  Its rule over plain inputs (:func:`commit_hook.judge`); its reads over the
 ``code`` fixture's real git, a claim and its starts made by ``quill`` over the in-memory
 tracker; and ``git commit`` itself, run through pre-commit with this repository's own entry
-for the hook, at both message stages.
+for the hook, at both message stages, from a shell whose ``python`` is not the checkout's.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -17,7 +18,7 @@ from tools.ci.arcs import REPO
 from tools.ci.gitcmd import run as _git_run
 from tools.ci.scratch import run as _run
 from tools.quill import _git, commit_hook
-from tools.quill._command import Refused
+from tools.quill._exits import Refused
 from tools.quill._fake import run, two_tasks
 from tools.quill.commit_hook import judge
 
@@ -221,6 +222,23 @@ def test_the_hook_leaves_a_merge_a_detached_head_and_another_branch_alone(code, 
     assert _judged(code, tmp_path, named) == (0, named)
 
 
+def test_the_hook_stamps_a_commit_with_no_package_installed(code, tmp_path, monkeypatch):
+    """Run as pre-commit runs it, by an interpreter given no installed package (``-S``, so
+    neither ``requests`` nor ``cryptography`` can be imported), the hook stamps a commit as
+    it does in the venv: it imports the standard library and quill's git reads alone, so no
+    package can fail a commit, as a ``python`` lacking ``cryptography`` failed every commit
+    while the hook took its refusal from ``_command``, which loads ``_github`` (plan#1990)."""
+    tracker = _claimed_with_tasks(code)
+    assert run(tracker, code, "start", "plan#2") == 0
+    message = tmp_path / "MESSAGE"
+    message.write_text("work\n", encoding="utf-8")
+    monkeypatch.setenv("PYTHONPATH", str(REPO))
+    done = subprocess.run([sys.executable, "-S", "-m", commit_hook.__name__, str(message)],
+                          cwd=code, capture_output=True, text=True, check=False)
+    assert (done.returncode, done.stderr) == (0, "")
+    assert message.read_text(encoding="utf-8") == "work\n\nTask: plan#2\n"
+
+
 def test_the_hook_needs_one_message_file(code, capsys):
     """Run naming no file, or two, the hook fails (exit 2) and says how it is run: pre-commit
     always names the one file, so neither is skipped."""
@@ -238,9 +256,11 @@ def _through_pre_commit(code, tmp_path, monkeypatch):
     ``.pre-commit-config.yaml``'s top-level keys, its hook ``quill-task``, and a hook naming no
     stage that always fails, committed on the branch checked out; and the shim
     ``pre-commit install`` writes for each message stage, in a hooks directory of the test's.
-    The working directory's ``tools`` is put on the path the hook's ``python -m`` reads.  The
-    command running ``git`` with those hooks; ``git`` started through ``tools.ci.gitcmd``, bound
-    to ``code`` alone."""
+    ``code``'s own interpreter, ``.venv/bin/python``, runs this test's, as a lane's ``.venv``
+    links the main checkout's, while the ``python`` first on ``PATH`` fails every run, as the
+    host's did from a shell without the venv active (plan#1990).  The working directory's
+    ``tools`` is put on the path the hook's ``python -m`` reads.  The command running ``git``
+    with those hooks; ``git`` started through ``tools.ci.gitcmd``, bound to ``code`` alone."""
     config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
     hook = next(hook for repo in config["repos"] for hook in repo["hooks"]
                 if hook["id"] == "quill-task")
@@ -257,6 +277,14 @@ def _through_pre_commit(code, tmp_path, monkeypatch):
                         f'--config=.pre-commit-config.yaml --hook-type={stage} '
                         f'--hook-dir "$(dirname "$0")" -- "$@"\n', encoding="utf-8")
         shim.chmod(0o755)
+    own = code / ".venv" / "bin"
+    own.mkdir(parents=True)
+    host = tmp_path / "host"
+    host.mkdir()
+    for python, run_by in ((own, f'exec {sys.executable} "$@"'), (host, "exit 97")):
+        (python / "python").write_text(f"#!/bin/sh\n{run_by}\n", encoding="utf-8")
+        (python / "python").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{host}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("PYTHONPATH", str(REPO))
     monkeypatch.setenv("PRE_COMMIT_HOME", str(tmp_path / "pre-commit-home"))
     monkeypatch.delenv("SKIP", raising=False)

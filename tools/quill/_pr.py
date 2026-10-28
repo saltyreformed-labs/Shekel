@@ -28,7 +28,8 @@ from pathlib import Path
 
 from tools.ci.gitcmd import DEV
 from tools.quill import _git
-from tools.quill._command import Refused, _read
+from tools.quill._command import _read
+from tools.quill._exits import Refused
 from tools.quill._tracker import Tracker
 from tools.quill.setup_tracker import PLAN
 

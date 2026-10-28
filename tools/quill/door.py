@@ -56,6 +56,7 @@ Each name, and who reads it:
 from __future__ import annotations
 
 from tools.quill._command import with_closure
+from tools.quill._exits import described
 from tools.quill._fake import FakeTracker
 from tools.quill._git import (
     MARKERS,
@@ -66,7 +67,7 @@ from tools.quill._git import (
     markers_in,
     merged_tree,
 )
-from tools.quill._github import CredentialsError, GitHubError, described
+from tools.quill._github import CredentialsError, GitHubError
 from tools.quill._production import IgnoreFileError, changed
 from tools.quill._state import (
     OWNED,

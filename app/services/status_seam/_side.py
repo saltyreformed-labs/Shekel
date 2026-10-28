@@ -95,7 +95,10 @@ from app.services.status_seam._refusals import (
     reject_settlement_without_settled_status,
 )
 from app.services.transfer_legs import side_movements
-from app.utils.balance_predicates import settled_status_ids
+from app.utils.balance_predicates import (
+    settled_status_ids,
+    touches_settled_band,
+)
 
 if TYPE_CHECKING:  # pragma: no cover -- annotations only
     from app.services.transfer_legs import TransferLeg
@@ -183,7 +186,9 @@ def sync_side_records(
             "settlement record. A settle states what moved as well as when: "
             "pass settlement=Settlement(...)."
         )
-    if not was_settled and not now_settled:
+    # Neither end in the band: no record moves, so none is read (the writer
+    # asks the same predicate before it loads the sides' records).
+    if not touches_settled_band(transfer, new_status_id):
         return
     # As the act FOUND them: a side's record is read live, and the writes
     # below append one (a first settle) or take both out (a ``$0.00`` close).

@@ -49,6 +49,7 @@ from app.services.transfer_legs._leg import (
     PlanItem,
     TransferLeg,
     leg_of,
+    side_legs,
     side_movements,
     side_movements_key,
     transfer_side_leg,
@@ -675,28 +676,26 @@ def parent_entries(movement: TransactionEntry) -> list[TransactionEntry]:
 def transfer_sides(transfer: Transfer) -> "tuple[TransferLeg, TransferLeg]":
     """Return *transfer*'s ``(expense, income)`` legs, both sides' records loaded in ONE statement.
 
-    The transfer writer's view of the pair (ruling **plan#2136**): every act
-    that reads both sides' records -- the status applier's seam pass
-    (``transfer_service._status``, behind Mark Paid, a settle, a revert, a
-    cancel and statement match's accept) and the endpoint move
-    (``transfer_service._endpoints``) -- builds them here, so the two lists
-    load together (:func:`preload_side_records`) where each side's lazy read
-    was a query of its own.  A list the session already holds is left as it
-    is, so an act that runs after another in the same request reads what that
-    one wrote.
+    The transfer writer's view of the pair for an act that reads both sides'
+    records (ruling **plan#2136**): the status applier's seam pass on a move
+    that touches the settled band (``transfer_service._status``, behind Mark
+    Paid, a settle, a revert and statement match's accept; a cancel reads no
+    record and builds :func:`~._leg.side_legs`) and the endpoint move
+    (``transfer_service._endpoints``) build them here, so the two lists load
+    together (:func:`preload_side_records`) where each side's lazy read was a
+    query of its own.  A list the session already holds is left as it is, so
+    an act that runs after another in the same request reads what that one
+    wrote.
 
     Args:
         transfer: The parent transfer.
 
     Returns:
-        ``(expense leg, income leg)``, each built by
-        :func:`transfer_side_leg`.
+        ``(expense leg, income leg)``, as :func:`~._leg.side_legs` builds
+        them.
     """
     preload_side_records((transfer,))
-    return (
-        transfer_side_leg(transfer, is_income=False),
-        transfer_side_leg(transfer, is_income=True),
-    )
+    return side_legs(transfer)
 
 
 def grid_transfer_legs(

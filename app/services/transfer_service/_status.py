@@ -49,9 +49,10 @@ replaces.
 
 Flask-isolated like the parent service: plain data and ORM rows in, mutations
 applied in place, no ``request`` / ``session`` imports, no flush or commit of
-its own -- the caller owns the session boundary.  (Each writer reads both
-sides' records by a query, which may autoflush pending writes; the seam's
-Transfer arm moves the transfer's counter itself when a record or day moves.)
+its own -- the caller owns the session boundary.  (The applier reads both
+sides' records by one query when its move touches the settled band, which
+may autoflush pending writes; the seam's Transfer arm moves the transfer's
+counter itself when a record or day moves.)
 """
 
 from datetime import date
@@ -65,7 +66,7 @@ from app.services.match_press import Press
 from app.services.planned_rows_books import reject_revert_below_the_books
 from app.services.settle_day import recorded_settle_day
 from app.services.state_machine import verify_transition
-from app.services.transfer_legs import TransferLeg, transfer_sides
+from app.services.transfer_legs import TransferLeg, side_legs, transfer_sides
 from app.services.transfer_service._side_days import (
     NO_DAYS,
     PairDays,
@@ -75,6 +76,7 @@ from app.services.transfer_service._side_days import (
 from app.utils.balance_predicates import (
     delete_returns_to_plan,
     settled_status_ids,
+    touches_settled_band,
 )
 from app.utils.dates import display_today
 
@@ -328,8 +330,14 @@ def apply_status_to_all_three(
     reject_stated_days_without_settle(new_status_id, stated)
     # Both sides' records in ONE statement (ruling plan#2136), each read LIVE
     # off the transfer's list for its side (ruling plan#1984), so a record an
-    # earlier write of the same request appended is what this act reads.
-    legs = transfer_sides(transfer)
+    # earlier write of the same request appended is what this act reads --
+    # and only for a move that reads them: one with neither end in the band
+    # (a cancel) moves no record, and the arm returns before its first read.
+    legs = (
+        transfer_sides(transfer)
+        if touches_settled_band(transfer, new_status_id)
+        else side_legs(transfer)
+    )
     reject_stated_day_on_a_zero_close(legs, stated, settlement)
     # Each SIDE's day, resolved before either side is written; out of the
     # band the arm un-dates both, so nothing is resolved there.

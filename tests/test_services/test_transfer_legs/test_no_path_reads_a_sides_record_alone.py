@@ -24,7 +24,8 @@ pinned today's figure would break on unrelated work.
 **What makes each control fire is named in its docstring, and was measured**
 by deleting that pre-load or fill (or, for a path that reads no record,
 adding a read) at plan#2090's commit: the case then collects the sides the
-fixture puts in its path.
+fixture puts in its path.  The last class holds the ruling's other half: an
+act that reads no record fetches none (plan#2138).
 """
 
 from contextlib import contextmanager
@@ -625,3 +626,40 @@ class TestNoActReadsASideAlone:
             assert response.status_code == 200
             assert db.session.get(Transfer, paid.id).notes == "Moved to savings"
             assert alone == []
+
+
+class TestAMoveThatReadsNoRecordFetchesNone:
+    """Ruling plan#2136's other half: a records fetch runs only where something reads it."""
+
+    def test_a_cancel_loads_neither_sides_records(
+        self, app, seed_user, seed_periods_today,
+    ):
+        """Cancelling a planned transfer leaves both its sides' lists unloaded.
+
+        A cancel moves the transfer between two statuses outside the settled
+        band, so it moves and reads no record
+        (``balance_predicates.touches_settled_band``), and the status writer
+        builds the pair without its records (``transfer_legs.side_legs``)
+        where it loaded both lists for every move (plan#2138).  The act still
+        runs the seam's refusals; only the fetch is gone.
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            planned = create_transfer(
+                seed_user, db.session, checking, _a_savings_account(seed_user),
+                seed_periods_today[4], amount=Decimal("120.00"),
+            )
+            db.session.commit()
+            db.session.expire_all()
+            xfer = db.session.get(Transfer, planned.id)
+
+            transfer_service.update_transfer(
+                xfer.id, seed_user["user"].id,
+                status_id=ref_cache.status_id(StatusEnum.CANCELLED),
+            )
+
+            assert xfer.status_id == ref_cache.status_id(StatusEnum.CANCELLED)
+            assert {
+                side_movements_key(is_income=flag) for flag in (False, True)
+            } <= inspect(xfer).unloaded
+            db.session.rollback()

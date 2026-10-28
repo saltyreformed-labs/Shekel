@@ -9,7 +9,8 @@ LABEL (:func:`leg_label`), the one statement of a leg's IDENTITY beside a plan
 row's (:func:`cell_key`, :func:`key_order`, :func:`is_leg_key`, ruling
 **R-BAL87**), the one answer to which row PRICES an item (:func:`parent_of`,
 ruling **plan#1983**), and the one construction of a leg from its parent
-(:func:`transfer_side_leg`, and :func:`leg_of` from an account).
+(:func:`transfer_side_leg`, :func:`leg_of` from an account, and
+:func:`side_legs` for both sides).
 The package docstring carries the argument.  The functions these definitions
 name by bare name (:func:`planned_transfer_legs`,
 :func:`recorded_transfer_legs`, :func:`preload_side_records`,
@@ -577,9 +578,10 @@ def transfer_side_leg(transfer: Transfer, *, is_income: bool) -> TransferLeg:
     :func:`movement_parent` from a MOVEMENT whose link names its side
     (:func:`_leg_is_income`), and the transfer service from the side ITSELF
     (``_settle.record_leg_clearing`` since leaf ``X-bi-6-4d-1``, and the
-    status applier and the endpoint move through
-    :func:`~._records.transfer_sides`, which loads both sides' records first,
-    since ruling **plan#2136**).  Either way
+    status applier and the endpoint move through :func:`side_legs`, the
+    pair -- through :func:`~._records.transfer_sides`, which loads both
+    sides' records first, wherever the act reads them, since ruling
+    **plan#2136**).  Either way
     the account is the endpoint on that side, so
     ``ck_transfers_different_accounts`` keeps the pair ``(transfer,
     account)`` a leg's identity (:attr:`TransferLeg.cell_key`).
@@ -609,4 +611,27 @@ def transfer_side_leg(transfer: Transfer, *, is_income: bool) -> TransferLeg:
             transfer.to_account_id if is_income else transfer.from_account_id
         ),
         is_income=is_income,
+    )
+
+
+def side_legs(transfer: Transfer) -> tuple[TransferLeg, TransferLeg]:
+    """Return *transfer*'s ``(expense, income)`` legs, loading nothing.
+
+    The pair as values, each built by :func:`transfer_side_leg`: a leg reads
+    its record off its transfer's list for its side only when asked
+    (:attr:`TransferLeg.record`), so building the pair costs no query.
+    :func:`~._records.transfer_sides` is this pair with both lists loaded in
+    ONE statement, for an act that reads them; the status writer builds this
+    one for a move that reads none (ruling **plan#2136**,
+    ``transfer_service._status.apply_status_to_all_three``).
+
+    Args:
+        transfer: The parent transfer.
+
+    Returns:
+        ``(expense leg, income leg)``.
+    """
+    return (
+        transfer_side_leg(transfer, is_income=False),
+        transfer_side_leg(transfer, is_income=True),
     )

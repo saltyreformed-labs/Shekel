@@ -276,6 +276,35 @@ def enters_settled_band(row, new_status_id: int) -> bool:
     return row.status_id not in settled and new_status_id in settled
 
 
+def touches_settled_band(row, new_status_id: int) -> bool:
+    """Return whether moving *row* to *new_status_id* starts or ends in the settled band.
+
+    **The moves whose act keeps a payment record in step with the status**:
+    a settle, a revert, a correction and an identity re-submit in the band.
+    A move with neither end in the band -- the cancel of a Projected item,
+    the restore of a Cancelled one -- moves no record, so its act reads
+    none.  The transfer seam's arm returns before its first read on such a
+    move (``status_seam._side.sync_side_records``), and the transfer's status
+    writer loads the two sides' records only for a move this answers True
+    for (``transfer_service._status.apply_status_to_all_three``, ruling
+    **plan#2136**: a record is fetched only where something reads it), so
+    the two ask this one predicate rather than each spelling it.
+    Polymorphic over both status-bearing models for the reason
+    :func:`enters_settled_band` states.
+
+    Args:
+        row: The :class:`~app.models.transaction.Transaction` or
+            :class:`~app.models.transfer.Transfer`, read for its CURRENT
+            ``status_id``.
+        new_status_id: The status a door is asking for.
+
+    Returns:
+        True when *row*'s current status or *new_status_id* is settled.
+    """
+    settled = settled_status_ids()
+    return row.status_id in settled or new_status_id in settled
+
+
 def reverts_to_projected(row, new_status_id: int) -> bool:
     """Return whether moving *row* to *new_status_id* sets it BACK to Projected.
 

@@ -203,7 +203,8 @@ built from its parent -- :class:`TransferLeg`, its label
 (:func:`leg_label`), its identity (:func:`cell_key`, :func:`key_order`,
 :func:`is_leg_key`), its parent (:func:`parent_of`, the one answer to which
 row prices it, ruling **plan#1983**), its construction
-(:func:`transfer_side_leg`, :func:`leg_of`) and, since ruling **plan#1984**,
+(:func:`transfer_side_leg`, :func:`leg_of`, :func:`side_legs`) and, since
+ruling **plan#1984**,
 which of the transfer's lists holds a side's record
 (:func:`side_movements`), the list its :attr:`~TransferLeg.record` reads.
 :mod:`._records` holds the package's code that knows where a movement hangs
@@ -242,6 +243,7 @@ from app.services.transfer_legs._leg import (
     leg_label,
     leg_of,
     parent_of,
+    side_legs,
     side_movements,
     transfer_side_leg,
 )
@@ -284,6 +286,7 @@ __all__ = [
     "planned_transfer_legs",
     "preload_side_records",
     "recorded_transfer_legs",
+    "side_legs",
     "side_movements",
     "transfer_family_movements",
     "transfer_holds_a_movement",

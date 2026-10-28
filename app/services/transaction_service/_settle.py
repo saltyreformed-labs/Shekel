@@ -133,7 +133,7 @@ def retained_settle_amounts_by_id(rows) -> "dict[int, Decimal | None]":
     popover still had.
 
     ``None`` for every row where no such gap exists: a row already SETTLED
-    (:func:`app.services.row_valuation.settled_amounts_by_id` is that row's
+    (:func:`app.services.row_valuation.settled_amounts_by_key` is that row's
     map, and the screen shows the recorded figure already), a row that settles
     from its purchases (its entries are on screen and are the figure), and a row
     holding no ``corrected`` record (its plan IS what a settle would book).  So

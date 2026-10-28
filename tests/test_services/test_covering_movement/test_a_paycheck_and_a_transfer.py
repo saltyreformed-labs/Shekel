@@ -28,6 +28,7 @@ from app.services import (
     transfer_service,
 )
 from app.services.cash_ledger import settled_cash_facts
+from app.services.transfer_legs import parent_of
 from app.services.settle_day import SettleDay
 from tests._test_helpers import (
     create_loan_account,
@@ -563,7 +564,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
 
     A payment's income leg sits on the LOAN account and carries a covering
     movement there; every loan reader values the leg by its record
-    (``row_valuation.leg_settled_contribution``; from plan step
+    (``row_valuation.settled_contribution`` of its parent; from plan step
     ``balance:X-bi-4b-1`` the record was the leg's movement, ruling
     **R-BAL80**, which hangs off the transfer by its side link since
     ``balance:X-bi-6-4d-2``, not off the leg's shadow) -- and since that
@@ -620,7 +621,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
                     posted_loan_balance_at(loan.id, scenario_id, as_of),
                 )
 
-            assert row_valuation.leg_settled_contribution(income) == Decimal("1910.95")
+            assert row_valuation.settled_contribution(parent_of(income)) == Decimal("1910.95")
             with_movement = _read()
             # Deleted, THEN out of the list: the list no longer deletes (R-CC64;
             # rule-5 re-expression, developer-confirmed 2026-09-23).  The list
@@ -651,7 +652,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
             # and the posted ledger does not move: the loan side's entry
             # against transit, one of R-BAL45's two, keeps its postings.
             income = _leg_again(income)
-            assert row_valuation.leg_settled_contribution(income) == Decimal("0")
+            assert row_valuation.settled_contribution(parent_of(income)) == Decimal("0")
             without_movement = _read()
             assert without_movement[0] != with_movement[0]
             assert without_movement[1] == with_movement[1]

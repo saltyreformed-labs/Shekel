@@ -130,12 +130,11 @@ from decimal import Decimal
 # Pylint: ``unused-import`` -- the re-export IS the use; ``__init__`` names it.
 from app.services.row_valuation import (  # pylint: disable=unused-import
     fixed_contribution,
-    leg_fixed_contribution,
     settled_contribution,
 )
 from app.utils.balance_predicates import is_projected
 
-from app.services.transfer_legs import TransferLeg
+from app.services.transfer_legs import TransferLeg, parent_of
 
 from ._amount_source import (
     AmountBasis,
@@ -413,7 +412,8 @@ def leg_contribution_of(leg: TransferLeg, basis: AmountBasis) -> Decimal:
     the same two steps in the same order: what the leg is worth WITHOUT a
     producer -- ``0`` for a parent that does not contribute, the figure its
     transfer stores once it has settled
-    (:func:`~app.services.row_valuation.leg_fixed_contribution`) -- else the
+    (:func:`~app.services.row_valuation.fixed_contribution` of its parent) --
+    else the
     parent's resolved amount through :func:`planned_leg_contribution`, the
     ONE plan-half producer the cash fold prices a leg with.  A settled
     display leg therefore reads its transfer's stored figure, where the
@@ -428,7 +428,7 @@ def leg_contribution_of(leg: TransferLeg, basis: AmountBasis) -> Decimal:
         What the leg contributes to the account it is on, as a magnitude;
         ``leg.is_income`` says which way it moves the account.
     """
-    fixed = leg_fixed_contribution(leg)
+    fixed = fixed_contribution(parent_of(leg))
     if fixed is not None:
         return fixed
     return planned_leg_contribution(leg, basis)
@@ -458,8 +458,8 @@ def planned_leg_contribution(
     (:attr:`~app.models.transfer.Transfer.settled_figure`): the cash fold
     books it per side on that side's dated record
     (:func:`._cash_leg.movement_cash_leg`), and a display leg reads it
-    through :func:`~app.services.row_valuation.leg_fixed_contribution` --
-    never here.
+    through :func:`~app.services.row_valuation.fixed_contribution` of its
+    parent -- never here.
 
     Args:
         leg: The :class:`~app.services.transfer_legs.TransferLeg`.

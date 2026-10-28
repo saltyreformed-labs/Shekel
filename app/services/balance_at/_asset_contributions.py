@@ -53,7 +53,8 @@ from app.services.loan_loaders import (
     settled_income_legs,
 )
 from app.services.pay_calendar import DerivedPeriod, PeriodWindow
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 
 _ZERO = Decimal("0")
 
@@ -175,7 +176,8 @@ def _recorded_contributions(
     contribution that has SETTLED is read by
     :func:`~app.services.loan_loaders.settled_income_legs` and worth the
     figure its transfer stores
-    (:func:`~app.services.row_valuation.leg_settled_contribution`); one still
+    (:func:`~app.services.row_valuation.settled_contribution` of its
+    parent, ruling **plan#1983**); one still
     PROJECTED is read by
     :func:`~app.services.loan_loaders.projected_income_legs` and worth what
     the parent resolves to
@@ -225,7 +227,8 @@ def _recorded_contributions(
         account_id, basis.scenario_id, options=(),
     ):
         totals[leg.pay_period_id] = (
-            totals.get(leg.pay_period_id, _ZERO) + leg_settled_contribution(leg)
+            totals.get(leg.pay_period_id, _ZERO)
+            + settled_contribution(parent_of(leg))
         )
     for leg in projected_income_legs(
         account_id, basis.scenario_id,

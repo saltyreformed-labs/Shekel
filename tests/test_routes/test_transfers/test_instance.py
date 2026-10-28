@@ -24,7 +24,8 @@ from tests._test_helpers import (
     transfer_family_journal_filter,
     transfer_side_record,
 )
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 from tests._test_helpers import rendered_transfer_amount
 from tests._test_helpers import transfer_amount
 
@@ -723,7 +724,7 @@ class TestTransferInstance:
             db.session.refresh(xfer)
             for account_id in (xfer.from_account_id, xfer.to_account_id):
                 leg = transfer_legs.grid_transfer_leg(xfer, account_id)
-                assert leg_settled_contribution(leg) == Decimal("0")
+                assert settled_contribution(parent_of(leg)) == Decimal("0")
 
     def test_update_other_users_transfer(self, app, auth_client, seed_user):
         """PATCH /transfers/instance/<id> for another user's transfer returns 404.

@@ -259,8 +259,7 @@ def figure_for_status(
             (:func:`app.services.row_valuation.settled_figure`), which is what
             the box was prefilled from -- so equality here is exactly "the user
             did not touch the box".  For a transfer it is the figure the
-            transfer stores, read through its expense leg
-            (:func:`~app.services.row_valuation.leg_settled_figure`).
+            transfer stores, the same function asked of the transfer.
 
     Returns:
         *submitted* when the row is settling or staying settled; ``None`` when

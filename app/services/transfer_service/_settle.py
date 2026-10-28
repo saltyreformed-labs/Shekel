@@ -136,8 +136,9 @@ def _reject_unsettleable(transfer: Transfer) -> None:
 # is worth stating because it was load-bearing: it made the capture ONE-SHOT,
 # so a ``done -> done`` replay from a stale tab could not rewrite a recorded
 # figure with a later derivation.  What holds that now is
-# :func:`~app.services.row_valuation.leg_fixed_contribution`, asked FIRST inside
-# :func:`~app.services.cash_ledger.leg_contribution_of` -- a settled leg answers
+# :func:`~app.services.row_valuation.fixed_contribution` of the leg's parent,
+# asked FIRST inside :func:`~app.services.cash_ledger.leg_contribution_of` -- a
+# settled leg answers
 # from its transfer's settled figure and never reaches a producer -- plus
 # :func:`settle` running only on the way INTO the settled band.  Two
 # independent reasons

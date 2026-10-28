@@ -1563,7 +1563,7 @@ class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
     non-``None`` entry means "this row will book something other than what you
     can SEE", so a template draws a marker without deciding anything.  A settled
     row is already showing its recorded figure
-    (``row_valuation.settled_amounts_by_id``), so a marker there would tell the
+    (``row_valuation.settled_amounts_by_key``), so a marker there would tell the
     user a settled row is about to book something -- which it is not.
 
     **Measured 2026-08-17 by an adversarial mutation pass**: dropping the

@@ -79,7 +79,8 @@ class TransferRows:
     (``load_transfer_rows``) and the arms of ``_update``, ``_amount`` and
     ``_endpoints`` that wrote the mirrors over them.  What the value still
     carries beside the transfer is :attr:`expense_leg`, the read an act's
-    settle and figure grade share.
+    settle makes (the figure grade read it too until ruling **plan#1983**,
+    and reads the transfer's figure off the transfer now).
 
     Attributes:
         transfer: The :class:`~app.models.transfer.Transfer` the act writes.
@@ -91,10 +92,9 @@ class TransferRows:
     def expense_leg(self) -> TransferLeg:
         """Return the from-side LEG with its record; what the pair records is read through it.
 
-        The settle and the update read what a pair RECORDS through its
-        expense leg -- the retained correction a re-settle honours, the record
-        it carries forward, the figure an echoed Actual box is compared
-        against, each read off the leg's TRANSFER, the settled figure's one
+        The settle reads what a pair RECORDS through its expense leg -- the
+        retained correction a re-settle honours and the record it carries
+        forward, each read off the leg's TRANSFER, the settled figure's one
         home (plan step ``balance:X-bi-6-4d-2``) -- and since leaf
         ``balance:X-bi-6-4d-1`` they read it here, through
         :func:`app.services.transfer_legs.transfer_side_leg`, rather than off
@@ -104,8 +104,8 @@ class TransferRows:
         current account, because an endpoint move earlier in the same act
         leaves ``from_account_id`` stale until a flush (see the producer).
 
-        **Read ONCE per act and kept**, so the grade, the settle and the
-        correction of one update ask one query between them: a producer asked
+        **Read ONCE per act and kept**, so every read of one act asks one
+        query between them: a producer asked
         twice in one request is two resolution points, which can come to
         disagree about WHEN they resolved.
         That is correct because every reader asks BEFORE the act's seam pass,
@@ -118,12 +118,11 @@ class TransferRows:
         see the act's own write consistently (a first settle's new record is
         absent from the cached value; a kept one is the same object, re-dated
         in place), so none may be added there.  **Its ``account_id`` is
-        frozen at the read**, too, and an act may move an endpoint around
-        that read: when a figure is
-        graded the read precedes the move (``_update._grade_submitted_figure``
-        runs ahead of ``_endpoints._apply_endpoint_move``) and names the OLD
-        source after it; otherwise the first read is the settle's, after the
-        move has flushed, and names the NEW source.  Either way nothing may
+        frozen at the read**, too: the read is the settle's, after an act's
+        endpoint move has flushed, so it names the NEW source (the figure
+        grade, ``_update._grade_submitted_figure``, ran ahead of
+        ``_endpoints._apply_endpoint_move`` and read the OLD source until
+        ruling **plan#1983** moved it onto the transfer).  Nothing may
         read this leg's account: every
         reader reads through its ``transfer``, and one that needs the side's
         account reads the transfer's.

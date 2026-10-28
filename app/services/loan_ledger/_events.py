@@ -49,8 +49,8 @@ from datetime import date
 
 from app.services import loan_loaders
 from app.services.loan_loaders import LoanAnchorFact
-from app.services.row_valuation import leg_settled_contribution
-from app.services.transfer_legs import TransferLeg
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import TransferLeg, parent_of
 
 from ._charges import LoanCalendar
 from ._replay import (
@@ -190,8 +190,9 @@ def loan_event_stream(
             (:func:`~app.services.loan_loaders.settled_income_legs`; this
             parameter's name is the shadow era's).  Each leg's
             cash is read through
-            :func:`~app.services.row_valuation.leg_settled_contribution` -- the
-            accessor whose NAME asserts the payment has SETTLED -- rather than
+            :func:`~app.services.row_valuation.settled_contribution` of its
+            parent (ruling **plan#1983**) -- the accessor whose NAME asserts
+            the payment has SETTLED -- rather than
             a resolver, because every leg here has, so it answers from the
             figure its TRANSFER stores as having moved
             (``leg.transfer.settled_figure``) and there is no plan to reach;
@@ -219,7 +220,7 @@ def loan_event_stream(
             on_date=loan_loaders.loan_payment_due_date(
                 leg, calendar.payment_day,
             ),
-            cash=leg_settled_contribution(leg),
+            cash=settled_contribution(parent_of(leg)),
             source=leg,
             # The ONE clock, read once here: the settled day the posting
             # writer stamps the entry with, and the day the fold counts the

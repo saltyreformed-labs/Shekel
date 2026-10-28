@@ -25,12 +25,12 @@ from app.services.cash_ledger import (
     leg_amounts_by_key,
     leg_contribution_of,
     leg_contributions_by_key,
-    leg_settled_amounts_by_key,
+    settled_amounts_by_key,
 )
 from app.services.row_valuation import (
-    leg_fixed_contribution,
-    leg_settled_contribution,
-    leg_settled_figure,
+    fixed_contribution,
+    settled_contribution,
+    settled_figure,
 )
 from app.services.transaction_service import leg_retained_amounts_by_key
 from app.services.transfer_legs import (
@@ -39,6 +39,7 @@ from app.services.transfer_legs import (
     covering_movements_by_leg,
     grid_transfer_leg,
     grid_transfer_legs,
+    parent_of,
 )
 from app.services.transfer_service import (
     delete_transfer,
@@ -294,7 +295,7 @@ class TestTheLegMapProducers:
             assert leg_amounts_by_key(
                 [leg], basis_for(checking, seed_user["scenario"]),
             ) == {key: _AMOUNT}
-            assert leg_settled_amounts_by_key([leg]) == {key: None}
+            assert settled_amounts_by_key([leg]) == {key: None}
             assert leg_retained_amounts_by_key([leg]) == {key: None}
 
     def test_both_legs_of_a_settled_transfer_record_its_figure_beside_the_plan_and_retain_nothing(
@@ -302,8 +303,8 @@ class TestTheLegMapProducers:
     ):  # pylint: disable=unused-argument
         """The recorded figure is the transfer's, not the plan's, on both sides.
 
-        ``leg_settled_amounts_by_key`` reads each leg through
-        ``row_valuation.leg_settled_figure``, which reads
+        ``settled_amounts_by_key`` values each leg by its parent through
+        ``row_valuation.settled_figure``, which reads
         ``Transfer.settled_figure``.  Named
         ``test_a_settled_leg_records_its_movements_figure`` until plan step
         ``balance:X-bi-6-4d-2``'s 4d-4 half, when each side's record held the
@@ -323,7 +324,7 @@ class TestTheLegMapProducers:
                 grid_transfer_leg(settled, savings.id),
             ]
 
-            assert leg_settled_amounts_by_key(legs) == {
+            assert settled_amounts_by_key(legs) == {
                 (settled.id, checking.id): Decimal("240.00"),
                 (settled.id, savings.id): Decimal("240.00"),
             }
@@ -355,7 +356,7 @@ class TestTheLegMapProducers:
             closed, legs = _closed_at_zero(seed_user, db.session, seed_periods[2])
 
             assert [leg.record for leg in legs] == [None, None]
-            assert leg_settled_amounts_by_key(legs) == {
+            assert settled_amounts_by_key(legs) == {
                 (closed.id, closed.from_account_id): Decimal("0"),
                 (closed.id, closed.to_account_id): Decimal("0"),
             }
@@ -398,7 +399,7 @@ class TestTheLegMapProducers:
                 typed_leg.cell_key: Decimal("240.00"),
                 resolved_leg.cell_key: None,
             }
-            assert leg_settled_amounts_by_key([typed_leg, resolved_leg]) == {
+            assert settled_amounts_by_key([typed_leg, resolved_leg]) == {
                 typed_leg.cell_key: None, resolved_leg.cell_key: None,
             }
 
@@ -406,9 +407,10 @@ class TestTheLegMapProducers:
 class TestTheLegContributionTwins:
     """The per-leg valuation twins leaf X-bi-6-1b gave the display readers.
 
-    ``leg_settled_figure`` / ``leg_fixed_contribution`` / ``leg_settled_contribution``
-    beside ``settled_figure`` / ``fixed_contribution`` / ``settled_contribution``,
-    and ``leg_contribution_of`` / ``leg_contributions_by_key`` beside
+    ``settled_figure`` / ``fixed_contribution`` / ``settled_contribution``
+    asked of a leg's parent (ruling **plan#1983**; leaf X-bi-6-1b's leg twins
+    of them until then), and ``leg_contribution_of`` /
+    ``leg_contributions_by_key`` beside
     ``contribution_of`` / ``contributions_by_id``, over the four states a
     display leg can be in: planned, settled with a movement, settled with none
     (the $0.00 record), and excluded.
@@ -428,12 +430,12 @@ class TestTheLegContributionTwins:
             leg = grid_transfer_leg(transfer, checking.id)
             basis = basis_for(checking, seed_user["scenario"])
 
-            assert leg_settled_figure(leg) is None
-            assert leg_fixed_contribution(leg) is None
+            assert settled_figure(parent_of(leg)) is None
+            assert fixed_contribution(parent_of(leg)) is None
             assert leg_contribution_of(leg, basis) == _AMOUNT
             assert leg_contributions_by_key([leg], basis) == {leg.cell_key: _AMOUNT}
             with pytest.raises(AmountUnresolvable):
-                leg_settled_contribution(leg)
+                settled_contribution(parent_of(leg))
 
     def test_a_settled_from_side_leg_is_worth_the_transfers_figure_and_not_its_plan(
         self, app, db, seed_user, seed_periods,
@@ -457,9 +459,9 @@ class TestTheLegContributionTwins:
             leg = grid_transfer_leg(settled, checking.id)
             basis = basis_for(checking, seed_user["scenario"])
 
-            assert leg_settled_figure(leg) == Decimal("240.00")
-            assert leg_fixed_contribution(leg) == Decimal("240.00")
-            assert leg_settled_contribution(leg) == Decimal("240.00")
+            assert settled_figure(parent_of(leg)) == Decimal("240.00")
+            assert fixed_contribution(parent_of(leg)) == Decimal("240.00")
+            assert settled_contribution(parent_of(leg)) == Decimal("240.00")
             assert leg_contribution_of(leg, basis) == Decimal("240.00")
             assert leg_amounts_by_key([leg], basis) == {leg.cell_key: _AMOUNT}
 
@@ -478,8 +480,8 @@ class TestTheLegContributionTwins:
 
             assert [leg.record for leg in legs] == [None, None]
             for leg in legs:
-                assert leg_settled_figure(leg) == Decimal("0")
-                assert leg_settled_contribution(leg) == Decimal("0")
+                assert settled_figure(parent_of(leg)) == Decimal("0")
+                assert settled_contribution(parent_of(leg)) == Decimal("0")
                 assert leg_contribution_of(leg, basis) == Decimal("0")
 
     def test_an_excluded_leg_is_worth_zero_whatever_it_remembers(
@@ -495,9 +497,9 @@ class TestTheLegContributionTwins:
             db.session.commit()
             leg = grid_transfer_leg(cancelled, checking.id)
 
-            assert leg_settled_figure(leg) is None
-            assert leg_fixed_contribution(leg) == Decimal("0")
-            assert leg_settled_contribution(leg) == Decimal("0")
+            assert settled_figure(parent_of(leg)) is None
+            assert fixed_contribution(parent_of(leg)) == Decimal("0")
+            assert settled_contribution(parent_of(leg)) == Decimal("0")
             assert leg_contribution_of(
                 leg, basis_for(checking, seed_user["scenario"]),
             ) == Decimal("0")

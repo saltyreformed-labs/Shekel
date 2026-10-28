@@ -6,8 +6,10 @@ movement hangs: the :class:`TransferLeg` value every reader holds a transfer's
 side as (carrying the covering movement a loader hands it as its
 :attr:`~TransferLeg.record`), the one composition of a leg's LABEL
 (:func:`leg_label`), the one statement of a leg's IDENTITY beside a plan row's
-(:func:`cell_key`, :func:`key_order`, ruling **R-BAL87**), and the one
-construction of a leg from its parent (:func:`leg_of`, :func:`_leg_on_side`).
+(:func:`cell_key`, :func:`key_order`, :func:`is_leg_key`, ruling **R-BAL87**),
+the one answer to which row PRICES an item (:func:`parent_of`, ruling
+**plan#1983**), and the one construction of a leg from its parent
+(:func:`leg_of`, :func:`_leg_on_side`).
 The package docstring carries the argument.  The functions these definitions
 name by bare name (:func:`planned_transfer_legs`,
 :func:`recorded_transfer_legs`, :func:`covering_movements_by_leg`,
@@ -317,6 +319,54 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
 #: list of these since leaves ``X-bi-6-1`` and ``X-bi-6-1b``.
 PlanItem = Transaction | TransferLeg
 
+#: A plan item's PARENT: the row that stores its money facts once.  A plan row
+#: is its own parent; a transfer leg's is its transfer (:func:`parent_of`).
+#: Every pricing rule is a question about a parent (ruling **plan#1983**,
+#: "price the parent, draw the side"), so both legs of one transfer are
+#: valued by the one stored row and cannot show two figures.
+PlanParent = Transaction | Transfer
+
+
+def parent_of(item: PlanItem) -> PlanParent:
+    """Return the parent whose money facts price *item*.
+
+    **The ONE place a row and a leg are told apart for PRICING** (ruling
+    **plan#1983**), beside :func:`cell_key`, the one place they are told
+    apart for identity.  A page keys a map by the side and values it by the
+    parent, ``{cell_key(item): value(parent_of(item))}``: a leg is a
+    projection of its transfer that stores no money, and every one of its
+    pricing questions (the plan amount, the recorded figure, the retained
+    record) is a question about the transfer.  A plan row stores its own
+    money facts, so it is its own parent.
+
+    Args:
+        item: A row or a leg.
+
+    Returns:
+        *item* for a row, its :attr:`TransferLeg.transfer` for a leg.
+    """
+    if isinstance(item, TransferLeg):
+        return item.transfer
+    return item
+
+
+def is_leg_key(key) -> bool:
+    """Return ``True`` iff *key* is a transfer leg's :func:`cell_key`.
+
+    The ONE test of a key's shape (finding **BAL-552**): a leg's key is the
+    ``(transfer id, account id)`` pair and a row's its ``int`` id, so a reader
+    holding only a key -- :func:`key_order`, the reconcile panel's tick form
+    (``reconcile_service.TickForm.of``) -- asks this rather than spelling the
+    tuple test again.
+
+    Args:
+        key: A :func:`cell_key` value.
+
+    Returns:
+        ``True`` for a leg's pair, ``False`` for a row's id.
+    """
+    return isinstance(key, tuple)
+
 
 def cell_key(item: PlanItem):
     """Return the key a surface publishes *item*'s per-item facts under.
@@ -360,7 +410,7 @@ def key_order(key) -> tuple[int, int, int]:
     Returns:
         A three-int tuple that sorts as stated.
     """
-    if isinstance(key, tuple):
+    if is_leg_key(key):
         return (1, key[0], key[1])
     return (0, key, 0)
 

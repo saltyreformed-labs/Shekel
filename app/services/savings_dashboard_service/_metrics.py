@@ -28,11 +28,12 @@ from app.services import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCadence, PayCalendar, PeriodWindow
-from app.services.row_valuation import (
-    leg_settled_contribution,
-    settled_contribution,
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import (
+    expense_legs,
+    parent_of,
+    recorded_transfer_legs,
 )
-from app.services.transfer_legs import expense_legs, recorded_transfer_legs
 from app.services.savings_dashboard_service._types import (
     AccountProjection,
     _DashboardCoreData,
@@ -377,9 +378,12 @@ def _recent_settled_expenses_monthly(
         TransactionEntry.settled_on.isnot(None),
     ))
 
+    # Each row and each leg is worth what its PARENT recorded (ruling
+    # plan#1983): a leg's is its transfer's one stored figure.
     total_expenses = sum(
-        (settled_contribution(txn) for txn in recent_txns), Decimal("0.00"),
-    ) + sum((leg_settled_contribution(leg) for leg in legs), Decimal("0.00"))
+        (settled_contribution(parent_of(item)) for item in [*recent_txns, *legs]),
+        Decimal("0.00"),
+    )
 
     per_period = total_expenses / len(recent_periods)
     return pay_cadence.per_paycheck_to_monthly(per_period)

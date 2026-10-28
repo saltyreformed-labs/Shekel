@@ -165,9 +165,9 @@ class TestTheGridDrawsALegOffItsParent:
     ):
         """After a settle the leg's cell says Paid, shows what moved, offers no Mark Paid.
 
-        The figure is the transfer's (``leg_settled_amounts_by_key`` over
-        ``leg_settled_figure``, which reads ``Transfer.settled_figure``; the
-        leg's record holds none); the settle here
+        The figure is the transfer's (``settled_amounts_by_key`` values the
+        leg by its parent, ``Transfer.settled_figure``; the leg's record
+        holds none); the settle here
         typed a correction so the recorded figure DIFFERS from the plan and
         the cell's strike-through arm is exercised, not just its presence.
         """

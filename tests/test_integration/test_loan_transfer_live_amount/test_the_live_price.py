@@ -13,7 +13,8 @@ from app.services import loan_ledger, transfer_legs, transfer_recurrence
 from app.services.installment_calendar import monthly_due_date
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 from tests._test_helpers import find_loan_ledger_account, ledger_net
 
 from ._helpers import (
@@ -314,7 +315,7 @@ def test_live_cash_and_split_agree_on_a_mid_window_escrow_change(
 
         db.session.expire_all()
         settled = _side_leg(xfer_id, loan.id)
-        assert leg_settled_contribution(settled) == Decimal("1699.10")
+        assert settled_contribution(parent_of(settled)) == Decimal("1699.10")
 
         (split,) = loan_ledger.compute_loan_payment_splits(loan.id, scenario_id)
         assert split.due_date == date(2026, 3, 1)
@@ -326,7 +327,7 @@ def test_live_cash_and_split_agree_on_a_mid_window_escrow_change(
         assert split.excess == Decimal("0.00")
         assert (
             split.interest + split.escrow + split.principal + split.excess
-            == leg_settled_contribution(settled)
+            == settled_contribution(parent_of(settled))
         )
 
 
@@ -394,7 +395,7 @@ def test_an_off_day_payment_is_priced_on_its_intervals_installment(
 
         db.session.expire_all()
         settled = _side_leg(xfer_id, loan.id)
-        assert leg_settled_contribution(settled) == Decimal("1299.10")
+        assert settled_contribution(parent_of(settled)) == Decimal("1299.10")
 
         (split,) = loan_ledger.compute_loan_payment_splits(loan.id, scenario_id)
         assert split.due_date == date(2026, 3, 10)
@@ -405,7 +406,7 @@ def test_an_off_day_payment_is_priced_on_its_intervals_installment(
         assert split.excess == Decimal("0.00")
         assert (
             split.interest + split.escrow + split.principal + split.excess
-            == leg_settled_contribution(settled)
+            == settled_contribution(parent_of(settled))
         )
 
 
@@ -456,7 +457,7 @@ def test_an_early_extra_is_charged_nothing_in_the_posted_ledger(
 
         db.session.expire_all()
         settled = _side_leg(xfer_id, loan.id)
-        assert leg_settled_contribution(settled) == Decimal("1299.10")
+        assert settled_contribution(parent_of(settled)) == Decimal("1299.10")
 
         (split,) = loan_ledger.compute_loan_payment_splits(loan.id, scenario_id)
         assert split.due_date == date(2026, 2, 10)

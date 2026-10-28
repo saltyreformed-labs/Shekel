@@ -51,7 +51,7 @@ class LoanPaymentHistoryRow:
     table renders a Confirmed badge on each.
 
     ``cash`` is the payment's full cash (the settled payment leg's
-    :func:`~app.services.row_valuation.leg_settled_contribution`, read once by
+    parent's :func:`~app.services.row_valuation.settled_contribution`, read once by
     the walk's event); ``principal + interest + escrow`` equals it for an
     ordinary payment.  The one case they diverge is a payoff OVERPAYMENT, whose
     surplus is a lender refund (a receivable) rather than principal -- there
@@ -75,7 +75,7 @@ class LoanPaymentHistoryRow:
             from the pay period or the settled day, so a payment settled late
             still reports the installment it actually paid.
         cash: The full cash paid (the settled payment leg's
-            :func:`~app.services.row_valuation.leg_settled_contribution`),
+            parent's :func:`~app.services.row_valuation.settled_contribution`),
             cent-quantized.
         principal: The real debt paid down, cent-quantized; may be negative
             for an underpayment, and equals the payment's net on the loan's
@@ -155,7 +155,7 @@ def confirmed_loan_payment_history(
     row link now and the walk the ledger is reconciled from already holds
     every figure this table shows, so the walk is the table's one producer.
     ``cash`` is the outcome's (the settled payment leg's
-    :func:`~app.services.row_valuation.leg_settled_contribution`, read once by
+    parent's :func:`~app.services.row_valuation.settled_contribution`, read once by
     the walk's event); ``principal`` equals the payment's net on the loan's linked
     ledger by the split's construction; for an ordinary payment ``principal +
     interest + escrow == cash``; a payoff overpayment's surplus is a lender

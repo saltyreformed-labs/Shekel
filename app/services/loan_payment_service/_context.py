@@ -41,7 +41,8 @@ from app.services.loan_loaders import (
     load_escrow_lines,
     load_rate_history,
 )
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 from ._engine_prep import compute_contractual_pi, prepare_payments_for_engine
 
 
@@ -252,8 +253,9 @@ def get_payment_history(
 
     **Two valuations, one per half, and the split is the record/plan split
     itself.**  A settled leg is worth what moved, which
-    :func:`~app.services.row_valuation.leg_settled_contribution` answers from
-    the figure its transfer stores without reaching the amount model; a
+    :func:`~app.services.row_valuation.settled_contribution` of its parent
+    (ruling **plan#1983**) answers from the figure its transfer stores
+    without reaching the amount model; a
     projected leg is worth its
     parent's resolved amount,
     :func:`~app.services.cash_ledger.planned_leg_contribution`.  WHICH half an
@@ -274,7 +276,7 @@ def get_payment_history(
     **It is the JOIN of two producers since plan step balance:X-bl-2a, and owns
     neither** (finding **N-432**).  The rows, their order and their three dates
     are :func:`app.services.loan_ledger.payment_installments`; the figures are
-    :func:`~app.services.row_valuation.leg_settled_contribution` and
+    :func:`~app.services.row_valuation.settled_contribution` and
     :func:`~app.services.cash_ledger.planned_leg_contribution`, one per half.
     What is left here is the pairing.  Splitting it that way is what lets a
     consumer that needs only the chronology -- the schedule replay, which
@@ -460,7 +462,7 @@ def get_payment_history(
         PaymentRecord(
             dates=installment.dates,
             amount=(
-                leg_settled_contribution(installment.source)
+                settled_contribution(parent_of(installment.source))
                 if installment.dates.is_confirmed
                 else planned_leg_contribution(installment.source, basis)
             ),

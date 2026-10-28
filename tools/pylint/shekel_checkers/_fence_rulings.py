@@ -279,9 +279,11 @@ _FENCED_MODULE_RULINGS = {
         # ``settled_figure`` is what the row RECORDED as having moved -- a
         # stored fact, not a projection of one -- ``purchases_total`` is the
         # reduction an envelope's record defers to (it takes entries, not even a
-        # row), and ``settled_amounts_by_id`` is ``settled_figure`` mapped over
-        # a row set for a render, which is a LOOP over a non-producer and not a
-        # fold toward a balance: it dates nothing and sums nothing.  The batch
+        # row), and ``settled_amounts_by_key`` is ``settled_figure`` mapped over
+        # a render's rows and legs, each valued by its parent and keyed by
+        # ``cell_key`` (ruling plan#1983), which is a LOOP over a non-producer
+        # and not a fold toward a balance: it dates nothing and sums nothing.
+        # The batch
         # is the one to look at twice, and it is ``display_amounts_by_id``'s
         # sibling one tier up -- that map needs an ``AmountBasis`` because a
         # plan may be DERIVED, and this one needs none because a record is the
@@ -294,26 +296,17 @@ _FENCED_MODULE_RULINGS = {
         # record is the sum of its entries and a row with none is the $0.00
         # record (rulings R-BAL80, R-BAL82); the edit doors read the counting
         # pair now.  Dropped here for the reason the paragraph above gives.
-        # ``leg_settled_amounts_by_key`` (leaf X-bi-6-1, ruling R-BAL87) is
-        # the same loop over the grid's transfer LEGS: each answers from the
-        # leg's own covering movement and the parent's status, keyed by the
-        # leg's ``(transfer id, account id)``; it dates nothing and sums
-        # nothing.  Leaf X-bi-6-1b split its per-leg body out as
-        # ``leg_settled_figure`` (``settled_figure``'s twin: the parent's
-        # status decides, the record states the figure) and added
-        # ``leg_fixed_contribution`` / ``leg_settled_contribution``, the twins
-        # of ``fixed_contribution`` / ``settled_contribution`` arm for arm
-        # (plan step balance:X-bi-6-4b gave ``leg_settled_contribution`` one
-        # arm more, ruling R-BAL140: a leg whose own money moved under a parent
-        # still Projected answers its movement's figure) -- each answers about
-        # ONE LEG from its parent's columns and its own movement, and none
-        # folds, dates, sums or reads an anchor.
-        "leg_fixed_contribution",
-        "leg_settled_amounts_by_key",
-        "leg_settled_contribution",
-        "leg_settled_figure",
+        # Four LEG twins were ruled here on the same ground until ruling
+        # plan#1983 ("price the parent, draw the side") deleted them:
+        # ``leg_settled_figure``, ``leg_fixed_contribution``,
+        # ``leg_settled_contribution`` and ``leg_settled_amounts_by_key``, each
+        # the row form arm for arm over a leg's parent transfer.  The row forms
+        # take a PARENT now (a row or a transfer) and the batch is keyed by
+        # ``cell_key``, so a leg is valued by its transfer through the same
+        # names.  Dropped here, as was ``settled_amounts_by_id``, renamed to
+        # ``settled_amounts_by_key``, for the reason the paragraph above gives.
         "purchases_total",
-        "settled_amounts_by_id",
+        "settled_amounts_by_key",
         "settled_figure",
     })),
     # The cash LEDGER leaf (plan steps D1a + D1c).  Its ruling -- the largest

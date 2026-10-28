@@ -50,7 +50,7 @@ from app.services.transfer_service._ownership import (
     _get_owned_period,
 )
 from app.services.match_press import Press
-from app.services.row_valuation import leg_settled_figure
+from app.services.row_valuation import settled_figure
 from app.services.status_seam import (
     correction_record,
     figure_for_status,
@@ -139,10 +139,9 @@ def _grade_submitted_figure(
     on every settled transfer, which is the trap ruling **R-EG** removed for the
     settle day.  A figure the user CHANGED is a different thing and is refused.
 
-    The record is the transfer's one settled figure
-    (``leg_settled_figure``), read through the EXPENSE leg
-    (``rows.expense_leg``), the leg :func:`._settle.settle` resolves its
-    figures from; either leg would answer the same.
+    The record is the transfer's one settled figure, read off the transfer
+    itself (``row_valuation.settled_figure`` of the parent, ruling
+    **plan#1983**): both legs would answer it, so neither is asked.
 
     Args:
         rows: The transfer, at its pre-update status.
@@ -159,7 +158,7 @@ def _grade_submitted_figure(
         rows.transfer,
         updates.get("status_id", rows.transfer.status_id),
         updates["figure"],
-        leg_settled_figure(rows.expense_leg),
+        settled_figure(rows.transfer),
     )
     if figure is None:
         del updates["figure"]
@@ -306,17 +305,15 @@ def _apply_remaining_fields(
     # transfer's settled figure: a side's record holds no figure
     # (``ck_transaction_entries_side_record_states_no_figure``).
     new_status_id = updates.get("status_id", rows.transfer.status_id)
-    # Resolved through the EXPENSE leg, read once for the act
-    # (``rows.expense_leg``) as :func:`._settle.settle` reads it:
-    # ``leg_settled_figure`` answers the transfer's one settled figure, so
-    # either leg would answer the same and one is the choice.
+    # The transfer's one settled figure, read off the transfer itself
+    # (ruling plan#1983): both legs would answer it, so neither is asked.
     # A figure only ever reaches here as a CORRECTION -- a settling one is the
     # settle's (:data:`_SETTLE_OWNED_FIELDS`), and one on an unsettled pair was
     # refused before any field was written (:func:`_grade_submitted_figure`).
     submitted = updates.get("figure")
     correction = (
         None if submitted is None
-        else correction_record(leg_settled_figure(rows.expense_leg), submitted)
+        else correction_record(settled_figure(rows.transfer), submitted)
     )
     if "status_id" in updates or correction is not None or stated != NO_DAYS:
         apply_status_to_all_three(

@@ -31,9 +31,8 @@ from app.services.cash_ledger import (
     derived_amount_basis,
     amounts_by_id,
     leg_amounts_by_key,
-    leg_settled_amounts_by_key,
     resolve_transfer_amount,
-    settled_amounts_by_id,
+    settled_amounts_by_key,
 )
 from app.services.account_resolver import (
     resolve_owner_and_view,
@@ -90,7 +89,7 @@ class RenderAmounts:
             :func:`~app.services.cash_ledger.amounts_by_id`.
         settled: ``{transaction_id: what its money DID}``, ``None`` per row that
             has not settled --
-            :func:`~app.services.cash_ledger.settled_amounts_by_id`, the SAME
+            :func:`~app.services.cash_ledger.settled_amounts_by_key`, the SAME
             map the grid counts from.  It read a TOTAL twin
             (``recorded_amounts_by_id``) through ``X-bi-4a``, whose one
             difference was ``None`` for a settled row that RECORDED NOTHING --
@@ -167,7 +166,7 @@ def fragment_amounts(txn: Transaction) -> RenderAmounts:
     basis = derived_amount_basis(txn.account.user_id, txn.scenario_id)
     return RenderAmounts(
         budgets=amounts_by_id([txn], basis),
-        settled=settled_amounts_by_id([txn]),
+        settled=settled_amounts_by_key([txn]),
         retained=retained_settle_amounts_by_id([txn]),
     )
 
@@ -315,9 +314,9 @@ def transfer_settlement_amounts(
     or from a grid leg's cell, and that page's cell -- because a rule
     written at each is how one click shows a different figure from another.
 
-    **It asks the LEG producers, the same two the grid prices a leg's cell
-    by** (leaf ``X-bi-6-1``, ruling **R-BAL87**; rule 14):
-    :func:`~app.services.cash_ledger.leg_settled_amounts_by_key` and
+    **It asks the producers the grid prices a leg's cell by** (leaf
+    ``X-bi-6-1``, ruling **R-BAL87**; rule 14):
+    :func:`~app.services.cash_ledger.settled_amounts_by_key` and
     :func:`~app.services.transaction_service.leg_retained_amounts_by_key` over
     ONE leg built by :func:`~app.services.transfer_legs.leg_of`, so what
     this popover promises, what the cell beside it shows and what a tick
@@ -325,8 +324,9 @@ def transfer_settlement_amounts(
     the shadow pair and read the expense SHADOW's entries through the row
     producers -- a second walk over the same record that agreed with the
     cell's only while Transfer Invariant 3 held, which an adversarial review
-    named.  The settled producer reads the transfer's figure
-    (``row_valuation.leg_settled_figure``) and the retained one the seam's
+    named.  The settled producer reads the transfer's figure (a leg is
+    valued by its parent, ``row_valuation.settled_figure``, ruling
+    **plan#1983**) and the retained one the seam's
     own reads (``recorded_leg_settlement``, ``honoured_figure``): since plan
     step ``balance:X-bi-6-4d-2`` either leg reads the transfer's ONE settled
     figure.
@@ -369,7 +369,7 @@ def transfer_settlement_amounts(
         raise NotFoundError(f"Transfer {xfer.id} not found.")
     leg = leg_of(xfer, xfer.from_account_id)
     return TransferSettlementAmounts(
-        settled={xfer.id: leg_settled_amounts_by_key([leg])[leg.cell_key]},
+        settled={xfer.id: settled_amounts_by_key([leg])[leg.cell_key]},
         retained={xfer.id: leg_retained_amounts_by_key([leg])[leg.cell_key]},
     )
 
@@ -849,7 +849,7 @@ def leg_fragment_amounts(leg: TransferLeg) -> LegRenderAmounts:
         budgets=leg_amounts_by_key(
             [leg], derived_amount_basis(xfer.user_id, xfer.scenario_id),
         ),
-        settled=leg_settled_amounts_by_key([leg]),
+        settled=settled_amounts_by_key([leg]),
         retained=leg_retained_amounts_by_key([leg]),
     )
 

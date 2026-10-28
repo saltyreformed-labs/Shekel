@@ -84,12 +84,13 @@ from app.services.cash_ledger import (
     resolve_transfer_amount,
     settled_contribution,
 )
-from app.services.row_valuation import (
-    leg_settled_contribution,
-    leg_settled_figure,
-    settled_figure,
+from app.services.row_valuation import settled_figure
+from app.services.transfer_legs import (
+    PlanItem,
+    TransferLeg,
+    expense_legs,
+    parent_of,
 )
-from app.services.transfer_legs import PlanItem, TransferLeg, expense_legs
 from app.utils.amount_relationships import transfer_pricing_load_options
 from app.utils.balance_predicates import settled_status_ids
 from app.utils.dates import pay_period_range_label
@@ -363,11 +364,10 @@ def recorded_spend(item: PlanItem) -> Decimal:
 
     The spending readers' one question of a settled item (leaf
     ``balance:X-bi-6-1b``): :func:`~app.services.row_valuation
-    .settled_contribution` for a row, its twin
-    :func:`~app.services.row_valuation.leg_settled_contribution` for a leg
-    -- ``0`` for an excluded one, the recorded figure otherwise, and a
-    refusal for one that has not settled, which no reader here can hand it
-    (both loaders filter to the settled statuses in SQL).
+    .settled_contribution` of its parent (ruling **plan#1983**) -- ``0``
+    for an excluded one, the recorded figure otherwise, and a refusal for
+    one that has not settled, which no reader here can hand it (both
+    loaders filter to the settled statuses in SQL).
 
     Args:
         item: A row or a transfer leg from one of this module's loaders.
@@ -379,9 +379,7 @@ def recorded_spend(item: PlanItem) -> Decimal:
     Raises:
         AmountUnresolvable: The item has not settled.
     """
-    if isinstance(item, TransferLeg):
-        return leg_settled_contribution(item)
-    return settled_contribution(item)
+    return settled_contribution(parent_of(item))
 
 
 def planned_spend(item: PlanItem, basis: AmountBasis) -> Decimal:
@@ -412,9 +410,9 @@ def resolved_actual_amount(txn: PlanItem, basis: AmountBasis) -> Decimal:
     """Return the 'actual' amount for an estimate-vs-actual comparison.
 
     The Variance/surprises kernel's rule: a settled item is worth what it
-    RECORDED as having moved (:func:`~app.services.row_valuation.settled_figure`,
-    or its leg twin :func:`~app.services.row_valuation.leg_settled_figure`
-    for a transfer leg since leaf ``balance:X-bi-6-1b``), and an unsettled
+    RECORDED as having moved (:func:`~app.services.row_valuation.settled_figure`
+    of its parent, ruling **plan#1983**: a leg's is its transfer's), and an
+    unsettled
     one has recorded nothing, so it reads back its own PLAN
     (:func:`planned_spend`) and its individual variance is exactly zero.  A
     "surprise" is an item whose recorded figure differs from its plan.
@@ -478,10 +476,7 @@ def resolved_actual_amount(txn: PlanItem, basis: AmountBasis) -> Decimal:
             is not the derived-plan refusal this function used to carry, which
             plan step X-bu removed from here.
     """
-    recorded = (
-        leg_settled_figure(txn) if isinstance(txn, TransferLeg)
-        else settled_figure(txn)
-    )
+    recorded = settled_figure(parent_of(txn))
     if recorded is not None:
         return recorded
     return planned_spend(txn, basis)

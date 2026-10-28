@@ -46,8 +46,9 @@ covering movement as its record.  Flask-isolated, reads only, no commits.  No
 amount is read off a side's record for a payment that has settled: a record
 holds no figure since plan step balance:X-bi-6-4d-2, and a settled leg is
 worth the figure its transfer stores
-(:func:`app.services.row_valuation.leg_settled_figure`; the transfer
-paragraph at the end of ``CLAUDE.md``'s Architecture).
+(:func:`app.services.row_valuation.settled_figure` of its parent, ruling
+**plan#1983**; the transfer paragraph at the end of ``CLAUDE.md``'s
+Architecture).
 """
 
 from dataclasses import dataclass
@@ -271,8 +272,8 @@ def settled_income_legs(
             traverse on the parents, rooted at
             :class:`~app.models.transfer.Transfer` -- ``()`` for every caller
             today: a settled leg is worth the figure its transfer stores
-            (:func:`~app.services.row_valuation.leg_settled_contribution`),
-            a column of the parent this loads, and dated from its record,
+            (:func:`~app.services.row_valuation.settled_contribution` of
+            its parent), a column of the parent this loads, and dated from its record,
             which the join attaches, or from the parent's own columns.
 
     Returns:

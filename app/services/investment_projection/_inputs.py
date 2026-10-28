@@ -71,7 +71,8 @@ class PricedContribution:
             opening day.
         amount: What the to-side leg CONTRIBUTES: the figure its transfer
             stores for a leg that has SETTLED
-            (:func:`app.services.row_valuation.leg_settled_contribution`), else
+            (:func:`app.services.row_valuation.settled_contribution` of the
+            transfer), else
             what the transfer resolves to
             (:func:`app.services.cash_ledger.planned_leg_contribution`).
         is_confirmed: Whether the contribution actually happened, as opposed

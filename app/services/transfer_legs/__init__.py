@@ -196,10 +196,12 @@ prose shaved off a measured claim), cut along the seam the module already had
 and moved without a byte changed in any definition.  :mod:`._leg` is the value,
 built from its parent (and the record a loader hands it), whose code is blind
 to where a movement hangs -- :class:`TransferLeg`, its label
-(:func:`leg_label`), its identity (:func:`cell_key`, :func:`key_order`) and its
-construction (:func:`leg_of`).  :mod:`._records` holds the package's code that
-knows where a movement hangs (off a shadow row until plan step
-``balance:X-bi-6-4d-2``, off the transfer by a side link since): the one join
+(:func:`leg_label`), its identity (:func:`cell_key`, :func:`key_order`,
+:func:`is_leg_key`), its parent (:func:`parent_of`, the one answer to which
+row prices it, ruling **plan#1983**) and its construction (:func:`leg_of`).
+:mod:`._records` holds the package's code that knows where a movement hangs
+(off a shadow row until plan step ``balance:X-bi-6-4d-2``, off the transfer by
+a side link since): the one join
 from a transfer to a leg's covering movement, its expressions, every loader in this package
 built on it (:func:`planned_transfer_legs` and the grid's
 :func:`grid_transfer_legs` included, since each reads the join), and
@@ -224,12 +226,15 @@ from app.services.transfer_legs._leg import (
     TRANSFER_FROM_PREFIX,
     TRANSFER_TO_PREFIX,
     PlanItem,
+    PlanParent,
     TransferLeg,
     cell_key,
     expense_legs,
+    is_leg_key,
     key_order,
     leg_label,
     leg_of,
+    parent_of,
 )
 from app.services.transfer_legs._records import (
     covering_movements_by_leg,
@@ -251,6 +256,7 @@ from app.services.transfer_legs._records import (
 
 __all__ = [
     "PlanItem",
+    "PlanParent",
     "TRANSFER_FROM_PREFIX",
     "TRANSFER_TO_PREFIX",
     "TransferLeg",
@@ -260,6 +266,7 @@ __all__ = [
     "grid_transfer_leg",
     "grid_transfer_legs",
     "held_transfer_entries",
+    "is_leg_key",
     "key_order",
     "leg_label",
     "leg_of",
@@ -267,6 +274,7 @@ __all__ = [
     "movement_parent_loads",
     "offerable_transfer_legs",
     "parent_entries",
+    "parent_of",
     "planned_transfer_legs",
     "recorded_transfer_legs",
     "transfer_family_movements",

@@ -51,7 +51,7 @@ from app.services.account_resolver import resolve_owner_cash_flow_set
 from app.services.cash_ledger import (
     baseline_amount_basis,
     amounts_by_id,
-    settled_amounts_by_id,
+    settled_amounts_by_key,
 )
 from app.services.entry_service import build_entry_lists_dict, build_entry_sums_dict
 from app.services.transaction_service import retained_settle_amounts_by_id
@@ -148,7 +148,7 @@ def _build_partial_context(
     # shares that macro, publishes both for exactly the reason the owner grid
     # does.  It needs no basis: a settlement record is the row's own, and
     # reading one consults no producer.
-    settled = settled_amounts_by_id(transactions)
+    settled = settled_amounts_by_key(transactions)
     # And what each row WOULD book if it were marked paid, where that differs
     # from both maps above (plan step X-au-c3, developer 2026-08-17): a row
     # reverted out of the settled band keeps what it recorded and a re-settle

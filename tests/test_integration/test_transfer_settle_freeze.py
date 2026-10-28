@@ -81,7 +81,8 @@ from tests.test_integration.test_loan_transfer_live_amount._helpers import (
     _build_derived_loan_transfer,
     _side_leg,
 )
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 from app.models.amount_ownership import AmountOwnership
 from tests._test_helpers import rendered_transfer_amount
 
@@ -218,8 +219,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.expire_all()
             for account_id in _sides(xfer.id):
                 # What it BOOKS -- the ledger figure, and the whole point.
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == _LIVE_PITI
                 # What it RECORDS -- the side's record's figure.
                 assert transfer_side_figure(
@@ -263,8 +264,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == Decimal("1512.44")
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == Decimal("1512.44")
 
     def test_an_ECHOED_prefill_is_not_written(
@@ -309,8 +310,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == Decimal("250.00")
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == Decimal("250.00")
 
     # ``test_an_explicit_None_still_CLEARS_a_typed_actual`` lived here until
@@ -375,8 +376,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == Decimal("1325.00")
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == Decimal("1325.00")
 
     def test_a_re_settle_does_not_rewrite_the_frozen_figure(
@@ -416,8 +417,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == _LIVE_PITI
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == _LIVE_PITI
 
     def test_settle_amount_publishes_what_a_tick_WILL_book(
@@ -450,8 +451,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.commit()
 
             db.session.expire_all()
-            assert leg_settled_contribution(
-                _side_leg(xfer.id, xfer.from_account_id),
+            assert settled_contribution(
+                parent_of(_side_leg(xfer.id, xfer.from_account_id)),
             ) == offered
             assert transfer_side_figure(
                 db.session, xfer.id, xfer.from_account_id,
@@ -481,8 +482,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, account_id,
@@ -517,8 +518,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, account_id,
@@ -592,8 +593,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, account_id,
@@ -637,8 +638,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, account_id,
@@ -690,8 +691,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for side_account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, side_account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, side_account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, side_account_id,
@@ -822,8 +823,8 @@ class TestTheNamedVerbItself:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == Decimal("250.00")
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == Decimal("250.00")
                 # ... and the day the money moved was not moved.
                 assert transfer_side_record(

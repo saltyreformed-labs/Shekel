@@ -594,13 +594,13 @@ def correction_record(
     row, so they get two boxes, and editing the actual states what the bank
     really took.  ``transaction_service._door`` asks it with a plain row's
     record and ``transfer_service._update`` with the figure a transfer
-    stores, read through its expense leg; a second spelling of the echo
+    stores; a second spelling of the echo
     comparison is how the two tables would come to disagree about what counts
     as a correction.  It takes the RECORDED FIGURE rather than the row since
     leaf ``balance:X-bi-6-4d-1``, so each table reads its own record its own
     way -- a row off its entries, a transfer off its own stored figure
-    (:func:`~app.services.row_valuation.leg_settled_figure`) -- and the rule
-    stays one.
+    (:func:`~app.services.row_valuation.settled_figure` asks each its own,
+    ruling **plan#1983**) -- and the rule stays one.
 
     **An ECHO writes nothing.**  Both popovers PREFILL the box with what the row
     already records, so an untouched Save posts the same figure back; recording
@@ -614,9 +614,8 @@ def correction_record(
     (:attr:`Settlement.stated`).
 
     **The comparison is against what the row RECORDS, not its plan**
-    (:func:`app.services.row_valuation.settled_figure`, the sum of its
-    entries, or :func:`~app.services.row_valuation.leg_settled_figure` for a
-    leg -- the same maps the box was PREFILLED from).  The two differ
+    (:func:`app.services.row_valuation.settled_figure`: a row's entry sum, a
+    transfer's stored figure -- the same map the box was PREFILLED from).  The two differ
     whenever a correction stands, so comparing against the plan would read
     every re-save of a corrected row as a fresh correction of the same
     figure.  It read a TOTAL twin, ``recorded_figure``, through ``X-bi-4a``,
@@ -629,8 +628,8 @@ def correction_record(
 
     Args:
         recorded: What the settled row or leg being corrected already records
-            (the caller's :func:`~app.services.row_valuation.settled_figure`
-            or :func:`~app.services.row_valuation.leg_settled_figure`).  The
+            (the caller's
+            :func:`~app.services.row_valuation.settled_figure`).  The
             CALLER establishes that it is settled;
             :func:`reject_figure_without_settled_status` is that check.
         submitted: The figure the door stated and who wrote it

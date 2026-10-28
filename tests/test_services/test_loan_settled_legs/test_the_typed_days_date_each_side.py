@@ -5,8 +5,7 @@ The module graded the loan walk's refusal of a settled payment whose record carr
 leaf deleted the refusal: the status-band rule refuses that state at commit, and its own test is
 ``tests/test_models/test_a_transfer_side_s_record_follows_its_status.py``'s
 ``test_an_undated_record_under_a_paid_transfer_is_refused``.  Its two cases went with it (developer
-answer 2026-10-27, "Delete all 6"); the repair's three are left, and the module's name is its
-history.
+answer 2026-10-27, "Delete all 6"); the repair's three are left.
 """
 
 from datetime import date
@@ -29,7 +28,7 @@ from ._helpers import (
 )
 
 
-class TestTheRefusalsRepairWorksThroughTheApp:
+class TestTheLoanReadsTheDaysTypedIntoThePopover:
     """The loan reads the days typed into the transfer's popover, through its own door.
 
     Each account's day typed into that account's "Money moved on" box dates
@@ -41,7 +40,7 @@ class TestTheRefusalsRepairWorksThroughTheApp:
     popover's two day boxes as that door's own route tests do, and the loan
     walk reads the day each box states.  ``_CLOSED_ON`` (03-05) is the day
     the transfer was marked paid; the suite's frozen clock is the day of the
-    click.  The class name is its history.
+    click.
 
     **Each case starts from the ordinary Paid payment** since plan step
     ``balance:X-bi-6-4d-2``.  It started from the state the refusal

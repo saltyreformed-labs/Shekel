@@ -1082,8 +1082,8 @@ class TestLoadInvestmentParamsForAccounts:
             assert load_investment_params_for_accounts([]) == {}
 
 
-class TestShadowContributionBoundary:
-    """The BOUNDARY where a shadow contribution is valued and screened.
+class TestAContributionIsValuedAndScreenedAtTheBoundary:
+    """The BOUNDARY where a contribution is valued and screened.
 
     ``load_transfer_contributions_for_account(s)`` became the one place a
     contribution's dollar is decided at plan step X-au-c2: it prices the whole

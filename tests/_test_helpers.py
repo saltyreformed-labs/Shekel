@@ -10549,7 +10549,7 @@ def write_past_the_amount_seam(row, value):
     derived answer is invariant under a rival figure (a definition's row
     under its own column, a generated transfer's leg under its parent's) and
     the one that proves the database refuses a declared row carrying one; in
-    ``test_a_transfer_shadow_is_derived/test_the_declaration.py``,
+    ``test_a_transfers_amount_is_declared/test_the_declaration.py``,
     ``test_a_leg_cannot_hold_a_figure_while_it_declares_a_parent``, which
     proves the database refuses a transfer's twin holding a figure; and the
     hand-run ``tests/manual/verify_amount_resolver.py``.  Each is constructing

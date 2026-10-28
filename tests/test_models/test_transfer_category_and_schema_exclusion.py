@@ -1,5 +1,5 @@
 """
-Shekel Budget App -- Transfer Shadow Transaction Schema Tests
+Shekel Budget App -- Transfer Category and Transaction Schema Exclusion Tests
 
 Tests for the schema additions in Task 2 of the Transfer Architecture Rework:
   - Transfer.category_id (nullable FK to Category)

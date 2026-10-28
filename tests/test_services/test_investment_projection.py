@@ -641,7 +641,8 @@ class TestCalculateInvestmentInputs:
 
 
 # The ESTIMATED-vs-EFFECTIVE alignment class (deep-quality-hunt #11) lived
-# here and MOVED WHOLE to ``test_projection_inputs.TestShadowContributionBoundary``
+# here and MOVED WHOLE to
+# ``test_projection_inputs.TestAContributionIsValuedAndScreenedAtTheBoundary``
 # at plan step X-au-c2, with its four cases and their hand-computed figures
 # intact.  It pinned that a settled shadow whose ``actual_amount`` differs from
 # its ``estimated_amount`` is read at the ACTUAL by the averaged inputs feed,
@@ -965,7 +966,7 @@ class TestBuildContributionTimeline:
     # rule (plan step X-au-c2): this module no longer screens by status, the
     # boundary loader does, and it DROPS such a row rather than pricing it at
     # zero.  Its replacement is
-    # ``test_projection_inputs.TestShadowContributionBoundary
+    # ``test_projection_inputs.TestAContributionIsValuedAndScreenedAtTheBoundary
     # .test_excluded_status_rows_are_dropped_not_zeroed``, which grades the
     # same rule against real rows and additionally pins why dropping and
     # zeroing are not interchangeable here.

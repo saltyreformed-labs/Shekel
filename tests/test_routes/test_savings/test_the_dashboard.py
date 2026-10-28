@@ -356,7 +356,7 @@ class TestDashboard:
 # ── Shadow Transaction Inclusion Tests ────────────────────────────
 
 
-class TestSavingsDashboardShadowTransactions:
+class TestSavingsDashboardCountsTransferDeposits:
     """Verify that the savings dashboard includes shadow transactions
     (from transfers) in account balance calculations.
 

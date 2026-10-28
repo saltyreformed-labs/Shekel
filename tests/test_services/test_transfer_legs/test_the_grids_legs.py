@@ -421,7 +421,7 @@ class TestTheLegMapProducers:
             }
 
 
-class TestTheLegContributionTwins:
+class TestALegIsValuedAsItsParent:
     """The per-leg valuation twins leaf X-bi-6-1b gave the display readers.
 
     ``settled_figure`` / ``fixed_contribution`` / ``settled_contribution``

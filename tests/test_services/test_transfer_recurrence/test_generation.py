@@ -376,12 +376,12 @@ class TestTransferGenerationSharesTheOccurrencePairs:
 # ── Generated Transfer Tests ──────────────────────────────────────
 
 
-class TestShadowTransactionCreation:
+class TestAGeneratedTransfersCategoryAndKeptRows:
     """A generated transfer's category, and the rows a maintain pass keeps.
 
-    The class name is history: it graded each transfer's two shadow (twin)
-    transactions until plan step ``balance:X-bi-6-4d-2``, and a transfer
-    stores no leg row since migration 82f7 (ruling **R-BAL167**).
+    It graded each transfer's two shadow (twin) transactions until plan
+    step ``balance:X-bi-6-4d-2``, and a transfer stores no leg row since
+    migration 82f7 (ruling **R-BAL167**).
     """
 
     def _make_template(self, seed_user, cadence, category_id=None,

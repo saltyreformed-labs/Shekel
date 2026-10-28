@@ -754,7 +754,7 @@ class TestTransferActualBox:
             assert "Marking this paid will record" not in body
 
 
-class TestTheTransferLockCoversTheShadowOnlyEdits:
+class TestAStalePopoverCannotOverwriteAFigureOrADay:
     """A stale popover cannot silently overwrite a figure or a day.
 
     **A transfer and its two shadows were ONE thing** (developer ruling,

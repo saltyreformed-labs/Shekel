@@ -1680,7 +1680,7 @@ class TestATransferIsALegOfItsParent:
                 "avg_days_before_due": Decimal("1.00"),
             }
 
-    def test_the_kernels_route_a_leg_to_its_producers(
+    def test_a_leg_reads_its_record_when_settled_else_its_plan(
         self, app, seed_user, seed_periods, db,
     ):
         """A settled $250.00 transfer that moved $240.00 and a planned $75.00 one.
@@ -2316,7 +2316,7 @@ class TestTheActualHalfAsksTheAmountModel:
     takes the fall-through's other arm --
     :func:`~app.services.cash_ledger.resolve_amount` prices it off its
     parent -- and
-    :meth:`TestATransferIsALegOfItsParent.test_the_kernels_route_a_leg_to_its_producers`
+    :meth:`TestATransferIsALegOfItsParent.test_a_leg_reads_its_record_when_settled_else_its_plan`
     grades that arm (an unsettled leg's actual is its plan, ``$75.00``).
     """
 

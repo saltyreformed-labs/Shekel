@@ -20,7 +20,7 @@ from tests.test_integration.test_transfer_settle_freeze import _derived_loan_tra
 from ._helpers import _CONTRACT, _plain_transfer
 
 
-class TestAShadowIsBornDerived:
+class TestATransferIsBornOwningItsFigure:
     """The declaration is made by the constructor, not by a later writer.
 
     Since plan step balance:X-bi-6-4d-2 the constructor makes ONE row, so what

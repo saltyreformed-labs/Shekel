@@ -400,7 +400,7 @@ def _cash_detail_current_balance(app, auth_client, account_id):
     return recorded[0]["current_balance"]
 
 
-class TestHysaDetailShadowTransactions:
+class TestHysaDetailCountsTransferDeposits:
     """Verify that the HYSA detail page includes shadow transactions
     from transfers in its balance calculation and projection.
     """

@@ -141,7 +141,7 @@ class TestTheSettledHalfComplementsThePlanHalf:
         whatever it carried -- measured bare, dated, Paid and dated, and Paid,
         dated and hidden -- so the movement and the hide planted after it
         could never be written: ONE refused shape, pinned on the income side in
-        ``test_a_transfer_shadow_is_derived/test_the_declaration.py`` and,
+        ``test_a_transfers_amount_is_declared/test_the_declaration.py`` and,
         for a loan payment, in ``test_loan_plan_assembly.py``, until plan step
         balance:X-bi-6-5 dropped the column the twin named its transfer by,
         after which no statement can write it (ruling plan#1850).  The

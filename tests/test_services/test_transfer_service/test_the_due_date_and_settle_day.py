@@ -17,7 +17,7 @@ from app.models.amount_ownership import AmountOwnership
 from ._helpers import _create_basic_transfer, _reread
 
 
-class TestDueDateAndSettleDayShadows:
+class TestTheDueDateAndEachSidesSettleDay:
     """A transfer's due date and each side's settle day, as the doors write them.
 
     The due date is a column of the transfer's row, read re-read from the
@@ -27,7 +27,7 @@ class TestDueDateAndSettleDayShadows:
     ``TestBothSidesShowTheTransfer``, both sides.  Until plan step
     ``balance:X-bi-6-4d-2`` each due-date case also read the transfer's two
     shadow rows, which that step's create door no longer writes (ruling
-    R-BAL290 part 1).  The name is kept as history.
+    R-BAL290 part 1).
     """
 
     def test_a_due_date_at_create_is_written_on_the_transfer(

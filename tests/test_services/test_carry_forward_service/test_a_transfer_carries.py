@@ -14,7 +14,7 @@ from tests._test_helpers import generate_transfer_of, make_transfer_template
 from ._helpers import _create_transaction, _create_savings, _create_transfer_in_period
 
 
-class TestCarryForwardShadowTransactions:
+class TestCarryForwardMovesEachPlannedTransferOnce:
     """Carry-forward's transfer arm: one ``update_transfer`` call per transfer.
 
     A transfer is ONE row, and both of its legs read its period

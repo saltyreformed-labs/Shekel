@@ -289,16 +289,16 @@ class TestUnmarkCreditStateMachine:
 # ══════════════════════════════════════════════════════════════════════
 
 
-class TestTransferShadowMarkDoneStateMachine:
+class TestAnIllegalMoveFromATransfersLegIsA400:
     """``transfer_service.update_transfer`` already enforces the state
     machine (commit C-21).  These tests confirm the route layer's
     exception handling translates the resulting ValidationError into
     a clean 400 instead of a 500 when mark_done is invoked from a
     transfer's grid leg while the transfer is in a non-mutable state.
 
-    The class name is history: each case reached its leg through a shadow
-    (twin) row until plan step ``balance:X-bi-6-4d-2``, and a transfer
-    stores no leg row since migration 82f7 (ruling **R-BAL167** class 1)."""
+    Each case reached its leg through a shadow (twin) row until plan step
+    ``balance:X-bi-6-4d-2``, and a transfer stores no leg row since
+    migration 82f7 (ruling **R-BAL167** class 1)."""
 
     def _create_transfer(
         self, app, db_session, seed_user, seed_periods_today,

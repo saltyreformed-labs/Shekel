@@ -139,19 +139,43 @@ from decimal import Decimal
 
 from app import create_app, ref_cache
 from app.models.account import Account
+from app.models.amount_ownership import AmountOwnership
 from app.models.pay_period import PayPeriod
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum, StatusEnum
 from app.exceptions import ShekelError
 from app.extensions import db
+# Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
+# schedule rows exactly as the loan route hands them to its template, a read the
+# route package does not publish.
+from app.routes.loan._helpers import build_schedule_context  # pylint: disable=shekel-private-module-import
 from app.services import balance_at, template_amount_service, transfer_service
 from app.services.balance_at import BalanceContext
-from app.services.balance_at._loan_stream import loan_timeline
-from app.services.balance_at._plan import loan_plan
+# Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
+# timeline's payment splits, an intermediate the balance seam does not publish.
+from app.services.balance_at._loan_stream import loan_timeline  # pylint: disable=shekel-private-module-import
+# Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
+# plan's payments, an intermediate the balance seam does not publish.
+from app.services.balance_at._plan import loan_plan  # pylint: disable=shekel-private-module-import
 from app.services.loan_ledger import walk_loan_ledger
+from app.services.loan_loaders import load_escrow_lines, load_loan_params
+from app.services.loan_posting_service import confirmed_loan_payment_history
+# Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
+# posting targets an anchor correction implies (what the next deploy's backfill
+# reconciles to), which the posting package does not publish.
+from app.services.loan_posting_service._anchors import (  # pylint: disable=shekel-private-module-import
+    anchor_correction_targets,
+)
+# Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
+# posting targets a payment split implies (what the next deploy's backfill
+# reconciles to), which the posting package does not publish.
+from app.services.loan_posting_service._payments import (  # pylint: disable=shekel-private-module-import
+    payment_split_targets,
+)
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import RecurrenceSpec, author_rule
+from app.services.scenario_resolver import get_baseline_scenario
 from app.utils.dates import add_months
 
 USER_ID = 1
@@ -206,14 +230,6 @@ def _ledger_lines(label, account):
     walk implies ARE what the next deploy writes -- printed here rather than read
     off the clone's stored postings, which the code under test has not synced.
     """
-    from app.services.loan_posting_service._anchors import (  # pylint: disable=import-outside-toplevel
-        anchor_correction_targets,
-    )
-    from app.services.loan_posting_service._payments import (  # pylint: disable=import-outside-toplevel
-        payment_split_targets,
-    )
-    from app.services.scenario_resolver import get_baseline_scenario  # pylint: disable=import-outside-toplevel
-
     walk = walk_loan_ledger(account.id, get_baseline_scenario(USER_ID).id)
     for outcome in walk.settled_splits:
         _outcome_line(label, "SETTLED", account, outcome)
@@ -247,16 +263,6 @@ def _display_lines(label, account, ctx):
     the seam's confirmed rows), printed while they are confirmed -- they come
     first -- with the number, date, escrow and total the template renders.
     """
-    from app.routes.loan._helpers import build_schedule_context  # pylint: disable=import-outside-toplevel
-    from app.services.loan_loaders import (  # pylint: disable=import-outside-toplevel
-        load_escrow_lines,
-        load_loan_params,
-    )
-    from app.services.loan_posting_service import (  # pylint: disable=import-outside-toplevel
-        confirmed_loan_payment_history,
-    )
-    from app.services.scenario_resolver import get_baseline_scenario  # pylint: disable=import-outside-toplevel
-
     # The card answers only a read on or before today (a later one is a
     # forward projection), and DOOR 2 reads after it on a run before that
     # read day (2026-10-25 on the grade clones): that door states so rather
@@ -304,11 +310,21 @@ def _plan_lines(label, account, ctx, *, months=GRID_MONTHS):
     the one file runs on the base worktree and on the branch: the plan's
     PAYMENTS (the plan's charges are deleted by that step and their effect is
     printed where it lands -- on each outcome's split and ``charge`` date).
+    The lines print in one fixed order: the ledger, the page's two naming
+    surfaces, the payoff, then :func:`_payment_lines`,
+    :func:`_trajectory_lines` and :func:`_interest_lines`.
     """
     _ledger_lines(label, account)
     _display_lines(label, account, ctx)
     figures = balance_at.loan_figures(account, ctx)
     print(f"{label}\tPAYOFF\taccount={account.id}\t{figures.payoff_date}")
+    _payment_lines(label, account, ctx)
+    _trajectory_lines(label, account, ctx, months)
+    _interest_lines(label, account, ctx)
+
+
+def _payment_lines(label, account, ctx):
+    """Print the plan's payment counts, then each payment the plan holds."""
     plan = loan_plan(account, ctx)
     estimated = [p for p in plan.payments if p.is_estimated]
     planned = [p for p in plan.payments if not p.is_estimated]
@@ -322,6 +338,17 @@ def _plan_lines(label, account, ctx, *, months=GRID_MONTHS):
             f"\tvisible={payment.effective_date}\tcash={payment.cash}"
             f"\testimated={payment.is_estimated}"
         )
+
+
+def _trajectory_lines(label, account, ctx, months):
+    """Print the projected splits, the balance grid, the what-if lever and the required extra.
+
+    Args:
+        label: The line prefix naming the read.
+        account: The loan account.
+        ctx: The read's balance context.
+        months: How many months of the balance grid to print, after ``ctx.as_of``.
+    """
     for outcome in balance_at.loan_installments(account, ctx):
         _outcome_line(label, "PROJECTED", account, outcome)
     grid = [add_months(ctx.as_of, n) for n in range(months + 1)]
@@ -344,6 +371,10 @@ def _plan_lines(label, account, ctx, *, months=GRID_MONTHS):
         f"{label}\tREQUIRED\taccount={account.id}\ttarget={target}"
         f"\t{balance_at.loan_required_extra(account, ctx, target)}"
     )
+
+
+def _interest_lines(label, account, ctx):
+    """Print each year's interest and chip figures, then every payment short of its charge."""
     # Schedule A's figure (the year's interest, settled and projected) and
     # the dashboard chip's (the interest the settled payments PAID), every
     # year the loan spans -- the coordinator's grade for finding REC-538
@@ -391,8 +422,6 @@ def _confirmed_legs(account_id):
     carry ``source``, ``due_date`` and ``visible_on`` on both trees, so the one
     file keeps running on both.
     """
-    from app.services.scenario_resolver import get_baseline_scenario  # pylint: disable=import-outside-toplevel
-
     walk = walk_loan_ledger(account_id, get_baseline_scenario(USER_ID).id)
     return [
         outcome.source for outcome in walk.settled_splits
@@ -419,9 +448,6 @@ def _period_containing(day):
 
 def _adhoc_projected(account_id, period, amount, due):
     """Create a projected ad-hoc transfer of *amount* into *account_id*."""
-    from app.models.amount_ownership import AmountOwnership  # pylint: disable=import-outside-toplevel
-    from app.services.scenario_resolver import get_baseline_scenario  # pylint: disable=import-outside-toplevel
-
     checking = (
         db.session.query(Account)
         .filter_by(user_id=USER_ID, is_active=True)

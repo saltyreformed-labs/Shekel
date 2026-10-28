@@ -40,7 +40,10 @@ DONE = "done "
 #: ``{card}`` standing for the card's number (ruling plan#1875, plan#1870): a card is ready to
 #: land once both are done.  ``quill claim`` files them (:func:`finishing`), and a task filed
 #: under a card goes above the first of them still to begin that comes after it here
-#: (:func:`place`).
+#: (:func:`place`).  The suite runs green before its task begins (ruling plan#1981).  A claim
+#: cut short while one is filed under an earlier text, still marked, does not find it by its
+#: text (``_filing._same_filing``): run again, it files the task anew, and the marked one,
+#: never offered, is withdrawn with ``quill drop``, as ``quill sync``'s report of it says.
 FINISHING = (
     ("Adversarial review",
      "A neutral fresh subagent reviews the design and the whole diff against the card's spec "
@@ -48,9 +51,11 @@ FINISHING = (
      "grading the change's claims about itself hardest. Each finding to fix in this pull "
      "request is filed as a task above \"Full suite and pull request\"."),
     ("Full suite and pull request",
-     "The full suite through `./scripts/test.sh`, `pylint app/` with CLAUDE.md's `--fail-on`, "
-     "the tools packages' own tests and pylint floor, the developer's comments read and "
-     "answered, then plan#{card}'s pull request into dev, queued."),
+     "Begun once the full suite is green (ruling plan#1981): `./scripts/test.sh`, `pylint "
+     "app/` with CLAUDE.md's `--fail-on`, and the tools packages' own tests and pylint floor, "
+     "each run before `quill start` begins this task, a failure filed as a fix task above it. "
+     "Then the developer's comments read and answered, and plan#{card}'s pull request into "
+     "dev, queued; a failure CI finds once it is open is a task filed then."),
 )
 #: Each finishing task's title, with its place among them.
 _FINISHING_RANKS = {title: rank for rank, (title, _) in enumerate(FINISHING)}

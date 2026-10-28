@@ -14,7 +14,7 @@ from tools.quill._fake import AnswerLostOnce, FailOnce, FakeTracker, claim, leaf
 from tools.quill._state import SHIPPABLE
 from tools.quill._tasks import finishing
 from tools.quill.check import Draft, Owner, violations
-from tools.quill.setup_tracker import TASK
+from tools.quill.setup_tracker import FILING, TASK
 
 (REVIEW, REVIEW_TEXT), (LAND, LAND_TEXT) = finishing(1)
 
@@ -49,7 +49,8 @@ def test_a_claim_files_the_two_finishing_tasks_last_each_naming_its_card(code, c
     assert _order(tracker) == [2, 3]
     assert tracker.bodies[2] == REVIEW_TEXT and tracker.bodies[3] == LAND_TEXT
     assert "`quill spec-history plan#1 --since card/1`" in REVIEW_TEXT
-    assert "then plan#1's pull request into dev, queued." in LAND_TEXT
+    assert LAND_TEXT.startswith("Begun once the full suite is green (ruling plan#1981): ")
+    assert "and plan#1's pull request into dev, queued; " in LAND_TEXT
     out = capsys.readouterr().out
     assert ("\n  switched to card/1\n  its finishing tasks, last in its order (ruling "
             "plan#1875); cut short, `quill claim plan#1` run again on card/1 files the rest:\n"
@@ -138,6 +139,23 @@ def test_a_claim_cut_short_is_finished_by_the_same_command_where_its_branch_is(c
     assert run(tracker, code, "claim", "plan#1") == 1
     assert "plan#1 is already claimed: card/1 (claimed " in capsys.readouterr().err
     assert tracker.writes == FILES_BOTH
+
+
+def test_a_claim_cut_short_under_an_earlier_text_files_the_task_anew(code):
+    """The suite and pull request created and linked under an earlier text of the constant,
+    its filing cut short, still marked: the claim does not find it by its text, so it files
+    the task anew, last, and the marked one, never offered, is withdrawn with ``quill drop``
+    (``_tasks.FINISHING``)."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    earlier = tracker.create("task", LAND, "An earlier text.", ())
+    tracker.add_child(1, tracker.cards_by_number[earlier])
+    assert run(tracker, code, "claim", "plan#1") == 0
+    assert _order(tracker) == [3, earlier, 4]
+    assert (tracker.bodies[4], tracker.cards_by_number[4].labels) == (LAND_TEXT, ())
+    assert FILING in tracker.cards_by_number[earlier].labels
+    assert run(tracker, code, "drop", f"plan#{earlier}", "--why", "an earlier text's") == 0
+    assert tracker.cards_by_number[earlier].state_reason == "NOT_PLANNED"
 
 
 @pytest.mark.parametrize("failing", ["add_child", "unmark"])

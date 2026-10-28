@@ -54,7 +54,7 @@ from app.services.cash_ledger import (
     settled_amounts_by_key,
 )
 from app.services.entry_service import build_entry_lists_dict, build_entry_sums_dict
-from app.services.transaction_service import retained_settle_amounts_by_id
+from app.services.transaction_service import retained_amounts_by_key
 from app.utils.dates import display_today
 from app.exceptions import NotFoundError
 
@@ -155,7 +155,7 @@ def _build_partial_context(
     # honours it.  The shared card macro draws it, so the companion publishes it
     # for the same reason it publishes the other two -- a surface that took two
     # of the three would show a figure the tick beside it does not book.
-    retained = retained_settle_amounts_by_id(transactions)
+    retained = retained_amounts_by_key(transactions)
     entry_sums = build_entry_sums_dict(transactions, budgets)
     # Pre-render context for the inline envelope entries list -- see
     # app/routes/grid/page.py::_build_entry_maps for the rate-limit

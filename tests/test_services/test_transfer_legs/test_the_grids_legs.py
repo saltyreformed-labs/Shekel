@@ -32,7 +32,7 @@ from app.services.row_valuation import (
     settled_contribution,
     settled_figure,
 )
-from app.services.transaction_service import leg_retained_amounts_by_key
+from app.services.transaction_service import retained_amounts_by_key
 from app.services.transfer_legs import (
     TransferLeg,
     cell_key,
@@ -296,7 +296,7 @@ class TestTheLegMapProducers:
                 [leg], basis_for(checking, seed_user["scenario"]),
             ) == {key: _AMOUNT}
             assert settled_amounts_by_key([leg]) == {key: None}
-            assert leg_retained_amounts_by_key([leg]) == {key: None}
+            assert retained_amounts_by_key([leg]) == {key: None}
 
     def test_both_legs_of_a_settled_transfer_record_its_figure_beside_the_plan_and_retain_nothing(
         self, app, db, seed_user, seed_periods,
@@ -335,7 +335,7 @@ class TestTheLegMapProducers:
                 (settled.id, checking.id): _AMOUNT,
                 (settled.id, savings.id): _AMOUNT,
             }
-            assert leg_retained_amounts_by_key(legs) == {
+            assert retained_amounts_by_key(legs) == {
                 (settled.id, checking.id): None, (settled.id, savings.id): None,
             }
 
@@ -366,9 +366,9 @@ class TestTheLegMapProducers:
     ):  # pylint: disable=unused-argument
         """A typed correction outlives the revert; the plan's own price does not.
 
-        ``honoured_figure`` over ``recorded_leg_settlement``: only a STATED record
-        is honoured (ruling R-BAL61), which is the rule the row twin applies
-        through ``honoured_correction``.
+        ``honoured_correction`` of the leg's transfer: only a STATED record is
+        honoured (ruling R-BAL61), the one rule a row and a transfer are asked
+        through (ruling plan#1983).
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -395,7 +395,7 @@ class TestTheLegMapProducers:
             resolved_leg = grid_transfer_leg(resolved, checking.id)
 
             assert typed_leg.record is not None and typed_leg.record.settled_on is None
-            assert leg_retained_amounts_by_key([typed_leg, resolved_leg]) == {
+            assert retained_amounts_by_key([typed_leg, resolved_leg]) == {
                 typed_leg.cell_key: Decimal("240.00"),
                 resolved_leg.cell_key: None,
             }

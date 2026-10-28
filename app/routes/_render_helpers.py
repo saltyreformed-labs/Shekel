@@ -42,10 +42,7 @@ from app.services.entry_service import build_entry_sums_dict
 from app.services.settle_day import SettleDay, is_evidence, recorded_settle_day
 from app.services import grid_view_service
 from app.services.grid_view_service import due_captions_by_key
-from app.services.transaction_service import (
-    leg_retained_amounts_by_key,
-    retained_settle_amounts_by_id,
-)
+from app.services.transaction_service import retained_amounts_by_key
 from app.services.transfer_legs import (
     TransferLeg,
     grid_transfer_leg,
@@ -100,7 +97,7 @@ class RenderAmounts:
             typing the real figure is still the repair.
         retained: ``{transaction_id: what a tick WOULD book}``, ``None`` per row
             where that is already on screen --
-            :func:`~app.services.transaction_service.retained_settle_amounts_by_id`.
+            :func:`~app.services.transaction_service.retained_amounts_by_key`.
     """
 
     budgets: dict[int, Decimal]
@@ -166,7 +163,7 @@ def fragment_amounts(txn: Transaction) -> RenderAmounts:
     return RenderAmounts(
         budgets=amounts_by_key([txn], basis),
         settled=settled_amounts_by_key([txn]),
-        retained=retained_settle_amounts_by_id([txn]),
+        retained=retained_amounts_by_key([txn]),
     )
 
 
@@ -316,7 +313,7 @@ def transfer_settlement_amounts(
     **It asks the producers the grid prices a leg's cell by** (leaf
     ``X-bi-6-1``, ruling **R-BAL87**; rule 14):
     :func:`~app.services.cash_ledger.settled_amounts_by_key` and
-    :func:`~app.services.transaction_service.leg_retained_amounts_by_key` over
+    :func:`~app.services.transaction_service.retained_amounts_by_key` over
     ONE leg built by :func:`~app.services.transfer_legs.leg_of`, so what
     this popover promises, what the cell beside it shows and what a tick
     books are one walk.  Until that leaf it loaded
@@ -326,16 +323,16 @@ def transfer_settlement_amounts(
     named.  The settled producer reads the transfer's figure (a leg is
     valued by its parent, ``row_valuation.settled_figure``, ruling
     **plan#1983**) and the retained one the seam's
-    own reads (``recorded_leg_settlement``, ``honoured_figure``): since plan
-    step ``balance:X-bi-6-4d-2`` either leg reads the transfer's ONE settled
-    figure.
+    own read of the same parent (``status_seam.honoured_correction``): since
+    plan step ``balance:X-bi-6-4d-2`` either leg reads the transfer's ONE
+    settled figure.
 
-    **The EXPENSE leg answers**, which is the leg
-    ``transfer_service._settle.settle`` resolves its figures from and the leg
-    the correction door compares a typed figure against
-    (``transfer_service._update``).  Either would answer the same -- both
-    read the transfer's one figure -- and naming one means the
-    choice is not made twice.  (A DAY is per side since plan step
+    **The EXPENSE leg is the side the maps are keyed by**, and either would
+    answer the same: both are valued by the transfer (ruling
+    **plan#1983**), the parent ``transfer_service._settle.settle`` books
+    from and the correction door compares a typed figure against
+    (``transfer_service._update``), so naming one means the choice is not
+    made twice.  (A DAY is per side since plan step
     ``balance:X-bi-6-4c-3``; :func:`transfer_side_boxes` draws each.)
 
     **It takes no records** (plan step ``balance:X-bi-6-4d-2``): neither
@@ -369,7 +366,7 @@ def transfer_settlement_amounts(
     leg = leg_of(xfer, xfer.from_account_id)
     return TransferSettlementAmounts(
         settled={xfer.id: settled_amounts_by_key([leg])[leg.cell_key]},
-        retained={xfer.id: leg_retained_amounts_by_key([leg])[leg.cell_key]},
+        retained={xfer.id: retained_amounts_by_key([leg])[leg.cell_key]},
     )
 
 
@@ -849,7 +846,7 @@ def leg_fragment_amounts(leg: TransferLeg) -> LegRenderAmounts:
             [leg], derived_amount_basis(xfer.user_id, xfer.scenario_id),
         ),
         settled=settled_amounts_by_key([leg]),
-        retained=leg_retained_amounts_by_key([leg]),
+        retained=retained_amounts_by_key([leg]),
     )
 
 

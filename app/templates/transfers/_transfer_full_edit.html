@@ -214,10 +214,10 @@
        is most likely looking at here is exactly the one carrying a retained
        figure -- and without this the card would show the plan for a pair that
        will book something else.  It reads the SAME rule the settle verb
-       honours (``status_seam.honoured_figure`` over the transfer's one
-       figure, via ``transaction_service.leg_retained_amounts_by_key``; the
-       verb reads it through the expense leg since leaf ``X-bi-6-4d-1``), so
-       what this promises and what a tick books cannot drift.  Read-only: the
+       honours (``status_seam.honoured_correction`` of the transfer, its one
+       figure, via ``transaction_service.retained_amounts_by_key``; the verb
+       reads it off the transfer, ruling plan#1983), so what this promises
+       and what a tick books cannot drift.  Read-only: the
        record has one write door, which is a settle. #}
     {% set will_book = retained[xfer.id] %}
     {% if will_book is not none %}

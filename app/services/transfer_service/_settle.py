@@ -80,8 +80,9 @@ from app.services.stated_figure import StatedFigure
 from app.services import status_seam
 from app.services.status_seam import (
     Settlement,
+    honoured_correction,
     honoured_figure,
-    recorded_leg_settlement,
+    recorded_settlement,
 )
 from app.services.transfer_legs import TransferLeg, parent_of, transfer_side_leg
 from app.services.transfer_service._side_days import PairDays
@@ -168,7 +169,7 @@ def settle(
        the status flip it would answer from the settled figure this act is
        about to write.  A RETAINED correction
        (:func:`~app.services.status_seam.honoured_figure` over the transfer's
-       one settled figure, read through the expense leg) outranks that
+       one settled figure, read off the transfer) outranks that
        derivation, and a figure a HUMAN supplied NOW outranks
        both: it is compared against what the row would book anyway and is a
        CORRECTION only if it differs.  A figure somebody read off a statement is
@@ -230,10 +231,10 @@ def settle(
     edit reconcile through one statement.
 
     Args:
-        rows: The transfer, at its pre-settle status.  The figure is resolved
-            from the EXPENSE leg; either would answer the same (both price the
-            one parent, and both read the transfer's one settled figure), and
-            naming one means the choice is not made twice.
+        rows: The transfer, at its pre-settle status.  The figure and the
+            retained record are read off ``rows.transfer``, the parent both
+            legs are priced as (ruling **plan#1983**), so no leg is chosen to
+            answer for the pair.
         new_status_id: The settled status the transfer moves to, as the DOOR
             asked for it.  Verified by
             :func:`~app.services.transfer_service._status.apply_status_to_all_three`.
@@ -287,10 +288,10 @@ def settle(
     # A RETAINED correction outranks the derivation, through the same published
     # rule :func:`leg_settle_amount` offers from, so the pair's offer and its
     # booking are one expression (plan step X-au-c3).  The record is the
-    # transfer's one settled figure, read once for the act through the
-    # expense leg (``rows.expense_leg``; ``recorded_leg_settlement`` reads
-    # the leg's transfer) and carried into the settlement below.
-    retained = recorded_leg_settlement(rows.expense_leg)
+    # transfer's one settled figure, read once for the act off the transfer
+    # (``status_seam.recorded_settlement``, the retained-record fact's one
+    # branch on a parent's table) and carried into the settlement below.
+    retained = recorded_settlement(rows.transfer)
     held = honoured_figure(retained)
     booked = resolved if held is None else held
     correction = (
@@ -314,10 +315,9 @@ def settle(
     # ``settled_figure_source_id``, plan step balance:X-bi-6-4d-2) rather than
     # being inferred from a column being populated.
     #
-    # The pair's RETAINED record is read from the expense leg -- the same leg the
-    # figures above come from, and for the same reason (both legs read the
-    # transfer's one settled figure, so naming one means the choice is not
-    # accidental).  A
+    # The pair's RETAINED record is read off the transfer, the parent the
+    # figure above is priced as: both legs read its one settled figure, so no
+    # leg is chosen to answer for the pair.  A
     # revert releases the pair's assertion and keeps a figure above ``$0.00``,
     # so re-settling a transfer the user reverted in order to edit honours the
     # figure they read off their statement instead of re-deriving over it.
@@ -398,7 +398,7 @@ def leg_settle_amount(leg: TransferLeg, basis: AmountBasis) -> Decimal:
             cannot price it.  A refusal is never a fallback.
     """
     _reject_unsettleable(leg.transfer)
-    held = honoured_figure(recorded_leg_settlement(leg))
+    held = honoured_correction(parent_of(leg))
     if held is not None:
         return held
     return contribution_of(parent_of(leg), basis)

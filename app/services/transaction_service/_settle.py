@@ -33,6 +33,7 @@ Architecture:
 """
 
 import logging
+from collections.abc import Iterable
 from decimal import Decimal
 
 from app.exceptions import ValidationError
@@ -52,13 +53,12 @@ from app.services.status_seam import (
     Settlement,
     apply_status_change,
     honoured_correction,
-    honoured_figure,
-    recorded_leg_settlement,
     recorded_settlement,
     tender_account_id_of,
     tender_for_status,
 )
 from app.services.transaction_service._status_rules import settled_status_id
+from app.services.transfer_legs import PlanItem, PlanParent, cell_key, parent_of
 from app.utils.balance_predicates import is_identity_move, settled_status_ids
 from app.utils.log_events import (
     BUSINESS,
@@ -97,7 +97,7 @@ def fixed_settle_amount(txn: Transaction) -> "Decimal | None":
     correction, so the two numbers genuinely differ and the second one was
     visible on no surface but the reconcile panel.  The developer's rule is that
     whatever will be booked against the account is shown wherever the row is
-    shown; :func:`retained_settle_amounts_by_id` is that map, and it is built
+    shown; :func:`retained_amounts_by_key` is that map, and it is built
     from THIS function rather than from a second reading of the same columns, so
     what a screen promises and what a tick books cannot drift.
 
@@ -121,8 +121,10 @@ def fixed_settle_amount(txn: Transaction) -> "Decimal | None":
     return honoured_correction(txn)
 
 
-def retained_settle_amounts_by_id(rows) -> "dict[int, Decimal | None]":
-    """Return ``{transaction_id: the figure a re-settle would RE-BOOK}``.
+def retained_amounts_by_key(
+    items: Iterable[PlanItem],
+) -> "dict[int | tuple[int, int], Decimal | None]":
+    """Return ``{cell_key(item): the figure a re-settle would RE-BOOK}``.
 
     The display map for the one figure a screen could not otherwise show (plan
     step X-au-c3, developer 2026-08-17).  A row that has been reverted out of
@@ -132,13 +134,23 @@ def retained_settle_amounts_by_id(rows) -> "dict[int, Decimal | None]":
     panel's own prefill was fixed for and which the grid and the full-edit
     popover still had.
 
-    ``None`` for every row where no such gap exists: a row already SETTLED
-    (:func:`app.services.row_valuation.settled_amounts_by_key` is that row's
+    **Keyed by the side and valued by its parent** (ruling **plan#1983**,
+    "price the parent, draw the side"): a row by its id and its own record, a
+    transfer leg by its ``(transfer id, account id)`` and its transfer's one
+    stored figure, which the transfer's re-settle honours
+    (``transfer_service._settle``), so the ``retained`` map a page publishes
+    holds both shapes and both legs of one transfer read one figure.
+    ``retained_settle_amounts_by_id`` and its leg twin
+    ``leg_retained_amounts_by_key`` (leaf ``X-bi-6-1``, ruling **R-BAL87**)
+    were the two halves of it until that ruling.
+
+    ``None`` for every item where no such gap exists: a parent already SETTLED
+    (:func:`app.services.row_valuation.settled_amounts_by_key` is that item's
     map, and the screen shows the recorded figure already), a row that settles
-    from its purchases (its entries are on screen and are the figure), and a row
-    holding no ``corrected`` record (its plan IS what a settle would book).  So
-    a non-``None`` value means exactly "this row will book something other than
-    what you can see", which is the only case worth drawing.
+    from its purchases (its entries are on screen and are the figure), and a
+    parent holding no stated record (its plan IS what a settle would book).  So
+    a non-``None`` value means exactly "this item will book something other
+    than what you can see", which is the only case worth drawing.
 
     **It asks :func:`~app.services.status_seam.honoured_correction` rather than
     :func:`fixed_settle_amount`, and the difference is a false caption on a
@@ -154,50 +166,33 @@ def retained_settle_amounts_by_id(rows) -> "dict[int, Decimal | None]":
     not do it).
 
     Args:
-        rows: The rows a surface is about to render.
+        items: The rows and transfer legs a surface is about to render.
 
     Returns:
-        ``{transaction_id: Decimal | None}`` covering every row.
+        ``{cell_key: Decimal | None}`` covering every item; a row's key is
+        its id.
     """
-    settled = settled_status_ids()
-    return {
-        row.id: (
-            None if row.status_id in settled else honoured_correction(row)
-        )
-        for row in rows
-    }
+    return {cell_key(item): _retained_amount(parent_of(item)) for item in items}
 
 
-def leg_retained_amounts_by_key(legs) -> "dict[tuple[int, int], Decimal | None]":
-    """Return ``{leg.cell_key: the figure a re-settle would RE-BOOK}`` for legs.
+def _retained_amount(parent: PlanParent) -> "Decimal | None":
+    """Return what a re-settle of *parent* would re-book, where it is not on screen.
 
-    :func:`retained_settle_amounts_by_id`'s twin for the grid's transfer legs
-    (leaf ``X-bi-6-1``, ruling **R-BAL87**), keyed by
-    :attr:`~app.services.transfer_legs.TransferLeg.cell_key`.  The same rule
-    through the same seam: ``None`` for a leg whose parent is settled (its
-    recorded figure is on screen already) and for one whose transfer stores
-    no stated figure; else what its transfer's retained figure still states
-    (:func:`~app.services.status_seam.honoured_figure` over
-    :func:`~app.services.status_seam.recorded_leg_settlement`, the transfer's
-    one figure since plan step ``balance:X-bi-6-4d-2``) -- the figure a
-    person read off a statement before the transfer was reverted, which the
-    transfer's re-settle honours (``transfer_service._settle``).
+    :func:`retained_amounts_by_key`'s value, one rule against a parent:
+    ``None`` for a parent in the settled band (its recorded figure is drawn
+    instead), else the retained correction it still states
+    (:func:`~app.services.status_seam.honoured_correction`), ``None`` when
+    it states none.
 
     Args:
-        legs: The :class:`~app.services.transfer_legs.TransferLeg` values a
-            surface is about to render, records loaded.
+        parent: A row or a transfer (``transfer_legs.parent_of``).
 
     Returns:
-        ``{(transfer_id, account_id): Decimal | None}`` covering every leg.
+        The figure a re-settle would honour, or ``None``.
     """
-    settled = settled_status_ids()
-    return {
-        leg.cell_key: (
-            None if leg.status_id in settled
-            else honoured_figure(recorded_leg_settlement(leg))
-        )
-        for leg in legs
-    }
+    if parent.status_id in settled_status_ids():
+        return None
+    return honoured_correction(parent)
 
 
 def settle_amount(txn: Transaction, basis: AmountBasis) -> Decimal:

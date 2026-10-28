@@ -626,17 +626,18 @@ def transfer_side_leg(transfer: Transfer, *, is_income: bool) -> TransferLeg:
     """Return *transfer*'s leg on one SIDE with its record, keyed by the side alone.
 
     How the transfer service reaches a side's leg and record (leaf
-    ``X-bi-6-4d-1``).  The act's expense leg
-    (``transfer_service._validation.TransferRows.expense_leg``) is how the
-    settle and the update read the retained correction a re-settle honours
-    and the figure an echoed Actual box is compared against -- each off the
-    leg's TRANSFER, the settled figure's one home since plan step
+    ``X-bi-6-4d-1``), for the writers that need a side's record itself:
+    both sides for the seam pass (``transfer_service._status._side_legs``)
+    and for an endpoint move (``transfer_service._endpoints``), and the
+    offered side for the statement link
+    (``transfer_service._settle.record_leg_clearing``).  The settle and the
+    update read the retained correction a re-settle honours and the figure
+    an echoed Actual box is compared against off the TRANSFER itself
+    (ruling **plan#1983**), the settled figure's one home since plan step
     ``balance:X-bi-6-4d-2``, never off the record, which holds no figure;
-    they read the expense shadow's ``entries`` until that leaf.  The writers
-    that need a side's record itself read it here too: both sides for the
-    seam pass (``transfer_service._status._side_legs``) and for an endpoint
-    move (``transfer_service._endpoints``), and the offered side for the
-    statement link (``transfer_service._settle.record_leg_clearing``).
+    they read it through an act's cached expense leg
+    (``TransferRows.expense_leg``, deleted at plan#2019) from leaf
+    ``X-bi-6-4d-1``, and the expense shadow's ``entries`` before it.
 
     **Keyed by the SIDE and never by an account**, which is what makes it
     safe inside an act that moves an endpoint: ``_endpoints._apply_endpoint_move``

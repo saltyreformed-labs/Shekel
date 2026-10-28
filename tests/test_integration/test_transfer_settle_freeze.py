@@ -179,12 +179,15 @@ def _sides(xfer_id):
 def _side_settlement(xfer_id, account_id):
     """Return the settlement *xfer_id*'s side on *account_id* records, or ``None``.
 
-    ``status_seam.recorded_leg_settlement`` over :func:`_side_leg`: the
-    record's figure and who wrote it, the side-shaped twin of the
-    ``recorded_settlement(shadow)`` this file read until plan step
-    ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 4).
+    ``status_seam.recorded_settlement`` of :func:`_side_leg`'s parent (ruling
+    **plan#1983**): the record's figure and who wrote it.  It read the
+    side-shaped twin ``recorded_leg_settlement`` until that ruling, and the
+    ``recorded_settlement(shadow)`` before plan step ``balance:X-bi-6-4d-2``
+    (ruling **R-BAL167** class 4).
     """
-    return status_seam.recorded_leg_settlement(_side_leg(xfer_id, account_id))
+    return status_seam.recorded_settlement(
+        parent_of(_side_leg(xfer_id, account_id)),
+    )
 
 
 class TestTheSettleFreezeIsTheSERVICEs:
@@ -996,10 +999,11 @@ class TestATransfersOfferIsWhatItsReSettleBOOKS:
         ``balance:X-bi-6-4d-2``): dropping its ``honoured_correction`` arm
         makes the offer ``$250.00`` while the settle still books ``$95.50``.
 
-        The retained record is read off the from-side's record and the offer
-        asked of that side's LEG (``leg_settle_amount``, whose retained arm is
-        ``honoured_figure``), where both were asked of the expense twin until
-        that step (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
+        The retained figure is the transfer's, and the offer is asked of the
+        from-side's LEG (``leg_settle_amount``, whose retained arm is
+        ``honoured_correction`` of the leg's parent, ruling plan#1983), where
+        both were asked of the expense twin until that step (ruling R-BAL167
+        class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             xfer = _plain_transfer(seed_user, seed_periods, amount="250.00")

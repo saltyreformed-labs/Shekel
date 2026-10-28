@@ -198,10 +198,9 @@ class TestTheGridDrawsALegOffItsParent:
         """Settle with a typed figure, revert: the cell says what marking paid records.
 
         The retained figure is the transfer's, kept across the revert beside
-        each side's kept, un-dated record (``leg_retained_amounts_by_key``
-        through ``status_seam.recorded_leg_settlement`` /
-        ``honoured_figure``), the same rule a plain row's cell reads through
-        ``retained_settle_amounts_by_id``.
+        each side's kept, un-dated record (``retained_amounts_by_key``, the
+        leg valued by its transfer through ``status_seam.honoured_correction``),
+        the one map a plain row's cell reads too (ruling plan#1983).
         """
         with app.app_context():
             savings = _create_savings(seed_user)

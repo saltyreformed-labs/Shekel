@@ -35,14 +35,12 @@ Flask-isolated like the parent service: plain data in, ORM objects out, no
 import logging
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from functools import cached_property
 
 from app.extensions import db
 from app.models.account import Account
 from app.models.transfer import Transfer
 from app.exceptions import NotFoundError, ValidationError
 from app.services.account_projection import is_revolving
-from app.services.transfer_legs import TransferLeg, transfer_side_leg
 from app.services.transfer_service._loan_posting import (
     _reject_transfer_out_of_loan,
 )
@@ -57,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class TransferRows:
-    """The transfer one act writes, and its expense side read once for the act.
+    """The transfer one act writes.
 
     Introduced at plan step X-f2-c3 as Transfer Invariant 1 as a TYPE -- a
     parent and exactly two shadow transactions, whose statuses and periods
@@ -77,63 +75,18 @@ class TransferRows:
     step's leaf 3b deleted the
     ``shadows`` attribute, the loader that queried the twins
     (``load_transfer_rows``) and the arms of ``_update``, ``_amount`` and
-    ``_endpoints`` that wrote the mirrors over them.  What the value still
-    carries beside the transfer is :attr:`expense_leg`, the read an act's
-    settle makes (the figure grade read it too until ruling **plan#1983**,
-    and reads the transfer's figure off the transfer now).
+    ``_endpoints`` that wrote the mirrors over them.  It carried one read
+    beside the transfer after that, ``expense_leg``, the from-side leg an
+    act's settle and its figure grade read the pair's record through; both
+    ask the transfer itself under ruling **plan#1983** (the grade since
+    plan#1999, the settle since plan#1987), and the cached leg went with its
+    last reader (plan#2019).
 
     Attributes:
         transfer: The :class:`~app.models.transfer.Transfer` the act writes.
     """
 
     transfer: Transfer
-
-    @cached_property
-    def expense_leg(self) -> TransferLeg:
-        """Return the from-side LEG with its record; what the pair records is read through it.
-
-        The settle reads what a pair RECORDS through its expense leg -- the
-        retained correction a re-settle honours and the record it carries
-        forward, each read off the leg's TRANSFER, the settled figure's one
-        home (plan step ``balance:X-bi-6-4d-2``) -- and since leaf
-        ``balance:X-bi-6-4d-1`` they read it here, through
-        :func:`app.services.transfer_legs.transfer_side_leg`, rather than off
-        the expense shadow's ``entries``: ``transfer_legs`` holds the one join
-        ``X-bi-6-4d``'s re-parent moves, so this read moves with it.  The
-        leg's status is its TRANSFER's.  It is read by SIDE, never by the transfer's
-        current account, because an endpoint move earlier in the same act
-        leaves ``from_account_id`` stale until a flush (see the producer).
-
-        **Read ONCE per act and kept**, so every read of one act asks one
-        query between them: a producer asked
-        twice in one request is two resolution points, which can come to
-        disagree about WHEN they resolved.
-        That is correct because every reader asks BEFORE the act's seam pass,
-        and asks only for its TRANSFER's facts -- the status and soft delete,
-        the settled figure and its source, and what the transfer resolves to
-        -- which the leg reads off the live transfer at each asking; none asks
-        for the leg's ``record``, which the read freezes (an endpoint move
-        carries it to the new endpoint and may re-date it ``borrowed``, ruling
-        **R-BAL168**).  A reader of the record AFTER the seam pass would not
-        see the act's own write consistently (a first settle's new record is
-        absent from the cached value; a kept one is the same object, re-dated
-        in place), so none may be added there.  **Its ``account_id`` is
-        frozen at the read**, too: the read is the settle's, after an act's
-        endpoint move has flushed, so it names the NEW source (the figure
-        grade, ``_update._grade_submitted_figure``, ran ahead of
-        ``_endpoints._apply_endpoint_move`` and read the OLD source until
-        ruling **plan#1983** moved it onto the transfer).  Nothing may
-        read this leg's account: every
-        reader reads through its ``transfer``, and one that needs the side's
-        account reads the transfer's.
-
-        Returns:
-            The :class:`~app.services.transfer_legs.TransferLeg` on the
-            transfer's source account, its ``record`` the covering movement
-            the expense side holds (dated, or kept un-dated across a revert),
-            ``None`` when it holds none.
-        """
-        return transfer_side_leg(self.transfer, is_income=False)
 
 
 def _validate_positive_amount(amount):

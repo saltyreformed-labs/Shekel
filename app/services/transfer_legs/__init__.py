@@ -66,7 +66,7 @@ names, renders only for a settled transfer
 (``transfers/_transfer_full_edit.html``'s ``zero_caption``), whose records
 are dated.  A reverted leg's
 "marking paid records $X" caption reads its TRANSFER's kept figure
-(``transaction_service.leg_retained_amounts_by_key``), never the record,
+(``transaction_service.retained_amounts_by_key``), never the record,
 which holds no figure; a settled leg's record is dated, so the ruling's
 case is unchanged.  That movement hangs off
 the transfer by its side link since plan step ``balance:X-bi-6-4d-2`` (off

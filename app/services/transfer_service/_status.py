@@ -83,11 +83,9 @@ from app.utils.dates import display_today
 def _side_legs(transfer: Transfer) -> "tuple[TransferLeg, TransferLeg]":
     """Return the transfer's ``(expense, income)`` legs, each with its record as it stands.
 
-    Read FRESH by each writer below rather than off
-    :attr:`~._validation.TransferRows.expense_leg`, whose cache is for the
-    readers that ask BEFORE an act's write: the writer's input is the record
-    as it is at the write, and a record an earlier write of the same request
-    created is absent from a value read before it.
+    Read FRESH by each writer below, never cached for the act: the writer's
+    input is the record as it is at the write, and a record an earlier write
+    of the same request created is absent from a value read before it.
     """
     return (
         transfer_side_leg(transfer, is_income=False),

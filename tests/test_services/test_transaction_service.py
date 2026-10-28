@@ -1557,7 +1557,7 @@ class TestAReplayedSettleIsANoOp:
 
 
 class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
-    """``retained_settle_amounts_by_id``'s status gate, which nothing graded.
+    """``retained_amounts_by_key``'s status gate, which nothing graded.
 
     The map's contract is narrow and its whole value is the narrowness: a
     non-``None`` entry means "this row will book something other than what you
@@ -1589,7 +1589,7 @@ class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
             )
             db.session.flush()
 
-            settled_map = transaction_service.retained_settle_amounts_by_id(
+            settled_map = transaction_service.retained_amounts_by_key(
                 [txn],
             )
             assert settled_map[txn.id] is None, (
@@ -1602,7 +1602,7 @@ class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
             )
             db.session.flush()
 
-            reverted_map = transaction_service.retained_settle_amounts_by_id(
+            reverted_map = transaction_service.retained_amounts_by_key(
                 [txn],
             )
             assert reverted_map[txn.id] == Decimal("245.32")
@@ -1769,7 +1769,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
 
 
 class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
-    """``retained_settle_amounts_by_id`` draws the re-book badge, and it lied.
+    """``retained_amounts_by_key`` draws the re-book badge, and it lied.
 
     The badge's caption is *"the figure recorded before this row was set back to
     Projected"*, so a non-``None`` value must mean exactly that.  The map
@@ -1796,7 +1796,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
             db.session.flush()
 
             assert status_seam.recorded_settlement(txn) is None, "fixture: nothing recorded"
-            assert transaction_service.retained_settle_amounts_by_id(
+            assert transaction_service.retained_amounts_by_key(
                 [txn],
             ) == {txn.id: None}
 
@@ -1822,7 +1822,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
                 txn, ref_cache.status_id(StatusEnum.PROJECTED),
             )
 
-            assert transaction_service.retained_settle_amounts_by_id(
+            assert transaction_service.retained_amounts_by_key(
                 [txn],
             ) == {txn.id: Decimal("245.32")}
 
@@ -1849,7 +1849,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
             assert status_seam.recorded_settlement(txn).source is (
                 MovementFigureSourceEnum.RESOLVED
             )
-            assert transaction_service.retained_settle_amounts_by_id(
+            assert transaction_service.retained_amounts_by_key(
                 [txn],
             ) == {txn.id: None}
 

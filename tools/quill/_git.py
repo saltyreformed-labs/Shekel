@@ -138,8 +138,8 @@ class Entry:
 
 @dataclass(frozen=True)
 class MarkerChange:
-    """One change a commit made to an entry under :data:`MARKERS`, or :data:`TASKS` where the
-    walk names it (:func:`marker_changes`):
+    """One change a commit made to an entry under :data:`MARKERS`, or another directory the
+    walk names (:func:`marker_changes`):
     the commit's ``sha`` and ``subject``, the ``entry`` it changed, and the blob that entry
     held before the change (``was``, None where it held none), which a delete's ``entry``
     no longer names."""
@@ -152,9 +152,9 @@ class MarkerChange:
 
 @dataclass(frozen=True)
 class Took:
-    """One commit of a branch's own line through which it took a marker's or a task file's
-    blob in (``sha``), and the next commit of that line that changed that file again
-    (``until``), None while the branch still holds it (:func:`landings`)."""
+    """One commit of a branch's own line through which it took a record's blob in (``sha``),
+    and the next commit of that line that changed that file again (``until``), None while the
+    branch still holds it (:func:`landings`)."""
 
     sha: str
     until: str | None
@@ -248,6 +248,12 @@ def task_named(value: str) -> int | None:
     (``tools/quill/commit_hook.py``)."""
     found = _TASK_NAMED.fullmatch(value.strip())
     return int(found.group(1)) if found else None
+
+
+def doing_named(root: Path, blob: str) -> int | None:
+    """The task a ``plan/doing`` file holding ``blob`` names (:func:`task_named`): the ONE
+    reading of its line, :func:`in_progress`'s and CI's (``tools/quill/_doing.py``)."""
+    return task_named(git(root, "cat-file", "blob", blob))
 
 
 def task_trailer(task: int) -> str:
@@ -434,11 +440,11 @@ def lines_in(root: Path, tree: str,
     """Each card whose marker the tree ``tree`` holds (a commit names its own tree), with
     that marker's line (its blob): every file under :data:`MARKERS` whose name is a card
     number; and the path of each other entry there -- a name that is no number, a file in a
-    directory below it, or :data:`MARKERS` itself a file.  Named :data:`TASKS` as
-    ``directory``, each task whose done file it holds, and every other entry there, alike.
-    The ONE reading of a tree's markers and task files: :func:`markers_in` names its cards,
-    :func:`tasks_in` its tasks, and CI's landing check compares the lines two merges hold
-    (``tools/quill/landing.py``, rule 8).
+    directory below it, or :data:`MARKERS` itself a file.  Named :data:`TASKS` or :data:`DOING`
+    as ``directory``, each task whose done file, or card whose file naming its task in
+    progress, it holds, and every other entry there, alike.  The ONE reading of a tree's
+    records: :func:`markers_in` names its cards, :func:`tasks_in` its tasks, and CI's landing
+    check compares the lines two merges hold (rule 8) and names each card's ``plan/doing`` file.
 
     Raises:
         GitError: When git cannot read ``tree``.
@@ -579,7 +585,7 @@ def stamps(root: Path, tip: str) -> list[Stamp]:
 def in_progress(root: Path, tip: str, number: int) -> int | None:
     """The task card ``number``'s branch at ``tip`` has in progress (rulings plan#1872,
     plan#2009): the one its file ``plan/doing/<number>`` names (:func:`doing_file`, one line
-    ``plan#T``, :func:`task_named`), while ``tip`` holds no done file for it
+    ``plan#T``, :func:`doing_named`), while ``tip`` holds no done file for it
     (:func:`task_file`); None when it holds neither, or that file names no task.  Only card
     ``number``'s own file is read, so another card's, which a merge, a rebase or a
     cherry-pick of its work brings, puts nothing in progress here.  The ONE reading of which
@@ -593,7 +599,7 @@ def in_progress(root: Path, tip: str, number: int) -> int | None:
     """
     if (blob := blob_at(root, tip, doing_file(number))) is None:
         return None
-    task = task_named(git(root, "cat-file", "blob", blob))
+    task = doing_named(root, blob)
     return None if task is None or blob_at(root, tip, task_file(task)) is not None else task
 
 
@@ -665,7 +671,7 @@ def marker_changes(root: Path, refs: tuple[str, ...] = TIPS, *, first_parent: bo
                    directories: tuple[str, ...] = (MARKERS,)) -> list[MarkerChange]:
     """Every change a commit of ``refs``' history (``dev``'s and ``main``'s unless named) made
     to an entry under :data:`MARKERS`, or under each of ``directories`` when named (CI's
-    landing check names :data:`TASKS` beside it, R-BAL386), newest first
+    landing check names :data:`TASKS`, R-BAL386, and :data:`DOING`), newest first
     (:class:`MarkerChange`); with
     ``first_parent``, of each ref's OWN line alone, its first-parent history, the states the
     branch itself was in; with ``no_merges``, of each commit that is no merge alone (one
@@ -741,7 +747,7 @@ def ever_marked(root: Path) -> frozenset[int]:
 def landings(root: Path, ref: str, directories: tuple[str, ...] = (MARKERS,)
              ) -> dict[tuple[str, str], tuple[Took, ...]]:
     """Each blob the branch ``ref`` itself ever held at an entry under :data:`MARKERS` (or
-    under each of ``directories`` when named: CI's write rule names :data:`TASKS` too), as
+    under each of ``directories`` when named: CI names :data:`TASKS` and :data:`DOING` too), as
     ``(path, blob)``, with every commit of its OWN line (its first-parent history, the states
     the branch itself was in) through which it took that blob in, newest first, each beside
     the next commit of the line that changed that entry again (:class:`Took`), all read from

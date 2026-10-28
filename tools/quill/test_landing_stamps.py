@@ -15,10 +15,10 @@ import yaml
 
 from tools.ci.arcs import REPO
 from tools.ci.scratch import commit_files, run
-from tools.quill import _git, _stamps, commit_hook
+from tools.quill import _stamps, commit_hook
 from tools.quill._git import marker, task_file
-from tools.quill._histories import MON, TUE, Lookup, card_node, judging, merge, never, reader
-from tools.quill._histories import start, tracker, verdict
+from tools.quill._histories import MON, TUE, Lookup, begun, card_node, judging, merge, never
+from tools.quill._histories import reader, start, tracker, verdict
 
 
 @pytest.fixture(name="code")
@@ -60,10 +60,9 @@ def _claimed(root, on):
 
 
 def _begun(root, on):
-    """Task 12 begun on ``on``, as ``quill start`` begins it on ``card/7``: a commit naming it
-    and writing card 7's file ``plan/doing/7`` to name it (ruling plan#2009)."""
-    return commit_files(root, on, "start plan#12: a piece\n\nTask: plan#12",
-                        {_git.doing_file(7): "plan#12\n"})
+    """Task 12 begun on ``on``, as ``quill start`` begins it on ``card/7``
+    (:func:`_histories.begun`); its sha."""
+    return begun(root, on, 7, 12)
 
 
 def _ended(root, on):
@@ -87,8 +86,8 @@ def test_a_claim_whose_every_commit_names_a_task_under_its_card_lands(check, cod
     tracker is read once, for the card and the task whose done file it writes, as before."""
     root, base = code
     onto = _hooked(root, base)
-    begun = _begun(root, _claimed(root, onto))
-    work = commit_files(root, begun, "half the piece\n\nTask: plan#12", {"half.py": "half\n"})
+    started = _begun(root, _claimed(root, onto))
+    work = commit_files(root, started, "half the piece\n\nTask: plan#12", {"half.py": "half\n"})
     github = _cards()
     status, out, _ = check(onto, _ended(root, work), "card/7", github=github)
     assert (status, out) == (0, verdict("card/7", 1, 0, tasks=1) + "\n")

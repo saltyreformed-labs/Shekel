@@ -181,13 +181,15 @@ root; never silence it with a bare disable.
   added or changed only from its own branch `card/N`, a finding's also from its owner step's branch
   (plan#1777), and a task's file `plan/tasks/T` only from its card's branch (R-BAL386), but for a
   line carried from the other integration branch (a release or a resync) and, while it lives, the
-  records-only door into `main` for a card never claimed (R-BAL363); a change that writes no line of
-  a done file may not change what `dev` and `main` together say of that card (R-BAL385, R-BAL390); a
-  pull request from `card/N` is refused while a task under N that was not dropped lacks its file,
-  while a work commit made on a tree holding the commit hook names no task under N (the hook's
-  backstop, `tools/quill/_stamps.py`, plan#1880), or while N or a step above it owns an open finding
-  neither marked fixed nor handed on (plan#1777, plan#1784), and a records-only change while a step
-  it records owns one; and a change to what production runs must add, delete or change a card's done
+  records-only door into `main` for a card never claimed (R-BAL363); the file naming card N's task
+  in progress, `plan/doing/N`, is added or changed only from `card/N` or carried so (plan#2009; a
+  delete passes from any branch, plan#2022); a change that writes no line of a done file may not
+  change what `dev` and `main` together say of that card (R-BAL385, R-BAL390); a pull request from
+  `card/N` is refused while a task under N that was not dropped lacks its file, while a work commit
+  made on a tree holding the commit hook names no task under N (the hook's backstop,
+  `tools/quill/_stamps.py`, plan#1880), or while N or a step above it owns an open finding neither
+  marked fixed nor handed on (plan#1777, plan#1784), and a records-only change while a step it
+  records owns one; and a change to what production runs must add, delete or change a card's done
   file, from any branch, a release or a resync passing only with the done files it carries
   (R-BAL362): the files the image holds, as Docker reads its ignore file (`.dockerignore`,
   R-BAL364's one list of them), and the files outside the image that build or run production, which

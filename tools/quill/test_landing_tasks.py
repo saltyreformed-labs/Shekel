@@ -17,8 +17,9 @@ import pytest
 
 from tools.ci.scratch import commit_files, point_dev, point_main, run
 from tools.quill._git import marker, task_file
-from tools.quill._histories import MON, PERSON, TUE, Lookup, card_node, claim, closed, judging
-from tools.quill._histories import merge, never, reader, start, tracker, verdict
+from tools.quill._histories import MON, PERSON, TUE, Lookup, built, card_node, claim, closed
+from tools.quill._histories import judging, merge, never, piece, reader, start, tracker, undone
+from tools.quill._histories import verdict
 from tools.quill.setup_tracker import APP_LOGIN
 
 
@@ -43,29 +44,6 @@ def _check(capsys, code):
     return _run
 
 
-def _piece(root, on, task, when=MON):
-    """The commit on ``on`` finishing task ``task``: its work, and its done file as ``quill
-    task-file`` writes it, ``done <when>``; its sha."""
-    return commit_files(root, on, f"task plan#{task}",
-                        {f"t{task}.txt": "work\n", task_file(task): f"done {when}\n"})
-
-
-def _built(root, on, card, *tasks):
-    """Card ``card``'s claim on ``on`` (:func:`_histories.claim`), then the commit finishing
-    each of ``tasks``; the branch's tip."""
-    tip = claim(root, on, card)[1]
-    for task in tasks:
-        tip = _piece(root, tip, task)
-    return tip
-
-
-def _reverted(root, on, card, task):
-    """A revert on ``on`` of card ``card``'s landing with task ``task``'s piece: its marker,
-    its work and the task's work and done file deleted; its sha."""
-    return commit_files(root, on, f"Revert plan#{card}", {
-        marker(card): None, f"w{card}.txt": None, f"t{task}.txt": None, task_file(task): None})
-
-
 def _owes(number, card=7, head="card/7", *, shown=False):
     """The open-task arm's refusal of ``head``, recording card ``card``, which owes task
     ``number``'s done file; ``shown``, the task closed by the tool as done, which ``quill
@@ -87,7 +65,7 @@ def test_a_claim_lands_its_card_with_the_done_file_of_each_task_under_it(check, 
     is a task under card 7, read once with it, so it lands."""
     root, base = code
     github = Lookup(tracker(card_node(7), card_node(12, "task", parent=7)))
-    status, out, _ = check(base, _built(root, base, 7, 12), "card/7", github=github)
+    status, out, _ = check(base, built(root, base, 7, 12), "card/7", github=github)
     assert (status, out) == (0, verdict("card/7", 1, 0, tasks=1) + "\n")
     assert github.asked == [[7, 12]]
 
@@ -140,14 +118,14 @@ def test_a_task_re_parented_is_done_on_its_new_cards_claim_only(check, code):
     owes it: refused without its file, and it lands with a done file of its own."""
     root, base = code
     github = Lookup(tracker(card_node(7), card_node(9), card_node(12, "task", parent=9)))
-    status, out, _ = check(base, _built(root, base, 7, 12), "card/7", github=github)
+    status, out, _ = check(base, built(root, base, 7, 12), "card/7", github=github)
     assert (status, out.splitlines()) == (1, [
         "REFUSED -- plan/tasks/12: card/7 writes it, but task plan#12 is under plan#9, not "
         "plan#7, so it marks nothing done (a task is done on its own card's branch only): take "
         "it off card/7", verdict("card/7", 1, 1, tasks=1)])
     status, out, _ = check(base, claim(root, base, 9)[1], "card/9", github=github)
     assert (status, out.splitlines()) == (1, [_owes(12, 9, "card/9"), verdict("card/9", 1, 1)])
-    assert check(base, _built(root, base, 9, 12), "card/9", github=github)[:2] == (
+    assert check(base, built(root, base, 9, 12), "card/9", github=github)[:2] == (
         0, verdict("card/9", 1, 0, tasks=1) + "\n")
 
 
@@ -156,7 +134,7 @@ def test_a_task_whose_done_file_landed_under_its_old_card_is_not_owed_by_its_new
     card/9, cut from that dev, writes no done file for task 12, but M's tree holds the one
     card 7 landed, so task 12 is done in git, as sync reads it: card/9 does not owe it."""
     root, base = code
-    point_dev(root, landed := merge(root, base, _built(root, base, 7, 12), "Merge card/7"))
+    point_dev(root, landed := merge(root, base, built(root, base, 7, 12), "Merge card/7"))
     github = Lookup(tracker(card_node(7), card_node(9), card_node(12, "task", parent=9)))
     status, out, _ = check(landed, claim(root, landed, 9)[1], "card/9", github=github)
     assert (status, out) == (0, verdict("card/9", 1, 0) + "\n")
@@ -174,7 +152,7 @@ def test_a_claim_writing_the_done_file_of_no_task_of_its_card_is_refused(check, 
     under none: the file marks nothing done, as sync reads it, so it is refused."""
     root, base = code
     github = Lookup(tracker(card_node(7), *cards))
-    status, out, _ = check(base, _built(root, base, 7, 12), "card/7", github=github)
+    status, out, _ = check(base, built(root, base, 7, 12), "card/7", github=github)
     assert (status, out.splitlines()) == (1, [
         f"REFUSED -- plan/tasks/12: card/7 writes it, but {why}, so it marks nothing done (a "
         "task is done on its own card's branch only): take it off card/7",
@@ -186,7 +164,7 @@ def test_a_done_file_from_no_claim_is_refused_unread(check, code, head):
     """A branch that is no claim writes task 12's done file: only the claim of the card the
     task is under may, so it is refused, the tracker never read."""
     root, base = code
-    status, out, _ = check(base, _piece(root, base, 12), head)
+    status, out, _ = check(base, piece(root, base, 12), head)
     who = head or "a branch of another repository"
     assert (status, out.splitlines()) == (1, [
         f"REFUSED -- plan/tasks/12: {who} adds it, but a task's done file is written only on "
@@ -216,7 +194,7 @@ def test_a_delete_of_a_done_file_lands_from_any_branch_unread(check, code):
     """Card 7 landed on dev with task 12's piece.  A branch of no card deletes task 12's done
     file, a person's "not done": a delete, which lands, the tracker never read."""
     root, base = code
-    landed = merge(root, base, _built(root, base, 7, 12), "Merge card/7")
+    landed = merge(root, base, built(root, base, 7, 12), "Merge card/7")
     not_done = commit_files(root, landed, "task 12 is not done", {task_file(12): None})
     assert check(landed, not_done, "feat/x")[:2] == (0, verdict("feat/x", 0, 0, tasks=1) + "\n")
 
@@ -255,20 +233,22 @@ def test_the_records_door_never_opens_for_a_done_file(check, code):
 
 
 def test_a_release_carries_the_done_files_dev_took_in_unread(check, code):
-    """Card 7 lands on dev with task 12's piece.  The release brings the merge through which
-    dev took the done file in with the marker: carried, judged where it landed, so it lands
+    """Card 7 lands on dev with task 12's piece, begun as ``quill start`` begins it.  The
+    release brings the merge through which dev took the done file in with the marker and
+    card 7's file naming its task in progress: carried, judged where they landed, so it lands
     in main, the tracker never read."""
     root, base = code
-    point_dev(root, dev := merge(root, base, _built(root, base, 7, 12), "Merge card/7"))
+    point_dev(root, dev := merge(root, base, built(root, base, 7, 12), "Merge card/7"))
     assert check(base, dev, "dev", base="main")[:2] == (
         0, verdict("dev", 1, 0, "main", tasks=1) + "\n")
 
 
 def test_a_resync_carries_a_hotfixs_done_files_unread(check, code):
-    """Hotfix card 8 lands on main with task 13's piece; main, brought back into dev, carries
-    the merge through which main took its done file in: it lands, the tracker never read."""
+    """Hotfix card 8 lands on main with task 13's piece, begun as ``quill start`` begins it;
+    main, brought back into dev, carries the merge through which main took its done file and
+    card 8's file naming its task in progress in: it lands, the tracker never read."""
     root, base = code
-    point_main(root, hotfix := merge(root, base, _built(root, base, 8, 13), "Merge card/8"))
+    point_main(root, hotfix := merge(root, base, built(root, base, 8, 13), "Merge card/8"))
     dev = commit_files(root, base, "dev's own work", {"app.py": "dev\n"})
     assert check(dev, hotfix, "main")[:2] == (0, verdict("main", 1, 0, tasks=1) + "\n")
 
@@ -278,7 +258,7 @@ def test_a_copy_of_a_done_file_dev_took_in_is_refused(check, code):
     file alone holds dev's line without the merge that landed its work: refused from any
     branch, as a marker's copy is."""
     root, base = code
-    point_dev(root, merge(root, base, _built(root, base, 7, 12), "Merge card/7"))
+    point_dev(root, merge(root, base, built(root, base, 7, 12), "Merge card/7"))
     copied = commit_files(root, base, "copy", {task_file(12): f"done {MON}\n"})
     status, out, _ = check(base, copied, "copy", base="main")
     assert (status, out.splitlines()[0]) == (1, (
@@ -296,17 +276,17 @@ def test_a_task_undone_is_done_again_only_from_a_fresh_done_file(check, code):
     mark it done with no change to its record: refused, the claim's own branch included.  A
     fresh done file, a new line, lands."""
     root, base = code
-    landed = merge(root, base, _built(root, base, 7, 12), "Merge card/7")
-    reverted = _reverted(root, landed, 7, 12)
+    landed = merge(root, base, built(root, base, 7, 12), "Merge card/7")
+    reverted = undone(root, landed, 7, 12)
     again = claim(root, reverted, 7, TUE)[1]
     github = Lookup(tracker(card_node(7), card_node(12, "task", parent=7)))
-    status, out, _ = check(reverted, _piece(root, again, 12), "card/7", github=github)
+    status, out, _ = check(reverted, piece(root, again, 12), "card/7", github=github)
     assert (status, out.splitlines()) == (1, [
         "REFUSED -- plan/tasks/12: origin/dev held this very line once and undid it, so it "
         "would mark task 12 done again with no change to its record: a task undone is done "
         "again from a fresh done file (quill task-file plan#12), which writes a new line",
         verdict("card/7", 1, 1, tasks=1)])
-    assert check(reverted, _piece(root, again, 12, TUE), "card/7", github=github)[:2] == (
+    assert check(reverted, piece(root, again, 12, TUE), "card/7", github=github)[:2] == (
         0, verdict("card/7", 1, 0, tasks=1) + "\n")
 
 
@@ -319,8 +299,8 @@ def test_a_resync_keeping_a_done_file_mains_hotfix_deleted_is_refused(check, cod
     file: it writes nothing there, yet task 12 would read done with its code gone.  Refused,
     in a task's words."""
     root, base = code
-    dev = merge(root, base, _built(root, base, 7, 12), "Merge card/7")
-    point_main(root, main_tip := _reverted(root, merge(root, base, dev, "release"), 7, 12))
+    dev = merge(root, base, built(root, base, 7, 12), "Merge card/7")
+    point_main(root, main_tip := undone(root, merge(root, base, dev, "release"), 7, 12))
     kept = commit_files(root, dev, "keep the done file",
                         {marker(7): None, "w7.txt": None, "t12.txt": None})
     resync = run(root, "commit-tree", f"{kept}^{{tree}}", "-p", dev, "-p", main_tip, "-m",
@@ -340,7 +320,7 @@ def test_a_resync_dropping_a_hotfixs_done_file_is_refused(check, code):
     code but drops task 13's done file: task 13 would read not done with its code running.
     Refused, in a task's words; git's own resync lands."""
     root, base = code
-    point_main(root, hotfix := merge(root, base, _built(root, base, 8, 13), "Merge card/8"))
+    point_main(root, hotfix := merge(root, base, built(root, base, 8, 13), "Merge card/8"))
     dropped = commit_files(root, hotfix, "drop the done file", {task_file(13): None})
     resync = run(root, "commit-tree", f"{dropped}^{{tree}}", "-p", base, "-p", hotfix, "-m",
                  "resync")
@@ -363,7 +343,7 @@ def test_a_branch_deleting_a_hotfixs_done_file_in_a_commit_of_its_own_lands(chec
     shows the delete (R-BAL391), so it lands, as the same drop made in a merge's resolution
     does not (:func:`test_a_resync_dropping_a_hotfixs_done_file_is_refused`)."""
     root, base = code
-    point_main(root, hotfix := merge(root, base, _built(root, base, 8, 13), "Merge card/8"))
+    point_main(root, hotfix := merge(root, base, built(root, base, 8, 13), "Merge card/8"))
     merged = merge(root, base, hotfix, "merge main in")
     not_done = commit_files(root, merged, "task 13 is not done", {task_file(13): None})
     assert check(base, not_done, "feat/x")[:2] == (0, verdict("feat/x", 1, 0) + "\n")
@@ -399,10 +379,10 @@ def test_a_conflict_a_change_brings_on_a_done_file_refuses_to_judge(check, code)
     where before they merge cleanly: whether task 14 is done would be unknown, so nothing is
     judged (exit 2)."""
     root, base = code
-    first = merge(root, base, _built(root, base, 8, 14), "Merge card/8")
-    undone = _reverted(root, first, 8, 14)
-    point_main(root, merge(root, undone, _piece(root, claim(root, undone, 8, TUE)[1], 14, TUE),
-                           "Merge card/8 again"))
+    first = merge(root, base, built(root, base, 8, 14), "Merge card/8")
+    reverted = undone(root, first, 8, 14)
+    point_main(root, merge(root, reverted, piece(root, claim(root, reverted, 8, TUE)[1], 14,
+                                                 TUE), "Merge card/8 again"))
     dropped = commit_files(root, merge(root, base, first, "merge main in"), "drop it",
                            {task_file(14): None})
     status, out, err = check(base, dropped, "feat/x")

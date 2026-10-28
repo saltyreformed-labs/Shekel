@@ -164,6 +164,11 @@ close, or ``quill drop``'s, is a drop.  **It is refused too while a commit of it
 no task under N** (:mod:`tools.quill._stamps`, the commit hook's backstop).  The release tool
 never reads a task.
 
+**The file naming a card's task in progress, ``plan/doing/N``, is judged in the same walk**
+(rulings plan#2009 and plan#2022; :mod:`tools.quill._doing`): only ``card/N`` adds or changes
+it, a release or a resync carrying it as rule 4 carries a marker; a delete passes, from any
+branch; and an entry there that is no card's file, or a file naming no task, is refused.
+
 **The tracker is read only when a card or a task must be**, through the card-only reader
 (:class:`_tracker.CardReader`) and the token :data:`TOKEN_VARIABLE` holds: never quill's
 App, never the board.  In CI that token is an installation token of the read-only App
@@ -207,7 +212,7 @@ import requests
 
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, tracking
-from tools.quill import _findings, _git, _production, _stamps, _tasks
+from tools.quill import _doing, _findings, _git, _production, _stamps, _tasks
 from tools.quill._command import with_closure
 from tools.quill._exits import described
 from tools.quill._github import GitHub, GitHubError, reading
@@ -286,6 +291,9 @@ _TASKS = _Kind(_git.TASKS, _git.task_file, _git.task_of, attrgetter("task_confli
 _KINDS = (_CARDS, _TASKS)
 #: Each kind's directory, which one walk of git's history reads together.
 _DIRECTORIES = tuple(kind.directory for kind in _KINDS)
+#: Each kind's directory and the one holding each card's file naming its task in progress
+#: (:mod:`_doing`): what M's tree is read for, and the other branch's one walk.
+_WALKED = (*_DIRECTORIES, _git.DOING)
 
 
 class NotSet(LookupError):
@@ -341,11 +349,11 @@ class Landing:
 
     @cached_property
     def lines(self) -> Mapping[str, Mapping[int, str]]:
-        """By directory, each card whose marker M's tree holds and each task whose done file
-        it holds, with that file's line, by quill's one reading of a tree's markers and task
-        files (:func:`_git.lines_in`)."""
+        """By directory, each card whose marker M's tree holds, each task whose done file it
+        holds and each card whose file naming its task in progress it holds, with that file's
+        line, by quill's one reading of a tree's records (:func:`_git.lines_in`)."""
         return {directory: _git.lines_in(self.root, self.merge, directory)[0]
-                for directory in _DIRECTORIES}
+                for directory in _WALKED}
 
     @cached_property
     def held(self) -> Mapping[tuple[str, str], tuple[_git.Took, ...]]:
@@ -356,9 +364,16 @@ class Landing:
 
     @cached_property
     def carried(self) -> Mapping[tuple[str, str], tuple[_git.Took, ...]]:
-        """The lines of markers and task files the other branch's own line took in, with the
-        commits that took each in and undid it (:func:`_git.landings`)."""
-        return _git.landings(self.root, self.other, _DIRECTORIES)
+        """The lines of markers, task files and files naming a card's task in progress the
+        other branch's own line took in, with the commits that took each in and undid it
+        (:func:`_git.landings`)."""
+        return _git.landings(self.root, self.other, _WALKED)
+
+    def carries(self, entry: _git.Entry) -> bool:
+        """Rule 4: whether ``entry``, a line the change writes, is one the other branch's own
+        line took in that the change carries from it (:func:`_carried`)."""
+        took = self.carried.get((entry.path, entry.blob))
+        return bool(took) and _carried(self, took)
 
     @cached_property
     def deleted(self) -> frozenset[tuple[str, str]]:
@@ -589,9 +604,9 @@ def _written(landing: Landing, kind: _Kind, entry: _git.Entry) -> tuple[str | No
         return (f"{entry.path}: {_git.shown(landing.target)} held this very line once and undid "
                 f"it, so it would {said.again.format(s='', it=it)} with no change to its "
                 f"record{counted if kind.counted else ''}: {said.redo.format(n=number)}"), None
-    if took := landing.carried.get((entry.path, entry.blob)):
-        if _carried(landing, took):
-            return None, None
+    if landing.carries(entry):
+        return None, None
+    if (entry.path, entry.blob) in landing.carried:
         other = _git.shown(landing.other)
         return (f"{entry.path}: {other} took this very line in, but this change does not bring "
                 "the commit through which it did, or holds the one through which it undid it, "
@@ -604,8 +619,9 @@ def _written(landing: Landing, kind: _Kind, entry: _git.Entry) -> tuple[str | No
 
 def _judged(landing: Landing) -> tuple[list[str], dict[str, set[int]]]:
     """One sentence for each refusal of rules 1-6 over ``landing``'s entries under
-    :data:`_git.MARKERS` and :data:`_git.TASKS`, and the cards it records and the tasks it
-    writes a done file of that the tracker must be read for, by directory."""
+    :data:`_git.MARKERS` and :data:`_git.TASKS`, then of :mod:`_doing`'s over those under
+    :data:`_git.DOING`, and the cards it records and the tasks it writes a done file of that
+    the tracker must be read for, by directory."""
     written = [(kind, entry) for entry in landing.entries
                if entry.blob is not None and (kind := _kind_of(entry.path)) is not None]
     claim = landing.claim
@@ -623,6 +639,8 @@ def _judged(landing: Landing) -> tuple[list[str], dict[str, set[int]]]:
             reasons.append(why)
         if number is not None:
             read[kind.directory].add(number)
+    reasons += _doing.refused(landing, [entry for entry in landing.entries
+                                        if _under(entry.path, _git.DOING)])
     return reasons, read
 
 

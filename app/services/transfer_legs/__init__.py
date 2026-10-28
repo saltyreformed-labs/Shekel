@@ -26,17 +26,19 @@ transfer by a side link since), so the maintenance contract that kept a
 shadow equal to its parent (Transfer Invariant 3) has no shadow left to
 keep in step.
 
-**A leg is planned exactly while its own DATED movement does not exist**
-(ruling **R-BAL79**, plan step ``balance:X-bi-4a``; ledger row
-**BAL-500**).  The settled half reads a leg as the dated covering movement
-filed under the transfer's side on that account, so the MOVEMENT -- not the
-parent's status -- is what decides which relation a leg is in, per side:
-a transfer whose parent is still Projected while one side's movement has
-been dated (a state the status-band rule refuses at commit since plan step
-``balance:X-bi-6-4d-2``, below) is emitted here for the OTHER side alone,
-so no leg is counted by both halves.  Through ``X-bi-3e`` both legs were
-emitted off the parent's status and that state read ``-$500.00`` on a
-`$250.00` transfer.
+**A leg is planned exactly while its transfer is Projected** (plan step
+``balance:X-bi-6-5``'s third leaf).  The settled half reads a leg as the
+dated covering movement filed under the transfer's side on that account,
+and from plan step ``balance:X-bi-4a`` until that leaf the MOVEMENT decided
+here too, per side (ruling **R-BAL79**; ledger row **BAL-500**): a
+transfer whose parent was still Projected while one side's movement had
+been dated was emitted for the OTHER side alone, so no leg was counted by
+both halves.  Through ``X-bi-3e`` both legs were emitted off the parent's
+status and that state read ``-$500.00`` on a `$250.00` transfer.  The
+status-band rule refuses that state at commit since plan step
+``balance:X-bi-6-4d-2`` (below) -- a record is dated exactly while its
+transfer is Paid or Received -- so the status and the movement give one
+answer, and the plan half reads the status alone.
 
 **A leg is DERIVED and carries its parent, deliberately.**  It stores no
 figure, no period and no date of its own: :attr:`~TransferLeg.due_date`
@@ -70,14 +72,16 @@ case is unchanged.  That movement hangs off
 the transfer by its side link since plan step ``balance:X-bi-6-4d-2`` (off
 the transfer's shadow row on that account until then), and
 :func:`covering_movements_by_leg` reaches it through ONE join -- the join
-:func:`planned_transfer_legs` already uses to decide which relation a leg is
-in -- which that step moved once.  The fold's loader still emits only legs
+:func:`planned_transfer_legs` used to decide which relation a leg is in,
+until plan step ``balance:X-bi-6-5``'s third leaf left it the status alone
+-- which that step moved once.  The fold's loader still emits only legs
 whose record is ``None``.
 
 **One fold PREDICATE did change at 6-1, and it was pinned rather than
 denied**: sharing the join gave :func:`planned_transfer_legs`' ``dated_leg``
-test the term ``the shadow is live`` (``Transaction.is_deleted IS FALSE``)
-that it did not carry before -- the term the settled half's
+test (deleted at plan step ``balance:X-bi-6-5``'s third leaf) the term
+``the shadow is live`` (``Transaction.is_deleted IS FALSE``) that it did
+not carry before -- the term the settled half's
 ``balance_contributing_clause`` applied to the same movement.  On every
 door-written state the two predicates agreed (no door soft-deleted one shadow
 alone); on the double drift -- a dated movement under a shadow deleted around
@@ -126,8 +130,8 @@ predicates, the reference cache and the date arithmetic, and no service.
 hand the cash fold, the ledger oracle and the savings metric each paid
 transfer's covering movement with its transfer and side, and since that
 leaf's second half the posting WRITER books every transfer movement under its
-LEG (:func:`movement_parent`, :func:`transfer_family_movements`,
-:func:`dated_leg_exists_clause`).  For THOSE readers and the writer this
+LEG (:func:`movement_parent`, :func:`transfer_family_movements`).  For
+THOSE readers and the writer this
 module is the one place a transfer's movement is reached (through a shadow
 row until plan step ``balance:X-bi-6-4d-2``, by its side link since), and so
 it is since leaf ``X-bi-6-4c-2`` for the reconcile panel
@@ -227,7 +231,6 @@ from app.services.transfer_legs._leg import (
 )
 from app.services.transfer_legs._records import (
     covering_movements_by_leg,
-    dated_leg_exists_clause,
     grid_transfer_leg,
     grid_transfer_legs,
     held_transfer_entries,
@@ -251,7 +254,6 @@ __all__ = [
     "TransferLeg",
     "cell_key",
     "covering_movements_by_leg",
-    "dated_leg_exists_clause",
     "expense_legs",
     "grid_transfer_leg",
     "grid_transfer_legs",

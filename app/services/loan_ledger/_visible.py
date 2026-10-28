@@ -10,11 +10,11 @@ carries in ``journal_entries.entry_date``:
   ``settled_on`` of the loan-side covering movement its leg carries as its
   record (plan step ``balance:X-bi-6-4b``; the shadow's own column until
   then, which the status seam keeps equal to its movement), read through the
-  leg's own :attr:`~app.services.transfer_legs.TransferLeg.settled_on` and
-  refused when missing by the one refusal of a missing settle day,
-  :func:`app.utils.balance_predicates.require_settled_day`, since leaf
-  ``balance:X-bi-6-4d-1`` (through the row accessor
-  :func:`~app.utils.balance_predicates.settled_day` until then).  It is the day
+  leg's own :attr:`~app.services.transfer_legs.TransferLeg.settled_on`.  It
+  was refused when missing (ruling **R-BAL147**) until plan step
+  ``balance:X-bi-6-5``'s third leaf: a settled transfer's records are dated
+  (the status-band rule, :mod:`app.side_band_infrastructure`), so a record
+  under one carries its day.  It is the day
   the posting writer files the loan-side entry under (plan step
   ``balance:X-bi-6-3``) and the day the cash walk folds that movement on.  It
   is the LOAN side's own day (plan step ``balance:X-bi-6-4c-3``, ruling
@@ -31,9 +31,8 @@ carries in ``journal_entries.entry_date``:
   and that is plan step X-f1** (ruling R-EC).  It WAS the display-timezone
   civil date of the shadow's ``paid_at``, falling back to its pay period's
   ``start_date`` when the instant was NULL (the developer ruling of
-  2026-07-17); the day is a stored fact now,
-  and a settled payment whose record carries none is REFUSED rather than
-  dated by a fallback.  R-BAL139's installment is not a fallback for a
+  2026-07-17); the day is a stored fact now, which the status-band rule
+  holds present on every settled transfer's record.  R-BAL139's installment is not a fallback for a
   missing day: it is the day of a payment that has no movement to carry one
   (and one due before the loan's first installment keeps its own due date,
   having no installment to skip).
@@ -95,7 +94,6 @@ from datetime import date
 from app.services.installment_calendar import installment_paid_by
 from app.services.loan_loaders import loan_payment_due_date
 from app.services.transfer_legs import TransferLeg
-from app.utils.balance_predicates import require_settled_day
 
 
 def anchor_visible_on(anchor_date: date) -> date:
@@ -164,10 +162,12 @@ def payment_visible_on(
     **It DERIVED the day from ``paid_at`` until plan step X-f1** (ruling R-EC)
     -- a display-timezone conversion of the click instant with the pay period's
     ``start_date`` as a NULL fallback.  The column stores the day now, so this
-    reads a fact; a record carrying none under a settled transfer is refused
-    rather than dated by a fallback.  No door writes that state: a revert
-    un-dates the movement and leaves the transfer unsettled, and a ``$0.00``
-    re-close withdraws it (``status_seam._covering``).
+    reads a fact.  A record carrying none under a settled transfer was
+    refused rather than dated by a fallback (ruling **R-BAL147**) until plan
+    step ``balance:X-bi-6-5``'s third leaf deleted the refusal: the
+    status-band rule refuses that state at commit, and the transfer writer
+    dates or un-dates both records before it writes the status and walks no
+    loan between (``transfer_service._status.apply_status_to_all_three``).
 
     **The split MATH is untouched by the zone, and that is what bounds this
     rule's blast radius to one day of VISIBILITY.**  The interest / principal /
@@ -196,91 +196,10 @@ def payment_visible_on(
 
     Returns:
         The date from which a balance read counts this payment's principal.
-
-    Raises:
-        UndatedSettleError: When the leg's record carries no ``settled_on``
-            (ruling **R-BAL147**: refused, never dated by a guess, and
-            corrected through the app), from
-            :func:`~app.utils.balance_predicates.require_settled_day`.  The
-            refusal names the payment as its owner finds it in the app -- the
-            transfer's own name and its two accounts, the figure, the
-            paycheck and the due date, the ids beside them
-            (:func:`_undated_payment_subject`) -- since leaf
-            ``balance:X-bi-6-4d-1``, where ruling R-BAL147's "you fix the row
-            through the app" was read onto the TRANSFER, the thing its owner
-            edits once the movement re-parents.  It named the row the movement
-            hangs off (``transaction_id``, the shadow, which no screen shows)
-            through :func:`~app.utils.balance_predicates.settled_day` until
-            then, an id ``X-bi-6-4d`` empties.  A log line only: no route
-            translates the error and the 500 page renders none of its text;
-            the loan's own page and the dashboard refuse on this state too,
-            which is the refusal's known surface.
     """
     if leg.record is None:
         return installment_paid_by(
             origination_date, payment_day,
             loan_payment_due_date(leg, payment_day),
         )
-    return require_settled_day(
-        leg.settled_on,
-        subject=lambda: _undated_payment_subject(leg),
-        cause=_UNDATED_PAYMENT_CAUSE,
-    )
-
-
-#: Why a settled transfer's loan-side payment can carry no day, and the repair
-#: its owner makes through the app: ``payment_visible_on``'s cause sentence
-#: for :func:`~app.utils.balance_predicates.require_settled_day`.  Each claim
-#: about the transfer's door is pinned through that door
-#: (``test_loan_settled_legs.test_the_undated_refusal
-#: .TestTheRefusalsRepairWorksThroughTheApp``): a day
-#: typed into a side's box dates that side, and a revert then Mark Paid dates
-#: the payment to the day of the click.  It asks for EACH account's day
-#: because, today, a side whose day is only a guess follows the other side's
-#: (ruling R-BAL142), so typing the loan's alone moves Checking's guessed day
-#: too; ruling R-R116 (plan step X-cu) reverses that for a loan, and the
-#: sentence is true under both.
-_UNDATED_PAYMENT_CAUSE = (
-    "Its transfer is settled, and a settle dates each side through the status "
-    "seam, so this was written around the transfer service.  Correct it in "
-    "place through the app (ruling R-BAL147): open the transfer from its "
-    "source account's grid, in that paycheck's column, and type the day each "
-    "account's money moved into that account's \"Money moved on\" box.  "
-    "Reverting the transfer and marking it Paid again would instead date the "
-    "payment to the day of that click"
-)
-
-
-def _undated_payment_subject(leg: TransferLeg) -> str:
-    """Name a settled payment whose record carries no day, as its owner finds it.
-
-    The words a reader of the log needs to FIND the transfer in the app
-    (ruling **R-BAL147**: refused, and corrected through the app): the
-    transfer's own name, which its popover is titled with; its two accounts
-    -- the source account's grid draws it in the row named for the
-    destination (``grid_view_service._short_display_name`` strips the leg
-    label's prefix), the loan's own page refusing on this state too -- the
-    figure, the paycheck whose column it sits in and its due date, which
-    tell apart a loan's many payments between one pair of accounts; then the
-    ids beside them.  Called only on the refusal
-    (:func:`~app.utils.balance_predicates.require_settled_day`), so the
-    relationships it reads cost the happy path nothing.
-
-    Args:
-        leg: The settled payment's to-side leg, its record attached.
-
-    Returns:
-        The subject words, e.g. ``The loan-side payment (movement 2) of
-        transfer 3 "Mortgage" (Checking to Mortgage, $1,000.00 in the
-        paycheck of 2026-02-27, due 2026-03-01)``; a transfer storing no
-        name (the create door always writes one) omits the quoted name.
-    """
-    transfer = leg.transfer
-    named = "" if transfer.name is None else f' "{transfer.name}"'
-    due = "no due date" if leg.due_date is None else f"due {leg.due_date}"
-    return (
-        f"The loan-side payment (movement {leg.record.id}) of transfer "
-        f"{transfer.id}{named} ({transfer.from_account.name} to "
-        f"{transfer.to_account.name}, ${transfer.settled_figure:,.2f} in the "
-        f"paycheck of {leg.pay_period.start_date}, {due})"
-    )
+    return leg.settled_on

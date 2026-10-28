@@ -109,9 +109,10 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
             by the status seam at the settle, dated when the money moved and
             kept un-dated across a revert (ruling **R-BAL61**).
             ``None`` when the leg has none -- or when the loader did not ask:
-            the fold's :func:`planned_transfer_legs` emits legs whose DATED
-            movement does not exist and never loads one (ruling **R-BAL79**
-            decides the relation by the movement in SQL), while the grid's
+            the fold's :func:`planned_transfer_legs` emits the legs of
+            still-Projected transfers, whose sides hold no dated movement
+            (the status-band rule, :mod:`app.side_band_infrastructure`), and
+            never loads one, while the grid's
             :func:`grid_transfer_legs` loads every leg's through
             :func:`covering_movements_by_leg`.  :func:`movement_parent` gave
             a leg ``None`` for a movement that was NOT its leg's record (one

@@ -660,17 +660,16 @@ def leg_settlement_candidate(
     it was built off the SHADOW the movement hangs off.
 
     **Only a DATED record is a leg's payment** (ruling **R-BAL80**: a
-    settled leg is its dated covering movement; the per-side rule R-BAL79
-    puts every other side on the plan).  So a side is a LEG while its
-    transfer is Projected and its money has not moved
-    (``transfer_legs.offerable_transfer_legs``), its payment once the money
-    has moved, and NEITHER when its record is un-dated under a transfer that
-    is no longer Projected.  Under a Cancelled transfer (a door-written
-    state: the seam keeps a cancelled row's movement) that was already
-    so -- the contributing gate offers nothing -- and under a Paid or
-    Received one it is a state no door writes, which the cash fold also
-    reads as nothing (its plan half needs a Projected parent and its record
-    half a dated movement).  Offering it there booked the WRONG day: an
+    settled leg is its dated covering movement).  So a side is a LEG while
+    its transfer is Projected (``transfer_legs.offerable_transfer_legs``),
+    its payment once the money has moved, and NEITHER when its record is
+    un-dated under a transfer that is no longer Projected.  Under a
+    Cancelled transfer (a door-written state: the seam keeps a cancelled
+    row's movement) that was already so -- the contributing gate offers
+    nothing -- and under a Paid or Received one it is a state the
+    status-band rule refuses at commit, which the cash fold also reads as
+    nothing (its plan half needs a Projected parent and its record half a
+    dated movement).  Offering it there booked the WRONG day: an
     Apply runs ``transfer_service.settle_transfer`` with the bank's day, the
     parent is already settled so the door keeps its status and drops that
     day, and the pair repair dates the kept record on the owner's TODAY

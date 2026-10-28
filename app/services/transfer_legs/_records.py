@@ -8,9 +8,7 @@ entry's two side links since plan step ``balance:X-bi-6-4d-2`` (ruling
 :func:`_movement_link` its correlated link, :func:`_links_any` the same link
 over transfer ids, and :func:`_leg_transfer_id` and :func:`_leg_is_income` say
 which transfer and which side.  Every loader in this package that asks the
-join lives here -- the plan half's :func:`planned_transfer_legs` and the
-reconcile panel's :func:`offerable_transfer_legs` (both through
-:func:`dated_leg_exists_clause`), the settled half's
+join lives here -- the settled half's
 :func:`transfer_movement_rows` / :func:`recorded_transfer_legs`, the posting
 writer's :func:`transfer_family_movements`, the grid's
 :func:`covering_movements_by_leg` / :func:`grid_transfer_leg` /
@@ -21,6 +19,11 @@ the recurrence engine's :func:`transfers_holding_records`, and every door's
 Python twin over one loaded movement, and :func:`parent_entries`, the list
 that movement's parent loaded it into.  Plan step ``balance:X-bi-6-4d-2``
 moved the join off the shadows HERE, once, for every reader built on it.
+The plan half's :func:`planned_transfer_legs` and the reconcile panel's
+:func:`offerable_transfer_legs` live here too, beside the join they asked
+until plan step ``balance:X-bi-6-5``'s third leaf: a still-Projected
+transfer's side holds no dated record (the status-band rule,
+:mod:`app.side_band_infrastructure`), so they read the transfer alone.
 
 **"The module docstring" in the definitions below means the PACKAGE's**
 (:mod:`app.services.transfer_legs`): they were written when this was one
@@ -81,10 +84,9 @@ def planned_transfer_legs(
             :class:`~app.models.transfer.Transfer`.
 
     Returns:
-        One :class:`TransferLeg` per matching transfer whose leg on this
-        account is not yet a dated movement, unordered and with no
-        :attr:`~TransferLeg.record`; ``[]`` for an account no still-projected
-        transfer touches.
+        One :class:`TransferLeg` per matching transfer, its side on this
+        account, unordered and with no :attr:`~TransferLeg.record`; ``[]``
+        for an account no still-projected transfer touches.
     """
     return _still_planned_legs(
         account_id, options, Transfer.scenario_id == scenario_id,
@@ -104,10 +106,9 @@ def offerable_transfer_legs(
     The reconcile panel's loader (leaf ``X-bi-6-4c-2``), and statement
     match's LEG arm's since leaf ``X-bi-6-4c-1``: the owner's live,
     still-Projected transfers on this account, either side, filed in one of
-    *period_ids*, each as the :class:`TransferLeg` on this account -- emitted
-    exactly while that side's own DATED movement does not exist, which is
-    ruling **R-BAL79**'s rule and the same test :func:`planned_transfer_legs`
-    applies (the two share :func:`_still_planned_legs`).  It is a SECOND
+    *period_ids*, each as the :class:`TransferLeg` on this account -- the
+    same test :func:`planned_transfer_legs` applies (the two share
+    :func:`_still_planned_legs`).  It is a SECOND
     loader rather than that one with an argument, because its contract is a
     different one: an offer screen's WINDOW is its contract (the periods that
     had started by the statement's day), where a fold over a windowed plan is
@@ -116,13 +117,13 @@ def offerable_transfer_legs(
     (``reconcile_service._rows.outstanding_scope`` carries the deferral).
 
     The PARENT decides (ruling **R-JM**, a transfer leg reads its parent): a
-    parent that is not Projected is not emitted, and a Projected parent's side
-    is emitted while that side's own DATED record does not exist.  Since plan
+    parent that is not Projected is not emitted, and a Projected parent's
+    side is.  Since plan
     step ``balance:X-bi-6-4d-2`` the leg is priced and ticked off the parent
     and the side's record alone (``transfer_service.leg_settle_amount``,
     ``record_leg_clearing``), so no shadow's status or soft-delete reaches the
     offer.  ``tests/test_services/test_reconcile_transfer_legs.py`` pins the
-    parent-side direction and the dated-side rule here.
+    parent-side direction here.
 
     Args:
         account_id: The account the statement is for -- either side.
@@ -158,9 +159,21 @@ def _still_planned_legs(
     The ONE statement of "this transfer's leg on this account is still
     planned" for :func:`planned_transfer_legs` and
     :func:`offerable_transfer_legs`: the parent is live and Projected (the
-    shared :func:`~app.utils.balance_predicates.is_projected_clause`), the
-    account is one of its endpoints, and that side's dated covering movement
-    does not exist (ruling **R-BAL79**).  Each caller adds its own scope.
+    shared :func:`~app.utils.balance_predicates.is_projected_clause`) and the
+    account is one of its endpoints.  Each caller adds its own scope.
+
+    **The parent's status decides alone** (plan step ``balance:X-bi-6-5``'s
+    third leaf).  From plan step ``balance:X-bi-4a`` a side's DATED record
+    decided too (ruling **R-BAL79**): a still-Projected transfer holding one
+    was emitted for its other side only, so the settled half, which reads
+    that record, and this one could not both count it.  The status-band rule
+    (:mod:`app.side_band_infrastructure`) refuses that state at commit -- a
+    record is dated exactly while its transfer is Paid or Received -- so the
+    test excluded nothing a transaction can leave, and no reader of these
+    legs runs inside the one act that stages it (the transfer writer dates
+    the records before it writes the status,
+    ``transfer_service._status.apply_status_to_all_three``, and reads no leg
+    between).
 
     Args:
         account_id: The account whose legs to load -- either side.
@@ -170,12 +183,6 @@ def _still_planned_legs(
     Returns:
         The legs, unordered, with no :attr:`~TransferLeg.record`.
     """
-    # The leg's RECORD, when it exists: a dated covering movement on this
-    # account (ruling **R-BAL79**).  A correlated EXISTS rather than a join,
-    # so a transfer is one row here whatever its sides hold.
-    dated_leg = dated_leg_exists_clause(
-        TransactionEntry.account_id == account_id,
-    )
     transfers = (
         db.session.query(Transfer)
         .options(*options)
@@ -187,7 +194,6 @@ def _still_planned_legs(
                 Transfer.from_account_id == account_id,
                 Transfer.to_account_id == account_id,
             ),
-            ~dated_leg,
         )
         .all()
     )
@@ -202,8 +208,7 @@ def _side_records() -> Query:
     side names it by :func:`_movement_link`'s two side keys, and a movement
     filed under a plan row names that row and no transfer
     (``ck_transaction_entries_one_parent``).  Every reader of a leg's record
-    narrows this -- the plan half's, the loan settled half's and the
-    resync's :func:`dated_leg_exists_clause`, the grid's
+    narrows this -- the grid's
     :func:`covering_movements_by_leg`, every settled-half reader through
     :func:`transfer_movement_rows`, the posting writer through
     :func:`transfer_family_movements`, and every door's "this transfer holds a
@@ -354,48 +359,6 @@ def recorded_transfer_legs(*filters) -> list[TransferLeg]:
         _leg_on_side(transfer, is_income=is_income, record=movement)
         for movement, transfer, is_income in transfer_movement_rows(*filters)
     ]
-
-
-def dated_leg_exists_clause(*filters):
-    """Return the SQL form of "this transfer has a leg whose record is DATED".
-
-    A correlated ``EXISTS`` over :func:`_side_records`, rooted at
-    ``Transfer``: one of the transfer's sides has a record carrying a
-    ``settled_on``.  Its three readers ask one question three ways -- the
-    plan half's :func:`_still_planned_legs` (behind
-    :func:`planned_transfer_legs` and :func:`offerable_transfer_legs`)
-    narrows it to ONE account and negates it (that side's money moved, so
-    its leg is no longer planned, ruling **R-BAL79**); the loan settled
-    half (``loan_loaders._legs.settled_half_clause``) narrows it to the
-    transfer's to-account and ORs it with "not Projected" (the payment into
-    the loan has happened, ruling **R-BAL140**); and the posting writer's
-    deploy resync asks it bare, ORed with "settled" (the transfer may hold
-    a posted leg whatever its status, the totality argument of
-    ``posting_service.resync_all_cash_postings``).  Stated once
-    since leaf ``X-bi-6-4a``: the resync's copy lived in
-    ``_posting_purchases`` and walked the shadow itself, and it read every
-    entry under a live shadow where this reads the covering movements the
-    writer's family holds (0 of 38 entries under a shadow were anything else
-    on the 2026-09-22 17:06 production dump).
-
-    Args:
-        *filters: Further clauses over ``TransactionEntry``, e.g. the
-            account.
-
-    Returns:
-        A SQLAlchemy ``EXISTS`` clause, correlated to ``Transfer``.
-    """
-    return (
-        _side_records()
-        .filter(
-            _movement_link(),
-            TransactionEntry.settled_on.isnot(None),
-            *filters,
-        )
-        .with_entities(TransactionEntry.id)
-        .correlate(Transfer)
-        .exists()
-    )
 
 
 def transfer_holds_a_movement() -> Exists:

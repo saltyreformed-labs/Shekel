@@ -95,7 +95,7 @@ def load_transfer_contributions_for_accounts(
     **It reads the loan loaders' ONE partition since plan step
     balance:X-bi-6-4b** (ruling **R-BAL140**), one account at a time, and the
     screen above is that partition's narrowing.  A contribution that has
-    SETTLED -- its transfer settled, or its to-side money moved -- is worth
+    SETTLED -- its transfer settled -- is worth
     the figure its transfer stores
     (:func:`~app.services.row_valuation.leg_settled_contribution`); one still
     PROJECTED is worth what the parent resolves to

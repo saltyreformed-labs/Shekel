@@ -808,8 +808,8 @@ class _CashPlan:
             unwindowed: every still-Projected contributing row of the
             account's OWN, one
             :class:`~app.services.transfer_legs.TransferLeg` per
-            still-projected transfer whose leg here is not yet a dated
-            movement (rulings **R-BAL13**, **R-BAL79**), and one
+            still-projected transfer the account is on (ruling
+            **R-BAL13**), and one
             :class:`~app.services.cash_ledger.InFlightMovement` per un-dated
             purchase on the account (ruling **R-BAL77**).
         by_day: The same items keyed by the day each LANDS on (ruling R-G's

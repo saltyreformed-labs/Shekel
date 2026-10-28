@@ -126,8 +126,9 @@ class TestTheSettledHalfComplementsThePlanHalf:
         Cancelled through the door, its records kept un-dated -- is what
         stands, excluded as before); and un-dating the last member's loan
         side under its Paid parent (the band again; rolled back, Paid and
-        dated, settled as it was -- its walk's refusal is
-        :class:`TestASettledPaymentWithAnUndatedRecordFailsLoud`'s).
+        dated, settled as it was -- the walk's refusal of it was graded
+        beside this file until plan step ``balance:X-bi-6-5``'s third leaf
+        deleted that refusal).
 
         **Four members left at plan step ``balance:X-bi-6-4d-2``**, where a
         transfer became one row (ruling **R-BAL258**).  Three planted the

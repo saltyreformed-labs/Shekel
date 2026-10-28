@@ -113,7 +113,9 @@ folded ``$0.00`` on both sides.  Before X-bi-6a either drift counted ONCE,
 because only the shadow was read.  Plan step ``X-bi-4a`` let a side's DATED
 movement, not a status, decide which half counts its leg (ruling
 **R-BAL79**), and both drifts were pinned in
-``tests/test_services/test_transfer_legs/test_the_plan_half.py``.  **Drift A
+``tests/test_services/test_transfer_legs/test_the_plan_half.py``; plan step
+``balance:X-bi-6-5``'s third leaf gave the plan half back to the status
+alone, the status-band rule having made the two one answer.  **Drift A
 is structural now**: plan step ``balance:X-bi-6-4d-2`` made a transfer one
 row (ruling **R-BAL258**), so no shadow's status can part from its
 transfer's.  What pins that is the database's refusal of a shadow row

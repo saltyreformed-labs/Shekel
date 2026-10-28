@@ -44,7 +44,10 @@ dropped before its filing finished gives it back (``_unsplit``).
 ``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
 ``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
-says when sync is behind.  ``answer`` answers the developer's comments on a card, and ``next``
+says when sync is behind.  ``watch`` runs every minute from the same clone, never beside
+``sync`` (``shekel-plan-watch.timer``): the same producer over each card whose branch moved
+since its last pass, so the board shows a push within a minute (rulings plan#1871, plan#1874,
+:mod:`_watch`).  ``answer`` answers the developer's comments on a card, and ``next``
 names each claimed card holding one no answer has followed (plan#1822, :mod:`_comments`).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
@@ -71,11 +74,13 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill move plan#N (--top | --bottom | --after plan#M)
     python -m tools.quill.quill drop plan#N --why REASON
     python -m tools.quill.quill sync [--dry-run]
+    python -m tools.quill.quill watch [--dry-run]
     python -m tools.quill.quill spec-history plan#N [--since BRANCH_OR_DATE]
     python -m tools.quill.quill spec-revert plan#N --to EDIT_ID
     python -m tools.quill.quill export --to DIR
 
-Exit status: 0 done; 1 refused, with nothing written (or, for ``sync``, a
+Exit status: 0 done (for ``watch``, its REPORT lines printed: they alert from ``sync``, ruling
+plan#1907); 1 refused, with nothing written (or, for ``sync``, a
 REPORT a person must act on); 2 a call failed -- GitHub, git, the network, or
 a file the command reads or writes (the App's credentials, a ``--body-file``,
 ``export``'s file) -- or the command line itself is not one of the forms above
@@ -105,7 +110,7 @@ import requests
 
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
-from tools.quill import _comments, _filing, _findings, _git, _status, _tasks
+from tools.quill import _comments, _filing, _findings, _git, _status, _sync, _tasks, _watch
 from tools.quill._command import (
     Refused,
     _label,
@@ -711,87 +716,34 @@ def _undo_splits(tracker: Tracker, cards: dict[int, Card], shipped: frozenset[in
         _unsplit(tracker, undo, cards, dry_run)
 
 
-def _sync_reads(tracker: Tracker, reads: _git.Reads,
-                ever: frozenset[int]) -> tuple[dict[int, Card], list[str]]:
-    """The cards ``sync`` decides over, and a HISTORY line for each card a ship marker in
-    ``reads`` names that does not exist.  ``ever``: every card whose marker a commit on
-    ``dev`` or ``main`` ever touched (:func:`_git.ever_marked`).
-
-    The listings of open cards and of EVERY card still marked (a filing unfinished, or
-    one closed while still being filed, whose link under its split step ``sync``
-    undoes wherever that step is) only FIND the cards it decides over; each
-    is then read by its number, which decides, since a listing may still show a card
-    as it was before a write: a leaf's close the listing lagged made its split step,
-    which ``quill drop`` had just closed, read as split again, and sync reopened it.
-    Every card a marker ever named (``ever``, which holds every card git says shipped now
-    too), and every claimed card, is read by its number too -- the first so that a card
-    the tool closed as shipped is reopened once a revert has deleted its marker, which no
-    listing finds (it is closed, and carries no mark); the
-    claimed ones so that a claim on a split step is reported whatever that step's
-    state (:func:`_state.sync_plan`) -- and then every card a decision over them reads
-    (:func:`with_closure`).  Every card a task file on ``dev`` or ``main``, or one a
-    claim's own commits wrote, names is read by its number too, and then every task linked
-    under a card read (R-BAL386): a task the tool closed as done is found through the card it
-    is under, so it is reopened once git no longer says it is done.  (Not found: one under a
-    card a PERSON closed while it was claimed, never shipped nor marked, whose claim was
-    released since; it stays shown done under that dropped card.)
-    """
-    listed = {**tracker.open_cards(), **tracker.marked()}
-    named = set(reads.shipped.tasks).union(*(claim.tasks for claim in reads.claims.values()))
-    cards = tracker.cards(ever | set(listed) | set(reads.claims) | named)
-    if unread := sorted(set(listed) - set(cards)):
-        raise TrackerError(f"plan#{unread[0]} is listed, but a read by its number does not hold "
-                           "it (that read has not caught up yet, or the card was deleted or "
-                           "moved since): run sync again")
-    history = [f"the marker {_git.marker(number)} on {DEV} or {MAIN} names plan#{number}, "
-               "which does not exist" for number in sorted(reads.shipped.cards - set(cards))]
-    cards = with_closure(tracker, cards)
-    tasks = {number for card in cards.values() for number in card.task_children} - set(cards)
-    return with_closure(tracker, {**cards, **tracker.cards(tasks)}), history
-
-
 def cmd_sync(args, tracker: Tracker, root: Path) -> int:
-    """Write each step's, finding's and task's open or closed state from git (display only), then
-    undo each split a leaf closed while still being filed is linked under (R-BAL205,
-    :func:`_undo_splits`): after every state write and every REPORT and HISTORY line, so a
-    failed undo costs none of them; run again, it finishes the undo.  Then put on the board
-    each task whose step is on it and that is not (ruling plan#1842,
+    """Write each step's, finding's and task's open or closed state from git (display only,
+    :func:`_sync.write_states`), then undo each split a leaf closed while still being filed is
+    linked under (R-BAL205, :func:`_undo_splits`): after every state write and every REPORT and
+    HISTORY line, so a failed undo costs none of them; run again, it finishes the undo.  Then
+    put on the board each task whose step is on it and that is not (ruling plan#1842,
     :func:`_tasks.put_on_board`), and last write the board's Status of every card it holds
     from git (rulings plan#1873, plan#1905, :func:`_status.sync_statuses`): display of the
     plan, so a failed write costs nothing above it; run again, it makes the writes still owed.
 
     Prints a REPORT for each thing a person must fix in the tracker, which makes
     it exit 1, and a HISTORY line for each thing ``dev`` and ``main`` already hold
-    wrongly, which no tracker write can change and so never fails it (R-BAL184).
+    wrongly, which no tracker write can change and so never fails it (R-BAL184): those
+    about the cards it decides, and each entry under ``plan/ships`` or ``plan/tasks`` there
+    that is no card's (:attr:`_git.Shipped.history`).
 
-    What it reads: :func:`_sync_reads`.
+    What it reads: :func:`_sync.every_card`.  ``quill watch`` runs the same producer over
+    the cards a moved branch names (:mod:`_watch`).
     """
     reads = _git.read(root)
     shipped = reads.shipped.cards
-    cards, history = _sync_reads(tracker, reads, _git.ever_marked(root))
-    changes = sync_plan(cards, shipped, reads.claims, reads.shipped.tasks)
-    verb = "would " if args.dry_run else ""
-    for number in changes.close:
-        if not args.dry_run:
-            tracker.close(number, "completed")
-        print(f"{verb}close {_label(cards[number])}")
-    for number in changes.drop:
-        if not args.dry_run:
-            tracker.close(number, "not_planned")
-        print(f"{verb}close as not planned, every leaf dropped (R-BAL187): "
-              f"{_label(cards[number])}")
-    for number in changes.reopen:
-        if not args.dry_run:
-            tracker.reopen(number)
-        print(f"{verb}reopen {_label(cards[number])}")
-    for line in changes.reports:
-        print(f"REPORT: {line}")
-    history += changes.history + list(reads.shipped.history)
-    for line in history:
+    decided = _sync.every_card(tracker, reads, _git.ever_marked(root))
+    changes = _sync.write_states(tracker, decided, shipped, args.dry_run)
+    for line in reads.shipped.history:
         print(f"HISTORY: {line}")
-    _undo_splits(tracker, cards, shipped, changes, args.dry_run)
-    _tasks.put_on_board(tracker, cards, args.dry_run)
-    for line in (shown := _status.sync_statuses(tracker, cards, reads, args.dry_run)):
+    _undo_splits(tracker, decided.cards, shipped, changes, args.dry_run)
+    _tasks.put_on_board(tracker, decided.cards, args.dry_run)
+    for line in (shown := _status.sync_statuses(tracker, decided.cards, reads, args.dry_run)):
         print(f"REPORT: {line}")
     return 1 if changes.reports or shown else 0
 
@@ -952,6 +904,9 @@ def parser() -> argparse.ArgumentParser:
     hand.add_argument("--to", type=card_number, required=True, help="its new owner step")
     commands.add_parser("sync", help="write cards' state from git").add_argument(
         "--dry-run", action="store_true")
+    commands.add_parser("watch", help="write the state of each card whose branch moved since "
+                                      "the last pass, from git").add_argument(
+        "--dry-run", action="store_true")
     history = commands.add_parser("spec-history", help="a card's body edits")
     history.add_argument("card", type=card_number)
     history.add_argument("--since", help="an ISO date or time, or a branch (from its start)")
@@ -975,13 +930,24 @@ COMMANDS: dict[str, Callable[..., int]] = {
 }
 
 
+#: The commands handed how to reach the tracker, ``connect``, in place of a tracker: each
+#: connects only once it has something to read or write there.  ``watch`` runs every minute,
+#: and most minutes ask git alone (:mod:`_watch`).
+CONNECTS_LATE: dict[str, Callable[..., int]] = {"watch": _watch.cmd_watch}
+
+#: What a command's failed call raises: exit status 2 (:func:`exit_status`).
+FAILURES = (GitHubError, TrackerError, GitError, requests.RequestException, OSError,
+            CredentialsError)
+
+
 def main(argv: list[str] | None = None, connect: Callable[[], Tracker] = CONNECT,
          root: Path | None = None) -> int:
     """Run one command; its exit status."""
     args = parser().parse_args(argv)
-    return exit_status(lambda: COMMANDS[args.command](args, connect(), root or REPO),
-                       (GitHubError, TrackerError, GitError, requests.RequestException, OSError,
-                        CredentialsError))
+    if args.command in CONNECTS_LATE:
+        return exit_status(partial(CONNECTS_LATE[args.command], args, connect, root or REPO),
+                           FAILURES)
+    return exit_status(lambda: COMMANDS[args.command](args, connect(), root or REPO), FAILURES)
 
 
 if __name__ == "__main__":

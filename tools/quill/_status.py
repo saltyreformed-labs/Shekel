@@ -11,20 +11,21 @@ which the board does not hold (its leaves take its place), shows its leaves
 (:func:`_state.container_shown`), should a person put it back.
 
 Only quill writes it: ``quill sync`` reads every card's Status on the board, decides each, and
-writes each that differs, a person's edit put back (:func:`sync_statuses`, ruling plan#1905);
-``--dry-run`` prints each write unmade.  Its options are set on the web, and ``setup_tracker``
-checks them: while the field lacks one of :data:`setup_tracker.STATUS_OPTIONS`, sync reports
-it and writes no card's Status at all (ruling plan#1906), so no card is shown a state the
-board cannot hold.  An item ``sync``'s own put-on added this run that the board's read lags is
-written by the next run (``_tracker`` measured the board lagging an add).
+writes each that differs, a person's edit put back (:func:`sync_statuses`, ruling plan#1905),
+and ``quill watch`` does the same for each card a moved branch names (its ``scope``,
+:mod:`_watch`); ``--dry-run`` prints each write unmade.  Its options are set on the web, and
+``setup_tracker`` checks them: while the field lacks one of :data:`setup_tracker.STATUS_OPTIONS`,
+sync reports it and writes no card's Status at all (ruling plan#1906), so no card is shown a
+state the board cannot hold.  An item ``sync``'s own put-on added this run that the board's
+read lags is written by the next run (``_tracker`` measured the board lagging an add).
 
 Split out of the command module, which this would take past the 1,000 lines
 ``too-many-lines`` allows.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, replace
 
 from tools.quill import _git
 from tools.quill._command import _label, with_cards, with_closure
@@ -122,12 +123,14 @@ def unwritable(statuses: Statuses) -> str | None:
 
 
 def sync_statuses(tracker: Tracker, cards: Mapping[int, Card], reads: _git.Reads,
-                  dry_run: bool) -> list[str]:
+                  dry_run: bool, scope: Collection[int] | None = None) -> list[str]:
     """``quill sync``'s last pass, display of the plan: the board's Status read, every card it
     holds that ``cards`` lacks read by its number, and each write :func:`status_writes` names
     made (or under ``dry_run`` printed and not made), each printed as it lands; none while
     the field cannot hold every answer (:func:`unwritable`).  Its REPORT lines, for ``sync``
-    to print and exit 1 on.
+    to print and exit 1 on.  With ``scope``, only the cards it numbers that the board holds
+    are decided and written: ``quill watch``'s pass over the cards a moved branch names
+    (:mod:`_watch`), ``cards`` holding each and what a decision over it reads.
 
     Raises:
         _tracker.TrackerError: when a card the board holds does not exist by its number.
@@ -135,6 +138,9 @@ def sync_statuses(tracker: Tracker, cards: Mapping[int, Card], reads: _git.Reads
     statuses = tracker.board.statuses()
     if why := unwritable(statuses):
         return [why]
+    if scope is not None:
+        statuses = replace(statuses, held={number: held for number, held in statuses.held.items()
+                                           if number in scope})
     held = with_closure(tracker, with_cards(tracker, dict(cards), statuses.held))
     verb = "would " if dry_run else ""
     for write in status_writes(statuses, held, reads):

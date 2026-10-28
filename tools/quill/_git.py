@@ -288,17 +288,34 @@ def instant(when: datetime) -> str:
     return when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def on_origin(root: Path) -> dict[int, str]:
-    """Every ``card/<number>`` branch ``origin`` holds, by card, with its tip: asked of
+#: The two integration branches as ``origin`` names them (``refs/heads/<name>``).
+INTEGRATION = ("dev", "main")
+
+
+def origin_tips(root: Path) -> dict[str, str]:
+    """Each branch quill reads that ``origin`` holds -- ``dev``, ``main`` and every
+    ``card/<number>`` -- by its name there, with its tip: ONE ``git ls-remote``, asked of
     ``origin``, not of this clone's tracking refs.  A branch under ``card/`` named by no card
-    number is not a claim and is passed over."""
+    number is not a claim and is passed over.  :func:`on_origin` reads its claims from it, and
+    ``quill watch`` compares it with the tips it saw last (``tools/quill/_watch.py``)."""
     found = {}
-    for line in git(root, "ls-remote", "origin", f"refs/heads/{CARD_BRANCH}*").splitlines():
+    out = git(root, "ls-remote", "origin", f"refs/heads/{CARD_BRANCH}*",
+              *(f"refs/heads/{name}" for name in INTEGRATION))
+    for line in out.splitlines():
         sha, _, ref = line.partition("\t")
-        number = claimed_card(ref.removeprefix("refs/heads/"))
-        if ref.startswith("refs/heads/") and number is not None:
-            found[number] = sha
+        branch = ref.removeprefix("refs/heads/")
+        if ref.startswith("refs/heads/") and (branch in INTEGRATION
+                                              or claimed_card(branch) is not None):
+            found[branch] = sha
     return found
+
+
+def on_origin(root: Path, tips: dict[str, str] | None = None) -> dict[int, str]:
+    """Every ``card/<number>`` branch ``origin`` holds, by card, with its tip: those
+    :func:`origin_tips` lists, or ``tips``, one such listing already read."""
+    listed = origin_tips(root) if tips is None else tips
+    return {number: sha for branch, sha in listed.items()
+            if (number := claimed_card(branch)) is not None}
 
 
 def fetch(root: Path, cards: Iterable[int] = ()) -> None:
@@ -604,12 +621,13 @@ def claims(root: Path, cards: Iterable[int]) -> dict[int, Claim]:
     return found
 
 
-def read(root: Path) -> Reads:
+def read(root: Path, tips: dict[str, str] | None = None) -> Reads:
     """What a command reads of git, once: the claim branches ``origin`` lists
-    (:func:`on_origin`), ONE fetch of ``dev``, ``main`` and each of them (:func:`fetch`),
-    then what shipped (:func:`shipped`), every claim (:func:`claims`) and every listed
-    branch that is none, merged."""
-    listed = on_origin(root)
+    (:func:`on_origin`; from ``tips``, :func:`origin_tips`'s listing, when one was read
+    already), ONE fetch of ``dev``, ``main`` and each of them (:func:`fetch`), then what
+    shipped (:func:`shipped`), every claim (:func:`claims`) and every listed branch that is
+    none, merged."""
+    listed = on_origin(root, tips)
     fetch(root, listed)
     found = claims(root, listed)
     merged = {number: git(root, "rev-parse", f"refs/remotes/origin/{card_branch(number)}").strip()

@@ -12,20 +12,29 @@ transfer in ONE statement (``transfer_legs.preload_side_records``), or filled
 at no cost by a loader that built the side FROM its record
 (``recorded_transfer_legs``, ``movement_parent``) -- never one side at a time.
 
-**So every path takes the same control: inside it, no side's list is loaded
-alone.**  :func:`_sides_read_alone` collects each such load -- the lazy load
-one :attr:`~app.services.transfer_legs.TransferLeg.record` read runs on a list
-nobody loaded, one statement per side -- and each case below asserts it
-collects none while its fixture holds sides the path builds.  The batched
-pre-load is a plain query and the fill issues none, so neither is collected.
-Zero holds whatever rows the fixture builds, where a total statement count
-pinned today's figure would break on unrelated work.
+**So every path takes the same control: inside it, no side's records are
+read alone.**  :func:`_sides_read_alone` collects each statement whose
+criteria name one side's link and not the other's -- the lazy load one
+:attr:`~app.services.transfer_legs.TransferLeg.record` read runs on a list
+nobody loaded, and an explicit query by one side's column -- and each case
+below asserts it collects none while its fixture holds sides the path builds.
+The batched pre-load names both sides and the fill issues no statement, so
+neither is collected.  Zero holds whatever rows the fixture builds, where a
+total statement count pinned today's figure would break on unrelated work.
+Until the review of plan#2086 (finding M3) it collected relationship lazy
+loads alone, so a per-side query passed every control; and every page
+fixture held Paid transfers alone, whose lists the cash fold fills, so a
+page's read of a planned side's record passed too (finding M2).  Each page
+case holds planned transfers since.
 
 **What makes each control fire is named in its docstring, and was measured**
 by deleting that pre-load or fill (or, for a path that reads no record,
-adding a read) at plan#2090's commit: the case then collects the sides the
-fixture puts in its path.  The last class holds the ruling's other half: an
-act that reads no record fetches none (plan#2138).
+adding a read) at plan#2090's commit, and for the planned sides and the
+per-side query at plan#2144's: the case then collects the sides the fixture
+puts in its path.  The last two classes hold the ruling's other halves: an
+act that reads no record fetches none (plan#2138), and a batch act fetches
+its transfers' records in one pre-load for all of them while its reader
+fetches none (finding L1).  :func:`_side_record_fetches` counts those.
 """
 
 from contextlib import contextmanager
@@ -33,12 +42,14 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import event, inspect
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, Join, Select, event, inspect
+from sqlalchemy.orm import Session, with_parent
+from sqlalchemy.sql import visitors
 
 from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db
+from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import (
     pay_calendar,
@@ -78,39 +89,126 @@ from ._helpers import _savings
 _HTMX = {"HX-Request": "true"}
 
 
-@contextmanager
-def _sides_read_alone():
-    """Collect each transfer side whose record list is loaded ON ITS OWN inside this block.
+def _side_links():
+    """Return ``{link column: is_income}``: the column each side's records are filed by.
 
-    A read of a side's record off a list nobody loaded runs the
-    relationship's lazy load: one SELECT for that one side.  SQLAlchemy fires
-    ``do_orm_execute`` for it with ``is_relationship_load`` set and
-    ``lazy_loaded_from`` naming the transfer, and its loader path ends at the
-    side's relationship, which :func:`side_movements_key` names -- the one
-    statement of which list is a side's.  A statement count could not tell
-    this load from any other SELECT on ``budget.transaction_entries``.
+    Read off the relationship :func:`side_movements_key` names for each side
+    -- the one statement of which list is a side's -- as the column its join
+    keys on the record (its remote side), so the instrument states no second
+    spelling of which column is which side's.
+    """
+    transfer_mapper = inspect(Transfer)
+    return {
+        column: is_income
+        for is_income in (False, True)
+        for column in transfer_mapper.relationships[
+            side_movements_key(is_income=is_income)
+        ].remote_side
+    }
+
+
+def _sides_named(statement) -> set[bool]:
+    """Return the sides whose link column *statement*'s criteria name.
+
+    The criteria are a SELECT's WHERE clause and the ON clause of every join
+    in its FROM list (``get_final_froms``, which computes the joins an eager
+    load adds too), and never its columns: a SELECT of the records names both
+    link columns whatever narrows it.  A column counts by lineage
+    (``shares_lineage``), so the ORM's annotated spelling of a link and an
+    aliased one both name it.
+
+    Args:
+        statement: The statement a session is about to execute.
+
+    Returns:
+        ``set()`` for a statement naming neither link (or no SELECT),
+        ``{False, True}`` for one narrowed by both -- the shape every query of
+        side records ``app/`` writes takes (``transfer_legs._records._movement_link``
+        and ``_links_any``) -- and one side alone for a per-side read.
+    """
+    if not isinstance(statement, Select):
+        return set()
+    criteria = [] if statement.whereclause is None else [statement.whereclause]
+    criteria.extend(
+        node.onclause
+        for source in statement.get_final_froms()
+        for node in visitors.iterate(source)
+        if isinstance(node, Join) and node.onclause is not None
+    )
+    links = _side_links()
+    return {
+        is_income
+        for criterion in criteria
+        for node in visitors.iterate(criterion)
+        if isinstance(node, ColumnElement)
+        for link, is_income in links.items()
+        if link.shares_lineage(node)
+    }
+
+
+@contextmanager
+def _collecting(collect):
+    """Collect what *collect* answers for each statement a session executes inside this block.
+
+    Args:
+        collect: ``ORMExecuteState -> item or None``; ``None`` collects nothing.
 
     Yields:
-        ``[(transfer id, is_income), ...]``, one per side loaded alone,
-        appended in load order as the block runs.
+        The items, appended in execution order as the block runs.
     """
-    sides = {side_movements_key(is_income=flag): flag for flag in (False, True)}
-    transfer_mapper = inspect(Transfer)
-    alone = []
+    found = []
 
     def _record(orm_state):
-        parent = orm_state.lazy_loaded_from
-        if not orm_state.is_relationship_load or parent is None:
-            return
-        relationship = orm_state.loader_strategy_path.path[-1]
-        if relationship.parent is transfer_mapper and relationship.key in sides:
-            alone.append((parent.identity[0], sides[relationship.key]))
+        item = collect(orm_state)
+        if item is not None:
+            found.append(item)
 
     event.listen(Session, "do_orm_execute", _record)
     try:
-        yield alone
+        yield found
     finally:
         event.remove(Session, "do_orm_execute", _record)
+
+
+def _sides_read_alone():
+    """Collect each statement that reads ONE side's records, not both, inside this block.
+
+    Every query of side records ``app/`` writes narrows by both sides'
+    links at once (:func:`_sides_named`), so a statement naming one side's
+    link and not the other's is a side read on its own: the lazy load one
+    :attr:`~app.services.transfer_legs.TransferLeg.record` read runs on a list
+    nobody loaded (the relationship's own SELECT, keyed on that side's link),
+    and an explicit query by one side's column, the shape ruling
+    **plan#2136** removed from ``transfer_sides``.  A statement count could
+    not tell either from any other SELECT on ``budget.transaction_entries``.
+
+    Returns:
+        A context manager yielding ``[(transfer id, is_income), ...]``, one
+        per such statement in execution order: the transfer is the one a lazy
+        load read the list of (``lazy_loaded_from``), and ``None`` for a query
+        of its own, which names no one parent.
+    """
+    def _alone(orm_state):
+        sides = _sides_named(orm_state.statement)
+        if len(sides) != 1:
+            return None
+        parent = orm_state.lazy_loaded_from
+        return (None if parent is None else parent.identity[0], *sides)
+
+    return _collecting(_alone)
+
+
+def _side_record_fetches():
+    """Collect each statement that fetches transfer sides' records inside this block.
+
+    Any statement whose criteria name a side's link (:func:`_sides_named`):
+    a batched pre-load, a loader's join, a lazy load, a per-side query.
+
+    Returns:
+        A context manager yielding one ``set`` of the sides named per such
+        statement, in execution order.
+    """
+    return _collecting(lambda orm_state: _sides_named(orm_state.statement) or None)
 
 
 def _a_savings_account(seed_user):
@@ -131,7 +229,7 @@ def _paid(seed_user, from_account, to_account, period, amount, **kwargs):
 
 
 class TestTheInstrument:
-    """:func:`_sides_read_alone` collects a side read alone, and not the batched pre-load."""
+    """:func:`_sides_read_alone` collects a side read alone, lazily or by a query, not the pre-load."""
 
     def test_a_side_read_off_an_unloaded_list_is_collected(
         self, app, seed_user, seed_periods_today,
@@ -152,10 +250,40 @@ class TestTheInstrument:
             assert record is not None
             assert alone == [(paid.id, False)]
 
-    def test_the_batched_preload_is_not_collected(
+    @pytest.mark.parametrize("is_income", [False, True])
+    def test_a_query_of_one_sides_records_is_collected(
+        self, app, seed_user, seed_periods_today, is_income,
+    ):
+        """A query narrowed by one side's link is ONE side read alone, naming no transfer.
+
+        The shape ruling **plan#2136** removed from ``transfer_sides``: the
+        side's records fetched by a query of their own rather than with the
+        other side's.  No list is read, so no relationship load runs and only
+        the statement's criteria show it.
+        """
+        with app.app_context():
+            paid = _paid(
+                seed_user, seed_user["account"], _a_savings_account(seed_user),
+                seed_periods_today[3], "120.00",
+            )
+            db.session.commit()
+
+            with _sides_read_alone() as alone:
+                records = db.session.query(TransactionEntry).filter(with_parent(
+                    paid, getattr(Transfer, side_movements_key(is_income=is_income)),
+                )).all()
+
+            assert len(records) == 1
+            assert alone == [(None, is_income)]
+
+    def test_the_batched_preload_is_one_fetch_and_not_collected(
         self, app, seed_user, seed_periods_today,
     ):
-        """Two transfers' four sides loaded by the pre-load, then read: nothing collected."""
+        """Two transfers' four sides loaded by the pre-load, then read: ONE fetch, nothing alone.
+
+        :func:`_side_record_fetches` counts the pre-load as one statement
+        naming both sides, and the four reads after it fetch nothing.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = _a_savings_account(seed_user)
@@ -166,7 +294,7 @@ class TestTheInstrument:
             db.session.commit()
             db.session.expire_all()
 
-            with _sides_read_alone() as alone:
+            with _sides_read_alone() as alone, _side_record_fetches() as fetches:
                 preload_side_records(paid)
                 records = [
                     transfer_side_leg(xfer, is_income=flag).record
@@ -175,6 +303,7 @@ class TestTheInstrument:
 
             assert all(record is not None for record in records)
             assert alone == []
+            assert fetches == [{False, True}]
 
 
 class TestNoPageReadsASideAlone:
@@ -199,12 +328,23 @@ class TestNoPageReadsASideAlone:
         the side from that record (``recorded_transfer_legs``).  Without the
         fill each page reads Checking's two sides alone, and ``/savings``,
         whose metric folds Savings too, four.
+
+        Two more out of Checking are still planned, in today's period and
+        the next, because no loader fills a planned side's list: a page that
+        reads a planned side's record reads it alone, where with only Paid
+        transfers the fold's fill hid that read (the review of plan#2086,
+        finding M2).
         """
         with app.app_context():
             checking = seed_user["account"]
             savings = _a_savings_account(seed_user)
             for index, amount in ((2, "120.00"), (3, "130.00")):
                 _paid(seed_user, checking, savings, seed_periods_today[index], amount)
+            for index, amount in ((4, "140.00"), (5, "150.00")):
+                create_transfer(
+                    seed_user, db.session, checking, savings,
+                    seed_periods_today[index], amount=Decimal(amount),
+                )
             db.session.commit()
             db.session.expire_all()
 
@@ -224,7 +364,11 @@ class TestNoPageReadsASideAlone:
         both fall in that day's month (a transfer is attributed to its due
         day).  The report's timeliness metric reads each expense leg's
         record, which ``spending_analysis._settled_items`` pre-loads; without
-        that pre-load it reads them alone.
+        that pre-load it reads them alone.  Two more due that day are still
+        planned, which the report does not draw today (it loads settled
+        money only, ``settled_status_ids``); they stand in the fixture so a
+        read of a planned side's record, whose list nothing fills, would be
+        seen here as on every other page (finding M2).
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -234,6 +378,11 @@ class TestNoPageReadsASideAlone:
                 _paid(
                     seed_user, checking, savings, seed_periods_today[3], amount,
                     due_date=due, settled_on=due,
+                )
+            for amount in ("140.00", "150.00"):
+                create_transfer(
+                    seed_user, db.session, checking, savings,
+                    seed_periods_today[3], amount=Decimal(amount), due_date=due,
                 )
             db.session.commit()
             db.session.expire_all()
@@ -255,7 +404,9 @@ class TestNoPageReadsASideAlone:
         Three payments into the loan, each Paid on its period's first day.
         The page's settled payments are ``loan_loaders.settled_income_legs``,
         which pre-loads their records; without that pre-load the page reads
-        the loan side of each alone.
+        the loan side of each alone.  Two later payments are still planned,
+        whose lists nothing fills, so a read of a planned side's record is
+        seen too (finding M2).
         """
         with app.app_context():
             loan = _loan(seed_user)
@@ -264,6 +415,11 @@ class TestNoPageReadsASideAlone:
                 _paid(
                     seed_user, seed_user["account"], loan, period, "1000.00",
                     settled_on=period.start_date,
+                )
+            for index in (6, 7):
+                create_transfer(
+                    seed_user, db.session, seed_user["account"], loan,
+                    seed_periods[index], amount=Decimal("1000.00"),
                 )
             db.session.commit()
             db.session.expire_all()
@@ -564,11 +720,14 @@ class TestNoActReadsASideAlone:
     ):
         """A reconcile tick settles two transfers and links the statement, reading no side alone.
 
-        Each tick settles its transfer through the status applier
-        (``transfer_sides``' pre-load) and then records which statement
-        showed its leg (``transfer_service.record_leg_clearing``), reading
-        the record that settle wrote.  Without the pre-load each tick reads
-        each side alone.
+        The writer pre-loads every ticked transfer's records in one
+        statement (the transfer arm's loader, ``reconcile_service._transfers``),
+        then each tick settles its transfer through the status applier
+        (``transfer_sides``, whose own pre-load finds both lists loaded) and
+        records which statement showed its leg
+        (``transfer_service.record_leg_clearing``), reading the record that
+        settle wrote.  Either pre-load alone keeps a tick from reading a side
+        alone; without both, each tick reads each side alone.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -663,3 +822,81 @@ class TestAMoveThatReadsNoRecordFetchesNone:
                 side_movements_key(is_income=flag) for flag in (False, True)
             } <= inspect(xfer).unloaded
             db.session.rollback()
+
+
+class TestAReconcileFetchesItsTransfersRecordsOnce:
+    """Ruling plan#2136's "one query for all of them" for a batch act, and none for its reader."""
+
+    @staticmethod
+    def _three_planned(seed_user, seed_periods_today):
+        """Three transfers out of Checking still planned, in periods started before today."""
+        checking = seed_user["account"]
+        savings = _a_savings_account(seed_user)
+        ticked = {
+            create_transfer(
+                seed_user, db.session, checking, savings,
+                seed_periods_today[index], amount=Decimal(amount),
+            ).id
+            for index, amount in ((1, "130.00"), (2, "140.00"), (3, "150.00"))
+        }
+        db.session.commit()
+        db.session.expire_all()
+        return ticked
+
+    def test_a_reconcile_of_three_transfers_pre_loads_their_records_in_one_statement(
+        self, app, seed_user, seed_periods_today,
+    ):
+        """Ticking three transfers fetches all their records in one pre-load, not one per settle.
+
+        The writer's narrowing (the transfer arm's loader given the ticked
+        ids, ``reconcile_service._transfers``) pre-loads every ticked
+        transfer's records in ONE statement, so each settle's pair
+        (``transfer_legs.transfer_sides``) finds both lists loaded and
+        fetches nothing.  The act's other side-record fetches are each
+        settle's posting walk (``transfer_legs.transfer_family_movements``),
+        one per transfer, which re-fetches what the pre-load loaded (finding
+        **plan#2147**).  So ``1 + 3``; without the pre-load each settle
+        fetches its own pair, ``3 + 3``.
+        """
+        with app.app_context():
+            ticked = self._three_planned(seed_user, seed_periods_today)
+
+            with _sides_read_alone() as alone, _side_record_fetches() as fetches:
+                reconcile_service.record_reconciliation(
+                    reconcile_service.ReconcileSubmission(
+                        statement=_reconciled(seed_user, observed_on=display_today()),
+                        entry_ids=set(), transaction_ids=set(), corrections={},
+                        transfer_ids=ticked, transfer_corrections={},
+                    ),
+                )
+
+            assert all(
+                db.session.get(Transfer, xfer_id).status.is_settled
+                for xfer_id in ticked
+            )
+            assert alone == []
+            assert len(fetches) == 1 + len(ticked)
+
+    def test_the_reconcile_panel_fetches_no_record_of_the_transfers_it_offers(
+        self, app, seed_user, seed_periods_today,
+    ):
+        """The panel offers the three transfers and fetches none of their records.
+
+        Its reader (the same loader with no narrowing) prices each leg off
+        its transfer (``transaction_service.settle_amount``) and reads no
+        side's record, so it fetches none.
+        """
+        with app.app_context():
+            ticked = self._three_planned(seed_user, seed_periods_today)
+            checking_id = seed_user["account"].id
+
+            with _side_record_fetches() as fetches:
+                groups = reconcile_service.outstanding_set(
+                    _reconciled(seed_user, observed_on=display_today()),
+                ).groups
+
+            assert {
+                group.key for group in groups
+                if group.settle.kind is reconcile_service.OfferKind.TRANSFER
+            } == {(xfer_id, checking_id) for xfer_id in ticked}
+            assert fetches == []

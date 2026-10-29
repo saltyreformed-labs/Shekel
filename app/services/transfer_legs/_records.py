@@ -435,9 +435,11 @@ def preload_side_records(transfers: Iterable[Transfer]) -> None:
     **plan#2136**): the Spending report's settled items
     (``spending_analysis``), the loan's settled payments
     (``loan_loaders.settled_income_legs``), statement match's still-planned
-    offers (``statement_match._leg_valuation.offered_legs``), the transfer
-    popover and its PATCH (``routes/transfers``) and, for one transfer's two
-    sides, :func:`transfer_sides`.  A loader whose readers read none -- the
+    offers (``statement_match._leg_valuation.offered_legs``), the reconcile
+    writer's ticked transfers, whose settles read them
+    (``reconcile_service._transfers``), the transfer popover and its PATCH
+    (``routes/transfers``) and, for one transfer's two sides,
+    :func:`transfer_sides`.  A loader whose readers read none -- the
     grid's :func:`grid_transfer_legs` -- loads none, where it spent this
     statement on every grid, dashboard, pulse and calendar render until that
     ruling.
@@ -687,7 +689,8 @@ def transfer_sides(transfer: Transfer) -> "tuple[TransferLeg, TransferLeg]":
     together (:func:`preload_side_records`) where each side's lazy read was a
     query of its own.  A list the session already holds is left as it is, so
     an act that runs after another in the same request reads what that one
-    wrote.
+    wrote, and a batch whose writer pre-loaded every transfer's records first
+    (the reconcile writer's ticks) fetches nothing here.
 
     Args:
         transfer: The parent transfer.

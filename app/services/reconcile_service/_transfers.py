@@ -201,7 +201,13 @@ def _load(
     The loads are what the arm reads: the pricing chain the leg price resolves
     through (``transfer_pricing_load_options``) and both endpoints, which
     :attr:`~app.services.transfer_legs.TransferLeg.name` composes the block's
-    heading from.
+    heading from.  **The writer's narrowing also loads every ticked leg's
+    records**, both sides of every transfer in ONE statement
+    (``transfer_legs.preload_side_records``, ruling **plan#2136**): each
+    settle reads its pair's (``transfer_legs.transfer_sides``, behind
+    ``settle_transfer``), which then finds both lists loaded, where each
+    settle fetched its own pair, one statement per ticked transfer.  The
+    reader reads no record, so it fetches none.
 
     Args:
         statement: The statement being reconciled.
@@ -229,6 +235,8 @@ def _load(
     legs.sort(key=lambda leg: (
         _rows.attributed_on(statement, leg.transfer), leg.transfer.id,
     ))
+    if transfer_ids is not None:
+        transfer_legs.preload_side_records(leg.transfer for leg in legs)
     return {leg.transfer.id: leg for leg in legs}
 
 

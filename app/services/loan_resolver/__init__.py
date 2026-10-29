@@ -87,7 +87,7 @@ The resolver collapses both onto a single derivation:
 * Not a payment preparation step.  ``payments`` is expected to be
   the already-prepared list from
   ``loan_payment_service.prepare_payments_for_engine`` (escrow
-  subtracted, biweekly redistributed).  Passing raw shadow-income
+  subtracted, biweekly redistributed).  Passing raw, unprepared
   payments will misalign principal/interest splits.
 * Not a writer.  The resolver never inserts or updates anything;
   Commit 16 owns the trueup write path via ``anchor_service``.

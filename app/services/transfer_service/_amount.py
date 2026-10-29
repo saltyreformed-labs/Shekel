@@ -30,13 +30,11 @@ in place; does not flush and does not commit.
 """
 
 from app.models.amount_ownership import AmountOwnership
-from app.services.transfer_service._validation import (
-    TransferRows,
-    _validate_positive_amount,
-)
+from app.models.transfer import Transfer
+from app.services.transfer_service._validation import _validate_positive_amount
 
 
-def apply_amount_ownership(rows: TransferRows, ownership) -> None:
+def apply_amount_ownership(transfer: Transfer, ownership) -> None:
     """Apply one stated AMOUNT OWNERSHIP to the transfer.
 
     Called for every update that states one.  Ruling **R-FI**'s two states and
@@ -54,7 +52,8 @@ def apply_amount_ownership(rows: TransferRows, ownership) -> None:
     **A twin row's ownership FOLLOWED the parent's** until plan step
     ``balance:X-bi-6-4d-2`` deleted the twins (its leaf 3b deleted the loop
     that wrote it): a twin COPIED an owned figure, and declared
-    :attr:`~app.enums.AmountSourceEnum.PARENT_TRANSFER` under a derived one.
+    ``PARENT_TRANSFER`` under a derived one (a member plan step
+    ``balance:X-bi-6-5`` deleted).
 
     **A THIRD answer the twins once had is gone because it has no caller left
     to express it.**  It was *say nothing and leave each leg as it stands*, and
@@ -81,7 +80,7 @@ def apply_amount_ownership(rows: TransferRows, ownership) -> None:
     definition prices the pair.
 
     Args:
-        rows: The transfer.
+        transfer: The transfer.
         ownership: The :class:`~app.models.amount_ownership.AmountOwnership`
             the caller states for the PARENT -- ``own`` over a figure a human
             authored, or ``derived`` naming
@@ -89,7 +88,7 @@ def apply_amount_ownership(rows: TransferRows, ownership) -> None:
             prices it.  Never ``None``: a caller with nothing to say about the
             amount does not call this.
     """
-    rows.transfer.amount_ownership = ownership
+    transfer.amount_ownership = ownership
 
 
 def grade_amount_ownership(updates: "dict[str, object]") -> None:

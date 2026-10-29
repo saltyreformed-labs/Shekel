@@ -63,7 +63,7 @@ names the loan TERM primitives (``loan_loaders``, ``loan_resolver``,
 ``escrow_calculator``, ``recurring_transfer_query``), none of which names it --
 and the loan READING tier may import this package, which plan step X-au-g-2c-1
 SPENT: ``loan_payment_service.get_payment_history`` prices its feed through
-:func:`contributions_by_id` rather than through
+:func:`contributions_by_key` rather than through
 ``row_valuation.settled_contribution``.  ``balance_at._plan._planned_from_shadows``
 -- the SECOND unrouted reader, which a census at that step found where the
 finding had named one -- went through in the same commit, so no reader of an
@@ -113,7 +113,9 @@ folded ``$0.00`` on both sides.  Before X-bi-6a either drift counted ONCE,
 because only the shadow was read.  Plan step ``X-bi-4a`` let a side's DATED
 movement, not a status, decide which half counts its leg (ruling
 **R-BAL79**), and both drifts were pinned in
-``tests/test_services/test_transfer_legs/test_the_plan_half.py``.  **Drift A
+``tests/test_services/test_transfer_legs/test_the_plan_half.py``; plan step
+``balance:X-bi-6-5``'s third leaf gave the plan half back to the status
+alone, the status-band rule having made the two one answer.  **Drift A
 is structural now**: plan step ``balance:X-bi-6-4d-2`` made a transfer one
 row (ruling **R-BAL258**), so no shadow's status can part from its
 transfer's.  What pins that is the database's refusal of a shadow row
@@ -123,8 +125,8 @@ went with the shadows (ruling **R-BAL313**).  Drift B without its shadows is
 a settled transfer whose sides hold no record, the zero close the
 status-band rule admits; it still folds ``$0.00`` on both sides and is still
 pinned there, on each
-(``TestAStatusDriftIsCountedOnce``'s
-``test_a_projected_shadow_under_a_settled_parent_is_counted_by_neither``).
+(``TestATransferClosedAtZeroIsCountedByNeitherHalf``'s
+``test_a_settled_transfer_with_no_side_record_is_counted_by_neither``).
 
 **The books row has no loan analog because a loan has no books to open.**  Its
 origination is ``LoanParams.original_principal``, synthesized rather than
@@ -187,10 +189,7 @@ in, frozen dataclasses out; no Flask symbol, no writes.  All money is
 # never name this package.  Re-exported here so a consumer asking what a row's
 # money DID names the same module it asks what the row's amount IS -- the same
 # reason ``_amounts`` re-exports ``settled_contribution``.
-from app.services.row_valuation import (
-    leg_settled_amounts_by_key,
-    settled_amounts_by_id,
-)
+from app.services.row_valuation import settled_amounts_by_key
 # Re-exported so a caller ABOVE the amount model asks the MODEL for the
 # model's own eager load and never has to know the relationship graph (plan
 # step X-au-g-2c-2).  It is DEFINED a tier down, in ``app.utils``, because
@@ -223,8 +222,8 @@ from ._amount_rule import (
 )
 from ._definition_cash import DefinitionRow, definition_cash
 from ._amount_source import (
-    amounts_by_id,
-    leg_amounts_by_key,
+    amounts_by_key,
+    resolve_amount,
     resolve_transaction_amount,
     resolve_transfer_amount,
 )
@@ -232,10 +231,7 @@ from ._amounts import (
     ReconciledThrough,
     contributed_amount,
     contribution_of,
-    contributions_by_id,
-    leg_contribution_of,
-    leg_contributions_by_key,
-    planned_leg_contribution,
+    contributions_by_key,
     settled_contribution,
 )
 from ._cash_leg import (
@@ -316,16 +312,13 @@ __all__ = [
     "definition_cash",
     "is_loan_payment_definition",
     "transfer_amount_rule",
-    "amounts_by_id",
-    "leg_amounts_by_key",
+    "amounts_by_key",
     "account_opening_fact",
     "cash_anchor_facts",
     "coverage_for",
     "contributed_amount",
     "contribution_of",
-    "contributions_by_id",
-    "leg_contribution_of",
-    "leg_contributions_by_key",
+    "contributions_by_key",
     "credit_entry_sum",
     "dated_deltas",
     "earliest_assertion_day",
@@ -339,9 +332,9 @@ __all__ = [
     "off_statement_sum",
     "settled_contribution",
     "planned_cash_rows",
-    "planned_leg_contribution",
     "posted_purchase_sum",
     "reconciled_through",
+    "resolve_amount",
     "resolve_anchor",
     "resolve_transaction_amount",
     "resolve_transfer_amount",
@@ -354,8 +347,7 @@ __all__ = [
     "valuation_load_options",
     "reject_line_before_books_open",
     "reject_movement_before_books_open",
-    "leg_settled_amounts_by_key",
-    "settled_amounts_by_id",
+    "settled_amounts_by_key",
     "settled_cash_facts",
     "statement_coverage",
     "sum_projected",

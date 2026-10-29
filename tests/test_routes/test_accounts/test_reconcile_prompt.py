@@ -21,8 +21,8 @@ from tests._test_helpers import (
 )
 from app.models.transfer import Transfer
 from app.services import account_service, cash_ledger
-from app.services.row_valuation import leg_settled_contribution
-from app.services.transfer_legs import grid_transfer_leg
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import leg_of, parent_of
 
 from ._helpers import _ACK_SWAP, _TestTheReconcileRouteMembers
 
@@ -566,8 +566,8 @@ class TestTheTransferArmThroughItsROUTE:
                 assert transfer_side_figure(
                     db.session, transfer_id, account_id,
                 ) == Decimal("80.25")
-                assert leg_settled_contribution(
-                    grid_transfer_leg(parent, account_id),
+                assert settled_contribution(
+                    parent_of(leg_of(parent, account_id)),
                 ) == Decimal("80.25")
 
     def test_an_ECHOED_prefill_on_a_transfer_records_no_correction(
@@ -621,6 +621,6 @@ class TestTheTransferArmThroughItsROUTE:
                 assert transfer_side_figure(
                     db.session, transfer_id, account_id,
                 ) == Decimal("75.00")
-                assert leg_settled_contribution(
-                    grid_transfer_leg(parent, account_id),
+                assert settled_contribution(
+                    parent_of(leg_of(parent, account_id)),
                 ) == Decimal("75.00")

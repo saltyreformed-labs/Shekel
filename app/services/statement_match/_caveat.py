@@ -71,7 +71,7 @@ class NotShownAlone:
 #: **The ENVELOPE arm is unreachable through PRICING, not merely unexercised.**
 #: An envelope that derives its figure from entries values at
 #: ``gross - Sigma(card entries) - Sigma(posted purchases)``
-#: (:func:`~._valuation.transaction_price`), and
+#: (:func:`~._settle_price.settle_price`), and
 #: :func:`~._valuation.transaction_candidate` drops a row worth nothing --
 #: measured 2026-08-25 on the developer's account, **63 of 63** such envelopes
 #: price to ``Decimal("0")`` and all 63 are dropped, so none can reach a panel.

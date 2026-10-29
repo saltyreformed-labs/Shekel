@@ -189,15 +189,13 @@ def _build_carry_forward_context(source_period_id, target_period_id,
     # Routed through ``is_projected_clause`` (D6-09 / MED-02) so the
     # source-period projected-only query and the two discrete bulk UPDATEs
     # (rows of a recurring definition, and the rest) share one definition of
-    # the rule with every other Projected SQL filter.  A transfer's SHADOW row
-    # is not a row this moves (``transfer_id IS NULL``): its transfer is
-    # loaded below and moves whole, both legs with it.
+    # the rule with every other Projected SQL filter.  A transfer is not a
+    # row here: it is loaded below and moves whole, both sides with it.
     projected_txns = (
         db.session.query(Transaction)
         .filter(
             Transaction.pay_period_id == source_period_id,
             Transaction.scenario_id == scenario_id,
-            Transaction.transfer_id.is_(None),
             is_projected_clause(Transaction),
             Transaction.is_deleted.is_(False),
         )

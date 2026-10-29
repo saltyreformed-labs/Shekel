@@ -416,15 +416,15 @@ def _earliest_payment_moved_on(account: Account) -> date | None:
     * WHICH payments: the loan walk's own set of the payments that have
       happened, :func:`app.services.loan_loaders.settled_income_legs`, so
       this refusal and the walk share one candidate set and every exclusion
-      -- a deleted or balance-excluded transfer is out, and ruling R-BAL140's
-      status drift is counted once, by its movement;
+      -- a deleted or balance-excluded transfer is out;
     * WHETHER and WHEN its money moved:
       :attr:`app.services.transfer_legs.TransferLeg.settled_on`, the stored
       day of the leg's covering movement.  A ``$0.00`` close holds no movement
       and answers ``None``, so it counts from no day at all (R-BAL155: the
-      tracking-start button "stops counting $0.00 payments now"), and so does
-      a settled transfer whose loan side holds none (R-BAL140's reverse
-      drift).
+      tracking-start button "stops counting $0.00 payments now").  It is the
+      one settled transfer whose loan side holds none: a settled transfer
+      holds a dated record on both sides or on neither (the status-band rule,
+      :mod:`app.side_band_infrastructure`).
 
     **No amount is read, and none needs to be.**  A movement cannot carry
     ``$0.00`` (``ck_transaction_entries_positive_amount``), so a dated
@@ -434,7 +434,7 @@ def _earliest_payment_moved_on(account: Account) -> date | None:
     close named a day on which nothing was paid.
 
     **Within that set it parts from the walk twice.**  WHETHER: a ``$0.00``
-    close (and R-BAL140's reverse drift) is a member the walk still counts,
+    close is a member the walk still counts,
     as a ``$0.00`` payment event dated by its installment (ruling R-R107)
     that can capitalize the charges standing before it, until step
     balance:X-db deletes that arm; this refusal counts it from no day --
@@ -458,14 +458,13 @@ def _earliest_payment_moved_on(account: Account) -> date | None:
     cannot pick a safe date for the owner while the walk keys the boundary on
     the due date: that is REC-552's to fix, in the walk, not in this read.
 
-    **One refusal moved downstream with that read.**  A settled payment whose
-    movement carries no day (ruling R-BAL147's drift, which no door writes)
-    answers ``None`` here, where the walk-day read raised
-    :class:`~app.exceptions.UndatedSettleError`.  Nothing that door would
-    write is committed: a door that stages a tracking start re-syncs the
-    loan's ledger before its commit, and that walk dates every settled
-    payment and raises; the one path that skips the re-sync, R-EQ's
-    ``UNCHANGED``, writes nothing.
+    **One refusal moved downstream with that read, and is gone.**  A
+    settled payment whose movement carried no day (ruling R-BAL147's drift)
+    answered ``None`` here, where the walk-day read raised
+    :class:`~app.exceptions.UndatedSettleError`, and the walk's own refusal
+    stood behind it until plan step balance:X-bi-6-5's third leaf: the
+    status-band rule refuses that state at commit, so a settled payment's
+    movement carries its day.
 
     **Every scenario the loan has a payment in**, through
     :func:`app.services.loan_posting_service.scenarios_with_loan_payments`, the

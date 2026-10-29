@@ -2,30 +2,28 @@
 Shekel Budget App -- Transaction route package: shared helpers.
 
 The Marshmallow schema singletons, the credit-payback unique-index name
-constant, the :class:`_RenderTarget` response-surface bundle, and the
-private render / ownership / FK helpers shared across the transaction
-route sub-modules.  Schema instances are constructed once at import time
-so every handler reuses the same instance (Marshmallow contract),
-preserving the pre-split monolith's behaviour.
+constant, and the private render / ownership / FK helpers shared across the
+transaction route sub-modules.  The response-surface bundle and the phone
+card they answer with are shared with the transfer routes
+(:mod:`app.routes._mobile_card`, ruling **plan#1983**).  Schema
+instances are constructed once at import time so every handler reuses the
+same instance (Marshmallow contract), preserving the pre-split monolith's
+behaviour.
 """
 
 import logging
 
-from dataclasses import dataclass
 from functools import wraps
 
-from flask import render_template, request
+from flask import render_template
 from flask_login import current_user
 
 from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.category import Category
 from app.models.ref import Status
-from app.routes._render_helpers import (
-    fragment_amounts,
-    fragment_cash_flow,
-    render_transaction_cell,
-)
+from app.routes._mobile_card import RenderTarget, render_mobile_card
+from app.routes._render_helpers import render_transaction_cell
 from app.routes.transactions._bp import transactions_bp
 from app.schemas.validation import (
     MarkDoneSchema,
@@ -38,18 +36,13 @@ from app.schemas.validation import (
 )
 from app.services import grid_view_service
 from app.services.state_machine import finalised_edit_rejection
-from app.services.entry_service import (
-    build_entry_lists_dict,
-    build_entry_sums_dict,
-)
-from app.services.pay_calendar import FiledRow, calendar_for
+from app.services.pay_calendar import calendar_for
 from app.utils.auth_helpers import (
     get_accessible_transaction,
     get_accessible_transaction_or_deleted,
     is_not_found_to_transaction_doors,
     log_refused_lookup,
 )
-from app.utils.dates import display_today
 from app.utils.db_errors import is_unique_violation
 from app.utils.error_fragments import (
     INVALID_REFERENCE_MSG,
@@ -127,216 +120,6 @@ _delete_dialog_schema = TransactionDeleteSchema()
 _unmark_credit_schema = ShownLinesSchema()
 
 
-@dataclass(frozen=True)
-class _RenderTarget:
-    """The response surface a mark_done request renders into.
-
-    Bundles the three render-routing fields the mobile / companion card
-    action bar posts (``render=mobile_card`` plus the per-tab
-    ``card_prefix`` and the ``can_edit`` flag) so :func:`mark_done` and
-    its helpers thread one value instead of three parallel arguments.
-    The desktop grid and full-edit popover omit these, so the default
-    (empty ``render_mode``) resolves to the cell + ``balanceChanged``
-    targeted-swap path.
-    """
-
-    render_mode: str
-    card_prefix: str
-    can_edit: bool
-
-    @classmethod
-    def from_form(cls) -> "_RenderTarget":
-        """Read the surface this request asked to be answered on off its form.
-
-        The mobile / companion card action bar posts ``render=mobile_card``
-        plus the per-tab ``card_prefix`` and the ``can_edit`` flag so the
-        response is a single re-rendered card (in-place swap, no reload); the
-        desktop grid and full-edit popover omit these, so the response
-        defaults to the cell.  Read off ``request.form`` directly -- these are
-        render-routing fields, not part of any money schema -- and before
-        any validation, so a refusal renders the right surface too.
-
-        Returns:
-            The surface, read once for the request.
-        """
-        return cls(
-            request.form.get("render", ""),
-            request.form.get("card_prefix", ""),
-            request.form.get("can_edit") == "1",
-        )
-
-
-def _render_mobile_card(txn, *, card_prefix, can_edit, error=None):
-    """Render a single mobile transaction card for an HTMX swap.
-
-    The mobile / companion Mark Paid form targets the card wrapper
-    (``hx-target="#card-<prefix-><id>"``, ``hx-swap="outerHTML"``), so
-    this returns exactly that one card re-rendered in its post-action
-    state -- the settled badge shows and the Mark Paid button drops --
-    without the full-page reload the desktop ``gridRefresh`` path uses.
-
-    Reuses the canonical producers so the swapped-in card is identical
-    to the page-load card: :func:`grid_view_service.build_row_keys` for
-    the row label, :func:`build_entry_sums_dict` for the progress
-    aggregate, and :func:`build_entry_lists_dict` for the inline
-    envelope entries.  Ownership scoping uses ``txn.user_id`` (the data
-    owner) so the companion path resolves the linked owner's categories, not
-    the companion's own (empty) set.  It read that value off the paycheck
-    (``txn.pay_period.user_id``) until plan step ``pay_calendar:C13-b``; the
-    walk hydrated a whole ``budget.pay_periods`` row to learn one integer the
-    transaction carries.
-
-    **It derives that owner's pay calendar since pay-calendar plan step
-    C4-a-3**, which is one indexed read of ``budget.pay_periods`` and one of
-    ``budget.pay_schedule`` more than this fragment used to cost.  The entry
-    list's out-of-period warning needs the paycheck's SPAN, and the span is a
-    derivation over the owner's paydays rather than the ``end_date`` column
-    plan step **C4-c** dropped -- so a single-row surface that holds no window
-    has to derive rather than read.  Deriving is the only honest option left:
-    a targeted "what is the next payday after this one" query here would be a
-    second implementation of the rule this arc exists to state once.
-
-    **And that owner's cash-flow set, since plan step ``credit_card:CC-5-2``**,
-    for the envelope's add-purchase account picker -- the owner's set with no
-    override, the purchase door's own predicate -- from the SAME walk that
-    resolves the chip's balance line (:func:`fragment_cash_flow`), so the
-    card pays one resolve for its two questions.
-
-    Args:
-        txn: The Transaction just settled, with ``entries`` and
-            ``template`` accessible.
-        card_prefix: The per-tab id namespace the requesting card used
-            (``"tp"`` for This Period and the companion view; ``""`` for
-            prefix-less direct renders).  Drives the wrapper id so the
-            outerHTML swap resolves.
-        can_edit: ``True`` for the owner card, ``False`` for companion.
-        error: Optional rejection message.  When set, the card renders
-            a danger banner naming why the mutation was refused (the
-            designed error-fragment path; see
-            :func:`_error_transaction_response`).
-
-    Returns:
-        Rendered HTML string for one ``grid/_mobile_card_single.html``.
-    """
-    owner_id = txn.user_id
-    categories = (
-        db.session.query(Category)
-        .filter_by(user_id=owner_id)
-        .order_by(Category.group_name, Category.item_name)
-        .all()
-    )
-    row_keys = grid_view_service.build_row_keys(
-        [txn], categories, is_income_section=txn.is_income,
-    )
-    # A just-settled transaction is neither cancelled nor deleted, so the
-    # SUCCESS path yields a row key -- except in finding BAL-565's race: the
-    # answer is drawn in a transaction of its own after Mark Paid's commit,
-    # a Delete queued behind it can hide a recurring row first, and
-    # ``build_row_keys`` skips a deleted row, so the phone card can receive
-    # the desktop cell below (plan step ``balance:X-dc`` owns it).  The
-    # guard degrades to that cell rather than raising IndexError.  The
-    # ERROR path can genuinely land here: the card lists filter cancelled
-    # rows out, so a stale card's rejected action (e.g. Mark Paid after
-    # another device cancelled) has no card to re-render -- swap in a
-    # banner-only wrapper that keeps the requesting card's id and says
-    # why the action was refused.
-    if not row_keys:
-        if error is not None:
-            return render_template(
-                "grid/_mobile_card_error.html",
-                card_id=grid_view_service.card_dom_id(txn, card_prefix),
-                error=error,
-            )
-        return render_transaction_cell(txn)
-    amounts = fragment_amounts(txn)
-    budgets = amounts.budgets
-    # The paycheck this row is FILED in, DERIVED (pay-calendar plan step
-    # C4-a-3): the entry-list builder judged its out-of-period warning against
-    # ``txn.pay_period.end_date`` until then, a stored column plan step C4-c
-    # drops.  The owner is the one resolved above -- the DATA owner, so the
-    # companion path reads the linked owner's schedule -- and ``require_period``
-    # rather than ``period_by_id`` because the id comes off a stored row with a
-    # NOT NULL, ``ON DELETE CASCADE`` foreign key, so a ``None`` here would be
-    # an inconsistent picture rather than an answer.
-    #
-    # **Only a row that TRACKS PURCHASES needs it**, on the same predicate
-    # ``build_entry_lists_dict`` already filters by: a plain bill draws no
-    # purchase list, so deriving its owner's whole calendar would be two
-    # queries for a value nothing reads.  Found by adversarial review,
-    # 2026-08-31.
-    #
-    # **The READ ORDER, stated here because ``require_period`` requires every
-    # caller to state its own**: the ROW is read first (the refresh after Mark
-    # Paid's commit, or the re-fetch after its rollback), the paydays second,
-    # and both in ONE transaction holding the owner's write lock.  Every
-    # caller is Mark Paid's answer, drawn in the command transaction its
-    # commit or rollback opens, which takes that lock before its first read
-    # (plan step ``balance:X-bn``, ``app.db_transaction``); a door that
-    # DELETES paydays -- reset, regenerate and truncate among them -- is a
-    # command too and takes the same lock, so it cannot land between the two
-    # reads.  What is reachable is the gap
-    # BEFORE this transaction: a door queued on the lock commits between Mark
-    # Paid's commit or rollback and this read (finding **BAL-565**, ruled to
-    # ship so, **R-BAL156**); plan step ``balance:X-dc`` makes each save one
-    # transaction.  *Until plan step ``balance:X-bn`` this said such a door
-    # could land between the two reads under ``READ COMMITTED`` (balance
-    # finding **N-358**), a render-after-commit path with no snapshot.*
-    period = (
-        calendar_for(owner_id).require_period(FiledRow.for_row(txn))
-        if txn.tracks_purchases
-        else None
-    )
-    # The owner's cash-flow set, resolved ONCE for the two things this card
-    # draws from it (plan step credit_card:CC-5-2): the balance line its
-    # account chip is decided against, and the add-purchase picker's
-    # accounts -- the OWNER's set with no override, because the purchase
-    # door admits the row's own account plus the owner's members whatever
-    # page the card is on.  Two questions, one walk.
-    cash_flow = fragment_cash_flow(owner_id)
-    return render_template(
-        "grid/_mobile_card_single.html",
-        rk=row_keys[0],
-        txn=txn,
-        budgets=budgets,
-        settled=amounts.settled,
-        retained=amounts.retained,
-        entry_sums=build_entry_sums_dict([txn], budgets),
-        # The span map is EMPTY for a row that draws no purchase list, and
-        # the builder's own ``tracks_purchases`` filter runs before it
-        # indexes -- so the two agree by reading one predicate rather than
-        # by a comment saying they do.
-        entry_lists=build_entry_lists_dict(
-            [txn], budgets,
-            {} if period is None else {period.period_id: period},
-            cash_flow.purchases,
-            # The SESSION's user decides whether the card's purchase list may
-            # name the owner's bank lines, never ``can_edit`` below, which the
-            # browser posts back (plan step ``credit_card:CC-5-4a-5``).
-            current_user.id,
-        ),
-        can_edit=can_edit,
-        id_prefix=card_prefix,
-        # The BALANCE LINE the card's account chip is decided against (plan
-        # step credit_card:CC-4-2): the balance line of the page this card
-        # lands on, or ``None`` for a companion -- by the row's OWNER, not by
-        # ``can_edit``, which is a render-routing field the form posts.  The
-        # one resolution the desktop cell and the transfer cell share.
-        account=cash_flow.balance_line,
-        # The USER's civil day, never the process's.  This reaches
-        # ``grid/_transaction_entries.html``'s add-purchase form as the
-        # ``purchased_on`` default and both pickers' ``max``, and
-        # ``entry_service._reject_future_purchase_date`` judges that field
-        # against ``display_today()`` (ruling R-M).  With ``date.today()`` here
-        # the two clocks disagree on any process not pinned to
-        # ``America/New_York`` -- CI runs ``TZ=Pacific/Kiritimati`` precisely to
-        # catch this -- and the app's own form would default to a date its own
-        # server rejects.  Prod pins the zone, so this was latent rather than
-        # live; it is the same two-clock shape as finding N-133 / R2.
-        today=display_today(),
-        error=error,
-    )
-
-
 def _mark_done_success_response(txn, target):
     """Build the success response tuple for a mark_done request.
 
@@ -367,7 +150,7 @@ def _mark_done_success_response(txn, target):
 
     Args:
         txn: The settled Transaction.
-        target: The :class:`_RenderTarget` describing the response
+        target: The :class:`RenderTarget` describing the response
             surface.  ``render_mode`` selects the mobile-card vs desktop
             path; ``card_prefix`` / ``can_edit`` are forwarded to the
             card render and are only meaningful on the mobile_card path.
@@ -377,7 +160,7 @@ def _mark_done_success_response(txn, target):
     """
     if target.render_mode == "mobile_card":
         return (
-            _render_mobile_card(
+            render_mobile_card(
                 txn, card_prefix=target.card_prefix, can_edit=target.can_edit,
             ),
             200,
@@ -430,7 +213,7 @@ def _stale_transaction_response(txn_id, target=None):
     (ruling **R-CC89**) -- there is no cell to render, and it raises
     :class:`_RowGone` for the door to answer.
 
-    The mobile/companion Mark Paid path passes a :class:`_RenderTarget`
+    The mobile/companion Mark Paid path passes a :class:`RenderTarget`
     with ``render_mode == "mobile_card"`` so the 409 body is the
     re-rendered mobile card (latest state) rather than the desktop cell;
     the card's ``hx-target`` is the card wrapper, so a desktop-cell body
@@ -443,7 +226,7 @@ def _stale_transaction_response(txn_id, target=None):
         txn_id: Primary key of the transaction the route was trying
             to mutate.  Used to re-fetch under ownership checks so
             the conflict UI renders the correct row.
-        target: The :class:`_RenderTarget` for the mobile/companion Mark
+        target: The :class:`RenderTarget` for the mobile/companion Mark
             Paid path, or ``None`` (the default) for the desktop-cell
             conflict every non-mobile caller wants.  When present and
             ``render_mode == "mobile_card"`` the 409 body is the mobile
@@ -463,7 +246,7 @@ def _stale_transaction_response(txn_id, target=None):
         if txn is None:
             raise _RowGone()
         return (
-            _render_mobile_card(
+            render_mobile_card(
                 txn, card_prefix=target.card_prefix, can_edit=target.can_edit,
             ),
             409,
@@ -498,7 +281,7 @@ def _error_transaction_response(txn_id, message, target=None, status=400):
             owner-only for the desktop cell).
         message: The user-facing rejection message (shown in the cell's
             title/aria hint or the card's danger banner).
-        target: The :class:`_RenderTarget` for the mobile/companion
+        target: The :class:`RenderTarget` for the mobile/companion
             path, or ``None`` for the desktop cell.
         status: The HTTP error status (400 domain rejection, 422
             validation failure).
@@ -518,7 +301,7 @@ def _error_transaction_response(txn_id, message, target=None, status=400):
         if txn is None:
             raise _RowGone()
         return designed_error(
-            _render_mobile_card(
+            render_mobile_card(
                 txn, card_prefix=target.card_prefix,
                 can_edit=target.can_edit, error=message,
             ),
@@ -620,7 +403,7 @@ def _gone_transaction_response(gone, refusal, txn_id, target=None):
             or ``None`` for a row it may not.
         refusal: The door's sentence for its act, taking the ``HiddenRow``.
         txn_id: The row id the request named.
-        target: The :class:`_RenderTarget`, or ``None`` for the desktop cell.
+        target: The :class:`RenderTarget`, or ``None`` for the desktop cell.
 
     Returns:
         A designed-fragment Flask response tuple at 404.
@@ -675,7 +458,7 @@ def _door_naming_a_gone_row(refusal):
     view's refusal cannot redraw for another reason (:class:`_RowGone`) is the
     blueprint handler's "not found".  The view is called as
     ``view(txn, target)``: the row as the door served it, and the
-    :class:`_RenderTarget` read off the form.
+    :class:`RenderTarget` read off the form.
 
     Args:
         refusal: The door's sentence for its act, taking a
@@ -687,7 +470,7 @@ def _door_naming_a_gone_row(refusal):
     def decorator(view):
         @wraps(view)
         def door(txn_id):
-            target = _RenderTarget.from_form()
+            target = RenderTarget.from_form()
             answer = get_accessible_transaction_or_deleted(txn_id)
             if not isinstance(answer, Transaction):
                 return _gone_transaction_response(
@@ -784,21 +567,17 @@ def _get_owned_transaction(txn_id):
     :func:`app.routes._render_helpers.render_transaction_cell` is the one that
     names it -- see its own docstring, which this step re-measured.
 
-    **A transfer SHADOW row and a DELETED row answer ``None`` too**, through
-    the one predicate
+    **A DELETED row answers ``None`` too**, through the one predicate
     :func:`~app.utils.auth_helpers.is_not_found_to_transaction_doors` states
-    for both ownership doors.  A shadow (leaf ``balance:X-bi-6-1``, ruling
-    **R-BAL87**): the grid's leg cells call the transfer routes, so a
-    transaction door asked about a shadow is a stale page or a probe, and
-    admitting it would let a regular PATCH write past the transfer's
-    invariants -- the interval's fence, which ``X-bi-6``'s last leaf deletes
-    with the rows.  A deleted row (ruling **R-CC89**): it takes no money, and
-    a stale popover's Save or Mark Credit on one wrote a payment record or a
-    card payback under a row no screen shows.
+    for both ownership doors (ruling **R-CC89**): it takes no money, and a
+    stale popover's Save or Mark Credit on one wrote a payment record or a
+    card payback under a row no screen shows.  (A transfer's SHADOW row did
+    too, leaf ``balance:X-bi-6-1``'s interval fence, until plan step
+    ``balance:X-bi-6-5`` dropped the ``transfer_id`` column that named one.)
 
     Returns:
-        Transaction if found, owned by current_user, not a transfer shadow
-        and not deleted, else None.
+        Transaction if found, owned by current_user and not deleted, else
+        None.
     """
     txn = db.session.get(Transaction, txn_id)
     if txn is None:

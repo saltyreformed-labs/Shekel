@@ -439,11 +439,6 @@ EVT_RECURRENCE_CONFLICTS_RESOLVED = _register(
     "recurrence_conflicts_resolved", BUSINESS,
     "User resolved override/delete conflicts after a regeneration.",
 )
-EVT_RESOLVE_CONFLICTS_SHADOW_REFUSED = _register(
-    "resolve_conflicts_shadow_refused", BUSINESS,
-    "recurrence_engine.resolve_conflicts refused to mutate a transfer "
-    "shadow transaction (transfer_id IS NOT NULL).  Closes F-007.",
-)
 EVT_TRANSFER_RECURRENCE_GENERATED = _register(
     "transfer_recurrence_generated", BUSINESS,
     "Transfer recurrence engine generated transfers from a template.",

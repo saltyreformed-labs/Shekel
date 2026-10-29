@@ -589,8 +589,9 @@ def account_has_ledger_postings(account_id: int) -> bool:
 
     A settled transfer writes balanced journal entries onto the account's
     linked ledger account (Build-Order Step 2).  Those entries are immutable
-    and SURVIVE a transfer delete (``journal_entries.transfer_id`` SET NULL),
-    so an account can still hold posting legs after every transaction
+    and SURVIVE a transfer delete, which removes the transfer's movements and
+    so SET-NULLs their entries' ``journal_entries.transaction_entry_id``, so
+    an account can still hold posting legs after every transaction
     referencing it is gone (e.g. its ad-hoc transfer was hard-deleted).
     Hard-deleting such an account would CASCADE-delete only its own legs and
     strand the paired legs as unbalanced single-leg entries (the balanced

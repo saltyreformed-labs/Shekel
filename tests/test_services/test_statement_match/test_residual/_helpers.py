@@ -71,8 +71,9 @@ def _minted(seed_user):
     shadow's category NULL, so this helper excluded shadows by
     ``transfer_id IS NULL`` (without that term it reported one as a row this
     door minted, in a first version of the group cases).  A transfer is one
-    row since that step (ruling **R-BAL258**) and the database refuses a row
-    naming one (``ck_transactions_names_no_transfer``), so the term went at
+    row since that step (ruling **R-BAL258**) and the database refused a row
+    naming one (``ck_transactions_names_no_transfer``, until plan step
+    balance:X-bi-6-5 dropped the column), so the term went at
     that step's vacuous-residue checkpoint: at each of the helper's 47
     calls in a run of the package, no row named a transfer (measured).
 

@@ -63,6 +63,7 @@ from tests._test_helpers import (
     create_settled_transfer,
     load_migration_module,
     loan_correction_entries,
+    step_down_through_the_journal_link_drop,
 )
 
 
@@ -302,6 +303,12 @@ class TestTheSplitUnlinkExecutes:
     row there, so the income shadow the old shape linked cannot be stored, and
     the statement and the grade read only whether a link is SET, never what
     it names.
+
+    **The case steps down through ``1712c506ee99`` first** (plan step
+    ``balance:X-bi-6-5``'s second leaf, card plan#1845): the statement and the
+    grade name ``journal_entries.transaction_id`` and ``transfer_id``, which
+    head's table no longer has, and the links are read by SQL because the
+    model no longer maps them.
     """
 
     def test_unlink_clears_every_link_and_the_grade_counts_what_is_left(
@@ -319,6 +326,7 @@ class TestTheSplitUnlinkExecutes:
         always answering zero.
         """
         with app.app_context():
+            step_down_through_the_journal_link_drop(db.session)
             loan = create_loan_with_trueup(
                 seed_user, _db.session,
                 origination_principal=SPLIT_LOAN.origination_principal,
@@ -335,7 +343,13 @@ class TestTheSplitUnlinkExecutes:
             )
             _db.session.commit()
             [entry] = loan_correction_entries(_db.session, xfer.id, loan.id)
-            assert entry.transaction_id is None
+            links = text(
+                "SELECT transaction_id, transfer_id, transaction_entry_id "
+                "FROM budget.journal_entries WHERE id = :eid"
+            )
+            assert db.session.execute(
+                links, {"eid": entry.id},
+            ).one().transaction_id is None
             linked_row = add_txn(
                 _db.session, seed_user, seed_periods[SPLIT_LOAN.p1],
                 "Linked row", Decimal("10.00"),
@@ -354,9 +368,9 @@ class TestTheSplitUnlinkExecutes:
             ).rowcount
             assert unlinked == 1
             assert db.session.execute(grade).scalar() == 0
-            db.session.expire(entry)
-            assert (entry.transaction_id, entry.transfer_id,
-                    entry.transaction_entry_id) == (None, None, None)
+            assert tuple(
+                db.session.execute(links, {"eid": entry.id}).one(),
+            ) == (None, None, None)
 
             # The grade counts: a link the statement did not reach is seen.
             db.session.execute(relink, {"sid": linked_row.id, "eid": entry.id})

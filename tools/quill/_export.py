@@ -17,8 +17,11 @@ idea of a card stands between the backup and the tracker; the board as quill rea
   each kept as ``{"nodes": [...]}``, every node, read to the end
   (:func:`_github.paged`).
 - ``milestones``: every milestone, open and closed, whole (:func:`_queries.milestones`).
-- ``board``: the tracker's cards on the board, in the developer's drag order (R-BAL177),
-  which no card holds (:meth:`_tracker.Board.order`).
+- ``board``: the tracker's cards on the board, in their positions, which no card holds
+  (:meth:`_tracker.Board.held`): the steps and questions in the developer's drag order
+  (R-BAL177), and each task the board holds at a position of its own, which is in no place
+  of that order (ruling plan#1814): its card's order of its tasks is its own (plan#1868).
+  Which step a task nests under is its parent, which ``cards`` holds.
 - ``tracker`` and ``taken_at``: whose cards, and when the export began.
 
 **What it does not hold:** a card's timeline -- its title's renames, its labels and its
@@ -34,7 +37,7 @@ anything is read, so a directory that cannot be written fails at once; a run tha
 before the rename leaves no file and every earlier day's as it was, and a run killed by
 a signal mid-write leaves its hidden ``.partial`` file, never a file under a day's name.
 Any failed read -- GitHub, the network, or a card or connection GitHub answers cut short
-or null (:func:`_tracker.card_from`, :func:`_tracker.connection_nodes`) -- and any
+or null (:func:`_tracker.card_from`, :func:`_github.connection_nodes`) -- and any
 failed write end the command with exit status 2 (``quill.py``'s module docstring): one
 bad read costs that night's file, and the timer's alert says so.  The file is its
 owner's to read only: the tracker is private, and its cards may hold real figures
@@ -54,14 +57,12 @@ from functools import partial
 from pathlib import Path
 
 from tools.quill import _queries
-from tools.quill._github import GitHub
+from tools.quill._github import GitHub, connection_nodes, issue_listing
 from tools.quill._tracker import (
     Tracker,
     card_from,
     comment_nodes,
     comment_versions,
-    connection_nodes,
-    listing,
     milestone_nodes,
     saved_versions,
 )
@@ -75,7 +76,7 @@ def _to_the_end(connection: dict | None, what: str, number: int,
 
     Raises:
         TrackerError: When GitHub answers the connection, or a node of it, as null
-            (:func:`_tracker.connection_nodes`).
+            (:func:`_github.connection_nodes`).
     """
     nodes = connection_nodes(connection, what, number)
     if connection["pageInfo"]["hasNextPage"]:
@@ -107,8 +108,8 @@ def _whole(github: GitHub, place: Place, card: dict) -> dict:
 
 
 def snapshot(tracker: Tracker, taken_at: datetime) -> dict:
-    """Every card of ``tracker`` whole, its milestones and its board's order, as one file
-    holds them (the module docstring), the export having begun at
+    """Every card of ``tracker`` whole, its milestones and the cards its board holds, in
+    their positions, as one file holds them (the module docstring), the export having begun at
     ``taken_at``.
 
     Raises:
@@ -116,7 +117,7 @@ def snapshot(tracker: Tracker, taken_at: datetime) -> dict:
             (:func:`_tracker.card_from`, :func:`_to_the_end`).
     """
     github, place = tracker.github, tracker.place
-    cards = listing(github, _queries.export_cards(place))
+    cards = issue_listing(github, _queries.export_cards(place), "every card, for the backup")
     for card in cards:
         card_from(card, place, tracker.board_id, tracker.app_login)
     return {
@@ -126,7 +127,7 @@ def snapshot(tracker: Tracker, taken_at: datetime) -> dict:
                         key=lambda card: card["number"]),
         "milestones": sorted(milestone_nodes(github, place),
                              key=lambda milestone: milestone["number"]),
-        "board": [number for number, _ in tracker.board.order()],
+        "board": [number for number, _, _ in tracker.board.held()],
     }
 
 

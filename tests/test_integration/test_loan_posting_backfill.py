@@ -497,9 +497,9 @@ class TestBackfillLeavesNonLoansAlone:
     ):
         """A settled Checking -> Savings transfer is untouched by the loan backfill.
 
-        Its income shadow lives on a non-loan account (no LoanParams), so the
-        enumerator never visits it: no loan_payment correction is posted for either
-        shadow and no per-loan ledger account is minted.
+        Its to-side is a non-loan account (no LoanParams), so the enumerator
+        never visits it: no loan_payment correction is posted for either side
+        and no per-loan ledger account is minted.
 
         **The owner's entries are counted since plan step
         ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 1): a transfer is

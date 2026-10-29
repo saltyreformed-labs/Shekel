@@ -28,7 +28,7 @@ from ._helpers import (
 )
 
 
-class TestTransactionShadowFamily:
+class TestAMovementReconcileReadsOnlyItsOwnSource:
     """A transfer movement's reconcile reads only its own source kind.
 
     The class's shadow case went at plan step ``balance:X-bi-6-4d-2``

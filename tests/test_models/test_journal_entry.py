@@ -1,5 +1,4 @@
-"""Tests for the JournalEntry + Posting models (Build-Order Step 2, Commit 3;
-the ``transaction_id`` source link added Step 3, Commit 2).
+"""Tests for the JournalEntry + Posting models (Build-Order Step 2, Commit 3).
 
 ``budget.journal_entries`` (event headers) and ``budget.account_postings``
 (signed, debit-positive legs) are the append-only double-entry ledger.  These
@@ -10,11 +9,15 @@ jointly guarantee:
     DELETE raises the model's named immutable error;
   * a posting leg's ``amount`` may not be zero (``ck_account_postings_amount_nonzero``);
   * NOT NULL columns are enforced at the storage tier;
-  * ``transfer_id`` (and, Step 3, ``transaction_id``) is SET NULL on a
-    source delete (the immutable posted fact survives), while the tenancy
-    CASCADE (a deleted pay period) disposes of the entry AND its legs -- a
-    database-level cascade that runs outside the ORM and so is NOT blocked
-    by the immutability guards;
+  * the tenancy CASCADE (a deleted pay period) disposes of the entry AND
+    its legs -- a database-level cascade that runs outside the ORM and so is
+    NOT blocked by the immutability guards.  The movement link's SET NULL on
+    a source delete (the immutable posted fact survives) is the transfer
+    posting lifecycle suite's: ``test_transfer_posting_lifecycle.py``
+    hard-deletes a settled transfer and reads its four movement entries
+    surviving with ``transaction_entry_id`` NULL.  The two older links this
+    file pinned the same way, ``transfer_id`` and ``transaction_id``, are gone
+    (plan step ``balance:X-bi-6-5``'s second leaf, card plan#1845);
   * ``posting_kind_id`` / ``source_kind_id`` are RESTRICT (the seeded ref
     rows are non-removable invariants);
   * both tables are registered for auditing and their triggers fire.
@@ -46,9 +49,7 @@ from app.models.journal_entry import (
 )
 from app.models.pay_period import PayPeriod
 from tests._test_helpers import (
-    add_txn,
     create_account_of_type,
-    create_settled_transfer,
     ledger_accounts_for_account,
     make_balanced_entry,
 )
@@ -199,7 +200,7 @@ class TestSchemaConstraints:
                 pay_period_id=seed_user["bootstrap_period"].id,
                 entry_date=date(2026, 1, 15),
                 source_kind_id=ref_cache.posting_source_id(
-                    PostingSourceEnum.TRANSFER,
+                    PostingSourceEnum.TRANSFER_MOVEMENT,
                 ),
                 description="zero-amount probe",
             )
@@ -237,7 +238,7 @@ class TestSchemaConstraints:
                     "p": seed_user["bootstrap_period"].id,
                     "d": date(2026, 1, 15),
                     "src": ref_cache.posting_source_id(
-                        PostingSourceEnum.TRANSFER,
+                        PostingSourceEnum.TRANSFER_MOVEMENT,
                     ),
                 })
                 _db.session.flush()
@@ -250,121 +251,7 @@ class TestSchemaConstraints:
 
 
 class TestForeignKeyActions:
-    """SET NULL on source delete; CASCADE disposal; RESTRICT on ref rows."""
-
-    def test_transfer_delete_sets_transfer_id_null(
-        self, app, db, seed_user, two_ledgers,
-    ):
-        """Deleting a source transfer SET-NULLs the entry's ``transfer_id``.
-
-        The posted fact is immutable history: a hard-deleted transfer must
-        leave its journal entry intact with a NULLed back-link, not cascade
-        the entry away.  The transfer's shadows cascade off (their
-        ``transfer_id`` FK is CASCADE); the entry survives.
-        """
-        from_ledger, to_ledger = two_ledgers
-        with app.app_context():
-            savings = (
-                _db.session.query(type(seed_user["account"]))
-                .filter_by(name="Posting Savings").one()
-            )
-            transfer = create_settled_transfer(
-                seed_user, _db.session, seed_user["account"], savings,
-                seed_user["bootstrap_period"], amount=Decimal("100.00"),
-            )
-            _db.session.commit()
-            entry = make_balanced_entry(
-                _db.session, seed_user,
-                from_ledger_id=from_ledger, to_ledger_id=to_ledger,
-                transfer_id=transfer.id,
-            )
-            entry_id = entry.id
-            transfer_id = transfer.id
-
-            # Delete the transfer at the storage tier (its shadows cascade).
-            # Its payments first, in the same raw SQL: a row holding one is no longer
-            # deleted with it (R-CC54; rule-5 re-expression, developer-confirmed
-            # 2026-09-23).  The payments hang off the TRANSFER by its side keys
-            # since plan step balance:X-bi-6-4d-2, which are NO ACTION on
-            # delete, so they are found by those links -- they were found under
-            # the shadows until then, which hold none now, and the transfer's
-            # delete is refused while one survives (ruling R-BAL167 class 2).
-            _db.session.execute(_db.text(
-                "DELETE FROM budget.transaction_entries "
-                "WHERE expense_transfer_id = :t OR income_transfer_id = :t"
-            ), {"t": transfer_id})
-            _db.session.execute(_db.text(
-                "DELETE FROM budget.transfers WHERE id = :t"
-            ), {"t": transfer_id})
-            _db.session.commit()
-            _db.session.expire_all()
-
-            survived = _db.session.get(JournalEntry, entry_id)
-            assert survived is not None, (
-                "the immutable journal entry must survive a source-transfer "
-                "delete"
-            )
-            assert survived.transfer_id is None, (
-                "the entry's transfer back-link must be SET NULL, not cascaded"
-            )
-            # Both legs survive too.
-            assert (
-                _db.session.query(Posting)
-                .filter_by(journal_entry_id=entry_id)
-                .count() == 2
-            )
-
-    def test_transaction_delete_sets_transaction_id_null(
-        self, app, db, seed_user, two_ledgers,
-    ):
-        """Deleting a source transaction SET-NULLs the entry's transaction_id.
-
-        The Step-3 analog of the transfer SET NULL above: an ordinary
-        transaction's posted journal entry is immutable history and must
-        survive a hard delete of its source transaction with only the
-        back-link cleared.  The FK SET NULL is a database-level action run
-        outside the ORM, so the ``before_update`` immutability guard does not
-        fire (the same mechanism the transfer case relies on).
-        """
-        from_ledger, to_ledger = two_ledgers
-        with app.app_context():
-            txn = add_txn(
-                _db.session, seed_user, seed_user["bootstrap_period"],
-                "Posted expense", "50.00", category_key="Groceries",
-            )
-            _db.session.commit()
-            txn_id = txn.id
-            entry = make_balanced_entry(
-                _db.session, seed_user,
-                from_ledger_id=from_ledger, to_ledger_id=to_ledger,
-                source_kind=PostingSourceEnum.TRANSACTION,
-                transaction_id=txn_id,
-                posting_kind=PostingKindEnum.EXPENSE,
-            )
-            entry_id = entry.id
-
-            # Delete the source transaction at the storage tier.
-            _db.session.execute(_db.text(
-                "DELETE FROM budget.transactions WHERE id = :t"
-            ), {"t": txn_id})
-            _db.session.commit()
-            _db.session.expire_all()
-
-            survived = _db.session.get(JournalEntry, entry_id)
-            assert survived is not None, (
-                "the immutable journal entry must survive a source-"
-                "transaction delete"
-            )
-            assert survived.transaction_id is None, (
-                "the entry's transaction back-link must be SET NULL, not "
-                "cascaded"
-            )
-            # Both legs survive too.
-            assert (
-                _db.session.query(Posting)
-                .filter_by(journal_entry_id=entry_id)
-                .count() == 2
-            )
+    """CASCADE disposal; RESTRICT on ref rows."""
 
     def test_pay_period_delete_cascades_entry_and_postings(
         self, app, db, seed_user, two_ledgers,
@@ -409,11 +296,13 @@ class TestForeignKeyActions:
         """Deleting a referenced ``ref.posting_sources`` row is refused.
 
         RESTRICT: a successful delete would strand every entry tagged with
-        that source kind.  An entry references the ``transfer`` source; the
-        raw DELETE on that row must raise.
+        that source kind.  An entry references the ``transfer_movement``
+        source; the raw DELETE on that row must raise.
         """
         with app.app_context():
-            source_id = ref_cache.posting_source_id(PostingSourceEnum.TRANSFER)
+            source_id = ref_cache.posting_source_id(
+                PostingSourceEnum.TRANSFER_MOVEMENT,
+            )
             entry = JournalEntry(
                 user_id=seed_user["user"].id,
                 scenario_id=seed_user["scenario"].id,

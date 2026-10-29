@@ -52,8 +52,9 @@ so either can move without the other.
   landed with the transfer delete that takes a side's records off first**
   (design D7, finding BAL-532), at the leaf's second checkpoint, so under
   :data:`TRANSFER_ARM` the row arm excepts nothing either, and since plan
-  step ``balance:X-bi-6-4d-2`` no row is a transfer's leg at all
-  (``ck_transactions_names_no_transfer``, ruling **R-BAL258**).  The
+  step ``balance:X-bi-6-4d-2`` no row is a transfer's leg at all (ruling
+  **R-BAL258**; plan step ``balance:X-bi-6-5`` dropped the column one named
+  its transfer by).  The
   row-only text a revision without :data:`TRANSFER_ARM` installs keeps the
   clause, and with it
   ``transfer_id`` watched as well as ``is_deleted``, so a raw ``UPDATE``
@@ -165,7 +166,11 @@ trusted.
 (``budget.transactions`` and ``budget.transaction_entries``; with
 :data:`TRANSFER_ARM`, ``budget.transfers`` and the entries' two side links).
 ``CREATE TRIGGER`` needs its table and columns, and each function body names
-the other tables.
+the other tables.  **The ROW-only text also names
+``budget.transactions.transfer_id``**, which exists only below migration
+``c956c1d83108`` (plan step ``balance:X-bi-6-5`` dropped it), so only a
+revision below that one may apply the row arm without :data:`TRANSFER_ARM`:
+``c4a4e7d1b9f2``'s upgrade and ``e616adf7fe22``'s downgrade, the two that do.
 """
 
 from __future__ import annotations

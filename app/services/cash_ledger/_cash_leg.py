@@ -59,10 +59,10 @@ shows it, flag or no flag.
 
 **Where ``gross`` comes from is the CALLER'S, and it must be.**  A projected
 row is worth what settling it would book, which is
-``transaction_service.settle_amount`` for an ordinary row and
-``transfer_service.leg_settle_amount`` for a transfer leg.  Asking this module to
-choose between them would put the settle verbs' own partition in a third place,
-and it cannot import either without a cycle.
+``transaction_service.settle_amount`` of its parent -- the row, or a transfer
+leg's transfer (ruling **plan#1983**).  Asking this module to resolve it would
+put the settle verbs' own composition in a second place, and it cannot import
+it without a cycle.
 
 Services-boundary discipline: pure per-row reads.  No query, no clock, no Flask
 import, no write.
@@ -291,7 +291,7 @@ def cash_leg_of(txn, gross: Decimal) -> Decimal:
     (``+`` income, ``-`` expense) -- behind the same TOTAL contributing gate
     :func:`movement_cash_leg` applies to a movement: a non-contributing row is
     worth ``0.00`` whatever *gross* says.  Its one caller is the statement
-    matcher (``statement_match._valuation.transaction_price``, plan step
+    matcher (``statement_match._settle_price.settle_price``, plan step
     ``bank_import:X-f6a-2``),
     which must compare a bank line against what the app would move if the
     Projected row it names settled -- and which asks this ONLY of a row that

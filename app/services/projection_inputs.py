@@ -27,7 +27,7 @@ paycheck engine, which means resolving a profile and its tax configs, which
 means a session -- so the PRICING happens at this loader and the pure module
 receives a finished
 :class:`~app.services.investment_projection.AccountPayrollFeed`.  It is the
-same split ``PricedContribution`` and ``ShadowContributions`` already sit on,
+same split ``PricedContribution`` and ``TransferContributions`` already sit on,
 applied to the third and last input that was still arriving raw.  **The
 contribution feed itself lives one module over since plan step
 balance:X-bi-6a** (:mod:`app.services.recorded_contributions`): that step's
@@ -777,7 +777,7 @@ def build_investment_projection_inputs(
     the ``too-many-arguments`` disable that justified six went with it.  The
     list served the wrapped function's two YTD windows alone, as a lookup from
     a contribution's pay period to that period's payday;
-    :func:`~app.services.recorded_contributions.load_shadow_income_contributions_for_accounts`
+    :func:`~app.services.recorded_contributions.load_transfer_contributions_for_accounts`
     dates each
     contribution now, so there is nothing left to look up.
 

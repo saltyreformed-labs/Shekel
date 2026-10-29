@@ -59,7 +59,7 @@ independent ways that must all agree:
     onto) must match the hand-computed literals too.
 
 Two adversarial cases prove the oracle is not vacuous: tampering a settled
-shadow makes the per-account reconciliation FAIL -- driven through the real
+transfer's figure makes the per-account reconciliation FAIL -- driven through the real
 ``_assert_full_reconciliation`` sweep helper under ``pytest.raises``, so a
 regression in the helper itself is caught, not only in an inline re-derivation
 (so a real ledger drift would be caught) -- and injecting one extra leg makes the
@@ -68,8 +68,8 @@ per-entry trigger makes unconditionally true).
 
 All money is ``Decimal`` from strings, with the arithmetic shown per the
 testing standard.  Transfers are built through ``transfer_service`` (the sole
-writer), so every shadow obeys the transfer invariants exactly as production
-produces them; Commit 5 wiring auto-posts each settle.
+writer), so every transfer is written exactly as production writes one; Commit
+5 wiring auto-posts each settle.
 """
 from __future__ import annotations
 
@@ -459,7 +459,7 @@ class TestPerAccountReconciliation:
 
         Arithmetic: settle +100 (Savings), then revert.  The transfer nets to
         zero (+100 settle, -100 reversal -- append-only), and the reverted
-        income shadow is no longer ``is_settled`` so it drops from the
+        transfer's side records are un-dated, so it drops from the
         settled-shadow effect too.  Each ledger lands back on its opening
         (Checking 1000.00, Savings 100.00) with a zero effect, and two
         transfer entries survive (the original is never edited).  This is
@@ -589,10 +589,11 @@ class TestEverySettledTransferPosts:
         Commit-4 review asked the oracle to carry.
 
         Arithmetic: the two simple settles ($100 to Savings, $250 to Mortgage)
-        each post exactly one entry, so the 2 settled non-deleted transfers map
-        one-to-one onto the 2 TRANSFER-sourced journal entries (the Step-5
-        account openings carry their own source kinds and are excluded); the
-        Projected $40 transfer is not settled and posts none.
+        each post exactly two entries, one per side, so the 2 settled
+        non-deleted transfers map two-to-one onto the 4 TRANSFER_MOVEMENT-sourced
+        journal entries (the Step-5 account openings carry their own source
+        kinds and are excluded); the Projected $40 transfer is not settled and
+        posts none.
         """
         with app.app_context():
             _build_asset_and_liability_books(seed_user)
@@ -847,10 +848,10 @@ class TestOracleIsNotVacuous:
     """Prove the reconciliation and trial-balance checks catch real breakage."""
 
     @pytest.mark.server_clock
-    def test_per_account_reconciliation_catches_a_tampered_shadow(
+    def test_per_account_reconciliation_catches_a_tampered_settled_figure(
         self, app, db, seed_user,
     ):
-        """Tampering a settled shadow makes ledger != settled-shadow effect.
+        """Tampering a transfer's settled figure makes ledger != settled-shadow effect.
 
         A reconciled $100 Checking -> Savings settle has ledger +100 and
         settled-shadow effect +100 on Savings.  Forcing the TRANSFER's settled

@@ -25,11 +25,12 @@ from app.schemas.validation import (
     TransferCreateSchema,
     TransferUpdateSchema,
 )
+from app.routes._mobile_card import RenderTarget, render_mobile_card
 from app.routes._render_helpers import (
+    render_transaction_cell,
     render_transfer_cell,
-    render_transfer_leg_card,
-    render_transfer_leg_cell,
 )
+from app.services.transfer_legs import leg_of
 from app.utils.digit_strings import parse_row_id
 from app.utils.error_fragments import designed_error
 
@@ -193,19 +194,25 @@ class _LegRequest:
     grid context), a transfer LEG's desktop grid cell, and a leg's mobile
     card (leaf ``X-bi-6-1``, ruling **R-BAL87**).  The form says which by
     ``leg_account_id`` -- the account the leg is on -- plus, for a card,
-    ``render=mobile_card`` and its ``card_prefix``, the same three-field
-    shape the transaction routes' ``_RenderTarget`` reads.
+    the render-routing fields the card's one form posts for a row and a leg
+    alike (``render=mobile_card``, ``card_prefix``, ``can_edit``).
+
+    **It HOLDS the transaction routes' render target rather than re-reading
+    its fields** (ruling **plan#1983**): until then this class re-read
+    ``render`` and ``card_prefix`` off the form itself and the leg card
+    hard-coded ``can_edit``, a second reading of one form beside
+    :meth:`~app.routes._mobile_card.RenderTarget.from_form`.  What a leg
+    adds to a row's request is its account, and that is all it states.
 
     Attributes:
         account_id: The leg's account, validated against the parent's
             endpoints.
-        render_mode: ``"mobile_card"`` for the card, else ``""``.
-        card_prefix: The card's per-tab namespace (``"tp"`` or ``""``).
+        target: The surface the request asked for -- the leg's card or its
+            cell -- read off the form by the one reader both packages call.
     """
 
     account_id: int
-    render_mode: str
-    card_prefix: str
+    target: RenderTarget
 
 
 def _resolve_leg_request(xfer) -> "_LegRequest | None":
@@ -248,21 +255,40 @@ def _resolve_leg_request(xfer) -> "_LegRequest | None":
             account_id, xfer.id, xfer.from_account_id, xfer.to_account_id,
         )
         return None
-    return _LegRequest(
-        account_id=account_id,
-        render_mode=request.form.get("render", ""),
-        card_prefix=request.form.get("card_prefix", ""),
-    )
+    return _LegRequest(account_id=account_id, target=RenderTarget.from_form())
 
 
 def _render_leg_surface(xfer, leg: _LegRequest, **extra):
-    """Render the leg's cell or card, whichever the request came from."""
-    if leg.render_mode == "mobile_card":
-        return render_transfer_leg_card(
-            xfer, leg.account_id, card_prefix=leg.card_prefix,
-            error=extra.get("error"),
+    """Render the leg's cell or card, whichever the request came from.
+
+    The leg is built here (:func:`~app.services.transfer_legs.leg_of`)
+    rather than kept from before the act, because the act may have just
+    moved it (a settle does).  Its record is not loaded: neither renderer
+    reads one (ruling **plan#2136**; it was pre-loaded until then, a
+    statement per fragment that nothing read).  It is drawn by the renderers a row's door draws
+    a row with (ruling **plan#1983**):
+    :func:`~app.routes._mobile_card.render_mobile_card` for the card, which
+    takes only the refusal of *extra*, as a row's card does, and
+    :func:`~app.routes._render_helpers.render_transaction_cell` for the
+    cell.  :func:`_resolve_leg_request` has already confirmed the account is
+    one of the transfer's endpoints, so the build does not refuse it.
+
+    Args:
+        xfer: The transfer the door acted on, owner-established.
+        leg: The request's :class:`_LegRequest`.
+        **extra: Forwarded to the cell (``conflict=True``,
+            ``error=<message>``); the card reads ``error`` alone.
+
+    Returns:
+        Rendered HTML string.
+    """
+    side = leg_of(xfer, leg.account_id)
+    if leg.target.render_mode == "mobile_card":
+        return render_mobile_card(
+            side, card_prefix=leg.target.card_prefix,
+            can_edit=leg.target.can_edit, error=extra.get("error"),
         )
-    return render_transfer_leg_cell(xfer, leg.account_id, **extra)
+    return render_transaction_cell(side, **extra)
 
 
 def _stale_transfer_response(xfer_id):
@@ -375,7 +401,7 @@ def _render_post_mutation_cell(xfer, *, leg_trigger, cell_trigger):
         db.session.refresh(xfer)
         response = _render_leg_surface(xfer, leg)
         trigger = (
-            "mobileCardSettled" if leg.render_mode == "mobile_card"
+            "mobileCardSettled" if leg.target.render_mode == "mobile_card"
             else leg_trigger
         )
         return response, 200, {"HX-Trigger": trigger}

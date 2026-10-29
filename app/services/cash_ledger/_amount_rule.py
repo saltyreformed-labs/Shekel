@@ -8,7 +8,7 @@ that module past ``max-module-lines``.  The cut is by tier and it is the seam
 the sibling's docstring already draws: *ownership is DECLARED and the
 refinement is READ, and the split between the two is the design*.  Nothing here
 resolves a figure, reads a price series or touches a live producer; it answers
-which of the five rules owns a row's amount and nothing else.
+which of the four rules owns a row's amount and nothing else.
 
 **The alternative was shaving prose, and this project has already ruled against
 it**: *"three lines of headroom is not a design, and the structural answer is a
@@ -16,19 +16,16 @@ package with one private leaf per verb"* (``transaction_service`` package
 docstring), restated by :mod:`._amount_basis` when the same ceiling forced the
 same choice at plan step X-au-j.
 
-**TWO ROW TABLES, two classifiers, and neither takes all five rules.**
+**TWO ROW TABLES, two classifiers, and neither takes all four rules.**
 :func:`amount_rule` classifies a ``budget.transactions`` row and can answer
-rules 1, 2, 3 and 5; :func:`transfer_amount_rule` classifies a
+rules 1, 2 and 3; :func:`transfer_amount_rule` classifies a
 ``budget.transfers`` row and can answer rules 1, 3 and 4.  Rule 2 needs a
-salary profile, which names a TRANSACTION template; rule 5 is *= my parent*,
-and a transfer has no parent transfer.  Rule 4 belongs to the TRANSFER
-classifier since ruling **R-BAL10** -- it was a shadow rule until plan step
-X-au-f-2 -- which is what makes rule 5 exceptionless.  No door writes a row
-rule 5 can answer since plan step ``balance:X-bi-6-4d-2`` deleted the shadows
-(ruling **R-BAL166**): a stored row that still declares the relation is
-classified here and refused one tier down, having no transfer to read
-(:func:`._amount_source._transfer_answer`), and that arm goes at plan step
-``balance:X-bi-6-5``.
+salary profile, which names a TRANSACTION template, and rule 4 belongs to the
+TRANSFER classifier since ruling **R-BAL10** (it was a shadow rule until plan
+step X-au-f-2).  A fifth rule, *= my parent*, priced a transfer's two shadow
+rows from their transfer; plan step ``balance:X-bi-6-4d-2`` deleted the
+shadows (ruling **R-BAL166**), and plan step ``balance:X-bi-6-5`` deleted the
+rule with the ``parent_transfer`` relation that declared it.
 
 Nothing here imports from :mod:`._amount_source`, so the split introduces no
 cycle: this module is strictly below it.  Boundary discipline (``CLAUDE.md``
@@ -40,12 +37,11 @@ from enum import Enum
 
 from app import ref_cache
 from app.enums import AmountSourceEnum
-from app.exceptions import AmountUnresolvable
 from app.services import template_amount_service
 
 
 class AmountRule(Enum):
-    """Which of ruling R-FI's five sources a row's amount comes from.
+    """Which of ruling R-FI's four sources a row's amount comes from.
 
     The dispatch key.  An explicit enum rather than a pair of link tests, because
     the rules are not a partition over the links -- see :mod:`._amount_source`'s
@@ -55,8 +51,8 @@ class AmountRule(Enum):
 
     **It is NOT what the ``amount_source_id`` column stores, and a first draft of
     this docstring said it was.**  That column names the RELATION that prices a
-    row -- its definition, or its parent transfer
-    (:class:`app.enums.AmountSourceEnum`) -- and the refinement between SALARY
+    row -- its definition (:class:`app.enums.AmountSourceEnum`) -- and the
+    refinement between SALARY
     and TEMPLATE for a transaction, or between LOAN_PAYMENT and TEMPLATE for a
     transfer, is a property of the DEFINITION rather than of the row, resolved
     live here.  Storing the rule
@@ -79,12 +75,11 @@ class AmountRule(Enum):
     SALARY = "salary"
     TEMPLATE = "template"
     LOAN_PAYMENT = "loan_payment"
-    TRANSFER = "transfer"
 
 
 
 def amount_rule(txn) -> AmountRule:
-    """Return which of R-FI's five rules owns *txn*'s amount.
+    """Return which of R-FI's four rules owns *txn*'s amount.
 
     **One question to the COLUMN, then one to the DEFINITION.**  A row that
     carries no ``amount_source_id`` owns its figure and is priced by rule 1; a
@@ -93,9 +88,8 @@ def amount_rule(txn) -> AmountRule:
     definition itself.  The refinement order is the rule: SALARY is tested
     before TEMPLATE because a salary profile names an ordinary transaction
     template, and testing them the other way round would place every paycheck
-    as a template row.  The parent-transfer relation refines into rule 5 alone
-    (:func:`_rule_is_parent_transfer`): a loan payment's rule 4 is the TRANSFER
-    classifier's since ruling **R-BAL10** (:func:`transfer_amount_rule`).
+    as a template row.  A loan payment's rule 4 is the TRANSFER classifier's
+    since ruling **R-BAL10** (:func:`transfer_amount_rule`).
 
     **Nothing here reads ``is_override``, ``is_projected`` or ``is_deleted``, and
     that is finding N-262's fix** (plan step X-au-c2).  Those three are facts
@@ -127,9 +121,7 @@ def amount_rule(txn) -> AmountRule:
     Args:
         txn: The :class:`~app.models.transaction.Transaction` to classify.  Its
             ``template`` relationship is read only when it DECLARES that
-            relation, and its ``transfer`` relationship never is (the
-            parent-transfer refiner reads nothing), so an undeclared row costs
-            no lazy load at all.
+            relation, so an undeclared row costs no lazy load at all.
 
     Returns:
         The :class:`AmountRule` that prices this row.
@@ -207,41 +199,6 @@ def _rule_within_definition(txn) -> AmountRule:
     )
 
 
-def _rule_is_parent_transfer(_txn) -> AmountRule:
-    """Refine the PARENT_TRANSFER relation: rule 5, unconditionally.
-
-    **It USED to refine into rule 4 or rule 5, and ruling R-BAL10 is what made
-    it total** (plan step X-au-f-2).  It read
-    ``AmountRule.LOAN_PAYMENT if _is_loan_payment(txn.transfer) else
-    AmountRule.TRANSFER`` -- so a loan payment's two legs were priced by the
-    LOAN while every other shadow was priced by its parent.  A loan payment's
-    occurrence was ONE economic event held as three rows, its legs were the
-    parent's PROJECTION, and the value's home was therefore the parent: rule 4
-    became a TRANSFER rule (:func:`_rule_within_transfer_definition`) and a
-    shadow's answer became *= my parent* whatever its parent was.  That was
-    R-JM's one chain, and what it deleted is the state where a leg answered a
-    figure its parent did not -- the ``$174.10`` an owner's typed amount lost
-    to the contract, twice.  The occurrence is held as ONE row since plan step
-    ``balance:X-bi-6-4d-2`` deleted the shadows (ruling **R-BAL166**), so no
-    door writes a row declaring this relation: a stored row that still does
-    names no transfer (``ck_transactions_names_no_transfer``) and is answered
-    by the refusal in :func:`._amount_source._transfer_answer`.  Plan step
-    ``balance:X-bi-6-5`` deletes the relation, and this refiner with it.
-
-    Kept as a one-line refiner rather than folded into ``_RELATION_RULES`` as a
-    constant, because that table's entries are CALLABLES and a member added to
-    :class:`~app.enums.AmountSourceEnum` must arrive with one; a table holding
-    a mix of the two would be read as though the constant were the shape.
-
-    Its parameter is UNREAD and named ``_txn`` to say so: the relation names
-    the rule on its own now.  The signature is the table's, not this answer's.
-
-    Returns:
-        :attr:`AmountRule.TRANSFER`.
-    """
-    return AmountRule.TRANSFER
-
-
 def _rule_within_transfer_definition(xfer) -> AmountRule:
     """Refine a TRANSFER's TEMPLATE relation into rule 4 or rule 3.
 
@@ -277,7 +234,7 @@ def _rule_within_transfer_definition(xfer) -> AmountRule:
 
 
 def transfer_amount_rule(xfer) -> AmountRule:
-    """Return which of R-FI's five rules owns *xfer*'s amount.
+    """Return which of R-FI's four rules owns *xfer*'s amount.
 
     The TRANSFER twin of :func:`amount_rule`, and it asks the two questions in
     the same order for the same reasons: the ``amount_source_id`` COLUMN says
@@ -285,13 +242,12 @@ def transfer_amount_rule(xfer) -> AmountRule:
     the refinement WITHIN a declared relation is read live off the definition
     (:func:`_rule_within_transfer_definition`).
 
-    **Three of the five rules can apply here and two cannot.**  A transfer
+    **Three of the four rules can apply here and one cannot.**  A transfer
     takes rule 1 (its own figure), rule 3 (its definition's dated series) or
     rule 4 (a loan payment's cash, since plan step X-au-f-2 -- ruling
     **R-BAL10**).  It cannot take rule 2, which prices a paycheck and needs a
-    salary profile naming a TRANSACTION template, and it cannot take rule 5,
-    which is *= my parent* and a transfer has no parent transfer.  The other
-    table's classifier is the mirror image: everything but rule 4.
+    salary profile naming a TRANSACTION template.  The other table's
+    classifier is the mirror image: everything but rule 4.
 
     Args:
         xfer: The :class:`~app.models.transfer.Transfer` to classify.  Its
@@ -302,26 +258,14 @@ def transfer_amount_rule(xfer) -> AmountRule:
         The :class:`AmountRule` that prices this transfer.
 
     Raises:
-        AmountUnresolvable: When the transfer declares PARENT_TRANSFER -- a
-            relation no transfer can name.  See
-            :func:`resolve_transfer_amount`, whose refusal message states what
-            wrote it.
         KeyError: When the row names a relation this dispatch has no rule for,
             exactly as :func:`amount_rule` does and for the same reason.
     """
     if xfer.amount_source_id is None:
         return AmountRule.OWN
-    relation = _declared_relation(xfer.amount_source_id)
-    if relation is not AmountSourceEnum.TEMPLATE:
-        raise AmountUnresolvable(
-            f"Transfer {xfer.id} declares amount source {relation.value!r}, "
-            "and a transfer has no parent transfer for one to name. Only a "
-            "transfer TEMPLATE can price a transfer; the parent-transfer "
-            "relation belongs to the transactions table, where a transfer's "
-            "shadow rows used it, and no shadow row exists any more. This row "
-            "was stamped by a writer that confused the two tables."
-        )
-    return _TRANSFER_RELATION_RULES[relation](xfer)
+    return _TRANSFER_RELATION_RULES[
+        _declared_relation(xfer.amount_source_id)
+    ](xfer)
 
 
 def _is_loan_payment(xfer) -> bool:
@@ -394,16 +338,20 @@ def is_loan_payment_definition(template) -> bool:
 # against the enum, so the completeness is a predicate rather than a comment.
 _RELATION_RULES = {
     AmountSourceEnum.TEMPLATE: _rule_within_definition,
-    AmountSourceEnum.PARENT_TRANSFER: _rule_is_parent_transfer,
 }
 
-# WHICH RULE a declared relation refines into for a TRANSFER.  It holds ONE
-# member where the transaction table holds both, and the absence is the
-# statement: a transfer has no parent transfer, so PARENT_TRANSFER is refused
-# by :func:`transfer_amount_rule` above with a message naming the writer that
-# confused the two tables, rather than reaching a lookup that would raise a
-# bare ``KeyError``.  The suite grades this table against the relations a
-# transfer may actually declare, so a new member arrives with a rule here too.
+# WHICH RULE a declared relation refines into for a TRANSFER.  It holds the one
+# member the transaction table holds, refined the transfer's way: a transfer's
+# definition is a loan payment or prices from its series, where a
+# transaction's is a paycheck or prices from its series.  It held one member
+# where the transaction table held two until plan step ``balance:X-bi-6-5``
+# deleted ``PARENT_TRANSFER``, which no transfer could declare, and the
+# refusal that named it.  A member added to
+# :class:`~app.enums.AmountSourceEnum` raises ``KeyError`` at this lookup
+# until it arrives with a rule here or a refusal in
+# :func:`transfer_amount_rule`, exactly as at ``_RELATION_RULES``; the suite
+# grades this table against the enum, so the decision is made where the member
+# is added.
 _TRANSFER_RELATION_RULES = {
     AmountSourceEnum.TEMPLATE: _rule_within_transfer_definition,
 }

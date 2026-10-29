@@ -54,7 +54,7 @@ from app.services.projection_inputs import (
     price_payroll_feeds,
 )
 from app.services.recorded_contributions import (
-    load_shadow_income_contributions_for_account,
+    load_transfer_contributions_for_account,
 )
 from tests._test_helpers import (
     an_entered_day,
@@ -1082,12 +1082,12 @@ class TestLoadInvestmentParamsForAccounts:
             assert load_investment_params_for_accounts([]) == {}
 
 
-class TestShadowContributionBoundary:
-    """The BOUNDARY where a shadow contribution is valued and screened.
+class TestAContributionIsValuedAndScreenedAtTheBoundary:
+    """The BOUNDARY where a contribution is valued and screened.
 
-    ``load_shadow_income_contributions_for_account(s)`` became the one place a
+    ``load_transfer_contributions_for_account(s)`` became the one place a
     contribution's dollar is decided at plan step X-au-c2: it prices the whole
-    row set through :func:`app.services.cash_ledger.contributions_by_id` and
+    row set through :func:`app.services.cash_ledger.contributions_by_key` and
     hands :mod:`app.services.investment_projection` frozen
     :class:`~app.services.investment_projection.PricedContribution` records.
 
@@ -1210,7 +1210,7 @@ class TestShadowContributionBoundary:
             .employer_contribution_type_id(EmployerContributionTypeEnum.NONE),
         )
 
-    def test_settled_shadow_is_priced_at_its_realized_actual(
+    def test_settled_contribution_is_priced_at_its_realized_actual(
         self, app, db, seed_user, seed_periods,
     ):
         """estimated $500 / actual $400 -> the record carries $400.
@@ -1227,7 +1227,7 @@ class TestShadowContributionBoundary:
             )
             db.session.commit()
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [seed_periods[0].id],
             ).records
@@ -1255,7 +1255,7 @@ class TestShadowContributionBoundary:
             # The pass's ``DerivedPeriod`` for that row (ruling R-SAL19).
             period = calendar_for(seed_user["user"].id).saved()[0]
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [period.period_id],
             ).records
@@ -1286,7 +1286,7 @@ class TestShadowContributionBoundary:
             # The pass's ``DerivedPeriod`` for that row (ruling R-SAL19).
             period = calendar_for(seed_user["user"].id).saved()[0]
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [period.period_id],
             ).records
@@ -1320,7 +1320,7 @@ class TestShadowContributionBoundary:
                 )
             db.session.commit()
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [p.id for p in periods],
             ).records
@@ -1363,7 +1363,7 @@ class TestShadowContributionBoundary:
             period = calendar_for(seed_user["user"].id).saved()[0]
             assert period.period_id == seed_periods[0].id
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [period.period_id],
             ).records
@@ -1408,7 +1408,7 @@ class TestShadowContributionBoundary:
             )
             db.session.commit()
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [seed_periods[0].id, seed_periods[1].id],
             ).records
@@ -1426,10 +1426,10 @@ class TestShadowContributionBoundary:
             # zero-carrying record would have made this $200.
             assert result.periodic_contribution == Decimal("400")
 
-    def test_projected_shadow_is_not_confirmed(
+    def test_projected_contribution_is_not_confirmed(
         self, app, db, seed_user, seed_periods,
     ):
-        """A still-Projected shadow is priced but NOT confirmed.
+        """A still-Projected contribution is priced but NOT confirmed.
 
         The ``status.is_settled -> ContributionRecord.is_confirmed`` mapping
         moved to this boundary at plan step X-au-c2, and an adversarial review
@@ -1445,7 +1445,7 @@ class TestShadowContributionBoundary:
             )
             db.session.commit()
 
-            records = load_shadow_income_contributions_for_account(
+            records = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [seed_periods[0].id],
             ).records
@@ -1475,7 +1475,7 @@ class TestShadowContributionBoundary:
             )
             db.session.commit()
 
-            loaded = load_shadow_income_contributions_for_account(
+            loaded = load_transfer_contributions_for_account(
                 basis_for(account, seed_user["scenario"]),
                 account.id, [seed_periods[0].id],
             )

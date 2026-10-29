@@ -31,9 +31,9 @@ def _derived_cash(seed_user, legs):
     deleted that rule outright, because a transfer shadow stores no figure for a
     read-time override to supersede.  So the map this file grades is the
     amount model's own, and the assertions below keep their original figures.
-    It was ``cash_ledger.amounts_by_id`` over the shadow rows, keyed by
+    It was ``cash_ledger.amounts_by_key`` over the shadow rows, keyed by
     transaction id, until plan step balance:X-bi-6-4d-2 stopped the shadows
-    being born; it is ``cash_ledger.leg_amounts_by_key`` over the legs now,
+    being born; it is ``cash_ledger.amounts_by_key`` over the legs now,
     keyed by ``leg.cell_key`` -- what the grid publishes for a leg since plan
     step ``balance:X-bi-6-1`` (ruling **R-BAL167** class 4).
 
@@ -59,7 +59,7 @@ def _derived_cash(seed_user, legs):
     basis = cash_ledger.derived_amount_basis(
         seed_user["user"].id, seed_user["scenario"].id,
     )
-    return cash_ledger.leg_amounts_by_key(legs, basis)
+    return cash_ledger.amounts_by_key(legs, basis)
 
 
 def _state_price(template, figure):
@@ -180,20 +180,21 @@ def _mark_done_from_leg(auth_client, transfer_id, account_id):
 
 
 def _side_leg(transfer_id, account_id):
-    """Return *transfer_id*'s leg on *account_id*, its record read by its own SQL.
+    """Return *transfer_id*'s leg on *account_id*, its record checked by its own SQL.
 
     What these cases value a settled side as since plan step
     ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 4): a side's payment
     record hangs off the TRANSFER and nothing keeps a twin's status or figure,
-    so a settled side is the transfer's status and the side's record
-    (``transfer_side_record``, independent SQL over the side links, never
-    ``transfer_legs``' own join), where these cases read the twin row until
-    then.  ``test_transfer_settle_freeze`` imports it.
+    so a settled side is the transfer's status and the side's record, where
+    these cases read the twin row until then.  ``test_transfer_settle_freeze``
+    imports it.  The leg reads its record off the transfer's list since ruling
+    **plan#1984** and can no longer be handed one, so the independent SQL over
+    the side links (``transfer_side_record``, never ``transfer_legs``' own
+    read) stays as a check on that read rather than as its source.
     """
-    return transfer_legs.leg_of(
-        db.session.get(Transfer, transfer_id), account_id,
-        record=transfer_side_record(db.session, transfer_id, account_id),
-    )
+    leg = transfer_legs.leg_of(db.session.get(Transfer, transfer_id), account_id)
+    assert leg.record is transfer_side_record(db.session, transfer_id, account_id)
+    return leg
 
 
 def _loan_payment_legs(loan_id, scenario_id):

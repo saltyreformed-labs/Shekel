@@ -34,7 +34,8 @@
   <span class="text-muted">&mdash;</span>
 </div>
 {% else %}
-{# Uncategorized row (e.g. transfer shadow with missing category).
-   No quick-create -- the transaction is managed via the transfer form. #}
+{# Uncategorized row: no quick-create, because the create URL names a
+   category.  (Its example was a transfer shadow with no category, until plan
+   step balance:X-bi-6-4d-2 deleted the shadows.) #}
 <span class="text-muted">&mdash;</span>
 {% endif %}

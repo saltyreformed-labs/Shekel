@@ -81,7 +81,7 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # the ``display_amounts_by_id`` composition over them are all DELETED:
     # a paycheck row no longer stores a figure a live recompute has to
     # supersede, so there is no second answer for a screen to compose and
-    # nothing left to classify.  What survives is ``amounts_by_id`` below,
+    # nothing left to classify.  What survives is ``amounts_by_key`` below,
     # which answers what a row's amount IS with no live half at all.
     # *The four names outlived the functions by one commit; CI's checker
     # step caught them, and the LOCAL suite structurally could not --
@@ -92,41 +92,30 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # ground, and it is the same question ``Transaction.effective_amount``
     # answered as a model property: ``contributed_amount`` composes a
     # resolved amount with the status, the soft delete and an entered
-    # actual; ``contribution_of`` and ``contributions_by_id`` are the
-    # one-row and batch forms that resolve first.  Each answers what ONE
-    # ROW is worth -- none folds, dates, sums, or reads an anchor, and the
-    # batch is a dict keyed by row id rather than anything per account.
+    # actual; ``contribution_of`` and ``contributions_by_key`` are the
+    # one-parent and batch forms that resolve first.  Each answers what ONE
+    # ROW or TRANSFER is worth -- none folds, dates, sums, or reads an
+    # anchor, and the batch is a dict keyed by a row's id or a transfer
+    # leg's ``(transfer id, account id)`` rather than anything per account.
     # ``settled_contribution`` is ruled with them,
     # under :data:`_ROW_VALUATION_MODULES` -- it is DEFINED one module
     # down and only re-exported here, and this fence keys on where a
     # function is DEFINED.  (It was ``owned_contribution`` until plan step
     # X-bx renamed it; its budget twin ``owned_amount`` was ruled there too
     # until plan step X-bu deleted the accessor.)
+    # Their leg twins -- ``planned_leg_contribution`` (plan step X-bi-6a),
+    # ``leg_contribution_of`` and ``leg_contributions_by_key`` (leaf
+    # X-bi-6-1b) -- were ruled here until leaf ``balance:X-bi-6-5`` 4
+    # deleted them (ruling plan#1983): a leg is valued as its parent
+    # transfer, through the two names above.
     "contributed_amount",
     "contribution_of",
-    "contributions_by_id",
-    # ``planned_leg_contribution`` joins the valuation family at plan step
-    # X-bi-6a on the same ground: what ONE LEG of a still-projected
-    # transfer is worth to the account on that side -- the parent's
-    # resolved amount, nothing folded, dated, summed or anchored.  It is
-    # the per-leg twin of ``contribution_of`` for the plan half ruling
-    # R-BAL13 derives from ``budget.transfers``.
-    "planned_leg_contribution",
-    # ``leg_contribution_of`` and ``leg_contributions_by_key`` (leaf
-    # X-bi-6-1b) are the one-leg and batch twins of ``contribution_of`` and
-    # ``contributions_by_id`` for a DISPLAY reader's legs, which carry a
-    # record where the fold's never do: each composes the leg's fixed worth
-    # (its parent's status, its own covering movement) with
-    # ``planned_leg_contribution``, and the batch is a dict keyed by the
-    # leg's ``(transfer id, account id)`` -- nothing folded, dated, summed
-    # or anchored, and nothing per account.
-    "leg_contribution_of",
-    "leg_contributions_by_key",
+    "contributions_by_key",
     # ``_amount_source`` / ``_amount_rule`` -- WHERE one row's amount comes
     # from (plan step X-au-b, ruling R-FI).  FIVE names, one ruling, because
     # they are one question at two tiers: ``amount_basis`` resolves the live
     # producers ONCE for a row set, the two ``*amount_rule`` entries say
-    # which of the five sources prices a row of each TABLE (the transfer
+    # which of the four sources prices a row of each TABLE (the transfer
     # classifier arrived with rule 4 at plan step X-au-f-2, ruling R-BAL10),
     # and the two ``resolve_*_amount`` entries answer what one
     # row's AMOUNT COLUMN holds or would hold.  Non-producers on exactly the
@@ -152,6 +141,11 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     "transfer_amount_rule",
     "resolve_transaction_amount",
     "resolve_transfer_amount",
+    # The ONE branch on a plan item's PARENT table (ruling plan#1983): a
+    # row's amount or a transfer's, by the two resolvers above.  A
+    # non-producer on their ground: one parent's amount, nothing folded,
+    # dated, summed or anchored.
+    "resolve_amount",
     # The estimate's price and the classifier it dispatches on (plan step
     # R16-b-2, ruling R-R67): what a row a definition has NOT written yet
     # would resolve to, through the identical arms a written one takes.
@@ -161,17 +155,15 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     "definition_cash",
     "is_loan_payment_definition",
     # The BATCH form of the same answer (plan step X-au-c2b), on the same
-    # ground as ``contributions_by_id`` above: a dict keyed by ROW ID, one
-    # entry per row the caller loaded, and nothing per account.  It differs
-    # from that sibling in the question rather than the tier -- what a row's
-    # amount IS (ruling E-21's budget base) rather than what it is worth --
-    # so a reader that needs a budget stops reaching for a contribution.
-    "amounts_by_id",
-    # The same batch over the grid's TRANSFER LEGS (leaf X-bi-6-1, ruling
-    # R-BAL87): a dict keyed by the leg's ``(transfer id, account id)``, one
-    # entry per leg the caller loaded, each ``resolve_transfer_amount`` over
-    # the parent -- a loop over a non-producer, nothing per account.
-    "leg_amounts_by_key",
+    # ground as ``contributions_by_key`` above: a dict keyed by a row's id or
+    # a transfer leg's ``(transfer id, account id)``, one entry per item the
+    # caller loaded, each ``resolve_amount`` over its parent, and nothing per
+    # account.  It differs from that sibling in the question rather than the
+    # tier -- what an item's amount IS (ruling E-21's budget base) rather
+    # than what it is worth -- so a reader that needs a budget stops reaching
+    # for a contribution.  Its leg twin ``leg_amounts_by_key`` (leaf
+    # X-bi-6-1) was ruled here until ruling plan#1983 folded the two.
+    "amounts_by_key",
     # The ONE statement of "is this movement already inside the balance the
     # user declared" (ruling R-DH (a)), and since the one-partition step it
     # is a METHOD on ``ReconciledThrough`` rather than a free function, so
@@ -381,8 +373,9 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # escrow" became "that installment's escrow", because the derivation
     # resolves it on the shadow's own due date (ruling D5), never on a
     # current one.  ``live_cash`` was the non-derive arm beside it and is
-    # gone; a shadow DECLARES ``parent_transfer`` now and the amount model
-    # answers what the override used to.
+    # gone; a shadow DECLARED ``parent_transfer`` from then and the amount
+    # model answered what the override used to, until plan step
+    # ``balance:X-bi-6-4d-2`` deleted the shadows.
     "derive_cash",
     # The named constructor for the derivation.  Ingredients; it resolves
     # nothing when it is called.  Word for word from the

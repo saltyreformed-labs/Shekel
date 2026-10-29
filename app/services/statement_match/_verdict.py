@@ -70,7 +70,7 @@ closes it.
 
 **What it costs instead is the MATCH.**  `E` now holds a purchase, and a row
 holding a purchase is worth ``$0.00`` to the offer
-(``_valuation.transaction_price``, ruling **R-BAL81**), so
+(``_settle_price.settle_price``, ruling **R-BAL81**), so
 :func:`~._resolve.resolve_rows` refuses any later act naming `E` as a whole as
 no longer available -- the proposal beside it becomes impossible to accept,
 and the bank line that proposal explained can no longer be matched to `E`: it
@@ -96,7 +96,7 @@ MATCH paragraph above gives.  The create and the later accept are always TWO
 requests -- a batch runs every match before any creation
 (:func:`~._batch.apply_reviewed`), and the import's filing runs through that
 batch -- so the accept's offer set is a fresh candidate scan, and that scan
-never offers `E`: ``_valuation.transaction_price`` prices it ``0`` and
+never offers `E`: ``_settle_price.settle_price`` prices it ``0`` and
 ``_valuation.transaction_candidate`` returns ``None`` for it.
 :func:`~._resolve.resolve_rows` therefore refuses the Accept as naming a row
 no longer available, before :func:`~._valuation.repriced` is reached for `E`

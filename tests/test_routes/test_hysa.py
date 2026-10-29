@@ -400,7 +400,7 @@ def _cash_detail_current_balance(app, auth_client, account_id):
     return recorded[0]["current_balance"]
 
 
-class TestHysaDetailShadowTransactions:
+class TestHysaDetailCountsTransferDeposits:
     """Verify that the HYSA detail page includes shadow transactions
     from transfers in its balance calculation and projection.
     """
@@ -408,8 +408,8 @@ class TestHysaDetailShadowTransactions:
     def test_hysa_detail_includes_transfer_deposit(
         self, app, auth_client, seed_user, db, seed_periods_today
     ):
-        """Verify that the HYSA detail page includes shadow income
-        transactions from transfers in the balance projection.  Without
+        """Verify that the HYSA detail page includes the deposits
+        transfers make into the account in the balance projection.  Without
         this, the HYSA projected balance underestimates by the total of
         all missed transfer deposits, and interest compounds on the
         wrong base amount.

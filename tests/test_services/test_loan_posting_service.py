@@ -1076,8 +1076,6 @@ class TestSyncLoanPaymentPostings:
             # then (ruling R-BAL167 class 1).  The period is the transfer's
             # since plan step balance:X-bi-6-4d-2; it read the shadow's
             # mirrored copy until then (ruling R-BAL167 class 1).
-            assert entry.transfer_id is None
-            assert entry.transaction_id is None
             assert entry.transaction_entry_id is None
             assert entry.pay_period_id == xfer.pay_period_id
             assert entry.entry_date == _loan_side_movement(xfer, loan).settled_on
@@ -1582,8 +1580,7 @@ class TestTheSplitIsADateKeyedCorrection:
             )
             assert len(entries) == 1
             entry = entries[0]
-            assert (entry.transaction_id, entry.transfer_id,
-                    entry.transaction_entry_id) == (None, None, None)
+            assert entry.transaction_entry_id is None
             legs = _entry_legs(entry.id)
             interest_ledger = _find_loan_ledger(
                 loan.id, LedgerAccountKindEnum.LOAN_INTEREST,
@@ -3347,8 +3344,11 @@ class TestCheckedProjection:
                 scenario_id=scenario_id,
                 pay_period_id=seed_periods[_P1].id,
                 entry_date=date(2026, 2, 15),
+                # A purchase linking no movement: a kind the loan walk does
+                # not model (it was the ``transaction`` source, deleted at
+                # card plan#1845).
                 source_kind_id=ref_cache.posting_source_id(
-                    PostingSourceEnum.TRANSACTION
+                    PostingSourceEnum.PURCHASE
                 ),
                 description="forced walk-invisible drift",
             )
@@ -3620,102 +3620,3 @@ class TestCheckedProjection:
             assert _source_entry_count(xfer.id, loan.id) == before
 
 
-class TestTheDeployResyncReBooksALoanPayment:
-    """The deploy's first two hooks re-book a legacy-shape LOAN payment (R-BAL98).
-
-    The loan half of the R-BAL98 grade the cash twin in
-    ``test_posting_service.py`` gives for a non-loan transfer: a settled loan
-    payment forged into the one-entry legacy shape, the cash resync run, then
-    the loan sync -- whose checked-projection assert REFUSES to commit a
-    linked ledger whose per-date nets diverge from the fold.  That assert is
-    what makes the re-book fail-closed at deploy for the 11 production loan
-    payments; this makes it a suite gate rather than a clone rehearsal alone.
-    """
-
-    def test_resync_then_loan_sync_hold_the_projection(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """Legacy shape -> resync (0, 1) -> loan sync passes -> nets unchanged.
-
-        Arithmetic: P1's $1,000.00 payment settles 2026-01-20 against the
-        folded $100,000 balance: interest 500.00, principal 500.00, so the
-        linked ledger nets cash +1000.00 - correction 500.00 = +500.00 on
-        01-20.  Forged legacy state: the two per-movement cash entries
-        dropped, ONE ``transfer``-source entry {Checking -1000, Loan +1000}
-        at 01-20 in their place -- production's shape.  The resync reports
-        (0, 1): the legacy entry reversed at 01-20, the loan-side movement
-        posted {Loan +1000, transit -1000} and the Checking side {Checking
-        -1000, transit +1000}, both at 01-20.  The loan sync then re-derives
-        the split off the same walk and asserts the linked ledger against the
-        fold: 01-20 still nets +500.00, nothing else moved, the assert holds.
-        A second pass of both writes nothing.
-        """
-        with app.app_context():
-            scenario_id = seed_user["scenario"].id
-            loan = _make_loan(seed_user)
-            xfer = _settle_payment(
-                seed_user, loan, seed_periods[_P1], Decimal("1000.00"),
-                settled_on=date(2026, 1, 20),
-            )
-            db.session.commit()
-            linked_id = _linked_ledger_id(loan)
-            checking_ledger = _linked_ledger_id(seed_user["account"])
-            before = _linked_net_by_date(linked_id, scenario_id)
-            assert before[date(2026, 1, 20)] == Decimal("500.00")
-
-            # Forge the legacy shape (raw SQL, as every legacy forge here).
-            # The per-movement entries are found through the transfer's SIDE
-            # links since plan step balance:X-bi-6-4d-2, where each side's
-            # record hangs; they were found through its shadows' movements
-            # until then (ruling R-BAL167 class 4).
-            db.session.execute(sa.text(
-                "DELETE FROM budget.journal_entries WHERE id IN ("
-                "  SELECT je.id FROM budget.journal_entries je"
-                "  JOIN budget.transaction_entries te"
-                "    ON te.id = je.transaction_entry_id"
-                "  WHERE te.expense_transfer_id = :t"
-                "     OR te.income_transfer_id = :t)"
-            ), {"t": xfer.id})
-            legacy = JournalEntry(
-                user_id=seed_user["user"].id,
-                scenario_id=scenario_id,
-                pay_period_id=xfer.pay_period_id,
-                entry_date=date(2026, 1, 20),
-                source_kind_id=ref_cache.posting_source_id(
-                    PostingSourceEnum.TRANSFER,
-                ),
-                transfer_id=xfer.id,
-                description="Transfer: Checking to Split Loan",
-            )
-            transfer_kind = ref_cache.posting_kind_id(PostingKindEnum.TRANSFER)
-            _emit_balanced_entry(legacy, [
-                _PostingLeg(checking_ledger, Decimal("-1000.00"), transfer_kind),
-                _PostingLeg(linked_id, Decimal("1000.00"), transfer_kind),
-            ])
-            db.session.commit()
-            assert _linked_net_by_date(linked_id, scenario_id) == before
-
-            assert posting_service.resync_all_cash_postings() == (0, 1)
-            # Hook 2: the loan sync, whose checked-projection assert would
-            # raise PostingError on any per-date divergence.
-            loan_posting_service.sync_loan_postings(loan.id, scenario_id)
-            db.session.commit()
-
-            assert _linked_net_by_date(linked_id, scenario_id) == before
-            loan_side = _cash_reader_loan_net(xfer, loan, linked_id)
-            assert loan_side == Decimal("1000.00")
-            # The legacy source nets to zero on the loan's ledger.
-            assert db.session.query(
-                db.func.coalesce(db.func.sum(Posting.amount), 0)
-            ).join(
-                JournalEntry, Posting.journal_entry_id == JournalEntry.id,
-            ).filter(
-                JournalEntry.transfer_id == xfer.id,
-                Posting.ledger_account_id == linked_id,
-            ).scalar() == 0
-
-            entries = _source_entry_count(xfer.id, loan.id)
-            assert posting_service.resync_all_cash_postings() == (0, 0)
-            loan_posting_service.sync_loan_postings(loan.id, scenario_id)
-            db.session.flush()
-            assert _source_entry_count(xfer.id, loan.id) == entries

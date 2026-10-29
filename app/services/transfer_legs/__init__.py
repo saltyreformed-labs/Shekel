@@ -26,17 +26,19 @@ transfer by a side link since), so the maintenance contract that kept a
 shadow equal to its parent (Transfer Invariant 3) has no shadow left to
 keep in step.
 
-**A leg is planned exactly while its own DATED movement does not exist**
-(ruling **R-BAL79**, plan step ``balance:X-bi-4a``; ledger row
-**BAL-500**).  The settled half reads a leg as the dated covering movement
-filed under the transfer's side on that account, so the MOVEMENT -- not the
-parent's status -- is what decides which relation a leg is in, per side:
-a transfer whose parent is still Projected while one side's movement has
-been dated (a state the status-band rule refuses at commit since plan step
-``balance:X-bi-6-4d-2``, below) is emitted here for the OTHER side alone,
-so no leg is counted by both halves.  Through ``X-bi-3e`` both legs were
-emitted off the parent's status and that state read ``-$500.00`` on a
-`$250.00` transfer.
+**A leg is planned exactly while its transfer is Projected** (plan step
+``balance:X-bi-6-5``'s third leaf).  The settled half reads a leg as the
+dated covering movement filed under the transfer's side on that account,
+and from plan step ``balance:X-bi-4a`` until that leaf the MOVEMENT decided
+here too, per side (ruling **R-BAL79**; ledger row **BAL-500**): a
+transfer whose parent was still Projected while one side's movement had
+been dated was emitted for the OTHER side alone, so no leg was counted by
+both halves.  Through ``X-bi-3e`` both legs were emitted off the parent's
+status and that state read ``-$500.00`` on a `$250.00` transfer.  The
+status-band rule refuses that state at commit since plan step
+``balance:X-bi-6-4d-2`` (below) -- a record is dated exactly while its
+transfer is Paid or Received -- so the status and the movement give one
+answer, and the plan half reads the status alone.
 
 **A leg is DERIVED and carries its parent, deliberately.**  It stores no
 figure, no period and no date of its own: :attr:`~TransferLeg.due_date`
@@ -50,13 +52,18 @@ this step exists to stop reading.
 **The same value is what the GRID draws in a transfer's cell** (leaf
 ``X-bi-6-1``, ruling **R-BAL87**): a leg's identity on a grid is the pair
 ``(transfer id, the account it is on)`` -- :attr:`~TransferLeg.cell_key` --
-and its cell's doors are the transfer's own routes.  The grid's leg carries
-one more thing the fold's never does: its RECORD, the covering movement the
-status seam wrote when the transfer settled (:attr:`~TransferLeg.record`).
+and its cell's doors are the transfer's own routes.  A leg answers one more
+thing: its RECORD, the covering movement the status seam wrote when the
+transfer settled (:attr:`~TransferLeg.record`), read off the transfer's list
+for that side since ruling **plan#1984** -- a loader whose readers read
+records pre-loads them in one statement (:func:`preload_side_records`; both
+sides of one transfer, :func:`transfer_sides`), and one whose readers read
+none loads none: the grid's draws legs and reads no record, nor does the
+fold's plan half (ruling **plan#2136**).
 **R-BAL87's text says "its dated covering movement"; the record here is
 that movement dated OR kept un-dated across a revert** (ruling **R-BAL61**),
-one word wider than the ruling's, because the load takes a side's record
-whatever its day (:func:`covering_movements_by_leg`).  Since plan step
+one word wider than the ruling's, because a side's list holds its record
+whatever its day.  Since plan step
 ``balance:X-bi-6-4d-2`` no reader of this load uses an un-dated record: it
 gives the popover's day box no day, as no record does, and the withdrawal
 caption (``routes/transfers/forms._payment_withdrawal``), with the lines it
@@ -64,20 +71,21 @@ names, renders only for a settled transfer
 (``transfers/_transfer_full_edit.html``'s ``zero_caption``), whose records
 are dated.  A reverted leg's
 "marking paid records $X" caption reads its TRANSFER's kept figure
-(``transaction_service.leg_retained_amounts_by_key``), never the record,
+(``transaction_service.retained_amounts_by_key``), never the record,
 which holds no figure; a settled leg's record is dated, so the ruling's
 case is unchanged.  That movement hangs off
 the transfer by its side link since plan step ``balance:X-bi-6-4d-2`` (off
 the transfer's shadow row on that account until then), and
-:func:`covering_movements_by_leg` reaches it through ONE join -- the join
-:func:`planned_transfer_legs` already uses to decide which relation a leg is
-in -- which that step moved once.  The fold's loader still emits only legs
-whose record is ``None``.
+:func:`preload_side_records` reaches it through ONE join -- the join
+:func:`planned_transfer_legs` used to decide which relation a leg is in,
+until plan step ``balance:X-bi-6-5``'s third leaf left it the status alone
+-- which that step moved once.
 
 **One fold PREDICATE did change at 6-1, and it was pinned rather than
 denied**: sharing the join gave :func:`planned_transfer_legs`' ``dated_leg``
-test the term ``the shadow is live`` (``Transaction.is_deleted IS FALSE``)
-that it did not carry before -- the term the settled half's
+test (deleted at plan step ``balance:X-bi-6-5``'s third leaf) the term
+``the shadow is live`` (``Transaction.is_deleted IS FALSE``) that it did
+not carry before -- the term the settled half's
 ``balance_contributing_clause`` applied to the same movement.  On every
 door-written state the two predicates agreed (no door soft-deleted one shadow
 alone); on the double drift -- a dated movement under a shadow deleted around
@@ -126,8 +134,8 @@ predicates, the reference cache and the date arithmetic, and no service.
 hand the cash fold, the ledger oracle and the savings metric each paid
 transfer's covering movement with its transfer and side, and since that
 leaf's second half the posting WRITER books every transfer movement under its
-LEG (:func:`movement_parent`, :func:`transfer_family_movements`,
-:func:`dated_leg_exists_clause`).  For THOSE readers and the writer this
+LEG (:func:`movement_parent`, :func:`transfer_family_movements`).  For
+THOSE readers and the writer this
 module is the one place a transfer's movement is reached (through a shadow
 row until plan step ``balance:X-bi-6-4d-2``, by its side link since), and so
 it is since leaf ``X-bi-6-4c-2`` for the reconcile panel
@@ -150,7 +158,8 @@ out of the list :func:`parent_entries` answers, and since leaf
 ``X-bi-6-4c-3`` (ruling **R-BAL142**, ledger row **BAL-568**) for "Remove
 earlier paychecks"' dated-money arm and the transfer popover's two day boxes,
 which read each side's own day off its movement
-(:func:`transfer_movement_rows`, :func:`covering_movements_by_leg`), and
+(:func:`transfer_movement_rows`, and the popover's sides' records through
+:func:`preload_side_records` since ruling **plan#1984**), and
 since leaf ``X-bi-6-4d-1`` for the transfer service's own reads of a side's
 leg (:func:`transfer_side_leg`, keyed by side) -- the expense leg the settle
 and the update read the transfer's figures through (the retained correction,
@@ -165,7 +174,9 @@ movements it resolves through :func:`movement_parent_loads` where it spelled
 that chain inline.  The loan walk's refusal of an un-dated settle
 (``loan_ledger._visible.payment_visible_on``) stopped reaching a movement
 through a shadow at that leaf too: it named the shadow's ``transaction_id``
-and names the transfer now, as its owner finds it in the app.
+and then the transfer, until plan step ``balance:X-bi-6-5``'s third leaf
+deleted it, the status-band rule refusing a settled side's un-dated record
+at commit.
 **The last readers that reached a transfer's movement themselves moved at
 plan step ``balance:X-bi-6-4d-2``**, with the join: the integrity sweep's one
 raw-SQL leg join (``scripts/_integrity_core.TRANSFER_LEG_RECORDS_JOIN``,
@@ -188,12 +199,17 @@ is Python.
 1000 lines** (finding **N-152**'s answer to the same ceiling: a package, never
 prose shaved off a measured claim), cut along the seam the module already had
 and moved without a byte changed in any definition.  :mod:`._leg` is the value,
-built from its parent (and the record a loader hands it), whose code is blind
-to where a movement hangs -- :class:`TransferLeg`, its label
-(:func:`leg_label`), its identity (:func:`cell_key`, :func:`key_order`) and its
-construction (:func:`leg_of`).  :mod:`._records` holds the package's code that
-knows where a movement hangs (off a shadow row until plan step
-``balance:X-bi-6-4d-2``, off the transfer by a side link since): the one join
+built from its parent -- :class:`TransferLeg`, its label
+(:func:`leg_label`), its identity (:func:`cell_key`, :func:`key_order`,
+:func:`is_leg_key`), its parent (:func:`parent_of`, the one answer to which
+row prices it, ruling **plan#1983**), its construction
+(:func:`transfer_side_leg`, :func:`leg_of`, :func:`side_legs`) and, since
+ruling **plan#1984**,
+which of the transfer's lists holds a side's record
+(:func:`side_movements`), the list its :attr:`~TransferLeg.record` reads.
+:mod:`._records` holds the package's code that knows where a movement hangs
+(off a shadow row until plan step ``balance:X-bi-6-4d-2``, off the transfer by
+a side link since): the one join
 from a transfer to a leg's covering movement, its expressions, every loader in this package
 built on it (:func:`planned_transfer_legs` and the grid's
 :func:`grid_transfer_legs` included, since each reads the join), and
@@ -218,17 +234,21 @@ from app.services.transfer_legs._leg import (
     TRANSFER_FROM_PREFIX,
     TRANSFER_TO_PREFIX,
     PlanItem,
+    PlanParent,
     TransferLeg,
     cell_key,
     expense_legs,
+    held_records,
+    is_leg_key,
     key_order,
     leg_label,
     leg_of,
+    parent_of,
+    side_legs,
+    side_movements,
+    transfer_side_leg,
 )
 from app.services.transfer_legs._records import (
-    covering_movements_by_leg,
-    dated_leg_exists_clause,
-    grid_transfer_leg,
     grid_transfer_legs,
     held_transfer_entries,
     movement_parent,
@@ -236,26 +256,27 @@ from app.services.transfer_legs._records import (
     offerable_transfer_legs,
     parent_entries,
     planned_transfer_legs,
+    preload_side_records,
     recorded_transfer_legs,
     transfer_family_movements,
     transfer_holds_a_movement,
     transfer_movement_rows,
-    transfer_side_leg,
+    transfer_sides,
     transfers_holding_records,
 )
 
 __all__ = [
     "PlanItem",
+    "PlanParent",
     "TRANSFER_FROM_PREFIX",
     "TRANSFER_TO_PREFIX",
     "TransferLeg",
     "cell_key",
-    "covering_movements_by_leg",
-    "dated_leg_exists_clause",
     "expense_legs",
-    "grid_transfer_leg",
     "grid_transfer_legs",
+    "held_records",
     "held_transfer_entries",
+    "is_leg_key",
     "key_order",
     "leg_label",
     "leg_of",
@@ -263,11 +284,16 @@ __all__ = [
     "movement_parent_loads",
     "offerable_transfer_legs",
     "parent_entries",
+    "parent_of",
     "planned_transfer_legs",
+    "preload_side_records",
     "recorded_transfer_legs",
+    "side_legs",
+    "side_movements",
     "transfer_family_movements",
     "transfer_holds_a_movement",
     "transfer_movement_rows",
     "transfer_side_leg",
+    "transfer_sides",
     "transfers_holding_records",
 ]

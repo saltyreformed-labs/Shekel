@@ -14,8 +14,8 @@ from app.models.ref import Status
 from app.models.amount_ownership import AmountOwnership
 from app.models.transfer import Transfer
 from app.services.balance_at._cash_fold import assembled_fold, balances_at
-from app.services.cash_ledger import leg_amounts_by_key
-from app.services.transfer_legs import grid_transfer_leg, transfer_side_leg
+from app.services.cash_ledger import amounts_by_key
+from app.services.transfer_legs import leg_of, transfer_side_leg
 from app.services.transfer_service import (
     TransferSpec,
     create_transfer as create_transfer_from_spec,
@@ -69,7 +69,7 @@ def _shown(leg, basis):
     return {
         "account_id": leg.account_id,
         "is_income": leg.is_income,
-        "amount": leg_amounts_by_key([leg], basis)[leg.cell_key],
+        "amount": amounts_by_key([leg], basis)[leg.cell_key],
         "status_id": leg.status_id,
         "status": leg.status,
         "pay_period_id": leg.pay_period_id,
@@ -116,15 +116,15 @@ def _reread_sides(transfer_id):
     """Commit, expire every loaded object, and return the transfer's row re-read and its sides.
 
     Four sides: the two, each read through two doors to a leg, by ACCOUNT
-    (``grid_transfer_leg``, the grid's) and by SIDE (``transfer_side_leg``,
+    (``leg_of``, the grid's) and by SIDE (``transfer_side_leg``,
     the transfer service's), the expense side first in each.
     """
     db.session.commit()
     db.session.expire_all()
     row = db.session.get(Transfer, transfer_id)
     return row, [
-        grid_transfer_leg(row, row.from_account_id),
-        grid_transfer_leg(row, row.to_account_id),
+        leg_of(row, row.from_account_id),
+        leg_of(row, row.to_account_id),
         transfer_side_leg(row, is_income=False),
         transfer_side_leg(row, is_income=True),
     ]

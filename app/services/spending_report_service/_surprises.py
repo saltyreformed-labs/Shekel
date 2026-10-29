@@ -10,8 +10,8 @@ module already loaded.  All money is ``Decimal``.
 """
 
 from app.services import spending_analysis
-from app.services.cash_ledger import AmountBasis
-from app.services.transfer_legs import PlanItem, cell_key, key_order
+from app.services.cash_ledger import AmountBasis, resolve_amount
+from app.services.transfer_legs import PlanItem, cell_key, key_order, parent_of
 from app.utils.money import ZERO
 
 from ._types import Surprise, Surprises
@@ -48,7 +48,10 @@ def _build_surprises(
     surprises: list[Surprise] = []
     net = ZERO
     for txn in txns:
-        actual = spending_analysis.resolved_actual_amount(txn, basis)
+        # Both halves are questions about the item's PARENT (ruling
+        # plan#1983): a row is its own, a transfer leg's is its transfer.
+        parent = parent_of(txn)
+        actual = spending_analysis.resolved_actual_amount(parent, basis)
         # The ESTIMATE half, through the amount model's ONE plan producer.
         # It read ``owned_amount``, the cheap accessor that answered a row's own
         # ``estimated_amount`` column and REFUSED a row whose plan is derived --
@@ -111,12 +114,13 @@ def _build_surprises(
         # past date -- so this is a measurement of today's data, not an
         # invariant the schema holds.
         #
-        # It is deliberately not ``recorded_spend``: that answers what the
-        # item RECORDED as having moved, which is the ACTUAL half below, so
-        # reading it here would make every surprise's delta zero by
-        # construction.  ``planned_spend`` is the ONE place this package
-        # routes a row and a leg to their plan producers (leaf X-bi-6-1b).
-        estimated = spending_analysis.planned_spend(txn, basis)
+        # It is deliberately not ``settled_contribution``: that answers what
+        # the parent RECORDED as having moved, which is the ACTUAL half above,
+        # so reading it here would make every surprise's delta zero by
+        # construction.  ``resolve_amount`` is the ONE branch on the parent's
+        # table for a plan; ``planned_spend``, the router that sent a row and
+        # a leg to their plan producers (leaf X-bi-6-1b), is deleted.
+        estimated = resolve_amount(parent, basis)
         delta = actual - estimated
         if delta == ZERO:
             continue

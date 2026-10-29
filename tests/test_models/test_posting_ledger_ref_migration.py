@@ -16,12 +16,15 @@ DDL in the worker:
     carries exactly its five classes with the correct ``is_debit_normal``
     flags (f5037400dc5e is the sole, permanent producer of that table --
     accounting has exactly five classes);
-  * the Step-2 ``transfer`` kind and source are present.  Later Build-Order
-    steps add more rows to ``posting_kinds`` / ``posting_sources`` via
-    their own migrations (Step 3's ``income`` / ``expense`` /
-    ``transaction``), so this file asserts only f5037400dc5e's own
-    contribution; the cumulative inline-seed coverage for every enum
-    member lives in ``test_posting_ref_seed_parity.py``;
+  * the Step-2 ``transfer`` kind is present.  Later Build-Order steps add
+    more rows to ``posting_kinds`` / ``posting_sources`` via their own
+    migrations (Step 3's ``income`` / ``expense`` / ``transaction``), so
+    this file asserts only f5037400dc5e's own contribution; the cumulative
+    inline-seed coverage for every enum member lives in
+    ``test_posting_ref_seed_parity.py``.  The ``transfer`` SOURCE it seeds
+    beside the kind is gone at HEAD: migration ``1712c506ee99`` (plan step
+    ``balance:X-bi-6-5``'s second leaf, card plan#1845) deleted it, and its
+    own suite proves that;
   * the ``downgrade`` is not a bare pass -- it drops every table the
     ``upgrade`` materialises.
 
@@ -138,8 +141,11 @@ class TestMigratedAndSeededState:
             }, rows
 
     def test_posting_kinds_and_sources_seeded(self, app, db):
-        """f5037400dc5e seeds the Step-2 ``transfer`` kind and source.
+        """f5037400dc5e seeds the Step-2 ``transfer`` kind (its source is gone at HEAD).
 
+        The ``transfer`` source it seeded beside the kind was deleted by
+        migration ``1712c506ee99`` (the module docstring); the kind stays,
+        carried by a transfer movement's legs.
         Asserts membership rather than the exact row set: later Build-Order
         steps add more kinds/sources (Step 3's ``income`` / ``expense``
         kinds and ``transaction`` source) via their own migrations, each
@@ -154,13 +160,7 @@ class TestMigratedAndSeededState:
                     "SELECT name FROM ref.posting_kinds"
                 )).fetchall()
             }
-            sources = {
-                row[0] for row in db.session.execute(text(
-                    "SELECT name FROM ref.posting_sources"
-                )).fetchall()
-            }
             assert "transfer" in kinds, kinds
-            assert "transfer" in sources, sources
 
 
 class TestDowngradeReversible:

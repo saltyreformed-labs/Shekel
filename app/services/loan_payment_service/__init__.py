@@ -22,7 +22,7 @@ it here forced ``cash_ledger._amount_source`` to reach UP a tier for it, which
 is what forced the split of :mod:`app.services.row_valuation`.  That reach is
 deleted rather than routed around, so this package imports the amount model --
 which plan step X-au-g-2c did: :func:`get_payment_history` prices its feed
-through ``cash_ledger.contributions_by_id`` rather than through
+through ``cash_ledger.contributions_by_key`` rather than through
 ``row_valuation.settled_contribution``, which closed finding **N-266**(a).  **The
 cycle that reach created was real and pylint reported nothing about it**, which
 is measured once, in ``cash_ledger._loan_installment``.
@@ -55,13 +55,14 @@ read that composes these loaders with the pure resolver lives in
 ``app.services.balance_at._resolution``; that module imports THIS one, and this
 one imports nothing from the seam, so there is no cycle.
 
-Shadow income transactions represent payments received by a debt account via
-transfers.  When a user transfers money from checking to a mortgage account,
-the transfer service creates two shadow transactions: an expense on checking
-(money out) and an income on the mortgage (money in).  The payment feed reads
-the income side (via the :mod:`app.services.loan_loaders` leaf, which owns the
-row loaders and the shadow-income query this package used to host) to discover
-all payments into a loan account.
+A payment received by a debt account is the to-side LEG of a transfer into
+it.  When a user transfers money from checking to a mortgage account, the
+transfer is ONE row whose two sides are its legs: money out of checking and
+money into the mortgage.  The payment feed reads the to-side legs (via
+:func:`app.services.loan_loaders.income_legs`, the leaf that owns the row
+loaders and the payment query this package used to host, which read income
+shadow rows until plan step balance:X-bi-6-4b) to discover all payments into a
+loan account.
 
 **What queries what, and the history matters because the sentence has been
 wrong here before.**  This file once asserted that the service "queries ONLY
@@ -85,8 +86,9 @@ then) and whose PROJECTED half is the parent rows in ``budget.transfers`` as
 derived legs
 (:func:`app.services.loan_loaders.projected_income_legs`; ruling **R-BAL13**,
 Transfer Invariant 5 as restated at that step), plus the loan's own params,
-rate history and escrow lines.  No amount is read off a transfer for a
-payment that has settled.  The paragraph above predicted that "the next name
+rate history and escrow lines.  A payment that has settled is worth the
+figure its transfer stores, never a figure read off its record (which holds
+none).  The paragraph above predicted that "the next name
 added here is the one that could make it false again", and it was: this is
 that sentence being kept honest rather than kept.
 

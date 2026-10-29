@@ -893,8 +893,7 @@ def clear_loan_ledger(loan_account_id):
     ``loan_payment`` split corrections) on any of the loan's own ledger accounts,
     leaving the Step-2/3 CASH entries untouched.  The posting ledger is
     append-only (the ORM blocks deletes on ``budget.journal_entries`` /
-    ``budget.account_postings``), so it clears them via raw SQL -- the same
-    mechanism, and the same rationale, as :func:`clear_postings_for_transfer`.
+    ``budget.account_postings``), so it clears them via raw SQL.
 
     A configured loan with no opening posting is NOT a legitimate state: the
     opening is written in the same transaction as the ``LoanParams``
@@ -911,7 +910,7 @@ def clear_loan_ledger(loan_account_id):
     fallback path this arc exists to delete; a call to something named
     ``clear_loan_ledger`` cannot be made by accident.
 
-    Commits (mirroring :func:`clear_postings_for_transfer`).
+    Commits.
 
     Args:
         loan_account_id: The loan whose genesis ledger to remove.
@@ -1878,8 +1877,8 @@ def linked_ledger_account(db_session, account_id):
 
 def make_balanced_entry(  # pylint: disable=too-many-arguments
     session, seed_user, *, from_ledger_id, to_ledger_id,
-    amount=Decimal("100.00"), transfer_id=None, transaction_id=None,
-    transaction_entry_id=None, source_kind=None, posting_kind=None,
+    amount=Decimal("100.00"), transaction_entry_id=None, source_kind=None,
+    posting_kind=None,
     period_id=None,
 ):
     """Create and commit one balanced journal entry (two legs summing to zero).
@@ -1891,15 +1890,15 @@ def make_balanced_entry(  # pylint: disable=too-many-arguments
     (previously module-local to the former -- a duplicate-code finding once
     the R4 tests needed the same shape).
 
-    ``source_kind`` / ``transfer_id`` / ``transaction_id`` / ``posting_kind``
-    default to the transfer shape (Step 2); a Step-3 transaction-sourced
-    entry passes ``source_kind=PostingSourceEnum.TRANSACTION``,
-    ``transaction_id=<id>``, and ``posting_kind=PostingKindEnum.EXPENSE`` (or
-    ``INCOME``).  Both concrete FKs default to ``None`` so a caller sets
-    exactly the one its source kind implies.  ``source_kind`` /
-    ``posting_kind`` default to ``None`` (resolved lazily to the TRANSFER
-    members) so the enums are not imported at module load, matching this
-    module's collection-time-safety convention.
+    ``source_kind`` / ``posting_kind`` default to a transfer movement's
+    shape with no movement linked (``transfer_movement`` / ``transfer``):
+    the one-entry ``transfer`` source this default named until plan step
+    ``balance:X-bi-6-5``'s second leaf (card plan#1845) is gone, with the
+    ``transfer_id`` / ``transaction_id`` links it and the row's own leg
+    carried.  A movement-sourced entry passes ``transaction_entry_id=<id>``.
+    ``source_kind`` / ``posting_kind`` default to ``None`` (resolved lazily)
+    so the enums are not imported at module load, matching this module's
+    collection-time-safety convention.
 
     Args:
         session: The test ``db.session``.
@@ -1908,14 +1907,10 @@ def make_balanced_entry(  # pylint: disable=too-many-arguments
         from_ledger_id: Ledger account id for the ``-amount`` leg.
         to_ledger_id: Ledger account id for the ``+amount`` leg.
         amount: The leg magnitude (Decimal).
-        transfer_id: Optional ``budget.transfers`` back-link.
-        transaction_id: Optional ``budget.transactions`` back-link.
         transaction_entry_id: Optional ``budget.transaction_entries``
-            back-link (a movement's).  A test planting a DUAL-linked entry --
-            the shape no writer produces -- passes this beside
-            *transaction_id* to grade the readers' partition.
+            back-link (a movement's).
         source_kind: :class:`~app.enums.PostingSourceEnum` member, or
-            ``None`` for TRANSFER.
+            ``None`` for TRANSFER_MOVEMENT.
         posting_kind: :class:`~app.enums.PostingKindEnum` member, or
             ``None`` for TRANSFER.
         period_id: Pay period id, or ``None`` for the bootstrap period.
@@ -1932,7 +1927,7 @@ def make_balanced_entry(  # pylint: disable=too-many-arguments
     from app.models.journal_entry import JournalEntry, Posting
 
     if source_kind is None:
-        source_kind = PostingSourceEnum.TRANSFER
+        source_kind = PostingSourceEnum.TRANSFER_MOVEMENT
     if posting_kind is None:
         posting_kind = PostingKindEnum.TRANSFER
     if period_id is None:
@@ -1943,8 +1938,6 @@ def make_balanced_entry(  # pylint: disable=too-many-arguments
         pay_period_id=period_id,
         entry_date=_real_date(2026, 1, 15),
         source_kind_id=ref_cache.posting_source_id(source_kind),
-        transfer_id=transfer_id,
-        transaction_id=transaction_id,
         transaction_entry_id=transaction_entry_id,
         description="Test entry",
     )
@@ -2913,6 +2906,70 @@ def load_migration_module(filename):
     return module
 
 
+def step_down_through_the_journal_link_drop(db_session):
+    """Run revision ``1712c506ee99``'s downgrade: the journal entries' two old links come back.
+
+    **The ONE statement of what a migration case below plan step
+    ``balance:X-bi-6-5``'s second leaf does first** (card plan#1845).  The
+    suite's database is built at head, where ``budget.journal_entries`` has no
+    ``transfer_id`` or ``transaction_id`` and ``ref.posting_sources`` no
+    ``transfer`` or ``transaction`` row, so a lower revision whose upgrade or
+    downgrade names either -- the posting backfills, the shape-C split's
+    unlink -- fails on it.  This puts back both columns (EMPTY: the revision
+    deleted every entry that carried one), their keys, their two partial
+    indexes and both reference rows, and the case then walks its own revisions
+    exactly as it did before the drop.  The deleted entries are not re-created
+    (ruling plan#1867).
+
+    **It does not come back up**, deliberately: each case's database is its
+    own and is dropped after it, and the upgrade would delete the legacy
+    entries a revision below had written for the case to read.
+
+    Args:
+        db_session: The test ``db.session``.
+    """
+    run_migration_callable(
+        load_migration_module(
+            "1712c506ee99_a_ledger_entry_links_only_its_movement.py",
+        ).downgrade,
+        db_session,
+    )
+
+
+def step_down_through_the_transfer_column_drop(db_session):
+    """Run revisions ``1712c506ee99``'s and ``c956c1d83108``'s downgrades, in that order.
+
+    **The ONE statement of what a migration case below plan step
+    ``balance:X-bi-6-5``'s column drop does first** (card plan#1844).  The
+    suite's database is built at head, where ``budget.transactions`` has no
+    ``transfer_id``, so a lower revision whose upgrade or downgrade names the
+    column -- ``82f7b7ed4332``'s twins, ``c4a4e7d1b9f2``'s row-only deleted-row
+    rule, ``596408fab6f1``'s pricing CHECK -- fails on it.  Every such case is
+    below ``1712c506ee99`` too, so this steps down through it first
+    (:func:`step_down_through_the_journal_link_drop` says what that restores),
+    then through ``c956c1d83108``: that puts back the column (EMPTY: no row
+    names a transfer), its key, its two indexes, its two CHECKs and the
+    ``parent_transfer`` source, and the case then walks its own revisions
+    exactly as it did before the drop.  The twin copy that revision dropped is
+    not re-created (ruling plan#1851), and ``82f7b7ed4332``'s downgrade reads a
+    missing copy as an empty one.
+
+    **It does not come back up**, deliberately: each case's database is its
+    own and is dropped after it, and the upgrade would drop a twin copy a
+    revision below had kept for the case to read.
+
+    Args:
+        db_session: The test ``db.session``.
+    """
+    step_down_through_the_journal_link_drop(db_session)
+    run_migration_callable(
+        load_migration_module(
+            "c956c1d83108_a_transaction_names_no_transfer.py",
+        ).downgrade,
+        db_session,
+    )
+
+
 def load_init_database_module():
     """Load ``scripts/init_database.py`` by path (it is not a package member).
 
@@ -2948,70 +3005,6 @@ def load_init_database_module():
         else:
             os.environ["DATABASE_URL_APP"] = saved
     return module
-
-
-def clear_postings_for_transfer(transfer_id):
-    """Delete a transfer's posted journal entries and legs (raw SQL).
-
-    The posting ledger is append-only (the ORM blocks deletes on
-    ``budget.journal_entries`` / ``budget.account_postings``), so this clears a
-    transfer's auto-posted entries via raw SQL.  Used by the posting-ledger
-    suites to reproduce the pre-ledger historical state the Commit-3 backfill
-    targets: Commit 5 auto-posts on settle, so a settled transfer already
-    carries go-forward postings; clearing them lets the backfill genuinely
-    re-post (rather than no-opping on its ``NOT EXISTS`` guard).  Legs are
-    deleted before the header for explicitness (the FK CASCADE would do it
-    either way).  Commits.
-
-    Args:
-        transfer_id: The transfer whose posted entries and legs to remove.
-    """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app.extensions import db
-
-    db.session.execute(db.text(
-        "DELETE FROM budget.account_postings WHERE journal_entry_id IN "
-        "(SELECT id FROM budget.journal_entries WHERE transfer_id = :t)"
-    ), {"t": transfer_id})
-    db.session.execute(db.text(
-        "DELETE FROM budget.journal_entries WHERE transfer_id = :t"
-    ), {"t": transfer_id})
-    db.session.commit()
-
-
-def clear_postings_for_transaction(transaction_id):
-    """Delete an ordinary transaction's posted journal entries and legs (raw SQL).
-
-    The transaction analog of :func:`clear_postings_for_transfer`: the posting
-    ledger is append-only (the ORM blocks deletes on ``budget.journal_entries``
-    / ``budget.account_postings``), so this clears a transaction's auto-posted
-    entries via raw SQL, keyed on the ``journal_entries.transaction_id`` linkage.
-    Used by the Commit-8 cash reconciliation oracle to reproduce the pre-ledger
-    historical state the Commit-7 backfill targets: the go-forward poster
-    auto-posts on settle, so a settled transaction already carries go-forward
-    postings; clearing them lets the backfill genuinely re-post (rather than
-    no-opping on its ``NOT EXISTS`` guard), so the two producers can be compared
-    leg-for-leg.  Legs are deleted before the header for explicitness (the FK
-    CASCADE would do it either way); the category/fallback ledger accounts the
-    postings referenced are left in place (the backfill's ``ON CONFLICT`` reuses
-    them).  Commits.
-
-    Args:
-        transaction_id: The transaction whose posted entries and legs to remove.
-    """
-    # pylint: disable=import-outside-toplevel  -- same lazy-app-import
-    # convention every helper in this module follows.
-    from app.extensions import db
-
-    db.session.execute(db.text(
-        "DELETE FROM budget.account_postings WHERE journal_entry_id IN "
-        "(SELECT id FROM budget.journal_entries WHERE transaction_id = :t)"
-    ), {"t": transaction_id})
-    db.session.execute(db.text(
-        "DELETE FROM budget.journal_entries WHERE transaction_id = :t"
-    ), {"t": transaction_id})
-    db.session.commit()
 
 
 _UNSET_SETTLED_ON = object()
@@ -3993,9 +3986,7 @@ def settle_cash_row(
             txn,
             SettleDay(day=settled_on, basis=SettledDayBasisEnum.ENTERED),
         )
-        sync_covering_movement(
-            txn, was_settled=True, now_settled=True, settlement=None,
-        )
+        sync_covering_movement(txn, now_settled=True, settlement=None)
     posting_service.sync_transaction_postings(txn)
     return txn
 
@@ -4786,13 +4777,13 @@ def transfer_family_journal_filter(transfer_id):
     ``journal_entries.transaction_entry_id`` to the movement covering that
     side (the side's record; it hung off the side's shadow until the
     re-parent below), each against the owner's Transfers-in-transit account.  A
-    suite that reads "the transfer's postings" by ``JournalEntry.transfer_id``
-    alone reads only the LEGACY one-entry shape, which the pair's door reverses
-    to zero and which no go-forward settle writes.  This is the ONE spelling
-    of the transfer family read -- the records of BOTH sides of the transfer,
-    plus whatever still links the transfer directly -- so the cases the
-    developer confirmed when the shape moved widen their subject the same way
-    and no figure per real account moves.
+    suite read "the transfer's postings" by ``JournalEntry.transfer_id`` until
+    plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted that
+    link with the LEGACY one-entry shape it named, which no go-forward settle
+    wrote.  This is the ONE spelling of the transfer family read -- the
+    records of BOTH sides of the transfer -- so the cases the developer
+    confirmed when the shape moved widen their subject the same way and no
+    figure per real account moves.
 
     **Independent SQL over the side links** (plan step
     ``balance:X-bi-6-4d-2``, ruling **R-BAL167** class 4): a record hangs off
@@ -4822,10 +4813,7 @@ def transfer_family_journal_filter(transfer_id):
             TransactionEntry.income_transfer_id == transfer_id,
         ),
     )
-    return db.or_(
-        JournalEntry.transfer_id == transfer_id,
-        JournalEntry.transaction_entry_id.in_(movement_ids),
-    )
+    return JournalEntry.transaction_entry_id.in_(movement_ids)
 
 
 def transfer_side_journal_filter(transfer_id, account_id):
@@ -4860,94 +4848,6 @@ def transfer_side_journal_filter(transfer_id, account_id):
         TransactionEntry.account_id == account_id,
     )
     return JournalEntry.transaction_entry_id.in_(movement_ids)
-
-
-def assert_a_twin_is_refused(db_session, xfer, is_income):
-    """Stage the twin one side of *xfer* used to have, and assert it is refused.
-
-    A ruling **R-BAL167** class 2 re-expression of a test whose subject was a
-    transfer's shadow row: a transfer is one row since plan step
-    ``balance:X-bi-6-4d-2``, and ``ck_transactions_names_no_transfer`` (ruling
-    **R-BAL258**) refuses any ``budget.transactions`` row naming one, so the
-    row such a test drove a door on, priced or read can no longer be stored.
-    The refusal is spelled other ways too (the transfer schema's
-    ``_make_shadow`` cases, ``test_amount_ownership``, the 82f7 migration's
-    own); this is the one a class-2 re-expression calls.  The row is
-    :func:`a_twin_of`'s, which says what it carries and why that CHECK is the
-    one reported.
-
-    **The session is rolled back after the refusal**, which discards anything
-    the caller had not committed; commit first, and re-read what the session
-    held after.
-
-    Args:
-        db_session: The test ``db.session``.
-        xfer: The flushed :class:`~app.models.transfer.Transfer`.
-        is_income: ``True`` for the to-side's (income) twin, ``False`` for
-            the from-side's (expense) twin.
-    """
-    db_session.add(a_twin_of(xfer, is_income))
-    with pytest.raises(sa_exc.IntegrityError) as excinfo:
-        db_session.flush()
-    db_session.rollback()
-    assert constraint_name_from(excinfo.value) == (
-        "ck_transactions_names_no_transfer"
-    ), f"the twin was refused by another rule: {excinfo.value}"
-
-
-def a_twin_of(xfer, is_income):
-    """Return, unsaved, the twin row one side of *xfer* used to have.
-
-    The ONE construction of a twin for a test that plants one (plan step
-    ``balance:X-bi-6-4d-2``): :func:`assert_a_twin_is_refused` adds it as it
-    is, and a test whose planted shape is a twin with something MORE on it --
-    a figure written past the amount seam -- takes it from here and adds that,
-    so the two cannot come to disagree about what the rest of the row is.
-
-    The row carries what ``transfer_service._create._build_shadow`` copied
-    onto a twin at ``5f46d6973`` (the leaf below, where the create door still
-    made two): the transfer's owner, period, scenario, category and due date,
-    the side's endpoint and type, and a figure derived from its parent
-    (``PARENT_TRANSFER``).  It is NOT that builder's row column for column:
-    its ``name`` is this helper's own (the builder wrote "Transfer to / from
-    <account>"), and its status is Projected, the status every transfer door
-    created a transfer in, where the builder wrote the transfer's own (the
-    service's born-settled branch built settled twins).  Neither column bears
-    on ``ck_transactions_names_no_transfer``, and as built the row satisfies
-    every other rule, so that CHECK is the only one it violates.
-
-    Args:
-        xfer: The flushed :class:`~app.models.transfer.Transfer`.
-        is_income: ``True`` for the to-side's (income) twin, ``False`` for
-            the from-side's (expense) twin.
-
-    Returns:
-        The unsaved :class:`~app.models.transaction.Transaction`.
-    """
-    # Pylint: import-outside-toplevel -- same lazy-app-import convention
-    # every helper in this module follows.
-    # pylint: disable=import-outside-toplevel
-    from app import ref_cache
-    from app.enums import AmountSourceEnum, StatusEnum, TxnTypeEnum
-    from app.models.transaction import Transaction
-    from app.services.amount_ownership import declare_derived
-
-    twin = Transaction(
-        user_id=xfer.user_id,
-        account_id=xfer.to_account_id if is_income else xfer.from_account_id,
-        transfer_id=xfer.id,
-        pay_period_id=xfer.pay_period_id,
-        scenario_id=xfer.scenario_id,
-        status_id=ref_cache.status_id(StatusEnum.PROJECTED),
-        name=f"Twin of transfer {xfer.id}",
-        category_id=xfer.category_id,
-        transaction_type_id=ref_cache.txn_type_id(
-            TxnTypeEnum.INCOME if is_income else TxnTypeEnum.EXPENSE,
-        ),
-        due_date=xfer.due_date,
-    )
-    declare_derived(twin, AmountSourceEnum.PARENT_TRANSFER)
-    return twin
 
 
 def transfer_side_record(db_session, transfer_id, account_id):
@@ -4988,6 +4888,35 @@ def transfer_side_record(db_session, transfer_id, account_id):
         )
         .one_or_none()
     )
+
+
+def side_records_by_key(xfer):
+    """Return ``{(transfer id, account id): record}`` for each side of *xfer* holding one.
+
+    The map ``transfer_legs.covering_movements_by_leg`` answered until ruling
+    **plan#1984** deleted it, built from what replaced it: each side's leg
+    reads its record off the transfer's list for that side
+    (``TransferLeg.record``), both lists loaded in one statement
+    (``transfer_legs.transfer_sides``).  The cases that asserted that
+    map assert it unchanged through this, keyed by the side's ``cell_key``,
+    which is the record's account (a record's account IS its side's
+    endpoint, by the side keys).
+
+    Args:
+        xfer: The transfer, loaded.
+
+    Returns:
+        The map, holding a key only for a side that holds a record.
+    """
+    # pylint: disable=import-outside-toplevel -- same lazy-app-import
+    # convention every helper in this module follows.
+    from app.services import transfer_legs
+
+    return {
+        leg.cell_key: leg.record
+        for leg in transfer_legs.transfer_sides(xfer)
+        if leg.record is not None
+    }
 
 
 def transfer_side_figure(db_session, transfer_id, account_id):
@@ -5092,11 +5021,13 @@ def family_journal_filter(txn):
     settlement as one ``transaction_entries`` row, the bill's own leg reads
     zero, and the posting writer files the money under
     ``journal_entries.transaction_entry_id`` (the purchase source) rather than
-    under ``transaction_id``.  A suite that reads "the row's postings" by
-    ``JournalEntry.transaction_id`` alone therefore reads an empty ledger for
-    a covered bill.  This is the ONE spelling of the family read, so the 38
-    cases the developer confirmed on 2026-09-15 widen their subject the same
-    way and no figure moves: the row's entries, plus its covering movements'.
+    under ``transaction_id``, a link plan step ``balance:X-bi-6-5``'s second
+    leaf (card plan#1845) deleted with the row's own ``transaction`` leg.  A
+    suite that read "the row's postings" by ``JournalEntry.transaction_id``
+    alone read an empty ledger for a covered bill.  This is the ONE spelling
+    of the family read, so the 38 cases the developer confirmed on 2026-09-15
+    widen their subject the same way and no figure moves: the row's
+    movements' entries.
 
     The movements are read through ``Transaction.entries`` -- EVERY movement
     of the row since plan step ``balance:X-bi-4a`` (ruling **R-BAL80**: the
@@ -5124,16 +5055,15 @@ def family_journal_filter(txn):
 
     row = txn if isinstance(txn, Transaction) else db.session.get(Transaction, txn)
     if row is None:
-        # A hard-deleted row: its postings were reversed and SET-NULLed before
-        # it went, and so were its movement's (they cascade with it), so the
-        # family is whatever still names the id -- nothing, which is the claim
-        # such a case makes.
-        return JournalEntry.transaction_id == txn
-    movement_ids = [movement.id for movement in row.entries]
-    own = JournalEntry.transaction_id == row.id
-    if not movement_ids:
-        return own
-    return db.or_(own, JournalEntry.transaction_entry_id.in_(movement_ids))
+        # A hard-deleted row: its movements' postings were reversed, then the
+        # delete took the movements off the books (``movement_removal``) and
+        # each entry's link SET-NULLed as its movement went, so no entry names
+        # the family any more -- nothing, which is the claim such a case
+        # makes.
+        return db.false()
+    return JournalEntry.transaction_entry_id.in_(
+        [movement.id for movement in row.entries],
+    )
 
 
 def purchases_of(txn):
@@ -5366,9 +5296,7 @@ def cover_bare_settled_row(db_session, txn, amount, submitted=None):
             amount=Decimal(str(submitted)),
             source=MovementFigureSourceEnum.TYPED,
         )
-    sync_covering_movement(
-        txn, was_settled=False, now_settled=True, settlement=settlement,
-    )
+    sync_covering_movement(txn, now_settled=True, settlement=settlement)
     db_session.flush()
 
 
@@ -6750,9 +6678,10 @@ def assert_pay_period_invariants(db_session, user_id):
     # 2. Every transfer is in one of the user's own (surviving) periods.  It
     #    also counted two shadows per transfer, each in the transfer's period,
     #    until plan step balance:X-bi-6-4d-2 (ruling R-BAL167 class 4): a
-    #    transfer is one row there and ck_transactions_names_no_transfer
-    #    refuses a row naming one, so its legs are drawn off the transfer
-    #    itself and have no period of their own to disagree with.
+    #    transfer is one row there (ck_transactions_names_no_transfer refused
+    #    a row naming one until plan step balance:X-bi-6-5 dropped the
+    #    column), so its legs are drawn off the transfer itself and have no
+    #    period of their own to disagree with.
     for transfer in db_session.query(Transfer).filter_by(user_id=user_id):
         assert transfer.pay_period_id in period_ids, (
             f"user {user_id}: transfer {transfer.id} is in period "
@@ -8207,8 +8136,10 @@ def net_posted_by_day(filter_clause):
 
     The LEDGER half of every settle-day assertion in the X-f1c suites, shared
     because the transaction and transfer versions differed only in their filter
-    clause (``JournalEntry.transaction_id == id`` vs ``.transfer_id == id``) --
-    identical ``group_by``, identical reduction, identical rationale.  ``tests/``
+    clause (``JournalEntry.transaction_id == id`` vs ``.transfer_id == id``
+    then; both links went at plan step ``balance:X-bi-6-5``'s second leaf,
+    card plan#1845, and a caller passes a family read now) -- identical
+    ``group_by``, identical reduction, identical rationale.  ``tests/``
     is outside R0801's reach, so that duplication had to be found by reading;
     it was, by a neutral review.
 
@@ -8229,7 +8160,7 @@ def net_posted_by_day(filter_clause):
 
     Args:
         filter_clause: The SQLAlchemy clause selecting the journal entries of
-            one source row, e.g. ``JournalEntry.transaction_id == txn.id``.
+            one source row, e.g. ``family_journal_filter(txn)``.
 
     Returns:
         ``{entry_date: Decimal}`` for the days that still carry a non-zero net
@@ -10618,7 +10549,7 @@ def write_past_the_amount_seam(row, value):
     derived answer is invariant under a rival figure (a definition's row
     under its own column, a generated transfer's leg under its parent's) and
     the one that proves the database refuses a declared row carrying one; in
-    ``test_a_transfer_shadow_is_derived/test_the_declaration.py``,
+    ``test_a_transfers_amount_is_declared/test_the_declaration.py``,
     ``test_a_leg_cannot_hold_a_figure_while_it_declares_a_parent``, which
     proves the database refuses a transfer's twin holding a figure; and the
     hand-run ``tests/manual/verify_amount_resolver.py``.  Each is constructing

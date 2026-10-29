@@ -215,7 +215,7 @@ class StatementMatchMember(db.Model):
     money twice and would break ``Sigma(lines) = Sigma(members)``, and no act
     can.  A row holding a purchase is never offered: while Projected it is
     worth ``$0.00`` to the matcher's offer
-    (:func:`~app.services.statement_match._valuation.transaction_price`,
+    (:func:`~app.services.statement_match._settle_price.settle_price`,
     ruling **R-BAL81**), and closed from its purchases it holds no payment to
     name.  A column on this table therefore had nowhere to put the one
     subject the undo most needed to reach.

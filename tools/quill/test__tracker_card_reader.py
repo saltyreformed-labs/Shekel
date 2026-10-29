@@ -126,9 +126,9 @@ def _step(number, card_type=BareCard, **changes):
     """An open step of the plan's tracker, of ``card_type``, with ``changes`` applied."""
     fields = {
         "number": number, "id": 1000 + number, "node_id": f"I_{number}", "title": f"card {number}",
-        "kind": "step", "labels": ("balance",), "is_open": True, "state_reason": None,
-        "parent": None, "children": (), "blocked_by": (), "closed_by_tool": False,
-        "touched_by_hand": False, "outside": (), **changes,
+        "kind": "step", "labels": ("balance",), "arc": "balance", "is_open": True,
+        "state_reason": None, "parent": None, "children": (), "blocked_by": (),
+        "closed_by_tool": False, "touched_by_hand": False, "outside": (), **changes,
     }
     return card_type(**fields)
 

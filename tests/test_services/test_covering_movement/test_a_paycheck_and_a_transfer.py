@@ -28,6 +28,7 @@ from app.services import (
     transfer_service,
 )
 from app.services.cash_ledger import settled_cash_facts
+from app.services.transfer_legs import parent_of
 from app.services.settle_day import SettleDay
 from tests._test_helpers import (
     create_loan_account,
@@ -300,8 +301,8 @@ class TestATransferIsCoveredOnBothLegs:
         **R-BAL101**), which pinned the interval that step closes.  The cash
         nets move by exactly the figure on each account, each MOVEMENT links
         its own entry (two, against the owner's Transfers-in-transit
-        account), NO entry links the transfer whole, the oracle's per-account
-        identity holds on both, transit nets to zero, and the deploy resync --
+        account), the oracle's per-account identity holds on both, transit
+        nets to zero, and the deploy resync --
         which walks every settled source -- finds nothing to post.  A
         movement posted beside a whole-pair entry would read ``$1,000.00``
         against the oracle's ``$500.00`` on that account.
@@ -320,7 +321,7 @@ class TestATransferIsCoveredOnBothLegs:
                 account.id: posting_service.account_posting_total(account.id, scenario_id)
                 for account in accounts
             }
-            xfer, expense, income = _settled_pair(
+            _xfer, expense, income = _settled_pair(
                 seed_user, seed_periods[0], to_account=savings,
             )
             movement_ids = [_only_movement(leg).id for leg in (expense, income)]
@@ -330,11 +331,7 @@ class TestATransferIsCoveredOnBothLegs:
             }
             assert after[accounts[0].id] - before[accounts[0].id] == Decimal("-500.00")
             assert after[savings.id] - before[savings.id] == Decimal("500.00")
-            # ONE entry per MOVEMENT, and none linked by the transfer whole.
-            pair_entries = (
-                db.session.query(JournalEntry).filter_by(transfer_id=xfer.id).all()
-            )
-            assert pair_entries == []
+            # ONE entry per MOVEMENT.
             assert len(_movement_entries(movement_ids)) == 2
             transit = transit_ledger_account(db.session, seed_user["user"].id)
             assert db.session.query(
@@ -439,7 +436,7 @@ class TestATransferIsCoveredOnBothLegs:
 class TestATransfersMovementsFollowItsLifecycle:
     """Soft delete, restore, hard delete and the endpoint move (R-BAL46)."""
 
-    def test_a_soft_deleted_transfer_keeps_its_movements_worth_nothing_and_restore_revives_them(
+    def test_a_soft_delete_takes_both_movements_off_and_restore_brings_back_a_plan(
         self, app, seed_user, seed_periods,
     ):
         """A soft delete takes both $500.00 movements off; a restore brings back a plan.
@@ -450,8 +447,7 @@ class TestATransfersMovementsFollowItsLifecycle:
         **credit_card:R-CC75**) and sets the Paid transfer back to Projected
         (ruling **R-BAL246**, "Back as a plan, now", developer 2026-10-09).
         So the restore returns a plan holding no movement, and neither
-        account reads a settled fact either side of it.  The name is kept as
-        history.
+        account reads a settled fact either side of it.
         """
         with app.app_context():
             xfer, expense, income = _settled_pair(seed_user, seed_periods[0])
@@ -469,7 +465,7 @@ class TestATransfersMovementsFollowItsLifecycle:
                 assert leg.record is None
                 assert settled_cash_facts(leg.account_id, leg.scenario_id) == []
 
-    def test_a_reverted_then_soft_deleted_then_restored_transfer_keeps_both_survivors(
+    def test_a_reverted_transfers_kept_records_leave_with_its_delete(
         self, app, seed_user, seed_periods,
     ):
         """A reverted transfer's kept un-dated records leave with its delete.
@@ -482,8 +478,7 @@ class TestATransfersMovementsFollowItsLifecycle:
         record either side holds off the books (ruling
         **credit_card:R-CC75**).  The transfer was Projected already, so it
         stays Projected (ruling **R-BAL246** sets back only a settled one) and
-        the restore returns a plan holding no record.  The name is kept as
-        history.
+        the restore returns a plan holding no record.
         """
         with app.app_context():
             xfer, _, _ = _settled_pair(seed_user, seed_periods[0])
@@ -567,7 +562,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
 
     A payment's income leg sits on the LOAN account and carries a covering
     movement there; every loan reader values the leg by its record
-    (``row_valuation.leg_settled_contribution``; from plan step
+    (``row_valuation.settled_contribution`` of its parent; from plan step
     ``balance:X-bi-4b-1`` the record was the leg's movement, ruling
     **R-BAL80**, which hangs off the transfer by its side link since
     ``balance:X-bi-6-4d-2``, not off the leg's shadow) -- and since that
@@ -624,7 +619,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
                     posted_loan_balance_at(loan.id, scenario_id, as_of),
                 )
 
-            assert row_valuation.leg_settled_contribution(income) == Decimal("1910.95")
+            assert row_valuation.settled_contribution(parent_of(income)) == Decimal("1910.95")
             with_movement = _read()
             # Deleted, THEN out of the list: the list no longer deletes (R-CC64;
             # rule-5 re-expression, developer-confirmed 2026-09-23).  The list
@@ -655,7 +650,7 @@ class TestALoanPaymentReStatedAtZeroMovesTheLoansPositionAndNotItsPostedLedger:
             # and the posted ledger does not move: the loan side's entry
             # against transit, one of R-BAL45's two, keeps its postings.
             income = _leg_again(income)
-            assert row_valuation.leg_settled_contribution(income) == Decimal("0")
+            assert row_valuation.settled_contribution(parent_of(income)) == Decimal("0")
             without_movement = _read()
             assert without_movement[0] != with_movement[0]
             assert without_movement[1] == with_movement[1]

@@ -69,23 +69,26 @@ does every leaf under it.
 
 **A finding or a ruling names its owner step by GitHub's "blocked by" link to it**
 (ruling ``balance:R-BAL395``, :data:`OWNED`), never as its sub-issue, so a step's
-progress counts only its pieces: its one blocker is its owner.  A finding's owner is a step
-a branch builds (:func:`can_own`; plan#1784, "One owner, always a leaf"), never one split
-into smaller steps, so some claim's pull request owes it (CI's landing check refuses that
-pull request while it does, ``landing``'s rule 7), and an open finding whose owner is not
-one such step is reported (:func:`_owner_lost`).
+progress counts only its pieces: its one blocker is its owner.  A question may name one the
+same way, the step it is asked for, which the ruling it becomes keeps (plan#1861's item 10).
+A finding's owner is a step a branch builds (:func:`can_own`; plan#1784, "One owner, always
+a leaf"), never one split into smaller steps, so some claim's pull request owes it (CI's
+landing check refuses that pull request while it does, ``landing``'s rule 7), and an open
+finding whose owner is not one such step is reported (:func:`_owner_lost`).
 
-**A task is a piece of one step or finding** (ruling ``balance:R-BAL386``): a sub-issue
-of type ``task`` under that card, a commit inside its one pull request, never offered,
-claimed or on the board.  It is DONE when git says so (:func:`done_tasks`): its file
-``plan/tasks/N`` is in the merge of ``dev`` and ``main``, or the live claim of the card it
-is under wrote it.  Its open or closed state is the tool's display of that, which
-``sync`` keeps in step both ways, as it does a step's: closed as completed once done,
-reopened once a revert (or a claim released, or a branch rewritten) takes its file away
-while the tool's close stands.  A person's close is a drop, and ``quill drop`` of a card
-drops the tasks under it that are still to do (R-BAL190's shape, :func:`drop_takes`).
-An open task under a card that can never take its file -- dropped, shipped without it, or
-no work -- is reported, never closed (:func:`_stale_task`).
+**A task is a piece of one step or finding** (ruling ``balance:R-BAL386``): a sub-issue of
+type ``task`` under that card, a commit inside its one pull request, never offered or
+claimed, and outside the board's order: on the board under a step it nests there (ruling
+plan#1814), in its card's order of its tasks (ruling plan#1868).  It
+is DONE when git says so (:func:`done_tasks`): its file ``plan/tasks/N`` is in the merge of
+``dev`` and ``main``, or the live claim of the card it is under wrote it.  Its open or
+closed state is the tool's display of that, which ``sync`` keeps in step both ways, as it
+does a step's: closed as completed once done, reopened once a revert (or a claim released,
+or a branch rewritten) takes its file away while the tool's close stands.  A person's close
+is a drop, and ``quill drop`` of a card drops the tasks under it that are still to do
+(R-BAL190's shape, :func:`drop_takes`).  An open task under a card that can never take its
+file -- dropped, shipped without it, or no work -- is reported, never closed
+(:func:`_stale_task`).
 
 **``sync`` never overrides a person** (the build plan: a check "never acts on"
 the developer's own edit): a card whose last close or reopen was a person's is
@@ -115,14 +118,15 @@ STALE_CLAIM = timedelta(days=3)
 SHIPPABLE = ("step", "finding")
 #: The kinds that name their owner step by GitHub's "blocked by" link to it, never as its
 #: sub-issue, which its progress would count (ruling ``balance:R-BAL395``): the step is
-#: the one card each is blocked by.
-OWNED = ("finding", "ruling")
+#: the one card each is blocked by.  A finding and a ruling always name one; a question names
+#: the step it is asked for, when it has one (plan#1861's item 10).
+OWNED = ("finding", "ruling", "question")
 
 
 def leaves(card: BareCard, cards: Mapping[int, BareCard],
            shipped: Iterable[int]) -> tuple[int, ...]:
     """The steps ``card`` splits into, the one spelling: each step linked under it
-    (:attr:`_tracker.Card.step_children`; the findings and rulings it owns are no
+    (:attr:`_tracker.Card.step_children`; the findings, rulings and questions it owns are no
     sub-issues of it, R-BAL395) but one dropped before its filing finished -- CLOSED while still
     marked, and :func:`dropped` (not shipped by git's answer).
 
@@ -264,7 +268,7 @@ def above(card: BareCard, cards: Mapping[int, BareCard]) -> Iterator[BareCard]:
 def missing(cards: Mapping[int, BareCard]) -> set[int]:
     """Cards the decisions below would read that ``cards`` does not hold yet:
     blockers, parents, and every step linked under a card, each read to decide whether
-    it is a leaf (:func:`leaves`; the findings and rulings a card owns decide
+    it is a leaf (:func:`leaves`; the findings, rulings and questions a card owns decide
     nothing)."""
     wanted = set()
     for card in cards.values():
@@ -448,7 +452,7 @@ def next_step(order: Iterable[int], cards: Mapping[int, Card], shipped: Iterable
     shipped = set(shipped)
 
     def fits(card: Card) -> bool:
-        return workable(card, cards, shipped, claims) and (arc is None or arc in card.labels)
+        return workable(card, cards, shipped, claims) and (arc is None or card.arc == arc)
 
     first = next((cards[n] for n in order if n in cards and fits(cards[n])), None)
     placed = set(order)
@@ -937,11 +941,12 @@ def sync_unsplits(cards: Mapping[int, Card], shipped: Iterable[int], plan: SyncP
 
 
 def owner(card: BareCard) -> int | None:
-    """A finding's or a ruling's owner (ruling ``balance:R-BAL395``, :data:`OWNED`), the one
-    spelling: the card of the tracker it is blocked by, when nothing else blocks it, in the
-    tracker or outside it.  None for a card of another kind, and for one blocked by no card
-    of the tracker, by an issue outside it, or by more than one, which names no one owner.
-    Whether that card is a step, and live, is the reader's to ask (:func:`_owner_lost`)."""
+    """A finding's, a ruling's or a question's owner (ruling ``balance:R-BAL395``,
+    :data:`OWNED`), the one spelling: the card of the tracker it is blocked by, when nothing
+    else blocks it, in the tracker or outside it.  None for a card of another kind, and for
+    one blocked by no card of the tracker (a question asked of no step among them), by an
+    issue outside it, or by more than one, which names no one owner.  Whether that card is a
+    step, and live, is the reader's to ask (:func:`_owner_lost`)."""
     if card.kind not in OWNED or len(card.blocked_by) != 1 or outside_blockers(card):
         return None
     return card.blocked_by[0]

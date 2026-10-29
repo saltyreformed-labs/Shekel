@@ -832,7 +832,7 @@ def latest_settled_payment_due_date(
     settled LATER against an earlier installment is not seen by a guard that ran
     before it; a settled payment's escrow is additionally frozen by
     capture-on-settle
-    (amount rule 4, via :func:`app.services.cash_ledger.amounts_by_id`).
+    (amount rule 4, via :func:`app.services.cash_ledger.amounts_by_key`).
 
     Args:
         account_id: The loan account whose settled payments to scan.

@@ -418,7 +418,7 @@ class TestEveryDoorThatRemovesARowWithdrawsItsMatches:
 
         assert line.id not in _matched_line_ids(seed_user)
 
-    def test_deleting_a_transfer_frees_both_shadows_lines(
+    def test_deleting_a_transfer_frees_the_line_its_side_matched(
         self, app, db, seed_user,
     ):
         """A transfer's two legs move together, and so do their matches.
@@ -855,14 +855,14 @@ class TestARowThatIsHalfOfSomethingElseRefusesTheDelete:
     # until plan step balance:X-bi-6-4d-2 (ruling **R-BAL300**, developer
     # 2026-10-15: "Delete all 27").  It asked ``deletion_refusal`` and the
     # delete verb about a transfer's SHADOW row and asserted the sentence
-    # pointing at the transfer's own delete.  No shadow can exist now (the
-    # database refuses one, ``ck_transactions_names_no_transfer``, ruling
-    # R-BAL258, pinned once by
+    # pointing at the transfer's own delete.  No shadow can exist now: no
+    # transaction has a transfer column since plan step X-bi-6-5, and
+    # ``ck_transactions_names_no_transfer`` refused a row naming one until
+    # then (ruling R-BAL258, pinned once, below that drop, by
     # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
-    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
-    # and no app code builds one), so that arm is reachable by no row and
-    # goes with the column at plan step X-bi-6-5.  A transfer's own delete
-    # is ``test_deleting_a_transfer_frees_both_shadows_lines`` in
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``).
+    # That arm was reachable by no row, and it went at that step.  A
+    # transfer's own delete is ``test_deleting_a_transfer_frees_the_line_its_side_matched`` in
     # :class:`TestEveryDoorThatRemovesARowWithdrawsItsMatches`.
 
     def test_a_CC_payback_is_refused_and_names_Undo_CC(

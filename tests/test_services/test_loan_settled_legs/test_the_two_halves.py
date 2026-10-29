@@ -15,9 +15,8 @@ from app.services import loan_loaders, transfer_service
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.loan_posting_service._linked_ledger import _movement_nets_by_date
 from app.services.posting_service import _ledger_account_for
-from app.services.recorded_contributions import load_shadow_income_contributions_for_account
+from app.services.recorded_contributions import load_transfer_contributions_for_account
 from tests._test_helpers import (
-    assert_a_twin_is_refused,
     basis_for,
     create_savings_account,
     create_settled_transfer,
@@ -113,8 +112,11 @@ class TestTheSettledHalfComplementsThePlanHalf:
         **The reverted member is the boundary of "its money moved"** (ruling
         **R-BAL140**): the revert KEEPS its records and releases their days
         (ruling **R-BAL61**), so records EXIST and none is DATED; the plan
-        emits a leg for a side with no dated movement (ruling **R-BAL79**),
-        and the settled half, the plan half's complement, does not hold it.
+        emits a leg for it because its transfer is Projected (the status
+        alone since plan step ``balance:X-bi-6-5``'s third leaf; ruling
+        **R-BAL79** also asked for a side with no dated movement until
+        then), and the settled half, the plan half's complement, does not
+        hold it.
         It is a NEW member at plan step ``balance:X-bi-6-4d-2``: no member
         stood in that state before.
 
@@ -127,24 +129,24 @@ class TestTheSettledHalfComplementsThePlanHalf:
         Cancelled through the door, its records kept un-dated -- is what
         stands, excluded as before); and un-dating the last member's loan
         side under its Paid parent (the band again; rolled back, Paid and
-        dated, settled as it was -- its walk's refusal is
-        :class:`TestASettledPaymentWithAnUndatedRecordFailsLoud`'s).
+        dated, settled as it was -- the walk's refusal of it was graded
+        beside this file until plan step ``balance:X-bi-6-5``'s third leaf
+        deleted that refusal).
 
         **Four members left at plan step ``balance:X-bi-6-4d-2``**, where a
         transfer became one row (ruling **R-BAL258**).  Three planted the
         loan-side twin first: Paid with nothing moved, Paid with a dated
-        movement under it, and that one with its twin hidden.  The twin is
+        movement under it, and that one with its twin hidden.  The twin was
         refused at the write by ``ck_transactions_names_no_transfer``
-        whatever it carries -- measured bare, dated, Paid and dated, and Paid,
-        dated and hidden -- so the movement and the hide planted after it can
-        never be written: ONE refused shape, pinned on the income side by
-        ``test_a_transfer_shadow_is_derived/test_the_declaration.py``'s
-        ``TestAShadowIsBornDerived`` case
-        ``test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored``
-        and, for a loan payment, by ``test_loan_plan_assembly.py``'s
-        ``test_a_projected_loan_payment_is_priced_and_its_derived_twin_refused``.
-        The fourth, "parent Paid, twin still Projected" (its status written
-        past the seam), is without its twin the SAME stored state as the
+        whatever it carried -- measured bare, dated, Paid and dated, and Paid,
+        dated and hidden -- so the movement and the hide planted after it
+        could never be written: ONE refused shape, pinned on the income side in
+        ``test_a_transfers_amount_is_declared/test_the_declaration.py`` and,
+        for a loan payment, in ``test_loan_plan_assembly.py``, until plan step
+        balance:X-bi-6-5 dropped the column the twin named its transfer by,
+        after which no statement can write it (ruling plan#1850).  The
+        fourth, "parent Paid, twin still Projected" (its status written past
+        the seam), is without its twin the SAME stored state as the
         ``$0.00`` close: measured, every ``budget.transfers`` column is equal
         bar the literal figure and name (the close stores its PLAN figure:
         ``$0.00`` is the absence of a record, ruling **R-BAL141**), both are
@@ -401,33 +403,31 @@ class TestTheContributionFeedCountsADriftOnce:
     def test_a_twin_settled_with_nothing_moved_is_one_planned_contribution(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """$250.00 planned, twin Paid, nothing moved: the twin is refused, ONE planned $250.00.
+        """$250.00 planned, twin Paid, nothing moved: no twin can exist, ONE planned $250.00.
 
         The feed read it as ONE planned $250.00: the parent decides, and no
-        money moved.  **The twin is REFUSED at the write since plan step
+        money moved.  **The twin was REFUSED at the write from plan step
         ``balance:X-bi-6-4d-2``** (ruling **R-BAL167** class 2, ruling
-        **R-BAL258**): ``ck_transactions_names_no_transfer`` refuses the
+        **R-BAL258**): ``ck_transactions_names_no_transfer`` refused the
         income twin with or without the Paid status and the 03-05 day the
-        drift wrote onto it (measured both ways), so it is staged as
-        :func:`~tests._test_helpers.assert_a_twin_is_refused` builds it and
-        that refusal asserted.  The feed's answer on the transfer that
-        stands is asserted as before, one planned $250.00, so the refused
-        plant leaves nothing a reader could count twice.
+        drift wrote onto it (measured both ways), and the case asserted that
+        refusal until plan step balance:X-bi-6-5 dropped the column the twin
+        named its transfer by; no statement can write one now, so the
+        refusal went with the column (ruling plan#1850).  The feed's answer
+        on the transfer that stands is asserted as before, one planned
+        $250.00, so nothing is left a reader could count twice.
         """
         with app.app_context():
             savings = create_savings_account(
                 seed_user, db.session, "Drift Savings", Decimal("0.00"),
             )
-            transfer = create_transfer(
+            create_transfer(
                 seed_user, db.session, seed_user["account"], savings,
                 seed_periods[_PERIOD], amount=Decimal("250.00"),
             )
             db.session.commit()
-            assert_a_twin_is_refused(
-                db.session, db.session.get(Transfer, transfer.id), is_income=True,
-            )
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis_for(savings, seed_user["scenario"]), savings.id,
                 [period.id for period in seed_periods],
             )
@@ -472,17 +472,23 @@ class TestTheContributionFeedCountsADriftOnce:
             ) is None
 
 
-class TestTheLineageProbeNamesADeadShadowsMovement:
-    """The posting sync resolves a stale movement's transfer through ``movement_parent``."""
+class TestTheLoanSidesMovementIsItsRecord:
+    """A paid loan payment's movement is the loan side's record, posted on its day.
 
-    def test_a_movement_under_a_dead_shadow_is_reversed(
+    The class graded the posting sync resolving a stale movement's transfer
+    through ``movement_parent``, under a dead shadow; no shadow can exist
+    since plan step ``balance:X-bi-6-5`` (the case's docstring says how).
+    """
+
+    def test_a_paid_loan_payment_s_movement_posts_on_its_settle_day(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """Paid $1,000.00, then its twin soft-deleted around the service.
+        """Paid $1,000.00: the loan side's movement posts $1,000.00 on 03-05.
 
-        The movement was no leg's record any more (a dead shadow's), so the
-        walk expected no cash for it and the posted cash leg was STALE; the
-        probe had to still name its transfer so the transfer's pair door
+        The case paid $1,000.00, then soft-deleted its twin around the
+        service.  The movement was no leg's record any more (a dead shadow's),
+        so the walk expected no cash for it and the posted cash leg was STALE;
+        the probe had to still name its transfer so the transfer's pair door
         reversed it.
 
         **The state is REFUSED since plan step ``balance:X-bi-6-4d-2``**
@@ -493,15 +499,17 @@ class TestTheLineageProbeNamesADeadShadowsMovement:
         under their twins in one statement -- and a twin hidden holding one
         was refused by the deleted-row rule's row arm.  **Since that step the
         twin itself cannot be stored** (ruling **R-BAL258**): the loan-side
-        twin the plant re-parented the movement under is refused at the write
-        by ``ck_transactions_names_no_transfer``, so neither the re-parenting
-        nor the hide has a row to act on, and the sync's answer on a stale
-        movement under a dead shadow -- the posted cash leg reversed,
-        ``_movement_nets_by_date`` reading ``{}`` -- is not asserted.  What
-        stands is the movement as the side's record, posted on 03-05, read
-        BEFORE the plant; the read after it graded that the refused hide's
-        rollback restored the re-parented record, and went with the
-        re-parenting.
+        twin the plant re-parented the movement under was refused at the
+        write by ``ck_transactions_names_no_transfer``, so neither the
+        re-parenting nor the hide has a row to act on, and the sync's answer
+        on a stale movement under a dead shadow -- the posted cash leg
+        reversed, ``_movement_nets_by_date`` reading ``{}`` -- is not
+        asserted.  The case asserted that refusal until plan step
+        balance:X-bi-6-5 dropped the column the twin named its transfer by,
+        after which no statement can write one (ruling plan#1850).  What
+        stands is the movement as the side's record, posted on 03-05; the
+        read after the plant graded that the refused hide's rollback
+        restored the re-parented record, and went with the re-parenting.
         """
         with app.app_context():
             loan = _loan(seed_user)
@@ -520,7 +528,3 @@ class TestTheLineageProbeNamesADeadShadowsMovement:
             assert _movement_nets_by_date(linked_id, scenario_id) == {
                 movement_id: {_CLOSED_ON: Decimal("1000.00")},
             }
-
-            assert_a_twin_is_refused(
-                db.session, db.session.get(Transfer, transfer_id), is_income=True,
-            )

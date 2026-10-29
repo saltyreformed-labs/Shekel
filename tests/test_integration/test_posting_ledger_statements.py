@@ -1053,9 +1053,9 @@ class TestRevertAndResidueDropped:
     ):
         """Residue split across two years nets to zero and is dropped from both.
 
-        A hard delete SET-NULLs ``journal_entries.transaction_id`` after
-        reversing the postings, leaving residue: transaction-source entries with
-        both concrete FKs NULL.  Here the ORIGINAL residue lands in 2098 and its
+        A hard delete SET-NULLs ``journal_entries.transaction_entry_id`` after
+        reversing the postings, leaving residue: purchase-source entries with
+        their movement link NULL.  Here the ORIGINAL residue lands in 2098 and its
         REVERSAL in 2099 -- different calendar years, netting to zero per account
         (the reverse-before-delete discipline).  Because the reader keeps only
         correction sources in the sourceless bucket, BOTH years' income
@@ -1072,8 +1072,8 @@ class TestRevertAndResidueDropped:
                 db, seed_user, checking, "Groceries",
             )
 
-            # Residue original in 2098, reversal in 2099 -- both transaction-
-            # source, transaction_id NULL, netting to zero on each account.
+            # Residue original in 2098, reversal in 2099 -- both purchase-
+            # source, transaction_entry_id NULL, netting to zero on each account.
             self._residue_entry(
                 seed_user, linked.id, groceries_ledger_id,
                 amount=Decimal("100.00"), entry_date=date(2098, 6, 15),
@@ -1144,12 +1144,15 @@ class TestRevertAndResidueDropped:
 
     @staticmethod
     def _residue_entry(seed_user, linked_id, expense_id, *, amount, entry_date):
-        """Post one residue entry (transaction source, NULL FKs) at a civil date.
+        """Post one residue entry (purchase source, NULL link) at a civil date.
 
         Two balanced legs (linked ``amount`` cash, expense ``-amount`` counter)
-        under a ``transaction`` source with ``transaction_id`` NULL -- the shape a
-        hard delete leaves after SET-NULLing the FK.  ``entry_date`` is set
-        explicitly so the original and reversal can straddle a year boundary.
+        under a ``purchase`` source with ``transaction_entry_id`` NULL -- the
+        shape a hard delete leaves after SET-NULLing the FK.  ``entry_date`` is
+        set explicitly so the original and reversal can straddle a year
+        boundary.  It was a ``transaction`` source with ``transaction_id`` NULL
+        until plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845)
+        deleted both.
         """
         entry = JournalEntry(
             user_id=seed_user["user"].id,
@@ -1157,10 +1160,9 @@ class TestRevertAndResidueDropped:
             pay_period_id=seed_user["bootstrap_period"].id,
             entry_date=entry_date,
             source_kind_id=ref_cache.posting_source_id(
-                PostingSourceEnum.TRANSACTION,
+                PostingSourceEnum.PURCHASE,
             ),
-            transaction_id=None,
-            transfer_id=None,
+            transaction_entry_id=None,
             description="Residue entry",
         )
         _db.session.add(entry)

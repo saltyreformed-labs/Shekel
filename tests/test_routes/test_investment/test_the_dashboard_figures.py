@@ -249,7 +249,7 @@ class TestEmployerMatchCapped:
         only sanctioned path for budget.transfers rows -- and leaves it in
         a ``Received`` status whose ``excludes_from_balance = False`` so
         the route's YTD aggregation (``calculate_investment_inputs``
-        Step 4) counts the resulting shadow income.
+        Step 4) counts the resulting transfer contribution.
 
         **Created Projected, settled through the settle verb, then laid
         Received on BARE**: the create makes no settled transfer (ruling
@@ -297,7 +297,7 @@ class TestEmployerMatchCapped:
         Setup (F-043 worked example, scaled to fit a deduction):
 
           annual_contribution_limit = $23,500
-          YTD shadow income contributed in past period of current year
+          YTD transfer contribution in a past period of current year
             = $23,300  -> remaining = $200
           gross_biweekly                                 = $8,000
           (annual_salary = 8000 * 26 = $208,000)
@@ -350,7 +350,7 @@ class TestEmployerMatchCapped:
         _create_deduction(db.session, profile.id, acct.id, "1500.00")
         db.session.commit()
 
-        # YTD seed: $23,300 settled shadow income in a past period
+        # YTD seed: $23,300 settled transfer contribution in a past period
         # within the current year.  seed_periods_today[0] is ~56 days
         # before today (period 4 = current), so for any test date this
         # year it lands in the same calendar year as today.

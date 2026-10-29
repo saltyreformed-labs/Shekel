@@ -66,59 +66,26 @@ Architecture (``CLAUDE.md``):
   - All monetary arithmetic uses :class:`~decimal.Decimal`.
 """
 
-from decimal import Decimal
-
-from app.exceptions import ValidationError
 from app.models.transfer import Transfer
-from app.services.cash_ledger import (
-    AmountBasis,
-    derived_amount_basis,
-    leg_contribution_of,
-)
+from app.services.cash_ledger import derived_amount_basis
 from app.services.match_press import Press
 from app.services.stated_figure import StatedFigure
-from app.services import status_seam
-from app.services.status_seam import (
-    Settlement,
-    honoured_figure,
-    recorded_leg_settlement,
-)
-from app.services.transfer_legs import TransferLeg, transfer_side_leg
+from app.services import status_seam, transaction_service
+from app.services.status_seam import Settlement, recorded_settlement
+from app.services.transfer_legs import TransferLeg
 from app.services.transfer_service._side_days import PairDays
 from app.services.transfer_service._status import apply_status_to_all_three
-from app.services.transfer_service._validation import TransferRows
 
 
-def _reject_unsettleable(transfer: Transfer) -> None:
-    """Refuse a transfer this module may not settle or price -- one rule, once.
-
-    **The twin of ``transaction_service.reject_unsettleable``, and it exists
-    for the reason that one does** (finding **N-233**): a verb owns its own
-    preconditions.  **A soft-deleted transfer** must not be resurrected by a
-    settle, nor priced for one: it values at ``Decimal("0")`` (the
-    valuation's own gate), so settling it would book nothing while stamping
-    the pair Paid.  ``_get_transfer_or_raise`` already refuses a deleted
-    transfer at the settle's door, and the reconcile arm's offer scope
-    excludes one -- but :func:`leg_settle_amount` is a public pure read with
-    neither in front of it, and a figure this module publishes for a transfer
-    it refuses to book is the shape plan step X-f2-c3 removed one table over.
-
-    It was asked of the EXPENSE SHADOW until plan step
-    ``balance:X-bi-6-4d-2``, together with "is this a transfer shadow at all":
-    a shadow is no longer what this module prices, so the second rule has no
-    subject, and a twin's soft-delete is no longer read.
-
-    Args:
-        transfer: The transfer to check.
-
-    Raises:
-        ValidationError: When *transfer* is soft-deleted.
-    """
-    if transfer.is_deleted:
-        raise ValidationError(
-            f"Transfer {transfer.id} is soft-deleted; a settle cannot "
-            "resurrect a deleted transfer.",
-        )
+# ``_reject_unsettleable`` and ``leg_settle_amount`` stood here until ruling
+# **plan#1983**'s settle fold.  They were the transfer twins of
+# ``transaction_service.reject_unsettleable`` and ``settle_amount``: the same
+# three rules -- refuse a deleted parent, honour a retained correction, else
+# what the parent is worth -- spelled over a transfer and over a leg, with a
+# refusal sentence of their own that showed the owner a transfer's id (ruling
+# **R-CC98** forbids one), and spelled a third time inside :func:`settle`.  A
+# transfer is a parent like a row, so both settle verbs and every offer ask
+# the one composition of it, and a leg is offered at its transfer's answer.
 
 
 # ``frozen_amount`` stood here until plan step X-au-g-2c-2, and what deleted it
@@ -126,8 +93,8 @@ def _reject_unsettleable(transfer: Transfer) -> None:
 # It published ``LoanPricing.live_cash`` under a name -- *the live payment-date
 # figure a settle FREEZES* -- because a loan-payment shadow STORED a
 # creation-time estimate that the settle had to supersede.  A transfer has no
-# shadow now, and a transfer leg is priced by the amount model,
-# so :func:`~app.services.cash_ledger.leg_contribution_of` answers the same number
+# shadow now, and a transfer is priced by the amount model,
+# so :func:`~app.services.cash_ledger.contribution_of` answers the same number
 # for a derive-mode payment (its installment's P&I + escrow + extra), for a
 # manual one (its definition's price + extra) and for a plain transfer (its
 # parent's), and there is nothing left to freeze OVER.
@@ -136,8 +103,9 @@ def _reject_unsettleable(transfer: Transfer) -> None:
 # is worth stating because it was load-bearing: it made the capture ONE-SHOT,
 # so a ``done -> done`` replay from a stale tab could not rewrite a recorded
 # figure with a later derivation.  What holds that now is
-# :func:`~app.services.row_valuation.leg_fixed_contribution`, asked FIRST inside
-# :func:`~app.services.cash_ledger.leg_contribution_of` -- a settled leg answers
+# :func:`~app.services.row_valuation.fixed_contribution` of the transfer,
+# asked FIRST inside :func:`~app.services.cash_ledger.contribution_of` -- a
+# settled transfer answers
 # from its transfer's settled figure and never reaches a producer -- plus
 # :func:`settle` running only on the way INTO the settled band.  Two
 # independent reasons
@@ -145,7 +113,7 @@ def _reject_unsettleable(transfer: Transfer) -> None:
 
 
 def settle(
-    rows: TransferRows,
+    transfer: Transfer,
     new_status_id: int,
     *,
     submitted: StatedFigure | None,
@@ -161,17 +129,18 @@ def settle(
 
     Two acts, in this order, and the order is the rule:
 
-    1. **The figure, decided but not yet written.**  What the expense LEG is
-       worth (:func:`~app.services.cash_ledger.leg_contribution_of`, the
-       parent's resolved amount) is asked ONCE, before anything moves -- after
-       the status flip it would answer from the settled figure this act is
-       about to write.  A RETAINED correction
-       (:func:`~app.services.status_seam.honoured_figure` over the transfer's
-       one settled figure, read through the expense leg) outranks that
-       derivation, and a figure a HUMAN supplied NOW outranks
-       both: it is compared against what the row would book anyway and is a
-       CORRECTION only if it differs.  A figure somebody read off a statement is
-       a fact; a derivation is an inference.
+    1. **The figure, decided but not yet written.**  What settling the
+       TRANSFER books (``transaction_service.settle_amount``, the one
+       composition both settle verbs and every offer ask of a parent, ruling
+       **plan#1983**) is asked ONCE, before anything moves -- after the
+       status flip it would answer from the settled figure this act is about
+       to write.  Inside it a RETAINED correction (the transfer's one settled
+       figure, read off the transfer) outranks the derivation, and a figure a
+       HUMAN supplied NOW outranks both: it is compared against what the
+       transfer would book anyway (``transaction_service.is_correction``, the
+       echo rule both verbs ask) and is a CORRECTION only if it differs.  A
+       figure somebody read off a statement is a fact; a derivation is an
+       inference.
     2. **The status, each side's settle day and the RECORD, in ONE seam
        pass.**  A side's day is the caller's when it states one -- the
        reconcile tick's statement date for the leg on the statement's account
@@ -229,10 +198,10 @@ def settle(
     edit reconcile through one statement.
 
     Args:
-        rows: The transfer, at its pre-settle status.  The figure is resolved
-            from the EXPENSE leg; either would answer the same (both price the
-            one parent, and both read the transfer's one settled figure), and
-            naming one means the choice is not made twice.
+        transfer: The transfer, at its pre-settle status.  The figure and
+            the retained record are read off it, the parent both legs are
+            priced as (ruling **plan#1983**), so no leg is chosen to answer
+            for the pair.
         new_status_id: The settled status the transfer moves to, as the DOOR
             asked for it.  Verified by
             :func:`~app.services.transfer_service._status.apply_status_to_all_three`.
@@ -262,39 +231,38 @@ def settle(
         is of what this tick's user did.
 
     Raises:
-        ValidationError: On a transfer this module may not settle
-            (:func:`_reject_unsettleable`), or from the status seam's own
-            transition and settle-day refusals.
+        ValidationError: On a transfer no door may settle
+            (``transaction_service.reject_unsettleable``: a deleted one), or
+            from the status seam's own transition and settle-day refusals.
     """
-    _reject_unsettleable(rows.transfer)
+    transaction_service.reject_unsettleable(transfer)
 
     # Resolved ONCE, and everything below reads this answer rather than asking
     # again.  It was asked up to three times per ticked row before plan step
     # X-f2-c3 -- by the arm's correction predicate, by the dispatch's own
     # predicate, and by its fallback -- and each asking is a ``Transfer`` query
     # plus, for a derive-mode payment, a loan-basis resolve and an escrow load.
-    basis = derived_amount_basis(
-        rows.transfer.user_id, rows.transfer.scenario_id,
-    )
-    # Off the expense LEG -- its transfer, never its side's record -- never a
-    # twin row (plan step ``balance:X-bi-6-4d-2``): a twin's status is no
-    # longer kept, and a twin left saying Paid under a reverted transfer would
-    # price at the sum of its empty entries, ``$0.00``, and a ``$0.00`` settle
-    # takes the sides' records off the books.
-    resolved = leg_contribution_of(rows.expense_leg, basis)
-    # A RETAINED correction outranks the derivation, through the same published
-    # rule :func:`leg_settle_amount` offers from, so the pair's offer and its
-    # booking are one expression (plan step X-au-c3).  The record is the
-    # transfer's one settled figure, read once for the act through the
-    # expense leg (``rows.expense_leg``; ``recorded_leg_settlement`` reads
-    # the leg's transfer) and carried into the settlement below.
-    retained = recorded_leg_settlement(rows.expense_leg)
-    held = honoured_figure(retained)
-    booked = resolved if held is None else held
+    basis = derived_amount_basis(transfer.user_id, transfer.scenario_id)
+    # Off the TRANSFER, the parent both legs are priced as (ruling
+    # plan#1983) -- never its side's record, never a twin row (plan step
+    # ``balance:X-bi-6-4d-2``): a twin's status is no longer kept, and a twin
+    # left saying Paid under a reverted transfer would price at the sum of its
+    # empty entries, ``$0.00``, and a ``$0.00`` settle takes the sides'
+    # records off the books.  The ONE composition the reconcile panel and the
+    # statement matcher offer each leg at, so the pair's offer and its booking
+    # are one expression (plan step X-au-c3): a retained correction outranks
+    # the derivation inside it.
+    booked = transaction_service.settle_amount(transfer, basis)
     correction = (
-        submitted if submitted is not None and submitted.amount != booked
+        submitted
+        if transaction_service.is_correction(transfer, submitted, booked)
         else None
     )
+    # The transfer's one settled figure, read off the transfer
+    # (``status_seam.recorded_settlement``, the retained-record fact's one
+    # branch on a parent's table) and carried into the settlement below, as
+    # ``transaction_service.settle_transaction`` carries a row's.
+    retained = recorded_settlement(transfer)
 
     # ONE act: the status, each side's day, and what the transfer RECORDS as
     # having moved.  ``Settlement.from_settle`` states the "a human's figure
@@ -312,15 +280,14 @@ def settle(
     # ``settled_figure_source_id``, plan step balance:X-bi-6-4d-2) rather than
     # being inferred from a column being populated.
     #
-    # The pair's RETAINED record is read from the expense leg -- the same leg the
-    # figures above come from, and for the same reason (both legs read the
-    # transfer's one settled figure, so naming one means the choice is not
-    # accidental).  A
+    # The pair's RETAINED record is read off the transfer, the parent the
+    # figure above is priced as: both legs read its one settled figure, so no
+    # leg is chosen to answer for the pair.  A
     # revert releases the pair's assertion and keeps a figure above ``$0.00``,
     # so re-settling a transfer the user reverted in order to edit honours the
     # figure they read off their statement instead of re-deriving over it.
     apply_status_to_all_three(
-        rows, new_status_id, stated=stated, press=press,
+        transfer, new_status_id, stated=stated, press=press,
         settlement=Settlement.from_settle(booked, correction, retained),
     )
 
@@ -350,58 +317,6 @@ def settle(
     return correction is not None
 
 
-def leg_settle_amount(leg: TransferLeg, basis: AmountBasis) -> Decimal:
-    """Return what settling *leg*'s transfer would BOOK on the leg's account.
-
-    **The transfer twin of ``transaction_service.settle_amount``, and it exists
-    for the same reason**: the reconcile panel and the statement matcher offer
-    LEGS, and must show the figure a tick will book.  :func:`settle` resolves
-    its own figure through the same two rules, so the displayed figure and the
-    booked one cannot drift:
-
-    * a RETAINED correction outranks every derivation (plan step X-au-c3), read
-      off the transfer's one settled figure (plan step
-      ``balance:X-bi-6-4d-2``; until then off the offered side's record,
-      re-read through ``transfer_legs.transfer_side_leg``) -- a draft honoured
-      it only at the WRITE, so the panel offered the plan and the settle
-      booked the human's figure;
-    * else what the leg is worth
-      (:func:`~app.services.cash_ledger.leg_contribution_of`): ``0`` for a
-      parent that does not contribute, else the parent's resolved amount.
-
-    It was asked of the leg's TWIN ROW through plan step
-    ``balance:X-bi-6-4d-2`` (``settle_amount(shadow)``, through a
-    ``_shadow_of`` that refused a corrupt twin pair); a twin is no longer
-    read, so a leg is priced off its transfer, never its side's record.
-
-    **The basis is the CALLER'S and this builds none** (plan step X-au-j,
-    finding **N-295**): each caller's read pass builds one for the owner and
-    prices every offered leg against it.
-
-    A PURE read: nothing here mutates.
-
-    Args:
-        leg: The leg being offered, its parent still Projected.
-        basis: The read pass's
-            :class:`~app.services.cash_ledger.AmountBasis`, built for the
-            leg's owner.
-
-    Returns:
-        A retained correction where one stands, else what the leg is worth.
-
-    Raises:
-        ValidationError: On a soft-deleted transfer
-            (:func:`_reject_unsettleable`).
-        AmountUnresolvable: From the amount model, for a parent whose rule
-            cannot price it.  A refusal is never a fallback.
-    """
-    _reject_unsettleable(leg.transfer)
-    held = honoured_figure(recorded_leg_settlement(leg))
-    if held is not None:
-        return held
-    return leg_contribution_of(leg, basis)
-
-
 def record_leg_clearing(leg: TransferLeg, anchor_id: int) -> None:
     """Record WHICH statement showed *leg* (ruling **R-FL**), on the side's record.
 
@@ -413,7 +328,10 @@ def record_leg_clearing(leg: TransferLeg, anchor_id: int) -> None:
     other side, whose account's statement nobody read in this act; a side
     closed at ``$0.00`` holds no record and keeps no link (ruling
     **R-BAL141**).  Until plan step ``balance:X-bi-6-4d-2`` it linked the
-    side's twin row and that row's covering movement.
+    side's twin row and that row's covering movement.  *leg* is passed as it
+    is: a leg reads its record live off its transfer's list for the side
+    (ruling **plan#1984**), so the record the settle just wrote is what it
+    reads, where this rebuilt the same leg from its transfer and side.
 
     Issues no flush and no commit -- the caller owns the session boundary.
 
@@ -424,6 +342,4 @@ def record_leg_clearing(leg: TransferLeg, anchor_id: int) -> None:
             this account by construction.  Its transfer has just settled.
         anchor_id: The ``budget.account_anchor_history`` row the statement is.
     """
-    status_seam.record_side_clearing(
-        transfer_side_leg(leg.transfer, is_income=leg.is_income), anchor_id,
-    )
+    status_seam.record_side_clearing(leg, anchor_id)

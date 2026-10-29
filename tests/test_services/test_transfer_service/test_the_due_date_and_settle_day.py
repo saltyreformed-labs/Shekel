@@ -17,7 +17,7 @@ from app.models.amount_ownership import AmountOwnership
 from ._helpers import _create_basic_transfer, _reread
 
 
-class TestDueDateAndSettleDayShadows:
+class TestTheDueDateAndEachSidesSettleDay:
     """A transfer's due date and each side's settle day, as the doors write them.
 
     The due date is a column of the transfer's row, read re-read from the
@@ -27,7 +27,7 @@ class TestDueDateAndSettleDayShadows:
     ``TestBothSidesShowTheTransfer``, both sides.  Until plan step
     ``balance:X-bi-6-4d-2`` each due-date case also read the transfer's two
     shadow rows, which that step's create door no longer writes (ruling
-    R-BAL290 part 1).  The name is kept as history.
+    R-BAL290 part 1).
     """
 
     def test_a_due_date_at_create_is_written_on_the_transfer(
@@ -110,7 +110,7 @@ class TestDueDateAndSettleDayShadows:
 
             assert _reread(xfer.id).due_date == date(2026, 2, 1)
 
-    def test_a_settle_day_correction_lands_on_both_shadows(
+    def test_a_settle_day_correction_lands_on_both_sides(
         self, app, db, transfer_data,
     ):
         """A day corrected on ONE side reaches both sides: the other borrows it.
@@ -125,8 +125,7 @@ class TestDueDateAndSettleDayShadows:
         entry under that side's own covering movement's day, so the two land
         together.  Each side's day is its RECORD's since plan step
         ``balance:X-bi-6-4d-2``; the shadows carried it until then (ruling
-        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).  The name is kept
-        as history.
+        R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
         """
         with app.app_context():
             td = transfer_data
@@ -168,7 +167,8 @@ class TestDueDateAndSettleDayShadows:
         It also asked the transfer's shadow rows for a day after the refusal
         until plan step ``balance:X-bi-6-4d-2``'s checkpoint 2e-2b-2b.  From
         that step's create door no row can name a transfer
-        (``ck_transactions_names_no_transfer``), so the loop ran over none
+        (``ck_transactions_names_no_transfer``, until plan step
+        balance:X-bi-6-5 dropped the column), so the loop ran over none
         (a vacuous read, structurally empty), and it is dropped, not moved
         onto each side's record: with the three refusals the update asks
         deleted (its own before the first write, the transfer status

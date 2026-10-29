@@ -954,15 +954,20 @@ class TestPostRenameShapeCheck:
             # Add a second FK with the legacy name -- on a different
             # column to avoid collision with the existing unique FK.
             # The transactions table has plenty of FK columns; we
-            # piggyback on ``transfer_id`` which has its own ondelete
+            # piggyback on ``template_id`` which has its own ondelete
             # already and won't collide with the canonical
-            # transactions_credit_payback_for_id_fkey logic.
+            # transactions_credit_payback_for_id_fkey logic.  (It was
+            # ``transfer_id`` until plan step ``balance:X-bi-6-5`` dropped
+            # that column; only the catalog entry is read.  The referenced
+            # table must be one the seed's idle session holds no lock on,
+            # or the ``DROP`` below waits on it: ``budget.categories``
+            # timed out, measured 2026-10-27.)
             db.session.execute(text(
                 "ALTER TABLE budget.transactions "
                 "ADD CONSTRAINT transactions_credit_payback_for_id_fkey "
-                "FOREIGN KEY (transfer_id) "
-                "REFERENCES budget.transfers (id) "
-                "ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED"
+                "FOREIGN KEY (template_id) "
+                "REFERENCES budget.transaction_templates (id) "
+                "ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED"
             ))
             db.session.commit()
 

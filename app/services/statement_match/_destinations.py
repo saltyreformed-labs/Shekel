@@ -191,7 +191,6 @@ def destinations_for(
         )
         .filter(
             Transaction.account_id == account_id,
-            Transaction.transfer_id.is_(None),
             balance_contributing_clause(),
             Transaction.pay_period_id.in_(spans.keys()),
         )

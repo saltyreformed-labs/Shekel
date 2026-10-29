@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SessionStart: print the multi-session context every Shekel session needs
-# before its first action -- where it stands, who coordinates merges, and where
-# the next step comes from.
+# before its first action -- where it stands, where the rules for sharing the
+# repository live, and where the next step comes from.
 #
 # It used to report the shared suite slot too.  ``balance:X-br-4`` deleted the
 # slot: ``scripts/test.sh`` gives every run a private cluster, so there is no
@@ -10,9 +10,11 @@
 # stdout on exit 0 is added to the session's context (the SessionStart hook
 # contract). A status hook must never block a session, so every probe fails
 # soft and the script always exits 0. Deliberately reads $PWD, not
-# $CLAUDE_PROJECT_DIR: the latter resolves to the PRIMARY checkout whatever
-# worktree the session runs in (measured by two sessions, 2026-08-29), and
-# this hook reports the session's OWN checkout.
+# $CLAUDE_PROJECT_DIR: the latter is not the checkout a session works in
+# (two sessions working in worktrees measured it as the PRIMARY checkout on
+# 2026-08-29; a session launched in a worktree measured it as that worktree
+# on 2026-10-26, see _hooklib.sh), and this hook reports the session's OWN
+# checkout.
 #
 # **IT ALSO REPORTS A RELEASE PIN, and that is why** (developer ruling
 # 2026-09-05, after it cost two sessions in one evening).  A constraint that
@@ -40,18 +42,20 @@ toplevel="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)" || toplevel="$
 
 echo "Shekel session context (SessionStart hook):"
 echo "- checkout: ${toplevel}, branch: ${branch}"
-echo "- coordination doctrine: CLAUDE.md, Multi-session operation (stated once there, not here)"
+echo "- multi-session doctrine: CLAUDE.md, Multi-session operation (stated once there, not here)"
 
 # DERIVED: is the SHARED MAIN checkout pinned to a release branch?  Read from
 # `git worktree list`, which answers for every worktree from inside any one of
 # them -- no cross-directory git call, which a worktree-isolated session's
-# harness would refuse anyway.  The main worktree is the FIRST entry.
-worktrees="$(git -C "$PWD" worktree list 2>/dev/null)" || worktrees=""
-main_line="$(printf '%s\n' "${worktrees}" | head -n 1)" || main_line=""
-if [ -n "${main_line}" ]; then
-    main_path="${main_line%% *}"
-    main_branch="${main_line##*[}"
-    main_branch="${main_branch%]*}"
+# harness would refuse anyway.  The main checkout is _hooklib.sh's one reading
+# of it (hook_main_checkout); its branch is the first entry's `branch` line,
+# which a detached main checkout does not have.
+source "$(dirname "${BASH_SOURCE[0]}")/_hooklib.sh"
+main_path="$(hook_main_checkout "$PWD")"
+if [ -n "${main_path}" ]; then
+    # shellcheck disable=SC2312 # a failing git prints nothing, and an empty branch matches no case below.
+    main_branch="$(git -C "$PWD" worktree list --porcelain 2>/dev/null \
+        | sed -n '/^$/q;s|^branch refs/heads/||p')"
     case "${main_branch}" in
         release/*)
             echo "- STANDING: the shared main checkout ${main_path} is on"

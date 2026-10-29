@@ -208,7 +208,13 @@ class AccountType(db.Model):
     # paired partial unique indexes that enforce it.
     user_id = db.Column(
         db.Integer,
-        db.ForeignKey("auth.users.id", ondelete="RESTRICT"),
+        # Named as migration d477228fee56 named it, which production holds
+        # (plan#1858).
+        db.ForeignKey(
+            "auth.users.id",
+            name="fk_account_types_user_id_users",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
     )
 
@@ -661,10 +667,12 @@ class PostingSource(db.Model):
 
     Tags every ``budget.journal_entries`` row with the kind of source
     event that produced it, independently of the concrete (nullable)
-    source FK the entry also carries.  Step 2 seeds the single value
+    source FK the entry also carries.  Step 2 seeded the single value
     ``transfer``; later steps INSERT ``transaction``, ``loan_payment``,
     ``paycheck``, ``credit_payback`` via their own migrations -- new
-    values are data, never schema.
+    values are data, never schema -- and a retired value is deleted by
+    one: card plan#1845's ``1712c506ee99`` deleted ``transfer`` and
+    ``transaction``.
 
     Application code resolves these via ``ref_cache.posting_source_id``
     and compares against the integer ID -- never the string ``name`` --
@@ -729,11 +737,12 @@ class AmountSource(db.Model):
     is a CHECK on each table, so a stale derived figure is unrepresentable
     rather than merely unlikely.
 
-    Two values: ``template`` (the recurring definition that generated the row
-    states its price) and ``parent_transfer`` (a shadow is worth exactly what
-    its parent transfer is).  Later steps INSERT additional relations -- plan
-    step X-au-i's CC payback would add the row it repays -- and new values are
-    data, never schema.
+    One value: ``template`` (the recurring definition that generated the row
+    states its price).  ``parent_transfer`` (a shadow was worth exactly what
+    its parent transfer was) went with the shadows' link at plan step
+    ``balance:X-bi-6-5`` (migration ``c956c1d83108``).  Later steps INSERT
+    additional relations -- plan step X-au-i's CC payback would add the row
+    it repays -- and new values are data, never schema.
 
     **They name the RELATION, not the RULE**, which is a developer ruling of
     2026-08-12 amending R-FI's own five-value enumeration; the evidence (two

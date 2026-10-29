@@ -215,12 +215,13 @@ class TestThePeriodLock:
         ``balance:X-bi-6-4d-2`` (ruling **R-BAL258**).  Until plan step
         ``balance:X-bi-6-4d-2`` its two shadow rows carried the same status
         on this door-written state, so the case could not tell which of the
-        three the lock read, and :class:`TestTheParentDecidesADrift` planted
+        three the lock read, and :class:`TestTheLockReadsTheTransfersOwnStatus` planted
         a drift to tell them apart; from that step a settle left the twins
         Projected under the Paid transfer, until the next deleted them.  The
         plant's count also left the shadows out
-        (``transfer_id IS NULL``), a term no row can fail since
-        (``ck_transactions_names_no_transfer``), dropped at that step's
+        (``transfer_id IS NULL``), a term no row could fail since
+        (``ck_transactions_names_no_transfer``, until plan step
+        balance:X-bi-6-5 dropped the column), dropped at that step's
         vacuous-residue checkpoint: the count was 0 with it and without it
         (measured).
         """
@@ -252,7 +253,7 @@ class TestThePeriodLock:
             assert locks[period.id] is PeriodLockReason.HOLDS_MOVEMENT
 
 
-class TestTheParentDecidesADrift:
+class TestTheLockReadsTheTransfersOwnStatus:
     """The TRANSFER's status is what the lock reads (ruling **R-JM**).
 
     As ``pay_period_locks.settled_items`` states it.  The class planted the
@@ -271,8 +272,7 @@ class TestTheParentDecidesADrift:
     over its two Projected legs, is the one case left, and it is no drift
     any more: a Paid transfer whose sides hold no record is the ``$0.00``
     close the status-band rule admits (``side_band_infrastructure``), so
-    the case closes the transfer at ``$0.00`` through its settle door.  The
-    class's name is its history.
+    the case closes the transfer at ``$0.00`` through its settle door.
     """
 
     def test_a_transfer_closed_at_zero_is_settled(
@@ -313,7 +313,7 @@ class TestTheParentDecidesADrift:
             )
 
             assert locks[period.id] is PeriodLockReason.SETTLED_TXN
-            assert pay_period_gates.settled_transaction_count(user_id) == 1
+            assert pay_period_gates.settled_item_count(user_id) == 1
 
 
 class TestTheResetCounts:
@@ -347,7 +347,7 @@ class TestTheResetCounts:
             _paid_500(seed_user, seed_periods_today)
             user_id = seed_user["user"].id
 
-            assert pay_period_gates.settled_transaction_count(user_id) == 2
+            assert pay_period_gates.settled_item_count(user_id) == 2
             refusal = self._refusal(seed_user, seed_periods_today)
             assert (refusal.settled_count, refusal.holding_count) == (2, 0)
             assert str(refusal).startswith(
@@ -365,8 +365,8 @@ class TestTheResetCounts:
             _reverted_500(seed_user, seed_periods_today)
             user_id = seed_user["user"].id
 
-            assert pay_period_gates.settled_transaction_count(user_id) == 0
-            assert pay_period_gates.movement_holding_row_count(user_id) == 1
+            assert pay_period_gates.settled_item_count(user_id) == 0
+            assert pay_period_gates.movement_holding_item_count(user_id) == 1
             refusal = self._refusal(seed_user, seed_periods_today)
             assert (refusal.settled_count, refusal.holding_count) == (0, 1)
             assert str(refusal).startswith(

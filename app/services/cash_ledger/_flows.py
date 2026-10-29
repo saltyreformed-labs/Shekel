@@ -56,7 +56,7 @@ in, plain data out; no Flask import.
 
 from decimal import Decimal
 
-from app.services.transfer_legs import TransferLeg
+from app.services.transfer_legs import parent_of
 from app.utils.balance_predicates import is_projected
 
 from ._amount_source import AmountBasis
@@ -64,7 +64,6 @@ from ._events import InFlightMovement
 from ._amounts import (
     _entry_aware_amount,
     contribution_of,
-    planned_leg_contribution,
 )
 
 
@@ -73,19 +72,30 @@ def sum_projected(transactions, basis: AmountBasis):
 
     **The plan set holds three kinds since plan step ``balance:X-bi-4a``**,
     and all three are reduced here: an ordinary still-projected
-    :class:`Transaction`, valued as below; a
-    :class:`~app.services.transfer_legs.TransferLeg` -- one side of a
-    still-projected transfer, derived from the parent row rather than read
-    off a shadow row (ruling **R-BAL13**, plan step X-bi-6a) -- valued by
-    :func:`~._amounts.planned_leg_contribution` and placed on the income or
-    the expense side by which side of the parent the account is on; and a
-    :class:`~app.services.cash_ledger.InFlightMovement` -- a purchase the
-    bank has not been seen to take (ruling **R-BAL77**), worth its own
-    signed figure and filed on its parent's leg, whatever the parent's
-    status.  ONE reduction over all three, so a day's or a period's net is a
-    single walk whatever mixture the plan holds; the Projected re-check below
-    is applied to a leg's PARENT exactly as it is to a row, so the loader and
-    this reduction cannot disagree about which legs are in the plan either.
+    :class:`Transaction`; a :class:`~app.services.transfer_legs.TransferLeg`
+    -- one side of a still-projected transfer, derived from the parent row
+    rather than read off a shadow row (ruling **R-BAL13**, plan step
+    X-bi-6a); and a :class:`~app.services.cash_ledger.InFlightMovement` -- a
+    purchase the bank has not been seen to take (ruling **R-BAL77**), worth
+    its own signed figure and filed on its parent's leg, whatever the
+    parent's status.  ONE reduction over all three, so a day's or a period's
+    net is a single walk whatever mixture the plan holds.
+
+    **A row and a leg take ONE path, priced as their PARENT** (ruling
+    **plan#1983**): the Projected re-check, the valuation and the
+    reservation below ask :func:`~app.services.transfer_legs.parent_of` --
+    the row itself, or the leg's transfer -- and only the DIRECTION is asked
+    of the item, because a leg's side of its transfer is what says which way
+    it moves this account.  So the loader and this reduction cannot disagree
+    about which legs are in the plan, and a leg is worth exactly what
+    :func:`~app.services.cash_ledger.contributions_by_key` shows for it on a
+    screen.  The leg arm this replaced priced a leg through
+    ``planned_leg_contribution``, the resolved amount alone; the two are one
+    figure on every leg the fold is handed, because its loader
+    (``transfer_legs.planned_transfer_legs``) admits only live,
+    still-Projected parents, for which ``fixed_contribution`` answers
+    ``None`` (contributing, not settled) and a transfer carries no purchases
+    for the reservation to hold back.
     A movement in flight has no such re-check: its parent's status is not
     what puts it in the plan (an un-dated purchase under a CLOSED envelope is
     in flight exactly as one under an open envelope is), and the loader's
@@ -187,21 +197,14 @@ def sum_projected(transactions, basis: AmountBasis):
             else:
                 expenses -= txn.delta
             continue
-        if isinstance(txn, TransferLeg):
-            if not is_projected(txn.transfer):
-                continue
-            if txn.is_income:
-                income += planned_leg_contribution(txn, basis)
-            else:
-                expenses += planned_leg_contribution(txn, basis)
-            continue
 
-        if not is_projected(txn):
+        parent = parent_of(txn)
+        if not is_projected(parent):
             continue
 
         if txn.is_income:
-            income += contribution_of(txn, basis)
+            income += contribution_of(parent, basis)
         elif txn.is_expense:
-            expenses += _entry_aware_amount(txn, basis)
+            expenses += _entry_aware_amount(parent, basis)
 
     return income, expenses

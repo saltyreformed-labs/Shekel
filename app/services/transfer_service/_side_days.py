@@ -92,7 +92,7 @@ class PairDays(NamedTuple):
     """One transfer's two sides' days, expense side then income side.
 
     The ``(expense, income)`` order every pair of sides in this package is
-    written in (``_status._side_legs``).  ``None`` on a side means "no day" --
+    written in (``transfer_legs.transfer_sides``).  ``None`` on a side means "no day" --
     for a stated pair, that nothing was stated for that side; for a current
     pair, that the side holds no day in the settled band.
     """

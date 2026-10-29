@@ -18,7 +18,8 @@ the pair when the shape moved (each docstring says how).  The truth table:
   * ``done -> settled``         is an idempotent no-op (already at target);
   * ``done -> projected``       reverses them to net zero (append-only);
   * ``projected -> cancelled``  posts nothing (never settled);
-  * soft-delete of a settled transfer reverses, and restore re-posts;
+  * soft-delete of a settled transfer reverses, and restore brings back a
+    plan, which posts nothing;
   * hard-delete of a settled transfer reverses, then the immutable pairs
     survive with their movement links SET NULL;
   * a double mark-done never double-posts;
@@ -321,9 +322,9 @@ class TestRevertReverses:
         (ruling **R-BAL61**), so each side's target is 0 and the door posts
         the deltas: -100 on Savings against +100 transit, +100 on Checking
         against -100 transit.  Four entries survive (append-only -- the
-        originals are never edited).  The reverted income shadow is no longer
-        is_settled, so it drops from settled_transfer_effect, and the Savings
-        total lands back on its $100.00 opening.
+        originals are never edited).  The reverted transfer's side records
+        are un-dated, so it drops from settled_transfer_effect, and the
+        Savings total lands back on its $100.00 opening.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -407,7 +408,7 @@ class TestCancelPostsNothing:
 class TestDeleteAndRestore:
     """Deleting a settled transfer reverses it; restoring brings back a plan."""
 
-    def test_soft_delete_settled_reverses_then_restore_reposts(
+    def test_soft_delete_settled_reverses_then_restore_brings_back_a_plan(
         self, app, db, seed_user, savings,
     ):
         """Soft-delete reverses a settled transfer; restore brings back a plan.
@@ -425,7 +426,7 @@ class TestDeleteAndRestore:
         (:func:`_movement_sourced_entries`), and it sets the transfer back to
         Projected (ruling **R-BAL246**, "Back as a plan, now", developer
         2026-10-09): what the restore brings back is a plan holding no
-        record, which posts nothing.  The name is kept as history.
+        record, which posts nothing.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -463,7 +464,7 @@ class TestDeleteAndRestore:
             ) == Decimal("100.00")
             _assert_reconciles(scenario_id, checking, savings)
 
-    def test_hard_delete_of_a_soft_deleted_pair_finds_the_ledger_at_zero(
+    def test_hard_delete_after_soft_delete_writes_no_more_entries(
         self, app, db, seed_user, savings,
     ):
         """Soft-delete then hard-delete: the second teardown writes nothing.
@@ -482,7 +483,7 @@ class TestDeleteAndRestore:
         ``balance:X-bi-6-4d-2``, whose soft delete takes both payment records
         off (ruling **credit_card:R-CC75**) and so nulls the links the family
         filter follows; the transfer then waits as a plan (ruling
-        **R-BAL246**).  The name is kept as history.
+        **R-BAL246**).
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -744,11 +745,11 @@ class TestSettleWithActualSameCall:
     ):
         """One call settling AND setting actual_amount posts the ACTUAL effect.
 
-        The grid shadow-edit path can send ``status_id=done`` AND
-        ``actual_amount`` in a single ``update_transfer`` call, and the service
-        applies ``actual_amount`` AFTER ``status_id``.  The reconcile runs at
-        the END of ``update_transfer`` (NOT inside ``apply_status_to_all_three``), so
-        it reads the FINAL income-shadow effective amount.
+        A settle can state what moved (``figure``) in the same
+        ``update_transfer`` call, and the settle (``_settle.settle``) records
+        it on the transfer through ``apply_status_to_all_three``.  The reconcile runs at the END
+        of ``update_transfer`` (NOT inside ``apply_status_to_all_three``), so
+        it reads the transfer's FINAL settled figure.
 
         Arithmetic: nominal $100, settled figure $88.00 -> each side's
         covering movement records $88.00, so the postings are -88.00 on

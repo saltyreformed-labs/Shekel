@@ -675,16 +675,18 @@ class TestGenerateTransferOf:
         ``test_a_saved_generated_transfers_sides_name_no_definition_projected_or_settled``.
         Its read of the legs' amount declaration -- no figure, priced by
         ``PARENT_TRANSFER`` -- went with them and moved nowhere, because no
-        live row or value carries a declaration: the rows it read are refused
-        by ``ck_transactions_names_no_transfer``, a
+        live row or value carries a declaration: the rows it read cannot be
+        stored (``ck_transactions_names_no_transfer`` refused them until plan
+        step balance:X-bi-6-5 dropped the column they named a transfer by), a
         :class:`~app.services.transfer_legs.TransferLeg` stores no amount of
         its own (it holds its parent and, once settled, its record; a
         still-planned leg is worth what its parent resolves to), and the
         declaration's one writer in ``app/`` is gone: the loop in
         ``transfer_service._amount.apply_amount_ownership`` that wrote it onto
         ``TransferRows.shadows``, empty on every transfer, went with that
-        attribute at the step's second leaf (``TransferRows``'s docstring, in
-        ``app/services/transfer_service/_validation.py``).  Measured
+        attribute at the step's second leaf (the module docstring of
+        ``app/services/transfer_service/_validation.py``, which keeps the
+        wrapper's history since finding plan#2043 deleted it).  Measured
         2026-10-18, before that deletion: the loop declaring ``TEMPLATE`` in
         its place failed no test the unmutated suite passed, over the whole
         suite (the coordinator's ruling, **R-BAL207**).
@@ -753,9 +755,10 @@ class TestGenerateTransferOf:
         The transfer would have been written, and it is not: the refusal is
         the schedule's, one tier above the composite keys that would refuse
         the INSERT.  It counted the owner's transactions naming a transfer too
-        until plan step ``balance:X-bi-6-4d-2``: the database refuses such a
-        row (``ck_transactions_names_no_transfer``), so that count was over
-        rows nothing can write (measured 0; ruling **R-BAL167**).
+        until plan step ``balance:X-bi-6-4d-2``: the database refused such a
+        row (``ck_transactions_names_no_transfer``) until plan step
+        balance:X-bi-6-5 dropped the column, so that count was over rows
+        nothing can write (measured 0; ruling **R-BAL167**).
         """
         with app.app_context():
             savings = create_savings_account(

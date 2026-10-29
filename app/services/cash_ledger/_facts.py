@@ -39,8 +39,6 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import and_
-
 from app.extensions import db
 from app.models.account import Account, AccountAnchorHistory
 from app.models.transaction import Transaction
@@ -417,20 +415,21 @@ def planned_cash_rows(
     projection onto its two accounts, and until this step this loader was
     kind-blind on ``transfer_id``: it loaded the shadow on this account and
     the valuation walked it to the parent (amount rule 5).  The row half of
-    the plan then EXCLUDED shadows -- the one place this loader narrows on
-    ``transfer_id`` -- and it excludes nothing since plan step
-    ``balance:X-bi-6-4d-2`` deleted them (ruling **R-BAL166**); the narrowing
-    goes with the column at plan step ``balance:X-bi-6-5``.  The leg half is
+    the plan then EXCLUDED shadows, until plan step ``balance:X-bi-6-4d-2``
+    deleted them (ruling **R-BAL166**); no transaction row names a transfer
+    since.  The leg half is
     :func:`app.services.transfer_legs.planned_transfer_legs` over
     ``budget.transfers``: one :class:`~app.services.transfer_legs.TransferLeg`
     per live still-projected transfer the account is on either side of, worth
-    the parent's resolved amount -- **and only for a side whose DATED
-    movement does not yet exist** (ruling **R-BAL79**, plan step
-    ``balance:X-bi-4a``): the settled twin reads a settled leg as its side's
-    covering movement, which hangs off the transfer by a side link since plan
-    step ``balance:X-bi-6-4d-2``, so the movement, not the parent's status, is
-    what decides which relation a leg is in, and a leg cannot be counted by
-    both halves.  Where a shadow had drifted from its parent on period, due
+    the parent's resolved amount.  The settled twin reads a settled leg as its
+    side's DATED covering movement, which hangs off the transfer by a side
+    link since plan step ``balance:X-bi-6-4d-2``, and a still-Projected
+    transfer's sides hold no dated movement (the status-band rule,
+    :mod:`app.side_band_infrastructure`), so a leg cannot be counted by both
+    halves.  From plan step ``balance:X-bi-4a`` until plan step
+    ``balance:X-bi-6-5``'s third leaf the plan half also skipped a side whose
+    dated movement existed (ruling **R-BAL79**), the state that rule now
+    refuses at commit.  Where a shadow had drifted from its parent on period, due
     date, deletion or scenario the plan followed the PARENT, which is ruling
     **R-JA**'s direction; with the shadows gone the parent is the only row.
 
@@ -478,11 +477,11 @@ def planned_cash_rows(
         scenario_id: The budget scenario the rows live in.
 
     Returns:
-        Every still-Projected contributing row of the account's OWN (no
-        shadow), with ``entries`` populated, followed by one
+        Every still-Projected contributing row of the account's OWN, with
+        ``entries`` populated, followed by one
         :class:`~app.services.transfer_legs.TransferLeg` per live
-        still-projected transfer the account is on whose leg here is not yet
-        a dated movement, its parent's pricing relationships populated,
+        still-projected transfer the account is on, its parent's pricing
+        relationships populated,
         followed by one
         :class:`~app.services.cash_ledger._events.InFlightMovement` per
         un-dated purchase on the account.  Unordered: the fold groups them by
@@ -490,11 +489,7 @@ def planned_cash_rows(
     """
     rows: list[Transaction | TransferLeg | InFlightMovement] = (
         _unwindowed_contributing_rows(
-            account_id, scenario_id,
-            and_(
-                is_projected_clause(Transaction),
-                Transaction.transfer_id.is_(None),
-            ),
+            account_id, scenario_id, is_projected_clause(Transaction),
         )
     )
     rows.extend(planned_transfer_legs(
@@ -563,9 +558,8 @@ def _unwindowed_contributing_rows(
         narrowing: The caller's narrowing as a SQLAlchemy boolean expression
             over ``Transaction``, built from the shared builders in
             :mod:`app.utils.balance_predicates`
-            (:func:`~app.utils.balance_predicates.is_projected_clause` composed
-            with ``transfer_id IS NULL`` for the plan), never a status literal
-            written at the call site.
+            (:func:`~app.utils.balance_predicates.is_projected_clause` for
+            the plan), never a status literal written at the call site.
 
     Returns:
         ``list[Transaction]`` -- the matching rows, unordered, with ``entries``

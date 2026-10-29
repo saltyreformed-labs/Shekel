@@ -20,8 +20,9 @@ Nothing here calls GitHub.
 
 What git says -- a card shipped, a card claimed, a task done -- is never faked:
 :func:`ship`, :func:`unship` and :func:`claim` write the ship markers and claims (ruling
-``balance:R-BAL359``), and :func:`finish`, :func:`unfinish`, :func:`piece` and
-:func:`unpiece` the task files (ruling ``balance:R-BAL386``), to the ``code`` fixture's bare
+``balance:R-BAL359``), :func:`finish`, :func:`unfinish`, :func:`piece` and
+:func:`unpiece` the task files (ruling ``balance:R-BAL386``), and :func:`named` a commit naming
+its task (ruling plan#1872), to the ``code`` fixture's bare
 ``origin`` (``conftest.py``), which every command then reads as it reads the real one.
 """
 from __future__ import annotations
@@ -34,23 +35,42 @@ from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
+from tools.quill._arcs import ArcCard
+from tools.quill._board_fields import STATUS_OPTIONS
+from tools.quill._command import on_board as goes_on_board
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Card, Child, Comment, Edit
-from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, unmarked
+from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, filed_labels, in_order
+from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
 
 
 class FakeBoard:
-    """The board in memory: card numbers in drag order; its writes go to the tracker's log."""
+    """The board in memory: card numbers in their positions, each card's kind read from the
+    tracker's ``cards``, and each card's Status; its moves go to the tracker's log, and its
+    Status writes to :attr:`status_writes`, apart, as ``sync`` writes every card's Status
+    (``_status``), so the tracker's log stays what each test of a card's writes reads."""
 
-    def __init__(self, writes):
-        """An empty board logging into ``writes``; it shows each placement at once."""
+    def __init__(self, writes, cards):
+        """An empty board logging into ``writes``, reading kinds from ``cards``; it shows each
+        placement at once.  Its Status field holds every option quill writes
+        (:data:`_board_fields.STATUS_OPTIONS`), each id ``OPT_<name>``: a test sets
+        :attr:`status_field` to a field lacking one, or to none."""
         self.items: list[int] = []
         self.writes = writes
+        self.cards = cards
         self.lagging = False
+        self.status: dict[int, str] = {}
+        self.status_field: tuple[str | None, dict[str, str]] = (
+            "PVTSSF_status", {name: f"OPT_{name}" for name in STATUS_OPTIONS})
+        self.status_writes: list[tuple[int, str | None]] = []
+
+    def held(self):
+        """Every card on the board, in its positions: ``(card number, item id, kind)``."""
+        return [(n, f"PVTI_{n}", self.cards[n].kind) for n in self.items]
 
     def order(self):
-        """The board's order: ``(card number, item id)``."""
-        return [(n, f"PVTI_{n}") for n in self.items]
+        """The board's order, by the one projection :class:`_tracker.Board` reads
+        (:func:`_tracker.in_order`): ``(card number, item id)``."""
+        return in_order(self.held())
 
     def add(self, card):
         """Add a card at the bottom; one already on the board keeps its item, as GitHub
@@ -67,6 +87,7 @@ class FakeBoard:
         number = int(item.removeprefix("PVTI_"))
         self.writes.append(("board_remove", number))
         self.items.remove(number)
+        self.status.pop(number, None)
 
     def place(self, item, after):
         """Move an item to just after ``after`` (the top when None); whether the board
@@ -78,15 +99,35 @@ class FakeBoard:
         self.items.insert(index, number)
         return not self.lagging
 
+    def statuses(self):
+        """The Status field and every card on the board with the Status it holds."""
+        field, options = self.status_field
+        return Statuses(field, dict(options),
+                        {number: (f"PVTI_{number}", self.status.get(number))
+                         for number in self.items})
+
+    def set_status(self, item, field, option):
+        """Set a card's Status to the option whose id is ``option``, or with None clear it; a
+        field or an option the board does not hold is a write the tool must never send."""
+        held, options = self.status_field
+        assert field == held, f"no Status field {field!r} to write"
+        number = int(item.removeprefix("PVTI_"))
+        name = None if option is None else {i: n for n, i in options.items()}[option]
+        self.status_writes.append((number, name))
+        if name is None:
+            self.status.pop(number, None)
+        else:
+            self.status[number] = name
 
 
 class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-attributes
     """The tracker in memory: cards, bodies, comments, its board, and every write.
 
-    Pylint: ``too-many-public-methods`` (24/20, measured at X-cx's S3b) -- it
-    stands in for :class:`_tracker.Tracker`, so it has each of that class's 22
+    Pylint: ``too-many-public-methods`` (29/20, measured at plan#1861's merge of plan#1811) --
+    it stands in for :class:`_tracker.Tracker`, so it has each of that class's 27
     reads and writes but ``connect`` (its own disable says why there are so many),
-    and ``add`` and ``add_task``, which put a card or a task in.
+    ``blocking``, which that class takes from :class:`_tracker.CardReader`, and ``add``
+    and ``add_task``, which put a card or a task in.
     ``too-many-instance-attributes`` (8/7) -- **one per kind
     of fact it keeps**: seven a command reads back (cards, bodies, saved
     versions, comments, the board, the milestones that exist, and each card's
@@ -108,26 +149,32 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.milestones: set[int] = set()
         self.milestone_of: dict[int, int] = {}
         self.writes: list[tuple] = []
-        self.board = FakeBoard(self.writes)
+        self.board = FakeBoard(self.writes, self.cards_by_number)
 
     def add(self, number, kind="step", body="", on_board=True, **fields):
-        """Put a card in the tracker (open, unclaimed, by default on the board's bottom)."""
+        """Put a card in the tracker (open, unclaimed, and by default on the board's bottom when
+        quill would put it there, :func:`_command.on_board`), by default in the balance arc, its
+        Arc and its label, but a task, which holds neither (R-BAL386)."""
         values = {"number": number, "id": 1000 + number, "node_id": f"I_{number}",
                   "title": f"card {number}", "kind": kind, "labels": ("balance",),
-                  "is_open": True, "state_reason": None, "parent": None, "children": (),
+                  "arc": None if kind == TASK else "balance", "is_open": True,
+                  "state_reason": None, "parent": None, "children": (),
                   "blocked_by": (), "board_item": None, "closed_by_tool": False,
                   "touched_by_hand": False, "outside": (), **fields}
         self.cards_by_number[number] = Card(**values)
         self.bodies[number] = body
-        if on_board and values["is_open"] and kind in quill.ON_BOARD:
+        parent = values["parent"]
+        if (on_board and values["is_open"] and goes_on_board(
+                kind, self._view(parent) if parent in self.cards_by_number else None)):
             self.board.items.append(number)
         return self.cards_by_number[number]
 
     def add_task(self, number, parent, **fields):
         """Put a task in the tracker (R-BAL386): a sub-issue of type ``task`` under the card
         ``parent``, which lists it, as GitHub links one; open and carrying no label by
-        default, and never on the board."""
-        task = self.add(number, "task", labels=(), parent=parent, **fields)
+        default, and on the board under a step the board holds (:func:`_command.on_board`)
+        unless ``on_board=False`` says it was filed off the board."""
+        task = self.add(number, "task", parent=parent, **{"labels": (), **fields})
         held = self.cards_by_number[parent]
         self._set(parent, children=(*held.children, Child(number, "task", task.is_open)))
         return task
@@ -161,6 +208,12 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         """The cards that exist among ``numbers``."""
         return {n: self._view(n) for n in numbers if n in self.cards_by_number}
 
+    def card_arcs(self):
+        """Every card, open and closed, as the every-card listing reads it: its type, title,
+        labels and Arc (:class:`_arcs.ArcCard`), in card order."""
+        return [ArcCard(n, c.kind, c.title, c.labels, c.arc)
+                for n, c in sorted(self.cards_by_number.items())]
+
     def milestones_of(self, numbers):
         """The milestone each card that exists among ``numbers`` is in, None for none."""
         return {n: self.milestone_of.get(n) for n in numbers if n in self.cards_by_number}
@@ -179,39 +232,55 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
 
     def edits(self, number):
         """A card's body and its versions (the body as filed when it was never edited).  A
-        number nobody filed is GitHub's NOT_FOUND error, which the strict read raises
-        (:meth:`_github.GitHub.graphql`): the type and message ``recorded/tracker.json``
-        records for a missing issue, at this query's path, without the recorded
-        ``locations``."""
-        if number not in self.cards_by_number:
-            raise GitHubError(200, 'graphql: [{"type": "NOT_FOUND", "path": ["repository", '
-                              f'"issue"], "message": "Could not resolve to an Issue with the '
-                              f'number of {number}."}}]')
+        number nobody filed is GitHub's NOT_FOUND error (:meth:`_refuse_unfiled`)."""
+        self._refuse_unfiled(number)
         versions = self.versions.get(number) or [
             Edit(None, "2026-10-01T00:00:00Z", self.app_login, self.bodies[number])]
         return self.bodies[number], list(versions)
 
     def comments(self, number):
-        """A card's comments, oldest first."""
+        """A card's comments, oldest first.  A number nobody filed is GitHub's NOT_FOUND
+        error (:meth:`_refuse_unfiled`)."""
+        self._refuse_unfiled(number)
         return list(self.notes.get(number, []))
+
+    def comments_of(self, numbers):
+        """The comments of each card that exists among ``numbers``, oldest first, as the read of
+        many cards by number answers them: one nobody filed is absent."""
+        return {n: list(self.notes.get(n, [])) for n in numbers if n in self.cards_by_number}
+
+    def _refuse_unfiled(self, number):
+        """GitHub's NOT_FOUND error, which the strict read raises
+        (:meth:`_github.GitHub.graphql`), for a read by number of a card nobody filed, as
+        the read of its versions and the read of its comments each ask for it, at
+        ``repository.issue``: the type and message ``recorded/tracker.json`` records for a
+        missing issue (at the by-number lookup's path), without the recorded ``locations``.
+        Neither read's own answer is recorded; the strict read raises on any error, so what
+        either command does with it holds whatever the path."""
+        if number not in self.cards_by_number:
+            raise GitHubError(200, 'graphql: [{"type": "NOT_FOUND", "path": ["repository", '
+                              f'"issue"], "message": "Could not resolve to an Issue with the '
+                              f'number of {number}."}}]')
 
     def find_titles(self, text):
         """Cards whose title holds ``text``."""
         return [(n, c.title) for n, c in self.cards_by_number.items() if text in c.title]
 
     # -- writes
-    def create(self, kind, title, body, labels, milestone=None):
-        """File a card at the next number, marked :data:`setup_tracker.FILING` beside
-        ``labels``, as :meth:`_tracker.Tracker.create` files every card, in ``milestone``
-        when one is given.  One the tracker lacks is a write the tool must never send, so it
-        fails loudly rather than guess GitHub's answer."""
+    def create(self, card, milestone=None):
+        """File ``card`` (a ``check.Draft``) at the next number holding its Arc (a task none),
+        marked :data:`setup_tracker.FILING` beside its labels and its arc label, by the labels
+        :meth:`_tracker.Tracker.create` sends (:func:`_tracker.filed_labels`), in
+        ``milestone`` when one is given.  One the tracker lacks is a write the tool must never
+        send, so it fails loudly rather than guess GitHub's answer."""
         number = max(self.cards_by_number, default=0) + 1
-        labels = tuple(sorted({*labels, FILING}))
+        labels = tuple(filed_labels(card.labels, card.arc))
         assert milestone is None or milestone in self.milestones, (
             f"no milestone #{milestone} to file plan#{number} in")
-        self.writes.append(("create", number, kind, title, labels)
+        self.writes.append(("create", number, card.kind, card.title, labels, card.arc)
                            + (() if milestone is None else (milestone,)))
-        self.add(number, kind, body, on_board=False, title=title, labels=labels)
+        self.add(number, card.kind, card.body, on_board=False, title=card.title, labels=labels,
+                 arc=card.arc)
         if milestone is not None:
             self.milestone_of[number] = milestone
         return number
@@ -275,6 +344,24 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.writes.append(("unmark", number))
         self._set(number, labels=unmarked(labels))
 
+    def set_arc(self, number, arc):
+        """Set a card's Arc, its other facts kept."""
+        self.writes.append(("set_arc", number, arc))
+        self._set(number, arc=arc)
+
+    def relabel(self, number, add, remove):
+        """Add the labels ``add`` to a card and remove ``remove``, its other labels kept.  A
+        removal of one it does not carry is answered as GitHub answers a mark's
+        (:meth:`unmark`), 404 "Label does not exist", and nothing is written."""
+        add, remove = tuple(add), tuple(remove)
+        labels = self.cards_by_number[number].labels
+        if lacked := [label for label in remove if label not in labels]:
+            raise GitHubError(404, f'DELETE .../issues/{number}/labels/{lacked[0]} -> 404: '
+                                   '{"message":"Label does not exist"}')
+        self.writes.append(("relabel", number, add, remove))
+        self._set(number, labels=tuple(label for label in labels if label not in remove)
+                  + tuple(label for label in add if label not in labels))
+
     def add_child(self, parent, child):
         """Make ``child`` a sub-issue of ``parent``; the tool never re-parents a card, in the
         tracker or outside it."""
@@ -286,6 +373,17 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         held = self.cards_by_number[parent]
         self._set(parent, children=(*held.children, Child(child.number, child.kind, True)))
         self._set(child.number, parent=parent)
+
+    def place_child(self, parent, child, before):
+        """Move ``child``, a sub-issue of ``parent``, to just above ``before``, another, in
+        ``parent``'s order of them; the same move sent again changes nothing
+        (``recorded/priority.json``)."""
+        self.writes.append(("place_child", parent, child.number, before.number))
+        held = self.cards_by_number[parent].children
+        moved = next(c for c in held if c.number == child.number)
+        rest = [c for c in held if c.number != child.number]
+        at = next(i for i, c in enumerate(rest) if c.number == before.number)
+        self._set(parent, children=(*rest[:at], moved, *rest[at:]))
 
     def remove_child(self, parent, child):
         """Unlink ``child`` from ``parent``.  One that is no sub-issue of ``parent`` -- a read
@@ -429,6 +527,22 @@ def piece(root, card, *numbers):
         _git.task_file(number): f"done {_git.instant(CLAIMED)}\n" for number in numbers})
 
 
+def named(root, card, task):
+    """Push onto ``card/<card>`` a commit naming ``task`` by its trailer ``Task: plan#<task>``
+    (ruling plan#1872), as a commit of its piece names it, writing no task file and no
+    ``plan/doing`` file, so it begins nothing (ruling plan#2009); its sha."""
+    return _onto_claim(root, card, f"work\n\n{_git.task_trailer(task)}",
+                       {f"work-{task}.txt": "work\n"})
+
+
+def begun(root, card, task):
+    """Push onto ``card/<card>`` the start of ``task``, as ``quill start`` in another clone
+    writes it (ruling plan#2009): a commit writing ``plan/doing/<card>`` to name it, carrying
+    its trailer ``Task: plan#<task>``; its sha."""
+    return _onto_claim(root, card, f"start plan#{task}\n\n{_git.task_trailer(task)}",
+                       {_git.doing_file(card): f"plan#{task}\n"})
+
+
 def unpiece(root, card, *numbers):
     """Push onto ``card/<card>`` a commit deleting the file of each task in ``numbers``, as a
     revert of the commit finishing the piece does on the branch; its sha."""
@@ -439,9 +553,21 @@ def claim(root, number, when=CLAIMED):
     """Claim card ``number`` on ``origin`` as a session in another clone would
     (:func:`_git.claim` on the ``dev`` ``origin`` holds, from :func:`scratch.elsewhere`):
     ``root`` learns of it only through a read of its own, and its HEAD and branches are left
-    as they were; the claim's sha."""
+    as they were; the claim's sha.  Its git alone: the finishing tasks ``quill claim`` files
+    (ruling plan#1875) are the tracker's, which a test adds where it reads them."""
     return _git.claim(elsewhere(root), number, tracking(DEV), when)
 
+
+
+def two_tasks():
+    """A tracker holding step 1 and its two tasks, 2 ("piece a") then 3 ("piece b"): the card
+    whose pieces the tests of ``quill start``, a drop of a task begun and the commit hook
+    begin, end and drop."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    tracker.add_task(2, 1, title="piece a")
+    tracker.add_task(3, 1, title="piece b")
+    return tracker
 
 
 def leaf_filing(tmp_path, title, parent="plan#1"):

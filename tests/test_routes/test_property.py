@@ -837,7 +837,7 @@ class TestPropertyEquityChartProducer:
         axis index the summed debt equals ``home_equity.total_debt`` and the
         equity band equals ``home_equity.equity`` to the cent -- both read from
         the SAME single resolution.  This needs REAL confirmed history: settling
-        monthly payments INTO the loan books confirmed shadow-income the resolver
+        monthly payments INTO the loan books confirmed payments the resolver
         replays.  The reconciliation month is the LAST CONFIRMED month, NOT
         ``today_index`` -- a still-projected current month sits one payment below
         ``current_balance``, which is exactly why the identity test alone is not

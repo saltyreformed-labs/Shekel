@@ -267,8 +267,8 @@ class TestTransferActualBox:
     ):
         """$200.00 settled, the statement says $214.37: both legs post it.
 
-        Transfer Invariant 3 for the settlement record: a transfer's money moves
-        on its two legs by the one figure the transfer stores, while each side's
+        The settlement record is ONE figure: a transfer's money moves on its
+        two legs by the one figure the transfer stores, while each side's
         day is its own (ruling **R-BAL108**, plan step ``balance:X-bi-6-4c-3``;
         the fixture dates both sides alike).  The ledger follows in the same request, because the
         figure IS the pair's confirmed cash effect -- a correction that changed
@@ -754,7 +754,7 @@ class TestTransferActualBox:
             assert "Marking this paid will record" not in body
 
 
-class TestTheTransferLockCoversTheShadowOnlyEdits:
+class TestAStalePopoverCannotOverwriteAFigureOrADay:
     """A stale popover cannot silently overwrite a figure or a day.
 
     **A transfer and its two shadows were ONE thing** (developer ruling,

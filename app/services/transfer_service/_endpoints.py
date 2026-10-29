@@ -42,10 +42,11 @@ from typing import NamedTuple
 
 from app.exceptions import ValidationError
 from app.models.account import Account
+from app.models.transfer import Transfer
 from app.services import status_seam
 from app.services.match_press import Press
 from app.services.settle_day import recorded_settle_day
-from app.services.transfer_legs import TransferLeg, transfer_side_leg
+from app.services.transfer_legs import TransferLeg, transfer_sides
 from app.services.transfer_service._side_days import (
     NO_DAYS,
     PairDays,
@@ -53,10 +54,7 @@ from app.services.transfer_service._side_days import (
     resolve_pair_days,
 )
 from app.services.transfer_service._ownership import _get_owned_account
-from app.services.transfer_service._validation import (
-    TransferRows,
-    _reject_unmodeled_source,
-)
+from app.services.transfer_service._validation import _reject_unmodeled_source
 from app.utils.dates import display_today
 
 
@@ -108,7 +106,7 @@ class _Endpoints(NamedTuple):
 
 
 def _resolve_endpoints(
-    rows: TransferRows, user_id: int, updates: "dict[str, object]",
+    transfer: Transfer, user_id: int, updates: "dict[str, object]",
 ) -> _Endpoints:
     """Resolve and REFUSE the endpoints this update leaves the transfer with.
 
@@ -156,7 +154,7 @@ def _resolve_endpoints(
     legs with nothing written.
 
     Args:
-        rows: The transfer, at its pre-update endpoints.
+        transfer: The transfer, at its pre-update endpoints.
         user_id: The expected owner -- both resulting accounts are re-checked
             against it, so a caller that skips the route cannot re-point a
             transfer at an account across an ownership line.
@@ -178,17 +176,17 @@ def _resolve_endpoints(
             A move that leaves the source where it is does not re-ask, for the
             reason the comment at that call states.
     """
-    xfer = rows.transfer
-    from_id = updates.get("from_account_id", xfer.from_account_id)
-    to_id = updates.get("to_account_id", xfer.to_account_id)
+    from_id = updates.get("from_account_id", transfer.from_account_id)
+    to_id = updates.get("to_account_id", transfer.to_account_id)
     vacated_source = (
-        xfer.from_account_id if from_id != xfer.from_account_id else None
+        transfer.from_account_id if from_id != transfer.from_account_id
+        else None
     )
     vacated_destination = (
-        xfer.to_account_id if to_id != xfer.to_account_id else None
+        transfer.to_account_id if to_id != transfer.to_account_id else None
     )
     if vacated_source is None and vacated_destination is None:
-        return _Endpoints(xfer.from_account, xfer.to_account, None, None)
+        return _Endpoints(transfer.from_account, transfer.to_account, None, None)
     if from_id == to_id:
         raise ValidationError(
             "Source and destination accounts must be different."
@@ -216,7 +214,7 @@ def _resolve_endpoints(
 
 
 def _apply_endpoint_move(
-    rows: TransferRows, endpoints: _Endpoints, press: Press | None,
+    transfer: Transfer, endpoints: _Endpoints, press: Press | None,
 ) -> None:
     """Move a transfer and both legs onto *endpoints*, carrying each side's record.
 
@@ -288,7 +286,7 @@ def _apply_endpoint_move(
        flush (``record_settle_day``).
 
     Args:
-        rows: The transfer.
+        transfer: The transfer.
         endpoints: The resolved :class:`_Endpoints`; a no-op when its *vacated*
             is empty, which is every update that names no account.
         press: The save's :class:`~app.services.match_press.Press`, or ``None``
@@ -301,28 +299,29 @@ def _apply_endpoint_move(
     """
     if not endpoints.vacated:
         return
-    transfer = rows.transfer
+    # Both sides' records in ONE statement (ruling plan#2136).
     moving = tuple(
-        (leg, account)
-        for leg, account in zip(
-            (
-                transfer_side_leg(transfer, is_income=False),
-                transfer_side_leg(transfer, is_income=True),
-            ),
+        zip(
+            transfer_sides(transfer),
             (endpoints.from_account, endpoints.to_account),
         )
     )
     days = _moved_days(moving)
-    for leg, account in moving:
-        if leg.record is not None and leg.account_id != account.id:
+    # Each side's record as the act FOUND it, read once before the first
+    # flush: a leg reads its record live off the transfer's list (ruling
+    # plan#1984), and a read after the accounts are assigned that had to load
+    # the list would autoflush the move before step 3 lands the records.
+    records = tuple(leg.record for leg, _account in moving)
+    for (leg, account), record in zip(moving, records):
+        if record is not None and leg.account_id != account.id:
             status_seam.free_moving_side_record(
-                leg.record, transfer.user_id, press,
+                record, transfer.user_id, press,
             )
     transfer.from_account = endpoints.from_account
     transfer.to_account = endpoints.to_account
-    for (leg, account), day in zip(moving, days):
-        if leg.record is not None and leg.account_id != account.id:
-            status_seam.land_moved_side_record(leg.record, account, day)
+    for (leg, account), record, day in zip(moving, records, days):
+        if record is not None and leg.account_id != account.id:
+            status_seam.land_moved_side_record(record, account, day)
 
 
 def _moved_days(

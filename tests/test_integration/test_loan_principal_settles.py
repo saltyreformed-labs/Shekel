@@ -76,7 +76,8 @@ from tests._test_helpers import (
     transfer_side_record,
     unseeded_replay_balance,
 )
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 from tests.test_integration.test_loan_transfer_live_amount._helpers import _side_leg
 from app.models.amount_ownership import AmountOwnership
 
@@ -477,10 +478,10 @@ class TestLoanPrincipalSettles:
             # balance:X-bi-6-4d-2, which stopped keeping the expense
             # shadow's status and figure.
             checking_side = _side_leg(xfer.id, ctx["checking_id"])
-            assert leg_settled_contribution(checking_side) == PITI_WITH_ESCROW, (
+            assert settled_contribution(parent_of(checking_side)) == PITI_WITH_ESCROW, (
                 f"Expected checking side = {PITI_WITH_ESCROW} "
                 f"(full PITI per E-01); got "
-                f"{leg_settled_contribution(checking_side)}."
+                f"{settled_contribution(parent_of(checking_side))}."
             )
 
             balance_after = _resolve_balance(

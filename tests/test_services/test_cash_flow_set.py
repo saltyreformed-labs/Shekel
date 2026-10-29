@@ -338,9 +338,10 @@ class TestOwnRowsClause:
         not; with no row off checking in the scenario, the equality held
         whatever the clause filtered on.  The filter it is compared with
         also read ``transfer_id IS NULL`` until plan step
-        ``balance:X-bi-6-4d-2``: no row may name a transfer
-        (``ck_transactions_names_no_transfer``, ruling **R-BAL258**), so
-        that term held on every row and is gone.
+        ``balance:X-bi-6-4d-2``: no row could name a transfer
+        (``ck_transactions_names_no_transfer``, ruling **R-BAL258**, until
+        plan step balance:X-bi-6-5 dropped the column), so that term held on
+        every row and is gone.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -422,7 +423,7 @@ class TestFarLegsOf:
                 (paid.id, Decimal("80.00")),
             ]
 
-    def test_reads_no_shadow_row(
+    def test_reads_transfers_alone_in_one_statement(
         self, app, db, seed_user, seed_periods_today,
     ):
         """Invariant 5 by statement census, structurally: ONE read, of transfers.

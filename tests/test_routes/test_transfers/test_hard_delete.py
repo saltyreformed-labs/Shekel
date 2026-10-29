@@ -29,9 +29,10 @@ class TestTransferTemplateHardDelete:
     These tests verify transfer invariant compliance: all deletions must
     flow through the transfer service.  They also counted shadow
     transactions before and after, so none was orphaned, until plan step
-    ``balance:X-bi-6-4d-2``, which births none: the database refuses a
-    transaction naming a transfer (``ck_transactions_names_no_transfer``),
-    so an orphan count is over rows nothing can write, 0 before any act,
+    ``balance:X-bi-6-4d-2``, which births none: no transaction can name a
+    transfer (``ck_transactions_names_no_transfer`` refused one until plan
+    step balance:X-bi-6-5 dropped the column), so an orphan count is over
+    rows nothing can write, 0 before any act,
     and those counts are dropped (ruling R-BAL167 class 1, plan step
     balance:X-bi-6-4d-2).
     """

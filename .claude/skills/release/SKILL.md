@@ -20,10 +20,20 @@ everything with a person or a judgment in it is here.
 ## 0. Before anything
 
 - Run only when Josh says to release.
-- Run from a session LAUNCHED with `SHEKEL_PR_COORDINATOR=1`; without it every `gh pr create` and
-  `gh pr merge` is a permission prompt Josh cannot see from the web: STOP and say so. Work in that
-  session's own worktree with `dev` checked out, never in `~/projects/Shekel`, which stays clean on
-  `main` because production's deploy script is a symlink into it (trap u).
+- Run as a fresh session's whole work in the release worktree, `~/projects/shekel-release`: the one
+  worktree that holds `dev`, used for nothing else (plan#1829, plan#1838). Josh starts it with this
+  line in a new terminal, which brings its `dev` up to GitHub's BEFORE the session starts, because a
+  session reads its hooks from its own worktree when it starts (measured 2026-10-26):
+
+  ```bash
+  cd ~/projects/shekel-release && git fetch --prune origin && git merge --ff-only origin/dev && claude "/release"
+  ```
+
+  It runs this skill to the end and stops. A session building a card does not run it: it gives Josh
+  that line and does not start the release. The worktree is made once, by `git worktree add
+  ~/projects/shekel-release dev` (git refuses while another worktree holds `dev`) and `ln -s
+  ~/projects/Shekel/.venv ~/projects/shekel-release/.venv`. Never in `~/projects/Shekel`, which
+  stays clean on `main` because production's deploy script is a symlink into it (trap u).
 - **The auto-mode classifier can refuse an act outright, even one Josh's word already covers**
   (10-20: inside the approved release, a copy into `/opt/docker/shekel` as 'Production Deploy';
   after it, a repository settings change as 'Permission Grant'; and under his standing merge
@@ -130,9 +140,14 @@ Then, line by line:
   too. A group's way out is reverting the merge that landed each member it names, never deleting a
   marker by hand (that leaves the code in production, unseen).
 - For each card reading `moves money: yes` and each `ADDED` migration, find the rehearsal kit its
-  lane wrote (the lane's handoff names the kit's directory), and append each directory found to
-  `current.sh` as `KITS="<dir> <dir> ..."`. For each with no kit, re-run with
-  `--unrehearsed plan#N` or `--unrehearsed <revision>`; `plan` then refuses the release for it.
+  lane wrote: card N's is `~/projects/shekel-handoffs/kits/plan-N/`, and a migration's is the kit
+  of the card whose pull request added it, the merge on `dev`'s first-parent line that brought the
+  file naming its branch `card/N` (ruling plan#1980); a kit written before that ruling is named by
+  its lane's handoff file, `~/projects/shekel-handoffs/HANDOFF-<lane>.md`, or, once the lane
+  posted its first note, the same file under `~/projects/shekel-handoffs/archive/` (`/handoff`
+  moves it there). Append each directory found to `current.sh` as `KITS="<dir> <dir> ..."`.
+  For each with no kit, re-run with `--unrehearsed plan#N` or `--unrehearsed <revision>`; `plan`
+  then refuses the release for it.
 - A refusal naming a card the tracker does not hold, a card that is no work, or an entry under
   `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no judgment for this run to make:
   STOP and report it to Josh.
@@ -186,7 +201,8 @@ grade to the lane.
 
 **What a lane writing a kit is told:**
 
-- The kit is a directory in the lane's handoff folder. Its README names what it grades and its
+- The kit is the directory `~/projects/shekel-handoffs/kits/plan-N/`, N its card (ruling
+  plan#1980), which no note or file need name. Its README names what it grades and its
   command, which takes the dump's path and exits 0 only when every grade passes.
 - Its FIRST act creates `release-manifest.txt` in that directory (`touch`), and it only ever
   appends to it (`>>`), never truncates (`>`). One line per thing it makes, ending in a newline:

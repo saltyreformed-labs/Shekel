@@ -238,50 +238,11 @@ class TestOnePricingLink:
     It read "at most one" until plan step ``balance:X-bi-7d-2`` re-cut it to
     ``= 1``.  Measured before it was imposed, on a 2026-08-12 production clone at
     ``a9d3c15e7f42``: 997 rows -- 606 template-linked, 342 transfer shadows, 21
-    CC paybacks, 28 with no link -- and 0 holding two of the three.
+    CC paybacks, 28 with no link -- and 0 holding two of the three.  Its third
+    term, a shadow's ``transfer_id``, went with that column at plan step
+    ``balance:X-bi-6-5`` (migration ``c956c1d83108``), and with it the case
+    that planted a template row naming a transfer too (ruling plan#1850).
     """
-
-    def test_a_template_row_may_not_also_name_a_transfer(
-        self, app, db, seed_full_user_data
-    ):
-        """template_id + transfer_id on one row is refused.
-
-        Two links means two candidate answers for "who prices this row", with
-        only dispatch ORDER separating them -- which is the link-derived
-        discriminator ruling R-FI refused, arriving as data instead of as code.
-
-        **Refused by ``ck_transactions_names_no_transfer`` since plan step
-        ``balance:X-bi-6-4d-2``** (ruling **R-BAL258**; re-expressed under
-        ruling **R-BAL167** class 2): a row may name no transfer at all, so
-        the row this plants is refused before the pricing-link count is
-        reached (PostgreSQL checks a table's CHECKs in name order).  The
-        pricing link's ``transfer_id`` term goes with the column at
-        ``X-bi-6-5``.
-        """
-        with app.app_context():
-            data = seed_full_user_data
-            xfer = _make_transfer(data)
-            db.session.flush()
-
-            # Period 1, not 0, and it is REQUIRED rather than a precaution:
-            # the fixture's row is the engine's (plan step balance:X-cf) and
-            # already answers period 0's occurrence, so ``generate_row_of``
-            # refuses to write a second one there ("wrote 0 rows") before the
-            # constraint under test is ever reached.  It began as a precaution
-            # against the undated index firing first, while the fixture's row
-            # was hand-built; that cause is gone and this one replaced it.
-            _make_transaction(
-                data, data["periods"],
-                pay_period_id=data["periods"][1].id,
-                template_id=data["template"].id,
-                transfer_id=xfer.id,
-            )
-            with pytest.raises(
-                sqlalchemy.exc.IntegrityError,
-                match="ck_transactions_names_no_transfer",
-            ):
-                db.session.flush()
-            db.session.rollback()
 
     def test_a_payback_may_not_also_name_a_template(
         self, app, db, seed_full_user_data

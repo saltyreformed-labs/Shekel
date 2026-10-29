@@ -40,7 +40,7 @@ from app.services import posting_service, status_seam, transaction_service
 from app.services.transaction_service import _settle
 from app.services.row_valuation import settled_contribution, settled_figure
 from app.services.cash_ledger import (
-    amounts_by_id,
+    amounts_by_key,
     derived_amount_basis,
     resolve_transaction_amount,
 )
@@ -358,8 +358,8 @@ class TestSettleFromEntriesPreconditions:
     The helper is the lowest-level "settle a tracked row" mutation,
     used by both manual mark-done and the carry-forward batch.  A
     permissive helper would silently corrupt state when fed a
-    soft-deleted row, a transfer shadow, an immutable status, or a
-    non-envelope template; defensive validation keeps the bug
+    soft-deleted row, an immutable status, or a non-envelope template;
+    defensive validation keeps the bug
     surface narrow.  Each test below confirms one rule.
     """
 
@@ -404,39 +404,6 @@ class TestSettleFromEntriesPreconditions:
             with pytest.raises(ValidationError) as exc_info:
                 transaction_service.settle_from_entries(txn)
             assert "envelope-tracked" in str(exc_info.value)
-
-    def test_rejects_transfer_shadow(self, app, db, seed_user, seed_periods):
-        """Transfer shadows must settle through transfer_service.
-
-        The invariants in CLAUDE.md require shadow legs and the
-        parent transfer to mutate together; settling one shadow in
-        isolation would break the invariant ``shadow amounts and
-        statuses always equal the parent transfer's``.
-
-        Uses ``no_autoflush`` because the test stamps a synthetic
-        ``transfer_id`` in memory that would violate the FK if
-        SQLAlchemy autoflushed before the helper's guard fires.  The
-        helper itself only reads the attribute -- the FK never enters
-        the picture in production callers.
-        """
-        with app.app_context():
-            template = _make_template(seed_user)
-            txn = generate_row_of(template, seed_periods[0])
-            db.session.commit()
-
-            with db.session.no_autoflush:
-                # The helper inspects ``transfer_id`` directly without
-                # a DB query, so an in-memory non-None value is enough
-                # to exercise the guard -- avoiding a real
-                # transfer/category setup that the rule does not
-                # depend on.
-                txn.transfer_id = 999_999
-
-                with pytest.raises(ValidationError) as exc_info:
-                    transaction_service.settle_from_entries(txn)
-                assert "transfer" in str(exc_info.value).lower()
-
-            db.session.rollback()
 
     def test_rejects_already_settled_status(
         self, app, db, seed_user, seed_periods,
@@ -542,47 +509,6 @@ class TestSettleTransactionTheVerb:
     leaf (the reconcile panel's tick) whose shape nothing pinned.
     """
 
-    def test_a_transfer_shadow_is_refused(self, app, seed_user, seed_periods):
-        """A shadow cannot settle through this verb (transfer invariants 3-4).
-
-        **The control for a defect the first draft of this verb shipped.**  Its
-        docstring claimed ``settle_from_entries`` refused a shadow by
-        precondition.  That guard is real but UNREACHABLE for a shadow: a
-        shadow carries no ``template_id`` and no ``is_envelope``, so
-        ``tracks_purchases`` is False and it always takes the MANUAL branch,
-        where nothing looked at ``transfer_id``.  A review ran it and settled
-        one leg of a pair -- expense shadow Paid, income shadow Projected,
-        parent transfer Projected -- which is ``CLAUDE.md`` transfer invariants
-        3 and 4 broken in one call, silently, because the posting reconcile
-        returns ``[]`` for a shadow so the ledger stays flat under a grid that
-        shows one leg settled.
-
-        Shown to FIRE: deleting the ``transfer_id`` guard settles the row.
-        """
-        with app.app_context():
-            template = _make_template(seed_user)
-            txn = generate_row_of(template, seed_periods[0])
-            # Make it a shadow the cheap way -- the verb reads exactly one
-            # field to decide, and a real transfer pair would grade the
-            # transfer service rather than this guard.
-            txn.transfer_id = 1
-            status_before = txn.status_id
-
-            with pytest.raises(ValidationError) as exc:
-                transaction_service.settle_transaction(txn)
-
-            assert "transfer shadow" in str(exc.value)
-            assert "transfer_service.update_transfer" in str(exc.value)
-            # A refused call leaves the row untouched.  The record read loads
-            # the row's entries, and the flush that load would trigger lands
-            # the cheap ``transfer_id`` beside the row's ``template_id`` --
-            # a pairing ``ck_transactions_one_pricing_link`` refuses, and not
-            # what this case is about.
-            assert txn.status_id == status_before
-            assert txn.settled_on is None
-            with db.session.no_autoflush:
-                assert status_seam.recorded_settlement(txn) is None
-
     def test_a_soft_deleted_row_is_refused(
         self, app, seed_user, seed_periods,
     ):
@@ -626,8 +552,8 @@ class TestSettleTransactionTheVerb:
 
         A deleted row values at ``Decimal("0")`` through ``effective_amount``,
         so answering here would publish a figure ``settle_transaction`` will not
-        book -- the exact argument the transfer-shadow half of
-        ``reject_unsettleable`` already made, applied to the rule that was
+        book -- the argument ``reject_unsettleable``'s transfer-shadow half
+        made while transfers had twin rows, applied to the rule that was
         missing beside it.
         """
         with app.app_context():
@@ -944,7 +870,7 @@ class TestASettleBooksTheFreshestFigure:
             # An adversarial review of this step found the docstring claiming
             # this and nothing grading it -- ``estimated_amount is None`` says
             # the column is empty, not that the derivation still answers.
-            assert amounts_by_id(
+            assert amounts_by_key(
                 [txn], derived_amount_basis(txn.account.user_id, txn.scenario_id),
             )[txn.id] == Decimal("4000.00")
 
@@ -1105,39 +1031,6 @@ class TestASettleBooksTheFreshestFigure:
             assert settled_figure(txn) == Decimal("500.00")
             assert settled_contribution(txn) == Decimal("500.00")
 
-    def test_settle_amount_refuses_a_transfer_shadow(
-        self, app, db, seed_user, seed_periods,
-    ):
-        """The valuation refuses what the verb refuses to book.
-
-        ``settle_amount`` is PUBLIC and the reconcile panel reads it, so a
-        version that priced a shadow off the loan-payment seam would publish a
-        figure ``settle_transaction`` then refuses -- which is what plan step
-        X-f2-c3 would have walked into with the transfer arm.  One rule
-        (``reject_unsettleable``), three doors.
-        """
-        with app.app_context():
-            template = _make_template(seed_user, is_envelope=False)
-            txn = generate_row_of(template, seed_periods[0])
-            txn.transfer_id = 1
-
-            # The basis comes from the SEEDED bundle, not from the row:
-            # this row is deliberately left dirty in memory (a template link
-            # AND a transfer link, which ``ck_transactions_one_pricing_link``
-            # forbids), and reading ``txn.account`` to build one would autoflush
-            # that state into an IntegrityError before the refusal under test
-            # could speak.  ``reject_unsettleable`` fires first either way; the
-            # bundle just keeps the session clean while it does.
-            with pytest.raises(ValidationError) as exc:
-                transaction_service.settle_amount(
-                    txn,
-                    derived_amount_basis(
-                        seed_user["user"].id, seed_user["scenario"].id,
-                    ),
-                )
-
-            assert "transfer shadow" in str(exc.value)
-
     def test_the_figure_is_resolved_BEFORE_the_status_flip(
         self, app, db, seed_user, seed_periods, tax_law,
     ):
@@ -1264,6 +1157,26 @@ class TestApplyRequestedStatusTheDoorVerb:
                 seed_user["account"].id, seed_user["scenario"].id,
             ) == Decimal("-100.00")
 
+    @staticmethod
+    def _ledger_entry_ids(user_id):
+        """Return the ids of every journal entry the owner's ledger holds, ascending.
+
+        The ledger is append-only, so a write of any kind -- a leg for this
+        row, its movement, or anything else -- adds an id, and the same list
+        before and after a call is the whole of "it posted nothing".  These
+        cases read the row's own ``transaction_id`` link until plan step
+        ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted it; that
+        read had found nothing since plan step ``balance:X-bi-4a``, when a
+        row's money moved onto its movements, so it graded nothing.
+        """
+        return [
+            entry_id for (entry_id,) in (
+                db.session.query(JournalEntry.id)
+                .filter(JournalEntry.user_id == user_id)
+                .order_by(JournalEntry.id)
+            )
+        ]
+
     def test_a_cancel_leaves_the_ledger_flat(
         self, app, db, seed_user, seed_periods,
     ):
@@ -1277,6 +1190,7 @@ class TestApplyRequestedStatusTheDoorVerb:
         """
         with app.app_context():
             txn = self._plain_row(seed_user, seed_periods[0])
+            ledger_before = self._ledger_entry_ids(seed_user["user"].id)
 
             transaction_service.apply_requested_status(
                 txn, ref_cache.status_id(StatusEnum.CANCELLED),
@@ -1284,10 +1198,7 @@ class TestApplyRequestedStatusTheDoorVerb:
 
             assert txn.status_id == ref_cache.status_id(StatusEnum.CANCELLED)
             assert txn.settled_on is None
-            assert (
-                db.session.query(JournalEntry)
-                .filter_by(transaction_id=txn.id).count() == 0
-            )
+            assert self._ledger_entry_ids(seed_user["user"].id) == ledger_before
 
     def test_an_illegal_transition_raises_and_posts_nothing(
         self, app, db, seed_user, seed_periods,
@@ -1302,6 +1213,7 @@ class TestApplyRequestedStatusTheDoorVerb:
         """
         with app.app_context():
             txn = self._plain_row(seed_user, seed_periods[0])
+            ledger_before = self._ledger_entry_ids(seed_user["user"].id)
             transaction_service.apply_requested_status(
                 txn, ref_cache.status_id(StatusEnum.CANCELLED),
             )
@@ -1313,10 +1225,7 @@ class TestApplyRequestedStatusTheDoorVerb:
 
             assert "transition" in str(exc.value)
             assert txn.status_id == ref_cache.status_id(StatusEnum.CANCELLED)
-            assert (
-                db.session.query(JournalEntry)
-                .filter_by(transaction_id=txn.id).count() == 0
-            )
+            assert self._ledger_entry_ids(seed_user["user"].id) == ledger_before
 
 
 class TestARevertKeepsWhatMovedAndReleasesTheAssertion:
@@ -1648,13 +1557,13 @@ class TestAReplayedSettleIsANoOp:
 
 
 class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
-    """``retained_settle_amounts_by_id``'s status gate, which nothing graded.
+    """``retained_amounts_by_key``'s status gate, which nothing graded.
 
     The map's contract is narrow and its whole value is the narrowness: a
     non-``None`` entry means "this row will book something other than what you
     can SEE", so a template draws a marker without deciding anything.  A settled
     row is already showing its recorded figure
-    (``row_valuation.settled_amounts_by_id``), so a marker there would tell the
+    (``row_valuation.settled_amounts_by_key``), so a marker there would tell the
     user a settled row is about to book something -- which it is not.
 
     **Measured 2026-08-17 by an adversarial mutation pass**: dropping the
@@ -1680,7 +1589,7 @@ class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
             )
             db.session.flush()
 
-            settled_map = transaction_service.retained_settle_amounts_by_id(
+            settled_map = transaction_service.retained_amounts_by_key(
                 [txn],
             )
             assert settled_map[txn.id] is None, (
@@ -1693,7 +1602,7 @@ class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
             )
             db.session.flush()
 
-            reverted_map = transaction_service.retained_settle_amounts_by_id(
+            reverted_map = transaction_service.retained_amounts_by_key(
                 [txn],
             )
             assert reverted_map[txn.id] == Decimal("245.32")
@@ -1818,9 +1727,11 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             txn = self._settled_row(seed_user, seed_periods[0])
             # The LEDGER before, from the journal rather than from the row --
             # see the archive test for why the row-tier reader is not an oracle.
-            ledger_before = net_posted_by_day(
-                JournalEntry.transaction_id == txn.id,
-            )
+            # The row's FAMILY, its movements' entries: it read the row's own
+            # ``transaction_id`` link until card plan#1845 deleted it, which
+            # had found nothing since plan step ``balance:X-bi-4a``.
+            ledger_before = net_posted_by_day(family_journal_filter(txn))
+            assert ledger_before == {txn.settled_on: Decimal("100.00")}
 
             with pytest.raises(ValidationError) as exc:
                 transaction_service.apply_requested_status(
@@ -1831,9 +1742,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
             assert "has nothing to record" in str(exc.value)
             assert txn.status_id == ref_cache.status_id(StatusEnum.DONE)
             assert settled_figure(txn) == Decimal("100.00")
-            assert net_posted_by_day(
-                JournalEntry.transaction_id == txn.id,
-            ) == ledger_before, (
+            assert net_posted_by_day(family_journal_filter(txn)) == ledger_before, (
                 "a refused request posted to the ledger anyway"
             )
 
@@ -1860,7 +1769,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
 
 
 class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
-    """``retained_settle_amounts_by_id`` draws the re-book badge, and it lied.
+    """``retained_amounts_by_key`` draws the re-book badge, and it lied.
 
     The badge's caption is *"the figure recorded before this row was set back to
     Projected"*, so a non-``None`` value must mean exactly that.  The map
@@ -1887,7 +1796,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
             db.session.flush()
 
             assert status_seam.recorded_settlement(txn) is None, "fixture: nothing recorded"
-            assert transaction_service.retained_settle_amounts_by_id(
+            assert transaction_service.retained_amounts_by_key(
                 [txn],
             ) == {txn.id: None}
 
@@ -1913,7 +1822,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
                 txn, ref_cache.status_id(StatusEnum.PROJECTED),
             )
 
-            assert transaction_service.retained_settle_amounts_by_id(
+            assert transaction_service.retained_amounts_by_key(
                 [txn],
             ) == {txn.id: Decimal("245.32")}
 
@@ -1940,7 +1849,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
             assert status_seam.recorded_settlement(txn).source is (
                 MovementFigureSourceEnum.RESOLVED
             )
-            assert transaction_service.retained_settle_amounts_by_id(
+            assert transaction_service.retained_amounts_by_key(
                 [txn],
             ) == {txn.id: None}
 

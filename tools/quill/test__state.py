@@ -47,7 +47,8 @@ def _card(number, kind="step", **changes):
     """An open, unclaimed, unblocked card on the board, with ``changes`` applied."""
     fields = {
         "number": number, "id": 1000 + number, "node_id": f"I_{number}", "title": f"card {number}",
-        "kind": kind, "labels": ("balance",), "is_open": True, "state_reason": None,
+        "kind": kind, "labels": ("balance",), "arc": None if kind == "task" else "balance",
+        "is_open": True, "state_reason": None,
         "parent": None, "children": (), "blocked_by": (), "board_item": f"PVTI_{number}",
         "closed_by_tool": False, "touched_by_hand": False, "outside": (),
     }
@@ -74,8 +75,8 @@ def _linked(split):
 def _claim(number, committed="2026-10-04T11:00:00+00:00", claimed="2026-10-04T11:00:00Z"):
     """The branch ``card/<number>``, claimed and last committed an hour before NOW: its tip's
     committer date as git prints it (ISO, with its offset), its marker's instant in UTC; no
-    task file at its tip."""
-    return Claim(number, f"sha{number}", committed, claimed, frozenset())
+    task file at its tip, and no task in progress."""
+    return Claim(number, f"sha{number}", committed, claimed, frozenset(), None)
 
 
 def test_shipped_in_git_is_resolved_whatever_the_card_shows():
@@ -133,8 +134,8 @@ def test_a_blocker_that_shipped_or_was_dropped_releases_the_step():
 
 def test_next_filters_by_arc_and_never_skips_an_unplaced_card_silently():
     """A hand-filed step (not on the board) cannot be ordered, so it is named instead."""
-    cards = _cards(_card(1, labels=("salary",)), _card(2, labels=("balance",), board_item=None),
-                   _card(3, labels=("balance",)))
+    cards = _cards(_card(1, labels=("salary",), arc="salary"),
+                   _card(2, labels=("balance",), board_item=None), _card(3, labels=("balance",)))
     answer = next_step([1, 3], cards, shipped=set(), claims={}, arc="balance")
     assert answer.card.number == 3
     assert [card.number for card in answer.unplaced] == [2]

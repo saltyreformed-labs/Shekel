@@ -3,8 +3,7 @@
 The half of :mod:`app.services.loan_loaders` that answers *which payments*,
 against :mod:`._terms`' *what are this loan's contractual facts*.  It owns the
 two producers -- :func:`settled_income_legs` and
-:func:`projected_income_legs` -- the settled half's membership clause
-(:func:`settled_half_clause`), and the partition value that composes them
+:func:`projected_income_legs` -- and the partition value that composes them
 (:func:`income_legs`).
 
 A payment INTO an account is the to-side LEG of a transfer into it
@@ -26,14 +25,20 @@ caller's statement.
 
 **The two halves are ONE relation, each other's complement, since X-bi-6-4b**
 (ruling **R-BAL140**).  A payment is PLANNED while its transfer is Projected
-and its side's money has not moved -- :func:`~app.services.transfer_legs
-.planned_transfer_legs`' test, ruling **R-BAL79** -- and SETTLED otherwise, so
-each half is the other's exact complement over the live, non-excluded
-transfers into the account and no payment can be counted twice or not at all.
-From X-bi-6a to X-bi-6-4b the settled half was the shadow rows keyed on the
-SHADOW's status while the plan half keyed on the parent's, so a status drift
-no door writes was counted twice (a settled shadow holding no movement under a
-Projected parent) or not at all (a Projected shadow under a settled parent).
+-- :func:`~app.services.transfer_legs.planned_transfer_legs`' test -- and
+SETTLED otherwise, so each half is the other's exact complement over the
+live, non-excluded transfers into the account and no payment can be counted
+twice or not at all.  From X-bi-6a to X-bi-6-4b the settled half was the
+shadow rows keyed on the SHADOW's status while the plan half keyed on the
+parent's, so a status drift no door writes was counted twice (a settled
+shadow holding no movement under a Projected parent) or not at all (a
+Projected shadow under a settled parent).  From X-bi-6-4b each half asked
+the side's money too (rulings **R-BAL79**, **R-BAL140**), so a Projected
+transfer whose to-side record was dated counted once, as settled, until plan
+step balance:X-bi-6-5's third leaf: the status-band rule
+(:mod:`app.side_band_infrastructure`) refuses that state at commit, a record
+being dated exactly while its transfer is Paid or Received, so the status
+alone partitions.
 
 A LEAF: models, the ref cache, the shared balance predicates and
 :mod:`app.services.transfer_legs`, whose one join attaches each settled leg's
@@ -41,27 +46,24 @@ covering movement as its record.  Flask-isolated, reads only, no commits.  No
 amount is read off a side's record for a payment that has settled: a record
 holds no figure since plan step balance:X-bi-6-4d-2, and a settled leg is
 worth the figure its transfer stores
-(:func:`app.services.row_valuation.leg_settled_figure`; the transfer
-paragraph at the end of ``CLAUDE.md``'s Architecture).
+(:func:`app.services.row_valuation.settled_figure` of its parent, ruling
+**plan#1983**; the transfer paragraph at the end of ``CLAUDE.md``'s
+Architecture).
 """
 
 from dataclasses import dataclass
 
-from sqlalchemy import or_
-
 from app.extensions import db
-from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services.transfer_legs import (
     TransferLeg,
-    dated_leg_exists_clause,
     grid_transfer_legs,
     planned_transfer_legs,
+    preload_side_records,
 )
 from app.utils.amount_relationships import transfer_period_load_option
 from app.utils.balance_predicates import (
     balance_excluded_status_ids,
-    is_projected,
     is_projected_clause,
     settled_status_ids,
 )
@@ -77,8 +79,9 @@ class IncomeLegs:
     one place (:func:`income_legs`) and read from here.
 
     **Both halves are legs of transfers since plan step balance:X-bi-6-4b**,
-    each the other's complement (ruling **R-BAL140**; see
-    :func:`settled_half_clause` for what holds that).
+    each the other's complement (ruling **R-BAL140**): one status test,
+    :func:`~app.utils.balance_predicates.is_projected_clause`, the plan half
+    applies and the settled half negates.
     Until then the settled half was the shadow rows -- one table partitioned
     by ``status_id``, which is ``docs/design/from_scratch_architecture.md``'s
     named root cause: a PLAN and a RECORD OF WHAT HAPPENED in one row, with a
@@ -87,14 +90,13 @@ class IncomeLegs:
     Attributes:
         settled: The payments that have happened -- one
             :class:`~app.services.transfer_legs.TransferLeg` per live,
-            non-excluded transfer INTO the account that is not Projected or
-            whose to-side money has moved, its covering movement attached as
-            its ``record`` -- ascending by ``(pay_period.start_date, transfer
-            id)``.
+            non-excluded transfer INTO the account that is not Projected, its
+            covering movement attached as its ``record`` -- ascending by
+            ``(pay_period.start_date, transfer id)``.
         projected: The payments still planned, as one
             :class:`~app.services.transfer_legs.TransferLeg` per
-            still-projected transfer INTO the account whose to-side money has
-            not moved, ascending by ``(pay_period.start_date, transfer id)``.
+            still-projected transfer INTO the account, ascending by
+            ``(pay_period.start_date, transfer id)``.
             The exact complement of ``settled``: a payment is in one half
             and never both.
     """
@@ -123,10 +125,12 @@ def income_legs(
     step balance:X-bi-6-4b, ruling **R-BAL140**).  The settled half is
     :func:`settled_income_legs`, the projected half
     :func:`projected_income_legs`; both select transfers INTO the account,
-    and :func:`settled_half_clause` is the settled half's membership: the
-    plan half's test negated by hand over the SAME two builders, the
-    complement held by a test rather than by one shared expression (see that
-    function).  In a fresh session that is five statements -- the settled
+    and the settled half's membership is the plan half's one status test
+    negated (:func:`~app.utils.balance_predicates.is_projected_clause`).
+    It was the plan half's two-term test negated by hand, a status test and a
+    dated-record test, the complement held by a test rather than by one
+    expression, until plan step balance:X-bi-6-5's third leaf deleted the
+    dated-record terms.  In a fresh session that is five statements -- the settled
     transfers, their periods, their movements through the one join, the
     projected transfers, their periods (the period load is a ``selectinload``
     each producer adds) -- fewer when the periods are already loaded and more
@@ -186,12 +190,15 @@ def settled_income_legs(
     itself lives since plan step **balance:X-bl-2a**.  **It returns LEGS since
     plan step balance:X-bi-6-4b.**  What follows describes the set: one
     :class:`~app.services.transfer_legs.TransferLeg` per live, non-excluded
-    transfer INTO the account in the scenario that :func:`settled_half_clause`
-    admits -- not Projected, or its to-side money has moved (ruling
-    **R-BAL140**) -- each carrying its covering movement as its ``record``
-    through the one join (:func:`~app.services.transfer_legs.grid_transfer_legs`),
-    and NOTHING ELSE.  Every settled-payment consumer reads this ONE set, so no
-    two can disagree on which payments are settled: the fold's event stream
+    transfer INTO the account in the scenario that is not Projected (ruling
+    **R-BAL140**) -- each reading its covering movement as its ``record``, every
+    side's loaded here in one statement
+    (:func:`~app.services.transfer_legs.preload_side_records`, ruling
+    **plan#2136**: the walk's visible day, the posting probe and the
+    tracking-start refusal read each leg's record, where the grid's loader
+    that builds the legs reads none), and NOTHING ELSE.  Every settled-payment
+    consumer reads this ONE set, so no two can disagree on which payments are
+    settled: the fold's event stream
     (:func:`app.services.loan_ledger.walk_loan_ledger`), the fold's display bound
     (:func:`app.services.loan_ledger.confirmed_shadows_through`), the ledger's
     per-payment principal reader, the asset contribution pass,
@@ -211,13 +218,16 @@ def settled_income_legs(
     dated by the installment it skips (ruling **R-BAL139**,
     :func:`app.services.loan_ledger.payment_visible_on`).
 
-    **Each transfer that arrives must be settled or Projected, and the gap is
-    the refusal.**  The query excludes the balance-excluded statuses and
-    admits a Projected transfer only when its to-side money has moved (the
-    status drift R-BAL140 counts once, by its movement); a sixth status that
-    is neither is admitted by the clause's ``NOT Projected`` arm, so it is
-    refused by name HERE, at the one door every settled-payment reader
-    passes, rather than wherever a reader first values it.
+    **Each transfer that arrives must be settled, and the gap is the
+    refusal.**  The query excludes the balance-excluded statuses and
+    ``Projected``; a sixth status that is neither settled nor Projected is
+    admitted by the ``NOT Projected`` clause, so it is refused by name HERE,
+    at the one door every settled-payment reader passes, rather than
+    wherever a reader first values it.  The query admitted a Projected
+    transfer whose to-side record was dated too (the status drift ruling
+    R-BAL140 counted once, by its movement), until plan step
+    balance:X-bi-6-5's third leaf: the status-band rule refuses that state
+    at commit.
 
     Two bounds the resolver's
     :func:`app.services.rate_period_engine.is_confirmed_payment_eligible` filter
@@ -267,9 +277,9 @@ def settled_income_legs(
             traverse on the parents, rooted at
             :class:`~app.models.transfer.Transfer` -- ``()`` for every caller
             today: a settled leg is worth the figure its transfer stores
-            (:func:`~app.services.row_valuation.leg_settled_contribution`),
-            a column of the parent this loads, and dated from its record,
-            which the join attaches, or from the parent's own columns.
+            (:func:`~app.services.row_valuation.settled_contribution` of
+            its parent), a column of the parent this loads, and dated from its record,
+            which this pre-loads, or from the parent's own columns.
 
     Returns:
         Every settled payment's leg, ascending by ``(pay_period.start_date,
@@ -290,70 +300,34 @@ def settled_income_legs(
             Transfer.scenario_id == scenario_id,
             Transfer.is_deleted.is_(False),
             ~Transfer.status_id.in_(balance_excluded_status_ids()),
-            settled_half_clause(),
+            # The plan half's one status test, negated: a payment is planned
+            # exactly while its transfer is Projected
+            # (``transfer_legs.planned_transfer_legs``).
+            ~is_projected_clause(Transfer),
         )
         .all()
     )
     settled_ids = settled_status_ids()
     for transfer in transfers:
-        # The SHARED predicates -- ``settled_status_ids`` is the one "which
-        # statuses are settled" answer (D6-09) and ``is_projected`` the one
-        # "still Projected".  An inline ``status_id ==`` here would be a second
-        # status rule in a module whose whole subject is having one, and
-        # ``TestNoInlineStatusBusinessLogic`` refuses it.
-        if transfer.status_id not in settled_ids and not is_projected(transfer):
+        # The SHARED predicate -- ``settled_status_ids`` is the one "which
+        # statuses are settled" answer (D6-09).  An inline ``status_id ==``
+        # here would be a second status rule in a module whose whole subject
+        # is having one, and ``TestNoInlineStatusBusinessLogic`` refuses it.
+        # The query admits no Projected transfer, so what is not settled here
+        # is neither.
+        if transfer.status_id not in settled_ids:
             raise ValueError(
                 f"transfer {transfer.id} into account {account_id} carries "
                 f"status_id {transfer.status_id}, which is neither settled nor "
                 f"Projected: this partition is the app's one settled-payment "
                 f"derivation and cannot place the payment"
             )
+    preload_side_records(transfers)
     legs = grid_transfer_legs(
         transfers, lambda transfer: (transfer.to_account_id,),
     )
     legs.sort(key=lambda leg: (leg.pay_period.start_date, leg.transfer.id))
     return legs
-
-
-def settled_half_clause():
-    """Return the SQL truth of "this transfer's payment INTO its to-account has happened".
-
-    The settled half's membership, stated ONCE (plan step balance:X-bi-6-4b,
-    ruling **R-BAL140**): the transfer is not ``Projected``, OR its to-side's
-    money has moved -- a DATED covering movement on the transfer's
-    ``to_account_id``, through the SAME
-    :func:`~app.services.transfer_legs.dated_leg_exists_clause` the plan half
-    (:func:`~app.services.transfer_legs.planned_transfer_legs`, ruling
-    **R-BAL79**) excludes a leg by.  Over the live, non-excluded transfers into
-    an account, the settled half is therefore the plan half's exact complement:
-    a still-Projected transfer whose to-side money has not moved is planned,
-    and everything else has happened.
-
-    **It is the plan half's test negated BY HAND, not one expression shared.**
-    The two share their builders (``is_projected_clause`` and
-    ``dated_leg_exists_clause``) but each composes its own filter, so an edit
-    to one composition that is not made to the other would let the halves
-    drift apart silently;
-    ``tests/test_services/test_loan_settled_legs/test_the_two_halves.py``
-    (``TestTheSettledHalfComplementsThePlanHalf``) is what holds the
-    complement until ONE clause serves both, which belongs in
-    ``transfer_legs._records`` beside ``dated_leg_exists_clause``, now that
-    the package split has given it the room.
-
-    Correlated to :class:`~app.models.transfer.Transfer`.  Its caller still
-    states the scope -- account, scenario, soft-delete and the
-    balance-excluded statuses -- because this is the partition and not the
-    domain.
-
-    Returns:
-        A SQLAlchemy boolean clause over ``Transfer``.
-    """
-    return or_(
-        ~is_projected_clause(Transfer),
-        dated_leg_exists_clause(
-            TransactionEntry.account_id == Transfer.to_account_id,
-        ),
-    )
 
 
 def projected_income_legs(
@@ -363,10 +337,9 @@ def projected_income_legs(
 
     The forward analogue of :func:`settled_income_legs`: one
     :class:`~app.services.transfer_legs.TransferLeg` per live
-    still-projected transfer INTO the account whose to-side money has not
-    moved, derived from the parent row in ``budget.transfers`` (ruling
-    **R-BAL13**; the movement test is **R-BAL79**'s, applied by
-    :func:`~app.services.transfer_legs.planned_transfer_legs`).  It was
+    still-projected transfer INTO the account, derived from the parent row
+    in ``budget.transfers`` (ruling **R-BAL13**), through
+    :func:`~app.services.transfer_legs.planned_transfer_legs`.  It was
     ``projected_income_shadows``, the shadow-income query narrowed to the
     PROJECTED status, until plan step **balance:X-bi-6a**; the payment
     RECORDS a loan's forward projection folds (plan step C6, the PLANNED
@@ -375,10 +348,12 @@ def projected_income_legs(
 
     **Complementary with the settled set, so no payment is counted twice or
     dropped** (ruling **R-BAL140**), which is what lets the C6c settled-slot
-    de-dup stay deleted.  Both halves select the same transfers, and the
-    settled half's membership (:func:`settled_half_clause`) is this half's
-    test negated by hand; ``TestTheSettledHalfComplementsThePlanHalf``
-    holds the complement until one clause serves both.
+    de-dup stay deleted.  Both halves select the same transfers and part on
+    ONE status test,
+    :func:`~app.utils.balance_predicates.is_projected_clause`, which this
+    half's loader applies and the settled half negates, so the complement is
+    one expression's (``TestTheSettledHalfComplementsThePlanHalf`` grades
+    it).
 
     **The income side is the TO-side.**  The leaf loader returns every leg the
     account is on; a payment INTO the account is the leg whose parent names
@@ -388,7 +363,7 @@ def projected_income_legs(
     not a payment and is not returned.
 
     Carries no period bound and NO cash: the plan builder resolves each leg's
-    cash (:func:`app.services.cash_ledger.planned_leg_contribution` over the
+    cash (:func:`app.services.cash_ledger.resolve_amount` over the
     parent), its due date (:func:`loan_payment_due_date`, which takes a leg)
     and its escrow as the plan is assembled.
 

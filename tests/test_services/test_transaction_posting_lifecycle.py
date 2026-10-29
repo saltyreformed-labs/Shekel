@@ -128,31 +128,16 @@ def _ledger_total(ledger_account_id):
 def _entries_for_transaction(transaction_id):
     """Return every journal entry still linked to the row's FAMILY, oldest first.
 
-    The row and its covering movement together (plan step **X-bi-3a**): a
-    settled bill's money is posted under the movement the seam writes for
-    it, so a read keyed on ``transaction_id`` alone finds the parent's
-    now-zero leg and none of the money.  Every leg figure asserted through
-    this reader is unchanged.
+    The row's movements together (plan step **X-bi-3a**): a settled bill's
+    money is posted under the movement the seam writes for it, so a read
+    keyed on the row's own ``journal_entries.transaction_id`` link found the
+    parent's now-zero leg and none of the money, until plan step
+    ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted that link.
+    Every leg figure asserted through this reader is unchanged.
     """
     return (
         db.session.query(JournalEntry)
         .filter(family_journal_filter(transaction_id))
-        .order_by(JournalEntry.id)
-        .all()
-    )
-
-
-def _own_entries_for_transaction(transaction_id):
-    """Return the journal entries linked to the ROW itself, not its movements.
-
-    The transaction source's own legs -- EMPTY for every row since plan step
-    ``balance:X-bi-4a`` (ruling **R-BAL80**: a plan row posts nothing of its
-    own), which is what the two cases reading this assert.  The family read
-    (:func:`_entries_for_transaction`) sees every movement's legs beside it.
-    """
-    return (
-        db.session.query(JournalEntry)
-        .filter(JournalEntry.transaction_id == transaction_id)
         .order_by(JournalEntry.id)
         .all()
     )
@@ -163,8 +148,8 @@ def _entries_for_purchase(entry_id):
 
     The purchase twin of :func:`_entries_for_transaction` (plan step X-f3b,
     ruling **R-FM**): a purchase's own cash leg links by
-    ``transaction_entry_id`` and carries no ``transaction_id``, so the two
-    windows are disjoint and a test that means one cannot read the other.
+    ``transaction_entry_id``, so the family read sees it beside the row's
+    other movements and this read sees it alone.
     """
     return (
         db.session.query(JournalEntry)
@@ -244,7 +229,9 @@ def _assert_reconciles(scenario_id, *accounts):
     test asserts the figure directly and says so at the call site.
 
     **TWO terms since plan step ``balance:X-bi-4a``** (ruling **R-BAL80**): a
-    transfer's settled effect off the income shadow's record, and every DATED
+    transfer's settled effect (off the income shadow's record then, off the
+    side's record and the transfer's one figure since plan step
+    ``balance:X-bi-6-4d-2``), and every DATED
     movement of a contributing non-transfer parent (``posted_purchase_effect``,
     keyed on the movement's own account).  A plan row posts nothing of its
     own, so the transaction source's term (``settled_transaction_effect``,
@@ -817,14 +804,13 @@ class TestEnvelopePostingLifecycle:
             # The fact really was recorded -- otherwise "the total did not move"
             # would be true of a no-op and prove nothing.
             assert updated.settled_on == purchased_on
-            # The envelope's own leg is NOTHING (a plan row posts nothing of
-            # its own, ruling **R-BAL80**) and the purchase carries the money
-            # on the day the bank was seen to take it.  The old ordering
-            # reached the same place in two journal entries -- a close that
-            # posted the $40 and a re-date that reversed it -- where recording
-            # the day FIRST meant the close had nothing left to post; since
-            # plan step ``balance:X-bi-4a`` a close never has.
-            assert len(_own_entries_for_transaction(txn_id)) == 0
+            # The purchase carries the money on the day the bank was seen to
+            # take it; the envelope posts nothing of its own (a plan row has
+            # no leg, ruling **R-BAL80**).  The old ordering reached the same
+            # place in two journal entries -- a close that posted the $40 and
+            # a re-date that reversed it -- where recording the day FIRST
+            # meant the close had nothing left to post; since plan step
+            # ``balance:X-bi-4a`` a close never has.
             purchase_entries = _entries_for_purchase(entry_id)
             assert len(purchase_entries) == 1
             assert purchase_entries[0].entry_date == purchased_on
@@ -864,10 +850,10 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
         """The case that could not exist before: postings under a Projected row.
 
         A ``$100.00`` envelope nobody has closed, carrying one ``$40.00``
-        purchase the bank took on the period's start day.  The envelope's own
-        leg is absent (it has not settled), and the purchase's is present:
-        cash ``-40.00`` against the category ``+40.00``, dated the day the money
-        moved.
+        purchase the bank took on the period's start day.  The envelope has
+        no leg of its own (a plan row books nothing, ruling **R-BAL80**), and
+        the purchase's is present: cash ``-40.00`` against the category
+        ``+40.00``, dated the day the money moved.
 
         Hand-computed and asserted in BOTH directions -- the leg's own two
         amounts, and the account's total ``1000 - 40 = 960.00`` -- because a
@@ -883,16 +869,13 @@ class TestAPurchaseIsAPostingSourceOfItsOwn:
             )
             entry = _add_purchase(seed_user, txn, "40.00", is_credit=False)
             db.session.commit()
-            entry_id, txn_id = entry.id, txn.id
+            entry_id = entry.id
 
             entry_service.update_entry(
                 entry_id, user_id, settle_day=an_entered_day(seed_periods[0].start_date),
             )
             db.session.commit()
 
-            assert not _own_entries_for_transaction(txn_id), (
-                "a plan row books nothing of its own (ruling R-BAL80)"
-            )
             posted, = _entries_for_purchase(entry_id)
             assert posted.entry_date == seed_periods[0].start_date
             legs = _legs_by_ledger(posted.id)
@@ -1060,7 +1043,7 @@ class TestDeleteReversesPostings:
         The $50 expense posts -50 / +50; the hard delete reverses to zero
         BEFORE the row goes, so after the delete every ledger account nets to
         zero (the original + reversal survive as a net-zero pair with their
-        ``transaction_id`` SET NULL).
+        movement link SET NULL as the movement goes with the row).
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -1080,7 +1063,7 @@ class TestDeleteReversesPostings:
             resp = auth_client.delete(f"/transactions/{txn_id}")
             assert resp.status_code == 200
 
-            # Row is gone; the transaction_id link SET-NULLed on both legs.
+            # Row is gone with its movement; the link SET-NULLed on both entries.
             assert db.session.get(Transaction, txn_id) is None
             assert _entries_for_transaction(txn_id) == []
             assert _ledger_total(groceries_ledger) == Decimal("0.00")

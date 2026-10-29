@@ -185,7 +185,10 @@ _REF_TABLE_SEEDS = (
     # ``account_opening`` / ``account_trueup`` sources (the non-loan anchor
     # corrections -- the ``opening`` / ``trueup`` KINDS are reused, the source
     # disambiguates); plan step X-f3b adds the ``purchase`` source (the
-    # ``expense`` KIND is reused), and later steps INSERT more.
+    # ``expense`` KIND is reused), and later steps INSERT more.  Plan step
+    # ``balance:X-bi-6-5``'s second leaf (card plan#1845, migration
+    # ``1712c506ee99``) deleted the ``transfer`` and ``transaction`` SOURCES;
+    # the ``transfer`` KIND stays, carried by a transfer movement's legs.
     # ``LedgerAccountKind`` (Step 4) is the explicit row-kind discriminator
     # for ``budget.ledger_accounts``: the four kinds the chart already uses,
     # the three per-loan accounts the loan-payment correction books into, the
@@ -212,7 +215,7 @@ _REF_TABLE_SEEDS = (
         "opening", "trueup",
     ]),
     ("PostingSource", [
-        "transfer", "transaction", "loan_payment",
+        "loan_payment",
         "loan_opening", "loan_trueup",
         "account_opening", "account_trueup",
         # A single PURCHASE whose bank posting day the owner recorded (ruling
@@ -225,8 +228,7 @@ _REF_TABLE_SEEDS = (
         # its own bank day against the owner's Transfers-in-transit account
         # (ruling **R-BAL45**'s shape C, built at plan step
         # ``balance:X-bi-6-3`` under **R-BAL101**); it links
-        # ``transaction_entry_id`` exactly as ``purchase`` does.  The
-        # ``transfer`` source above is legacy since that step.  Migration
+        # ``transaction_entry_id`` exactly as ``purchase`` does.  Migration
         # ``c7d1e9a4b2f8`` inline-seeds it.
         "transfer_movement",
     ]),
@@ -260,15 +262,16 @@ _REF_TABLE_SEEDS = (
     # The amount model's discriminator (balance arc, plan step X-au-c1; ruling
     # **R-FI**).  WHICH RELATION states a row's amount when the row does not
     # state it itself: ``template`` is the recurring definition that generated
-    # it, ``parent_transfer`` is the transfer a shadow belongs to.  A row that
-    # OWNS its amount carries ``amount_source_id IS NULL``, so there is
-    # deliberately no ``own`` row here -- see
+    # it.  A row that OWNS its amount carries ``amount_source_id IS NULL``, so
+    # there is deliberately no ``own`` row here -- see
     # :class:`app.enums.AmountSourceEnum` for why the OWN state is an absence.
-    # The migration ``b3f7c2a9d514`` inline-seeds the identical rows so a
-    # freshly upgraded DB resolves the enum before this idempotent reseed runs
-    # -- the same dual-seed pattern the posting and recurrence refs use.  Names
-    # match the enum ``.value`` strings in ``app/enums.py`` exactly.
-    ("AmountSource", ["template", "parent_transfer"]),
+    # The migration ``b3f7c2a9d514`` inline-seeds this row so a freshly
+    # upgraded DB resolves the enum before this idempotent reseed runs -- the
+    # same dual-seed pattern the posting and recurrence refs use -- with
+    # ``parent_transfer``, the transfer a shadow belonged to, which migration
+    # ``c956c1d83108`` deletes (plan step ``balance:X-bi-6-5``).  Names match
+    # the enum ``.value`` strings in ``app/enums.py`` exactly.
+    ("AmountSource", ["template"]),
     # WHERE a recorded statement line came from (bank-import arc, plan step
     # X-f6a-1; ruling **R-FP**).  One row per source ADAPTER -- a FORMAT at an
     # institution, because one bank publishes one statement several ways and

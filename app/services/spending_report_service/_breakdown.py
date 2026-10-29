@@ -14,7 +14,8 @@ from collections import defaultdict
 from decimal import Decimal
 
 from app.services import spending_analysis
-from app.services.transfer_legs import PlanItem
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import PlanItem, parent_of
 from app.utils.money import ZERO
 
 from ._types import (
@@ -37,8 +38,8 @@ def _totals_by_category(txns: list[PlanItem]) -> dict[int, _CategoryTotal]:
     Args:
         txns: One window's settled expense items -- rows and transfer legs
             (leaf ``balance:X-bi-6-1b``), every one SETTLED, which is what
-            :func:`~app.services.spending_analysis.recorded_spend` requires
-            and refuses without.
+            :func:`~app.services.row_valuation.settled_contribution` of its
+            parent requires and refuses without.
 
     Returns:
         ``category_id -> _CategoryTotal`` (labels + summed spend).  **A total
@@ -65,7 +66,7 @@ def _totals_by_category(txns: list[PlanItem]) -> dict[int, _CategoryTotal]:
         # non-negative DISPLAY, if one is ever wanted, belongs at the render:
         # clamping here destroys the arithmetic the whole report is built on
         # (:func:`_share`'s denominator, every ``delta``, both group totals).
-        amounts[cat_id] += spending_analysis.recorded_spend(txn)
+        amounts[cat_id] += settled_contribution(parent_of(txn))
         if cat_id not in labels:
             labels[cat_id] = spending_analysis.category_names(txn)
     return {

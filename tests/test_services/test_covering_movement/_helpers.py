@@ -105,22 +105,26 @@ def _side_record(xfer, *, is_income):
 def _legs_of(xfer):
     """Return a transfer's ``(expense leg, income leg)``, freshly read.
 
-    Each a :class:`~app.services.transfer_legs.TransferLeg` holding its side's
-    record as :func:`_side_record` reads it, so its status is the TRANSFER's
-    and its day its record's.  They were the transfer's two shadow rows, by
-    TYPE, until plan step balance:X-bi-6-4d-2 stopped keeping a shadow's
-    status and day (ruling R-BAL167 class 4).  A leg holds the record it was
-    read with, so a case reads the legs again after a door.
+    Each a :class:`~app.services.transfer_legs.TransferLeg` whose record is
+    its side's, so its status is the TRANSFER's and its day its record's.
+    They were the transfer's two shadow rows, by TYPE, until plan step
+    balance:X-bi-6-4d-2 stopped keeping a shadow's status and day (ruling
+    R-BAL167 class 4).  A leg reads its record live off the transfer's list
+    since ruling plan#1984 and can no longer be handed one, so the
+    independent read (:func:`_side_record`) is asserted against it here
+    rather than handed to it.
     """
-    return tuple(
+    legs = tuple(
         TransferLeg(
             transfer=xfer,
             account_id=xfer.to_account_id if is_income else xfer.from_account_id,
             is_income=is_income,
-            record=_side_record(xfer, is_income=is_income),
         )
         for is_income in (False, True)
     )
+    for leg in legs:
+        assert leg.record is _side_record(xfer, is_income=leg.is_income)
+    return legs
 
 
 def _settled_pair(seed_user, period, *, to_account=None, amount="500.00"):

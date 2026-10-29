@@ -58,7 +58,6 @@ from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services import ledger_account_service
 from app.services._posting_write import (
-    _MAX_DESCRIPTION_LENGTH,
     emit_typed_source_deltas,
     is_transfer_leg,
     ledger_class_of,
@@ -126,26 +125,21 @@ def purchase_posts(parent: PlanItem, entry) -> bool:
     revert un-dates it (ruling **R-BAL61**), so the movement's own state says
     whether its leg is in the ledger.
 
-    **A transfer LEG posts its RECORD alone** (leaf ``X-bi-6-4a``): its gate
-    is the TRANSFER's, read through the leg, so the fold's leg arm
-    (``settled_cash_facts``) and this answer from one parent.  Through the
-    interval a movement under a DEAD shadow of its transfer is no leg's
-    record (:func:`app.services.transfer_legs.movement_parent` gives its leg
-    none), so it posts nothing and any leg it holds reverses: the answer the
-    dead shadow's own gate gave while the writer read the shadow, and the
-    fold's.  No door writes that state (0 on the 2026-09-22 17:06 dump); the
-    term answers ``True`` for every movement from ``X-bi-6-4d``, where each
-    movement a side links is that side's record, and goes then.
+    **A transfer LEG posts its record by the same three narrowings** (leaf
+    ``X-bi-6-4a``): its gate is the TRANSFER's, read through the leg, so the
+    fold's leg arm (``settled_cash_facts``) and this answer from one parent.
+    A fourth term asked whether *entry* was the leg's record, for a movement
+    under a DEAD shadow of its transfer (no leg's record, so it posted
+    nothing); every movement a side links is that side's record since plan
+    step ``balance:X-bi-6-4d-2`` (a side holds at most one, and a record is
+    its side's link), so the term answered ``True`` for every movement a door
+    hands here and was deleted when the leg's record stopped being a field
+    (ruling **plan#1984**, finding **plan#2013**).
 
     Args:
         parent: The movement's parent, as
             :func:`~app.services.transfer_legs.movement_parent` resolves it
-            FOR *entry*: a plan row, or a transfer leg carrying *entry* as its
-            record when it is one.  A leg built without the movement
-            (``transfer_legs.leg_of``, ``planned_transfer_legs``) carries no
-            record, and this answers ``False`` for it -- a dated leg would
-            silently reverse -- so every door resolves the parent through
-            ``movement_parent`` and none hands the writer a leg of its own.
+            FOR *entry*: a plan row, or the transfer leg on *entry*'s side.
         entry: The movement.
 
     Returns:
@@ -155,7 +149,6 @@ def purchase_posts(parent: PlanItem, entry) -> bool:
         is_balance_contributing(parent)
         and not entry.is_credit
         and entry.settled_on is not None
-        and (not is_transfer_leg(parent) or parent.record is entry)
     )
 
 
@@ -263,8 +256,10 @@ def emit_purchase_deltas(
 ) -> "list[JournalEntry]":
     """Emit the delta entries for ONE purchase's own cash leg -- ruling **R-FM**.
 
-    The purchase analog of :func:`_emit_transaction_deltas`, and deliberately
-    the SAME shape: reconcile-to-target over the ``(pay period, entry date)``
+    The purchase analog of the row's own-leg reconcile
+    (``posting_service._emit_transaction_deltas``, which plan#1845 deleted with
+    the source), and deliberately the SAME shape: reconcile-to-target over the
+    ``(pay period, entry date)``
     keys the purchase has already posted to, unioned with the one it should
     hold.  That is what makes every lifecycle act on a purchase one call -- a
     posting day recorded, corrected, or cleared; a parent cancelled or
@@ -309,9 +304,8 @@ def emit_purchase_deltas(
     )
     return emit_typed_source_deltas(
         parent,
+        entry,
         targets=targets,
         source=source,
-        description=entry.description[:_MAX_DESCRIPTION_LENGTH],
         log_label=f"{source.value} {entry.id} (posted={posted})",
-        transaction_entry_id=entry.id,
     )

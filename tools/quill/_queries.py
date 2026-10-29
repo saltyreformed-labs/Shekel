@@ -14,13 +14,16 @@ are sent through.
 """
 from __future__ import annotations
 
+from tools.quill._arcs import LABELS_AND_ARC
+from tools.quill._board_fields import GITHUB_STATUS_FIELD
 from tools.quill.setup_tracker import FILING, LINKED_REPOSITORIES, Place
 
-#: What a card says of itself and its links, read first.
+#: What a card says of itself and its links, read first: its labels and its arc among them, the
+#: value of its issue field Arc (:data:`_arcs.LABELS_AND_ARC`, rulings ``R-BAL349``, ``R-BAL354``).
 _ISSUE_FIELDS = """
   id number fullDatabaseId title state stateReason
   issueType { name }
-  labels(first: 100) { totalCount nodes { name } }
+""" + LABELS_AND_ARC + """\
   parent { number repository { nameWithOwner } }
   subIssues(first: 100) { totalCount nodes {
     number state issueType { name } repository { nameWithOwner } } }
@@ -42,15 +45,24 @@ _LAST_CLOSE_FIELDS = """\
 CARD_FIELDS = _ISSUE_FIELDS + _BOARD_ITEM_FIELDS + _LAST_CLOSE_FIELDS
 #: What :class:`_tracker.CardReader` reads of every card: the same, but its board items.
 BARE_CARD_FIELDS = _ISSUE_FIELDS + _LAST_CLOSE_FIELDS
+#: How many cards one page of a listing of cards holds (:func:`open_cards`,
+#: :func:`marked_cards`), inside GitHub's limit of about ten seconds a request.  Measured
+#: 2026-10-26 15:27-15:33 on the tracker, 684 open cards, three whole walks: 100 a page took
+#: up to 3.7-4.2 s, and at 14:17 was cut off at 10.6 and 11.1 s (finding plan#1806); 25 a
+#: page took at most 1.3-2.6 s, typically 1.0.  The marked listing reads the same fields, so
+#: a filing pass that marks dozens of cards costs per card what the open listing does.  The
+#: recordings' six listings were re-keyed to this text at plan#1809, their answers untouched:
+#: each holds at most 16 cards and no next page, as GitHub answers the same read at 25.
+_LISTING_PAGE = 25
 
 
 def open_cards(place: Place) -> str:
     """The listing of every open card of ``place``."""
     return (
         """query($after: String) { repository(owner: "%s", name: "%s") {
-  issues(first: 100, after: $after, states: [OPEN]) {
+  issues(first: %d, after: $after, states: [OPEN]) {
     pageInfo { hasNextPage endCursor } nodes { %s } } } }"""
-        % (place.owner, place.name, CARD_FIELDS)
+        % (place.owner, place.name, _LISTING_PAGE, CARD_FIELDS)
     )
 
 
@@ -60,21 +72,41 @@ def marked_cards(place: Place) -> str:
     mark, and a ruling closed as completed by anyone is still unfinished (R-BAL206)."""
     return (
         """query($after: String) { repository(owner: "%s", name: "%s") {
-  issues(first: 100, after: $after, labels: ["%s"], states: [OPEN, CLOSED]) {
+  issues(first: %d, after: $after, labels: ["%s"], states: [OPEN, CLOSED]) {
     pageInfo { hasNextPage endCursor } nodes { %s } } } }"""
-        % (place.owner, place.name, FILING, CARD_FIELDS)
+        % (place.owner, place.name, _LISTING_PAGE, FILING, CARD_FIELDS)
     )
 
 
 #: What quill reads of a comment (:func:`_tracker._comment`).
 COMMENT_FIELDS = "author { login } createdAt body"
+#: What a read of many cards by number reads of each card's comments
+#: (:meth:`_tracker.Tracker.comments_of`, ruling plan#1931): their first page, a page as
+#: :func:`comments` reads one, and whether another follows, which is then read whole that way.
+COMMENT_PAGE_FIELDS = ("number comments(first: 100) { pageInfo { hasNextPage } nodes { %s } }"
+                       % COMMENT_FIELDS)
 
 
-#: The board's cards in their drag order, a page at a time (:meth:`_tracker.Board.order`).
+#: The board's cards in their positions, each with its issue type, a page at a time
+#: (:meth:`_tracker.Board.held`): the type is what keeps a task, which the board holds
+#: nested under its step (ruling plan#1814), out of the drag order (:meth:`_tracker.Board.order`).
 BOARD_ORDER = """query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {
   items(first: 100, after: $after, orderBy: {field: POSITION, direction: ASC}) {
     pageInfo { hasNextPage endCursor }
-    nodes { id content { ... on Issue { number repository { nameWithOwner } } } } } } } }"""
+    nodes { id content { ... on Issue {
+      number issueType { name } repository { nameWithOwner } } } } } } } }"""
+
+
+#: The board's Status field, with its id and its options' ids, and each item with the Status
+#: it holds, a page at a time (:meth:`_tracker.Board.statuses`, rulings plan#1873, plan#1905):
+#: its own read, so no recording of :data:`BOARD_ORDER` changes.
+BOARD_STATUS = """query($id: ID!, $after: String) { node(id: $id) { ... on ProjectV2 {
+  field(name: "%s") { ... on ProjectV2SingleSelectField { id options { id name } } }
+  items(first: 100, after: $after) {
+    pageInfo { hasNextPage endCursor }
+    nodes { id content { ... on Issue { number repository { nameWithOwner } } }
+      fieldValueByName(name: "%s") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
+  } } }""" % (GITHUB_STATUS_FIELD, GITHUB_STATUS_FIELD)
 
 
 #: What quill reads of one saved version of a card's text or a comment's.  GitHub keeps
@@ -98,8 +130,8 @@ def edits(place: Place) -> str:
 
 def blocking(place: Place) -> str:
     """The read of the cards one card blocks, each with its state and type (ruling
-    ``balance:R-BAL395``: a step's are the findings and rulings it owns, beside any card
-    waiting on it).  Its own read, never a field of every card's: only ``quill show``, a
+    ``balance:R-BAL395``: a step's are the findings, rulings and questions it owns, beside
+    any card waiting on it).  Its own read, never a field of every card's: only ``quill show``, a
     ruling's filing run again, the release tool (``tools/release/_cards.py``, R-BAL395's
     groups), and the doors that keep a finding's one owner
     (``_findings.owned``: ``quill drop``, the split, and CI's landing check, which reads it
@@ -176,6 +208,20 @@ def milestones(place: Place) -> str:
 COMMENT_EDITS = """query($id: ID!, $after: String) { node(id: $id) { ... on IssueComment {
   userContentEdits(first: 100, after: $after) {
     pageInfo { hasNextPage endCursor } nodes { %s } } } } }""" % EDIT_FIELDS
+
+
+def issue_fields(place: Place) -> str:
+    """The read of ``place``'s issue fields, each single select's REST id and name, how many
+    the repository holds beside them: what a filing reads to write a card's Arc
+    (:meth:`_tracker.Tracker.create`).  A field of another type answers ``{}``, as
+    :data:`_arcs.FIELD_VALUES`' values do.  Measured 2026-10-27 with quill's App token: it
+    reads them (Arc's ``fullDatabaseId`` 48771436), five fields in all."""
+    return (
+        """query { repository(owner: "%s", name: "%s") {
+  issueFields(first: 100) { totalCount nodes {
+    ... on IssueFieldSingleSelect { fullDatabaseId name } } } } }"""
+        % (place.owner, place.name)
+    )
 
 
 #: The repositories a board is linked to, read when quill connects

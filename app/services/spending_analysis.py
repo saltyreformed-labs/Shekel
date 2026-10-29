@@ -30,18 +30,18 @@ defined once rather than re-implemented per surface (coding-standards rule
   periods, over both tables.  The Spending report's calendar windows read
   through it so a bill due in month M is attributed to M even when its
   funding period does not overlap M.
-* :func:`recorded_spend`, :func:`planned_spend` and
-  :func:`resolved_actual_amount` -- the per-item kernels, and since leaf
-  ``balance:X-bi-6-1b`` **the one MODULE in which this package tells a row
-  and a leg apart for a FIGURE** (three routers, one per question, each to a
-  different pair of producers): each routes to the producer of its shape
-  (``row_valuation`` / ``cash_ledger`` for a row, their leg twins for a leg)
-  and derives nothing itself, so the consumers that reduce a window's
-  items ask one question each.  ``resolved_actual_amount`` is the
-  settled-surprises kernel's plan-at-entry vs recorded-at-settle rule (a
-  settled item is worth what it RECORDED as having moved; an unsettled one
-  has recorded nothing, so it asks the amount model for its plan and shows
-  zero variance BY CONSTRUCTION).
+* :func:`resolved_actual_amount` -- the settled-surprises kernel's
+  plan-at-entry vs recorded-at-settle rule, a question about an item's
+  PARENT (ruling **plan#1983**): a settled parent is worth what it RECORDED
+  as having moved; an unsettled one has recorded nothing, so it asks the
+  amount model for its plan and shows zero variance BY CONSTRUCTION.  Since
+  that ruling this module tells a row and a leg apart for no FIGURE: the
+  routers ``recorded_spend`` and ``planned_spend`` (leaf
+  ``balance:X-bi-6-1b``), which sent each shape to its own pair of
+  producers, are deleted, and their callers ask
+  :func:`~app.services.row_valuation.settled_contribution` and
+  :func:`~app.services.cash_ledger.resolve_amount` of the item's
+  :func:`~app.services.transfer_legs.parent_of`.
 * :func:`signed_pct` -- the guarded "signed value as a percentage of a
   base" helper (``None`` when the base is zero), shared by the surprises
   figures and the Spending hero's vs-prior / vs-average chips.
@@ -49,8 +49,8 @@ defined once rather than re-implemented per surface (coding-standards rule
   days-before-due rule, given the already window-attributed settled
   expenses.  Its gate asks each item whether it RECORDS a payment
   (``_holds_a_record``, a row's entries or a leg's record, leaf
-  ``balance:X-bi-6-4a``): a fourth row-or-leg router, for a predicate
-  rather than a figure.
+  ``balance:X-bi-6-4a``): a row-or-leg router for a predicate rather than a
+  figure.
 
 Pure-function module -- no Flask imports; the only side effects are the two
 read queries, :func:`query_settled_expenses` and
@@ -78,18 +78,15 @@ from app.services.cash_flow_set import (
     touched_transfers_clause,
 )
 from app.services.pay_calendar import DerivedPeriod
-from app.services.cash_ledger import (
-    AmountBasis,
-    resolve_transaction_amount,
-    resolve_transfer_amount,
-    settled_contribution,
+from app.services.cash_ledger import AmountBasis, resolve_amount
+from app.services.row_valuation import settled_figure
+from app.services.transfer_legs import (
+    PlanItem,
+    PlanParent,
+    TransferLeg,
+    expense_legs,
+    preload_side_records,
 )
-from app.services.row_valuation import (
-    leg_settled_contribution,
-    leg_settled_figure,
-    settled_figure,
-)
-from app.services.transfer_legs import PlanItem, TransferLeg, expense_legs
 from app.utils.amount_relationships import transfer_pricing_load_options
 from app.utils.balance_predicates import settled_status_ids
 from app.utils.dates import pay_period_range_label
@@ -190,11 +187,11 @@ def query_settled_expenses(
     parent), so the chain this query would have had to load was
     ``Transaction.transfer -> pay_period``; the count was unchanged and the
     relationship was not.  A row reached that arm only as a transfer's
-    shadow, through rule 5, and no row names a transfer since plan step
-    ``balance:X-bi-6-4d-2`` (``ck_transactions_names_no_transfer``), so this
-    query's rows no longer reach it; whether the census is total again is
-    not re-measured here.  The removal is not re-litigated here, and whether
-    this query should adopt
+    shadow, through rule 5: plan step ``balance:X-bi-6-4d-2`` deleted the
+    shadows and plan step ``balance:X-bi-6-5`` the rule, so no row this query
+    loads reaches it (a transaction's dispatch holds no rule 4); whether the
+    census is total again is not re-measured here.  The removal is not
+    re-litigated here, and whether this query should adopt
     ``amount_relationships.pricing_load_options`` -- which would re-add the
     ``pay_period`` load C2-f3d removed -- is finding **N-296**'s, whose census
     of unguarded batch pricing callers this reader joined.
@@ -257,11 +254,10 @@ def query_settled_expenses(
         .all()
     )
     # pylint: enable=duplicate-code
-    legs = expense_legs(set_transfer_legs_in_periods(
+    return _settled_items(rows, set_transfer_legs_in_periods(
         cash_flow, scenario_id, period_ids,
         Transfer.status_id.in_(settled_status_ids()),
     ))
-    return PlanItems.of(rows, legs)
 
 
 def query_settled_expenses_in_span(
@@ -355,69 +351,50 @@ def query_settled_expenses_in_span(
         .order_by(Transfer.id)
         .all()
     )
-    return PlanItems.of(rows, expense_legs(set_transfer_legs(cash_flow, transfers)))
+    return _settled_items(rows, set_transfer_legs(cash_flow, transfers))
 
 
-def recorded_spend(item: PlanItem) -> Decimal:
-    """Return what a settled item RECORDED as having moved, refusing one that has not.
+def _settled_items(rows: list[Transaction], legs: list[TransferLeg]) -> PlanItems:
+    """Return *rows* and the expense half of *legs* as the window's items, every record loaded.
 
-    The spending readers' one question of a settled item (leaf
-    ``balance:X-bi-6-1b``): :func:`~app.services.row_valuation
-    .settled_contribution` for a row, its twin
-    :func:`~app.services.row_valuation.leg_settled_contribution` for a leg
-    -- ``0`` for an excluded one, the recorded figure otherwise, and a
-    refusal for one that has not settled, which no reader here can hand it
-    (both loaders filter to the settled statuses in SQL).
-
-    Args:
-        item: A row or a transfer leg from one of this module's loaders.
-
-    Returns:
-        The signed recorded figure (a refunded envelope's is negative,
-        ruling **bank_import:R-II**).
-
-    Raises:
-        AmountUnresolvable: The item has not settled.
-    """
-    if isinstance(item, TransferLeg):
-        return leg_settled_contribution(item)
-    return settled_contribution(item)
-
-
-def planned_spend(item: PlanItem, basis: AmountBasis) -> Decimal:
-    """Return what an item's amount IS -- its plan -- by the producer of its shape.
-
-    :func:`~app.services.cash_ledger.resolve_transaction_amount` for a
-    row; :func:`~app.services.cash_ledger.resolve_transfer_amount` over the
-    PARENT for a leg (ruling **R-BAL10**: a transfer's amount lives on the
-    parent and each leg reads it).  The estimate half of a surprise.
+    Where the report's two settled loaders (:func:`query_settled_expenses`,
+    :func:`query_settled_expenses_in_span`) meet.  The timeliness metric
+    (:func:`payment_timeliness_from_txns`) reads every settled item's RECORD:
+    a row's through its ``entries``, which each loader's query loads
+    (``selectinload``), and a leg's off its transfer's side list, loaded here
+    for every leg in ONE statement
+    (``transfer_legs.preload_side_records``, ruling **plan#2136**), where it
+    would otherwise cost a query per leg.  The grid's leg loader loaded them
+    for every reader until that ruling, the grid, the dashboard and the
+    calendar included, which read none.
 
     Args:
-        item: A row or a transfer leg.
-        basis: The read pass's :class:`~app.services.cash_ledger.AmountBasis`.
+        rows: The window's settled expense rows, ``entries`` loaded.
+        legs: The legs the set draws for the window's settled transfers,
+            either side.
 
     Returns:
-        The resolved plan.
-
-    Raises:
-        AmountUnresolvable: From the resolver, when the item's rule cannot
-            answer.
+        The :class:`~app.services.cash_flow_set.PlanItems`: *rows*, then the
+        EXPENSE legs (:func:`~app.services.transfer_legs.expense_legs`).
     """
-    if isinstance(item, TransferLeg):
-        return resolve_transfer_amount(item.transfer, basis)
-    return resolve_transaction_amount(item, basis)
+    spent = expense_legs(legs)
+    preload_side_records(leg.transfer for leg in spent)
+    return PlanItems.of(rows, spent)
 
 
-def resolved_actual_amount(txn: PlanItem, basis: AmountBasis) -> Decimal:
+def resolved_actual_amount(parent: PlanParent, basis: AmountBasis) -> Decimal:
     """Return the 'actual' amount for an estimate-vs-actual comparison.
 
-    The Variance/surprises kernel's rule: a settled item is worth what it
-    RECORDED as having moved (:func:`~app.services.row_valuation.settled_figure`,
-    or its leg twin :func:`~app.services.row_valuation.leg_settled_figure`
-    for a transfer leg since leaf ``balance:X-bi-6-1b``), and an unsettled
+    The Variance/surprises kernel's rule, a question about a PARENT (ruling
+    **plan#1983**: a caller holding a transfer leg asks its transfer,
+    :func:`~app.services.transfer_legs.parent_of`): a settled parent is
+    worth what it RECORDED as having moved
+    (:func:`~app.services.row_valuation.settled_figure`), and an unsettled
     one has recorded nothing, so it reads back its own PLAN
-    (:func:`planned_spend`) and its individual variance is exactly zero.  A
-    "surprise" is an item whose recorded figure differs from its plan.
+    (:func:`~app.services.cash_ledger.resolve_amount`) and its individual
+    variance is exactly zero.  A "surprise" is an item whose recorded figure
+    differs from its plan.  It routed a row and a leg to their twin producers
+    through ``planned_spend`` (leaf ``balance:X-bi-6-1b``) until that ruling.
 
     **Which rows can produce one changed at plan step X-au-c3, and it is a
     widening the surprises list wanted.**  The old rule read
@@ -458,9 +435,9 @@ def resolved_actual_amount(txn: PlanItem, basis: AmountBasis) -> Decimal:
     same row against a different pass.
 
     Args:
-        txn: The row or transfer leg to resolve.  Its settlement record is
-            read, and ``status`` is declared ``lazy="joined"`` on both models
-            so nothing here needs an explicit load.
+        parent: The plan row or transfer to resolve.  Its settlement record
+            is read, and ``status`` is declared ``lazy="joined"`` on both
+            models so nothing here needs an explicit load.
         basis: The read pass's
             :class:`~app.services.cash_ledger.AmountBasis`, built once by the
             caller.  REQUIRED rather than optional for the same reason
@@ -478,13 +455,10 @@ def resolved_actual_amount(txn: PlanItem, basis: AmountBasis) -> Decimal:
             is not the derived-plan refusal this function used to carry, which
             plan step X-bu removed from here.
     """
-    recorded = (
-        leg_settled_figure(txn) if isinstance(txn, TransferLeg)
-        else settled_figure(txn)
-    )
+    recorded = settled_figure(parent)
     if recorded is not None:
         return recorded
-    return planned_spend(txn, basis)
+    return resolve_amount(parent, basis)
 
 
 def calendar_window_bounds(

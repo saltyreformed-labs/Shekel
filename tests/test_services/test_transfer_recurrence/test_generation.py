@@ -376,12 +376,12 @@ class TestTransferGenerationSharesTheOccurrencePairs:
 # ── Generated Transfer Tests ──────────────────────────────────────
 
 
-class TestShadowTransactionCreation:
+class TestAGeneratedTransfersCategoryAndKeptRows:
     """A generated transfer's category, and the rows a maintain pass keeps.
 
-    The class name is history: it graded each transfer's two shadow (twin)
-    transactions until plan step ``balance:X-bi-6-4d-2``, and a transfer
-    stores no leg row since migration 82f7 (ruling **R-BAL167**).
+    It graded each transfer's two shadow (twin) transactions until plan
+    step ``balance:X-bi-6-4d-2``, and a transfer stores no leg row since
+    migration 82f7 (ruling **R-BAL167**).
     """
 
     def _make_template(self, seed_user, cadence, category_id=None,
@@ -497,8 +497,9 @@ class TestShadowTransactionCreation:
 
     # ``test_no_orphaned_shadows_after_regeneration`` was deleted at plan step
     # ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**): its one read was a loop over
-    # the transactions naming a transfer, which the database refuses to store
-    # (``ck_transactions_names_no_transfer``), so it looped over none
+    # the transactions naming a transfer, which the database refused to store
+    # (``ck_transactions_names_no_transfer``, until plan step balance:X-bi-6-5
+    # dropped the column), so it looped over none
     # (measured 0 after its regeneration).
     #
     # ``test_resolve_update_syncs_shadow_amounts`` was deleted there too: its
@@ -564,10 +565,11 @@ class TestATransferRecordsItsOccurrence:
             )
 
     # ``test_the_shadows_carry_no_occurrence`` was deleted at plan step
-    # ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**): the twins it read are rows
-    # the database refuses to store (``ck_transactions_names_no_transfer``,
+    # ``balance:X-bi-6-4d-2`` (ruling **R-BAL320**): the twins it read were rows
+    # the database refused to store (``ck_transactions_names_no_transfer``,
     # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``'s
-    # ``test_the_database_refuses_a_twin``), so it read none (measured 0), and
+    # ``test_the_database_refuses_a_twin``) until plan step balance:X-bi-6-5
+    # dropped the column, so it read none (measured 0), and
     # the column's one writer is graded by the case above.
 
     def test_a_maintain_pass_retains_an_undated_transfer_and_deletes_nothing(

@@ -200,7 +200,7 @@ class TestAStillPlannedTransferIsOfferedAsItsLeg:
             assert leg.settled_on is None and not leg.is_settled
             assert leg.version_id == transfer.version_id
             assert leg.period.period_id == transfer.pay_period_id
-            # One side of a transfer is never corrected alone (invariant 3).
+            # A side's figure is its transfer's, so it is never corrected alone.
             assert leg.figure_is_correctable is False
         # Moved here at plan step balance:X-bi-6-4d-2 from the deleted
         # test_a_broken_shadow_pair_is_offered_at_its_price_and_counted_nowhere
@@ -559,15 +559,18 @@ class TestAcceptingALeg:
         ]
 
 
-class TestTheParentDecidesADriftedSide:
-    """The PARENT decides a side (ruling **R-JM**; R-BAL79 per side, R-BAL80).
+class TestASettledTransferHoldingNoDatedRecordOffersNothing:
+    """The PARENT decides a side (ruling **R-JM**; R-BAL80).
 
-    The first two states are DECLARED: the status-band rule refuses each at
-    commit (``side_band_infrastructure``: a settled transfer over an
-    un-dated record, and a dated record under a Projected transfer), so each
-    is built around the service and only flushed.  The third is the
-    ``$0.00`` close, which the settle door writes.  The class's name is its
-    history.
+    The first state is DECLARED: the status-band rule refuses it at commit
+    (``side_band_infrastructure``: a settled transfer over an un-dated
+    record), so it is built around the service and only flushed.  The second
+    is the ``$0.00`` close, which the settle door writes.  A case between
+    them planted a dated record under a Projected transfer and graded that
+    the leg arm offered the side once, as its movement (ruling **R-BAL79**,
+    per side); it went with that per-side test at plan step
+    ``balance:X-bi-6-5``'s third leaf (developer answer 2026-10-27, "Delete
+    all 6"), the band rule's own case refusing the state.
     """
 
     def test_a_settled_transfer_over_an_undated_kept_record_offers_nothing(
@@ -589,31 +592,6 @@ class TestTheParentDecidesADriftedSide:
         rows = _offered(seed_user, seed_user["account"].id).rows
 
         assert _of_transfer(rows, transfer) == []
-
-    def test_a_projected_transfer_whose_side_is_dated_offers_the_movement(
-        self, app, db, seed_user,
-    ):
-        """The movement, not the status, decides a side: a dated one is the SETTLEMENT.
-
-        Through leaf ``X-bi-6-4c-2`` the shadow was offered as a Projected row
-        at the settle price and its movement hidden; the leg arm emits a side
-        only while its dated movement does not exist, so the dated movement
-        is the subject, at its recorded figure.  The case also set each
-        shadow back to Projected, until plan step ``balance:X-bi-6-4d-2``'s
-        vacuous-residue checkpoint: a transfer is one row since that step
-        (ruling **R-BAL258**), so that loop walked no row (measured).
-        """
-        transfer = _a_transfer(seed_user)
-        _settle(seed_user, transfer)
-        transfer.status_id = ref_cache.status_id(StatusEnum.PROJECTED)
-        db.session.flush()
-
-        (only,) = _of_transfer(
-            _offered(seed_user, seed_user["account"].id).rows, transfer,
-        )
-
-        assert only.kind is RowKind.SETTLEMENT
-        assert only.cash_amount == -_AMOUNT
 
     def test_a_transfer_closed_at_zero_offers_nothing(
         self, app, db, seed_user,

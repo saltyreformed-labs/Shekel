@@ -357,14 +357,15 @@ class TestARowCannotBeHiddenHoldingMoney:
             assert outcome.soft is True
             assert (_is_hidden(row.id), _held_by(row.id)) == (True, 0)
 
-    def test_a_transfer_leg_is_excepted(self, app, db, seed_user):
+    def test_hiding_a_transfer_holding_its_payment_records_is_refused_at_commit(
+        self, app, db, seed_user,
+    ):
         """BAL-532's state is REFUSED at commit since plan step ``balance:X-bi-6-4d-2``.
 
         It committed until then (ruling **R-CC92**'s exception for a
         transfer's half).  The payments hang off the transfer since that step,
         and the TRANSFER arm refuses hiding one that holds a record (ruling
-        **R-BAL167** class 2: a plant the new database refuses).  The name is
-        the test's history; nothing is excepted.
+        **R-BAL167** class 2: a plant the new database refuses).
         """
         with app.app_context():
             transfer_id, _record_id = _hiding_a_paid_transfer(seed_user)
@@ -379,15 +380,17 @@ class TestARowCannotBeHiddenHoldingMoney:
     # 2026-10-15: "Delete all 27").  It re-parented both of a paid transfer's
     # side records, each under its own side's TWIN, hid the expense twin, and
     # asserted the row arm's refusal at commit: the arm excepts no twin since
-    # plan step balance:X-bi-6-4d-2 (design D7).  No twin can exist now (the
-    # database refuses one, ``ck_transactions_names_no_transfer``, ruling R-BAL258,
-    # pinned once by
+    # plan step balance:X-bi-6-4d-2 (design D7).  No twin can exist now: no
+    # transaction has a transfer column since plan step balance:X-bi-6-5, and
+    # ``ck_transactions_names_no_transfer`` refused a row naming one until
+    # then (ruling R-BAL258, pinned once, below that drop, by
     # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
-    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
-    # and no app code builds one), so no row can carry the carve-out's
-    # ``transfer_id``; hiding a row that holds money is
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``),
+    # so no row can carry the carve-out's ``transfer_id``; hiding a row that
+    # holds money is
     # :meth:`test_hiding_a_row_holding_a_purchase_is_refused_at_commit`, and a
-    # hidden transfer holding one :meth:`test_a_transfer_leg_is_excepted`.
+    # hidden transfer holding one
+    # :meth:`test_hiding_a_transfer_holding_its_payment_records_is_refused_at_commit`.
 
 
 class TestWhatIsNeitherPasses:

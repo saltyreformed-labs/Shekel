@@ -269,9 +269,12 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
     every ordinary delete.
 
     **It walks :func:`live_payback_chain` where it used to RECURSE**, and
-    the order is unchanged: DEEPEST FIRST, so each level reverses and
-    deletes before the level above it does and every ledger account is
-    net-zero before a ``transaction_id`` link SET-NULLs on the delete.
+    the order is unchanged: DEEPEST FIRST, so each level is deleted before
+    the level above it, which ``fk_transactions_credit_payback_for``
+    (``ON DELETE RESTRICT``) requires: a level deleted while the one below
+    it still names it is refused.  The order carries nothing for the
+    ledger, because the one caller reversed every level's postings and
+    took every movement off the books before this runs.
     The walk is published because the delete verb and its confirm dialog
     need the same chain and neither may write to get it (plan step
     ``bank_import:X-gb``).
@@ -300,8 +303,9 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
     for depth in range(len(chain) - 1, -1, -1):
         payback = chain[depth]
         parent = txn if depth == 0 else chain[depth - 1]
-        # Reverse this level's postings while ``journal_entries.transaction_id``
-        # still links them.  Idempotent no-op for a still-Projected payback.
+        # Reverse this level's postings before the row goes.  Idempotent: a
+        # no-op for a still-Projected payback, and for one whose family the
+        # caller already reversed before taking its movements off.
         posting_service.reverse_postings_before_delete(payback)
         db.session.delete(payback)
 
@@ -352,8 +356,8 @@ def mark_as_credit(transaction_id, user_id):
         NotFoundError:  If the transaction doesn't exist, doesn't
             belong to *user_id*, or was deleted (ruling **R-CC99** (b)).
         ValidationError: If the transaction is income (can't credit income),
-            is a transfer shadow, uses entry tracking, has a status
-            other than projected, or has no following pay period.
+            uses entry tracking, has a status other than projected, or has
+            no following pay period.
     """
     txn = load_owned_transaction(transaction_id, user_id)
     # **A deleted row is "not found"** (plan step ``credit_card:CC-5-4a-4``,
@@ -371,8 +375,6 @@ def mark_as_credit(transaction_id, user_id):
         raise NotFoundError(f"Transaction {transaction_id} not found.")
     if txn.is_income:
         raise ValidationError("Cannot mark income as credit.")
-    if txn.transfer_id is not None:
-        raise ValidationError("Cannot mark transfer transactions as credit.")
 
     # Block legacy credit on entry-capable transactions.
     if txn.tracks_purchases:

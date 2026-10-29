@@ -60,14 +60,17 @@ class TestRestoreTransfer:
     ``test_corrects_drifted_shadow_category``,
     ``test_corrects_drifted_shadow_is_override`` and
     ``test_a_shadow_amount_CANNOT_drift_from_its_transfer`` (its amount).
-    No side row can be stored since that step's create door
-    (``ck_transactions_names_no_transfer``, ruling R-BAL258), so there is
-    nothing to plant; the refusal is ``test_a_transfer_is_one_row/test_the_upgrade.py``'s
-    ``test_the_database_refuses_a_twin`` (the expense side) and
-    ``test_a_transfer_shadow_is_derived/test_the_declaration.py``'s
-    ``test_the_transfer_owns_its_figure_and_neither_twin_can_be_stored``
-    (both sides) until plan step ``balance:X-bi-6-5`` deletes the column
-    it guards.  The eighth,
+    No side row could be stored from that step's create door
+    (``ck_transactions_names_no_transfer``, ruling R-BAL258), and no row can
+    name a transfer since plan step ``balance:X-bi-6-5`` dropped the column,
+    so there is nothing to plant.  The refusal was pinned by
+    ``test_a_transfer_is_one_row/test_the_upgrade.py``'s
+    ``test_the_database_refuses_a_twin`` (the expense side; it runs below the
+    drop) and by a twin case in
+    ``test_a_transfers_amount_is_declared/test_the_declaration.py`` (both
+    sides) until plan step ``balance:X-bi-6-5`` dropped the column it
+    guarded, which took that case's twin refusal with it (ruling
+    plan#1850).  The eighth,
     ``test_raises_on_missing_shadows``, asked the restore to refuse a
     transfer with no side rows, which every transfer is now (ruling
     R-BAL273, "Delete it").
@@ -76,13 +79,13 @@ class TestRestoreTransfer:
     draws it, and the amount case priced both shadow rows (none of those
     reads ran after that step's create door: each case failed at its
     plant).  The restored transfer's amount is
-    :meth:`test_restores_transfer_and_shadows`'s, and what a side shows of
+    :meth:`test_restores_transfer_and_its_leg_in_both_plans`'s, and what a side shows of
     it ``test_transfer_legs/test_what_a_side_shows.py``'s ``TestBothSidesShowTheTransfer``.  Each
     state the side reads asked is asked elsewhere, failing under a mutant
     gated on that state and side (measured at that checkpoint), with one
     exception.  A restored ``$0.00`` close's side reads Paid: on the expense
     side, ``test_transfer_legs/test_the_grids_legs.py``'s ``TestTheLegMapProducers`` and
-    ``TestTheLegContributionTwins`` cases
+    ``TestALegIsValuedAsItsParent`` cases
     ``test_a_settled_leg_with_no_movement_is_the_zero_record`` and
     ``test_routes/test_a_zero_close_has_no_day.py``.  On the INCOME side no
     case reads it: the mutant fails only ``test_loan_settled_legs/``'s
@@ -101,7 +104,7 @@ class TestRestoreTransfer:
     on the income side.
     """
 
-    def test_restores_transfer_and_shadows(self, app, transfer_data):
+    def test_restores_transfer_and_its_leg_in_both_plans(self, app, transfer_data):
         """A hidden planned transfer comes back unhidden, unchanged, and in both plans.
 
         The restore un-hides the row and returns it; its amount ($250.00, as
@@ -114,8 +117,7 @@ class TestRestoreTransfer:
         (measured at plan step ``balance:X-bi-6-4d-2``'s checkpoint
         2e-2b-2b).  Until that checkpoint it read the object in the session
         and asked the transfer's two shadow rows for their delete flags
-        (ruling R-BAL290 part 1).  The name is kept: ruling R-BAL273 names
-        it.
+        (ruling R-BAL290 part 1).
         """
         with app.app_context():
             td = transfer_data

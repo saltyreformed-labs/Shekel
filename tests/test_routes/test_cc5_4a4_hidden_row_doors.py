@@ -984,14 +984,15 @@ class TestNothingLeaksThroughTheName:
     # developer 2026-10-15: "Delete all 27").  They pressed each surface on a
     # transfer SHADOW row's crafted id -- live, and after its transfer's soft
     # delete (review 6's L2) -- and asserted the nameless answer: the shadow
-    # fence met before the deleted-row arm.  No shadow can exist now (the
-    # database refuses one, ``ck_transactions_names_no_transfer``, ruling
-    # R-BAL258, pinned once by
+    # fence met before the deleted-row arm.  No shadow can exist now: no
+    # transaction has a transfer column since plan step X-bi-6-5, and
+    # ``ck_transactions_names_no_transfer`` refused a row naming one until
+    # then (ruling R-BAL258, pinned once, below that drop, by
     # ``TestTheUpgrade::test_the_database_refuses_a_twin`` in
-    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``,
-    # and no app code builds one), so no request reaches that order, which
-    # goes with the column at plan step X-bi-6-5.  The reordering the class
-    # exists for -- naming a row before the access check -- is still graded:
+    # ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``).
+    # No request reached that order, and the fence went at that step.  The
+    # reordering the class exists for -- naming a row before the access check
+    # -- is still graded:
     # :meth:`test_another_users_deleted_row_is_not_named` fails on it (the
     # stranger is told "Gym was deleted", measured at that step).
 

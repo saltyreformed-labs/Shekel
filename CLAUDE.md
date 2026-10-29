@@ -113,13 +113,26 @@ decision).
 ## Multi-session operation
 
 Several Claude sessions regularly work this repo at once, each in its own worktree
-(`~/projects/shekel-*`), with one session acting as COORDINATOR.
+(`~/projects/shekel-*`). None coordinates the others: each claims its own card and lands its own
+work.
 
-- **PRs and merges are coordinated.** When multiple sessions are active, the coordinator session
-  opens, orders and merges every PR. **Any session may `git push` its own branch to back up work**
-  (developer ruling 2026-09-02); a pushed branch is not a handoff and not a request to merge.
+- **Each session lands its own work in `dev`** (**plan#1828**). It opens its card's pull request
+  into `dev` and puts it in `dev`'s merge queue (Git Workflow); the queue tests it on top of `dev`
+  and lands it or refuses it, so no session waits on another to merge and no hook asks the
+  developer. The auto-mode classifier can still refuse an enqueue ('Merge Without Review'): that
+  refusal is a question to the developer for that one act, its alert first, never routed around.
+  **Any session may `git push` its own branch to back up work** (developer ruling 2026-09-02); a
+  pushed branch is not a handoff and not a request to merge.
+- **A release is a session of its own** (**plan#1829**). `/release` merges a release into `main`
+  once the developer approves it (**R-BAL217**, **R-BAL279**). On his word a fresh session in the
+  release worktree `~/projects/shekel-release`, the one worktree that holds `dev` (**plan#1838**),
+  runs `/release` to the end and stops, so no building lane spends its context on one. The line that
+  starts it is in `/release`'s section 0.
 - **GitHub numbers the cards, so there is no id to reserve.** A step, finding, ruling or question is
   filed as a card (`quill file`, Common Commands) and its number, `plan#N`, is GitHub's.
+- **A session resumes from its card, never a file** (rulings plan#1921, plan#1922). A stop posts its
+  note on the task the next session starts (`/handoff`, `quill note`), and that session's whole
+  prompt is `Resume plan#T`, which `/charter` item 0 follows.
 - **Suite runs no longer need coordinating, and there is no slot to take.** `./scripts/test.sh`
   gives every run a postgres cluster of its own, so no run can restart, corrupt or collide with
   another -- in one worktree or many. What concurrent runs still share is this host's cores, which
@@ -148,9 +161,14 @@ root; never silence it with a bare disable.
   into context at session start, a warning when the shared main checkout is pinned to a release
   branch, a pointer to the Multi-session doctrine, and one to `python -m tools.quill.quill next` for
   the next step (it reads no network, so a start never waits on the tracker).
-- **PR-guard hook** (`scripts/hooks/guard-pr-actions.sh`) turns `gh pr create` / `gh pr merge` into
-  a permission prompt outside the coordinator session (which exports `SHEKEL_PR_COORDINATOR=1`);
-  `git push` is never gated. Advisory by design: an ask decision, never a deny.
+- **Context hook** (`scripts/hooks/context_meter.py`, after each batch of tool calls; ruling
+  plan#1834) tells the session, once each, that its context passed 33% of 1,000,000 tokens (finish
+  what is in flight, then `/handoff`), 45% (start no new build loop) and 65% (commit what is clean
+  and stop). It reads only the session's own transcript and never blocks.
+- **Commit hook** (`tools/quill/commit_hook.py`, pre-commit's `quill-task` at `prepare-commit-msg`
+  and `commit-msg`, installed once for every worktree; ruling plan#1872) stamps each commit on
+  `card/N` with `Task: plan#T`, the task in progress, and refuses one while none is or naming
+  another.
 - **Stop hook** runs full `pylint app/` -- the only place cross-file `duplicate-code` is caught --
   and hard-blocks once `scripts/hooks/ENFORCE_PYLINT_FLOOR` exists (the 10.00/10 lock-in).
 - **Custom checkers:** `tools/pylint/shekel_checkers/` (+ tests), loaded via `.pylintrc`. Add one
@@ -163,16 +181,20 @@ root; never silence it with a bare disable.
   added or changed only from its own branch `card/N`, a finding's also from its owner step's branch
   (plan#1777), and a task's file `plan/tasks/T` only from its card's branch (R-BAL386), but for a
   line carried from the other integration branch (a release or a resync) and, while it lives, the
-  records-only door into `main` for a card never claimed (R-BAL363); a change that writes no line of
-  a done file may not change what `dev` and `main` together say of that card (R-BAL385, R-BAL390); a
-  pull request from `card/N` is refused while a task under N that was not dropped lacks its file, or
-  while N or a step above it owns an open finding neither marked fixed nor handed on (plan#1777,
-  plan#1784), and a records-only change while a step it records owns one; and a change to what
-  production runs must add, delete or change a card's done file, from any branch, a release or a
-  resync passing only with the done files it carries (R-BAL362): the files the image holds, as
-  Docker reads its ignore file (`.dockerignore`, R-BAL364's one list of them), and the files outside
-  the image that build or run production, which `tools/quill/_production.py` lists, their one list
-  (R-BAL400, R-BAL401). Its module docstring states every rule.
+  records-only door into `main` for a card never claimed (R-BAL363); the file naming card N's task
+  in progress, `plan/doing/N`, is added or changed only from `card/N` or carried so (plan#2009; a
+  delete passes from any branch, plan#2022); a change that writes no line of a done file may not
+  change what `dev` and `main` together say of that card (R-BAL385, R-BAL390); a pull request from
+  `card/N` is refused while a task under N that was not dropped lacks its file, while a work commit
+  made on a tree holding the commit hook names no task under N (the hook's backstop,
+  `tools/quill/_stamps.py`, plan#1880), or while N or a step above it owns an open finding neither
+  marked fixed nor handed on (plan#1777, plan#1784), and a records-only change while a step it
+  records owns one; and a change to what production runs must add, delete or change a card's done
+  file, from any branch, a release or a resync passing only with the done files it carries
+  (R-BAL362): the files the image holds, as Docker reads its ignore file (`.dockerignore`,
+  R-BAL364's one list of them), and the files outside the image that build or run production, which
+  `tools/quill/_production.py` lists, their one list (R-BAL400, R-BAL401). Its module docstring
+  states every rule.
 - **Archived documents** (`tools/ci/archive.py`): every document under an `archive/` or
   `historical/` directory opens with the `> **ARCHIVED.` banner, and CI refuses one that does not.
 - **Judgment the linters cannot mechanize** (float-on-money boundaries, IDOR, transfer invariants,
@@ -209,10 +231,19 @@ python -m tools.quill.quill next [--arc ARC]          # the next step to build
 python -m tools.quill.quill claim plan#N              # claim card N: branch card/N, checked out
 python -m tools.quill.quill show plan#N               # a card, its comments and its git history
 python -m tools.quill.quill file step|finding|ruling|question --arc ARC --title NAME ...
+python -m tools.quill.quill file question ... --owner plan#S # a question linked to its step
 python -m tools.quill.quill file task --parent plan#N ...    # a task: a piece inside N's one PR
+python -m tools.quill.quill start plan#T              # begin task T: each commit is its piece's
 python -m tools.quill.quill task-file plan#T          # write task T's file on its card's branch
+python -m tools.quill.quill note plan#N --body-file NOTE     # a stop's note; prints Resume plan#T
+python -m tools.quill.quill pr plan#N --title T --body-file B  # N's pull request into dev, linked
 python -m tools.quill.quill sync                      # write every card's state from git
 python -m tools.quill.quill release plan#N            # free a claim, keeping its work
+
+# A new lane, run in a new terminal from a checkout's root (no venv need be active): a worktree
+# ~/projects/shekel-NAME detached at origin/dev, and a session in it, the venv active, whose
+# first act claims plan#N (or `next`'s step)
+.venv/bin/python -m tools.quill.lane NAME [plan#N]
 ```
 
 ## Architecture
@@ -267,7 +298,6 @@ A task is NOT complete until ALL of these are true:
 8. A neutral adversarial review of the design and diff ran, and its findings are fixed or reported
    (see Design doctrine).
 9. Commit message format: `<type>(<scope>): <what changed>`
-10. Developer asked if they want to commit and push.
 
 ## Standards
 
@@ -348,12 +378,12 @@ each take a change only through a pull request and the merge queue (rulesets `de
 for everyone, and so is `gh pr merge --admin`. A merge is `gh pr merge N --merge`, which puts the PR
 in the queue; the queue lands it only once `lint-and-test` and `polyglot-lint` pass on the exact
 merge commit it lands. CI runs on pull requests, on each queue group and on pushes to `main` -- NOT
-on pushes to `dev`, so `dev` work is validated when you open its PR. To ship `dev` to `main`: open a
-PR `dev` -> `main`, wait for the green check, then queue it. Do NOT
+on pushes to `dev`, so `dev` work is validated when you open its PR. Shipping `dev` to `main` is
+`/release`'s, on the developer's word (Multi-session operation): it opens a PR into `main` from a
+release branch at the cut it judged, waits for the green check, then queues it. Do NOT
 `git checkout main && git merge dev && git push origin main` -- the `main-queue` ruleset rejects it.
 After a PR merges into `main`, resync `dev` so it holds every commit `main` does: a PR `main` ->
-`dev`, queued through `dev`'s queue (`git push origin dev` is rejected). When several sessions are
-active, PR and merge timing is the coordinator session's call -- see Multi-session operation.
+`dev`, queued through `dev`'s queue (`git push origin dev` is rejected).
 
 **Work for card N is on its branch `card/N`**, which `quill claim N` makes from `dev` with the
 card's done file `plan/ships/N` as its first commit: one branch records one card, merging it ships
@@ -363,8 +393,9 @@ the card, and a revert of that merge removes the file and reopens the card.
 tests green, independently revertible by reverting its merge; a `recurrence` step states its
 behaviour change by measurement, not a hedge.
 
-**A piece of work inside a card's one pull request is a TASK** (R-BAL386), a sub-issue of the card:
-filed under it when the piece is planned (`quill file task`), its file `plan/tasks/T` written in the
+**A piece of work inside a card's one pull request is a TASK** (R-BAL386), a sub-issue of the card,
+and the card's tasks in order are its plan (plan#1868): filed before the piece is built, then each
+started, built and finished in turn (`/charter` item 4), its file `plan/tasks/T` written in the
 commit that finishes it (`quill task-file plan#T`). The task closes once the pushed `card/N` holds
 the file and reopens if a revert removes it; the card's pull request is refused while a task under
 it that was not dropped lacks its file. A piece that lands by a pull request of its own is a leaf

@@ -1,7 +1,9 @@
 {# Single mobile transaction card -- HTMX response fragment.
 
-   Rendered by ``transactions.mark_done`` (via ``_render_mobile_card``)
-   when the Mark Paid request came from a mobile / companion card.  The
+   Rendered by ``routes/_mobile_card.render_mobile_card`` -- for a row from
+   ``transactions.mark_done``, for a transfer side from the transfer's own
+   doors (ruling plan#1983: one card renderer for both shapes) -- when the
+   Mark Paid request came from a mobile / companion card.  The
    form in ``_mobile_card_actions.html`` targets the card wrapper
    (``hx-target="#card-<prefix-><id>"``, ``hx-swap="outerHTML"``), so
    the response replaces exactly that one card in place -- the settled

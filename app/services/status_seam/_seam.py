@@ -57,6 +57,7 @@ from app.services.status_seam._refusals import (
 from app.utils.balance_predicates import (
     enters_settled_band,
     settled_status_ids,
+    touches_settled_band,
 )
 from app.utils.dates import display_today
 
@@ -259,8 +260,7 @@ def figure_for_status(
             (:func:`app.services.row_valuation.settled_figure`), which is what
             the box was prefilled from -- so equality here is exactly "the user
             did not touch the box".  For a transfer it is the figure the
-            transfer stores, read through its expense leg
-            (:func:`~app.services.row_valuation.leg_settled_figure`).
+            transfer stores, the same function asked of the transfer.
 
     Returns:
         *submitted* when the row is settling or staying settled; ``None`` when
@@ -609,9 +609,13 @@ def apply_status_change(
         # definition twice.
         reject_revert_below_the_books(row, new_status_id)
     # Read BEFORE the assignment, for the covering movement below: whether
-    # this act moves the row's assertion at all is a question about the
-    # status the row is LEAVING as well as the one it enters.
-    was_settled = row.status_id in settled_status_ids()
+    # this act moves the row's record at all is a question about the status
+    # the row is LEAVING as well as the one it enters.  A move with neither
+    # end in the settled band (the cancel of a Projected row, the restore of
+    # a Cancelled one) moves none, so the covering arm is not called and the
+    # row's entries are not read: the one predicate the transfer's arm and
+    # status writer ask (plan#2139).
+    touches_band = touches_settled_band(row, new_status_id)
     row.status_id = new_status_id
 
     # Settle-day maintenance -- the day AND the basis that says how it is known,
@@ -727,12 +731,12 @@ def apply_status_change(
         # of row (expense since 3a, income since 3b), and a transfer's sides
         # are the Transfer arm's (``_side``) since plan step
         # ``balance:X-bi-6-4d-2``.
-        sync_covering_movement(
-            row,
-            was_settled=was_settled,
-            now_settled=new_status_id in settled_status_ids(),
-            settlement=settlement,
-            press=press,
-        )
+        if touches_band:
+            sync_covering_movement(
+                row,
+                now_settled=new_status_id in settled_status_ids(),
+                settlement=settlement,
+                press=press,
+            )
 
     db.session.expire(row, ["status"])

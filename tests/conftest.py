@@ -722,7 +722,6 @@ from app.models.user import User, UserSettings
 # storage-tier NOT NULL constraint directly use raw SQL inserts.
 from app.models.scenario import Scenario
 from app.models.category import Category
-from app.models.pay_period import PayPeriod
 from app.models.salary_profile import SalaryProfile
 from app.models.savings_goal import SavingsGoal
 from app.models.transfer_template import TransferTemplate
@@ -757,6 +756,7 @@ from tests._test_helpers import (
     generate_row_of,
     settle_day_columns,
     state_template_price,
+    step_down_through_the_transfer_column_drop,
 )
 from tests._per_request_globals import PerRequestGlobalsClient
 from tests._shard import SHARD_ENV, apply_shard, parse_shard
@@ -1557,6 +1557,18 @@ def db(app, setup_database, request, set_totp_key, disable_hibp_check):  # pylin
                 _db.session.remove()
                 _db.engine.dispose()
             _profile_write_row(nodeid, timings)
+
+
+@pytest.fixture()
+def below_the_transfer_column_drop(db):
+    """The case's database, stepped down through revisions ``1712c506ee99`` and ``c956c1d83108``.
+
+    For a migration case of a revision below plan step ``balance:X-bi-6-5``'s
+    column drop, requested as ``pytest.mark.usefixtures``;
+    :func:`tests._test_helpers.step_down_through_the_transfer_column_drop`
+    says what it restores and why it does not come back up.
+    """
+    step_down_through_the_transfer_column_drop(db.session)
 
 
 @pytest.fixture()

@@ -41,7 +41,6 @@ from app.models.transfer import Transfer
 from app.services import (
     account_posting_service,
     pay_period_admin,
-    pay_period_write,
     posting_service,
     transfer_service,
 )
@@ -66,7 +65,6 @@ from tests._test_helpers import (
     derived_span,
     last_covered_day,
     make_cadence_rule,
-    make_every_period_rule,
     make_expense_template,
     make_transfer_template,
     populate_in_a_fresh_pass,
@@ -94,7 +92,7 @@ def _emit_untethered_entry(db_session, seed_user, savings, period, amount):
 
     The shape a loan opening / true-up correction has -- balanced across two
     ledger accounts (Checking ``-amount`` / Savings ``+amount``), each with a
-    non-zero net, linked to NO transaction or transfer -- so the LEDGER_POSTINGS
+    non-zero net, linked to NO movement -- so the LEDGER_POSTINGS
     gate is exercised without a settled source row (which would trip the
     higher-precedence SETTLED_TXN lock instead).  Built directly on the models
     (tests are unfenced); the deferred balanced-journal trigger accepts it.
@@ -110,7 +108,9 @@ def _emit_untethered_entry(db_session, seed_user, savings, period, amount):
         scenario_id=seed_user["scenario"].id,
         pay_period_id=period.id,
         entry_date=period.start_date,
-        source_kind_id=ref_cache.posting_source_id(PostingSourceEnum.TRANSFER),
+        source_kind_id=ref_cache.posting_source_id(
+            PostingSourceEnum.TRANSFER_MOVEMENT,
+        ),
         description="Untethered balanced correction",
     )
     db_session.add(entry)
@@ -245,8 +245,10 @@ class TestTruncateHappyPath:
 
         Until plan step ``balance:X-bi-6-4d-2`` the case also read that
         neither of the transfer's two shadow rows survived in the deleted
-        period.  A transfer is one row since (``ck_transactions_names_no_transfer``),
-        so that count found no row to count.  Renamed from
+        period.  A transfer is one row since, and no row could name one
+        (``ck_transactions_names_no_transfer``, until plan step
+        balance:X-bi-6-5 dropped the column), so that count found no row to
+        count.  Renamed from
         ``test_cascade_removes_transfers_and_both_shadows``.
         """
         with app.app_context():

@@ -28,10 +28,10 @@ tracker it reads is private: real production figures are allowed there
   REST write takes one of the routes in :data:`_ROUTES` on the tracker, with
   exactly the body keys quill sends (their values are not checked but
   for the cards they name) and every card it names -- in its path, or by its
-  REST id -- a scratch card; a GraphQL write is one of the
-  board's four, word for word, on the plan board, moving a scratch card's
-  board item.  A body sent other than as JSON is refused too.  Anything else is
-  refused, unsent.
+  REST id -- a scratch card; a GraphQL write is one of the board's six (its
+  four moves and its two Status writes), word for word, on the plan board, moving
+  or writing a scratch card's board item.  A body sent other than as JSON is
+  refused too.  Anything else is refused, unsent.
 - **Every string an answer holds is redacted** (:data:`REDACTED`) unless its
   key is one of :data:`_KEPT` -- ids, states, names of labels, types and
   repositories, dates, error messages -- or it belongs to a scratch card, or it
@@ -72,7 +72,14 @@ from pathlib import Path
 import requests
 
 from tools.quill._github import API
-from tools.quill._tracker import BOARD_ADD, BOARD_AFTER, BOARD_REMOVE, BOARD_TOP
+from tools.quill._tracker import (
+    BOARD_ADD,
+    BOARD_AFTER,
+    BOARD_REMOVE,
+    BOARD_STATUS_CLEAR,
+    BOARD_STATUS_SET,
+    BOARD_TOP,
+)
 from tools.quill.setup_tracker import FILING, PLAN, Place
 
 #: Where the recordings the tests replay are kept.
@@ -82,11 +89,13 @@ SCRATCH = "[L2 measurement] scratch"
 #: What stands in a recording for a string it may not keep.
 REDACTED = "[redacted: not a scratch card]"
 #: The keys whose strings are kept whichever card they belong to: none holds a
-#: card's text.
+#: card's text.  ``issue_field_name`` and ``data_type`` are an issue field's name and type in
+#: REST's answer to a create that writes one (plan#1811), which reads its Arc by that name
+#: (``_arcs.arc_answered``).
 _KEPT = frozenset({
-    "__typename", "authoredDate", "createdAt", "date", "editedAt", "endCursor",
-    "fullDatabaseId", "full_name", "id", "login", "merged_at", "message", "name",
-    "nameWithOwner", "node_id", "path", "ref", "repository_url", "sha", "state",
+    "__typename", "authoredDate", "createdAt", "data_type", "date", "editedAt", "endCursor",
+    "fullDatabaseId", "full_name", "id", "issue_field_name", "login", "merged_at", "message",
+    "name", "nameWithOwner", "node_id", "path", "ref", "repository_url", "sha", "state",
     "stateReason", "state_reason", "type",
 })
 #: The keys under which an object with no number is its enclosing card's own content: its
@@ -95,9 +104,10 @@ _OWN_CONTENT = frozenset({"userContentEdits", "comments"})
 #: GitHub's node-id prefix for a board (a ProjectV2).
 _BOARD_NODE = "PVT_"
 _GRAPHQL_URL = f"{API}/graphql"
-#: Each GraphQL write a recording may send, and the variable naming what it moves: the
-#: card's node id for an add, its board item for the rest.
-_BOARD_WRITES = {BOARD_ADD: "c", BOARD_REMOVE: "i", BOARD_TOP: "i", BOARD_AFTER: "i"}
+#: Each GraphQL write a recording may send, and the variable naming what it moves or writes:
+#: the card's node id for an add, its board item for the rest.
+_BOARD_WRITES = {BOARD_ADD: "c", BOARD_REMOVE: "i", BOARD_TOP: "i", BOARD_AFTER: "i",
+                 BOARD_STATUS_SET: "i", BOARD_STATUS_CLEAR: "i"}
 _MUTATION = re.compile(r"\bmutation\b")
 _REPOSITORY_ARGUMENTS = re.compile(r"\brepository\s*\(([^)]*)\)")
 _REPOSITORY_ALIAS = re.compile(r"\brepository\s*:")
@@ -109,6 +119,11 @@ _STRING_OR_IGNORED = re.compile(
 #: The bodies quill PATCHes an issue with: retype, retitle, a new body, close, reopen.
 _PATCHES = frozenset(frozenset(keys) for keys in (
     {"type"}, {"title"}, {"body"}, {"state", "state_reason"}, {"state"}))
+#: The bodies quill files a card with (``_tracker.Tracker.create``): a task's, and a card's
+#: holding its Arc, which writes the issue field in the same call (plan#1811).
+_CREATES = frozenset(frozenset(keys) for keys in (
+    {"title", "body", "type", "labels"},
+    {"title", "body", "type", "labels", "issue_field_values"}))
 
 
 def _repo_url(place: Place) -> str:
@@ -171,7 +186,7 @@ _Allows = Callable[[re.Match, dict, Scratch], bool]
 _ROUTES: tuple[tuple[str, re.Pattern, _Allows], ...] = tuple(
     (method, re.compile(path), allows) for method, path, allows in (
         ("POST", r"/issues",
-         lambda _m, body, _s: set(body) == {"title", "body", "type", "labels"}
+         lambda _m, body, _s: frozenset(body) in _CREATES
          and str(body["title"]).startswith(SCRATCH)),
         ("PATCH", r"/issues/([0-9]+)",
          lambda m, body, s: int(m[1]) in s.numbers and frozenset(body) in _PATCHES
@@ -181,6 +196,9 @@ _ROUTES: tuple[tuple[str, re.Pattern, _Allows], ...] = tuple(
         ("POST", r"/issues/([0-9]+)/sub_issues",
          lambda m, body, s: int(m[1]) in s.numbers and set(body) == {"sub_issue_id"}
          and body["sub_issue_id"] in s.ids),
+        ("PATCH", r"/issues/([0-9]+)/sub_issues/priority",
+         lambda m, body, s: int(m[1]) in s.numbers and set(body) == {"sub_issue_id", "before_id"}
+         and body["sub_issue_id"] in s.ids and body["before_id"] in s.ids),
         ("DELETE", r"/issues/([0-9]+)/sub_issue",
          lambda m, body, s: int(m[1]) in s.numbers and set(body) == {"sub_issue_id"}
          and body["sub_issue_id"] in s.ids),

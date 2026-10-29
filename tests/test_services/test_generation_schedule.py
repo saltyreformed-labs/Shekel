@@ -76,7 +76,6 @@ from app.routes._period_population import populate_new_periods
 from app.services import (
     cash_ledger,
     pay_period_write,
-    period_population,
     recurrence_engine,
 )
 from app.services.balance_at import BalanceContext
@@ -708,7 +707,7 @@ class TestThePaycheckSeesTheWholeSchedule:
             # where the whole-schedule requirement now lives.  A row asserted
             # by its column would compare ``None`` here.
             assert created[0].estimated_amount is None
-            priced = cash_ledger.amounts_by_id(
+            priced = cash_ledger.amounts_by_key(
                 created,
                 cash_ledger.derived_amount_basis(seed_user["user"].id, scenario_id),
             )
@@ -782,7 +781,7 @@ class TestThePaycheckSeesTheWholeSchedule:
             )
             db.session.flush()
 
-            priced = cash_ledger.amounts_by_id(
+            priced = cash_ledger.amounts_by_key(
                 created,
                 cash_ledger.derived_amount_basis(seed_user["user"].id, scenario_id),
             )

@@ -27,7 +27,7 @@ LABELS_ONLY = frozenset()
 def _finding(body=SENTENCE, **changes):
     """A finding that passes every rule, with ``changes`` applied."""
     fields = {"kind": "finding", "title": "Refund counted twice", "body": body,
-              "labels": ("balance",), "owner": Owner("step", True, False)}
+              "labels": (), "arc": "balance", "owner": Owner("step", True, False)}
     return Draft(**{**fields, **changes})
 
 
@@ -35,16 +35,16 @@ def _ruling(body=None, **changes):
     """A ruling that passes every rule, with ``changes`` applied."""
     fields = {"kind": "ruling", "title": "Where the plan lives",
               "body": body if body is not None else ruling_body("Where?", 'Picked "Here".'),
-              "labels": ("balance",), "owner": Owner("step", False, False)}
+              "labels": (), "arc": "balance", "owner": Owner("step", False, False)}
     return Draft(**{**fields, **changes})
 
 
 @pytest.mark.parametrize("draft", [
     _finding(),
     _ruling(),
-    Draft("question", "Which day?", "Which day should a transfer show?", ("recurrence",)),
-    Draft("step", "Split the walk", "Any spec at all.", ("balance", "moves-money")),
-    Draft("step", "A leaf", "", ("salary",), Owner("step", True, False)),
+    Draft("question", "Which day?", "Which day should a transfer show?", (), "recurrence"),
+    Draft("step", "Split the walk", "Any spec at all.", ("moves-money",), "balance"),
+    Draft("step", "A leaf", "", (), "salary", Owner("step", True, False)),
 ])
 def test_a_new_card_of_each_kind_that_keeps_the_rules_passes(draft):
     """Each kind's own rules, and no more: a step and a question have no text cap."""
@@ -54,20 +54,31 @@ def test_a_new_card_of_each_kind_that_keeps_the_rules_passes(draft):
 def test_a_type_outside_the_four_kinds_is_refused_whatever_the_change():
     """A card the plan cannot classify cannot be ordered, owned or shipped."""
     for kind in (None, "Bug", "Step"):
-        (problem,) = violations(Draft(kind, "t", "b", ("balance",)), LABELS_ONLY)
+        (problem,) = violations(Draft(kind, "t", "b", (), "balance"), LABELS_ONLY)
         assert problem.startswith(f"its type is {kind!r}")
 
 
-@pytest.mark.parametrize("labels", [(), ("moves-money",), ("balance", "salary")])
-def test_a_card_carries_exactly_one_arc_label(labels):
-    """None or two arcs is a card no arc's lane would find; other labels do not count."""
-    problems = violations(_finding(labels=labels), LABELS_ONLY)
-    assert len(problems) == 1 and "exactly one arc label" in problems[0]
+@pytest.mark.parametrize(("arc", "held"), [(None, "none"), ("Balance", "'Balance'"),
+                                            ("moves-money", "'moves-money'")])
+def test_a_card_holds_one_arc_in_its_arc_field(arc, held):
+    """No arc, or a value that is no arc, is a card no arc's lane would find (R-BAL349,
+    R-BAL354: the Arc field is the arc's one home)."""
+    assert violations(_finding(arc=arc), LABELS_ONLY) == [
+        "it holds one arc in its Arc field, one of balance, recurrence, pay_calendar, "
+        f"credit_card, bank_import, salary; it holds {held}"]
+
+
+def test_the_check_reads_no_arc_label():
+    """R-BAL354: quill reads the arc only from the field, its label being display that sync
+    puts back, so a card's arc labels, none, another's or two, decide nothing."""
+    for labels in ((), ("salary",), ("balance", "salary")):
+        assert not violations(_finding(labels=labels)), labels
+    assert not violations(_task(labels=("balance",)))
 
 
 def test_the_release_labels_ride_beside_the_arc():
     """``moves-money`` and ``deploy-together`` are not arcs."""
-    assert not violations(_finding(labels=("balance", "moves-money", "deploy-together")))
+    assert not violations(_finding(labels=("moves-money", "deploy-together")))
 
 
 def test_a_title_written_is_a_short_name_of_at_most_100_characters():
@@ -101,7 +112,7 @@ def test_a_finding_set_under_a_split_step_is_refused_and_a_ruling_and_a_leaf_are
         "smaller steps"]
     assert not violations(_finding(owner=Owner("step", True, False)), {OWNER})
     assert not violations(_ruling(owner=split), {OWNER})
-    assert not violations(Draft("step", "A leaf", "", ("balance",), split))
+    assert not violations(Draft("step", "A leaf", "", (), "balance", split))
 
 
 def test_a_ruling_set_under_an_owner_needs_a_step_done_or_not():
@@ -119,10 +130,24 @@ def test_the_owner_is_graded_only_when_the_change_sets_it():
 
 
 def test_a_step_splits_only_a_step_and_a_question_needs_no_owner():
-    """A leaf's parent is the step it splits (R-BAL179); a question's owner is the developer."""
-    leaf = Draft("step", "leaf", "", ("balance",), Owner("finding", True, False))
+    """A leaf's parent is the step it splits (R-BAL179); a question names an owner only when
+    it is asked for a step (plan#1861's item 10), so it needs none."""
+    leaf = Draft("step", "leaf", "", (), "balance", Owner("finding", True, False))
     assert violations(leaf) == ["a step's parent is the step it splits, not a finding"]
-    assert not violations(Draft("question", "q", "Why?", ("balance",)))
+    assert not violations(Draft("question", "q", "Why?", (), "balance"))
+
+
+@pytest.mark.parametrize(("kind", "named"), [("finding", "finding"), ("ruling", "ruling"),
+                                             ("question", "question"),
+                                             (None, "a card with no type")])
+def test_a_question_that_names_an_owner_is_asked_for_a_step(kind, named):
+    """Spec item 10: a question's owner, when it names one, is the step it is asked for, done or
+    not and split or not, as a ruling's is (R-BAL395); any other card is refused."""
+    asked = Draft("question", "q", "Why?", (), "balance", Owner("step", False, True))
+    assert not violations(asked)
+    assert violations(Draft("question", "q", "Why?", (), "balance", Owner(kind, True, False))) == [
+        "a question that names an owner is blocked by the step it is asked for (R-BAL395); its "
+        f"owner is {named}"]
 
 
 @pytest.mark.parametrize(("body", "said"), [
@@ -159,7 +184,7 @@ def test_a_body_stored_with_crlf_or_as_null_is_read_as_its_text():
     crlf = ruling_body("Where?", "Here.").replace("\n", "\r\n")
     assert not violations(_ruling(crlf), {BODY})
     assert "complete sentence" in violations(_finding(None), {BODY})[0]
-    empty = Draft("ruling", "t", None, ("balance",), Owner("step", False, False))
+    empty = Draft("ruling", "t", None, (), "balance", Owner("step", False, False))
     assert "question and his answer" in violations(empty, {BODY})[0]
 
 
@@ -225,7 +250,7 @@ def test_an_initialism_is_not_a_sentence_end(body):
 
 def test_a_leaf_splits_only_a_live_step():
     """Review H2: a step already done with has no work left to split."""
-    leaf = Draft("step", "leaf", "", ("balance",), Owner("step", False, False))
+    leaf = Draft("step", "leaf", "", (), "balance", Owner("step", False, False))
     assert violations(leaf) == [
         "a step's parent is the LIVE step it splits; its parent is a step that is done"]
 
@@ -257,12 +282,12 @@ def test_a_card_under_a_parent_with_no_type_is_refused_never_read_as_having_none
     """Review cp3 M-4: an untyped parent passed as "no parent", so a leaf was filed under a
     card that is no step."""
     untyped = Owner(None, True, False)
-    assert violations(Draft("step", "leaf", "", ("balance",), untyped)) == [
+    assert violations(Draft("step", "leaf", "", (), "balance", untyped)) == [
         "a step's parent is the step it splits; its parent is a card with no type"]
     for draft in (_finding(owner=untyped), _ruling(owner=untyped)):
         (problem,) = violations(draft, {OWNER})
         assert problem.endswith("its owner is a card with no type")
-    assert not violations(Draft("step", "top", "", ("balance",)))
+    assert not violations(Draft("step", "top", "", (), "balance"))
 
 
 def test_in_ruling_shape_needs_both_marks():
@@ -275,23 +300,22 @@ def test_in_ruling_shape_needs_both_marks():
 def _task(**changes):
     """A task that passes every rule (R-BAL386), with ``changes`` applied."""
     fields = {"kind": "task", "title": "4d-4a: the links' migration", "body": "The migration.",
-              "labels": (), "owner": Owner("step", True, False)}
+              "labels": (), "arc": None, "owner": Owner("step", True, False)}
     return Draft(**{**fields, **changes})
 
 
 @pytest.mark.parametrize("owner", [Owner("step", True, False), Owner("finding", True, False)])
 def test_a_task_under_a_live_piece_of_work_carrying_no_arc_passes(owner):
-    """R-BAL386: a task is a piece of one step or finding, still work, and carries no arc
-    label, its arc being its card's (rule 14); the filing mark and a release label are no
-    arc."""
+    """R-BAL386: a task is a piece of one step or finding, still work, and holds no Arc,
+    its arc being its card's (rule 14); the filing mark and a release label are no arc."""
     assert not violations(_task(owner=owner))
     assert not violations(_task(owner=owner, labels=("filing", "moves-money")))
 
 
-def test_a_task_carrying_an_arc_label_is_refused_whatever_the_change():
+def test_a_task_holding_an_arc_is_refused_whatever_the_change():
     """An arc on a task is a second home for its card's arc."""
-    (problem,) = violations(_task(labels=("balance",)), LABELS_ONLY)
-    assert problem == "a task carries no arc label: its arc is its card's; it has ['balance']"
+    (problem,) = violations(_task(arc="balance"), LABELS_ONLY)
+    assert problem == "a task holds no Arc: its arc is its card's; it holds 'balance'"
 
 
 @pytest.mark.parametrize(("owner", "said"), [

@@ -241,7 +241,7 @@ class Transfer(
         # across periods.  ``is_deleted = FALSE`` keeps soft-deleted
         # rows out of the index so a delete-and-recreate workflow
         # remains legal, mirroring the predicate on
-        # ``uq_transactions_transfer_type_active``.  scenario_id is
+        # ``uq_transactions_credit_payback_unique``.  scenario_id is
         # included so an ad-hoc transfer in the baseline scenario
         # does not block the same transfer in a what-if scenario.
         db.Index(
@@ -552,6 +552,23 @@ class Transfer(
             The source id, or ``None`` exactly when no figure is stored.
         """
         return self.__settled_figure_source_id
+
+    @property
+    def purchases(self) -> tuple[()]:
+        """``()``: a transfer holds no purchase.
+
+        What ``Transaction.purchases`` answers for a plan row -- what a person
+        recorded against it, less the status seam's covering movement --
+        asked of the other parent (ruling **plan#1983**, "price the parent,
+        draw the side").  A movement filed under a transfer is a side's
+        RECORD (``ck_transaction_entries_side_link_is_a_record``), never a
+        purchase, so the answer is the schema's.  It is asked by the rules
+        that price a parent whatever its table: whether a settle books a
+        parent's purchases (``transaction_service.settles_from_entries``) and
+        what the plan reserves for them (``cash_ledger._entry_aware_amount``);
+        a side's ``purchases`` reads it off its transfer.
+        """
+        return ()
 
     @DerivedFlag
     def recurs(self):

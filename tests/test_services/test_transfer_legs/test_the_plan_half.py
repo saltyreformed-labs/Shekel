@@ -4,7 +4,7 @@ neither half of the cash fold.
 
 The part's docstring named the two status drifts it pinned, drift A counted once and drift B by
 neither, until plan step ``balance:X-bi-6-4d-2`` deleted drift A's four cases (ruling
-**R-BAL313**); :class:`TestAStatusDriftIsCountedOnce` says what is left.
+**R-BAL313**); :class:`TestATransferClosedAtZeroIsCountedByNeitherHalf` says what is left.
 """
 
 from datetime import timedelta
@@ -16,11 +16,12 @@ from app.models.settled_figure import SettledFigure
 from app.models.transfer import Transfer
 from app.services.balance_at._asset_contributions import _recorded_contributions
 from app.services.balance_at._cash_fold import assembled_fold
-from app.services.cash_ledger import planned_cash_rows, planned_leg_contribution, sum_projected
-from app.services.recorded_contributions import load_shadow_income_contributions_for_account
+from app.services.cash_ledger import planned_cash_rows, resolve_amount, sum_projected
+from app.services.recorded_contributions import load_transfer_contributions_for_account
 from app.services.transfer_legs import (
     TransferLeg,
     leg_of,
+    parent_of,
     planned_transfer_legs,
 )
 from app.services.transfer_service import delete_transfer
@@ -125,9 +126,10 @@ class TestTheCashFoldReadsTheParent:
         would have counted the transfer twice) until plan step
         ``balance:X-bi-6-4d-2``'s vacuous-residue checkpoint: a transfer is
         one row since that step (ruling **R-BAL258**), and the database
-        refuses a row naming one (``ck_transactions_names_no_transfer``,
+        refused a row naming one (``ck_transactions_names_no_transfer``,
         pinned by ``tests/test_models/test_a_transfer_is_one_row/test_the_upgrade.py``'s
-        ``TestTheUpgrade::test_the_database_refuses_a_twin``), so that read
+        ``TestTheUpgrade::test_the_database_refuses_a_twin``) until plan step
+        balance:X-bi-6-5 dropped the column, so that read
         walked a list holding no such row (measured empty).  Renamed from
         ``test_the_plan_holds_a_leg_and_no_shadow_row``.
         """
@@ -280,8 +282,8 @@ class TestSumProjectedOverLegs:
             )
 
             assert (income, expense) == (_AMOUNT, _AMOUNT)
-            assert planned_leg_contribution(
-                leg_of(transfer, savings.id), basis,
+            assert resolve_amount(
+                parent_of(leg_of(transfer, savings.id)), basis,
             ) == _AMOUNT
 
     def test_a_leg_of_a_parent_that_is_not_projected_is_skipped(
@@ -326,7 +328,7 @@ class TestTheContributionFeedsReadTheParent:
             db.session.commit()
             basis = basis_for(account, seed_user["scenario"])
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis, account.id, [period.id],
             )
             recorded = _recorded_contributions(basis, account.id)
@@ -351,7 +353,7 @@ class TestTheContributionFeedsReadTheParent:
             db.session.commit()
             basis = basis_for(account, seed_user["scenario"])
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis, account.id, [period.id],
             )
 
@@ -379,7 +381,7 @@ class TestTheContributionFeedsReadTheParent:
             db.session.commit()
             basis = basis_for(account, seed_user["scenario"])
 
-            feed = load_shadow_income_contributions_for_account(
+            feed = load_transfer_contributions_for_account(
                 basis, account.id, [period.id],
             )
 
@@ -391,7 +393,7 @@ class TestTheContributionFeedsReadTheParent:
             }
 
 
-class TestAStatusDriftIsCountedOnce:
+class TestATransferClosedAtZeroIsCountedByNeitherHalf:
     """A transfer settled with no record on either side is counted by neither half.
 
     The class pinned the two status drifts between a transfer and its
@@ -406,12 +408,12 @@ class TestAStatusDriftIsCountedOnce:
     B, the parent settled alone, is the one case left, and it is no drift
     any more: a settled transfer whose sides hold no record is the shape the
     status-band rule admits for a transfer closed at zero
-    (``side_band_infrastructure``).  The class's name is its history.  The
+    (``side_band_infrastructure``).  The
     loan walk counts the same state once, as a ``$0.00`` payment (ruling
     **R-BAL140**), in ``test_loan_settled_legs/test_the_two_halves.py``.
     """
 
-    def test_a_projected_shadow_under_a_settled_parent_is_counted_by_neither(
+    def test_a_settled_transfer_with_no_side_record_is_counted_by_neither(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
         """Settled with no record on either side, the $250.00 transfer moves nothing.
@@ -439,8 +441,7 @@ class TestAStatusDriftIsCountedOnce:
         ``test_loan_settled_legs/``.  Until that step its
         shadows stayed Projected under the settled parent, a status drift no
         door wrote; a transfer is one row since (ruling **R-BAL258**), and
-        the state is the status-band rule's zero close.  The name is the
-        test's history.
+        the state is the status-band rule's zero close.
         """
         with app.app_context():
             checking = seed_user["account"]

@@ -169,7 +169,7 @@
     </button>
     {% endif %}
 
-    {% if not txn.transfer_id and txn.is_expense and txn.status_id == STATUS_PROJECTED
+    {% if txn.is_expense and txn.status_id == STATUS_PROJECTED
        and not txn.tracks_purchases %}
     <button type="button" class="btn btn-xs btn-warning flex-grow-1"
             hx-post="{{ url_for('transactions.mark_credit', txn_id=txn.id) }}"
@@ -178,7 +178,7 @@
             aria-label="Mark as credit card">
       <i class="bi bi-credit-card"></i> Credit
     </button>
-    {% elif not txn.transfer_id and txn.status_id == STATUS_CREDIT %}
+    {% elif txn.status_id == STATUS_CREDIT %}
     <button type="button" class="btn btn-xs btn-outline-warning flex-grow-1"
             hx-delete="{{ url_for('transactions.unmark_credit', txn_id=txn.id) }}"
             hx-target="#txn-cell-{{ txn.id }}" hx-swap="innerHTML"
@@ -452,8 +452,8 @@
        row that would book ``$245.32``, with the number visible nowhere but the
        reconcile panel.  It reads the SAME map the grid does, built from the same
        function the settle verb asks
-       (``transaction_service.retained_settle_amounts_by_id`` ->
-       ``fixed_settle_amount``), so what this promises and what a tick books
+       (``transaction_service.retained_amounts_by_key`` ->
+       ``status_seam.honoured_correction``), so what this promises and what a tick books
        cannot drift.  Rendered read-only: the record has ONE write door, which is
        a settle. #}
     {% set will_book = retained[txn.id] %}
@@ -517,7 +517,7 @@
          The PATCH handler re-verifies ownership of the submitted id (F-029)
          and flags template-generated rows as overrides when the period
          changes so the recurrence engine does not regenerate over the
-         moved row.  Not rendered for transfer shadows: those edit through
+         moved row.  A transfer edits through
          transfers/_transfer_full_edit.html instead.
 
          ``p`` is a ``DerivedPeriod`` since plan step C2-f, so its identity is
@@ -574,8 +574,8 @@
          the date prices the row, so it may move and never clear, and the
          browser refuses the clear first; the gate
          (``_gates._reject_generated_due_date_edit``) is the backstop.  A
-         transfer shadow's or a CC payback's date is its own optional note,
-         priced through its parent, and stays clearable. #}
+         CC payback's date is its own optional note, priced through its
+         parent, and stays clearable. #}
       <div class="mb-2">
         <label class="form-label mb-0 small">Due Date</label>
         {% if not txn.recurs %}
@@ -656,9 +656,9 @@
          plan step balance:X-bi-7d-2).  A recurring definition's row reads
          its flags off the definition and renders no control, and the PATCH
          door loads a schema that declares none for it (BAL-484's writer is
-         gone); a transfer shadow and a CC payback name no definition and
-         carry no cell of their own since the cutover dropped both, so they
-         render no control either and their PATCH drops a flag the same way.
+         gone); a CC payback names no definition and carries no cell of its
+         own since the cutover dropped both, so it renders no control either
+         and its PATCH drops a flag the same way.
          Until the cutover a legacy link-less row stated its flags in cells
          of its own and the predicate was ``not txn.recurs``.
 

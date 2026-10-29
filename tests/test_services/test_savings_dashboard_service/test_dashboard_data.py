@@ -184,7 +184,7 @@ class TestTheHistoricalOperandReadsATransferAsItsFromLeg:
     transfer in it is settled and live.  A soft-deleted parent's legs are
     dropped with its shadows already (``transfer_legs
     ._covering_movements_query`` reads live shadows only) and valued ``0``
-    by ``row_valuation.leg_fixed_contribution``.
+    by ``row_valuation.fixed_contribution`` of their parent.
     """
 
     def test_a_transfer_out_of_checking_counts_once_and_nothing_else_does(

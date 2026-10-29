@@ -51,14 +51,18 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
+import pytest
+
 from app import ref_cache
 from app.enums import MovementFigureSourceEnum, StatusEnum
+from app.exceptions import ValidationError
 from app.extensions import db
 from app.models.transfer import Transfer
 from app.services import (
     account_service,
     posting_service,
     status_seam,
+    transaction_service,
     transfer_service,
     transfer_recurrence,
 )
@@ -81,7 +85,8 @@ from tests.test_integration.test_loan_transfer_live_amount._helpers import (
     _build_derived_loan_transfer,
     _side_leg,
 )
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 from app.models.amount_ownership import AmountOwnership
 from tests._test_helpers import rendered_transfer_amount
 
@@ -178,12 +183,15 @@ def _sides(xfer_id):
 def _side_settlement(xfer_id, account_id):
     """Return the settlement *xfer_id*'s side on *account_id* records, or ``None``.
 
-    ``status_seam.recorded_leg_settlement`` over :func:`_side_leg`: the
-    record's figure and who wrote it, the side-shaped twin of the
-    ``recorded_settlement(shadow)`` this file read until plan step
-    ``balance:X-bi-6-4d-2`` (ruling **R-BAL167** class 4).
+    ``status_seam.recorded_settlement`` of :func:`_side_leg`'s parent (ruling
+    **plan#1983**): the record's figure and who wrote it.  It read the
+    side-shaped twin ``recorded_leg_settlement`` until that ruling, and the
+    ``recorded_settlement(shadow)`` before plan step ``balance:X-bi-6-4d-2``
+    (ruling **R-BAL167** class 4).
     """
-    return status_seam.recorded_leg_settlement(_side_leg(xfer_id, account_id))
+    return status_seam.recorded_settlement(
+        parent_of(_side_leg(xfer_id, account_id)),
+    )
 
 
 class TestTheSettleFreezeIsTheSERVICEs:
@@ -218,8 +226,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.expire_all()
             for account_id in _sides(xfer.id):
                 # What it BOOKS -- the ledger figure, and the whole point.
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == _LIVE_PITI
                 # What it RECORDS -- the side's record's figure.
                 assert transfer_side_figure(
@@ -263,8 +271,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == Decimal("1512.44")
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == Decimal("1512.44")
 
     def test_an_ECHOED_prefill_is_not_written(
@@ -309,8 +317,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == Decimal("250.00")
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == Decimal("250.00")
 
     # ``test_an_explicit_None_still_CLEARS_a_typed_actual`` lived here until
@@ -375,8 +383,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == Decimal("1325.00")
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == Decimal("1325.00")
 
     def test_a_re_settle_does_not_rewrite_the_frozen_figure(
@@ -416,8 +424,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == _LIVE_PITI
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == _LIVE_PITI
 
     def test_settle_amount_publishes_what_a_tick_WILL_book(
@@ -425,8 +433,10 @@ class TestTheSettleFreezeIsTheSERVICEs:
     ):
         """The panel's figure and the booked figure come from one expression.
 
-        ``leg_settle_amount`` is what the reconcile panel renders; the dispatch
-        resolves its own figure through the same two functions.  A panel showing
+        ``transaction_service.settle_amount`` of the leg's transfer is what the
+        reconcile panel renders, and the dispatch books it: one function since
+        ruling plan#1983's settle fold, which deleted the leg's twin
+        ``leg_settle_amount``.  A panel showing
         one number beside a verb that books another is this arc's own root cause
         1 applied to a screen.
 
@@ -440,7 +450,9 @@ class TestTheSettleFreezeIsTheSERVICEs:
             xfer = _derived_loan_transfer(seed_user, seed_periods)
             leg = _side_leg(xfer.id, xfer.from_account_id)
 
-            offered = transfer_service.leg_settle_amount(leg, amount_basis_for(leg))
+            offered = transaction_service.settle_amount(
+                parent_of(leg), amount_basis_for(leg),
+            )
             assert offered == _LIVE_PITI
 
             transfer_service.update_transfer(
@@ -450,8 +462,8 @@ class TestTheSettleFreezeIsTheSERVICEs:
             db.session.commit()
 
             db.session.expire_all()
-            assert leg_settled_contribution(
-                _side_leg(xfer.id, xfer.from_account_id),
+            assert settled_contribution(
+                parent_of(_side_leg(xfer.id, xfer.from_account_id)),
             ) == offered
             assert transfer_side_figure(
                 db.session, xfer.id, xfer.from_account_id,
@@ -481,8 +493,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, account_id,
@@ -517,8 +529,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, account_id,
@@ -592,8 +604,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, account_id,
@@ -637,8 +649,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, account_id,
@@ -690,8 +702,8 @@ class TestEveryDoorReachesTheSameFigure:
 
         with app.app_context():
             for side_account_id in _sides(xfer_id):
-                assert leg_settled_contribution(
-                    _side_leg(xfer_id, side_account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer_id, side_account_id)),
                 ) == _LIVE_PITI
                 assert transfer_side_figure(
                     db.session, xfer_id, side_account_id,
@@ -822,8 +834,8 @@ class TestTheNamedVerbItself:
                 assert transfer_side_figure(
                     db.session, xfer.id, account_id,
                 ) == Decimal("250.00")
-                assert leg_settled_contribution(
-                    _side_leg(xfer.id, account_id),
+                assert settled_contribution(
+                    parent_of(_side_leg(xfer.id, account_id)),
                 ) == Decimal("250.00")
                 # ... and the day the money moved was not moved.
                 assert transfer_side_record(
@@ -971,8 +983,9 @@ class TestTheNamedVerbItself:
 class TestATransfersOfferIsWhatItsReSettleBOOKS:
     """The TRANSFER half of finding **C1**, which nothing graded.
 
-    ``transaction_service.settle_amount`` and ``transfer_service.leg_settle_amount``
-    both answer a retained ``corrected`` record before they price anything, so
+    ``transaction_service.settle_amount`` answers a retained ``corrected``
+    record before it prices anything, for a row and (since ruling plan#1983's
+    settle fold deleted ``transfer_service.leg_settle_amount``) a transfer, so
     the reconcile panel's PREFILL equals what a tick BOOKS on either kind of
     row.  The transaction half is pinned by
     ``test_full_edit_settle_door.TestWhatAReSettleBooksIsWhatTheOfferSHOWED``;
@@ -995,10 +1008,11 @@ class TestATransfersOfferIsWhatItsReSettleBOOKS:
         ``balance:X-bi-6-4d-2``): dropping its ``honoured_correction`` arm
         makes the offer ``$250.00`` while the settle still books ``$95.50``.
 
-        The retained record is read off the from-side's record and the offer
-        asked of that side's LEG (``leg_settle_amount``, whose retained arm is
-        ``honoured_figure``), where both were asked of the expense twin until
-        that step (ruling R-BAL167 class 1, plan step balance:X-bi-6-4d-2).
+        The retained figure is the transfer's, and the offer is asked of the
+        from-side LEG's parent (``settle_amount(parent_of(leg))``, ruling
+        plan#1983; ``leg_settle_amount`` of the leg until that ruling's settle
+        fold), where both were asked of the expense twin until plan step
+        balance:X-bi-6-4d-2 (ruling R-BAL167 class 1).
         """
         with app.app_context():
             xfer = _plain_transfer(seed_user, seed_periods, amount="250.00")
@@ -1030,7 +1044,9 @@ class TestATransfersOfferIsWhatItsReSettleBOOKS:
 
             # THE CLAIM: what the panel would offer is what a tick will book.
             leg = _side_leg(xfer_id, checking)
-            offered = transfer_service.leg_settle_amount(leg, amount_basis_for(leg))
+            offered = transaction_service.settle_amount(
+                parent_of(leg), amount_basis_for(leg),
+            )
             assert offered == Decimal("95.50"), (
                 f"the panel would offer {offered} for a transfer whose "
                 "re-settle books its retained correction"
@@ -1040,6 +1056,38 @@ class TestATransfersOfferIsWhatItsReSettleBOOKS:
             db.session.commit()
             db.session.expire_all()
             assert transfer_side_figure(db.session, xfer_id, checking) == offered
+
+    def test_a_deleted_transfer_is_refused_by_the_rows_guard_in_its_words(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """A soft-deleted transfer's offer is refused by the one guard, naming no id.
+
+        ``settle_amount`` refuses a deleted parent whatever its table
+        (``transaction_service.reject_unsettleable``, ruling plan#1983's
+        settle fold).  The transfer twin it replaced refused with "Transfer
+        <id> is soft-deleted; a settle cannot resurrect a deleted transfer.",
+        showing the owner an id (ruling R-CC98 forbids one); the seam's
+        sentence names the transfer by its from-side's label, the words its
+        Transfer arm refuses a deleted transfer's record with.  Shown to fire
+        by restoring the twin's sentence: the first assertion fails.
+        """
+        with app.app_context():
+            xfer = _plain_transfer(seed_user, seed_periods, amount="250.00")
+            db.session.commit()
+            leg = _side_leg(xfer.id, xfer.from_account_id)
+            xfer.is_deleted = True
+            db.session.flush()
+
+            with pytest.raises(ValidationError) as exc:
+                transaction_service.settle_amount(
+                    parent_of(leg), amount_basis_for(leg),
+                )
+
+            message = str(exc.value)
+            assert "was deleted: a payment cannot be recorded under it" in (
+                message
+            )
+            assert f"Transfer {xfer.id}" not in message
 
 
 class TestOneBrokenPairCannotStopTheDeployResync:
@@ -1061,12 +1109,13 @@ class TestOneBrokenPairCannotStopTheDeployResync:
     would have posted a figure and carried on.
 
     **That drift has no row to live on since plan step balance:X-bi-6-4d-2**: a
-    transfer is one row and ``ck_transactions_names_no_transfer`` refuses a
-    twin (ruling **R-BAL258**).  The batch's blast radius is still the subject,
-    so the case below breaks a transfer the way one still CAN be broken -- its
-    to-side's record carried onto an account whose ledger pairing is gone,
-    ``test_posting_service.py``'s recipe -- beside a healthy transfer the
-    resync genuinely has to re-post.
+    transfer is one row, and no transaction can name it:
+    ``ck_transactions_names_no_transfer`` refused a twin (ruling **R-BAL258**)
+    until plan step balance:X-bi-6-5 dropped the column.  The batch's blast
+    radius is still the subject, so the case below breaks a transfer the way
+    one still CAN be broken -- its to-side's record carried onto an account
+    whose ledger pairing is gone, ``test_posting_service.py``'s recipe --
+    beside a healthy transfer the resync genuinely has to re-post.
     """
 
     @staticmethod

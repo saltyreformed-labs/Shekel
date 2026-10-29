@@ -45,8 +45,9 @@ from app.models.ref import AccountType
 from app.posting_infrastructure import apply_ledger_append_only_privileges
 from app.services import account_service
 from tests._test_helpers import (
-    add_txn,
+    add_entry,
     create_account_of_type,
+    create_envelope_txn,
     ledger_accounts_for_account,
     make_balanced_entry,
     one_off_row_of,
@@ -897,41 +898,49 @@ class TestLedgerAppendOnlyPrivileges:
             .count() == 0
         )
 
-    def test_transaction_delete_set_null_survives_revoke(
+    def test_movement_delete_set_null_survives_revoke(
         self, db, seed_user, shekel_app_role,
     ):
         """Source SET NULL keeps working for the revoked role.
 
-        Deleting a transaction as ``shekel_app`` must null the entry's
-        ``transaction_id`` back-link -- an UPDATE of a table the role cannot
-        UPDATE, executed by the referential action as the owner.  The posted
-        fact itself (entry + legs) survives, per the ledger's immutability
-        contract.
+        Deleting a movement (a purchase) as ``shekel_app`` must null the
+        entry's ``transaction_entry_id`` back-link -- an UPDATE of a table the
+        role cannot UPDATE, executed by the referential action as the owner.
+        The posted fact itself (entry + legs) survives, per the ledger's
+        immutability contract.  It deleted a transaction and read the entry's
+        ``transaction_id`` link until plan step ``balance:X-bi-6-5``'s second
+        leaf (card plan#1845) deleted that link; the movement link is the one
+        a source delete can null now.
         """
         try:
             db.session.execute(db.text("RESET ROLE"))
             from_ledger, to_ledger = self._owner_ledger_pair(
                 db.session, seed_user,
             )
-            txn = add_txn(
-                db.session, seed_user, seed_user["bootstrap_period"],
+            envelope = create_envelope_txn(
+                seed_user, db.session, seed_user["bootstrap_period"],
                 "R4 set-null probe", Decimal("50.00"),
             )
+            add_entry(
+                db.session, seed_user, envelope, Decimal("20.00"),
+                seed_user["bootstrap_period"].start_date,
+            )
             db.session.commit()
-            txn_id = txn.id
+            [movement] = envelope.entries
+            movement_id = movement.id
             entry = make_balanced_entry(
                 db.session, seed_user,
                 from_ledger_id=from_ledger, to_ledger_id=to_ledger,
-                transaction_id=txn_id,
-                source_kind=PostingSourceEnum.TRANSACTION,
+                transaction_entry_id=movement_id,
+                source_kind=PostingSourceEnum.PURCHASE,
                 posting_kind=PostingKindEnum.EXPENSE,
             )
             entry_id = entry.id
 
             db.session.execute(db.text(f"SET ROLE {shekel_app_role}"))
             db.session.execute(db.text(
-                "DELETE FROM budget.transactions WHERE id = :t"
-            ), {"t": txn_id})
+                "DELETE FROM budget.transaction_entries WHERE id = :e"
+            ), {"e": movement_id})
             db.session.commit()
         finally:
             db.session.rollback()
@@ -940,7 +949,7 @@ class TestLedgerAppendOnlyPrivileges:
         db.session.expire_all()
         stored = db.session.get(JournalEntry, entry_id)
         assert stored is not None, "the posted fact must survive its source"
-        assert stored.transaction_id is None
+        assert stored.transaction_entry_id is None
         assert (
             db.session.query(Posting)
             .filter_by(journal_entry_id=entry_id)

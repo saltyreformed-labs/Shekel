@@ -50,11 +50,11 @@ from app.services import companion_service, grid_view_service
 from app.services.account_resolver import resolve_owner_cash_flow_set
 from app.services.cash_ledger import (
     baseline_amount_basis,
-    amounts_by_id,
-    settled_amounts_by_id,
+    amounts_by_key,
+    settled_amounts_by_key,
 )
 from app.services.entry_service import build_entry_lists_dict, build_entry_sums_dict
-from app.services.transaction_service import retained_settle_amounts_by_id
+from app.services.transaction_service import retained_amounts_by_key
 from app.utils.dates import display_today
 from app.exceptions import NotFoundError
 
@@ -139,7 +139,7 @@ def _build_partial_context(
     # on a missing baseline, so an owner without one meets the application's
     # ONE designed answer (ruling R-BW) instead of two surfaces disagreeing
     # about whether they can price anything.
-    budgets = amounts_by_id(
+    budgets = amounts_by_key(
         transactions, baseline_amount_basis(owner_id),
     )
     # What each row's money DID, beside what its amount IS (plan step X-au-c3).
@@ -148,14 +148,14 @@ def _build_partial_context(
     # shares that macro, publishes both for exactly the reason the owner grid
     # does.  It needs no basis: a settlement record is the row's own, and
     # reading one consults no producer.
-    settled = settled_amounts_by_id(transactions)
+    settled = settled_amounts_by_key(transactions)
     # And what each row WOULD book if it were marked paid, where that differs
     # from both maps above (plan step X-au-c3, developer 2026-08-17): a row
     # reverted out of the settled band keeps what it recorded and a re-settle
     # honours it.  The shared card macro draws it, so the companion publishes it
     # for the same reason it publishes the other two -- a surface that took two
     # of the three would show a figure the tick beside it does not book.
-    retained = retained_settle_amounts_by_id(transactions)
+    retained = retained_amounts_by_key(transactions)
     entry_sums = build_entry_sums_dict(transactions, budgets)
     # Pre-render context for the inline envelope entries list -- see
     # app/routes/grid/page.py::_build_entry_maps for the rate-limit

@@ -275,8 +275,9 @@ class TestBalanceAnomalies:
         It also moved its two shadow rows' own day inside the schedule, and
         then hid the two, asserting both legs were still reported each time,
         until plan step ``balance:X-bi-6-4d-2``: a transfer is one row and no
-        row may name one (``ck_transactions_names_no_transfer``, ruling
-        **R-BAL258**), so each plant updated no row and nothing replaces
+        row could name one (``ck_transactions_names_no_transfer``, ruling
+        **R-BAL258**, until plan step balance:X-bi-6-5 dropped the column), so
+        each plant updated no row and nothing replaces
         them -- a transfer carries no settle day of its own to move, and has
         no twin to hide.
         """

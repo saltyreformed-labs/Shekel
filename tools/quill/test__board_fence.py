@@ -140,12 +140,14 @@ def _statement(node: ast.AST, parents: dict) -> ast.AST:
 
 def test_every_mutation_the_app_sends_goes_through_board_write():
     """The tool as committed keeps the fence, and it HAS mutations to keep it on: the
-    board's four, each a module-level constant of ``_tracker``."""
+    board's six, its four moves and its two Status writes (rulings plan#1873, plan#1905),
+    each a module-level constant of ``_tracker``."""
     modules = _modules()
     assert {name: fence_breaches(name, tree) for name, tree in modules.items()
             if fence_breaches(name, tree)} == {}
     assert sorted(_constants(modules[_TRACKER])) == [
-        "BOARD_ADD", "BOARD_AFTER", "BOARD_REMOVE", "BOARD_TOP"]
+        "BOARD_ADD", "BOARD_AFTER", "BOARD_REMOVE", "BOARD_STATUS_CLEAR", "BOARD_STATUS_SET",
+        "BOARD_TOP"]
 
 
 _PLANTED = '''

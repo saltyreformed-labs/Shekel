@@ -25,7 +25,8 @@ Each name, and who reads it:
   step is a drop its leaves inherit, never copied onto them).
 - ``owner`` and ``OWNED``: ``tools/release._cards``, for the groups a finding a release
   names is under, its owner's: the one step it is blocked by, never a parent (ruling
-  ``balance:R-BAL395``), by quill's one spelling of a finding's or a ruling's owner.
+  ``balance:R-BAL395``), by quill's one spelling of a finding's, a ruling's or a question's
+  owner.
 - ``SHIPPABLE``: ``tools/release._cards``, which refuses a marker naming a card of a
   kind no commit ships (a ruling, a question, a card of no type), by quill's one list
   of the kinds a commit ships.
@@ -44,7 +45,8 @@ Each name, and who reads it:
   a listing made of nothing, and its tests.
 - ``GitHubError``, ``TrackerError`` and ``CredentialsError``: ``tools/release.release``,
   which reports a failed read of the tracker, or App credentials it cannot use, as a
-  release judged on nothing.
+  release judged on nothing; ``described``, by which it prints that failure, as every
+  printer of one does: one line, naming the read it cut short (plan#1809).
 - ``FakeTracker`` and ``OutsideLink``: ``tools/release``'s tests, which drive the card
   reader against quill's own in-memory tracker, a card's link to an issue outside the
   tracker built as quill's read builds one.  The fake's cost, accepted so quill keeps ONE
@@ -54,6 +56,7 @@ Each name, and who reads it:
 from __future__ import annotations
 
 from tools.quill._command import with_closure
+from tools.quill._exits import described
 from tools.quill._fake import FakeTracker
 from tools.quill._git import (
     MARKERS,
@@ -94,6 +97,7 @@ __all__ = [
     "card_of",
     "changed",
     "changes",
+    "described",
     "dropped",
     "dropped_above",
     "leaves_below",

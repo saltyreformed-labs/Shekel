@@ -41,8 +41,8 @@ cleared ``is_override`` on a shadow through a VARIABLE
 Those doors reached SHADOWS only, and ``ck_transactions_one_pricing_link`` made
 ``transfer_id`` exclusive with ``template_id`` -- so the conclusion held by the
 schema rather than by the count, which is the stronger ground anyway.  Since
-plan step ``balance:X-bi-6-4d-2`` no transaction row names a transfer
-(``ck_transactions_names_no_transfer``), and those two doors write the flags
+plan step ``balance:X-bi-6-4d-2`` no transaction row names a transfer (plan
+step ``balance:X-bi-6-5`` dropped the column), and those two doors write the flags
 on the transfer itself, so they reach no transaction row at all.
 
 Deleting the decision would have stranded every
@@ -65,7 +65,6 @@ from typing import NamedTuple
 from app.enums import AmountSourceEnum
 from app.extensions import db
 from app.models.transaction import Transaction
-from app.exceptions import ValidationError
 from app.services import posting_service
 from app.services.amount_ownership import declare_derived
 from app.services.balance_at import BalanceContext
@@ -74,7 +73,6 @@ from app.services.definition_unarchive import UseRestore, restored_by_use
 from app.utils.log_events import (
     BUSINESS,
     EVT_RECURRENCE_CONFLICTS_RESOLVED,
-    EVT_RESOLVE_CONFLICTS_SHADOW_REFUSED,
     log_event,
 )
 
@@ -185,11 +183,6 @@ def resolve_conflicts(
         The sentence naming the picked rows left deleted
         (:attr:`~app.services.definition_unarchive.UseRestore.notice`), or
         ``None`` when none is -- always ``None`` for "keep".
-
-    Raises:
-        ValidationError: The id of a row naming a transfer was handed in;
-            nothing is changed.  No stored row names one since plan step
-            ``balance:X-bi-6-4d-2``.
     """
     if action == "keep":
         # Nothing to do -- the user wants to keep their overrides.
@@ -227,32 +220,6 @@ def resolve_conflicts(
                 )
                 skipped_count += 1
                 continue
-
-            # Transfer guard (F-007): every write of a transfer goes through
-            # transfer_service (the transfer paragraph at the end of
-            # CLAUDE.md's Architecture).  No stored row names a transfer
-            # since plan step balance:X-bi-6-4d-2
-            # (ck_transactions_names_no_transfer), and resolve_conflicts is
-            # reachable only from the transaction-template regeneration
-            # flow, so a row naming one arriving here is an internal logic
-            # error or an attacker probe.  Refuse.  The guard, its event
-            # and its message go with the column at plan step
-            # balance:X-bi-6-5.
-            if txn.transfer_id is not None:
-                log_event(
-                    logger, logging.WARNING,
-                    EVT_RESOLVE_CONFLICTS_SHADOW_REFUSED, BUSINESS,
-                    "Refused to mutate transfer shadow via resolve_conflicts",
-                    user_id=ctx.user_id,
-                    transaction_id=txn_id,
-                    transfer_id=txn.transfer_id,
-                    action=action,
-                )
-                raise ValidationError(
-                    "Cannot modify transfer shadow transactions via "
-                    "resolve_conflicts.  Route transfer mutations through "
-                    "transfer_service."
-                )
 
             picked.append(txn)
 

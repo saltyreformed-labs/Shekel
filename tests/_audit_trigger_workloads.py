@@ -753,12 +753,27 @@ def audit_triggers_off():
 #   insert      2.9 -  10.9 %      base 46.4-71.0 ms  (52 rows)
 #   update    152.2 - 161.4 %      base  7.3-8.5 ms   (260 rows)
 #   delete     28.0 -  44.0 %      base  6.0-6.7 ms   (52 rows)
+#
+# 2026-10-27, FIVE runs on a quiet machine (load average 2.2-3.2 over the
+# minute before each run, falling from a peer's suite that had ended a minute
+# earlier; no other pytest live), PostgreSQL 18.6 (the test image), after plan
+# step balance:X-bi-6-5 dropped ``budget.transactions.transfer_id`` (migration
+# ``c956c1d83108``), the one change to the surface pinned above.  The bases sit
+# below the busy 2026-09-25 block's; generate, regenerate and insert top out
+# 2.2-4.6 points above its tops, update sits wholly below its range, and
+# delete's range starts below it:
+#
+#   generate    4.7 -  10.9 %      base 19.3-20.2 ms  (25 rows)
+#   regenerate  8.5 -  11.6 %      base 35.9-37.6 ms  (25 rows)
+#   insert      4.7 -  13.1 %      base 23.4-24.3 ms  (52 rows)
+#   update    131.9 - 146.1 %      base  5.2-5.8 ms   (260 rows)
+#   delete     25.2 -  34.3 %      base  5.1-5.4 ms   (52 rows)
 
 #: :func:`fingerprint_of` the :func:`cost_surface` of the database the
-#: 2026-09-25 block above was measured on, the test image (PostgreSQL 18.6).
-#: The reader changed after that measurement, by this step's reviews (widened,
-#: and system.audit_log's storage-option reads narrowed); the database it
-#: reads did not.  A
+#: 2026-10-27 block above was measured on, the test image (PostgreSQL 18.6).
+#: The 2026-09-25 pin still held at commit ``bec6f2218``, the one below that
+#: migration (its full suite passed this gate), and of what the surface reads
+#: the migration changes only the audited table's column list.  A
 #: PostgreSQL upgrade that re-renders the catalogue's text moves the
 #: fingerprint too, and a re-measure is the right answer then as well.
-PINNED_COST_FINGERPRINT = "48249463dd2a7464bc45bb9a364428c7bd72cec2d8604af268e0be218b629e83"
+PINNED_COST_FINGERPRINT = "6665a3656a1c1a166f9847e0a505528d0b91158a4545597a041bbb2264c3783b"

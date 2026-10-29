@@ -380,7 +380,7 @@ def test_months_saved_single_quantity(
     The plan as it stands is the contractual 360 installments, so
     ``months_saved == 360 - 279 == 81``.  The loan originates at the
     current period's start with a derived payment day and is read AT its
-    origination (the clean-past shape ``test_standing_extra_folds_past_the_shadow_horizon``
+    origination (the clean-past shape ``test_standing_extra_folds_past_the_materialized_horizon``
     explains), so every one of the 360 installments is in the fold's
     future and the closed form applies to the whole plan.
     """
@@ -784,7 +784,7 @@ def test_a_generated_rows_extra_is_paid_once_in_the_plan(
         )
 
 
-def test_standing_extra_folds_past_the_shadow_horizon(
+def test_standing_extra_folds_past_the_materialized_horizon(
     app, seed_user, seed_periods_today,
 ):
     """C8a (N-15): the forward FOLD keeps a standing extra past the record horizon.
@@ -801,7 +801,7 @@ def test_standing_extra_folds_past_the_shadow_horizon(
     The loan ORIGINATES at the current period (clean past: no overdue installment,
     so the fold and the contractual schedule agree on the whole timeline rather
     than diverging on unpaid history via B-9), and has a recurring template but
-    NO generated projected shadows, so its ENTIRE forward is the ESTIMATED tier
+    NO generated transfer, so its ENTIRE forward is the ESTIMATED tier
     -- the pure N-15 path.  The fold is parallel-run against the engine's
     contract-plus-extra forward (an INDEPENDENT producer, ``project_forward``
     with the extra as its what-if) on EVERY month: equal on all of them means

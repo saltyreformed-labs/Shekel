@@ -8,8 +8,9 @@ outside it and the transfer recurrence engine (which delegates
 to this service for the final insert step).
 
 The transfer rules are CLAUDE.md's (the end of its Architecture section).  A
-transfer is one row, which ``ck_transactions_names_no_transfer`` holds by
-refusing a transaction that names one, and the database refuses the states its
+transfer is one row: no transaction can name one, the transactions table
+having no transfer column since plan step ``balance:X-bi-6-5``, and the
+database refuses the states its
 sides' payment records may not reach (the side keys, and the deferred rules in
 ``app/side_band_infrastructure.py`` and
 ``app/deleted_row_infrastructure.py``).  A settled transfer's amount is
@@ -63,12 +64,15 @@ through the grid and another through the transfers page, which is finding
   same act when one of those fields settles the row, so a fifth door cannot be
   written without the rule.
 
-:func:`leg_settle_amount` publishes what a tick will book on a transfer LEG,
-for the screens that must display the figure the verb is about to record (the
-reconcile panel's offer and the statement matcher's), as
-:func:`record_leg_clearing` records which statement showed one; the verb
-itself answers whether a human's figure was booked, so the panel's count and
-the column's contents come from one act rather than from two askings.
+What a tick will book on a transfer LEG is its transfer's
+``transaction_service.settle_amount`` (ruling **plan#1983**: a leg is offered
+at its parent's answer, the one composition the verb books through), for the
+screens that must display the figure the verb is about to record (the
+reconcile panel's offer and the statement matcher's); :func:`record_leg_clearing`
+records which statement showed one.  ``leg_settle_amount`` published it here,
+a twin of that composition, until the ruling's settle fold.  The verb itself
+answers whether a human's figure was booked, so the panel's count and the
+column's contents come from one act rather than from two askings.
 
 **The public surface is this module and ``__all__`` is it.**  A leaf is
 private; a caller outside the package depends on the names below.
@@ -89,7 +93,6 @@ from app.services.transfer_service._delete import delete_transfer
 from app.services.transfer_service._restore import restore_transfer
 from app.services.transfer_service._side_days import SideDay
 from app.services.transfer_service._settle import (
-    leg_settle_amount,
     record_leg_clearing,
 )
 from app.services.transfer_service._update import (
@@ -102,7 +105,6 @@ __all__ = [
     "TransferSpec",
     "create_transfer",
     "delete_transfer",
-    "leg_settle_amount",
     "restore_transfer",
     "record_leg_clearing",
     "settle_transfer",

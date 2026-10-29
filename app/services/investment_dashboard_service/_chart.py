@@ -87,7 +87,7 @@ def _run_growth_projection(
         ytd_contributions_start=ctx.projection_ytd,
         contributions=build_contribution_timeline(
             feed=ctx.feed,
-            contribution_transactions=ctx.shadow_contributions,
+            contribution_transactions=ctx.transfer_contributions,
             periods=periods,
             as_of=ctx.balance_ctx.as_of,
         ),

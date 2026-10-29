@@ -62,7 +62,7 @@ class TestDeleteTransfer:
       (:meth:`test_hard_delete_soft_deleted_transfer_succeeds`, a planned
       transfer hidden first; a PAID one hidden and then removed is
       ``test_transfer_posting_lifecycle.py``'s ``TestDeleteAndRestore`` case
-      ``test_hard_delete_of_a_soft_deleted_pair_finds_the_ledger_at_zero``).
+      ``test_hard_delete_after_soft_delete_writes_no_more_entries``).
     - Someone else's transfer, live or already hidden: not found, on either
       delete, and re-read after a COMMIT still there and still live or
       still hidden (:meth:`test_wrong_user_rejected`,
@@ -285,7 +285,8 @@ class TestDeleteTransfer:
         It read the shadow rows' flags afterwards ("still soft-deleted")
         until plan step ``balance:X-bi-6-4d-2``; from that step's create door
         on no row can name the transfer (``ck_transactions_names_no_transfer``,
-        ruling R-BAL258), so ``all()`` ran over none after the second delete
+        ruling R-BAL258, until plan step balance:X-bi-6-5 dropped the column),
+        so ``all()`` ran over none after the second delete
         (a vacuous read; a probe counted such rows 0 before the first delete
         and after the second, at checkpoint 2e-2a-2).
         """
@@ -328,7 +329,8 @@ class TestDeleteTransfer:
         It also counted the shadow rows naming the transfer afterwards (0)
         until plan step ``balance:X-bi-6-4d-2``; from that step's create door
         on no row can name one (``ck_transactions_names_no_transfer``, ruling
-        R-BAL258), so the count it took after the last delete read none (a
+        R-BAL258, until plan step balance:X-bi-6-5 dropped the column), so the
+        count it took after the last delete read none (a
         vacuous read; a probe counted such rows 0 before the first delete and
         after the last, at checkpoint 2e-2a-2), and it is dropped.
         """

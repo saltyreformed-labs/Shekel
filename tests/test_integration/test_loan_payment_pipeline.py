@@ -60,8 +60,9 @@ class TestLoanPaymentPipeline:
         numbered 1, 3, 4 and 5 -- one income and one expense, equal amounts,
         statuses and periods -- and step 7 took its pay period off the
         checking shadow.  ``ck_transactions_names_no_transfer`` (ruling
-        **R-BAL258**) refuses every row that loop read, so it was
-        STRUCTURALLY empty over any database the CHECK stands on; what the
+        **R-BAL258**) refused every row that loop read until plan step
+        balance:X-bi-6-5 dropped the column they named a transfer by, so it
+        was STRUCTURALLY empty over any database at either revision; what the
         pairs were kept equal to is each transfer's own row, which step 4
         now requires to exist.
         """

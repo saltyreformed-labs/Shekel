@@ -51,7 +51,6 @@ from app.utils.balance_predicates import (
     is_done,
     is_projected,
     is_projected_clause,
-    require_settled_day,
     settled_status_ids,
 )
 from tests._test_helpers import one_off_row_of
@@ -345,13 +344,15 @@ class TestSettledDay:
     def test_the_row_refusal_text_is_pinned_word_for_word(self):
         """A ROW's refusal reads exactly as it did before the refusal was shared.
 
-        Since leaf balance:X-bi-6-4d-1 the sentence frame is
-        :func:`require_settled_day`'s, shared with the loan walk's refusal of
-        a settled transfer's undated payment, and ``settled_day`` binds only
-        the row's subject and cause.  The leaf ruled the row's text stays
-        byte-identical, and the two checks above read two substrings of it,
-        so a word changed anywhere else in the shared frame would pass them:
-        this pins the whole sentence.
+        From leaf balance:X-bi-6-4d-1 the sentence frame was
+        ``require_settled_day``'s, shared with the loan walk's refusal of a
+        settled transfer's undated payment, and ``settled_day`` bound only the
+        row's subject and cause, until plan step balance:X-bi-6-5's third leaf
+        deleted the walk's refusal and folded the frame back (developer
+        answer 2026-10-27, "Delete all 6", which deleted the frame's own two
+        cases).  Each move kept the row's text byte-identical, and the two
+        checks above read two substrings of it, so a word changed anywhere
+        else in the sentence would pass them: this pins the whole sentence.
         """
         with pytest.raises(UndatedSettleError) as exc:
             settled_day(4242, None)
@@ -365,48 +366,6 @@ class TestSettledDay:
             "row with a settled status directly.  Route the write through the "
             "seam; there is deliberately no fallback day, because inventing "
             "one would place real money on a day nothing recorded."
-        )
-
-
-class TestRequireSettledDay:
-    """Pins the ONE refusal of a missing settle day (leaf balance:X-bi-6-4d-1).
-
-    Two holders reach it -- a row through :func:`settled_day` and a settled
-    transfer's loan-side payment through ``loan_ledger.payment_visible_on`` --
-    and the second names its holder by reading relationships, for every
-    settled payment the loan walk folds.  So the subject must be built only
-    when the refusal fires.
-    """
-
-    def test_a_day_is_returned_without_building_the_subject(self):
-        """The happy path calls nothing: the subject is never asked for."""
-        asked = []
-
-        def subject():
-            asked.append(True)
-            return "Never named"
-
-        assert require_settled_day(
-            date(2026, 3, 5), subject=subject, cause="Unused",
-        ) == date(2026, 3, 5)
-        assert asked == []
-
-    def test_a_missing_day_builds_the_subject_once_and_frames_the_cause(self):
-        """The refusal asks for the subject once and composes subject, frame and cause."""
-        asked = []
-
-        def subject():
-            asked.append(True)
-            return "Holder 7"
-
-        with pytest.raises(UndatedSettleError) as exc:
-            require_settled_day(None, subject=subject, cause="Because of X")
-        assert asked == [True]
-        assert str(exc.value) == (
-            "Holder 7 is in a settled status but carries no settled_on, so "
-            "the day its money moved is unknown.  Because of X; there is "
-            "deliberately no fallback day, because inventing one would place "
-            "real money on a day nothing recorded."
         )
 
 

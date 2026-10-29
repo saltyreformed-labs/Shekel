@@ -33,7 +33,7 @@ def _priced(amount, payday, *, is_confirmed=False, account_id=1):
     """Build one :class:`PricedContribution`, the module's real input type.
 
     Since plan step X-au-c2 this module consumes records that were VALUED and
-    SCREENED at the boundary (``recorded_contributions.load_shadow_income_
+    SCREENED at the boundary (``recorded_contributions.load_transfer_
     contributions_*``), not ORM rows -- so the two hand-rolled transaction
     fakes that used to mirror ``effective_amount`` and carry a status are gone,
     and with them the risk of a fake drifting from the model it imitated.
@@ -641,7 +641,8 @@ class TestCalculateInvestmentInputs:
 
 
 # The ESTIMATED-vs-EFFECTIVE alignment class (deep-quality-hunt #11) lived
-# here and MOVED WHOLE to ``test_projection_inputs.TestShadowContributionBoundary``
+# here and MOVED WHOLE to
+# ``test_projection_inputs.TestAContributionIsValuedAndScreenedAtTheBoundary``
 # at plan step X-au-c2, with its four cases and their hand-computed figures
 # intact.  It pinned that a settled shadow whose ``actual_amount`` differs from
 # its ``estimated_amount`` is read at the ACTUAL by the averaged inputs feed,
@@ -791,7 +792,7 @@ class TestBuildContributionTimeline:
         )
         assert payroll[axis[3].start_date] == Decimal("700.00")
     def test_transfer_only(self):
-        """Shadow income transactions with no payroll: one record per transaction."""
+        """Transfer contributions with no payroll: one record per contribution."""
         periods = _periods(date(2020, 1, 2), date(2020, 1, 16))
         txns = [
             _priced(Decimal("200"), periods[0].start_date, is_confirmed=True),
@@ -965,7 +966,7 @@ class TestBuildContributionTimeline:
     # rule (plan step X-au-c2): this module no longer screens by status, the
     # boundary loader does, and it DROPS such a row rather than pricing it at
     # zero.  Its replacement is
-    # ``test_projection_inputs.TestShadowContributionBoundary
+    # ``test_projection_inputs.TestAContributionIsValuedAndScreenedAtTheBoundary
     # .test_excluded_status_rows_are_dropped_not_zeroed``, which grades the
     # same rule against real rows and additionally pins why dropping and
     # zeroing are not interchangeable here.

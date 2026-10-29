@@ -396,7 +396,7 @@ class TestThePickerRendersOnEverySurface:
 
         ``settled_amount=-1`` is refused at the schema tier (422) and the
         response is the card itself (``render=mobile_card``), add form
-        included -- the one path ``_render_mobile_card`` draws a picker on,
+        included -- the one path ``render_mobile_card`` draws a picker on,
         since a SETTLED card withdraws the form.
         """
         with app.app_context():

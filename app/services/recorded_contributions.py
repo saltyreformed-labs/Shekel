@@ -13,9 +13,10 @@ argument ``transfer_service._posting_sync`` was split out under.
 **The loan loaders' ONE partition since plan step balance:X-bi-6-4b**
 (ruling **R-BAL140**).  A contribution is the to-side leg of a transfer into
 the account: one that has SETTLED is worth the figure its transfer stores
-(:func:`app.services.row_valuation.leg_settled_contribution`), one still
+(:func:`app.services.row_valuation.settled_contribution` of its parent),
+one still
 PROJECTED what the parent resolves to
-(:func:`app.services.cash_ledger.planned_leg_contribution`), and WHICH half a
+(:func:`app.services.cash_ledger.resolve_amount`), and WHICH half a
 leg is in is :func:`app.services.loan_loaders.income_legs`' answer -- the
 same one the balance seam's contribution events read -- so ``is_confirmed``
 is decided by the partition and never by a second reading of the status
@@ -35,7 +36,7 @@ from app.extensions import db
 from app.models.transfer import Transfer
 from app.services.cash_ledger import (
     AmountBasis,
-    planned_leg_contribution,
+    resolve_amount,
     transfer_pricing_load_options,
 )
 from app.services.investment_projection import (
@@ -43,7 +44,8 @@ from app.services.investment_projection import (
     TransferContributions,
 )
 from app.services.loan_loaders import income_legs
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 
 
 def load_transfer_contributions_for_accounts(
@@ -97,9 +99,10 @@ def load_transfer_contributions_for_accounts(
     screen above is that partition's narrowing.  A contribution that has
     SETTLED -- its transfer settled -- is worth
     the figure its transfer stores
-    (:func:`~app.services.row_valuation.leg_settled_contribution`); one still
+    (:func:`~app.services.row_valuation.settled_contribution` of its
+    parent); one still
     PROJECTED is worth what the parent resolves to
-    (:func:`~app.services.cash_ledger.planned_leg_contribution`).  Neither
+    (:func:`~app.services.cash_ledger.resolve_amount`).  Neither
     half admits a Credit or Cancelled transfer, so the Python screen this used
     to apply has nothing left to drop; ``is_confirmed`` is decided by WHICH
     half a leg came from rather than by a second reading of the status
@@ -163,7 +166,7 @@ def load_transfer_contributions_for_accounts(
             PricedContribution(
                 account_id=leg.account_id,
                 payday=leg.pay_period.start_date,
-                amount=leg_settled_contribution(leg),
+                amount=settled_contribution(parent_of(leg)),
                 is_confirmed=True,
             )
             for leg in payments.settled
@@ -173,7 +176,7 @@ def load_transfer_contributions_for_accounts(
             PricedContribution(
                 account_id=leg.account_id,
                 payday=leg.pay_period.start_date,
-                amount=planned_leg_contribution(leg, basis),
+                amount=resolve_amount(parent_of(leg), basis),
                 is_confirmed=False,
             )
             for leg in payments.projected

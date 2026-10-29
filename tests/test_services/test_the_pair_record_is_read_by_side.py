@@ -2,7 +2,9 @@
 
 The settle and the update read the pair's record -- the retained correction a
 re-settle honours, the figure an echoed Actual box is compared against -- off
-its expense side, through ``transfer_legs`` (``TransferRows.expense_leg``).
+the TRANSFER since ruling plan#1983 (the update since plan#1999, the settle
+since plan#1987); from this leaf until then they read it off its expense side,
+through ``transfer_legs`` (``TransferRows.expense_leg``, deleted at plan#2019).
 An update may move an endpoint AND settle in one call (``update_transfer``'s
 contract; ``_endpoints._apply_endpoint_move`` names the case), and the move
 assigns the transfer's account RELATIONSHIP, whose ``from_account_id`` column

@@ -57,7 +57,7 @@ class AmountBasis:
     link-derived discriminator ruling R-FI refuted, and it hides which producer
     answered.  *A ``_amounts.live_amounts`` did merge their ANSWERS for callers
     that wanted one map; it went with the read-time repair at plan step X-au-d,
-    and what a caller asks for a row set now is ``amounts_by_id``, which
+    and what a caller asks for a row set now is ``amounts_by_key``, which
     dispatches per row rather than merging per producer.*
 
     **It holds the derivations rather than per-row answers, and that is plan

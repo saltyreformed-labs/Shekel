@@ -56,8 +56,8 @@ A fifth rule, **TRANSFER**, priced a transfer's two shadow rows by their
 parent (a row declaring ``parent_transfer``).  Plan step
 ``balance:X-bi-6-4d-2`` deleted the shadows (ruling **R-BAL166**), and plan
 step ``balance:X-bi-6-5`` deleted the rule, its refusal of a row with no
-parent to read, and the relation (finding **BAL-642**).  A leg reads its
-parent through :func:`resolve_transfer_amount`.
+parent to read, and the relation (finding **BAL-642**).  A leg is priced as
+its parent (:func:`resolve_amount`).
 
 **WHICH rule owns a row is next door** (:mod:`._amount_rule`, split out at plan
 step X-au-f-2 when this module passed ``max-module-lines``).  That leaf holds
@@ -69,6 +69,17 @@ neither table takes all four**: a TRANSACTION takes rules 1, 2 and 3
 (:func:`resolve_transaction_amount`), a TRANSFER takes rules 1, 3 and 4
 (:func:`resolve_transfer_amount`).  Each has its own total dispatch below, and
 the suite grades their UNION against the enum.
+
+**WHICH TABLE prices a plan item is asked ONCE, in :func:`resolve_amount`**
+(ruling **plan#1983**, "price the parent, draw the side").  A plan item is a
+row or one side of a transfer, and its PARENT -- the row itself, or the
+transfer -- stores its money facts once
+(:func:`~app.services.transfer_legs.parent_of`).  Every reader of a plan
+asks :func:`resolve_amount` of a parent, and a page's map is
+:func:`amounts_by_key`, keyed by the side and valued by its parent, so both
+sides of one transfer read one figure.  The leg twins this replaced
+(``leg_amounts_by_key`` here and ``planned_leg_contribution`` in
+:mod:`._amounts`) were the same expression spelled a second and a third time.
 
 **What the column read buys is a resolver whose answer cannot contradict the
 CHECK.**  Until plan step X-au-c2 the OWN arm was INFERRED from ``is_override``
@@ -141,10 +152,13 @@ rows in, ``Decimal`` out; no Flask import, no writes.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.exceptions import AmountUnresolvable
+from app.models.transfer import Transfer
+from app.services.transfer_legs import PlanItem, PlanParent, cell_key, parent_of
 
 from ._amount_basis import AmountBasis
 from ._amount_rule import AmountRule, amount_rule, transfer_amount_rule
@@ -193,7 +207,8 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
     a transfer shadow was DERIVED from then, so a surface that loaded
     projected shadows walked to a parent per row without it.  None loads one
     now: the grid prices a transfer's legs since leaf ``X-bi-6-1``
-    (:func:`leg_amounts_by_key`), the cash fold and the loan payment feed read
+    (:func:`amounts_by_key` over their parents), the cash fold and the loan
+    payment feed read
     projected transfers as legs of the PARENT and take
     :func:`~app.utils.amount_relationships.transfer_pricing_load_options`
     instead, and plan step ``balance:X-bi-6-4d-2`` deleted the shadows (ruling
@@ -272,18 +287,68 @@ def resolve_transaction_amount(txn, basis: AmountBasis) -> Decimal:
     return _RULE_ANSWERS[amount_rule(txn)](txn, basis)
 
 
-def amounts_by_id(rows, basis: AmountBasis) -> dict[int, Decimal]:
-    """Return ``{transaction_id: what the row's amount IS}`` for *rows*.
+def resolve_amount(parent: PlanParent, basis: AmountBasis) -> Decimal:
+    """Return what *parent*'s amount is, by its table's rule set.
 
-    **The batch every reader that takes a row's BUDGET uses** (plan step
-    X-au-c2b), and the sibling of
-    :func:`~._amounts.contributions_by_id` rather than a second spelling of it.
-    The two answer different questions and a reader wants one or the other:
+    **The ONE place the plan amount branches on a parent's table** (ruling
+    **plan#1983**): a plan row is priced by :func:`resolve_transaction_amount`,
+    a transfer by :func:`resolve_transfer_amount` -- the two R-FI rule tables,
+    which differ in which rules a table takes (module docstring) and nothing
+    else.  Every reader of a plan item's plan asks this of the item's
+    :func:`~app.services.transfer_legs.parent_of`, so a transfer's two sides
+    read the one stored figure and a rule changed once changes both shapes.
 
-      * a CONTRIBUTION is what the row is worth to a balance -- ``0`` for an
-        excluded row, what the row RECORDED as having moved once it has settled
-        (``row_valuation.settled_figure``), else the resolved amount;
-      * an AMOUNT is what the row's budget IS, unconditionally.
+    It replaces ``planned_leg_contribution`` (``._amounts``) and this module's
+    ``leg_amounts_by_key``, each the transfer arm of this branch spelled again
+    for a side (leaves ``X-bi-6a`` and ``X-bi-6-1``).
+
+    Args:
+        parent: The plan row or transfer to price.
+        basis: The read pass's :class:`AmountBasis` (:func:`amount_basis`).
+
+    Returns:
+        The parent's amount as a ``Decimal``.
+
+    Raises:
+        AmountUnresolvable: From the table's resolver, when the rule that owns
+            *parent* cannot answer (or, for a row, when *basis* prices another
+            scenario).
+        UnsupportedStateError: From :func:`resolve_transaction_amount`'s
+            salary rule, for a row whose profile is in a state the tax law
+            does not list (plan step salary:X-at-3).
+    """
+    if isinstance(parent, Transfer):
+        return resolve_transfer_amount(parent, basis)
+    return resolve_transaction_amount(parent, basis)
+
+
+def amounts_by_key(
+    items: Iterable[PlanItem], basis: AmountBasis,
+) -> "dict[int | tuple[int, int], Decimal]":
+    """Return ``{cell_key(item): what its parent's amount IS}`` for *items*.
+
+    **The batch every reader that takes an item's BUDGET uses** (plan step
+    X-au-c2b), keyed by the side and valued by its parent (ruling
+    **plan#1983**): a row by its id and its own plan, a transfer leg by its
+    ``(transfer id, account id)`` and its transfer's plan
+    (:func:`resolve_amount`), so the one ``budgets`` map a page publishes
+    holds both shapes and both legs of one transfer read one figure -- the
+    figure the transfer popover the same click opens shows
+    (``routes._render_helpers.transfer_budgets``).  ``amounts_by_id`` and its
+    leg twin ``leg_amounts_by_key`` (leaf ``X-bi-6-1``, ruling **R-BAL87**)
+    were the two halves of it until that ruling.  The resolver is asked once
+    per item rather than once per parent because the cost is a lookup on
+    every arm but a derive-mode loan payment's, and a cache here would be a
+    second home for the answer.
+
+    It is the sibling of :func:`~._amounts.contributions_by_key` rather than
+    a second spelling of it.  The two answer different questions and a
+    reader wants one or the other:
+
+      * a CONTRIBUTION is what the item is worth to a balance -- ``0`` for an
+        excluded parent, what the parent RECORDED as having moved once it has
+        settled (``row_valuation.settled_figure``), else the resolved amount;
+      * an AMOUNT is what the item's budget IS, unconditionally.
 
     **Ruling E-21 is why the second exists.**  An entry-tracked bill row's
     budget base is ``estimated_amount`` -- never what the row recorded as
@@ -295,7 +360,7 @@ def amounts_by_id(rows, basis: AmountBasis) -> dict[int, Decimal]:
     number it is being compared against.
 
     **There is deliberately NO status gate above the resolve**, which is the one
-    place this differs in shape from ``contributions_by_id``.  That batch gates
+    place this differs in shape from ``contributions_by_key``.  That batch gates
     first because an excluded row is worth ``$0.00`` and has no producer to
     answer it; here the excluded row's budget is exactly what is being asked
     for, so the resolver is asked for every row.  A per-kind cutover
@@ -303,61 +368,33 @@ def amounts_by_id(rows, basis: AmountBasis) -> dict[int, Decimal]:
     answers whatever its status -- and rule 2 and rule 4 stopped reading status
     at this same step precisely so they can.
 
-    Every id in *rows* appears in the result, so a caller indexes it with ``[]``
-    and a row it forgot to price raises a ``KeyError`` where it is read.  There
-    is deliberately no ``.get(id, default)`` shape: a default here is a
-    fabricated figure in a money path.
+    Every key in *items* appears in the result, so a caller indexes it with
+    ``[]`` and an item it forgot to price raises a ``KeyError`` where it is
+    read.  There is deliberately no ``.get(key, default)`` shape: a default
+    here is a fabricated figure in a money path.
 
     Args:
-        rows: The loaded rows to price.  They may span accounts -- the basis is
-            keyed on the owner, not on one account -- but every one must belong
-            to *basis*'s owner and scenario.
+        items: The loaded rows and transfer legs to price, the legs' parents
+            loaded with
+            :func:`~app.utils.amount_relationships.transfer_pricing_load_options`.
+            They may span accounts -- the basis is keyed on the owner, not on
+            one account -- but every one must belong to *basis*'s owner and
+            scenario.
         basis: The read pass's :class:`AmountBasis`.
 
     Returns:
-        ``{transaction_id: Decimal}`` covering every row.
+        ``{cell_key: Decimal}`` covering every item; a row's key is its id.
 
     Raises:
-        AmountUnresolvable: From the resolver, for a row whose rule cannot
+        AmountUnresolvable: From the resolver, for a parent whose rule cannot
             answer.  A refusal is never a fallback (see the module docstring).
         UnsupportedStateError: From the resolver, for a salary-linked row
             whose profile is in a state the tax law does not list (plan step
             salary:X-at-3).
     """
-    return {row.id: resolve_transaction_amount(row, basis) for row in rows}
-
-
-def leg_amounts_by_key(legs, basis: AmountBasis) -> dict[tuple[int, int], Decimal]:
-    """Return ``{leg.cell_key: what the leg's amount IS}`` for transfer legs.
-
-    :func:`amounts_by_id`'s twin for the grid's transfer legs (leaf
-    ``X-bi-6-1``, ruling **R-BAL87**): a leg's budget is its parent's, priced
-    by :func:`resolve_transfer_amount` -- the ONE producer ruling **R-BAL10**
-    put a transfer's amount on, and what ``routes._render_helpers
-    .transfer_budgets`` asks for one transfer -- so a leg's cell and the
-    transfer popover the same click opens cannot show two figures.  Keyed by
-    :attr:`~app.services.transfer_legs.TransferLeg.cell_key`, a tuple, so the
-    page's one ``budgets`` map holds rows (by ``id``) and legs together.
-    Both legs of one transfer resolve to one figure; the resolver is asked
-    once per leg rather than once per parent because the cost is a lookup on
-    every arm but a derive-mode loan payment's, and a cache here would be a
-    second home for the answer.
-
-    Args:
-        legs: The :class:`~app.services.transfer_legs.TransferLeg` values a
-            surface is about to render, their parents loaded with
-            :func:`~app.utils.amount_relationships.transfer_pricing_load_options`.
-        basis: The read pass's :class:`AmountBasis`.
-
-    Returns:
-        ``{(transfer_id, account_id): Decimal}`` covering every leg.
-
-    Raises:
-        AmountUnresolvable: From the resolver, for a transfer whose rule cannot
-            answer.  A refusal is never a fallback (see the module docstring).
-    """
     return {
-        leg.cell_key: resolve_transfer_amount(leg.transfer, basis) for leg in legs
+        cell_key(item): resolve_amount(parent_of(item), basis)
+        for item in items
     }
 
 
@@ -385,9 +422,8 @@ def resolve_transfer_amount(xfer, basis: AmountBasis) -> Decimal:
     ``X-au-f-2``).  The occurrence is ONE economic
     event, held as three rows until plan step ``balance:X-bi-6-4d-2`` deleted
     its two shadows (ruling **R-BAL166**) and as one since; the two legs are
-    its PROJECTION, so the value's home is the parent and each leg reads it
-    through this function (the grid's :func:`leg_amounts_by_key` and the cash
-    fold's :func:`~._amounts.planned_leg_contribution` among its callers).
+    its PROJECTION, so the value's home is the parent and each leg is priced
+    as it, through :func:`resolve_amount` (ruling **plan#1983**).
 
     **The OWN arm is asked FIRST, and on a loan payment that is the whole of
     R-JM.**  A transfer carrying a figure owns it whatever its template says, so

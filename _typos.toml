@@ -61,6 +61,7 @@ HSA = "HSA"             # Health Savings Account (app/enums.py)
 hsa = "hsa"
 astroid = "astroid"    # the pylint AST library (tools/pylint/)
 selectin = "selectin"   # SQLAlchemy's lazy="selectin" loader strategy (app/models/pay_stub.py)
+froms = "froms"         # SQLAlchemy's Select.get_final_froms(), a statement's FROM list (test_no_path_reads_a_sides_record_alone.py)
 # Jinja/loop-variable abbreviations used as template conventions.
 ded = "ded"            # {% for ded in pretax_deductions %}
 ect = "ect"            # {% for ect in employer_contribution_types %}

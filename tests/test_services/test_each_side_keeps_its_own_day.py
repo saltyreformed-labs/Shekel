@@ -271,7 +271,7 @@ class TestAFigureCorrection:
                 .first()
             )
             transfer_service.record_leg_clearing(
-                transfer_legs.grid_transfer_leg(xfer, xfer.from_account_id),
+                transfer_legs.leg_of(xfer, xfer.from_account_id),
                 anchor.id,
             )
             db.session.commit()
@@ -294,14 +294,12 @@ class TestASettleOverADriftedSide:
     and the repair went with it; the first case says what still holds.
     """
 
-    def test_the_drifted_side_takes_the_stated_day_and_the_other_keeps_its_own(
+    def test_a_drifted_side_is_refused_and_a_settle_in_its_save_keeps_the_others_day(
         self, app, seed_user, seed_periods_today,
     ):
         """A drifted side is refused at commit; a settle inside the save keeps the other's day.
 
-        The name is the test's history: the drifted side was repaired on the
-        statement's day until plan step ``balance:X-bi-6-4d-2`` (DROPPED
-        below).  The drift is the RETAINED shape (the Savings side reverted alone, its
+        The drift is the RETAINED shape (the Savings side reverted alone, its
         record kept and un-dated), planted behind the seam's back because no
         door writes it.  Until plan step ``balance:X-bi-6-4c-3`` the settle
         kept only its status over an already-settled parent, so the stated day

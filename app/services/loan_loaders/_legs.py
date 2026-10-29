@@ -46,8 +46,9 @@ covering movement as its record.  Flask-isolated, reads only, no commits.  No
 amount is read off a side's record for a payment that has settled: a record
 holds no figure since plan step balance:X-bi-6-4d-2, and a settled leg is
 worth the figure its transfer stores
-(:func:`app.services.row_valuation.leg_settled_figure`; the transfer
-paragraph at the end of ``CLAUDE.md``'s Architecture).
+(:func:`app.services.row_valuation.settled_figure` of its parent, ruling
+**plan#1983**; the transfer paragraph at the end of ``CLAUDE.md``'s
+Architecture).
 """
 
 from dataclasses import dataclass
@@ -58,6 +59,7 @@ from app.services.transfer_legs import (
     TransferLeg,
     grid_transfer_legs,
     planned_transfer_legs,
+    preload_side_records,
 )
 from app.utils.amount_relationships import transfer_period_load_option
 from app.utils.balance_predicates import (
@@ -189,10 +191,14 @@ def settled_income_legs(
     plan step balance:X-bi-6-4b.**  What follows describes the set: one
     :class:`~app.services.transfer_legs.TransferLeg` per live, non-excluded
     transfer INTO the account in the scenario that is not Projected (ruling
-    **R-BAL140**) -- each carrying its covering movement as its ``record``
-    through the one join (:func:`~app.services.transfer_legs.grid_transfer_legs`),
-    and NOTHING ELSE.  Every settled-payment consumer reads this ONE set, so no
-    two can disagree on which payments are settled: the fold's event stream
+    **R-BAL140**) -- each reading its covering movement as its ``record``, every
+    side's loaded here in one statement
+    (:func:`~app.services.transfer_legs.preload_side_records`, ruling
+    **plan#2136**: the walk's visible day, the posting probe and the
+    tracking-start refusal read each leg's record, where the grid's loader
+    that builds the legs reads none), and NOTHING ELSE.  Every settled-payment
+    consumer reads this ONE set, so no two can disagree on which payments are
+    settled: the fold's event stream
     (:func:`app.services.loan_ledger.walk_loan_ledger`), the fold's display bound
     (:func:`app.services.loan_ledger.confirmed_shadows_through`), the ledger's
     per-payment principal reader, the asset contribution pass,
@@ -271,9 +277,9 @@ def settled_income_legs(
             traverse on the parents, rooted at
             :class:`~app.models.transfer.Transfer` -- ``()`` for every caller
             today: a settled leg is worth the figure its transfer stores
-            (:func:`~app.services.row_valuation.leg_settled_contribution`),
-            a column of the parent this loads, and dated from its record,
-            which the join attaches, or from the parent's own columns.
+            (:func:`~app.services.row_valuation.settled_contribution` of
+            its parent), a column of the parent this loads, and dated from its record,
+            which this pre-loads, or from the parent's own columns.
 
     Returns:
         Every settled payment's leg, ascending by ``(pay_period.start_date,
@@ -316,6 +322,7 @@ def settled_income_legs(
                 f"Projected: this partition is the app's one settled-payment "
                 f"derivation and cannot place the payment"
             )
+    preload_side_records(transfers)
     legs = grid_transfer_legs(
         transfers, lambda transfer: (transfer.to_account_id,),
     )
@@ -356,7 +363,7 @@ def projected_income_legs(
     not a payment and is not returned.
 
     Carries no period bound and NO cash: the plan builder resolves each leg's
-    cash (:func:`app.services.cash_ledger.planned_leg_contribution` over the
+    cash (:func:`app.services.cash_ledger.resolve_amount` over the
     parent), its due date (:func:`loan_payment_due_date`, which takes a leg)
     and its escrow as the plan is assembled.
 

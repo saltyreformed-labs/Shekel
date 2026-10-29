@@ -558,7 +558,7 @@ class TestUpdateTransfer:
         but ``test_transfer_legs/test_the_grids_legs.py``'s
         ``TestTheLegMapProducers``'
         ``test_both_legs_of_a_settled_transfer_record_its_figure_beside_the_plan_and_retain_nothing``
-        and ``TestTheLegContributionTwins``'
+        and ``TestALegIsValuedAsItsParent``'
         ``test_a_settled_from_side_leg_is_worth_the_transfers_figure_and_not_its_plan``
         (the review of that checkpoint measured both failing under a mutant
         pricing a settled side at $0).

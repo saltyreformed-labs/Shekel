@@ -3986,9 +3986,7 @@ def settle_cash_row(
             txn,
             SettleDay(day=settled_on, basis=SettledDayBasisEnum.ENTERED),
         )
-        sync_covering_movement(
-            txn, was_settled=True, now_settled=True, settlement=None,
-        )
+        sync_covering_movement(txn, now_settled=True, settlement=None)
     posting_service.sync_transaction_postings(txn)
     return txn
 
@@ -4892,6 +4890,35 @@ def transfer_side_record(db_session, transfer_id, account_id):
     )
 
 
+def side_records_by_key(xfer):
+    """Return ``{(transfer id, account id): record}`` for each side of *xfer* holding one.
+
+    The map ``transfer_legs.covering_movements_by_leg`` answered until ruling
+    **plan#1984** deleted it, built from what replaced it: each side's leg
+    reads its record off the transfer's list for that side
+    (``TransferLeg.record``), both lists loaded in one statement
+    (``transfer_legs.transfer_sides``).  The cases that asserted that
+    map assert it unchanged through this, keyed by the side's ``cell_key``,
+    which is the record's account (a record's account IS its side's
+    endpoint, by the side keys).
+
+    Args:
+        xfer: The transfer, loaded.
+
+    Returns:
+        The map, holding a key only for a side that holds a record.
+    """
+    # pylint: disable=import-outside-toplevel -- same lazy-app-import
+    # convention every helper in this module follows.
+    from app.services import transfer_legs
+
+    return {
+        leg.cell_key: leg.record
+        for leg in transfer_legs.transfer_sides(xfer)
+        if leg.record is not None
+    }
+
+
 def transfer_side_figure(db_session, transfer_id, account_id):
     """Return what a transfer's side on *account_id* RECORDS, or ``None``.
 
@@ -5269,9 +5296,7 @@ def cover_bare_settled_row(db_session, txn, amount, submitted=None):
             amount=Decimal(str(submitted)),
             source=MovementFigureSourceEnum.TYPED,
         )
-    sync_covering_movement(
-        txn, was_settled=False, now_settled=True, settlement=settlement,
-    )
+    sync_covering_movement(txn, now_settled=True, settlement=settlement)
     db_session.flush()
 
 
@@ -10524,7 +10549,7 @@ def write_past_the_amount_seam(row, value):
     derived answer is invariant under a rival figure (a definition's row
     under its own column, a generated transfer's leg under its parent's) and
     the one that proves the database refuses a declared row carrying one; in
-    ``test_a_transfer_shadow_is_derived/test_the_declaration.py``,
+    ``test_a_transfers_amount_is_declared/test_the_declaration.py``,
     ``test_a_leg_cannot_hold_a_figure_while_it_declares_a_parent``, which
     proves the database refuses a transfer's twin holding a figure; and the
     hand-run ``tests/manual/verify_amount_resolver.py``.  Each is constructing

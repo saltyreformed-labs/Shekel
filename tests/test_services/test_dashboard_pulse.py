@@ -1151,7 +1151,7 @@ class TestTheBillsAreThePaychecksAcrossTheSet:
         with app.app_context():
             card = self._card(seed_user, db.session)
             period = seed_periods[_CURRENT_IDX]
-            create_transfer(
+            payment = create_transfer(
                 seed_user, db.session, seed_user["account"], card, period,
                 amount=Decimal("165.00"), due_date=date(2026, 3, 24),
             )
@@ -1175,7 +1175,7 @@ class TestTheBillsAreThePaychecksAcrossTheSet:
             assert result["still_due"]["current_period"] == Decimal("165.00")
             bills = result["due_soon"]
             assert len(bills) == 1
-            assert bills[0]["is_transfer"] is True
+            assert bills[0]["id"] == (payment.id, seed_user["account"].id)
             assert bills[0]["amount"] == Decimal("165.00")
 
     def test_a_set_of_one_is_the_old_filter(
@@ -1235,6 +1235,11 @@ class TestTheBillsAreLegsReadOffTheParent:
     def test_the_loader_answers_own_rows_and_expense_legs(
         self, app, seed_user, seed_periods, db,
     ):
+        """$300.00 Rent and a $400.00 checking -> Sweep Target transfer, one period.
+
+        The unpaid loader answers Rent as the one row and the transfer as its
+        one EXPENSE leg on checking, and ``items`` is the rows then the legs.
+        """
         with app.app_context():
             checking = seed_user["account"]
             period = seed_periods[_CURRENT_IDX]
@@ -1270,6 +1275,12 @@ class TestTheBillsAreLegsReadOffTheParent:
     def test_a_leg_bill_is_keyed_by_the_pair_and_named_from_its_endpoints(
         self, app, seed_user, seed_periods, db,
     ):
+        """A $400.00 transfer to Sweep Target due 2026-03-24 is one due-soon bill.
+
+        Keyed by its ``(transfer id, account id)`` pair, named from its
+        endpoints ("Transfer to Sweep Target"), priced at its $400.00 plan
+        with no tracked base, and counted in the period's $400.00 still due.
+        """
         with app.app_context():
             checking = seed_user["account"]
             period = seed_periods[_CURRENT_IDX]
@@ -1289,7 +1300,6 @@ class TestTheBillsAreLegsReadOffTheParent:
             assert result["still_due"]["current_period"] == Decimal("400.00")
             [bill] = result["due_soon"]
             assert bill["id"] == (transfer.id, checking.id)
-            assert bill["is_transfer"] is True
             assert bill["name"] == "Transfer to Sweep Target"
             assert bill["amount"] == Decimal("400.00")
             assert bill["amount_base"] is None

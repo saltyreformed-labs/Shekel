@@ -8,8 +8,8 @@
      * the item no longer yields a card row-key -- e.g. a Cancelled row or
        a Cancelled transfer's leg: the card lists filter cancelled items
        out, so the stale card that fired the request has nothing to
-       re-render (``transactions/_helpers._render_mobile_card``,
-       ``_render_helpers`` for a leg);
+       re-render (``routes/_mobile_card.render_mobile_card``, for a row and
+       a leg alike);
      * the row is GONE -- deleted in another tab, or while the request
        waited for its lock (plan step credit_card:CC-5-4a-4, rulings
        R-CC101 and R-CC104): the phone card's Mark Paid shows the sentence

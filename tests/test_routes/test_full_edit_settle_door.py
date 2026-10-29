@@ -118,7 +118,7 @@ def _full_edit_save(auth_client, txn, status_id, **overrides):
     **The amount it posts is the one the popover RENDERS, which is the amount
     model's answer and not the raw column** (plan step balance:X-cf).  The
     template's box reads ``budgets[txn.id]`` --
-    :func:`~app.services.cash_ledger.amounts_by_id`, the resolved figure --
+    :func:`~app.services.cash_ledger.amounts_by_key`, the resolved figure --
     and a GENERATED row stores no figure of its own, so the column is ``None``
     there and a payload built from it posts the string ``"None"``, which the
     schema refuses with a 422 before the settle runs.  Every fixture this
@@ -942,7 +942,7 @@ class TestWhatAReSettleBooksIsWhatTheOfferSHOWED:
     That broke two things at once, and the second is worse than the drift.  The
     figure a tick booked was one the screen had never shown; and because a
     submitted figure counts as a correction only when it DIFFERS from the offer
-    (``transaction_service._settle._is_correction``), no input the user could
+    (``transaction_service.is_correction``), no input the user could
     give meant "book the plan".  ``status_seam.honoured_correction`` answers
     both sides now, so the offer equals the booking and any other number is a
     genuine correction.

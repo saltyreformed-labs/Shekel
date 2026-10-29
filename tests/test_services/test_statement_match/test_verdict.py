@@ -315,7 +315,7 @@ class TestAProposalOverTheRuleSDestination:
         ``gross - off_statement_sum`` -- so filing into the envelope leaves its
         leg unchanged to the cent and no dollar is counted twice, in either
         order.  What it costs is the MATCH: the envelope now holds a purchase,
-        so the candidate scan never offers it again (``transaction_price``
+        so the candidate scan never offers it again (``settle_price``
         prices it ``0``, ``transaction_candidate`` returns ``None``; ruling
         **R-BAL81**) and ``resolve_rows`` refuses any later act naming that
         envelope as a whole as no longer available, and the line the proposal

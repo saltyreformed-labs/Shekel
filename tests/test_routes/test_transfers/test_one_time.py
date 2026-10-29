@@ -564,8 +564,8 @@ class TestOneTimeTransfer:
         what MOVED is recorded on its two sides, in each side's payment record,
         which is the thing that must not change and the thing asserted below.
         No balance reader is affected either way:
-        ``row_valuation.leg_fixed_contribution`` answers a settled side from
-        its record before any producer runs.  The record hangs off the
+        ``row_valuation.fixed_contribution`` of a settled side's parent
+        answers from its record before any producer runs.  The record hangs off the
         transfer since plan step ``balance:X-bi-6-4d-2`` and is read there
         rather than off the twins (ruling R-BAL167 class 1, plan step
         balance:X-bi-6-4d-2); their count of two went at

@@ -10,14 +10,17 @@ over transfer ids, and :func:`_leg_transfer_id` and :func:`_leg_is_income` say
 which transfer and which side.  Every loader in this package that asks the
 join lives here -- the settled half's
 :func:`transfer_movement_rows` / :func:`recorded_transfer_legs`, the posting
-writer's :func:`transfer_family_movements`, the grid's
-:func:`covering_movements_by_leg` / :func:`grid_transfer_leg` /
-:func:`grid_transfer_legs`, the transfer service's :func:`transfer_side_leg`,
-the recurrence engine's :func:`transfers_holding_records`, and every door's
+writer's :func:`transfer_family_movements`, the pre-load of many sides'
+records (:func:`preload_side_records`, which :func:`transfer_sides` calls for
+one transfer's two), the recurrence
+engine's :func:`transfers_holding_records`, and every door's
 "this transfer holds a payment" (:func:`transfer_holds_a_movement` /
 :func:`held_transfer_entries`) -- beside :func:`movement_parent`, the join's
 Python twin over one loaded movement, and :func:`parent_entries`, the list
-that movement's parent loaded it into.  Plan step ``balance:X-bi-6-4d-2``
+that movement's parent loaded it into.  A leg's record is READ off its
+transfer's list for its side (:attr:`~TransferLeg.record`, ruling
+**plan#1984**), which these loaders fill; one side's lazy read goes through
+the list's relationship, whose join is the same side link.  Plan step ``balance:X-bi-6-4d-2``
 moved the join off the shadows HERE, once, for every reader built on it.
 The plan half's :func:`planned_transfer_legs` and the reconcile panel's
 :func:`offerable_transfer_legs` live here too, beside the join they asked
@@ -34,8 +37,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, inspect, or_
 from sqlalchemy.orm import Query, joinedload
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.expression import ColumnElement, Exists
 
 from app.extensions import db
@@ -44,8 +48,11 @@ from app.models.transfer import Transfer
 from app.services.transfer_legs._leg import (
     PlanItem,
     TransferLeg,
-    _leg_on_side,
     leg_of,
+    side_legs,
+    side_movements,
+    side_movements_key,
+    transfer_side_leg,
 )
 from app.utils.balance_predicates import is_projected_clause
 
@@ -85,8 +92,9 @@ def planned_transfer_legs(
 
     Returns:
         One :class:`TransferLeg` per matching transfer, its side on this
-        account, unordered and with no :attr:`~TransferLeg.record`; ``[]``
-        for an account no still-projected transfer touches.
+        account, unordered, its side's records not pre-loaded (no reader of
+        the fold's plan reads one); ``[]`` for an account no
+        still-projected transfer touches.
     """
     return _still_planned_legs(
         account_id, options, Transfer.scenario_id == scenario_id,
@@ -96,10 +104,10 @@ def planned_transfer_legs(
 def offerable_transfer_legs(
     account_id: int,
     owner_id: int,
-    period_ids,
+    period_ids: Iterable[int],
     *,
     options: tuple,
-    transfer_ids=None,
+    transfer_ids: Iterable[int] | None = None,
 ) -> list[TransferLeg]:
     """Return the still-planned legs on *account_id* a statement could settle.
 
@@ -120,9 +128,11 @@ def offerable_transfer_legs(
     parent that is not Projected is not emitted, and a Projected parent's
     side is.  Since plan
     step ``balance:X-bi-6-4d-2`` the leg is priced and ticked off the parent
-    and the side's record alone (``transfer_service.leg_settle_amount``,
-    ``record_leg_clearing``), so no shadow's status or soft-delete reaches the
-    offer.  ``tests/test_services/test_reconcile_transfer_legs.py`` pins the
+    and the side's record alone (priced at its transfer's
+    ``transaction_service.settle_amount`` since ruling **plan#1983**, cleared
+    through ``transfer_service.record_leg_clearing``), so no shadow's status
+    or soft-delete reaches the offer.
+    ``tests/test_services/test_reconcile_transfer_legs.py`` pins the
     parent-side direction here.
 
     Args:
@@ -139,8 +149,8 @@ def offerable_transfer_legs(
             outside the scope simply does not come back.
 
     Returns:
-        One :class:`TransferLeg` per matching transfer, unordered and with no
-        :attr:`~TransferLeg.record`.
+        One :class:`TransferLeg` per matching transfer, unordered, its side's
+        records not pre-loaded.
     """
     filters = [
         Transfer.user_id == owner_id,
@@ -181,7 +191,7 @@ def _still_planned_legs(
         *filters: The caller's further clauses over ``Transfer``.
 
     Returns:
-        The legs, unordered, with no :attr:`~TransferLeg.record`.
+        The legs, unordered, their sides' records not pre-loaded.
     """
     transfers = (
         db.session.query(Transfer)
@@ -207,9 +217,9 @@ def _side_records() -> Query:
     ``balance:X-bi-6-4d-2``, ruling **R-BAL88**): a movement filed under one
     side names it by :func:`_movement_link`'s two side keys, and a movement
     filed under a plan row names that row and no transfer
-    (``ck_transaction_entries_one_parent``).  Every reader of a leg's record
-    narrows this -- the grid's
-    :func:`covering_movements_by_leg`, every settled-half reader through
+    (``ck_transaction_entries_one_parent``).  Every loader of legs' records
+    narrows this -- the pre-load (:func:`preload_side_records`), every
+    settled-half reader through
     :func:`transfer_movement_rows`, the posting writer through
     :func:`transfer_family_movements`, and every door's "this transfer holds a
     payment" through :func:`transfer_holds_a_movement` /
@@ -340,7 +350,7 @@ def transfer_movement_rows(*filters):
 
 
 def recorded_transfer_legs(*filters) -> list[TransferLeg]:
-    """Return a :class:`TransferLeg` per matching covering movement, record attached.
+    """Return a :class:`TransferLeg` per matching covering movement, its record held.
 
     :func:`transfer_movement_rows` as legs: the value the grid and the plan
     half already hold a transfer's side as, carrying its movement as
@@ -352,13 +362,119 @@ def recorded_transfer_legs(*filters) -> list[TransferLeg]:
     Args:
         *filters: As :func:`transfer_movement_rows`.
 
+    Each side's list is marked loaded with the movement the row carries
+    (:func:`_hold_side_record`), so a reader of :attr:`~TransferLeg.record`
+    costs no query (ruling **plan#1984**).
+
     Returns:
         The legs in movement-id order; ``[]`` when none match.
     """
-    return [
-        _leg_on_side(transfer, is_income=is_income, record=movement)
-        for movement, transfer, is_income in transfer_movement_rows(*filters)
-    ]
+    legs = []
+    for movement, transfer, is_income in transfer_movement_rows(*filters):
+        _hold_side_record(transfer, is_income=is_income, movement=movement)
+        legs.append(transfer_side_leg(transfer, is_income=is_income))
+    return legs
+
+
+def _hold_side_record(
+    transfer: Transfer, *, is_income: bool, movement: TransactionEntry,
+) -> None:
+    """Mark *transfer*'s list for one side loaded with *movement*, the record a leg is built FROM.
+
+    For the loaders that start from a MOVEMENT (:func:`recorded_transfer_legs`,
+    :func:`movement_parent`): the movement in hand IS its side's whole list,
+    because a side holds at most one record
+    (``uq_transaction_entries_one_*_side_record``) and the movement's link
+    names the side, so the list is filled without a query
+    (``set_committed_value``, SQLAlchemy's way to attach what a separate
+    query loaded) and a reader of :attr:`~TransferLeg.record` reads it.
+
+    **It fills only what the database would answer, and leaves the rest to
+    load.**  A list already loaded is the session's own truth -- it holds a
+    record the status seam appended, and lacks one the removal act took out,
+    before either flushes -- so it is left as it is.  A movement the database
+    does not hold as the session sees it -- one not yet flushed, or one staged
+    for delete -- fills nothing either: the read then loads the list, whose
+    autoflush lands the pending write first, so it answers what is stored.
+
+    Args:
+        transfer: The movement's transfer.
+        is_income: The movement's side (its link column, ruling **R-BAL88**).
+        movement: The side's record.
+    """
+    key = side_movements_key(is_income=is_income)
+    if key not in inspect(transfer).unloaded:
+        return
+    if not inspect(movement).persistent or movement in db.session.deleted:
+        return
+    set_committed_value(transfer, key, [movement])
+
+
+def preload_side_records(transfers: Iterable[Transfer]) -> None:
+    """Load both sides' lists of every one of *transfers* in ONE statement.
+
+    What a reader of many legs' records calls before it reads them (ruling
+    **plan#1984**: loaders that read records pre-load them, as row loaders
+    pre-load ``entries``): one statement over :func:`_side_records` narrowed
+    to the transfers named, each record dated or kept un-dated, and every
+    list found unloaded filled with what it holds (``set_committed_value``,
+    an empty list for a side holding none) -- the batch form of the lazy load
+    one :attr:`~TransferLeg.record` read runs, so a page that draws many legs
+    reads their records in one round trip rather than one per side.  A list
+    already loaded is left as it is, for :func:`_hold_side_record`'s reason.
+
+    ONE statement where SQLAlchemy's ``selectinload`` over the two
+    relationships is two, and it takes transfers the caller has ALREADY
+    loaded, which a loader option cannot: the Spending report's settled items
+    and the loan's settled payments are loaded by their readers' own queries.
+    It replaced ``covering_movements_by_leg``, a ``{(transfer id, account
+    id): record}`` map built beside the transfer's own lists, statement for
+    statement.
+
+    **Called by a reader that READS records, and by no other** (ruling
+    **plan#2136**): the Spending report's settled items
+    (``spending_analysis``), the loan's settled payments
+    (``loan_loaders.settled_income_legs``), statement match's still-planned
+    offers (``statement_match._leg_valuation.offered_legs``), the reconcile
+    writer's ticked transfers, whose settles read them
+    (``reconcile_service._transfers``), the transfer popover and its PATCH
+    (``routes/transfers``) and, for one transfer's two sides,
+    :func:`transfer_sides`.  A loader whose readers read none -- the
+    grid's :func:`grid_transfer_legs` -- loads none, where it spent this
+    statement on every grid, dashboard, pulse and calendar render until that
+    ruling.
+
+    Args:
+        transfers: The parents whose sides' records are about to be read.
+            Those whose lists are all loaded cost nothing, and none at all
+            costs no query.
+    """
+    unloaded: dict[tuple[int, bool], tuple[Transfer, str]] = {}
+    for transfer in transfers:
+        loaded_not = inspect(transfer).unloaded
+        for is_income in (False, True):
+            key = side_movements_key(is_income=is_income)
+            if key in loaded_not:
+                unloaded[(transfer.id, is_income)] = (transfer, key)
+    if not unloaded:
+        return
+    held: dict[tuple[int, bool], list[TransactionEntry]] = {
+        side: [] for side in unloaded
+    }
+    for movement in (
+        _side_records()
+        .filter(_links_any({transfer_id for transfer_id, _side in unloaded}))
+        .order_by(TransactionEntry.id)
+    ):
+        side = (
+            (movement.income_transfer_id, True)
+            if movement.income_transfer_id is not None
+            else (movement.expense_transfer_id, False)
+        )
+        if side in held:
+            held[side].append(movement)
+    for side, (transfer, key) in unloaded.items():
+        set_committed_value(transfer, key, held[side])
 
 
 def transfer_holds_a_movement() -> Exists:
@@ -438,7 +554,9 @@ def movement_parent(movement: TransactionEntry) -> PlanItem:
     **Read off the movement's side links** (plan step ``balance:X-bi-6-4d-2``,
     :func:`_side_of`), the Python twin of :func:`_leg_transfer_id` and
     :func:`_leg_is_income`: a side record is its leg's record, always (the
-    schema's two rules :func:`_side_records` names), so its leg carries it;
+    schema's two rules :func:`_side_records` names), so its leg reads it --
+    its side's list marked loaded with it (:func:`_hold_side_record`, ruling
+    **plan#1984**), so a walk over many movements reads no list by a query;
     any other movement is filed under its plan row.
     ``tests/test_services/test_transfer_legs/test_the_settled_half.py`` pins the twin against
     :func:`transfer_movement_rows`.
@@ -455,7 +573,8 @@ def movement_parent(movement: TransactionEntry) -> PlanItem:
     if side is None:
         return movement.transaction
     transfer, is_income = side
-    return _leg_on_side(transfer, is_income=is_income, record=movement)
+    _hold_side_record(transfer, is_income=is_income, movement=movement)
+    return transfer_side_leg(transfer, is_income=is_income)
 
 
 def movement_parent_loads() -> tuple:
@@ -523,9 +642,10 @@ def parent_entries(movement: TransactionEntry) -> list[TransactionEntry]:
     verbs', the entry door's re-derivation -- never meets one that is gone.
     **Asked here since leaf ``X-bi-6-4c-4``** because a transfer's payment
     has no row: since plan step ``balance:X-bi-6-4d-2`` its list is its
-    side's collection on the TRANSFER (``Transfer.expense_movements`` /
-    ``income_movements``, :func:`_side_of`), and a plan row's movement's is
-    the row's ``entries``.  The act's contract is THAT collection, never a
+    side's collection on the TRANSFER (:func:`~._leg.side_movements`, the
+    list :attr:`~TransferLeg.record` reads since ruling **plan#1984**, so the
+    act takes the movement out of the very list its leg reads), and a plan
+    row's movement's is the row's ``entries``.  The act's contract is THAT collection, never a
     copy and never a union built over two of them: a list the parent did not
     load would take the movement out of itself and leave it in the parent's,
     which is the stale walk this act exists to prevent
@@ -554,131 +674,57 @@ def parent_entries(movement: TransactionEntry) -> list[TransactionEntry]:
     if side is None:
         return movement.transaction.entries
     transfer, is_income = side
-    return transfer.income_movements if is_income else transfer.expense_movements
+    return side_movements(transfer, is_income=is_income)
 
 
-def covering_movements_by_leg(
-    transfer_ids: Iterable[int],
-) -> dict[tuple[int, int], TransactionEntry]:
-    """Return ``{(transfer id, account id): the leg's covering movement}``.
+def transfer_sides(transfer: Transfer) -> "tuple[TransferLeg, TransferLeg]":
+    """Return *transfer*'s ``(expense, income)`` legs, both sides' records loaded in ONE statement.
 
-    The grid's one load of every leg's record for a window of transfers
-    (leaf ``X-bi-6-1``): one statement over :func:`_side_records` narrowed to
-    the transfers named, dated or not, so a reverted leg carries the record
-    its revert kept (ruling **R-BAL61**) as a settled leg carries its dated
-    one.  A record says where and when its side's money moved and holds no
-    figure: the settled and retained figures the grid draws are the
-    transfer's (:attr:`~app.models.transfer.Transfer.settled_figure`).  At
-    most one per key: a side holds at most one record
-    (``uq_transaction_entries_one_expense_side_record`` /
-    ``..._one_income_side_record``), and a record's account IS its side's
-    endpoint (the side keys), so the key is the leg's.
+    The transfer writer's view of the pair for an act that reads both sides'
+    records (ruling **plan#2136**): the status applier's seam pass on a move
+    that touches the settled band (``transfer_service._status``, behind Mark
+    Paid, a settle, a revert and statement match's accept; a cancel reads no
+    record and builds :func:`~._leg.side_legs`) and the endpoint move
+    (``transfer_service._endpoints``) build them here, so the two lists load
+    together (:func:`preload_side_records`) where each side's lazy read was a
+    query of its own.  A list the session already holds is left as it is, so
+    an act that runs after another in the same request reads what that one
+    wrote, and a batch whose writer pre-loaded every transfer's records first
+    (the reconcile writer's ticks) fetches nothing here.
 
     Args:
-        transfer_ids: The parents whose legs are being drawn.  Empty answers
-            ``{}`` without a query.
+        transfer: The parent transfer.
 
     Returns:
-        The map, holding a key only for a leg that has a record.
+        ``(expense leg, income leg)``, as :func:`~._leg.side_legs` builds
+        them.
     """
-    ids = list(transfer_ids)
-    if not ids:
-        return {}
-    movements = (
-        _side_records()
-        .add_columns(_leg_transfer_id())
-        .filter(_links_any(ids))
-        .all()
-    )
-    return {
-        (transfer_id, movement.account_id): movement
-        for movement, transfer_id in movements
-    }
-
-
-def grid_transfer_leg(transfer: Transfer, account_id: int) -> TransferLeg:
-    """Return ONE leg for a grid fragment, its record loaded.
-
-    What a transfer door renders back into a leg's cell (leaf
-    ``X-bi-6-1``): :func:`grid_transfer_legs` over one transfer and one
-    side, stated separately so the fragment renderers name what they load.
-
-    Args:
-        transfer: The parent.
-        account_id: The account the leg is on.
-
-    Returns:
-        The leg, with its covering movement when one exists.
-
-    Raises:
-        ValueError: When *account_id* is neither endpoint (from
-            :func:`leg_of`).
-    """
-    return leg_of(
-        transfer, account_id,
-        record=covering_movements_by_leg([transfer.id]).get(
-            (transfer.id, account_id),
-        ),
-    )
-
-
-def transfer_side_leg(transfer: Transfer, *, is_income: bool) -> TransferLeg:
-    """Return *transfer*'s leg on one SIDE with its record, keyed by the side alone.
-
-    How the transfer service reaches a side's leg and record (leaf
-    ``X-bi-6-4d-1``).  The act's expense leg
-    (``transfer_service._validation.TransferRows.expense_leg``) is how the
-    settle and the update read the retained correction a re-settle honours
-    and the figure an echoed Actual box is compared against -- each off the
-    leg's TRANSFER, the settled figure's one home since plan step
-    ``balance:X-bi-6-4d-2``, never off the record, which holds no figure;
-    they read the expense shadow's ``entries`` until that leaf.  The writers
-    that need a side's record itself read it here too: both sides for the
-    seam pass (``transfer_service._status._side_legs``) and for an endpoint
-    move (``transfer_service._endpoints``), and the offered side for the
-    statement link (``transfer_service._settle.record_leg_clearing``).
-
-    **Keyed by the SIDE and never by an account**, which is what makes it
-    safe inside an act that moves an endpoint: ``_endpoints._apply_endpoint_move``
-    assigns the transfer's account RELATIONSHIP, and ``from_account_id`` reads
-    the old account until a flush, so a read keyed by that column found the
-    record only when some lazy load happened to autoflush first (the leaf's
-    adversarial review measured the miss).  The side is its LINK column
-    (ruling **R-BAL88**), so this read never names an account.
-
-    Args:
-        transfer: The parent.
-        is_income: ``True`` for the to-side, ``False`` for the from-side.
-
-    Returns:
-        The leg, its record the side's covering movement -- dated, or kept
-        un-dated across a revert -- or ``None`` when the side holds none.
-
-    """
-    link = (
-        TransactionEntry.income_transfer_id if is_income
-        else TransactionEntry.expense_transfer_id
-    )
-    # ``one_or_none`` and not ``first``: a side holds at most one record
-    # (``uq_transaction_entries_one_*_side_record``), and a second would be a
-    # refusal rather than a pick.
-    record = _side_records().filter(link == transfer.id).one_or_none()
-    return _leg_on_side(transfer, is_income=is_income, record=record)
+    preload_side_records((transfer,))
+    return side_legs(transfer)
 
 
 def grid_transfer_legs(
     transfers: Iterable[Transfer], shown_accounts,
 ) -> list[TransferLeg]:
-    """Return the legs a grid draws for *transfers*, records attached.
+    """Return the legs a grid draws for *transfers*, their records NOT loaded.
 
     The grid-window loader (leaf ``X-bi-6-1``, ruling **R-BAL87**): for each
     transfer, one :class:`TransferLeg` per account *shown_accounts* names for
-    it, each carrying its covering movement from ONE
-    :func:`covering_movements_by_leg` load.  Which accounts are shown is the
+    it.  Which accounts are shown is the
     caller's rule -- :func:`app.services.cash_flow_set.leg_accounts_shown`
     for the paycheck grid, where a transfer between two members shows once
     from the balance line's side (ruling **R-CC23**) -- taken as a function
     so this loader states no set of its own.
+
+    **It loads no record, because the grid reads none** (ruling
+    **plan#2136**): the grid, the dashboard's bills and pulse, the calendar
+    and a leg's fragments draw a leg off its transfer, and the only records
+    they meet are the cash fold's, which fills its own
+    (:func:`recorded_transfer_legs`).  It pre-loaded every side's list until
+    that ruling, one statement per render that nothing read.  Its two callers
+    whose readers DO read a record pre-load them themselves: the Spending
+    report's settled items (``spending_analysis``) and the loan's settled
+    payments (``loan_loaders.settled_income_legs``).
 
     Args:
         transfers: The parents in the window, loaded by the caller with the
@@ -689,16 +735,11 @@ def grid_transfer_legs(
     Returns:
         The legs, in transfer order then side order; ``[]`` for no transfers.
     """
-    transfers = list(transfers)
-    records = covering_movements_by_leg(t.id for t in transfers)
-    legs: list[TransferLeg] = []
-    for transfer in transfers:
-        for account_id in shown_accounts(transfer):
-            legs.append(leg_of(
-                transfer, account_id,
-                record=records.get((transfer.id, account_id)),
-            ))
-    return legs
+    return [
+        leg_of(transfer, account_id)
+        for transfer in transfers
+        for account_id in shown_accounts(transfer)
+    ]
 
 
 def transfers_holding_records(transfer_ids: Iterable[int]) -> set[int]:

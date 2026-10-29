@@ -40,7 +40,7 @@ from app.services import posting_service, status_seam, transaction_service
 from app.services.transaction_service import _settle
 from app.services.row_valuation import settled_contribution, settled_figure
 from app.services.cash_ledger import (
-    amounts_by_id,
+    amounts_by_key,
     derived_amount_basis,
     resolve_transaction_amount,
 )
@@ -870,7 +870,7 @@ class TestASettleBooksTheFreshestFigure:
             # An adversarial review of this step found the docstring claiming
             # this and nothing grading it -- ``estimated_amount is None`` says
             # the column is empty, not that the derivation still answers.
-            assert amounts_by_id(
+            assert amounts_by_key(
                 [txn], derived_amount_basis(txn.account.user_id, txn.scenario_id),
             )[txn.id] == Decimal("4000.00")
 
@@ -1557,13 +1557,13 @@ class TestAReplayedSettleIsANoOp:
 
 
 class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
-    """``retained_settle_amounts_by_id``'s status gate, which nothing graded.
+    """``retained_amounts_by_key``'s status gate, which nothing graded.
 
     The map's contract is narrow and its whole value is the narrowness: a
     non-``None`` entry means "this row will book something other than what you
     can SEE", so a template draws a marker without deciding anything.  A settled
     row is already showing its recorded figure
-    (``row_valuation.settled_amounts_by_id``), so a marker there would tell the
+    (``row_valuation.settled_amounts_by_key``), so a marker there would tell the
     user a settled row is about to book something -- which it is not.
 
     **Measured 2026-08-17 by an adversarial mutation pass**: dropping the
@@ -1589,7 +1589,7 @@ class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
             )
             db.session.flush()
 
-            settled_map = transaction_service.retained_settle_amounts_by_id(
+            settled_map = transaction_service.retained_amounts_by_key(
                 [txn],
             )
             assert settled_map[txn.id] is None, (
@@ -1602,7 +1602,7 @@ class TestTheRetainedMapAnswersOnlyWhereTheGapIsREAL:
             )
             db.session.flush()
 
-            reverted_map = transaction_service.retained_settle_amounts_by_id(
+            reverted_map = transaction_service.retained_amounts_by_key(
                 [txn],
             )
             assert reverted_map[txn.id] == Decimal("245.32")
@@ -1769,7 +1769,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
 
 
 class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
-    """``retained_settle_amounts_by_id`` draws the re-book badge, and it lied.
+    """``retained_amounts_by_key`` draws the re-book badge, and it lied.
 
     The badge's caption is *"the figure recorded before this row was set back to
     Projected"*, so a non-``None`` value must mean exactly that.  The map
@@ -1796,7 +1796,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
             db.session.flush()
 
             assert status_seam.recorded_settlement(txn) is None, "fixture: nothing recorded"
-            assert transaction_service.retained_settle_amounts_by_id(
+            assert transaction_service.retained_amounts_by_key(
                 [txn],
             ) == {txn.id: None}
 
@@ -1822,7 +1822,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
                 txn, ref_cache.status_id(StatusEnum.PROJECTED),
             )
 
-            assert transaction_service.retained_settle_amounts_by_id(
+            assert transaction_service.retained_amounts_by_key(
                 [txn],
             ) == {txn.id: Decimal("245.32")}
 
@@ -1849,7 +1849,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
             assert status_seam.recorded_settlement(txn).source is (
                 MovementFigureSourceEnum.RESOLVED
             )
-            assert transaction_service.retained_settle_amounts_by_id(
+            assert transaction_service.retained_amounts_by_key(
                 [txn],
             ) == {txn.id: None}
 

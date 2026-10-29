@@ -20,7 +20,6 @@ from decimal import Decimal
 
 import pytest
 
-from app import ref_cache
 from app.exceptions import BaselineMissingError
 from app.models.account import Account
 from app.models.scenario import Scenario
@@ -96,7 +95,7 @@ class TestBillRowSingleBase:
         ``txn_to_bill_dict`` takes the row's contribution as an argument since
         plan step X-au-c2 (``Transaction.effective_amount`` could not answer for
         a row whose amount is derived).  These tests resolve it through the same
-        :func:`app.services.cash_ledger.contributions_by_id` the pulse producer
+        :func:`app.services.cash_ledger.contributions_by_key` the pulse producer
         calls rather than passing a literal, so the non-entry-tracked
         assertions below still grade what the row is actually worth instead of
         a number the test handed itself.
@@ -108,8 +107,8 @@ class TestBillRowSingleBase:
         basis = cash_ledger.derived_amount_basis(
             seed_user["user"].id, txn.scenario_id,
         )
-        contributions = cash_ledger.contributions_by_id([txn], basis)
-        budgets = cash_ledger.amounts_by_id([txn], basis)
+        contributions = cash_ledger.contributions_by_key([txn], basis)
+        budgets = cash_ledger.amounts_by_key([txn], basis)
         return dashboard_service.txn_to_bill_dict(
             txn, today, contributions[txn.id], budgets[txn.id],
         )

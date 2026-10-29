@@ -347,14 +347,17 @@ def touched_transfers_clause(cash_flow: CashFlowSet):
 def set_transfer_legs(
     cash_flow: CashFlowSet, transfers: Iterable[Transfer],
 ) -> list[TransferLeg]:
-    """Return the legs the set draws for *transfers*, records attached.
+    """Return the legs the set draws for *transfers*, their records not loaded.
 
     :func:`~app.services.transfer_legs.grid_transfer_legs` under the set's
     own rule: one leg per account :func:`leg_accounts_shown` names for each
     transfer.  The leaf's loader takes the rule as a function so that it
     states no set of its own; this is where the set supplies it, ONCE, for
     every reader (leaf ``X-bi-6-1b``) -- the period-windowed ones through
-    :func:`set_transfer_legs_in_periods`, the rest with their own query.
+    :func:`set_transfer_legs_in_periods`, the rest with their own query.  A
+    reader that reads the legs' records pre-loads them itself (the Spending
+    report's settled items, ruling **plan#2136**); the grid, the dashboard and
+    the calendar read none.
 
     Args:
         cash_flow: The set.
@@ -424,9 +427,12 @@ class PlanItems(NamedTuple):
     the dashboard's unpaid bills, the calendar's period rows and the Spending
     report's settled expenses each answer (leaves ``X-bi-6-1`` and
     ``X-bi-6-1b``): the rows :func:`own_rows_clause` selected and the legs
-    :func:`set_transfer_legs` drew, kept apart because the per-item maps are
-    built by a row producer and its leg twin, and together because every
-    row-key, match and fold over them takes one list.
+    :func:`set_transfer_legs` drew.  Every map, row-key, match and fold over
+    them takes the one list :attr:`items`, each map one call over rows and
+    legs alike since ruling **plan#1983** folded the per-item producers' leg
+    twins, and no ``app/`` code reads :attr:`rows` or :attr:`legs` apart
+    (only tests do): plan step **plan#2130** replaces this value with one
+    loader per screen (ruling **plan#2131**).
 
     Attributes:
         rows: The plan rows, :class:`~app.models.transaction.Transaction`.

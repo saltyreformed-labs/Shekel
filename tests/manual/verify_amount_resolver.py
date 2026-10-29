@@ -10,7 +10,7 @@ naming the rows where it does not.
 it by deleting the resolver.**  With the whole body replaced by
 ``return txn.estimated_amount`` the agreement pass reported *997 rows, 0
 mismatches, OK* (2026-08-12, pre-cutover).  It has to: the app's published
-answer IS this resolver (``cash_ledger.amounts_by_id`` is
+answer IS this resolver (``cash_ledger.amounts_by_key`` is
 ``{row.id: resolve_transaction_amount(row, basis)}``), so comparing the two
 compares a value with itself.  That is the harness question
 ``docs/plans/verification.md`` standard 3 asks -- *can it SEE the code under

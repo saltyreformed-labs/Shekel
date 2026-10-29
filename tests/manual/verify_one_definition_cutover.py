@@ -32,8 +32,9 @@ What it captures:
 * **the grid** (``grid``), per account over EVERY saved paycheck: the row keys
   of both sections and each cell's matched row ids, exactly as the route
   builds them (``load_grid_items`` -> ``build_row_keys`` ->
-  ``build_matched_by_row_period``), plus the ``amounts_by_id`` map every cell
-  reads its figure from;
+  ``build_matched_by_row_period``), plus the budget map every cell reads its
+  figure from (``cash_ledger.amounts_by_key``; ``amounts_by_id`` before
+  plan#1986 renamed it, the same map, a row keyed by its id either way);
 * **the companion pages** (``companion``): per companion user and paycheck,
   the row ids ``companion_service.get_visible_transactions`` shows;
 * **timeliness** (``timeliness``): ``payment_timeliness_from_txns`` over every
@@ -82,10 +83,25 @@ from app.models.transaction_template import TransactionTemplate
 from app.models.user import User
 from app.routes.grid._items import load_grid_items
 from app.services.cash_flow_set import CashFlowSet  # noqa: E402  pylint: disable=wrong-import-position
-from app.services import balance_at, companion_service, grid_view_service
-from app.services.cash_ledger import amounts_by_id, resolve_transaction_amount
+from app.services import (
+    balance_at,
+    cash_ledger,
+    companion_service,
+    grid_view_service,
+)
+from app.services.cash_ledger import resolve_transaction_amount
 from app.services.spending_analysis import payment_timeliness_from_txns
 from app.services.row_valuation import settled_figure
+
+
+#: The grid's budget batch, read by the name the tree carries, so this one file
+#: grades both sides of plan#1986's rename: ``amounts_by_id`` on a tree before
+#: it, ``amounts_by_key`` after.  Both key a row by its id, so the dump is the
+#: same shape on both trees.
+_budgets_by_row = (
+    getattr(cash_ledger, "amounts_by_key", None)
+    or getattr(cash_ledger, "amounts_by_id")
+)
 
 
 def _plain(value):
@@ -163,7 +179,7 @@ def _grid(account, ctx, periods, categories):
     matched = grid_view_service.build_matched_by_row_period(
         income_keys, expense_keys, periods, rows,
     )
-    budgets = amounts_by_id(rows, ctx.amounts())
+    budgets = _budgets_by_row(rows, ctx.amounts())
     return {
         "row_count": len(rows),
         "definitions": len({r.template_id for r in rows if r.template_id is not None}),

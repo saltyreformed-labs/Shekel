@@ -1805,7 +1805,7 @@ class TestATransferIsALegOfItsParent:
 
     ``_query_transactions_for_range`` answers the set's OWN rows -- no
     shadow -- beside one leg per transfer the set touches, on the side the
-    set shows, and the day fold prices a leg through ``leg_contributions_by_key``
+    set shows, and the day fold prices a leg through ``contributions_by_key``
     keyed by ``cell_key``.  The money cases above (R-CC23, the far leg)
     already grade what a transfer is WORTH here; these grade what it IS, and
     the two states a display leg adds to the fold's: settled with a record,
@@ -2561,7 +2561,7 @@ class TestARefundedDayOnTheRealCalendar:
     Plan step ``bank_import:X-gj-2b-3``.  ``test_calendar_day_flows`` grades
     the three day-level rules as pure arithmetic; this grades the claim those
     rules rest on -- that ``DayEntry.amount`` reaches them NEGATIVE.  The chain
-    is ``contributions_by_id -> fixed_contribution -> settled_figure ->
+    is ``contributions_by_key -> fixed_contribution -> settled_figure ->
     purchases_total(txn.entries)``, and ruling **bank_import:R-II** relaxed
     ``ck_transaction_entries_positive_amount`` to ``amount <> 0`` so a settled
     envelope can be worth less than nothing.

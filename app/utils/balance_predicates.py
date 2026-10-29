@@ -167,7 +167,7 @@ def settled_status_ids() -> frozenset[int]:
     })
 
 
-def is_identity_move(row, new_status_id: int) -> bool:
+def is_identity_move(row: Transaction | Transfer, new_status_id: int) -> bool:
     """Return whether *row* is ALREADY in *new_status_id* -- nothing to do.
 
     **The predicate that tells a re-submit from a transition**, and it is the
@@ -222,7 +222,7 @@ def is_identity_move(row, new_status_id: int) -> bool:
     return row.status_id == new_status_id
 
 
-def enters_settled_band(row, new_status_id: int) -> bool:
+def enters_settled_band(row: Transaction | Transfer, new_status_id: int) -> bool:
     """Return whether moving *row* to *new_status_id* SETTLES it.
 
     **The predicate that tells a status ASSIGNMENT from a SETTLE.**  Settling
@@ -276,7 +276,38 @@ def enters_settled_band(row, new_status_id: int) -> bool:
     return row.status_id not in settled and new_status_id in settled
 
 
-def reverts_to_projected(row, new_status_id: int) -> bool:
+def touches_settled_band(row: Transaction | Transfer, new_status_id: int) -> bool:
+    """Return whether moving *row* to *new_status_id* starts or ends in the settled band.
+
+    **The moves whose act keeps a payment record in step with the status**:
+    a settle, a revert, a correction and an identity re-submit in the band.
+    A move with neither end in the band -- the cancel of a Projected item,
+    the restore of a Cancelled one -- moves no record, so its act reads
+    none.  The transfer seam's arm returns before its first read on such a
+    move (``status_seam._side.sync_side_records``), the transfer's status
+    writer loads the two sides' records only for a move this answers True
+    for (``transfer_service._status.apply_status_to_all_three``, ruling
+    **plan#2136**: a record is fetched only where something reads it), and
+    a row's seam calls its covering arm only for such a move
+    (``status_seam._seam.apply_status_change``, plan#2139), so the three
+    ask this one predicate rather than each spelling it.
+    Polymorphic over both status-bearing models for the reason
+    :func:`enters_settled_band` states.
+
+    Args:
+        row: The :class:`~app.models.transaction.Transaction` or
+            :class:`~app.models.transfer.Transfer`, read for its CURRENT
+            ``status_id``.
+        new_status_id: The status a door is asking for.
+
+    Returns:
+        True when *row*'s current status or *new_status_id* is settled.
+    """
+    settled = settled_status_ids()
+    return row.status_id in settled or new_status_id in settled
+
+
+def reverts_to_projected(row: Transaction | Transfer, new_status_id: int) -> bool:
     """Return whether moving *row* to *new_status_id* sets it BACK to Projected.
 
     **The predicate that tells a revert from a re-submit** (plan step
@@ -304,7 +335,7 @@ def reverts_to_projected(row, new_status_id: int) -> bool:
     )
 
 
-def delete_returns_to_plan(row, *, took_off: bool) -> bool:
+def delete_returns_to_plan(row: Transaction | Transfer, *, took_off: bool) -> bool:
     """Return whether the delete that took *row*'s payments off sets it back to Projected.
 
     **Ruling R-BAL246's one statement** (developer 2026-10-09, "Back as a
@@ -415,7 +446,7 @@ def settled_day(transaction_id: int, settled_on: date | None) -> date:
     return settled_on
 
 
-def status_contributes_to_balance(txn) -> bool:
+def status_contributes_to_balance(txn: Transaction | Transfer) -> bool:
     """Return True iff *txn*'s status alone permits balance contribution.
 
     The status-only half of :func:`is_balance_contributing`: returns
@@ -434,10 +465,10 @@ def status_contributes_to_balance(txn) -> bool:
     of the rule.
 
     Args:
-        txn: any object with a ``status`` attribute that, when not
-            ``None``, carries an ``excludes_from_balance`` boolean.
-            ``Transaction`` and the ``FakeContribTransaction`` test
-            duck-types both satisfy this; ``is_deleted`` is NOT
+        txn: A ``Transaction`` or a ``Transfer`` (or the
+            ``FakeContribTransaction`` test duck-type): any object with a
+            ``status`` attribute that, when not ``None``, carries an
+            ``excludes_from_balance`` boolean.  ``is_deleted`` is NOT
             consulted.
 
     Returns:
@@ -450,7 +481,7 @@ def status_contributes_to_balance(txn) -> bool:
     return not (txn.status is not None and txn.status.excludes_from_balance)
 
 
-def is_balance_contributing(txn: Transaction) -> bool:
+def is_balance_contributing(txn: Transaction | Transfer) -> bool:
     """Return True iff *txn* contributes its effective amount to a balance.
 
     Mirrors the gate in ``row_valuation.fixed_contribution`` exactly: a
@@ -461,10 +492,16 @@ def is_balance_contributing(txn: Transaction) -> bool:
     loop and any consumer that wants to ask "should this row's amount
     be summed" cannot drift apart from the valuation rule.
 
+    **It takes a ``Transaction`` OR a ``Transfer``**, as :func:`is_projected`
+    does: ``row_valuation.fixed_contribution`` asks it of a plan item's
+    PARENT (ruling **plan#1983**), which is a transfer for a transfer leg,
+    and both tables carry ``is_deleted`` and a ``status`` into
+    ``ref.statuses``.
+
     Args:
-        txn: a ``Transaction`` instance. Both ``is_deleted`` and the
-            ``status`` relationship are expected to be loaded;
-            ``Transaction.status`` is declared ``lazy="joined"`` so a
+        txn: a ``Transaction`` or ``Transfer`` instance. Both ``is_deleted``
+            and the ``status`` relationship are expected to be loaded;
+            ``status`` is declared ``lazy="joined"`` on both models so a
             standard ORM load satisfies this without explicit
             ``selectinload``.
 

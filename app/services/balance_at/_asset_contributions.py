@@ -37,7 +37,7 @@ from app.services import growth_engine
 from app.services.cash_ledger import (
     AmountBasis,
     ReconciledThrough,
-    planned_leg_contribution,
+    resolve_amount,
     transfer_pricing_load_options,
 )
 from app.services.account_projection import (
@@ -53,7 +53,8 @@ from app.services.loan_loaders import (
     settled_income_legs,
 )
 from app.services.pay_calendar import DerivedPeriod, PeriodWindow
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
+from app.services.transfer_legs import parent_of
 
 _ZERO = Decimal("0")
 
@@ -175,11 +176,12 @@ def _recorded_contributions(
     contribution that has SETTLED is read by
     :func:`~app.services.loan_loaders.settled_income_legs` and worth the
     figure its transfer stores
-    (:func:`~app.services.row_valuation.leg_settled_contribution`); one still
+    (:func:`~app.services.row_valuation.settled_contribution` of its
+    parent, ruling **plan#1983**); one still
     PROJECTED is read by
     :func:`~app.services.loan_loaders.projected_income_legs` and worth what
     the parent resolves to
-    (:func:`~app.services.cash_ledger.planned_leg_contribution`).  The settled
+    (:func:`~app.services.cash_ledger.resolve_amount`).  The settled
     half was the income-shadow row, read from ``budget.transactions``, from
     plan step balance:X-bi-6a until then.  Both file under their transfer's
     period, the one the fold lands them in.
@@ -225,7 +227,8 @@ def _recorded_contributions(
         account_id, basis.scenario_id, options=(),
     ):
         totals[leg.pay_period_id] = (
-            totals.get(leg.pay_period_id, _ZERO) + leg_settled_contribution(leg)
+            totals.get(leg.pay_period_id, _ZERO)
+            + settled_contribution(parent_of(leg))
         )
     for leg in projected_income_legs(
         account_id, basis.scenario_id,
@@ -233,7 +236,7 @@ def _recorded_contributions(
     ):
         totals[leg.pay_period_id] = (
             totals.get(leg.pay_period_id, _ZERO)
-            + planned_leg_contribution(leg, basis)
+            + resolve_amount(parent_of(leg), basis)
         )
     return totals
 

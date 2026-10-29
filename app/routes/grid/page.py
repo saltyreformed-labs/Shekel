@@ -466,8 +466,10 @@ def _build_entry_maps(
     it moved in here beside its only consumer.
 
     Args:
-        transactions: Every row the page loaded -- NOT the visible-window
-            slice.  The mobile card macro indexes these maps by ``txn.id``
+        transactions: Every item the page loaded, rows and transfer sides
+            alike (finding plan#2050) -- NOT the visible-window slice.  A
+            side holds no purchase and tracks none, so neither map holds one.
+            The mobile card macro indexes these maps by ``txn.id``
             for any row it draws, and narrowing them to the rendered window
             is a behaviour question this leaf does not open (R-PC35's own
             rejected list).
@@ -741,7 +743,7 @@ def index():
     )
     grid_view, anchor = _build_grid_view(ctx.cash_flow, ctx.balance_ctx)
     # The ONE map every cell on this page reads its amount from, built by the
-    # ONE rule every OTHER surface reads it by (``amounts_by_id``): what the
+    # ONE rule every OTHER surface reads it by (``amounts_by_key``): what the
     # row's amount RESOLVES to (ruling R-Q).  It reads the pass's own basis, so
     # the cell and the balance row beside it cannot price one row two ways.
     #
@@ -815,10 +817,12 @@ def index():
     # docstring makes for a precondition carried by the QUERY.  The rolling
     # top-up above commits BEFORE ``_resolve_grid_context`` opens the pass that
     # window comes from, which is what makes it hold the paydays just appended.
-    # Over the ROWS alone: a leg holds no purchases, and the card macro reads
-    # both maps with ``.get``.
+    # Over EVERY item, rows and transfer sides alike: a side holds no purchase
+    # and tracks none, so neither builder draws it (finding plan#2050; the
+    # entry-list builder filters before it asks anything else), and the card
+    # macro reads both maps with ``.get``.
     entry_maps = _build_entry_maps(
-        items.rows, amounts.budgets, ctx.all_periods, ctx.owner_cash_flow,
+        items.items, amounts.budgets, ctx.all_periods, ctx.owner_cash_flow,
     )
 
     return render_template(

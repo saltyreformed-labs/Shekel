@@ -32,7 +32,6 @@ from app.services.cash_flow_set import (
 from app.services.entry_service import compute_entry_sums, compute_remaining
 from app.services.transfer_legs import (
     PlanItem,
-    TransferLeg,
     cell_key,
     expense_legs,
 )
@@ -161,10 +160,12 @@ def txn_to_bill_dict(
     and every question below is one both shapes answer -- a leg reads its
     ``name``, ``due_date``, ``pay_period``, ``category`` and
     ``tracks_purchases`` off its parent, the last as ``False`` -- so there
-    is no branch here on which it is.  Two keys are identity: ``id`` is
+    is no branch here on which it is.  The key ``id`` is its identity,
     :func:`~app.services.transfer_legs.cell_key` (a row's id, a leg's
-    ``(transfer id, account id)``), and ``is_transfer`` says the item is a
-    leg where it used to say the row carried a ``transfer_id``.
+    ``(transfer id, account id)``).  No key says which shape the item is:
+    ``is_transfer`` did, read by no template or app code, until plan step
+    ``balance:X-bi-6-5``'s fourth leaf deleted it (finding plan#2016,
+    ruling **plan#2094**).
 
     Expects txn.template and txn.entries to be accessible -- callers
     dealing with collections should eager-load them via selectinload
@@ -185,7 +186,7 @@ def txn_to_bill_dict(
     for a row whose amount is DERIVED -- such a row stores no figure, and
     resolving a paycheck needs the owner's whole pay-period set, which no
     per-row property can hold.  The caller resolves the whole row set
-    ONCE through :func:`app.services.cash_ledger.contributions_by_id` and
+    ONCE through :func:`app.services.cash_ledger.contributions_by_key` and
     indexes it here, so the paycheck engine runs once per read pass
     rather than once per bill (finding **N-228**).
 
@@ -193,13 +194,13 @@ def txn_to_bill_dict(
         txn: The row or transfer leg to convert.
         today: The reference date used to compute days_until_due.
         contribution: What this row contributes, from the caller's
-            :func:`~app.services.cash_ledger.contributions_by_id` map --
+            :func:`~app.services.cash_ledger.contributions_by_key` map --
             ``0`` for a row that contributes nothing, the entered
             figure a SETTLED row RECORDED as moved, else the row's resolved
             amount.  Read only for a non-entry-tracked row; an envelope
             answers on its E-21 budget base instead.
         budget: What the row's amount RESOLVES to, from the caller's
-            :func:`~app.services.cash_ledger.amounts_by_id` map -- the E-21
+            :func:`~app.services.cash_ledger.amounts_by_key` map -- the E-21
             declared base.  An ARGUMENT rather than a read of
             ``txn.estimated_amount`` since plan step X-au-c2b, for the reason
             the contribution beside it is one: under the amount model a derived
@@ -229,7 +230,6 @@ def txn_to_bill_dict(
         "period_start_date": txn.pay_period.start_date,
         "category_group": txn.category.group_name if txn.category else None,
         "category_item": txn.category.item_name if txn.category else None,
-        "is_transfer": isinstance(txn, TransferLeg),
         "days_until_due": days_until,
     }
     bill.update(_entry_progress_fields(txn, budget))

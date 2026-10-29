@@ -170,15 +170,14 @@ class TestTransactionEffectiveAmount:
         rule's transfer arm refuses a transfer hidden holding one, so the
         transfer is hidden by SQL with the payments left on, the Checking
         leg -- its transfer and its side's record -- is valued inside the
-        save (``leg_settled_contribution``, the leg's twin of
-        ``settled_contribution``), and then the commit is refused.
+        save (``settled_contribution`` of the leg's parent, ruling
+        **plan#1983**), and then the commit is refused.
         """
         # pylint: disable=import-outside-toplevel
         from sqlalchemy import text
 
         from app.models.transaction_entry import TransactionEntry
-        from app.services.row_valuation import leg_settled_contribution
-        from app.services.transfer_legs import TransferLeg
+        from app.services.transfer_legs import TransferLeg, parent_of
         from tests._test_helpers import (
             create_settled_transfer,
             refused_by_database_rule,
@@ -204,13 +203,15 @@ class TestTransactionEffectiveAmount:
             leg = TransferLeg(
                 transfer=xfer, account_id=seed_user["account"].id,
                 is_income=False,
-                record=db.session.query(TransactionEntry).filter(
-                    TransactionEntry.expense_transfer_id == xfer.id,
-                ).one(),
             )
+            # Read off the transfer's list (ruling plan#1984), checked by its
+            # own SQL rather than handed to the leg.
+            assert leg.record is db.session.query(TransactionEntry).filter(
+                TransactionEntry.expense_transfer_id == xfer.id,
+            ).one()
             assert leg.is_deleted and leg.status.is_settled and leg.covering_movements
 
-            assert leg_settled_contribution(leg) == Decimal("0")
+            assert settled_contribution(parent_of(leg)) == Decimal("0")
 
             with refused_by_database_rule(
                 "was deleted while it still holds a recorded payment",

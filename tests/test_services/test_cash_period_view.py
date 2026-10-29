@@ -1092,7 +1092,7 @@ class TestTheViewCarriesTheBasisItWasValuedOn:
 
     **The map is DELETED as of plan step X-au-d and the property is stronger
     for it.**  A derived row stores no figure, so there is nothing for a live
-    recompute to be laid over: both sides ask ``cash_ledger.amounts_by_id``
+    recompute to be laid over: both sides ask ``cash_ledger.amounts_by_key``
     over the pass's own basis and cannot come to hold two answers.  The field
     went with the producer -- and an AST and grep census found NOTHING had read
     ``CashPeriodView.amount_overrides`` since X-c2b2 anyway, while the case

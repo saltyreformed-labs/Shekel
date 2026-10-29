@@ -22,10 +22,10 @@ from tests._test_helpers import (
     typed,
 )
 from app.services.cash_ledger import derived_amount_basis
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
 from app.services.loan_payment_service import get_payment_history
 from app.services.transfer_service import delete_transfer, update_transfer
-from app.services.transfer_legs import transfer_side_leg
+from app.services.transfer_legs import parent_of, transfer_side_leg
 
 from ._helpers import _basis, _create_loan_account, _create_transfer_to_loan
 
@@ -499,13 +499,14 @@ class TestTheFeedPricesADerivedRow:
     the ROW accessor :func:`~app.services.row_valuation.settled_contribution`.
     A transfer is one row since that step (ruling **R-BAL258**), so that
     shadow cannot be stored: the database refused it on the income side,
-    pinned in ``test_a_transfer_shadow_is_derived/test_the_declaration.py``
+    pinned in ``test_a_transfers_amount_is_declared/test_the_declaration.py``
     and ``test_loan_plan_assembly.py``, until plan step balance:X-bi-6-5
     dropped the column it named its transfer by, after which no statement
     can write one (ruling plan#1850).  The payment that stores no figure today is one GENERATED from its
     definition (:func:`_generated_loan_payment`), priced at the same
-    ``$1,500.00``, and the settled half's accessor is the row accessor's
-    twin over a leg, :func:`~app.services.row_valuation.leg_settled_contribution`.
+    ``$1,500.00``, and the settled half's accessor is
+    :func:`~app.services.row_valuation.settled_contribution` asked of the
+    leg's parent (ruling **plan#1983**).
     """
 
     def test_a_derived_payment_resolves_through_the_amount_model(
@@ -518,7 +519,7 @@ class TestTheFeedPricesADerivedRow:
         would answer a STORED ``$1,500.00`` and pass, where on a payment
         storing none only the amount model can answer -- and the feed's
         projected half resolves it from its definition through
-        :func:`~app.services.cash_ledger.planned_leg_contribution`, at the
+        :func:`~app.services.cash_ledger.resolve_amount`, at the
         $1,500.00 the definition states.
 
         It declared the LOAN-side income shadow derived and asserted the feed
@@ -549,8 +550,8 @@ class TestTheFeedPricesADerivedRow:
 
         The other half of the pair, and it is what makes the pair a
         measurement.  Same fixture:
-        :func:`~app.services.row_valuation.leg_settled_contribution`, which
-        values the feed's SETTLED half, raises
+        :func:`~app.services.row_valuation.settled_contribution` of the leg's
+        parent, which values the feed's SETTLED half, raises
         :class:`~app.exceptions.AmountUnresolvable` on this payment's
         loan-side leg, because its transfer has not settled and its money has
         not moved.  If a future change priced the projected half through it,
@@ -575,4 +576,4 @@ class TestTheFeedPricesADerivedRow:
             assert leg.account_id == loan.id
 
             with pytest.raises(AmountUnresolvable, match="has not settled"):
-                leg_settled_contribution(leg)
+                settled_contribution(parent_of(leg))

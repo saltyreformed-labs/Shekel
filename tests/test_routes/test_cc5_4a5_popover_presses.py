@@ -39,7 +39,6 @@ from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services import (
     transaction_service,
-    transfer_legs,
     transfer_service,
 )
 from app.services.settle_day import SettleDay
@@ -49,7 +48,11 @@ from app.services.statement_match import (
     release_match,
 )
 from app.utils.log_events import EVT_STATEMENT_MATCH_WITHDRAWN
-from tests._test_helpers import create_account_of_type, typed
+from tests._test_helpers import (
+    create_account_of_type,
+    side_records_by_key,
+    typed,
+)
 from tests.test_routes._statement_forms import ReconcileFormReader
 from tests.test_routes.test_cc5_4a3_captions import (
     _claimed,
@@ -732,7 +735,7 @@ class TestTheTransferPopover:
             assert db.session.get(Transfer, xfer_id).status_id == (
                 ref_cache.status_id(StatusEnum.DONE)
             )
-            assert transfer_legs.covering_movements_by_leg([xfer_id]) == {}, (
+            assert side_records_by_key(db.session.get(Transfer, xfer_id)) == {}, (
                 "a $0.00 record moves nothing on either leg"
             )
 
@@ -805,7 +808,7 @@ class TestARefusedPressWithNoCardToDraw:
             assert db.session.get(Transfer, xfer_id).status_id == (
                 ref_cache.status_id(StatusEnum.DONE)
             )
-            assert len(transfer_legs.covering_movements_by_leg([xfer_id])) == 2, (
+            assert len(side_records_by_key(db.session.get(Transfer, xfer_id))) == 2, (
                 "the refused $0.00 took neither leg's payment off"
             )
 
@@ -827,7 +830,7 @@ class TestARefusedPressWithNoCardToDraw:
 
             assert response.status_code == 200
             _committed()
-            assert transfer_legs.covering_movements_by_leg([xfer_id]) == {}
+            assert side_records_by_key(db.session.get(Transfer, xfer_id)) == {}
 
 
 def transfer_service_revert(seed_user, xfer_id):

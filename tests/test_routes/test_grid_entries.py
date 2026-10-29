@@ -71,7 +71,7 @@ def _lists(rows):
 
     **It is the same construction TWO of the four call sites use, not four**,
     and saying which is the correction an adversarial review of this step
-    made: ``_render_entry_list`` and ``_render_mobile_card`` resolve a period
+    made: ``_render_entry_list`` and ``render_mobile_card`` resolve a period
     exactly this way, so for those the map here IS the app's.  ``/grid``
     builds a third construction (``{p.period_id: p for p in ctx.all_periods}``,
     inside ``grid.page._build_entry_maps``) and the companion page a fourth

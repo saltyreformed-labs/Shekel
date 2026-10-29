@@ -911,7 +911,6 @@ def record_clearing(row: Transaction, anchor_id: int) -> None:
 def sync_covering_movement(
     row: Transaction,
     *,
-    was_settled: bool,
     now_settled: bool,
     settlement: Optional[Settlement],
     press: Press | None = None,
@@ -920,8 +919,11 @@ def sync_covering_movement(
 
     Called by ``apply_status_change`` after it has written the row's status,
     settle-day pair, clearing link and settlement record, so every value
-    mirrored here is the row's FINAL one for this act.  Two cases, total over
-    what the seam can be asked to do:
+    mirrored here is the row's FINAL one for this act -- and only for a move
+    that starts or ends in the settled band
+    (:func:`~app.utils.balance_predicates.touches_settled_band`, which the
+    seam asks before it assigns the status).  Two cases, total over what the
+    seam calls it for:
 
     * **in the band with a record** -- the row is settling or re-settling on a
       ``derived`` / ``corrected`` basis: ensure one covering movement carries
@@ -933,25 +935,29 @@ def sync_covering_movement(
       ``_follow_assertion``, plan step ``X-bi-3e-2``), an identity re-submit
       or a settle-day correction.
 
-    **A row in the band neither before nor after this act is skipped**: its
-    assertion did not change, so a movement a revert kept has nothing to
-    follow (the days already agree at ``None`` and the link is already
-    ``None`` -- ``_mirror_assertion``'s equal-days arm would write nothing),
-    and reading it would cost a lazy load of the row's ``entries`` and a
-    mid-update autoflush for a no-op wherever the caller has not loaded them
-    (a transaction's door loads them for its reconcile anyway).
+    **The seam does not call it for a row in the band neither before nor
+    after the act**: its assertion did not change, so a movement a revert
+    kept has nothing to follow (the days already agree at ``None`` and the
+    link is already ``None`` -- ``_mirror_assertion``'s equal-days arm would
+    write nothing), and reading it would cost a lazy load of the row's
+    ``entries`` and a mid-update autoflush for a no-op wherever the caller
+    has not loaded them (a transaction's door loads them for its reconcile
+    anyway).
+    The seam asks the predicate the transfer seam's arm and status writer
+    ask (``_side.sync_side_records``,
+    ``transfer_service._status.apply_status_to_all_three``); this arm
+    returned on the same test spelled over a ``was_settled`` its caller
+    computed until plan#2139.
     The seam refuses a record beside a non-settled status before it gets here
     (``reject_settlement_without_settled_status``), so *settlement* is
     ``None`` whenever *now_settled* is ``False``.  The status the row was
     LEAVING was a third CASE through ``X-bi-3e-1`` (leaving the band deleted
-    the movement); it is a load gate now, and the act it gates is the same
-    "follow the row" a correction runs.
+    the movement); it is the seam's load gate now, and the act it gates is
+    the same "follow the row" a correction runs.
 
     Args:
         row: The transaction the seam just wrote.
-        was_settled: Whether the row was in the settled band BEFORE the seam
-            assigned its new status.
-        now_settled: Whether it is in the band after.
+        now_settled: Whether the row is in the settled band after the act.
         settlement: The record the seam was handed for this act, or ``None``.
         press: The save's :class:`~app.services.match_press.Press` (ruling **R-CC135**), over
             what the door's page named or what lets it stay silent: both arms
@@ -962,8 +968,6 @@ def sync_covering_movement(
             ``apply_status_change`` does, so a caller that says nothing is
             refused if the record would free a line.
     """
-    if not was_settled and not now_settled:
-        return
     if now_settled and settlement is not None:
         # A record that STATES a figure names who wrote it (``Settlement``
         # refuses one without the other), and only such a record has anything

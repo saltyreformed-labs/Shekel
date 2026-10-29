@@ -11,6 +11,9 @@ can reach the state, through the status seam itself) and read back as STORED:
   (ruling **R-BAL231**, amending R-BAL169; review M3);
 * the arm grades BOTH sides' days against their books before it writes
   either, so a refused settle stages no record (review L1);
+* a move INTO the settled band with no record of what moved is refused
+  before either side is written, by the predicate the row seam's refusal
+  asks (``balance_predicates.enters_settled_band``, plan#2140);
 * a hidden transfer is refused by its name, or "Transfer" when it has none,
   and "was archived" when its definition is (finding **BAL-547**);
 * a transfer whose twin row was deleted behind the app's back settled like
@@ -350,6 +353,50 @@ class TestTheArmRefusesEitherSideBeforeItWritesOne:
                     side_days=(transfer_service.SideDay(
                         xfer.from_account_id, an_observed_day(day),
                     ),),
+                )
+            staged = [
+                row for row in db.session.new if isinstance(row, TransactionEntry)
+            ]
+            db.session.rollback()
+
+            assert staged == []
+            assert _records(xfer.id) == (None, None)
+            assert _stored(xfer.id) == before
+
+
+class TestASettleStatesWhatMoved:
+    """A move into the band owes a record of what moved, for a transfer as for a row.
+
+    The arm's refusal asks ``balance_predicates.enters_settled_band``, which
+    the row seam's twin asks (``test_settlement_record``'s
+    ``TestTheSeamRefusesAnUnrecordedSettle``).  A ``ValueError``, as there:
+    every door into the band hands the writer a record, so only a caller
+    around the doors can reach it.  Measured at plan#2140: the predicate
+    answering False for Projected -> Paid fails this case and the row's
+    together.
+    """
+
+    def test_a_settle_with_no_record_is_refused_and_writes_neither_side(
+        self, app, seed_user,
+    ):
+        """Projected -> Paid with no settlement: refused, no record staged, nothing stored."""
+        with app.app_context():
+            xfer = _transfer(seed_user)
+            before = _stored(xfer.id)
+            legs = (
+                transfer_legs.transfer_side_leg(xfer, is_income=False),
+                transfer_legs.transfer_side_leg(xfer, is_income=True),
+            )
+            day = SettleDay(day=display_today(), basis=BORROWED)
+
+            with pytest.raises(
+                ValueError,
+                match=r"Transfer \d+ is entering the settled band with no "
+                "settlement record",
+            ):
+                status_seam.sync_side_records(
+                    legs, ref_cache.status_id(StatusEnum.DONE),
+                    days=(day, day), settlement=None, press=None,
                 )
             staged = [
                 row for row in db.session.new if isinstance(row, TransactionEntry)

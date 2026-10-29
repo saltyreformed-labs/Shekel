@@ -23,6 +23,7 @@ from app.services import (
 )
 from app.services.entry_service import EntryDetails
 from app.services.settle_day import SettleDay, recorded_settle_day
+from app.services.transfer_legs import parent_of
 from tests._test_helpers import observed, one_off_row_of, typed
 
 from ._helpers import (
@@ -622,7 +623,7 @@ class TestTheRetainedReadTakesTheSourceOffTheMovement:
             _revert(txn)
             db.session.flush()
             assert status_seam.recorded_settlement(txn) is None
-            assert transaction_service.retained_settle_amounts_by_id([txn]) == {
+            assert transaction_service.retained_amounts_by_key([txn]) == {
                 txn.id: None,
             }
             basis = cash_ledger.derived_amount_basis(
@@ -668,11 +669,12 @@ class TestTheRetainedReadTakesTheSourceOffTheMovement:
     ):
         """Each leg holds one record, and its retained read is the transfer's figure and source.
 
-        Read through ``status_seam.recorded_leg_settlement``, the leg-shaped
-        read the transfer settle takes its retained record by, since plan step
-        balance:X-bi-6-4d-2 hung each side's record off the transfer; it was
-        ``recorded_settlement`` off each shadow until then (ruling R-BAL167
-        class 4).  The figure and who wrote it are stored once on the
+        Read through ``status_seam.recorded_settlement`` of the leg's parent,
+        the read the transfer settle takes its retained record by (ruling
+        plan#1983); it was the leg-shaped twin ``recorded_leg_settlement``
+        from plan step balance:X-bi-6-4d-2, which hung each side's record off
+        the transfer, and ``recorded_settlement`` off each shadow until then
+        (ruling R-BAL167 class 4).  The figure and who wrote it are stored once on the
         TRANSFER since that step's 4d-4 half; each side's record carried
         them until then and states neither now.  Named
         ``test_both_legs_of_a_corrected_transfer_read_typed_off_their_movements``
@@ -690,7 +692,7 @@ class TestTheRetainedReadTakesTheSourceOffTheMovement:
                 assert leg.transfer.settled_figure_source_id == _source(
                     MovementFigureSourceEnum.TYPED,
                 )
-                retained = status_seam.recorded_leg_settlement(leg)
+                retained = status_seam.recorded_settlement(parent_of(leg))
                 assert retained.amount == Decimal("480.00")
                 assert retained.source is MovementFigureSourceEnum.TYPED
 

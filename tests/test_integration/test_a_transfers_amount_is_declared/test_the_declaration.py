@@ -6,8 +6,8 @@ from decimal import Decimal
 
 from app.extensions import db as _db
 from app.services.cash_ledger import (
+    amounts_by_key,
     derived_amount_basis,
-    leg_amounts_by_key,
     transfer_pricing_load_options,
 )
 from app.services.transfer_legs import planned_transfer_legs
@@ -20,7 +20,7 @@ from tests.test_integration.test_transfer_settle_freeze import _derived_loan_tra
 from ._helpers import _CONTRACT, _plain_transfer
 
 
-class TestAShadowIsBornDerived:
+class TestATransferIsBornOwningItsFigure:
     """The declaration is made by the constructor, not by a later writer.
 
     Since plan step balance:X-bi-6-4d-2 the constructor makes ONE row, so what
@@ -66,12 +66,12 @@ class TestTheAmountModelsOwnEagerLoad:
 
     **Re-expressed onto TRANSFER legs at plan step balance:X-bi-6-4d-2**
     (ruling **R-BAL167** class 1).  The pair loaded SHADOW rows with
-    ``pricing_load_options`` and priced them with ``amounts_by_id``; no shadow
+    ``pricing_load_options`` and priced them with ``amounts_by_key``; no shadow
     is born since that step, and a leg is read off its transfer (**R-BAL13**),
     so the row set is the legs :func:`~app.services.transfer_legs.planned_transfer_legs`
     loads -- the cash fold's plan-half loader -- with and without
     :func:`~app.utils.amount_relationships.transfer_pricing_load_options`,
-    priced by :func:`~app.services.cash_ledger.leg_amounts_by_key`, the batch
+    priced by :func:`~app.services.cash_ledger.amounts_by_key`, the batch
     the grid publishes.  ``pricing_load_options`` composed that same tuple
     under ``Transaction.transfer`` until the same step deleted that entry,
     which loaded nothing once no row named a transfer, so
@@ -148,7 +148,7 @@ class TestTheAmountModelsOwnEagerLoad:
             assert len(legs) >= 2
 
             priced, statements = capture_sql_statements(
-                lambda: leg_amounts_by_key(legs, basis),
+                lambda: amounts_by_key(legs, basis),
             )
 
             assert statements == [], (
@@ -171,7 +171,7 @@ class TestTheAmountModelsOwnEagerLoad:
             legs, basis = self._legs_and_warm_basis(seed_user, seed_periods, ())
 
             _priced, statements = capture_sql_statements(
-                lambda: leg_amounts_by_key(legs, basis),
+                lambda: amounts_by_key(legs, basis),
             )
 
             assert statements, (

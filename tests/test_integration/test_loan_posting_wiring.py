@@ -332,7 +332,7 @@ class TestRevertAndDeletePostFullCashReversal:
 class TestRestoreWiring:
     """Restoring a soft-deleted loan payment that was Paid brings back a plan."""
 
-    def test_restore_reposts_correction(
+    def test_restore_brings_back_a_plan_and_reposts_nothing(
         self, app, db, seed_user, seed_periods,
     ):
         """Settle (-99500), soft-delete (baseline -100000), restore (-100000: a plan).
@@ -353,7 +353,7 @@ class TestRestoreWiring:
         Projected (ruling **R-BAL246**, "Back as a plan, now", 2026-10-09:
         "the loan reads $100,000.00 owed and no missed installment is
         charged"), so the restore returns a planned payment and the figure
-        stays at the no-payment baseline.  The name is kept as history.
+        stays at the no-payment baseline.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id

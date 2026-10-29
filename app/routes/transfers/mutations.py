@@ -749,11 +749,9 @@ def _grade_submitted_side_days(xfer, data):
         the seam's refusal, raised inside the service call and answered by
         :func:`_execute_transfer_update`.
     """
+    transfer_legs.preload_side_records((xfer,))
     boxes = [
-        box for box in transfer_side_boxes(
-            xfer, transfer_legs.covering_movements_by_leg([xfer.id]),
-        )
-        if box.field in data
+        box for box in transfer_side_boxes(xfer) if box.field in data
     ]
     side_days = []
     try:

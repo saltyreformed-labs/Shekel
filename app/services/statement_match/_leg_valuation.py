@@ -7,10 +7,11 @@ the transfer itself -- keyed by the transfer's id on the screen's account --
 where the matcher offered the transfer's SHADOW row until this leaf.  Its own
 module because :mod:`._valuation` crossed the 1,000-line bound when this
 subject joined it (ruling **balance:R-IR**: the session that breaks a module
-splits it, by SUBJECT); the seam is the KIND.  What a leg is worth
-(:func:`leg_price`), what it is called (:func:`leg_candidate_label`), the one
+splits it, by SUBJECT); the seam is the KIND.  What a leg is called
+(:func:`leg_candidate_label`), the one
 construction the offer set and the re-price share (:func:`leg_candidate`) and
-the re-price's LEG arm (:func:`repriced_leg`) live here.  Which side is a LEG
+the re-price's LEG arm (:func:`repriced_leg`), and the one loader both
+read their legs through (:func:`offered_legs`), live here.  Which side is a LEG
 is the loader's (``transfer_legs.offerable_transfer_legs``: its transfer
 Projected, whose sides hold no dated record by the status-band rule); a
 side whose money has moved is its dated record, a SETTLEMENT (ruling
@@ -21,9 +22,10 @@ module imports this one, never the reverse.
 
 **No function here reaches a transfer through its shadow row**: a leg arrives
 as a ``transfer_legs.TransferLeg`` from ``transfer_legs``' loaders, and its
-figure is asked of the leg (``transfer_service.leg_settle_amount``, which
-prices it off its transfer alone since plan step
-``balance:X-bi-6-4d-2``; through the leg's shadow until then).
+figure is asked of its transfer (:func:`~._settle_price.settle_price`, the
+one price a row and a leg are offered at since ruling **plan#1983**; the
+leg's own ``leg_price`` until then, and through the leg's shadow until plan
+step ``balance:X-bi-6-4d-2``).
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): reads only, plain
 data in, frozen dataclasses out, no Flask import, no clock read.
@@ -31,74 +33,59 @@ data in, frozen dataclasses out, no Flask import, no clock read.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from app.exceptions import AmountUnresolvable
-from app.services import cash_ledger, transfer_legs, transfer_service
+from app.services import cash_ledger, transfer_legs
 from app.services.transfer_legs import TransferLeg
 from app.utils.amount_relationships import transfer_pricing_load_options
 
+from ._settle_price import settle_price
 from ._subjects import CandidateRow, RowKind
 
 if TYPE_CHECKING:  # pragma: no cover -- annotations only
     from app.services.pay_calendar import PayCalendar
 
 
-def leg_price(
-    leg: TransferLeg, basis: "cash_ledger.AmountBasis",
-) -> "Decimal | None":
-    """Return what settling *leg*'s transfer would book on its account, signed, or ``None``.
+def offered_legs(
+    account_id: int,
+    owner_id: int,
+    period_ids: Iterable[int],
+    *,
+    transfer_ids: Iterable[int] | None = None,
+) -> list[TransferLeg]:
+    """Return the still-planned legs on *account_id* a statement could settle, loaded to offer.
 
-    :func:`~._valuation.transaction_price`'s LEG twin (leaf ``balance:X-bi-6-4c-1``): the
-    figure is the transfer service's (``transfer_service.leg_settle_amount``,
-    the leg price the reconcile panel offers from since leaf ``X-bi-6-4c-2``),
-    signed by :func:`~app.services.cash_ledger.cash_leg_of`, which asks the
-    leg its direction and contributing gate off its transfer and side.
-
-    **One refusal leaves the candidate set, and it is not swallowed**:
-    ``AmountUnresolvable`` is :func:`~._valuation.transaction_price`'s case,
-    counted in the screen's "could not be priced" note.  A ``ValidationError``
-    was a second, a DAMAGED transfer whose twin pair the leg price refused
-    (ruling **R-BAL158**, "Skip it and say so"), until plan step
-    ``balance:X-bi-6-4d-2`` priced a leg off its transfer alone and the
-    developer ruled such a transfer is offered and settled
-    like any other (**R-BAL235**).  The leg price's one remaining refusal,
-    a soft-deleted transfer, cannot reach it: the loaders offer live
-    transfers only, so one arriving here is a defect to surface, not a row
-    to count.
+    The LEG arm's ONE loader, for the offer set
+    (``_candidates._leg_candidates``) and the re-price (:func:`repriced_leg`),
+    so the two cannot load differently: ``transfer_legs.offerable_transfer_legs``
+    with what a candidate reads.  That is what
+    :func:`~._settle_price.settle_price` walks (the
+    amount model's chain,
+    ``amount_relationships.transfer_pricing_load_options``; the endpoints the
+    label composes from and the status ride the transfer row itself,
+    ``lazy="joined"``), and each side's record, which :func:`leg_candidate`
+    reads for the leg's day: every leg's loaded in ONE statement
+    (``transfer_legs.preload_side_records``, ruling **plan#2136**), where the
+    re-price read its leg's by a query of its own until then.
 
     Args:
-        leg: The still-planned leg, its transfer loaded with
-            :func:`leg_loads`.
-        basis: The PASS's :class:`~app.services.cash_ledger.AmountBasis`,
-            threaded for :func:`~._valuation.transaction_price`'s reason.
+        account_id: The cash account the statement is for.
+        owner_id: The owner whose transfers may be offered.
+        period_ids: The pay-period ids an offer may be filed in.
+        transfer_ids: The re-price's narrowing to the transfer a row names;
+            ``None`` (the offer set) means every transfer in scope.
 
     Returns:
-        Its signed cash effect on the leg's account, or ``None`` when it
-        cannot be priced.
+        One leg per offerable transfer, unordered, its sides' records loaded.
     """
-    try:
-        return cash_ledger.cash_leg_of(
-            leg, transfer_service.leg_settle_amount(leg, basis),
-        )
-    except AmountUnresolvable:
-        return None
-
-
-def leg_loads() -> tuple:
-    """Return the loader options a LEG candidate reads, rooted at ``Transfer``.
-
-    What :func:`leg_price` walks (the amount model's chain,
-    ``amount_relationships.transfer_pricing_load_options``); the endpoints the
-    label composes from and the status ride the transfer row itself
-    (``lazy="joined"``).  Stated once for the offer set's arm and the
-    re-price, so the two cannot load different chains.
-
-    Returns:
-        A tuple of loader options.
-    """
-    return transfer_pricing_load_options()
+    legs = transfer_legs.offerable_transfer_legs(
+        account_id, owner_id, period_ids,
+        options=transfer_pricing_load_options(), transfer_ids=transfer_ids,
+    )
+    transfer_legs.preload_side_records(leg.transfer for leg in legs)
+    return legs
 
 
 def leg_candidate_label(leg: TransferLeg) -> str:
@@ -133,7 +120,8 @@ def leg_candidate(
     function's reason.  **The TRANSFER is the subject, keyed by its id on the
     screen's account** (rulings **R-BAL87**, **R-BAL159**): the figure is
     what settling the transfer books on this account (*amount*, from
-    :func:`leg_price`), the window is the transfer's paycheck, the door is
+    :func:`~._settle_price.settle_price`), the window is the transfer's
+    paycheck, the door is
     the transfer's (``transfer_id``, read by
     :func:`~._moving._apply_day`), and the REVISION is the transfer's
     counter -- the row a leg's period, status and figure are edited on.
@@ -154,7 +142,8 @@ def leg_candidate(
         leg: The still-planned leg (its transfer Projected --
             ``transfer_legs.offerable_transfer_legs``).
         calendar: The pass's :class:`~app.services.pay_calendar.PayCalendar`.
-        amount: Its signed cash effect, already resolved by :func:`leg_price`,
+        amount: Its signed cash effect, already resolved by
+            :func:`~._settle_price.settle_price`,
             taken for :func:`~._valuation.transaction_candidate`'s reason.
 
     Returns:
@@ -196,14 +185,14 @@ def repriced_leg(
     ``None`` and the act naming it is refused as stale -- the scope asked
     again rather than a subset of it restated here.
     """
-    legs = transfer_legs.offerable_transfer_legs(
+    legs = offered_legs(
         account_id, calendar.user_id, calendar.saved_by_id().keys(),
-        options=leg_loads(), transfer_ids=(row.row_id,),
+        transfer_ids=(row.row_id,),
     )
     if not legs:
         return None
     (leg,) = legs
-    amount = leg_price(leg, basis)
+    amount = settle_price(leg, basis)
     if amount is None:
         return None
     return leg_candidate(leg, calendar, amount)

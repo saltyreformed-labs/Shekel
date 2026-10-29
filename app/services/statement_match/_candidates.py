@@ -117,7 +117,8 @@ from app.utils.balance_predicates import (
     is_projected_clause,
 )
 
-from ._leg_valuation import leg_candidate, leg_loads, leg_price
+from ._leg_valuation import leg_candidate, offered_legs
+from ._settle_price import settle_price
 from ._subjects import CandidateRow, Candidates, HeldElsewhere, RowKind
 from ._valuation import (
     held_elsewhere_of,
@@ -126,7 +127,6 @@ from ._valuation import (
     settlement_candidate,
     settlement_price,
     transaction_candidate,
-    transaction_price,
 )
 
 if TYPE_CHECKING:  # pragma: no cover -- annotations only
@@ -492,7 +492,7 @@ def _transaction_candidates(
             amount = settlement_price(payment, basis)
         else:
             payment = None
-            amount = transaction_price(txn, basis)
+            amount = settle_price(txn, basis)
         if amount is None:
             unpriceable.append((RowKind.TRANSACTION, txn.id))
         elif payment is not None:
@@ -641,7 +641,7 @@ def _leg_candidates(
     transfers whose shadow that arm had offered on every door-written state
     (a Projected parent's two shadows were Projected, live and filed in its
     period -- Transfer Invariants 1, 3 and 4).  Priced by
-    :func:`~._leg_valuation.leg_price`, off the transfer alone: a transfer
+    :func:`~._settle_price.settle_price`, off the transfer alone: a transfer
     whose twin pair was DAMAGED was offered like any other (ruling
     **R-BAL235**; it was counted among the unpriceable and not offered,
     ruling **R-BAL158**, until plan step ``balance:X-bi-6-4d-2``), and a
@@ -662,10 +662,9 @@ def _leg_candidates(
     """
     candidates = []
     unpriceable = []
-    for leg in transfer_legs.offerable_transfer_legs(
-        account_id, calendar.user_id, period_ids, options=leg_loads(),
-    ):
-        amount = leg_price(leg, basis)
+    legs = offered_legs(account_id, calendar.user_id, period_ids)
+    for leg in legs:
+        amount = settle_price(leg, basis)
         if amount is None:
             unpriceable.append((RowKind.LEG, leg.transfer.id))
             continue

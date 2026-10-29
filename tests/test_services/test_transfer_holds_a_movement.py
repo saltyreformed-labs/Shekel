@@ -215,7 +215,7 @@ class TestThePeriodLock:
         ``balance:X-bi-6-4d-2`` (ruling **R-BAL258**).  Until plan step
         ``balance:X-bi-6-4d-2`` its two shadow rows carried the same status
         on this door-written state, so the case could not tell which of the
-        three the lock read, and :class:`TestTheParentDecidesADrift` planted
+        three the lock read, and :class:`TestTheLockReadsTheTransfersOwnStatus` planted
         a drift to tell them apart; from that step a settle left the twins
         Projected under the Paid transfer, until the next deleted them.  The
         plant's count also left the shadows out
@@ -253,7 +253,7 @@ class TestThePeriodLock:
             assert locks[period.id] is PeriodLockReason.HOLDS_MOVEMENT
 
 
-class TestTheParentDecidesADrift:
+class TestTheLockReadsTheTransfersOwnStatus:
     """The TRANSFER's status is what the lock reads (ruling **R-JM**).
 
     As ``pay_period_locks.settled_items`` states it.  The class planted the
@@ -272,8 +272,7 @@ class TestTheParentDecidesADrift:
     over its two Projected legs, is the one case left, and it is no drift
     any more: a Paid transfer whose sides hold no record is the ``$0.00``
     close the status-band rule admits (``side_band_infrastructure``), so
-    the case closes the transfer at ``$0.00`` through its settle door.  The
-    class's name is its history.
+    the case closes the transfer at ``$0.00`` through its settle door.
     """
 
     def test_a_transfer_closed_at_zero_is_settled(

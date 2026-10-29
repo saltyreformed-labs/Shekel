@@ -56,7 +56,9 @@ FIVE leaves, cut by what each DECIDES rather than by size:
   refusal pushed ``_settle`` past the cap and this docstring's own sentence
   about headroom decided how;
 * :mod:`._settle` -- what settling a row means: the amount, the verb, and the
-  envelope primitive;
+  envelope primitive.  The amount and the echo rule are asked of a PARENT,
+  a row or a transfer (ruling **plan#1983**), so the transfer service's
+  settle books and offers through them;
 * :mod:`._door` -- what a DOOR's requested status means, which is a settle for
   one direction and the mechanics alone for every other;
 * :mod:`._delete` -- what REMOVING a row means: the four-step sequence and its
@@ -85,8 +87,9 @@ from app.services.transaction_service._row_rules import (
 )
 from app.services.transaction_service._settle import (
     fixed_settle_amount,
-    leg_retained_amounts_by_key,
-    retained_settle_amounts_by_id,
+    is_correction,
+    retained_amount,
+    retained_amounts_by_key,
     settle_amount,
     settle_from_entries,
     settle_transaction,
@@ -107,11 +110,12 @@ __all__ = [
     "deletion_refusal",
     "preview_deletion",
     "fixed_settle_amount",
+    "is_correction",
     "offerable_status_ids",
     "reject_mismatched_settled_status",
     "reject_unsettleable",
-    "leg_retained_amounts_by_key",
-    "retained_settle_amounts_by_id",
+    "retained_amount",
+    "retained_amounts_by_key",
     "settle_amount",
     "settle_from_entries",
     "settle_transaction",

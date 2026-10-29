@@ -31,14 +31,18 @@ from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import loan_loaders
 from app.services._posting_reconcile import account_owner_id
-from app.services.row_valuation import leg_settled_contribution
+from app.services.row_valuation import settled_contribution
 from app.services.posting_service import (
     PostingError,
     _ledger_account_for,
     sync_transfer_postings,
 )
 from app.services.scenario_resolver import get_baseline_scenario
-from app.services.transfer_legs import movement_parent, movement_parent_loads
+from app.services.transfer_legs import (
+    movement_parent,
+    movement_parent_loads,
+    parent_of,
+)
 from app.services.user_write_lock import lock_every_user_writes
 from app.utils.db_errors import is_unique_violation
 from app.utils.money import round_money
@@ -243,7 +247,8 @@ def _reconcile_lineage_transfer_entries(
     # filter and the figure it admits come to disagree.  Every source here is
     # a leg from ``loan_loaders.settled_income_legs`` (the walk's own
     # loader, plan step balance:X-bi-6-4b), so it has SETTLED and
-    # ``leg_settled_contribution`` answers the figure its transfer stores --
+    # ``settled_contribution`` of its parent answers the figure its transfer
+    # stores --
     # and REFUSES a leg outside the settled half rather than pricing its
     # plan, so this loop's precondition is stated by the call it makes and
     # not only by the loader above it.  A leg with a non-zero cash holds its
@@ -256,7 +261,7 @@ def _reconcile_lineage_transfer_entries(
     transfer_by_movement: dict[int, int] = {}
     for outcome in walk.settled_splits:
         leg = outcome.source
-        cash = round_money(leg_settled_contribution(leg))
+        cash = round_money(settled_contribution(parent_of(leg)))
         if cash == 0:
             continue
         expected[leg.record.id] = {outcome.visible_on: cash}

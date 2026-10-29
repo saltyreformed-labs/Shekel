@@ -452,8 +452,8 @@
        row that would book ``$245.32``, with the number visible nowhere but the
        reconcile panel.  It reads the SAME map the grid does, built from the same
        function the settle verb asks
-       (``transaction_service.retained_settle_amounts_by_id`` ->
-       ``fixed_settle_amount``), so what this promises and what a tick books
+       (``transaction_service.retained_amounts_by_key`` ->
+       ``status_seam.honoured_correction``), so what this promises and what a tick books
        cannot drift.  Rendered read-only: the record has ONE write door, which is
        a settle. #}
     {% set will_book = retained[txn.id] %}

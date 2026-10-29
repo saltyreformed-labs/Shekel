@@ -182,8 +182,8 @@ def payment_visible_on(
     Args:
         leg: The settled payment's to-side
             :class:`~app.services.transfer_legs.TransferLeg`, its record
-            attached (:func:`app.services.loan_loaders.settled_income_legs`
-            attaches it).  A record-less leg's ``due_date`` and ``pay_period``
+            pre-loaded (:func:`app.services.loan_loaders.settled_income_legs`
+            loads it).  A record-less leg's ``due_date`` and ``pay_period``
             are read, so its parent's period must be loaded -- the producer
             loads it as its sort key.
         origination_date: The loan's origination

@@ -67,7 +67,7 @@ class TestRestoreTransfer:
     ``test_a_transfer_is_one_row/test_the_upgrade.py``'s
     ``test_the_database_refuses_a_twin`` (the expense side; it runs below the
     drop) and by a twin case in
-    ``test_a_transfer_shadow_is_derived/test_the_declaration.py`` (both
+    ``test_a_transfers_amount_is_declared/test_the_declaration.py`` (both
     sides) until plan step ``balance:X-bi-6-5`` dropped the column it
     guarded, which took that case's twin refusal with it (ruling
     plan#1850).  The eighth,
@@ -85,7 +85,7 @@ class TestRestoreTransfer:
     gated on that state and side (measured at that checkpoint), with one
     exception.  A restored ``$0.00`` close's side reads Paid: on the expense
     side, ``test_transfer_legs/test_the_grids_legs.py``'s ``TestTheLegMapProducers`` and
-    ``TestTheLegContributionTwins`` cases
+    ``TestALegIsValuedAsItsParent`` cases
     ``test_a_settled_leg_with_no_movement_is_the_zero_record`` and
     ``test_routes/test_a_zero_close_has_no_day.py``.  On the INCOME side no
     case reads it: the mutant fails only ``test_loan_settled_legs/``'s

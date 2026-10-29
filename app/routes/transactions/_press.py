@@ -40,7 +40,7 @@ def _refused(txn_id, exc, posted: Posted, target=None):
         exc: What the service raised.
         posted: What the request said about its page.
         target: The
-            :class:`~app.routes.transactions._helpers._RenderTarget`, or
+            :class:`~app.routes._mobile_card.RenderTarget`, or
             ``None`` for the desktop cell.
 
     Returns:

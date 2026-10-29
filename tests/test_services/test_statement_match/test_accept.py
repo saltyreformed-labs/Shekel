@@ -988,7 +988,7 @@ class TestAPurchaseIsMatchableToo:
         assert accepted.settled_count == 1
 
 
-class TestATransferShadowIsMatchedThroughItsService:
+class TestATransferIsMatchedThroughItsService:
     """The kind the bank shows most, and the one that must not be touched directly.
 
     **13 of 22 non-swipe one-to-one matches on the developer's own statement are

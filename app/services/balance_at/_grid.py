@@ -355,7 +355,7 @@ class GridBalanceView:
     census that found nothing had read it since plan step X-au-c2b routed the
     grid through the amount model's own map.  Ruling **R-Q** -- a cell and the
     balance row beside it price one row one way -- is unchanged and is now
-    structural: both read ``cash_ledger.amounts_by_id`` over the pass's basis,
+    structural: both read ``cash_ledger.amounts_by_key`` over the pass's basis,
     and a derived row has no second figure to disagree with.
     """
 

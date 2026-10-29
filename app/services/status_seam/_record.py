@@ -29,9 +29,15 @@ second home, written by the seam from this value until plan step
 a write-side field of :class:`Settlement` and, on a read, the movement's own
 ``account_id`` (:func:`tender_account_id_of`, the seam's one default).
 
-Pure: reads a row's ``entries`` relationship (its covering movement) and the
-ref cache, constructs values.  No query of its own, no session, no mutation,
-no Flask.
+**The record is read off a PARENT** (ruling **plan#1983**, "price the
+parent, draw the side"): a plan row's off its covering movement, a
+transfer's off its own stored figure, both through :func:`recorded_settlement`,
+the one branch on the parent's table.  A transfer leg asks its
+``transfer_legs.parent_of``.
+
+Pure: reads a row's ``entries`` relationship (its covering movement), a
+transfer's settled-figure columns and the ref cache, constructs values.  No
+query of its own, no session, no mutation, no Flask.
 """
 
 from dataclasses import dataclass, replace
@@ -42,11 +48,12 @@ from app import ref_cache
 from app.enums import MovementFigureSourceEnum
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
+from app.models.transfer import Transfer
 from app.services.stated_figure import StatedFigure
 from app.utils.balance_predicates import settled_status_ids
 
 if TYPE_CHECKING:
-    from app.services.transfer_legs import TransferLeg
+    from app.services.transfer_legs import PlanParent
 
 
 @dataclass(frozen=True)
@@ -100,11 +107,11 @@ class Settlement:
     (:func:`tender_account_id_of`: the kept record's account, else the
     row's), so a re-settle after a revert keeps where the money moved exactly
     as it keeps a stated figure (R-CC42).  A record READ back
-    (:func:`_movement_settlement`, :func:`recorded_leg_settlement`) leaves
-    it ``None``, because a read carries no instruction: :meth:`from_settle`
-    gives a re-settle the door's own *tender* whatever the retained record
-    held.  No transfer door names a tender: each side's record books on its
-    side's endpoint (:mod:`._side`).
+    (:func:`recorded_settlement`) leaves it ``None``, because a read
+    carries no instruction: :meth:`from_settle` gives a re-settle the
+    door's own *tender* whatever the retained record held.  No transfer
+    door names a tender: each side's record books on its side's endpoint
+    (:mod:`._side`).
 
     Attributes:
         amount: What moved.  ``None`` exactly when the row's own entries
@@ -281,7 +288,7 @@ def _source_named(figure_source_id: int) -> MovementFigureSourceEnum:
 
     The one decoding, read for a row's covering movement
     (:func:`_movement_settlement`) and a transfer's settled figure
-    (:func:`recorded_leg_settlement`).
+    (:func:`recorded_settlement`'s transfer arm).
 
     Raises:
         KeyError: When *figure_source_id* names no
@@ -295,18 +302,29 @@ def _source_named(figure_source_id: int) -> MovementFigureSourceEnum:
     }[figure_source_id]
 
 
-def recorded_settlement(row: Transaction) -> Optional[Settlement]:
-    """Return the settlement *row* already records, or ``None`` if it has none.
+def recorded_settlement(parent: "PlanParent") -> Optional[Settlement]:
+    """Return the settlement *parent* already records, or ``None`` if it has none.
 
-    The read half of the record, for the callers that must carry a row's
-    record forward without inventing either term: the transaction settle
-    verb honouring a RETAINED correction across a revert
-    (:meth:`Settlement.from_settle`; :func:`honoured_correction` is the same
-    read's projection), and ``transaction_service._door``'s tender-only
-    correction, which re-points the row's record whole.  A transfer's record
-    is :func:`recorded_leg_settlement`'s.
+    The read half of the record, for the callers that must carry a parent's
+    record forward without inventing either term: the two settle verbs
+    honouring a RETAINED correction across a revert
+    (:meth:`Settlement.from_settle`; ``transaction_service._settle
+    .settle_transaction`` for a row, ``transfer_service._settle.settle`` for
+    a transfer; :func:`honoured_correction` is the same read's projection),
+    and ``transaction_service._door``'s tender-only correction, which
+    re-points a row's record whole.
 
-    **The record is read off the COVERING MOVEMENT** (plan step
+    **The retained-record fact, and its ONE branch on the parent's table**
+    (ruling **plan#1983**, "price the parent, draw the side").  A transfer
+    leg asks its ``transfer_legs.parent_of``, so both legs of one transfer
+    answer the same record and the side a caller names cannot choose a
+    different one.  ``recorded_leg_settlement`` was this function's
+    transfer arm spelled again for a leg (leaf ``balance:X-bi-6-4d-1``)
+    until that ruling.  Every rule above the read -- the settled-band gate
+    (``transaction_service.retained_amounts_by_key``), the stated-only
+    honour (:func:`honoured_figure`) -- is written once against a parent.
+
+    **A plan row's record is read off its COVERING MOVEMENT** (plan step
     ``balance:X-bi-4b-1``, ruling **R-BAL80**): the row stores no writer --
     it never did -- and the movement the seam wrote for the record is where
     the figure and its source live (``amount``, ``figure_source_id``; the
@@ -335,63 +353,41 @@ def recorded_settlement(row: Transaction) -> Optional[Settlement]:
     on the 2026-09-19 production restore); the mapping retired at 4b-1 and
     the column at 4b-2.
 
-    Args:
-        row: The transaction to read, with ``entries`` loaded or loadable.
-
-    Returns:
-        The recorded :class:`Settlement`, or ``None``.
-
-    Raises:
-        KeyError: When the movement's ``figure_source_id`` names no member
-            of its enum (:func:`_source_named`).
-        ValueError: When the row holds more than one covering movement
-            (:func:`covering_movement_of`).
-    """
-    return _recorded(covering_movement_of(row), row.status_id)
-
-
-def recorded_leg_settlement(leg: "TransferLeg") -> Optional[Settlement]:
-    """Return the settlement a transfer *leg*'s TRANSFER records, or ``None``.
-
-    :func:`recorded_settlement`'s twin over a transfer leg (leaf
-    ``balance:X-bi-6-4d-1``).  **A transfer's settled figure has ONE home,
-    the transfer** (plan step ``balance:X-bi-6-4d-2``, rulings
-    **R-BAL365**, **R-BAL366**:
-    :attr:`~app.models.transfer.Transfer.settled_figure_pair`), so both legs
-    answer the same record and the side the caller names cannot choose a
-    different one.  Two answers, total over what a transfer can store:
+    **A transfer's record is its own stored figure** (plan step
+    ``balance:X-bi-6-4d-2``, rulings **R-BAL365**, **R-BAL366**:
+    :attr:`~app.models.transfer.Transfer.settled_figure_pair`).  Two
+    answers, total over what a transfer can store:
 
     * a stored figure -- it and who wrote it, settled or kept across a revert
       (ruling **R-BAL61**); ``0.00`` for a close of nothing (ruling
-      **R-BAL365**), where this answered ``Settlement(None, None)`` read off
-      the missing records until this step;
+      **R-BAL365**);
     * none -- ``None``: the transfer records nothing a re-settle could honour
       (never settled; a reverted ``$0.00`` close, whose figure the revert
       cleared; or a soft-deleted transfer whose delete took its records off,
       and its figure with them).
 
-    Asked by ``transfer_service._settle.settle`` for the pair's retained
-    record, by ``transfer_service._settle.leg_settle_amount`` for the
-    offered leg's and by
-    ``transaction_service._settle.leg_retained_amounts_by_key`` for a grid
-    leg's.
-
     Args:
-        leg: A :class:`~app.services.transfer_legs.TransferLeg`.
+        parent: The plan row (with ``entries`` loaded or loadable) or the
+            transfer to read.
 
     Returns:
         The recorded :class:`Settlement`, or ``None``.
 
     Raises:
-        KeyError: When the stored source names no member of its enum
+        KeyError: When the movement's ``figure_source_id``, or the
+            transfer's stored source, names no member of its enum
             (:func:`_source_named`).
+        ValueError: When a row holds more than one covering movement
+            (:func:`covering_movement_of`).
     """
-    stored = leg.transfer.settled_figure_pair
-    if stored is None:
-        return None
-    return Settlement(
-        amount=stored.figure, source=_source_named(stored.source_id),
-    )
+    if isinstance(parent, Transfer):
+        stored = parent.settled_figure_pair
+        if stored is None:
+            return None
+        return Settlement(
+            amount=stored.figure, source=_source_named(stored.source_id),
+        )
+    return _recorded(covering_movement_of(parent), parent.status_id)
 
 
 def _recorded(
@@ -399,12 +395,11 @@ def _recorded(
 ) -> Optional[Settlement]:
     """Return the record a row holding *movement* in *status_id* states.
 
-    :func:`recorded_settlement`'s body: the covering movement's figure and
+    :func:`recorded_settlement`'s row arm: the covering movement's figure and
     source when there is one; ``Settlement(None, None)`` for a SETTLED row
     with none (its entries are its record, ruling **R-BAL82**); else
-    ``None``.  A transfer's record is its own column pair
-    (:func:`recorded_leg_settlement`) since plan step
-    ``balance:X-bi-6-4d-2``.
+    ``None``.  A transfer's record is its own column pair (the function's
+    other arm) since plan step ``balance:X-bi-6-4d-2``.
     """
     if movement is not None:
         return _movement_settlement(movement)
@@ -487,11 +482,11 @@ def tender_account_id_of(row: Transaction) -> int:
 def _movement_settlement(movement) -> Settlement:
     """Return the :class:`Settlement` a row's covering movement states.
 
-    The leaf :func:`recorded_settlement` reads through.  It was published
-    from leaf ``X-bi-6-1`` for a transfer's leg, whose retained figure was
-    read off its side's record; a transfer's figure is its own since plan
-    step ``balance:X-bi-6-4d-2`` (:func:`recorded_leg_settlement`), so the
-    one reader left is the row's.
+    The leaf :func:`recorded_settlement`'s row arm reads through.  It was
+    published from leaf ``X-bi-6-1`` for a transfer's leg, whose retained
+    figure was read off its side's record; a transfer's figure is its own
+    since plan step ``balance:X-bi-6-4d-2`` (:func:`recorded_settlement`'s
+    transfer arm), so the one reader left is the row's.
 
     Args:
         movement: A :class:`~app.models.transaction_entry.TransactionEntry`
@@ -509,13 +504,17 @@ def _movement_settlement(movement) -> Settlement:
     )
 
 
-def honoured_correction(row: Transaction) -> Optional[Decimal]:
+def honoured_correction(parent: "PlanParent") -> Optional[Decimal]:
     """Return the figure a RETAINED correction still states, or ``None``.
 
     **The ONE statement of "a human's figure outlives the settle that recorded
     it"**, asked by :func:`settle_amount` -- what the reconcile panel OFFERS --
     and by :func:`settle_transaction` -- what a tick BOOKS -- so the two cannot
-    answer differently (plan step X-au-c3, developer 2026-08-17).
+    answer differently (plan step X-au-c3, developer 2026-08-17).  It is
+    asked of a PARENT (ruling **plan#1983**): a row, or a transfer, whose
+    :func:`settle_amount` both settle verbs book and the offers show a leg
+    at, and which ``transaction_service.retained_amounts_by_key`` draws on a
+    leg's cell.
 
     A revert releases the ASSERTION and keeps what moved
     (``status_seam.apply_status_change``), so a row the user reverted in order
@@ -543,38 +542,37 @@ def honoured_correction(row: Transaction) -> Optional[Decimal]:
     stores no figure, and this is not reached for such a row:
     :func:`settle_amount` takes the entries branch above it.
 
-    **It reads the covering movement, as :func:`recorded_settlement` does,
-    and is that read's one-line projection** (plan step ``balance:X-bi-4b-1``)
-    -- it read the row's two columns through ``X-bi-4a`` "so a whole grid
-    costs no ``entries`` load", and the grid loads them
+    **It is :func:`recorded_settlement`'s one-line projection** (plan step
+    ``balance:X-bi-4b-1``), so for a row it reads the covering movement -- it
+    read the row's two columns through ``X-bi-4a`` "so a whole grid costs no
+    ``entries`` load", and the grid loads them
     (``routes/grid/_items.load_grid_items`` through
     ``valuation_load_options``; ``companion_service`` likewise), as every
     batch reader of :func:`~app.services.row_valuation.settled_figure` does
-    since the same step.  A whole grid asks it per unsettled row
-    (``retained_settle_amounts_by_id``).
+    since the same step -- and for a transfer its own stored figure.  A
+    whole grid asks it per unsettled parent (``retained_amounts_by_key``).
 
     Args:
-        row: The row about to be offered or settled.
+        parent: The row or transfer about to be offered or settled.
 
     Returns:
-        The retained correction's figure, or ``None`` when the row holds no
+        The retained correction's figure, or ``None`` when *parent* holds no
         stated record.
     """
-    return honoured_figure(recorded_settlement(row))
+    return honoured_figure(recorded_settlement(parent))
 
 
 def honoured_figure(recorded: Optional[Settlement]) -> Optional[Decimal]:
     """Return the figure *recorded* still states, or ``None``.
 
     :func:`honoured_correction`'s rule over a record already read, so a
-    reader holding a transfer leg rather than a row (a leg's grid cell, leaf
-    ``X-bi-6-1``) applies the SAME rule to
-    :func:`recorded_leg_settlement` rather than restating it: only a STATED
-    record is honoured, for the reason the row-shaped reader gives.
+    settle that reads its parent's record ONCE and carries it into the
+    :class:`Settlement` it writes (``transfer_service._settle.settle``)
+    applies the SAME rule rather than restating it: only a STATED record is
+    honoured, for the reason :func:`honoured_correction` gives.
 
     Args:
-        recorded: What :func:`recorded_settlement` or
-            :func:`recorded_leg_settlement` answered, or ``None``.
+        recorded: What :func:`recorded_settlement` answered, or ``None``.
 
     Returns:
         The retained correction's figure, or ``None``.
@@ -594,13 +592,13 @@ def correction_record(
     row, so they get two boxes, and editing the actual states what the bank
     really took.  ``transaction_service._door`` asks it with a plain row's
     record and ``transfer_service._update`` with the figure a transfer
-    stores, read through its expense leg; a second spelling of the echo
+    stores; a second spelling of the echo
     comparison is how the two tables would come to disagree about what counts
     as a correction.  It takes the RECORDED FIGURE rather than the row since
     leaf ``balance:X-bi-6-4d-1``, so each table reads its own record its own
     way -- a row off its entries, a transfer off its own stored figure
-    (:func:`~app.services.row_valuation.leg_settled_figure`) -- and the rule
-    stays one.
+    (:func:`~app.services.row_valuation.settled_figure` asks each its own,
+    ruling **plan#1983**) -- and the rule stays one.
 
     **An ECHO writes nothing.**  Both popovers PREFILL the box with what the row
     already records, so an untouched Save posts the same figure back; recording
@@ -614,9 +612,8 @@ def correction_record(
     (:attr:`Settlement.stated`).
 
     **The comparison is against what the row RECORDS, not its plan**
-    (:func:`app.services.row_valuation.settled_figure`, the sum of its
-    entries, or :func:`~app.services.row_valuation.leg_settled_figure` for a
-    leg -- the same maps the box was PREFILLED from).  The two differ
+    (:func:`app.services.row_valuation.settled_figure`: a row's entry sum, a
+    transfer's stored figure -- the same map the box was PREFILLED from).  The two differ
     whenever a correction stands, so comparing against the plan would read
     every re-save of a corrected row as a fresh correction of the same
     figure.  It read a TOTAL twin, ``recorded_figure``, through ``X-bi-4a``,
@@ -629,8 +626,8 @@ def correction_record(
 
     Args:
         recorded: What the settled row or leg being corrected already records
-            (the caller's :func:`~app.services.row_valuation.settled_figure`
-            or :func:`~app.services.row_valuation.leg_settled_figure`).  The
+            (the caller's
+            :func:`~app.services.row_valuation.settled_figure`).  The
             CALLER establishes that it is settled;
             :func:`reject_figure_without_settled_status` is that check.
         submitted: The figure the door stated and who wrote it

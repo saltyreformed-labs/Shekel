@@ -11,7 +11,7 @@ from app.enums import StatusEnum
 from app.extensions import db
 from app.models.transfer import Transfer
 from app.routes._render_helpers import transfer_side_boxes
-from app.services import balance_at, transfer_legs
+from app.services import balance_at
 from app.services.balance_at import BalanceContext
 from app.services import transfer_service
 from app.utils.dates import display_today
@@ -693,9 +693,7 @@ class TestTheTransferSideBoxes:
         """Return both boxes for *xfer_id*, drawn from a fresh load."""
         db.session.expire_all()
         xfer = db.session.get(Transfer, xfer_id)
-        return transfer_side_boxes(
-            xfer, transfer_legs.covering_movements_by_leg([xfer_id]),
-        )
+        return transfer_side_boxes(xfer)
 
     @staticmethod
     def _transfer(seed_user, seed_periods_today):

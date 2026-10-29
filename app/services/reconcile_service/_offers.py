@@ -26,6 +26,7 @@ from app.services.match_withdrawal import MatchWithdrawal
 from app.services.pay_calendar import DerivedPeriod
 from app.services.reconcile_service._named import NamedLines, SharedMatch
 from app.services.reconcile_service._rows import Statement
+from app.services.transfer_legs import is_leg_key
 
 
 class OfferKind(enum.Enum):
@@ -223,9 +224,11 @@ class TickForm(enum.Enum):
             key: An offer's :attr:`OutstandingTransaction.key`.
 
         Returns:
-            :attr:`LEG` for a transfer leg's pair, :attr:`ROW` for a row id.
+            :attr:`LEG` for a transfer leg's pair, :attr:`ROW` for a row id,
+            told apart by the one key-shape test
+            (:func:`~app.services.transfer_legs.is_leg_key`).
         """
-        return cls.LEG if isinstance(key, tuple) else cls.ROW
+        return cls.LEG if is_leg_key(key) else cls.ROW
 
 
 @dataclass(frozen=True)

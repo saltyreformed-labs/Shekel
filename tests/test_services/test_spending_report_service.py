@@ -41,9 +41,9 @@ from app.services import (
 from app.services.cash_flow_set import CashFlowSet
 from app.services.pay_calendar import PayCalendar
 from app.utils.dates import display_today
-from app.services.cash_ledger import derived_amount_basis
+from app.services.cash_ledger import derived_amount_basis, resolve_amount
 from app.services.row_valuation import settled_contribution
-from app.services.transfer_legs import grid_transfer_leg
+from app.services.transfer_legs import leg_of, parent_of
 from app.services.spending_report_service import (
     Comparison,
     SpendingWindow,
@@ -1578,8 +1578,9 @@ class TestATransferIsALegOfItsParent:
 
     Both window loads answer the set's OWN rows -- no shadow -- beside the
     EXPENSE leg of every settled transfer the set touches, and the package's
-    kernels (``recorded_spend``, ``planned_spend``, ``resolved_actual_amount``)
-    route a leg to its producers.  The money case above (R-CC23) already
+    kernels (``settled_contribution`` and ``resolve_amount`` of a leg's
+    parent, and ``resolved_actual_amount`` over it, ruling plan#1983) price
+    a leg as its transfer.  The money case above (R-CC23) already
     grades what a transfer is WORTH here; these grade what it IS, and every
     figure the report derives from a leg.
     """
@@ -1587,6 +1588,13 @@ class TestATransferIsALegOfItsParent:
     def test_both_loaders_answer_own_rows_and_settled_expense_legs(
         self, app, seed_user, seed_periods, db,
     ):
+        """$100.00 Rent and three transfers: settled out, planned out, settled in.
+
+        Both settled-spend loaders (by period and by span) answer Rent as the
+        one row and the settled $250.00 checking -> Savings transfer as its
+        one expense leg; the planned $75.00 one is not settled and the
+        settled $60.00 one INTO checking is income here, so neither is spend.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = create_savings_account(
@@ -1672,9 +1680,17 @@ class TestATransferIsALegOfItsParent:
                 "avg_days_before_due": Decimal("1.00"),
             }
 
-    def test_the_kernels_route_a_leg_to_its_producers(
+    def test_a_leg_reads_its_record_when_settled_else_its_plan(
         self, app, seed_user, seed_periods, db,
     ):
+        """A settled $250.00 transfer that moved $240.00 and a planned $75.00 one.
+
+        Each is read through its checking leg's parent.  The settled one
+        contributes its $240.00 record against its $250.00 plan and reads
+        back $240.00 spent; the planned one reads back its $75.00 plan (zero
+        variance), and ``settled_contribution`` refuses it: it recorded
+        nothing.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = create_savings_account(
@@ -1692,17 +1708,17 @@ class TestATransferIsALegOfItsParent:
             basis = derived_amount_basis(
                 seed_user["user"].id, seed_user["scenario"].id,
             )
-            settled_leg = grid_transfer_leg(settled, checking.id)
-            planned_leg = grid_transfer_leg(planned, checking.id)
+            settled_leg = leg_of(settled, checking.id)
+            planned_leg = leg_of(planned, checking.id)
 
-            assert spending_analysis.recorded_spend(settled_leg) == Decimal("240.00")
-            assert spending_analysis.planned_spend(settled_leg, basis) == Decimal("250.00")
-            assert spending_analysis.resolved_actual_amount(settled_leg, basis) == Decimal("240.00")
+            assert settled_contribution(parent_of(settled_leg)) == Decimal("240.00")
+            assert resolve_amount(parent_of(settled_leg), basis) == Decimal("250.00")
+            assert spending_analysis.resolved_actual_amount(parent_of(settled_leg), basis) == Decimal("240.00")
             # An unsettled leg reads back its plan, so its variance is zero
             # by construction -- and it recorded nothing to spend.
-            assert spending_analysis.resolved_actual_amount(planned_leg, basis) == Decimal("75.00")
+            assert spending_analysis.resolved_actual_amount(parent_of(planned_leg), basis) == Decimal("75.00")
             with pytest.raises(AmountUnresolvable):
-                spending_analysis.recorded_spend(planned_leg)
+                settled_contribution(parent_of(planned_leg))
 
     def test_a_soft_deleted_settled_transfer_is_no_spend_on_either_arm(
         self, app, seed_user, seed_periods, db,
@@ -1771,7 +1787,7 @@ class TestATransferIsALegOfItsParent:
                 seed_user["scenario"].id, [period.id], CashFlowSet.single(checking),
             ).legs
             assert leg.transfer.id == zero.id and leg.record is None
-            assert spending_analysis.recorded_spend(leg) == Decimal("0")
+            assert settled_contribution(parent_of(leg)) == Decimal("0")
             assert leg.settled_on is None and leg.days_paid_before_due is None
             report = compute_spending_report(
                 seed_user["user"].id, _pp_window(period), user_settings=None,
@@ -2298,9 +2314,9 @@ class TestTheActualHalfAsksTheAmountModel:
     of that population (an engine-generated row), assertions unchanged (the
     coordinator's ruling, 10-15; not an R-BAL167 class).  A transfer LEG
     takes the fall-through's other arm --
-    :func:`~app.services.spending_analysis.planned_spend` prices it off its
+    :func:`~app.services.cash_ledger.resolve_amount` prices it off its
     parent -- and
-    :meth:`TestATransferIsALegOfItsParent.test_the_kernels_route_a_leg_to_its_producers`
+    :meth:`TestATransferIsALegOfItsParent.test_a_leg_reads_its_record_when_settled_else_its_plan`
     grades that arm (an unsettled leg's actual is its plan, ``$75.00``).
     """
 
@@ -2468,7 +2484,7 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
         (``test_a_transfer_is_one_row/test_the_upgrade.py::TestTheUpgrade::
         test_the_database_refuses_a_twin``),
         and a leg has no figure field at all, its plan being the parent's
-        through :func:`~app.services.spending_analysis.planned_spend`.
+        through :func:`~app.services.cash_ledger.resolve_amount`.
         """
         with app.app_context():
             savings = create_savings_account(
@@ -2482,7 +2498,7 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
             )
             db.session.commit()
 
-            expense_leg = grid_transfer_leg(xfer, seed_user["account"].id)
+            expense_leg = leg_of(xfer, seed_user["account"].id)
 
             surprises = _build_surprises(
                 [expense_leg],

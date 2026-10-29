@@ -22,27 +22,38 @@ the loan-posting glue into ``_loan_posting``.  :func:`assert_restorable`
 joined them at plan step X-aj1 (ruling **R-DR**), bringing ``restore_transfer``'s
 preconditions to the module whose single responsibility they already were.
 
-These helpers plus :class:`TransferRows` are a cohesive,
-transfer-service-private cluster (single responsibility: validate inputs and
-load the rows a mutation operates on).  They write no ``status_id``
-and construct no ``Transaction`` -- so they stay clear of the W9907 status
-fence, whose one transfer entry is the ``_create`` leaf's constructor write --
-and they compute no balance.
+These helpers are a cohesive, transfer-service-private cluster (single
+responsibility: validate inputs and load the transfer a mutation operates on).
+They write no ``status_id`` and construct no ``Transaction`` -- so they stay
+clear of the W9907 status fence, whose one transfer entry is the ``_create``
+leaf's constructor write -- and they compute no balance.
 Flask-isolated like the parent service: plain data in, ORM objects out, no
 ``request`` / ``session`` imports.
+
+**Each act takes the** :class:`~app.models.transfer.Transfer` **itself since
+finding plan#2043**, which deleted the ``TransferRows`` wrapper that stood
+here.  It came in at plan step X-f2-c3 as Transfer Invariant 1 made a TYPE --
+a parent and exactly two shadow transactions, whose statuses and periods were
+kept equal -- because threading the three through the settle's signature put
+it over pylint's argument ceiling, and a call site that could pair one
+transfer with another's shadows could break the invariant by typo.  Plan step
+``balance:X-bi-6-4d-2`` deleted the twin rows (rulings **R-BAL166**,
+**R-BAL258**) and its leaf 3b the ``shadows`` attribute with the loader that
+queried them (``load_transfer_rows``) and the arms of ``_update``,
+``_amount`` and ``_endpoints`` that wrote the mirrors over them.  Its last
+field beside the transfer, ``expense_leg``, went with its last reader at
+plan#2019 (ruling **plan#1983**), which left a wrapper of one field: no
+ceiling to stay under and no pair to keep together.
 """
 
 import logging
-from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from functools import cached_property
 
 from app.extensions import db
 from app.models.account import Account
 from app.models.transfer import Transfer
 from app.exceptions import NotFoundError, ValidationError
 from app.services.account_projection import is_revolving
-from app.services.transfer_legs import TransferLeg, transfer_side_leg
 from app.services.transfer_service._loan_posting import (
     _reject_transfer_out_of_loan,
 )
@@ -53,88 +64,6 @@ from app.utils.log_events import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class TransferRows:
-    """The transfer one act writes, and its expense side read once for the act.
-
-    Introduced at plan step X-f2-c3 as Transfer Invariant 1 as a TYPE -- a
-    parent and exactly two shadow transactions, whose statuses and periods
-    were kept equal -- because threading the three through the settle's
-    signature put it over pylint's argument ceiling, and a call site that
-    could pair one transfer with another's shadows could break the invariant
-    by typo.  The same reasoning
-    :class:`app.services.reconcile_service._rows.Statement` is built on.
-
-    **It holds ONE row since plan step ``balance:X-bi-6-4d-2``**, which
-    deleted the twin rows and made the database refuse a new one (rulings
-    **R-BAL166**, **R-BAL258**).  The twins had been mirrors and nothing more
-    since ``X-bi-6-4d-2``: a transfer's status is its own column, and each
-    side's day is its payment record's, hung off the transfer by a side
-    link; while the twins stood, that record held the side's figure too,
-    which is the transfer's own since ``X-bi-6-4d-2``'s 4d-4 half.  The
-    step's leaf 3b deleted the
-    ``shadows`` attribute, the loader that queried the twins
-    (``load_transfer_rows``) and the arms of ``_update``, ``_amount`` and
-    ``_endpoints`` that wrote the mirrors over them.  What the value still
-    carries beside the transfer is :attr:`expense_leg`, the read an act's
-    settle and figure grade share.
-
-    Attributes:
-        transfer: The :class:`~app.models.transfer.Transfer` the act writes.
-    """
-
-    transfer: Transfer
-
-    @cached_property
-    def expense_leg(self) -> TransferLeg:
-        """Return the from-side LEG with its record; what the pair records is read through it.
-
-        The settle and the update read what a pair RECORDS through its
-        expense leg -- the retained correction a re-settle honours, the record
-        it carries forward, the figure an echoed Actual box is compared
-        against, each read off the leg's TRANSFER, the settled figure's one
-        home (plan step ``balance:X-bi-6-4d-2``) -- and since leaf
-        ``balance:X-bi-6-4d-1`` they read it here, through
-        :func:`app.services.transfer_legs.transfer_side_leg`, rather than off
-        the expense shadow's ``entries``: ``transfer_legs`` holds the one join
-        ``X-bi-6-4d``'s re-parent moves, so this read moves with it.  The
-        leg's status is its TRANSFER's.  It is read by SIDE, never by the transfer's
-        current account, because an endpoint move earlier in the same act
-        leaves ``from_account_id`` stale until a flush (see the producer).
-
-        **Read ONCE per act and kept**, so the grade, the settle and the
-        correction of one update ask one query between them: a producer asked
-        twice in one request is two resolution points, which can come to
-        disagree about WHEN they resolved.
-        That is correct because every reader asks BEFORE the act's seam pass,
-        and asks only for its TRANSFER's facts -- the status and soft delete,
-        the settled figure and its source, and what the transfer resolves to
-        -- which the leg reads off the live transfer at each asking; none asks
-        for the leg's ``record``, which the read freezes (an endpoint move
-        carries it to the new endpoint and may re-date it ``borrowed``, ruling
-        **R-BAL168**).  A reader of the record AFTER the seam pass would not
-        see the act's own write consistently (a first settle's new record is
-        absent from the cached value; a kept one is the same object, re-dated
-        in place), so none may be added there.  **Its ``account_id`` is
-        frozen at the read**, too, and an act may move an endpoint around
-        that read: when a figure is
-        graded the read precedes the move (``_update._grade_submitted_figure``
-        runs ahead of ``_endpoints._apply_endpoint_move``) and names the OLD
-        source after it; otherwise the first read is the settle's, after the
-        move has flushed, and names the NEW source.  Either way nothing may
-        read this leg's account: every
-        reader reads through its ``transfer``, and one that needs the side's
-        account reads the transfer's.
-
-        Returns:
-            The :class:`~app.services.transfer_legs.TransferLeg` on the
-            transfer's source account, its ``record`` the covering movement
-            the expense side holds (dated, or kept un-dated across a revert),
-            ``None`` when it holds none.
-        """
-        return transfer_side_leg(self.transfer, is_income=False)
 
 
 def _validate_positive_amount(amount):

@@ -104,10 +104,10 @@ def planned_transfer_legs(
 def offerable_transfer_legs(
     account_id: int,
     owner_id: int,
-    period_ids,
+    period_ids: Iterable[int],
     *,
     options: tuple,
-    transfer_ids=None,
+    transfer_ids: Iterable[int] | None = None,
 ) -> list[TransferLeg]:
     """Return the still-planned legs on *account_id* a statement could settle.
 

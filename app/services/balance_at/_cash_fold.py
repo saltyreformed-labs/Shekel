@@ -123,7 +123,7 @@ from app.services.cash_ledger import (
     walk_cash_ledger,
 )
 from app.services.pay_calendar import FiledRow, PayCalendar, PeriodWindow
-from app.services.transfer_legs import TransferLeg
+from app.services.transfer_legs import TransferLeg, parent_of
 
 from ._assertions import CashAnchorCorrection, assertion_corrections
 from ._context import BalanceContext
@@ -946,8 +946,7 @@ def _cash_plan(
             # no earlier than the day it happened (ruling **R-BAL77**).
             by_day[max(item.purchased_on, not_before)].append(item)
             continue
-        filed = item.transfer if isinstance(item, TransferLeg) else item
-        period = calendar.require_period(FiledRow.for_row(filed))
+        period = calendar.require_period(FiledRow.for_row(parent_of(item)))
         nominal = period.attribution_day(item.due_date)
         by_day[max(nominal, not_before)].append(item)
     return _CashPlan(rows=rows, by_day=dict(by_day), basis=basis)

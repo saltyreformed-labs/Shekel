@@ -44,7 +44,7 @@ from app.services.transaction_service import (
     retained_amount,
     retained_amounts_by_key,
 )
-from app.services.transfer_legs import PlanItem, parent_of, transfer_side_leg
+from app.services.transfer_legs import PlanItem, parent_of, side_legs
 from app.utils.digit_strings import integer_arg
 
 
@@ -470,8 +470,7 @@ def transfer_side_boxes(
         The two boxes.
     """
     days = {}
-    for is_income in (False, True):
-        leg = transfer_side_leg(xfer, is_income=is_income)
+    for leg in side_legs(xfer):
         days[leg.account_id] = (
             None if leg.record is None else recorded_settle_day(leg.record)
         )

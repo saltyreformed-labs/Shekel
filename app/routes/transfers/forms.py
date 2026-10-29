@@ -245,8 +245,9 @@ def _payment_withdrawal(xfer):
     **R-CC54**).  An act names ONE side's record -- a member is held to its
     movement's account, and the sides are on two -- so the two sides' acts
     are disjoint and one read over both records is what that call
-    withdraws.  Each side's record is read off its leg as the seam's write
-    reads it (``status_seam._side._withdraw_sides``), from the popover's ONE
+    withdraws.  The records are the pair's as the seam's write reads them
+    (``transfer_legs.held_records`` over the pair, which
+    ``status_seam._side._withdraw_sides`` asks too), from the popover's ONE
     load of them (``transfer_legs.preload_side_records``), which its day
     boxes read too (ledger row **BAL-530**, closed at plan step
     ``balance:X-bi-6-4c-3``: this read made a second call of that join).
@@ -258,14 +259,7 @@ def _payment_withdrawal(xfer):
         A :class:`~app.services.match_withdrawal.MatchWithdrawal`, or
         ``None`` when neither side holds a payment.
     """
-    movements = [
-        leg.record
-        for leg in (
-            transfer_legs.transfer_side_leg(xfer, is_income=False),
-            transfer_legs.transfer_side_leg(xfer, is_income=True),
-        )
-        if leg.record is not None
-    ]
+    movements = transfer_legs.held_records(transfer_legs.side_legs(xfer))
     if not movements:
         return None
     return match_withdrawal.pending_for_movements(movements)

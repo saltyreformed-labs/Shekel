@@ -72,7 +72,7 @@ from app.services.match_press import Press
 from app.services.stated_figure import StatedFigure
 from app.services import status_seam, transaction_service
 from app.services.status_seam import Settlement, recorded_settlement
-from app.services.transfer_legs import TransferLeg, transfer_side_leg
+from app.services.transfer_legs import TransferLeg
 from app.services.transfer_service._side_days import PairDays
 from app.services.transfer_service._status import apply_status_to_all_three
 
@@ -328,7 +328,10 @@ def record_leg_clearing(leg: TransferLeg, anchor_id: int) -> None:
     other side, whose account's statement nobody read in this act; a side
     closed at ``$0.00`` holds no record and keeps no link (ruling
     **R-BAL141**).  Until plan step ``balance:X-bi-6-4d-2`` it linked the
-    side's twin row and that row's covering movement.
+    side's twin row and that row's covering movement.  *leg* is passed as it
+    is: a leg reads its record live off its transfer's list for the side
+    (ruling **plan#1984**), so the record the settle just wrote is what it
+    reads, where this rebuilt the same leg from its transfer and side.
 
     Issues no flush and no commit -- the caller owns the session boundary.
 
@@ -339,6 +342,4 @@ def record_leg_clearing(leg: TransferLeg, anchor_id: int) -> None:
             this account by construction.  Its transfer has just settled.
         anchor_id: The ``budget.account_anchor_history`` row the statement is.
     """
-    status_seam.record_side_clearing(
-        transfer_side_leg(leg.transfer, is_income=leg.is_income), anchor_id,
-    )
+    status_seam.record_side_clearing(leg, anchor_id)

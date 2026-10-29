@@ -7,10 +7,11 @@ The half of :mod:`app.services.transfer_legs` that holds the VALUE: the
 :func:`side_movements`, ruling **plan#1984**), the one composition of a leg's
 LABEL (:func:`leg_label`), the one statement of a leg's IDENTITY beside a plan
 row's (:func:`cell_key`, :func:`key_order`, :func:`is_leg_key`, ruling
-**R-BAL87**), the one answer to which row PRICES an item (:func:`parent_of`,
-ruling **plan#1983**), and the one construction of a leg from its parent
+**R-BAL87**), the one answer to which row PRICES and FILES an item
+(:func:`parent_of`, ruling **plan#1983**), and the one construction of a leg from its parent
 (:func:`transfer_side_leg`, :func:`leg_of` from an account, and
-:func:`side_legs` for both sides).
+:func:`side_legs` for both sides), and the one read of the records a pair of
+sides holds (:func:`held_records`).
 The package docstring carries the argument.  The functions these definitions
 name by bare name (:func:`planned_transfer_legs`,
 :func:`recorded_transfer_legs`, :func:`preload_side_records`,
@@ -431,7 +432,7 @@ PlanParent = Transaction | Transfer
 
 
 def parent_of(item: PlanItem) -> PlanParent:
-    """Return the parent whose money facts price *item*.
+    """Return the parent whose money facts price *item*, and the row it is filed as.
 
     **The ONE place a row and a leg are told apart for PRICING** (ruling
     **plan#1983**), beside :func:`cell_key`, the one place they are told
@@ -440,7 +441,11 @@ def parent_of(item: PlanItem) -> PlanParent:
     projection of its transfer that stores no money, and every one of its
     pricing questions (the plan amount, the recorded figure, the retained
     record) is a question about the transfer.  A plan row stores its own
-    money facts, so it is its own parent.
+    money facts, so it is its own parent.  **The parent is also the row an
+    item is FILED as**: a leg's period is its transfer's, and the calendar
+    places a mapped row (``pay_calendar.FiledRow.for_row``), so the cash
+    fold's plan files each item under this answer
+    (``balance_at._cash_fold._cash_plan``).
 
     Args:
         item: A row or a leg.
@@ -453,7 +458,7 @@ def parent_of(item: PlanItem) -> PlanParent:
     return item
 
 
-def is_leg_key(key) -> bool:
+def is_leg_key(key: int | tuple[int, int]) -> bool:
     """Return ``True`` iff *key* is a transfer leg's :func:`cell_key`.
 
     The ONE test of a key's shape (finding **BAL-552**): a leg's key is the
@@ -471,7 +476,7 @@ def is_leg_key(key) -> bool:
     return isinstance(key, tuple)
 
 
-def cell_key(item: PlanItem):
+def cell_key(item: PlanItem) -> int | tuple[int, int]:
     """Return the key a surface publishes *item*'s per-item facts under.
 
     **The ONE place a row and a leg are told apart for identity** (leaf
@@ -497,7 +502,7 @@ def cell_key(item: PlanItem):
     return item.id
 
 
-def key_order(key) -> tuple[int, int, int]:
+def key_order(key: int | tuple[int, int]) -> tuple[int, int, int]:
     """Return a TOTAL order over :func:`cell_key` values, for a mixed sort.
 
     A row's key is an ``int`` and a leg's a pair, and Python refuses to
@@ -637,3 +642,26 @@ def side_legs(transfer: Transfer) -> tuple[TransferLeg, TransferLeg]:
         transfer_side_leg(transfer, is_income=False),
         transfer_side_leg(transfer, is_income=True),
     )
+
+
+def held_records(legs: Iterable[TransferLeg]) -> list[TransactionEntry]:
+    """Return the records *legs*' sides hold, in the order given, a side holding none skipped.
+
+    The ONE read of what a transfer's sides hold (rule 14): the status
+    seam's Transfer arm asks it of the pair an act found -- whether the pair
+    holds any (``status_seam._side.sync_side_records``) and, for a ``$0.00``
+    close, which records the one removal act takes off the books
+    (``_withdraw_sides``) -- and the transfer popover asks it of the same pair
+    to say what that close would withdraw
+    (``routes/transfers/forms._payment_withdrawal``), so the preview and the
+    write read one list.  Each record is read live off its side's list
+    (:attr:`TransferLeg.record`).
+
+    Args:
+        legs: The sides to read: :func:`side_legs`' pair, or
+            :func:`~._records.transfer_sides`' with both lists loaded.
+
+    Returns:
+        Each side's record, in the order of *legs*; ``[]`` when none holds one.
+    """
+    return [leg.record for leg in legs if leg.record is not None]

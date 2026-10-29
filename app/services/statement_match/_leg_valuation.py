@@ -33,6 +33,7 @@ data in, frozen dataclasses out, no Flask import, no clock read.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -50,9 +51,9 @@ if TYPE_CHECKING:  # pragma: no cover -- annotations only
 def offered_legs(
     account_id: int,
     owner_id: int,
-    period_ids,
+    period_ids: Iterable[int],
     *,
-    transfer_ids=None,
+    transfer_ids: Iterable[int] | None = None,
 ) -> list[TransferLeg]:
     """Return the still-planned legs on *account_id* a statement could settle, loaded to offer.
 

@@ -94,7 +94,7 @@ from app.services.status_seam._refusals import (
     reject_settlement_on_a_deleted_row,
     reject_settlement_without_settled_status,
 )
-from app.services.transfer_legs import side_movements
+from app.services.transfer_legs import held_records, side_movements
 from app.utils.balance_predicates import (
     enters_settled_band,
     settled_status_ids,
@@ -194,7 +194,7 @@ def sync_side_records(
     now_settled = new_status_id in settled_status_ids()
     # As the act FOUND them: a side's record is read live, and the writes
     # below append one (a first settle) or take both out (a ``$0.00`` close).
-    held = any(leg.record is not None for leg in legs)
+    held = bool(held_records(legs))
     covers = now_settled and settlement is not None and settlement.amount != 0
     withdraws = now_settled and settlement is not None and not covers
     # The sides this act writes a day onto, each with its day: every side
@@ -420,7 +420,7 @@ def _withdraw_sides(legs: "tuple[TransferLeg, TransferLeg]", press: Press | None
     Returns:
         Whether any record was taken off.
     """
-    records = [leg.record for leg in legs if leg.record is not None]
+    records = held_records(legs)
     if not records:
         return False
     movement_removal.remove_movements(

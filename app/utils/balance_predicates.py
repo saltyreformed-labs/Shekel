@@ -167,7 +167,7 @@ def settled_status_ids() -> frozenset[int]:
     })
 
 
-def is_identity_move(row, new_status_id: int) -> bool:
+def is_identity_move(row: Transaction | Transfer, new_status_id: int) -> bool:
     """Return whether *row* is ALREADY in *new_status_id* -- nothing to do.
 
     **The predicate that tells a re-submit from a transition**, and it is the
@@ -222,7 +222,7 @@ def is_identity_move(row, new_status_id: int) -> bool:
     return row.status_id == new_status_id
 
 
-def enters_settled_band(row, new_status_id: int) -> bool:
+def enters_settled_band(row: Transaction | Transfer, new_status_id: int) -> bool:
     """Return whether moving *row* to *new_status_id* SETTLES it.
 
     **The predicate that tells a status ASSIGNMENT from a SETTLE.**  Settling
@@ -276,7 +276,7 @@ def enters_settled_band(row, new_status_id: int) -> bool:
     return row.status_id not in settled and new_status_id in settled
 
 
-def touches_settled_band(row, new_status_id: int) -> bool:
+def touches_settled_band(row: Transaction | Transfer, new_status_id: int) -> bool:
     """Return whether moving *row* to *new_status_id* starts or ends in the settled band.
 
     **The moves whose act keeps a payment record in step with the status**:
@@ -307,7 +307,7 @@ def touches_settled_band(row, new_status_id: int) -> bool:
     return row.status_id in settled or new_status_id in settled
 
 
-def reverts_to_projected(row, new_status_id: int) -> bool:
+def reverts_to_projected(row: Transaction | Transfer, new_status_id: int) -> bool:
     """Return whether moving *row* to *new_status_id* sets it BACK to Projected.
 
     **The predicate that tells a revert from a re-submit** (plan step
@@ -335,7 +335,7 @@ def reverts_to_projected(row, new_status_id: int) -> bool:
     )
 
 
-def delete_returns_to_plan(row, *, took_off: bool) -> bool:
+def delete_returns_to_plan(row: Transaction | Transfer, *, took_off: bool) -> bool:
     """Return whether the delete that took *row*'s payments off sets it back to Projected.
 
     **Ruling R-BAL246's one statement** (developer 2026-10-09, "Back as a

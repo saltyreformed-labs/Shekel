@@ -29,6 +29,11 @@ than one arc's argument:
 - **The development environment**: worktrees, virtualenvs and the dev server.
 - **Security work that no other arc's argument covers**: the host, the image, the network in front
   of the app, sign-in and sessions.
+- **App-wide code that holds no one arc's rule** (ruling plan#2292): what every arc's code stands
+  on, such as how a submitted form or query string is parsed, how a template renders, the reference
+  cache and its seeds, how a fresh database is built, package privacy, the integrity sweep, who an
+  audit row names as its author, the shared value types, and the honesty of the test suite as a
+  whole.
 
 ## What stays in another arc
 

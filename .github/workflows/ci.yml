@@ -38,6 +38,18 @@
 # THE STEP NUMBERS are kept from the single-job era, on the same steps, because
 # .pre-commit-config.yaml and pytest.ini cite them.  Python matches the
 # production Dockerfile (3.14) in every job.
+#
+# THE TIME LIMITS (rulings plan#2328, plan#2330).  Every job carries a
+# ``timeout-minutes`` of twice its longest successful run, rounded up to a
+# whole five minutes, so a stalled runner fails its job rather than holding a
+# pull request's check, which its enqueue waits on, for GitHub's default of
+# 360 minutes (run 38541852835, 2026-10-14: a shard still crawling when it was
+# cancelled by hand at 37.9 min).  The merge queue already drops a group
+# whose checks take 60 minutes (rulesets dev-queue and main-queue).  The
+# longest runs are every successful job of every run of this workflow created
+# 2026-10-01 to 2026-10-30, on ubuntu-24.04 (212 runs, every attempt, read
+# from GitHub's jobs API; a job GitHub lists again, unchanged, under a re-run
+# attempt counts once), each job's figure on its own limit's line.
 
 name: CI
 
@@ -95,7 +107,8 @@ env:
 # ── Jobs ──────────────────────────────────────────────────────────
 jobs:
   landing:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5  # longest of 114 runs: 0.52 min
     # The job's own token reads the pull request it judges (its base, head
     # branch and head commit), so this job alone adds ``pull-requests: read``
     # to the workflow's least privilege.  A job's permissions replace the
@@ -209,7 +222,8 @@ jobs:
         run: python -m tools.quill.landing "${EVENT_NAME}" "${MERGE_SHA}" "${PULL}"
 
   tools:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10  # longest of 58 runs: 4.30 min
     steps:
       # ── 1. Check out the repository ──────────────────────────────
       - name: Checkout code
@@ -271,7 +285,8 @@ jobs:
           pytest tools/rehearsal -c /dev/null -q -m "not cluster"
 
   tax-law:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5  # longest of 212 runs: 1.12 min
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -326,7 +341,8 @@ jobs:
         run: python scripts/check_tax_law.py refuse
 
   lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20  # longest of 203 runs: 8.47 min
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -450,7 +466,8 @@ jobs:
         run: pylint app/ scripts/ --disable=all --enable=duplicate-code --disable=unknown-option-value,bad-option-value --output-format=colorized
 
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 40  # longest of 1,201 shard runs: 18.68 min (shard 3)
     strategy:
       # One red shard must not cancel the others: a failing merge gate should
       # report every failure it has, not the first shard's.
@@ -596,7 +613,8 @@ jobs:
   lint-and-test:
     needs: [landing, tools, tax-law, lint, test]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5  # longest of 197 runs: 0.55 min
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -622,12 +640,13 @@ jobs:
   # (shell, JS/CSS, Jinja templates, workflows, Dockerfile, YAML,
   # secrets, spelling). Mirrors the local .pre-commit-config.yaml hooks.
   # Binary tools are pinned by version and downloaded (no extra
-  # third-party actions to SHA-pin); the pip tools (yamllint, zizmor,
-  # djlint) come from requirements-dev.txt. Each tool reads its own
-  # in-repo config file. The dev and main rulesets require it beside
+  # third-party actions to SHA-pin); the pip tools (yamllint, jactionlint,
+  # zizmor, djlint, rumdl) come from requirements-dev.txt. Each tool reads
+  # its own in-repo config file. The dev and main rulesets require it beside
   # lint-and-test, so the floor blocks merges.
   polyglot-lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5  # longest of 208 runs: 1.65 min
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -647,8 +666,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      # pip-installable linters (yamllint, zizmor, djlint) + jinja2 for the
-      # template parse check, all pinned in requirements-dev.txt.
+      # pip-installable linters (yamllint, jactionlint, zizmor, djlint, rumdl)
+      # + jinja2 for the template parse check, all pinned in
+      # requirements-dev.txt.
       - name: Install pip linters
         run: |
           python -m pip install --upgrade pip
@@ -667,13 +687,12 @@ jobs:
           echo "${bin}" >> "${GITHUB_PATH}"
           tmp="$(mktemp -d)"
           curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz | tar -xJf - -C "${tmp}"
-          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz | tar -xzf - -C "${tmp}"
           curl -fsSL https://github.com/crate-ci/typos/releases/download/v1.50.2/typos-v1.50.2-x86_64-unknown-linux-musl.tar.gz | tar -xzf - -C "${tmp}"
           curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xzf - -C "${tmp}"
           curl -fsSL -o "${tmp}/shfmt" https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_amd64
           curl -fsSL -o "${tmp}/biome" "https://github.com/biomejs/biome/releases/download/@biomejs/biome@2.5.14/biome-linux-x64"
           curl -fsSL -o "${tmp}/hadolint" https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-Linux-x86_64
-          for t in shellcheck actionlint typos gitleaks; do
+          for t in shellcheck typos gitleaks; do
               install -m 0755 "$(find "${tmp}" -type f -name "${t}" | head -1)" "${bin}/${t}"
           done
           install -m 0755 "${tmp}/shfmt" "${bin}/shfmt"
@@ -689,8 +708,11 @@ jobs:
       - name: yamllint
         run: git ls-files -z '*.yml' '*.yaml' | xargs -0 -r yamllint
 
-      - name: actionlint (GitHub workflows)
-        run: actionlint
+      # Its profile is .github/jactionlint.yaml's (ruling plan#2355).  Naming
+      # shellcheck makes a missing one exit 3, where jactionlint would
+      # otherwise skip its shellcheck rule without a word.
+      - name: jactionlint (GitHub workflows)
+        run: jactionlint --shellcheck=shellcheck
 
       - name: zizmor (workflow security)
         env:

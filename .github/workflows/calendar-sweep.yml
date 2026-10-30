@@ -42,7 +42,7 @@ permissions:
 
 jobs:
   sweep:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
 
     strategy:
       # One red date must not cancel the others: the whole point is to

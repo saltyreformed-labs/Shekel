@@ -12,8 +12,8 @@ documents and X-cx's migration lifted each step's entry from them, and S3b delet
 both, so no reader of the three is left.  Each arc's reasoning document stays in the
 repository.
 
-Adding an arc is one entry here.  The tracker's labels follow on the next
-``python -m tools.quill.setup_tracker --apply``.
+Adding an arc is one entry here, its slug and its label's colour (:data:`ARC_COLORS`).  The
+tracker's labels follow on the next ``python -m tools.quill.setup_tracker --apply``.
 """
 from __future__ import annotations
 
@@ -22,9 +22,19 @@ from pathlib import Path
 #: The repository root (``tools/ci/arcs.py`` -> its root).
 REPO = Path(__file__).resolve().parents[2]
 
-#: The arcs, by the slug each one's tracker label carries.  Their order is the
-#: tracker's label order, which assigns each label its colour.  ``tooling`` holds the
-#: tools, deploy, CI, dependency and security work no other arc's argument covers
-#: (ruling plan#2179), so ``balance`` is no catch-all.
-ARCS = ("balance", "recurrence", "pay_calendar", "credit_card", "bank_import", "salary",
-        "tooling")
+#: Each arc, by the slug its tracker label carries, with that label's colour beside it, so
+#: no arc's colour hangs on its place in a list (ruling plan#2219: each label's colour is
+#: its own).  ``tooling`` is ruling plan#2179's, so ``balance`` is no catch-all; its scope is
+#: ``docs/plans/implementation_plan_tooling.md``'s, and its colour the developer's.
+ARC_COLORS = {
+    "balance": "0e8a16",
+    "recurrence": "1d76db",
+    "pay_calendar": "5319e7",
+    "credit_card": "d93f0b",
+    "bank_import": "006b75",
+    "salary": "c5a100",
+    "tooling": "793625",
+}
+
+#: The arcs, in the tracker's label order.
+ARCS = tuple(ARC_COLORS)

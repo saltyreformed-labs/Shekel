@@ -47,7 +47,7 @@ def _declared_but(name):
 
 
 def test_the_five_declared_fields_holding_their_options_in_any_order_match():
-    """Arc, a single select of the six arcs (R-BAL348), and the four defaults the developer
+    """Arc, a single select of the arcs (R-BAL348), and the four defaults the developer
     kept on 2026-10-25, each a single select holding its options in any order, in any order
     of fields."""
     reordered = [_issue_field(node["name"], node["dataType"],

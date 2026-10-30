@@ -24,7 +24,7 @@ from pathlib import Path
 
 from tools.ci.arcs import ARCS
 from tools.quill import _findings, _git, _tasks
-from tools.quill._arcs import other_labels
+from tools.quill._arcs import arc_remedy, other_labels
 from tools.quill._command import (
     _label,
     _one,
@@ -786,8 +786,8 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
         raise Refused(f"{_label(question)}'s filing has not finished (R-BAL202): finish it with "
                       "the `quill file` command that filed it first, then convert it")
     if question.arc is None:
-        raise Refused(f"{_label(question)} holds no Arc, its arc's one home (R-BAL349): set it "
-                      f"with `quill arc plan#{question.number} --to ARC`, then convert it")
+        raise Refused(f"{_label(question)} holds no Arc, its arc's one home (R-BAL349): "
+                      f"{arc_remedy(question.number, question.kind)}, then convert it")
     if question.arc != args.arc:
         raise Refused(f"{_label(question)} is not in the {args.arc} arc; pass its own --arc")
     _refuse_rehoming(question, "ruling", to)

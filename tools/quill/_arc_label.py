@@ -10,7 +10,7 @@ sync``'s pass would at its next run (:mod:`_relabel`).  ``label`` adds or remove
 filing mark.  Each writes only what differs, each write printed as it lands, so the same
 command run again finishes one a failure cut short.  Each works on a ruling, whose title and
 text alone are the developer's words (R-BAL220), and on a closed card; each refuses a task
-and a card carrying the filing mark (:func:`_refusal`).
+and a card still being filed (:func:`_refusal`).
 
 Split out of the command module, which they would take past the 1,000 lines
 ``too-many-lines`` allows.
@@ -25,26 +25,24 @@ from tools.quill._exits import Refused
 from tools.quill._state import filing_unfinished
 from tools.quill._tracker import Card, Tracker
 from tools.quill.check import Draft, violations
-from tools.quill.setup_tracker import FILING, TASK
+from tools.quill.setup_tracker import TASK
 
 
 def _refusal(card: Card) -> str | None:
-    """Why neither command writes ``card``; None when they may.  A task holds no Arc and no
-    label of its own: its arc is its card's (R-BAL386), and quill files it with none.  A card
-    carrying the filing mark (R-BAL202) is found again by its ``quill file`` command, which
-    refuses one whose Arc or labels are not its own (``_filing._refuse_relabel``), so a change
-    here would stop that filing finishing."""
+    """Why neither command writes ``card``; None when they may (ruling plan#2221).  A task's
+    arc is its card's (R-BAL386), and its card carries what marks the work.  A card still
+    being filed (:func:`_state.filing_unfinished`, R-BAL202) is finished by its ``quill file``
+    command run again, which refuses a card whose Arc or labels are not its own
+    (``_filing._refuse_relabel``), so a change here would stop that filing finishing.  One
+    closed while still marked is no longer being filed, and is written."""
     if card.kind == TASK:
-        return (f"{_label(card)} is a task, a piece of plan#{card.parent}'s work (R-BAL386): it "
-                "holds no Arc and no label of its own, as its arc is its card's")
-    if FILING in card.labels:
-        return (f"{_label(card)} carries the {FILING!r} mark (R-BAL202): its `quill file` "
-                "command, run again, refuses it once its Arc or labels are not its own "
-                "(R-BAL186); "
-                + (f"finish its filing first (`quill show plan#{card.number}` says how)"
-                   if filing_unfinished(card) else
-                   "closed while still marked, it keeps them so that command files nothing "
-                   "over it"))
+        return (f"{_label(card)} is a task (R-BAL386): its arc is its card's, which carries "
+                "the Arc and the labels of its work: write them there")
+    if filing_unfinished(card):
+        return (f"{_label(card)}'s filing has not finished (R-BAL202): its `quill file` "
+                "command, run again, finishes it, and refuses a card whose Arc or labels are not "
+                f"its own (R-BAL186), so finish it first (`quill show plan#{card.number}` says "
+                "how)")
     return None
 
 

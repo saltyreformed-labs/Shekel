@@ -235,6 +235,8 @@ python -m tools.quill.quill file question ... --owner plan#S # a question linked
 python -m tools.quill.quill file task --parent plan#N ...    # a task: a piece inside N's one PR
 python -m tools.quill.quill start plan#T              # begin task T: each commit is its piece's
 python -m tools.quill.quill task-file plan#T          # write task T's file on its card's branch
+python -m tools.quill.quill arc plan#N --to ARC      # move card N to an arc, its label following
+python -m tools.quill.quill label plan#N --add security  # add (or --remove) a chosen label
 python -m tools.quill.quill note plan#N --body-file NOTE     # a stop's note; prints Resume plan#T
 python -m tools.quill.quill pr plan#N --title T --body-file B  # N's pull request into dev, linked
 python -m tools.quill.quill sync                      # write every card's state from git

@@ -1,8 +1,9 @@
 """``quill arc`` and ``quill label`` (ruling plan#2221): a card's Arc set and its arc labels put
 back to display it, and a label a person chooses added or removed, through the tracker's own
 writes -- over :class:`_fake.FakeTracker` and a throwaway git repository (the ``code``
-fixture, ``conftest.py``).  ``Tracker.set_arc`` and ``Tracker.relabel`` are graded against
-GitHub's recorded answers in ``test__tracker_arc.py``.  Nothing here calls GitHub.
+fixture, ``conftest.py``).  ``Tracker.set_arc`` is graded against GitHub's recorded answers
+in ``test__tracker_arc.py``, and ``Tracker.relabel`` in ``test__arcs_card_arcs.py``.  Nothing
+here calls GitHub.
 """
 from __future__ import annotations
 
@@ -85,30 +86,46 @@ def test_arc_refuses_a_task(code, capsys):
     tracker.add_task(2, 1)
     assert run(tracker, code, "arc", "plan#2", "--to", "tooling") == 1
     assert capsys.readouterr().err == (
-        "refused: plan#2 [task, no arc] card 2 is a task, a piece of plan#1's work (R-BAL386): "
-        "it holds no Arc and no label of its own, as its arc is its card's\n")
+        "refused: plan#2 [task, no arc] card 2 is a task (R-BAL386): its arc is its card's, "
+        "which carries the Arc and the labels of its work: write them there\n")
     assert not tracker.writes
 
 
-@pytest.mark.parametrize(("state", "why"), [
-    ({}, "finish its filing first (`quill show plan#1` says how)"),
-    ({"is_open": False, "state_reason": "NOT_PLANNED", "touched_by_hand": True},
-     "closed while still marked, it keeps them so that command files nothing over it"),
-], ids=["unfinished", "closed-marked"])
+#: A card still being filed (R-BAL202): marked and open, and a ruling its own filing closed
+#: before its last write removed the mark.
+STILL_FILED = [{}, {"kind": "ruling", **CLOSED_RULING}]
+
+
+@pytest.mark.parametrize("state", STILL_FILED, ids=["open", "closed-ruling"])
 @pytest.mark.parametrize("argv", [("arc", "plan#1", "--to", "tooling"),
                                   ("label", "plan#1", "--add", "security")],
                          ids=["arc", "label"])
-def test_a_card_carrying_the_filing_mark_is_refused(code, capsys, argv, state, why):
-    """Its ``quill file`` command, run again, refuses a card whose Arc or labels are not its
-    own (``_filing._refuse_relabel``), so neither command changes one: nothing is written."""
+def test_a_card_still_being_filed_is_refused(code, capsys, argv, state):
+    """Ruling plan#2221: its ``quill file`` command, run again, finishes it, and refuses a card
+    whose Arc or labels are not its own (``_filing._refuse_relabel``), so neither command
+    changes one: nothing is written."""
     tracker = FakeTracker()
-    tracker.add(1, labels=("balance", FILING), **state)
+    card = tracker.add(1, labels=("balance", FILING), **state)
     assert run(tracker, code, *argv) == 1
     assert capsys.readouterr().err == (
-        "refused: plan#1 [step, balance] card 1 carries the 'filing' mark (R-BAL202): its "
-        "`quill file` command, run again, refuses it once its Arc or labels are not its own "
-        f"(R-BAL186); {why}\n")
+        f"refused: plan#1 [{card.kind}, balance] card 1's filing has not finished (R-BAL202): "
+        "its `quill file` command, run again, finishes it, and refuses a card whose Arc or "
+        "labels are not its own (R-BAL186), so finish it first (`quill show plan#1` says "
+        "how)\n")
     assert not tracker.writes
+
+
+def test_a_card_closed_while_still_marked_is_written(code):
+    """Review of plan#2165, MEDIUM 2: a card dropped before its filing finished is no longer
+    being filed (``_state.filing_unfinished``), and its ``quill file`` command files nothing
+    over it whatever its Arc, so both commands write it (ruling plan#2221: a closed card)."""
+    tracker = FakeTracker()
+    tracker.add(1, labels=("balance", FILING), is_open=False, state_reason="NOT_PLANNED",
+                touched_by_hand=True)
+    assert run(tracker, code, "arc", "plan#1", "--to", "tooling") == 0
+    assert run(tracker, code, "label", "plan#1", "--add", "security") == 0
+    assert (tracker.cards_by_number[1].arc, tracker.cards_by_number[1].labels) == (
+        "tooling", (FILING, "tooling", "security"))
 
 
 def test_arc_refuses_a_card_the_check_refuses(code, capsys):
@@ -175,12 +192,12 @@ def test_label_labels_a_closed_ruling(code):
 
 
 def test_label_refuses_a_task(code, capsys):
-    """A task holds no label of its own (R-BAL386): nothing is written."""
+    """A task's card carries the labels of its work (ruling plan#2221): nothing is written."""
     tracker = FakeTracker()
     tracker.add(1)
     tracker.add_task(2, 1)
     assert run(tracker, code, "label", "plan#2", "--add", "security") == 1
-    assert "is a task, a piece of plan#1's work (R-BAL386)" in capsys.readouterr().err
+    assert "is a task (R-BAL386): its arc is its card's" in capsys.readouterr().err
     assert not tracker.writes
 
 

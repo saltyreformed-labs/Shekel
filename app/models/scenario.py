@@ -15,9 +15,10 @@ class Scenario(UserScopedMixin, TimestampMixin, db.Model):
     __tablename__ = "scenarios"
     __table_args__ = (
         db.UniqueConstraint("user_id", "name", name="uq_scenarios_user_name"),
-        # H-1 of model-migration-drift: at most one baseline scenario per
-        # user.  Production carries this partial unique index from
-        # migration c5d6e7f8a901_add_positive_amount_check_constraints.py;
+        # H-1 of shekel-audits/security-2026-04-15/model-migration-drift.md:
+        # at most one baseline scenario per user.  Production carries this
+        # partial unique index from migration
+        # c5d6e7f8a901_add_positive_amount_check_constraints.py;
         # the model-side declaration keeps db.create_all() (the test path)
         # in sync so the suite exercises the same constraint production
         # enforces.  Baseline scenarios are the load-bearing reference for

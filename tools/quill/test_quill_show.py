@@ -26,6 +26,22 @@ def test_show_resolves_an_old_id_by_its_title_alias(code, capsys):
     assert capsys.readouterr().out.startswith("plan#2 [ruling, bank_import] [R-GU] two")
 
 
+def test_show_finds_an_old_id_whose_card_left_the_arc_it_was_minted_in(code, capsys):
+    """Review of plan#2165, HIGH 1: ``quill arc`` moves a card (plan#2227 moves X-em out of
+    balance), and its old id keeps the arc it was minted in, so the arc chooses among the
+    cards titled with the id and never filters them down to none; two such cards, neither in
+    that arc, are still named, not guessed between."""
+    tracker = FakeTracker()
+    tracker.add(1, title="[X-em] Dependencies", labels=("tooling",), arc="tooling")
+    assert run(tracker, code, "arc", "plan#1", "--to", "tooling") == 0
+    capsys.readouterr()
+    assert run(tracker, code, "show", "balance:X-em") == 0
+    assert capsys.readouterr().out.startswith("plan#1 [step, tooling] [X-em] Dependencies")
+    tracker.add(2, title="[X-em] Again", labels=("salary",), arc="salary")
+    assert run(tracker, code, "show", "balance:X-em") == 1
+    assert "'balance:X-em' names 2 cards ([1, 2])" in capsys.readouterr().err
+
+
 def test_show_prints_the_claim_and_the_markers_history(code, capsys):
     """R-BAL359: the claim's branch, when it was claimed and last committed; whether git says
     the card shipped; each commit on dev or main that added or deleted its marker, newest

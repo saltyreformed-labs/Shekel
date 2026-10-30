@@ -398,21 +398,25 @@ class _CategoryTotal:
 class _ScopeIds:
     """The scope every settled-spend window load reads through.
 
-    One cohesive concept -- WHOSE data a window reads (the owner, the
-    cash-flow set, the baseline scenario) and the pay CALENDAR they resolve
-    against, which rides here because one report resolves TWELVE windows
-    against it and it varies with none of them -- twelve derivations of one
-    value otherwise (C2-f1).  A ``"pay_period"`` report asks it twice more,
-    for the chart's own run of preceding paychecks
+    One cohesive concept -- WHOSE data a window reads (the owner's cash-flow
+    set, the baseline scenario) and the pay CALENDAR they resolve against,
+    which rides here because one report resolves TWELVE windows against it
+    and it varies with none of them -- twelve derivations of one value
+    otherwise (C2-f1).  A ``"pay_period"`` report asks it twice more, for the
+    chart's own run of preceding paychecks
     (:func:`._window._series_windows`, C2-f3d); those two reads replaced
     eleven ``budget.pay_periods`` QUERIES.
 
     ``cash_flow`` was ``account_id`` until plan step CC-4-3: the rows a
     window loads are the paycheck's across checking and its cards (ruling
     ``R-CC16``), read through the one clause every plan-item reader appends.
+    The owner's ``user_id`` rode here too until plan step **plan#2130**, read
+    only by the calendar-span loader to scope its pay-period join; the one
+    loader states that join against each item's own owner
+    (:class:`~app.services.cash_flow_set.AttributionSpan`), so the field had
+    no reader and went.
     """
 
-    user_id: int
     cash_flow: CashFlowSet
     scenario_id: int
     calendar: PayCalendar

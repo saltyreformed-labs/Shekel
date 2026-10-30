@@ -84,7 +84,7 @@ from urllib.parse import quote
 
 import requests
 
-from tools.ci.arcs import ARCS
+from tools.ci.arcs import ARC_COLORS, ARCS
 from tools.quill._arcs import ARC_FIELD, arc_verdict, card_arcs
 from tools.quill._board_fields import (
     GITHUB_STATUS_FIELD,
@@ -209,11 +209,6 @@ REPOSITORY = {
     "has_wiki": False,
 }
 
-#: Each arc is one label.  The arcs are :data:`tools.ci.arcs.ARCS`, their one
-#: home beside each arc's planning document (step X-cx's L4 deleted this
-#: module's second list); a label's colour is the one at its arc's position.
-_ARC_COLORS = ("0e8a16", "1d76db", "5319e7", "d93f0b", "006b75", "c5a100")
-
 #: The mark every card quill files carries from the call that creates it
 #: until its filing's last write removes it (ruling ``balance:R-BAL202``).
 FILING = "filing"
@@ -227,28 +222,33 @@ def unmarked(labels: Iterable[str]) -> tuple[str, ...]:
 
 
 #: The two labels a release reads: a step whose release moves money, and a parent
-#: whose leaves ``/release`` ships in one release.  ``quill file step --label`` takes its
-#: choices from here.
+#: whose leaves ``/release`` ships in one release.
 MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL = "moves-money", "deploy-together"
-
-#: Every label the tracker carries: one per arc, the two a release reads, and
-#: quill's :data:`FILING` mark.
+#: The label marking security work, in whatever arc it is (ruling plan#2179).
+SECURITY_LABEL = "security"
+#: Every label the tracker carries: one per arc, its colour the arc's own
+#: (:data:`tools.ci.arcs.ARC_COLORS`, the arcs' one home beside each arc's planning document;
+#: step X-cx's L4 deleted this module's second list), the ones a person chooses, and quill's
+#: :data:`FILING` mark.
 LABELS = {
-    **{
-        arc: (_ARC_COLORS[index % len(_ARC_COLORS)], f"The {arc.replace('_', '-')} arc")
-        for index, arc in enumerate(ARCS)
-    },
+    **{arc: (color, f"The {arc.replace('_', '-')} arc") for arc, color in ARC_COLORS.items()},
     MOVES_MONEY_LABEL: (
         "b60205", "Its release moves money: /release carries at most one such step"
     ),
     DEPLOY_TOGETHER_LABEL: (
         "fbca04", "A parent whose leaves /release ships in one release, never split"
     ),
+    SECURITY_LABEL: ("d90466", "Security related issues"),
     FILING: (
         "bfdadc",
         "Quill has not finished filing this card, so it is not offered as work",
     ),
 }
+
+#: The labels a person chooses for a card: every declared label but the arc labels, which
+#: display its Arc, and quill's :data:`FILING` mark.  ``quill file step --label`` and
+#: ``quill label`` take their choices from here (ruling plan#2221).
+CHOSEN_LABELS = tuple(label for label in LABELS if label not in ARCS and label != FILING)
 
 #: What quill's App may do, and nothing more: write cards (issues,
 #: their sub-issues and dependencies) and place cards on the organization's

@@ -70,8 +70,8 @@ fields in one place is load-bearing for two reasons:
      designed to prevent.
   2. **DRY.**  Pylint R0801 flagged the duplicate blocks (one VERBATIM,
      one near-verbatim with only the literal message differing); a
-     fix in one copy that forgets the other is the bug class the
-     ``c-38-followups`` document calls out under Issue 1.
+     fix in one copy that forgets the other is the bug class Issue 1 of
+     ``shekel-audits/security-2026-04-15/c-38-followups.md`` calls out.
 
 These helpers are deliberately thin wrappers around
 ``app.utils.log_events.log_event`` -- they exist to lock in the

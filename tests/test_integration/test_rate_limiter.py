@@ -98,7 +98,7 @@ def _disable_limiter(limiter, rate_app):
     architecturally possible) cannot reintroduce the order-dependent
     false-confidence failure mode the testing-standards "zero
     tolerance for failing tests" rule is designed to prevent.  See
-    docs/audits/security-2026-04-15/c-38-followups.md Issue 2a.
+    shekel-audits/security-2026-04-15/c-38-followups.md Issue 2a.
     """
     with rate_app.app_context():
         # pylint: disable=import-outside-toplevel

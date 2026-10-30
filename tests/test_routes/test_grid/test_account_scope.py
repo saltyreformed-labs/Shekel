@@ -10,6 +10,7 @@ from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.ref import AccountType, Status, TransactionType
 from app.services import account_service
+from app.services.account_resolver import resolve_cash_flow_set
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
 
@@ -579,6 +580,35 @@ class TestAccountScopedGrid:
         resp = auth_client.get("/grid")
         html = resp.data.decode()
         assert "$999" not in html
+
+    # --- No cash-flow set ---
+
+    def test_an_owner_with_no_active_account_sees_no_row(
+        self, app, auth_client, seed_user, seed_periods_today
+    ):
+        """Archiving the owner's only checking account leaves the grid no row to draw.
+
+        A row on checking is a cell while checking is active.  Archived, the
+        owner holds no active grid-eligible account, the resolver answers no
+        set, and the grid draws no item: the set's items are what it draws
+        (plan step plan#2130, decided under ruling R-BAL207).  Until that step
+        the grid ran its row query with no account filter in this state and
+        listed the archived account's row under a balance line with no account
+        to place it on.
+        """
+        checking = seed_user["account"]
+        row = self._create_txn(checking, current_pay_period(seed_user["user"].id),
+                               seed_user["scenario"], "Archived Rent", 1234,
+                               category=seed_user["categories"]["Rent"])
+        db.session.commit()
+        assert f"txn-cell-{row.id}" in auth_client.get("/grid").data.decode()
+
+        assert auth_client.post(f"/accounts/{checking.id}/archive").status_code == 302
+        assert resolve_cash_flow_set(seed_user["user"].id) is None
+
+        resp = auth_client.get("/grid")
+        assert resp.status_code == 200
+        assert f"txn-cell-{row.id}" not in resp.data.decode()
 
     # --- Carry forward interaction test ---
 

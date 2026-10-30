@@ -78,8 +78,8 @@ Operations proxy.  Mirrors the C-42 round-trip pattern (see
 ``tests/test_models/test_c42_salary_indexes_and_fk_naming.py``).
 
 Audit reference: F-073, F-078, F-136 of
-docs/audits/security-2026-04-15/findings.md; commit C-43 of
-docs/audits/security-2026-04-15/remediation-plan.md.
+shekel-audits/security-2026-04-15/findings.md; commit C-43 of
+shekel-audits/security-2026-04-15/remediation-plan.md.
 """
 # pylint: disable=redefined-outer-name,unused-argument
 # pylint: disable=protected-access

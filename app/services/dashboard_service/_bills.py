@@ -18,24 +18,16 @@ from decimal import Decimal
 
 from sqlalchemy.orm import joinedload, selectinload
 
-from app import ref_cache
-from app.enums import TxnTypeEnum
-from app.extensions import db
 from app.models.transaction import Transaction
-from app.models.transfer import Transfer
 from app.services.cash_flow_set import (
     CashFlowSet,
-    PlanItems,
-    own_rows_clause,
-    set_transfer_legs_in_periods,
+    Paychecks,
+    PlanScope,
+    StatusBand,
+    load_plan_items,
 )
 from app.services.entry_service import compute_entry_sums, compute_remaining
-from app.services.transfer_legs import (
-    PlanItem,
-    cell_key,
-    expense_legs,
-)
-from app.utils.balance_predicates import is_projected_clause
+from app.services.transfer_legs import PlanItem, cell_key
 
 
 # ── Shared bill query and render-ready bill dict ───────────────────
@@ -45,7 +37,7 @@ def _query_unpaid_expense_rows(
     cash_flow: CashFlowSet,
     scenario_id: int,
     period_ids: list[int],
-) -> PlanItems:
+) -> list[PlanItem]:
     """Load the unpaid (Projected) expense items for a set of periods.
 
     The single load the dashboard's bill surfaces share -- the still-due
@@ -61,16 +53,12 @@ def _query_unpaid_expense_rows(
     plus one LEG per transfer, read off the parent in ``budget.transfers``
     rather than off a shadow row: :func:`~app.services.cash_flow_set
     .own_rows_clause` selects every member's plan rows and no shadow, and
-    :func:`~app.services.cash_flow_set.set_transfer_legs_in_periods` draws
-    each transfer the set touches in these periods from the side
+    each transfer the set touches in these periods is drawn from the side
     :func:`~app.services.cash_flow_set.leg_accounts_shown` names (ruling
     ``R-CC23``: once, from the balance line's side, when both endpoints are
     members).  It was ``Transaction.account_id == account_id``, then the
     paycheck-rows clause that carried the near-side shadow in as an expense
-    row; the two loads below keep both properties and neither selects a
-    shadow row of its own (a settled leg's RECORD is reached through the one
-    join in ``transfer_legs``, which walks the movement's side links since
-    plan step ``balance:X-bi-6-4d-2`` re-parented it onto the transfer).
+    row; the loader keeps both properties and selects no shadow row.
 
     **A transfer's EXPENSE leg is a bill; its income leg is not**
     (:func:`~app.services.transfer_legs.expense_legs`, the one spelling the
@@ -85,14 +73,20 @@ def _query_unpaid_expense_rows(
     endpoint outside the set (card -> savings) shows from its member
     endpoint, as a checking -> savings transfer always has.
 
+    **The dashboard's scope, stated once** (plan step **plan#2130**): the
+    set, the scenario, these paychecks, still projected, expenses only --
+    which :func:`~app.services.cash_flow_set.load_plan_items` turns into the
+    rows' query and the transfers' alike, the Projected filter through the
+    centralized ``is_projected_clause`` (D6-09 / MED-02) over both tables so
+    every SQL filter over Projected shares one definition with the Python
+    ``is_projected`` predicate.  An empty period list loads nothing and
+    issues no statement.
+
     selectinload(entries) + joinedload(template) avoid N+1 lookups when a
     consumer checks ``tracks_purchases`` or iterates purchases for the
     entries-aware still-due / progress computation; the transfer load
     states its own (the pricing chain, which includes the period a bill's
-    ``period_start_date`` reads).  The Projected filter routes through the
-    centralized ``is_projected_clause`` (D6-09 / MED-02) over BOTH tables so
-    every SQL filter over Projected shares one definition with the Python
-    ``is_projected`` predicate.
+    ``period_start_date`` reads).
 
     Args:
         cash_flow: The owner's cash-flow set, whose members' items to load.
@@ -101,37 +95,25 @@ def _query_unpaid_expense_rows(
             yields an empty result.
 
     Returns:
-        The :class:`~app.services.cash_flow_set.PlanItems`: the matching
-        :class:`Transaction` rows with ``category``, ``pay_period``,
-        ``template`` and ``entries`` eager-loaded, and the expense legs of
-        the matching transfers, records loaded.
+        The unpaid items: the matching :class:`Transaction` rows by id, with
+        ``category``, ``pay_period``, ``template`` and ``entries``
+        eager-loaded, then the expense legs of the matching transfers.
     """
-    if not period_ids:
-        return PlanItems.of([], [])
-
-    expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-    rows = (
-        db.session.query(Transaction)
-        .options(
+    return load_plan_items(
+        PlanScope(
+            cash_flow=cash_flow,
+            scenario_id=scenario_id,
+            window=Paychecks(tuple(period_ids)),
+            band=StatusBand.PROJECTED,
+            expenses_only=True,
+        ),
+        (
             joinedload(Transaction.category),
             joinedload(Transaction.pay_period),
             joinedload(Transaction.template),
             selectinload(Transaction.entries),
-        )
-        .filter(
-            own_rows_clause(cash_flow),
-            Transaction.scenario_id == scenario_id,
-            Transaction.pay_period_id.in_(period_ids),
-            Transaction.is_deleted.is_(False),
-            is_projected_clause(Transaction),
-            Transaction.transaction_type_id == expense_type_id,
-        )
-        .all()
+        ),
     )
-    legs = expense_legs(set_transfer_legs_in_periods(
-        cash_flow, scenario_id, period_ids, is_projected_clause(Transfer),
-    ))
-    return PlanItems.of(rows, legs)
 
 
 # ``_is_entry_tracked`` used to live here and is DELETED (pay-calendar plan

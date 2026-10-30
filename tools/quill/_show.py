@@ -30,7 +30,10 @@ _YES = {True: "yes", False: "no"}
 
 
 def _resolve_reference(tracker: Tracker, text: str) -> int:
-    """``plan#N`` -> N; an old id (``R-BAL80``, ``balance:X-bi-6-4d``) -> its titled card."""
+    """``plan#N`` -> N; an old id (``R-BAL80``, ``balance:X-bi-6-4d``) -> its titled card.
+    An old id's arc is the one it was minted in, which its card may since have left (``quill
+    arc``, ruling plan#2221; plan#2227 moves the tooling cards out of ``balance``), so it
+    chooses among the cards titled with the id, and never filters them down to none."""
     try:
         return card_number(text)
     except argparse.ArgumentTypeError:
@@ -42,7 +45,7 @@ def _resolve_reference(tracker: Tracker, text: str) -> int:
         if title.startswith(alias)
     ]
     if arc:
-        found = [n for n, card in tracker.cards(found).items() if card.arc == arc]
+        found = [n for n, card in tracker.cards(found).items() if card.arc == arc] or found
     if len(found) != 1:
         raise Refused(f"{text!r} names {len(found)} cards ({found}); name one as plan#N"
                       + ("" if arc else " or give its arc, e.g. balance:" + ident))

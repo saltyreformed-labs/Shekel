@@ -363,8 +363,9 @@ class TestNoPageReadsASideAlone:
         Two transfers out of Checking, each due and Paid on the same day, so
         both fall in that day's month (a transfer is attributed to its due
         day).  The report's timeliness metric reads each expense leg's
-        record, which ``spending_analysis._settled_items`` pre-loads; without
-        that pre-load it reads them alone.  Two more due that day are still
+        record, which ``spending_analysis.query_settled_expenses`` asks the
+        one plan-item loader to pre-load (``side_records``); without that
+        pre-load it reads them alone.  Two more due that day are still
         planned, which the report does not draw today (it loads settled
         money only, ``settled_status_ids``); they stand in the fixture so a
         read of a planned side's record, whose list nothing fills, would be

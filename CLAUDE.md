@@ -365,8 +365,8 @@ truth for what the app does; planning documents lag it.
 **A security audit is written in the private repository `saltyreformed-labs/shekel-audits`**,
 checked out at `~/projects/shekel-audits`, never in this tree, so an open finding is never public
 (rulings plan#2178, plan#2213): any audit that records a security finding or production's security
-setup. Shekel cites a file there as `shekel-audits/<path>`, and `.gitignore` refuses
-`docs/audits/security-*/` and `docs/audits/homelab-security-*/` as a backstop.
+setup. Shekel cites a file there as `shekel-audits/<path>`, and `.gitignore` refuses the moved
+audits' names under `docs/audits/` as a backstop.
 
 `docs/project_roadmap_v5.md` holds the older product direction and lags the code. Planning docs lag
 the code generally: treat the codebase and recent git history as the source of truth for what is

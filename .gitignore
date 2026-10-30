@@ -50,9 +50,11 @@ deploy/postgres/server.key
 # saltyreformed-labs/shekel-audits (~/projects/shekel-audits), never
 # here, so an open finding is never public (rulings plan#2178,
 # plan#2213; CLAUDE.md, Development Status).  These patterns are the
-# backstop against a session writing one into this tree by habit.
-docs/audits/security-*/
-docs/audits/homelab-security-*/
+# backstop against a session writing one into this tree by habit,
+# under a name the moved audits had, as a directory or a single file.
+docs/audits/security-*
+docs/audits/homelab-security-*
+docs/audits/dev-prod-parity*
 
 # IDE
 .vscode/

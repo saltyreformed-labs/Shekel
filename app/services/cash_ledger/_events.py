@@ -377,8 +377,8 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
             off its transfer by a side link since plan step
             ``balance:X-bi-6-4d-2``; the fold reads no parent through it.
             Its one reader is the bank-agreement screen's name lookup
-            (``bank_agreement._rows_on`` / ``_row_names``), which keys both
-            sides by this column, so a NULL matches a NULL.  The
+            (``bank_agreement._day_detail._rows_on`` / ``_row_names``), which
+            keys both sides by this column, so a NULL matches a NULL.  The
             sort's tie-break read it until leaf ``X-bi-6-4d-1`` re-keyed that
             on :attr:`entry_id`, because a ``None`` beside an ``int`` does
             not sort.
@@ -843,7 +843,7 @@ def settled_cash_facts(
         reads a day's boundary after every step on it, so only the day's
         total enters a balance.  One reader SHOWS it: the bank-agreement
         screen lists a day's movements stable-sorted by size
-        (``bank_agreement._rows_on``), so two of equal size on one day keep
+        (``bank_agreement._day_detail._rows_on``), so two of equal size on one day keep
         this order -- which the re-key on the movement id at leaf
         ``X-bi-6-4d-1`` may flip (a declared change; 0 listings moved on the
         2026-09-30 00:11 production dump).  The sort is total anyway,

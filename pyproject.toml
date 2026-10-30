@@ -1,0 +1,158 @@
+# Shekel Budget App -- the dependencies, declared here and locked in uv.lock
+#
+# THIS FILE SAYS WHICH PACKAGES AND WHICH RANGE; ``uv.lock`` SAYS WHICH VERSION
+# (ruling balance:R-BAL294, plan#1027).  Every package, indirect ones included,
+# is pinned in ``uv.lock`` with its sha256, and CI, the Docker image and the
+# local venv all install exactly that lock.  A range here is a policy, never
+# a version: each direct dependency is held to its current major (``uv add
+# --bounds major``'s form, so a 0.x package is held to its minor), the exact
+# version has ONE home, the lock (CLAUDE.md rule 14), and a major version
+# moves only by an edit to this file -- which needs a card (ruling plan#2351).
+# Minor and patch moves are the lock's alone, refreshed each Monday.
+#
+# The Python version is ``.python-version``'s, its one home: uv picks the
+# interpreter from it and CI's jobs read it.  ``requires-python`` below is
+# only the floor the code needs, so the minor version is never stated twice.
+#
+# Install:  uv sync --locked              (the local venv: runtime + dev)
+# Image:    the Dockerfile installs ``--no-dev --group server``.
+# No new package without the developer's approval (CLAUDE.md, Architecture).
+
+[project]
+name = "shekel"
+# Required by the [project] table.  Shekel is never built or published
+# (``package = false`` below), so this number names nothing.
+version = "0"
+requires-python = ">=3.14"
+dependencies = [
+    # Flask core
+    "flask>=3.1.3,<4.0.0",
+    # Werkzeug is Flask's WSGI/routing engine, declared because this
+    # application imports it DIRECTLY (plan step X-ae, finding N-143):
+    # ``app/url_converters.py`` subclasses ``werkzeug.routing.IntegerConverter``
+    # to make every ``<int:...>`` path parameter an ASCII-strict row id, and
+    # ``app/routes/static_pass.py`` uses ``werkzeug.security.safe_join`` as the
+    # static-file path-traversal guard.  Flask itself requires only
+    # ``werkzeug>=3.1.0`` with NO upper bound, so without this line a
+    # Werkzeug 4 would satisfy the resolver silently; here it can arrive only
+    # through an edit to this file.
+    "werkzeug>=3.1.9,<4.0.0",
+    "flask-limiter>=4.1.1,<5.0.0",
+    "flask-login>=0.6.3,<0.7.0",
+    "flask-sqlalchemy>=3.1.1,<4.0.0",
+    "flask-migrate>=4.1.0,<5.0.0",
+    "flask-wtf>=1.3.0,<2.0.0",
+    # Database
+    "sqlalchemy>=2.1.4,<3.0.0",
+    # psycopg 3, the ONE driver (rulings balance:R-BAL208, R-BAL209):
+    # SQLAlchemy 2.1 resolves a bare ``postgresql://`` URL to it, so no URL in
+    # this project names a driver.  ``[c]`` adds ``psycopg-c``, its C
+    # speed-up, an sdist the Dockerfile's builder stage COMPILES against the
+    # system libpq -- it carries the compiler and ``libpq-dev`` for exactly
+    # that -- so the image's apt security upgrades patch the libpq and OpenSSL
+    # it links.  Without it psycopg runs as pure Python, measured 2026-10-05 at
+    # 176 ms per grid render against 109 ms compiled; ``[binary]`` is as fast
+    # but bundles its own libpq and OpenSSL, which no apt upgrade reaches.
+    "psycopg[c]>=3.3.6,<4.0.0",
+    "alembic>=1.20.0,<2.0.0",
+    # Authentication and MFA
+    "bcrypt>=5.0.0,<6.0.0",
+    "pyotp>=2.10.0,<3.0.0",
+    "qrcode[pil]>=8.2,<9.0",
+    # quill's GitHub client signs its App token with it too
+    # (``tools/quill/_github.py``).
+    "cryptography>=50.0.2,<51.0.0",
+    # Input validation
+    "marshmallow>=4.3.1,<5.0.0",
+    # Environment
+    "python-dotenv>=1.2.4,<2.0.0",
+    # Logging
+    "python-json-logger>=4.2.0,<5.0.0",
+    # Rate limiting -- the Redis client Flask-Limiter's storage layer
+    # (``limits.storage.redis``) uses in production, where the limiter
+    # writes its counters to the bundled compose ``redis`` service so they
+    # are shared across Gunicorn workers and survive app restarts (audit
+    # finding F-034).  ``limits`` declares ``redis<8.0.0`` in its ``redis``
+    # extra, an extra nothing here requests, so this line holds the cap.
+    "redis>=7.4.1,<8.0.0",
+    # HTTP client -- ``app/services/auth_service.py`` queries the Have I Been
+    # Pwned k-anonymity API at password-set time (audit finding F-086, commit
+    # C-11), its one outbound endpoint (``api.pwnedpasswords.com``);
+    # ``requests`` is preferred over ``urllib`` for its reliable timeout
+    # semantics.  quill's GitHub client uses it too.
+    "requests>=2.34.2,<3.0.0",
+]
+
+[dependency-groups]
+# The tools a checkout needs to test, lint and run the hooks.  ``uv sync``
+# installs this group by default; the image never does.
+dev = [
+    # Testing
+    "pytest>=9.1.1,<10.0.0",
+    "pytest-flask>=1.3.0,<2.0.0",
+    "pytest-cov>=7.1.0,<8.0.0",
+    "pytest-timeout>=2.4.0,<3.0.0",
+    "pytest-xdist>=3.8.0,<4.0.0",
+    "factory-boy>=3.3.3,<4.0.0",
+    # Date faking for the calendar sweep (``SHEKEL_FAKE_TODAY``,
+    # ``tests/conftest.py``).  Approved by the developer 2026-08-01, for
+    # exactly this purpose: the suite produced four separate defects whose
+    # only trigger was the day of the month it ran on (findings N-131, N-132,
+    # R8 and the 2026-08-01 loan pair), and a TZ shift moves the clock by
+    # about a day at most -- not to "the 1st", "a month end" or "a leap day".
+    # Test-only; the application never imports it, and the default suite run
+    # never touches it (the sweep is opt-in through the env var).
+    "time-machine>=3.5.1,<4.0.0",
+    # YAML parsing for the deploy-layer tests (``tests/test_deploy/``), which
+    # assert the structure of the compose and nginx files, and for the release
+    # tool (``tools/release``), which reads the dev compose file.  The
+    # application never imports yaml.
+    "pyyaml>=6.0.3,<7.0.0",
+    # Linting
+    "pylint>=4.1.3,<5.0.0",
+    "pylint-flask>=0.6,<0.7",
+    "pylint-flask-sqlalchemy>=0.2.0,<0.3.0",
+    # The pip-installable polyglot linters.  The binary tools (shellcheck,
+    # shfmt, biome, actionlint, typos, gitleaks, hadolint) are installed on
+    # the host and pinned by download in CI; these four come from the lock,
+    # and the pre-commit hooks run them as ``.venv/bin/<tool>``, so the lock
+    # is the ONE home of each version and the host's own package, if any, is
+    # never what a commit is graded by.  Pinning guards against a new release
+    # flagging unchanged files.
+    "yamllint>=1.38.0,<2.0.0",
+    "zizmor>=1.30.1,<2.0.0",
+    "djlint>=1.46.4,<2.0.0",
+    # rumdl is the Markdown lint and format gate (living docs only; see
+    # ``.rumdl.toml``).  0.2.79 and 0.3.0 re-wrap a checkbox item that has
+    # nested sub-items wrongly: the "[x] " counts as zero width, so their own
+    # fix writes lines over 100 characters, and one item has no form 0.2.79
+    # accepts at all (developer ruling R-BAL332, 2026-10-20).  0.2.79 is
+    # excluded by name; 0.3.x is a new 0.x major, so it moves only by an
+    # edit here, judged by polyglot-lint.  Two rumdl versions can reject each
+    # other's formatting, so after a move run ``uv sync`` before a Markdown
+    # commit, or a stale venv fails it.
+    "rumdl>=0.2.78,<0.3.0,!=0.2.79",
+    # Runs the local hooks in ``.pre-commit-config.yaml`` before each commit,
+    # mirroring the CI gate for commits made outside a Claude Code session;
+    # CI remains the enforced gate.
+    "pre-commit>=4.7.0,<5.0.0",
+    # Manual mobile / browser verification harness: drives a headless
+    # Chromium at iPhone-sized viewports against the local dev server.  The
+    # scripts live under ``tests/manual/`` and are operator-invoked, never
+    # collected by pytest.  After ``uv sync`` the Chromium binary is fetched
+    # once with ``playwright install chromium`` (~150 MiB under
+    # ``~/.cache/ms-playwright``).
+    "playwright>=1.63.0,<2.0.0",
+]
+# The WSGI server, for the image only: the local venv runs Flask's own dev
+# server, so ``uv sync`` never installs this group and the Dockerfile asks
+# for it by name.
+server = [
+    "gunicorn>=26.2.0,<27.0.0",
+]
+
+[tool.uv]
+# Shekel is an application, not a library: uv installs its dependencies and
+# never builds or installs the project itself.
+package = false
+exclude-newer = "7 days"

@@ -46,6 +46,14 @@ cosign.key.pub
 deploy/postgres/server.crt
 deploy/postgres/server.key
 
+# Security audits.  They are written in the private repository
+# saltyreformed-labs/shekel-audits (~/projects/shekel-audits), never
+# here, so an open finding is never public (rulings plan#2178,
+# plan#2213; CLAUDE.md, Development Status).  These patterns are the
+# backstop against a session writing one into this tree by habit.
+docs/audits/security-*/
+docs/audits/homelab-security-*/
+
 # IDE
 .vscode/
 .idea/

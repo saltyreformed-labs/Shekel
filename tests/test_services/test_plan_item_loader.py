@@ -366,6 +366,48 @@ class TestTheListsOrder:
 
             assert _keys(items) == [first.id, second.id]
 
+    def test_sides_load_in_transfer_id_order_whatever_the_heap_holds(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """Two transfers' sides answer in transfer id order after the first is moved.
+
+        The rows case's technique, for the transfer table: the move to the
+        next paycheck goes through the transfer door and rewrites
+        ``pay_period_id``, an INDEXED column (``idx_transfers_period_scenario``),
+        so the first transfer's new version lands after the second's and a
+        scan with no ORDER BY returns the second first.  Every other fixture
+        creates its transfers in id order, which is why the sides' ORDER BY
+        stood ungraded until the adversarial review of plan#2130 deleted it
+        and 869 tests stayed green.
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            savings = create_savings_account(
+                seed_user, db.session, "Savings", Decimal("0.00"),
+            )
+            first = create_transfer(
+                seed_user, db.session, checking, savings, seed_periods[0],
+                amount=Decimal("301.00"),
+            )
+            second = create_transfer(
+                seed_user, db.session, checking, savings, seed_periods[0],
+                amount=Decimal("302.00"),
+            )
+            db.session.commit()
+            transfer_service.update_transfer(
+                first.id, seed_user["user"].id, pay_period_id=seed_periods[1].id,
+            )
+            db.session.commit()
+            window = Paychecks((seed_periods[0].id, seed_periods[1].id))
+
+            items = load_plan_items(
+                _scope(seed_user, window, StatusBand.EVERY), (),
+            )
+
+            assert _keys(items) == [
+                (first.id, checking.id), (second.id, checking.id),
+            ]
+
 
 class TestWhatTheLoaderIssues:
     """Statements: none for an empty window, and the records' one only when asked."""

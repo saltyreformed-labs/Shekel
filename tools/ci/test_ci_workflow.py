@@ -60,6 +60,10 @@ GRADED_JOBS = ("landing", "tools", "tax-law", "lint", "test", "lint-and-test")
 #: The tools job's one grading step.
 TOOLS_STEP = "Lint and test every tools package"
 
+#: GitHub's ``timeout-minutes`` for a job that names none, and the most a job on a
+#: GitHub-hosted runner may run.
+GITHUB_DEFAULT_TIMEOUT_MINUTES = 360
+
 
 def _jobs() -> dict[str, dict]:
     """Read the jobs out of the live workflow file."""
@@ -83,6 +87,20 @@ class TestTheWorkflowIsWiredToTheAnswer:
                 continue
             assert "if" not in job, name
             assert "needs" not in job, name
+
+    def test_every_job_carries_a_time_limit(self):
+        """Every job carries a whole ``timeout-minutes`` under GitHub's default (rulings
+        plan#2328, plan#2330).
+
+        Every job here holds a merge: the five graders through the aggregate, and the
+        aggregate and the polyglot linters as the required checks.  One with no limit waits
+        out GitHub's 360 minutes behind a stalled runner, and a limit of 360 or more is no
+        limit.  ``True`` is an ``int`` to Python but no number of minutes to GitHub.
+        """
+        for name, job in _jobs().items():
+            limit = job.get("timeout-minutes")
+            assert isinstance(limit, int) and not isinstance(limit, bool), (name, limit)
+            assert 0 < limit < GITHUB_DEFAULT_TIMEOUT_MINUTES, (name, limit)
 
     def test_the_code_graders_keep_their_steps(self):
         """The lint job and the test job each still hold every grading step they run."""
@@ -422,10 +440,11 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         A job-level ``defaults`` (a ``shell:`` for every step) could make the check
         exit 0 unrun, and a wider ``permissions:`` widen the job's GitHub token, as each
         step's extra key could (:attr:`SHAPES`): the job's token reads the code and the
-        pull request, and nothing else.
+        pull request, and nothing else.  Its ``timeout-minutes`` is every job's
+        (:meth:`TestTheWorkflowIsWiredToTheAnswer.test_every_job_carries_a_time_limit`).
         """
         job = _jobs()["landing"]
-        assert set(job) == {"runs-on", "permissions", "env", "steps"}
+        assert set(job) == {"runs-on", "timeout-minutes", "permissions", "env", "steps"}
         assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
         assert {step["name"]: set(step) for step in job["steps"]} == self.SHAPES
         for step in job["steps"]:

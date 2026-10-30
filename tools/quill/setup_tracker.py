@@ -211,8 +211,11 @@ REPOSITORY = {
 
 #: Each arc is one label.  The arcs are :data:`tools.ci.arcs.ARCS`, their one
 #: home beside each arc's planning document (step X-cx's L4 deleted this
-#: module's second list); a label's colour is the one at its arc's position.
-_ARC_COLORS = ("0e8a16", "1d76db", "5319e7", "d93f0b", "006b75", "c5a100")
+#: module's second list); a label's colour is the one at its arc's position, read with no
+#: wrap round, so an arc added without a colour of its own fails at import rather than
+#: wearing another's (ruling plan#2219: each label's colour is its own).  ``tooling``'s is
+#: the one the developer gave it on the web.
+_ARC_COLORS = ("0e8a16", "1d76db", "5319e7", "d93f0b", "006b75", "c5a100", "793625")
 
 #: The mark every card quill files carries from the call that creates it
 #: until its filing's last write removes it (ruling ``balance:R-BAL202``).
@@ -227,16 +230,21 @@ def unmarked(labels: Iterable[str]) -> tuple[str, ...]:
 
 
 #: The two labels a release reads: a step whose release moves money, and a parent
-#: whose leaves ``/release`` ships in one release.  ``quill file step --label`` takes its
-#: choices from here.
+#: whose leaves ``/release`` ships in one release.
 MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL = "moves-money", "deploy-together"
+#: The label marking security work, in whatever arc it is (ruling plan#2179).
+SECURITY_LABEL = "security"
+#: The labels a person chooses for a card: every declared label but the arc labels, which
+#: display its Arc, and quill's :data:`FILING` mark.  ``quill file step --label`` takes its
+#: choices from here.
+CHOSEN_LABELS = (MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL, SECURITY_LABEL)
 
-#: Every label the tracker carries: one per arc, the two a release reads, and
+#: Every label the tracker carries: one per arc, the ones a person chooses, and
 #: quill's :data:`FILING` mark.
 LABELS = {
     **{
-        arc: (_ARC_COLORS[index % len(_ARC_COLORS)], f"The {arc.replace('_', '-')} arc")
-        for index, arc in enumerate(ARCS)
+        arc: (color, f"The {arc.replace('_', '-')} arc")
+        for arc, color in zip(ARCS, _ARC_COLORS, strict=True)
     },
     MOVES_MONEY_LABEL: (
         "b60205", "Its release moves money: /release carries at most one such step"
@@ -244,6 +252,7 @@ LABELS = {
     DEPLOY_TOGETHER_LABEL: (
         "fbca04", "A parent whose leaves /release ships in one release, never split"
     ),
+    SECURITY_LABEL: ("d90466", "Security related issues"),
     FILING: (
         "bfdadc",
         "Quill has not finished filing this card, so it is not offered as work",

@@ -306,6 +306,20 @@ def test_a_label_named_twice_files_the_card_once(code, tmp_path):
                                  "salary")
 
 
+def test_a_security_step_is_filed_in_the_tooling_arc_carrying_its_label(code, tmp_path):
+    """Ruling plan#2179: tooling is an arc, and security a label a step is filed with, beside
+    its arc label, which displays its Arc."""
+    text = tmp_path / "spec.md"
+    text.write_text("Rate-limit each client.")
+    tracker = FakeTracker()
+    assert run(tracker, code, "file", "step", "--arc", "tooling", "--title", "Limits",
+               "--body-file", str(text), "--label", "security") == 0
+    assert tracker.writes[0] == ("create", 1, "step", "Limits", (FILING, "security", "tooling"),
+                                 "tooling")
+    assert (tracker.cards_by_number[1].arc, tracker.cards_by_number[1].labels) == (
+        "tooling", ("security", "tooling"))
+
+
 
 def test_a_finding_owner_open_on_the_tracker_but_shipped_in_git_is_refused(code, capsys):
     """Review M2: a live owner is git's answer, never the card's open state (display)."""

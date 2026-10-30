@@ -23,5 +23,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 #: The arcs, by the slug each one's tracker label carries.  Their order is the
-#: tracker's label order, which assigns each label its colour.
-ARCS = ("balance", "recurrence", "pay_calendar", "credit_card", "bank_import", "salary")
+#: tracker's label order, which assigns each label its colour.  ``tooling`` holds the
+#: tools, deploy, CI, dependency and security work no other arc's argument covers
+#: (ruling plan#2179), so ``balance`` is no catch-all.
+ARCS = ("balance", "recurrence", "pay_calendar", "credit_card", "bank_import", "salary",
+        "tooling")

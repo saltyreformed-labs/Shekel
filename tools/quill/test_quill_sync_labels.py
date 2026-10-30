@@ -117,8 +117,8 @@ def test_a_card_holding_an_arc_none_of_quills_is_reported_and_never_relabelled(c
     assert run(tracker, code, "sync") == 1
     assert capsys.readouterr().out == (
         "REPORT: plan#1 [step, tracker] card 1 holds the Arc 'tracker', none of quill's arcs "
-        "(balance, recurrence, pay_calendar, credit_card, bank_import, salary), so no arc label "
-        "can display it: set its Arc on the web to one of them\n")
+        "(balance, recurrence, pay_calendar, credit_card, bank_import, salary, tooling), so no "
+        "arc label can display it: set its Arc on the web to one of them\n")
     assert not tracker.writes
 
 

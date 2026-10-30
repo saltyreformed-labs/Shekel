@@ -183,10 +183,9 @@ from tools.quill.check import (
     violations,
 )
 from tools.quill.setup_tracker import (
-    DEPLOY_TOGETHER_LABEL,
+    CHOSEN_LABELS,
     FILING,
     IN_ORDER,
-    MOVES_MONEY_LABEL,
     PLAN,
     TASK,
 )
@@ -854,8 +853,7 @@ def _file_parser(commands) -> None:
     step = sub.add_parser("step", parents=[common], help="a step, or a leaf of one")
     step.add_argument("--body-file", required=True, help="its spec")
     step.add_argument("--parent", type=card_number, help="the step this leaf splits")
-    step.add_argument("--label", action="append",
-                      choices=(MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL))
+    step.add_argument("--label", action="append", choices=CHOSEN_LABELS)
     finding = sub.add_parser("finding", parents=[common], help="a defect in the code")
     finding.add_argument("--owner", type=card_number, required=True, help="its owner step")
     finding.add_argument("--text", required=True, help="one sentence, at most 400 characters")

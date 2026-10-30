@@ -65,7 +65,7 @@ def test_a_card_holds_one_arc_in_its_arc_field(arc, held):
     R-BAL354: the Arc field is the arc's one home)."""
     assert violations(_finding(arc=arc), LABELS_ONLY) == [
         "it holds one arc in its Arc field, one of balance, recurrence, pay_calendar, "
-        f"credit_card, bank_import, salary; it holds {held}"]
+        f"credit_card, bank_import, salary, tooling; it holds {held}"]
 
 
 def test_the_check_reads_no_arc_label():

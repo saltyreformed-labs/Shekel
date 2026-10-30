@@ -350,12 +350,12 @@ card's state.
 Every card but a task carries its arc (a task's is its card's). Each arc's argument, the reasoning
 behind its steps, stays in its own document: `docs/audits/balance_architecture/README.md` (balance),
 and `implementation_plan_*.md` in `docs/plans/` for recurrence, pay_calendar, credit_card,
-bank_import and salary. A ruling made before the tracker is a closed card titled by its old id, and
-every step, finding and question open when the tracker took over is a card titled by its id, so
-`python -m tools.quill.quill show balance:R-BAL38` finds one. A shipped step's or a closed finding's
-id names no card: its record is the commit that shipped or closed it, and the archives. Beside the
-arc documents, `docs/plans/verification.md` is what "done" means for a step in any arc, and
-`docs/plans/lessons.md` is what this project has already paid to learn.
+bank_import, salary and tooling. A ruling made before the tracker is a closed card titled by its old
+id, and every step, finding and question open when the tracker took over is a card titled by its id,
+so `python -m tools.quill.quill show balance:R-BAL38` finds one. A shipped step's or a closed
+finding's id names no card: its record is the commit that shipped or closed it, and the archives.
+Beside the arc documents, `docs/plans/verification.md` is what "done" means for a step in any arc,
+and `docs/plans/lessons.md` is what this project has already paid to learn.
 
 **Anything under an `archive/` or `historical/` directory is a HISTORICAL RECORD and governs
 nothing** -- every such file says so on its first line. Cite one for how a decision came to be,

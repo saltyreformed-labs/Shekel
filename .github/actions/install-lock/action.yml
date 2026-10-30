@@ -1,0 +1,122 @@
+# Shekel Budget App -- a job's Python and packages, from uv.lock
+#
+# Every workflow job that runs Python takes it from here (ruling
+# balance:R-BAL294, plan#1027): uv installs the interpreter
+# ``.python-version`` names and the packages ``uv.lock`` pins, every file
+# checked against its sha256 (``--locked`` also refuses a lock that no longer
+# matches pyproject.toml), into ``.venv``, whose ``bin`` the job's later steps
+# then find first on PATH.  One recipe, so no job states a Python version or a
+# package version of its own.
+#
+# UV IS THE DOCKERFILE'S.  Its ``FROM ghcr.io/astral-sh/uv:<version>@sha256:...
+# AS uv`` line is the one home of uv's version and digest (Dependabot's docker
+# entry moves it), and the first step below copies ``/uv`` out of that same
+# image, pulled by that digest, as the image build does: CI and the image run
+# one uv binary, and no third-party action installs it.
+#
+# THE INTERPRETER IS uv's OWN BUILD OF CPYTHON (``UV_PYTHON_PREFERENCE``
+# below): the newest release of ``.python-version``'s minor that this uv
+# lists, checked against the hash uv carries for it, whatever Python the
+# runner image holds, so it too moves only when the Dockerfile's uv does.
+# The image runs its base image's Python of the same minor (the Dockerfile's
+# FROM tags, which tests/test_deploy/test_image_supply_chain.py holds to
+# ``.python-version``); the patch releases can differ.
+
+name: Install the lock
+description: The job's Python from .python-version and its packages from uv.lock, by the Dockerfile's uv.
+
+inputs:
+  install:
+    description: >-
+      What the job installs from the lock: ``all`` (what ``uv sync``
+      installs: the runtime set and the dev and build groups), ``runtime``
+      (the runtime set and the build group, which psycopg-c compiles
+      against; no dev tools), ``landing`` (the landing check's packages
+      alone, pyproject.toml's ``landing`` group) or ``python`` (the
+      interpreter and no package).
+    required: true
+  cache:
+    description: >-
+      ``true`` keeps uv's cache in the GitHub Actions cache between runs;
+      anything else restores and saves none, as a job holding a token and
+      the release workflow ask, since a cache another run wrote is a way to
+      poison the job that restores it.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The image reference is read whole from the Dockerfile's uv line, digest
+    # included, so the pull is by digest; a Dockerfile holding no such line,
+    # or two, fails the job rather than guessing.
+    - name: Copy uv out of the Dockerfile's uv image
+      id: uv
+      shell: bash
+      run: |
+        set -euo pipefail
+        mapfile -t found < <(sed -n -E 's#^FROM (ghcr\.io/astral-sh/uv:[^@ ]+@sha256:([0-9a-f]{64})) AS uv$#\1 \2#p' Dockerfile)
+        if [ "${#found[@]}" -ne 1 ]; then
+            echo "The Dockerfile must hold exactly one 'FROM ghcr.io/astral-sh/uv:<version>@sha256:<digest> AS uv' line; it holds ${#found[@]}." >&2
+            exit 1
+        fi
+        read -r image digest <<< "${found[0]}"
+        dir="${RUNNER_TEMP}/uv"
+        mkdir -p "${dir}"
+        docker pull --quiet "${image}"
+        container="$(docker create "${image}" /uv)"
+        docker cp "${container}:/uv" "${dir}/uv"
+        docker rm "${container}" > /dev/null
+        "${dir}/uv" --version
+        {
+            echo "bin=${dir}/uv"
+            echo "digest=${digest}"
+            echo "cache=${RUNNER_TEMP}/uv-cache"
+        } >> "${GITHUB_OUTPUT}"
+
+    # GitHub's own cache action, never a third party's.  The key holds
+    # everything the cache's contents depend on: which packages (the install
+    # set and the lock), which interpreter (``.python-version`` and the uv
+    # that picks its release) and uv's own cache format (its digest again).
+    # A saved key is never overwritten, so a key two install sets shared
+    # would hand one of them a cache that lacks its wheels for good.
+    - name: Restore uv's cache
+      if: inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.uv.outputs.cache }}
+        key: uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.uv.outputs.digest }}-${{ hashFiles('uv.lock', '.python-version') }}
+        restore-keys: |
+          uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.uv.outputs.digest }}-
+
+    # ``--require-build-hashes`` refuses a source build whose build tools the
+    # lock does not hash (pyproject.toml's ``no-build-isolation-package``),
+    # as the Dockerfile's sync does.  An install set not named here fails.
+    #
+    # The PATH line is the one zizmor's github-env check flags: from this
+    # file it cannot see what triggers the workflows that call the action,
+    # and a PATH write is dangerous only under ``pull_request_target`` or
+    # ``workflow_run``.  It is ignored on that step alone (ruling plan#2376),
+    # and tools/ci/test_ci_workflow.py refuses any workflow that calls this
+    # action under either trigger, so the reason is checked, not only stated.
+    # The directory written is the workspace's own venv, no input's value.
+    - name: Install from the lock
+      shell: bash
+      env:
+        UV: ${{ steps.uv.outputs.bin }}
+        INSTALL: ${{ inputs.install }}
+        UV_CACHE_DIR: ${{ steps.uv.outputs.cache }}
+        UV_PYTHON_PREFERENCE: only-managed
+      run: | # zizmor: ignore[github-env]
+        set -euo pipefail
+        sync=("${UV}" sync --locked --require-build-hashes)
+        case "${INSTALL}" in
+            all) "${sync[@]}" ;;
+            runtime) "${sync[@]}" --no-dev ;;
+            landing) "${sync[@]}" --only-group landing ;;
+            python) "${UV}" venv ;;
+            *)
+                echo "No install set '${INSTALL}': all, runtime, landing or python." >&2
+                exit 1
+                ;;
+        esac
+        echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"

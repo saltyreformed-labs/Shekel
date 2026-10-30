@@ -63,7 +63,7 @@ jobs:
   # and the timezone stay in Python; the build compares two integers.
   #
   # Its OWN job, with read-only permissions, rather than a step of the build:
-  # installing the requirements runs third-party install code, and the build
+  # installing the lock's packages runs third-party install code, and the build
   # job holds ``id-token: write`` (it signs images) and ``packages: write``.
   # ``build-and-push`` NEEDS this job, so a failure here builds nothing.
   tax-law:
@@ -78,18 +78,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # The runtime set only: importing the law imports the ``app`` package,
+      # and the check needs nothing the dev tools add.  No cache: a cache
+      # restored into a release workflow is a way to poison it.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      # The runtime requirements only: importing the law imports the ``app``
-      # package, and the check needs nothing the dev tools add.  No pip cache:
-      # a cache restored into a release workflow is a way to poison it.
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          install: runtime
+          cache: "false"
 
       # The real clock, in the display timezone: fails from December 1 while
       # next year is missing (scripts/check_tax_law.py).

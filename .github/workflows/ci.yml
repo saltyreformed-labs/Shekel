@@ -36,8 +36,9 @@
 # runners; six shards at ``-n logical`` ran 6.4-9.7 min each.
 #
 # THE STEP NUMBERS are kept from the single-job era, on the same steps, because
-# .pre-commit-config.yaml and pytest.ini cite them.  Python matches the
-# production Dockerfile (3.14) in every job.
+# .pre-commit-config.yaml and pytest.ini cite them.  Every job takes its Python
+# and packages from .github/actions/install-lock: ``.python-version``'s
+# interpreter and ``uv.lock``'s packages, installed by the Dockerfile's uv.
 #
 # THE TIME LIMITS (rulings plan#2328, plan#2330).  Every job carries a
 # ``timeout-minutes`` of twice its longest successful run, rounded up to a
@@ -138,23 +139,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-
       # This job holds a token, so it runs the least third-party code it can:
       # the two packages the check imports (``requests``, and ``cryptography``
-      # through quill's GitHub client), at the versions requirements.txt pins
-      # -- read from that file, their one home -- and no pip upgrade.  (A
-      # constraints file cannot be used: pip refuses one holding extras, and
-      # requirements.txt has two.)  A package the check comes to import
-      # beyond these fails the job red.
-      - name: Install dependencies
-        run: |
-          set -euo pipefail
-          grep -E '^(requests|cryptography)==' requirements.txt > "${RUNNER_TEMP}/landing-requirements.txt"
-          python -m pip install -r "${RUNNER_TEMP}/landing-requirements.txt"
+      # through quill's GitHub client), pyproject.toml's ``landing`` group,
+      # with the indirect packages they need, at the lock's versions and
+      # hashes, and no cache another run wrote.  A package the check comes to
+      # import beyond these fails the job red.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
+        with:
+          install: landing
+          cache: "false"
 
       # The tracker's owner and repository, from quill's PLAN
       # (tools/quill/setup_tracker.py), their one home: the mint reads them
@@ -237,23 +232,11 @@ jobs:
           # artipacked).
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          install: all
+          cache: "true"
 
       # ── 4b. Every tools package, at one floor, in one step ───────
       # Each package's 10.00/10 pylint floor and its tests: quill
@@ -264,9 +247,9 @@ jobs:
       # ``tools/split`` (the proved test-file split; step balance:X-er, ruling
       # R-BAL301) and ``tools/rehearsal`` (the release rehearsal kit; step
       # X-cx's K1, rulings R-BAL314 and R-BAL315).  A job of its own, beside
-      # lint and the shards rather than ahead of them.  ``yaml`` (PyYAML,
-      # pinned in requirements-dev.txt) is what ``tools/ci/test_ci_workflow.py``
-      # reads THIS file with, which is why the step follows the install.
+      # lint and the shards rather than ahead of them.  ``yaml`` (PyYAML, in
+      # the lock's dev group) is what ``tools/ci/test_ci_workflow.py`` reads
+      # THIS file with, which is why the step follows the install.
       #
       # The rehearsal kit's tests that start a real private cluster carry the
       # ``cluster`` marker and are deselected here, so they run once, in the
@@ -293,29 +276,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # The runtime set only: importing the law imports the ``app`` package,
+      # and the check needs nothing the dev tools add.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      # Its OWN key: this job installs the runtime requirements only, and a
-      # cache saved under the key the other jobs share would lack every dev
-      # wheel -- and a saved key is never overwritten, so each of them would
-      # re-download those until the requirements next changed.
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-runtime-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-runtime-
-
-      # The runtime requirements only: importing the law imports the ``app``
-      # package, and the check needs nothing the dev tools add.
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          install: runtime
+          cache: "true"
 
       # ── 4c. Next year's tax law ──────────────────────────────────
       # From December 1 this job fails every pull request -- a release to
@@ -349,23 +316,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          install: all
+          cache: "true"
 
       # ── 5. Run pylint ────────────────────────────────────────────
       # Layered pylint gate:
@@ -490,23 +445,11 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          install: all
+          cache: "true"
 
       # ── 5d. Record the runner's capacity ─────────────────────────
       # The hosted fleet is not one machine: the X-gy measurement drew AMD
@@ -621,10 +564,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # The interpreter alone: the verdict reads its input with the
+      # standard library.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
+          install: python
+          cache: "false"
 
       # The verdict, fail-closed: every grader succeeded.  A failed,
       # cancelled or skipped job, a job the verdict does not know, or one
@@ -640,8 +586,8 @@ jobs:
   # (shell, JS/CSS, Jinja templates, workflows, Dockerfile, YAML,
   # secrets, spelling). Mirrors the local .pre-commit-config.yaml hooks.
   # Binary tools are pinned by version and downloaded (no extra
-  # third-party actions to SHA-pin); the pip tools (yamllint, jactionlint,
-  # zizmor, djlint, rumdl) come from requirements-dev.txt. Each tool reads
+  # third-party actions to SHA-pin); the Python tools (yamllint,
+  # jactionlint, zizmor, djlint, rumdl) come from the lock. Each tool reads
   # its own in-repo config file. The dev and main rulesets require it beside
   # lint-and-test, so the floor blocks merges.
   polyglot-lint:
@@ -653,26 +599,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # The Python linters (yamllint, jactionlint, zizmor, djlint, rumdl) and
+      # jinja2 for the template parse check, all from the lock.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
         with:
-          python-version: "3.14"
-
-      - name: Cache pip packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      # pip-installable linters (yamllint, jactionlint, zizmor, djlint, rumdl)
-      # + jinja2 for the template parse check, all pinned in
-      # requirements-dev.txt.
-      - name: Install pip linters
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          install: all
+          cache: "true"
 
       # Version-pinned standalone binaries, extracted to ~/.local/bin via
       # `find` so a change in an archive's internal layout cannot break the

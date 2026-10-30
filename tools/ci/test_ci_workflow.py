@@ -19,6 +19,8 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
+from pathlib import Path
 
 import yaml
 
@@ -64,6 +66,35 @@ TOOLS_STEP = "Lint and test every tools package"
 #: GitHub-hosted runner may run.
 GITHUB_DEFAULT_TIMEOUT_MINUTES = 360
 
+#: The install action every job that runs Python calls, by the ``$/`` form GitHub loads from
+#: the workflow's own commit (ruling plan#2375), and the file that defines it.
+INSTALL_LOCK = "$/.github/actions/install-lock"
+INSTALL_LOCK_FILE = arcs.REPO / ".github/actions/install-lock/action.yml"
+#: The step that calls it, named alike in every job.
+INSTALL_STEP = "Install the lock"
+
+#: What each job that runs Python installs from the lock, and whether it keeps uv's cache:
+#: every job of every workflow but the release image's build, which runs no Python.  The
+#: landing job holds a token and the release workflow publishes, so neither restores a
+#: cache; the scheduled runs keep none, as they kept no pip cache.
+INSTALLS = {
+    ("ci.yml", "landing"): {"install": "landing", "cache": "false"},
+    ("ci.yml", "tools"): {"install": "all", "cache": "true"},
+    ("ci.yml", "tax-law"): {"install": "runtime", "cache": "true"},
+    ("ci.yml", "lint"): {"install": "all", "cache": "true"},
+    ("ci.yml", "test"): {"install": "all", "cache": "true"},
+    ("ci.yml", "lint-and-test"): {"install": "python", "cache": "false"},
+    ("ci.yml", "polyglot-lint"): {"install": "all", "cache": "true"},
+    ("calendar-sweep.yml", "sweep"): {"install": "all", "cache": "false"},
+    ("tax-law.yml", "watch"): {"install": "runtime", "cache": "false"},
+    ("docker-publish.yml", "tax-law"): {"install": "runtime", "cache": "false"},
+}
+
+#: The triggers under which a step's PATH write lets a pull request's code run with the
+#: base's authority (zizmor's github-env audit): no workflow calling the install action may
+#: run on one (ruling plan#2376).
+DANGEROUS_TRIGGERS = frozenset({"pull_request_target", "workflow_run"})
+
 
 def _jobs() -> dict[str, dict]:
     """Read the jobs out of the live workflow file."""
@@ -74,6 +105,57 @@ def _jobs() -> dict[str, dict]:
 def _steps(job: str) -> dict[str, dict]:
     """One job's steps, keyed by name."""
     return {step["name"]: step for step in _jobs()[job]["steps"]}
+
+
+def _run_step(run: str, env: dict[str, str], cwd: Path | None = None,
+              ) -> subprocess.CompletedProcess:
+    """Run a step's ``run`` text as GitHub runs a ``shell: bash`` step, in ``cwd``.
+
+    ``bash --noprofile --norc -eo pipefail`` is GitHub's invocation for an
+    explicit ``shell: bash``, and for every ``run`` step of a composite action,
+    which must name its shell; a workflow step with NO ``shell:`` gets ``bash -e``
+    instead, which is why the wiring tests require ``shell: bash`` on each
+    workflow step this runs.
+    """
+    return subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run],
+        env={"PATH": "/usr/bin:/bin", **env}, cwd=cwd,
+        capture_output=True, text=True, check=False,
+    )
+
+
+def _workflows() -> dict[str, dict]:
+    """Every workflow file, read, by its file name."""
+    folder = arcs.REPO / ".github/workflows"
+    return {path.name: yaml.safe_load(path.read_text(encoding="utf-8"))
+            for path in sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")])}
+
+
+def _action_steps() -> dict[str, dict]:
+    """The install action's steps, keyed by name."""
+    action = yaml.safe_load(INSTALL_LOCK_FILE.read_text(encoding="utf-8"))
+    return {step["name"]: step for step in action["runs"]["steps"]}
+
+
+def _calls_the_install(job: dict) -> bool:
+    """Whether a job has a step naming the install action, in any form."""
+    return any("install-lock" in step.get("uses", "") for step in job.get("steps", []))
+
+
+def _dangerous_callers(workflows: dict[str, dict]) -> list[str]:
+    """The workflows that call the install action and run on a :data:`DANGEROUS_TRIGGERS`.
+
+    PyYAML reads the bare key ``on`` as the boolean True (YAML 1.1); a trigger written
+    alone, as a list or as a mapping is a trigger all the same.
+    """
+    found = []
+    for name, workflow in workflows.items():
+        on = workflow.get(True, workflow.get("on"))
+        triggers = {on} if isinstance(on, str) else set(on or ())
+        if triggers & DANGEROUS_TRIGGERS and any(
+                _calls_the_install(job) for job in workflow["jobs"].values()):
+            found.append(name)
+    return found
 
 
 class TestTheWorkflowIsWiredToTheAnswer:
@@ -254,7 +336,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
         for step in jobs["build-and-push"]["steps"]:
             assert "if" not in step and "continue-on-error" not in step, step.get("name")
         # Both executed steps name ``bash``, so GitHub runs them the way
-        # ``_run_step`` below does (pipefail included).
+        # ``_run_step`` does (pipefail included).
         assert gate["shell"] == "bash" and emit["shell"] == "bash"
 
     @staticmethod
@@ -264,21 +346,6 @@ class TestTheWorkflowIsWiredToTheAnswer:
             encoding="utf-8",
         )
         return yaml.safe_load(text)["jobs"]
-
-    @staticmethod
-    def _run_step(run: str, env: dict[str, str]) -> subprocess.CompletedProcess:
-        """Run a step's ``run`` text as GitHub runs a ``shell: bash`` step.
-
-        ``bash --noprofile --norc -eo pipefail`` is GitHub's invocation for an
-        explicit ``shell: bash``; a step with NO ``shell:`` gets ``bash -e``
-        instead, which is why the wiring test above requires ``shell: bash``
-        on both steps this runs.
-        """
-        return subprocess.run(
-            ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run],
-            env={"PATH": "/usr/bin:/bin", **env},
-            capture_output=True, text=True, check=False,
-        )
 
     def test_the_build_gate_lets_only_a_future_instant_through(self):
         """The build's first step, RUN: through only while the refusal instant is ahead.
@@ -314,7 +381,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
             "9" * 23: (1, malformed),
         }
         for value, (expected, reason) in cases.items():
-            result = self._run_step(run, {"REFUSE_FROM": value})
+            result = _run_step(run, {"REFUSE_FROM": value})
             assert result.returncode == expected, (value, result.stdout, result.stderr)
             assert reason in result.stdout + result.stderr, (value, result.stdout, result.stderr)
 
@@ -340,7 +407,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
         )
         stand_in.chmod(0o755)
         output.write_text("")
-        result = self._run_step(emit["run"], env)
+        result = _run_step(emit["run"], env)
         assert result.returncode == 0, result.stderr
         assert output.read_text() == "epoch=4242424242\n"
 
@@ -349,7 +416,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
         for failing in ("exit 1\n", "echo 4242424242\nexit 1\n"):
             stand_in.write_text("#!/bin/sh\n" + failing)
             output.write_text("")
-            result = self._run_step(emit["run"], env)
+            result = _run_step(emit["run"], env)
             assert result.returncode != 0, failing
             assert output.read_text() == "", failing
 
@@ -400,26 +467,24 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
     CHECK = "Ship markers against the write rule"
     PLACE = "Read the tracker's place"
     #: Every key each step may hold.  A ``shell:`` could run something other than the
-    #: check and exit 0, an ``env:`` could hand a step the key or move pip's index, and a
+    #: check and exit 0, an ``env:`` could hand a step the key or move uv's index, and a
     #: ``continue-on-error`` could fail green: none may be added unseen.
     SHAPES = {
         "Checkout code": {"name", "uses", "with"},
-        "Set up Python 3.14": {"name", "uses", "with"},
-        "Install dependencies": {"name", "run"},
+        INSTALL_STEP: {"name", "uses", "with"},
         PLACE: {"name", "id", "run"},
         MINT: {"name", "id", "if", "uses", "with"},
         CHECK: {"name", "env", "run"},
     }
 
     def test_the_job_judges_the_merge_checked_out_over_full_history_in_order(self):
-        """Unconditional, waiting on nothing, a full checkout, every install before the mint,
+        """Unconditional, waiting on nothing, a full checkout, the install before the mint,
         and the check handed the event, the commit checked out and the pull request the event
         names, with each token under the name the check reads it by."""
         job = _jobs()["landing"]
         assert "needs" not in job and "if" not in job
         assert [step["name"] for step in job["steps"]] == [
-            "Checkout code", "Set up Python 3.14", "Install dependencies", self.PLACE,
-            self.MINT, self.CHECK,
+            "Checkout code", INSTALL_STEP, self.PLACE, self.MINT, self.CHECK,
         ]
         assert job["steps"][0]["with"] == {"fetch-depth": 0, "persist-credentials": False}
         check = _steps("landing")[self.CHECK]
@@ -436,7 +501,9 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         )
 
     def test_the_job_and_every_step_hold_exactly_their_keys(self):
-        """Nothing beyond these keys on the job or any step, and every action pinned by sha.
+        """Nothing beyond these keys on the job or any step, and every action pinned by sha
+        but this repository's own install action, which GitHub loads from the workflow's own
+        commit (``$/``, ruling plan#2375).
 
         A job-level ``defaults`` (a ``shell:`` for every step) could make the check
         exit 0 unrun, and a wider ``permissions:`` widen the job's GitHub token, as each
@@ -449,9 +516,8 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         assert job["permissions"] == {"contents": "read", "pull-requests": "read"}
         assert {step["name"]: set(step) for step in job["steps"]} == self.SHAPES
         for step in job["steps"]:
-            if "uses" in step:
+            if "uses" in step and step["uses"] != INSTALL_LOCK:
                 assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", step["uses"]), step["name"]
-        assert _steps("landing")["Set up Python 3.14"]["with"] == {"python-version": "3.14"}
 
     def test_the_token_is_minted_for_reading_the_trackers_issues_alone(self):
         """The pinned action, its inputs exactly these, and its only condition the key's presence.
@@ -481,8 +547,10 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         (The mint's own post step keeps the token, to revoke it.)  The job's env
         holds the key only as the boolean the mint's condition reads, and no step
         writes GITHUB_ENV or GITHUB_PATH, through which a value set once would
-        reach every later step.  Either context, by attribute or by index
-        (``secrets['PLAN_READER_KEY']``), counts.
+        reach every later step, but the install action's one line putting the
+        workspace's own venv first on PATH, which holds no value of any input
+        (:class:`TestTheInstallActionInstallsTheLock`).  Either context, by
+        attribute or by index (``secrets['PLAN_READER_KEY']``), counts.
         """
         token = re.compile(r"\bsteps\s*(\.\s*token\b|\[\s*['\"]token['\"])")
         for step in _jobs()["landing"]["steps"]:
@@ -531,34 +599,21 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         stand_in.chmod(0o755)
         assert _run(arcs.REPO, {**env, "PATH": f"{tmp_path}:/usr/bin:/bin"}).returncode != 0
 
-    def test_the_install_takes_the_checks_two_pins_from_requirements_and_nothing_else(
-            self, tmp_path):
-        """The install step's shell, RUN with a stand-in ``python``: it is called once, as
-        exactly ``python -m pip install -r <file>`` (no index or other option), the file
-        holding requirements.txt's own ``requests`` and ``cryptography`` lines, and no pip
-        upgrade runs in the job that holds the token."""
-        install = _steps("landing")["Install dependencies"]
-        assert "--upgrade" not in install["run"]
-        stand_in = tmp_path / "python"
-        record = tmp_path / "called"
-        stand_in.write_text(
-            "#!/bin/sh\n"
-            '[ "$#" -eq 5 ] || exit 8\n'
-            'test "$1 $2 $3 $4" = "-m pip install -r" || exit 9\n'
-            f'test ! -e "{record}" || exit 7\n'
-            f'cp "$5" "{record}"\n'
-        )
-        stand_in.chmod(0o755)
-        done = subprocess.run(
-            ["bash", "--noprofile", "--norc", "-e", "-c", install["run"]], cwd=arcs.REPO,
-            env={"PATH": f"{tmp_path}:/usr/bin:/bin", "RUNNER_TEMP": str(tmp_path)},
-            capture_output=True, text=True, check=False)
-        assert done.returncode == 0, done.stderr
-        pins = (arcs.REPO / "requirements.txt").read_text(encoding="utf-8").splitlines()
-        wanted = [line for line in pins if line.split("==")[0] in {"requests", "cryptography"}]
-        assert len(wanted) == 2, wanted
-        assert record.read_text().splitlines() == wanted
-
+    def test_the_install_takes_the_landing_group_alone_and_no_cache(self):
+        """The install step syncs pyproject.toml's ``landing`` group alone, with no cache
+        another run wrote: exactly the two packages the check imports (``requests``, and
+        ``cryptography`` through quill's GitHub client), with the indirect packages they need,
+        at the lock's versions and hashes.  Each is held to its range by its entry in the
+        runtime ``dependencies``, so the group names which packages and never a version."""
+        assert _steps("landing")[INSTALL_STEP] == {
+            "name": INSTALL_STEP, "uses": INSTALL_LOCK,
+            "with": {"install": "landing", "cache": "false"},
+        }
+        project = tomllib.loads((arcs.REPO / "pyproject.toml").read_text(encoding="utf-8"))
+        group = project["dependency-groups"]["landing"]
+        assert group == ["requests", "cryptography"]
+        runtime = {re.match(r"[\w.-]+", entry)[0] for entry in project["project"]["dependencies"]}
+        assert set(group) <= runtime, group
 
 class TestTheRequiredCheckJudgesEveryGrader:
     """``lint-and-test`` -- the check branch protection requires -- answers for every job.
@@ -591,3 +646,227 @@ class TestTheRequiredCheckJudgesEveryGrader:
         assert step["run"].strip() == (
             "printf '%s' \"${NEEDS}\" | python -m tools.ci.ci_verdict"
         )
+
+
+class TestEveryJobInstallsTheLock:
+    """Every job that runs Python installs it through ``.github/actions/install-lock``.
+
+    Ruling balance:R-BAL294 (plan#1027) as X-em's plan#2327 builds it: the job's Python is
+    ``.python-version``'s and its packages ``uv.lock``'s, installed by one recipe, so no
+    job states a version of its own.  The action is called by the ``$/`` form (ruling
+    plan#2375), and its PATH write is safe only while no caller runs on a trigger that
+    hands a pull request's code the base's authority (ruling plan#2376).
+    """
+
+    def test_each_job_that_runs_python_installs_its_set_right_after_its_checkout(self):
+        """Exactly the jobs :data:`INSTALLS` names call the action, each once, as the step
+        straight after its checkout (the action reads the checkout's Dockerfile and lock),
+        with its install set and its cache; no other job calls it."""
+        calls = {}
+        for name, workflow in _workflows().items():
+            for job_name, job in workflow["jobs"].items():
+                steps = job["steps"]
+                at = [i for i, step in enumerate(steps) if "install-lock" in step.get("uses", "")]
+                if not at:
+                    continue
+                assert len(at) == 1, (name, job_name, at)
+                assert at[0] >= 1, (name, job_name)
+                assert steps[at[0] - 1]["uses"].startswith("actions/checkout@"), (name, job_name)
+                assert steps[at[0]]["name"] == INSTALL_STEP, (name, job_name)
+                calls[(name, job_name)] = steps[at[0]]["with"]
+        assert calls == INSTALLS
+
+    def test_the_action_is_called_by_the_self_repository_form(self):
+        """``$/``, which GitHub loads from the workflow's own commit, never ``./``, which
+        reads whatever the checkout holds when the step runs (ruling plan#2375)."""
+        uses = [step["uses"] for workflow in _workflows().values()
+                for job in workflow["jobs"].values() for step in job["steps"]
+                if "install-lock" in step.get("uses", "")]
+        assert len(uses) == len(INSTALLS)
+        assert set(uses) == {INSTALL_LOCK}
+
+    def test_no_workflow_installs_python_or_packages_any_other_way(self):
+        """No ``setup-python``, no ``python-version``, no pip and no cache action of a job's
+        own: a second recipe would be a second home of what it installs."""
+        for name, workflow in _workflows().items():
+            for job_name, job in workflow["jobs"].items():
+                for step in job["steps"]:
+                    where = (name, job_name, step.get("name"))
+                    uses = step.get("uses", "")
+                    assert not uses.startswith(("actions/setup-python@", "actions/cache@")), where
+                    assert "python-version" not in step.get("with", {}), where
+                    assert not re.search(r"\bpip3? install\b|-m pip\b", step.get("run", "")), where
+
+    def test_no_caller_runs_on_a_trigger_that_makes_the_path_write_dangerous(self):
+        """The reason zizmor's github-env flag is ignored on the action's PATH line (ruling
+        plan#2376), checked: no workflow calling the action runs on ``pull_request_target``
+        or ``workflow_run``.  The check is shown to refuse each spelling of such a trigger,
+        and to pass one that calls no install."""
+        assert not _dangerous_callers(_workflows())
+        calling = {"j": {"steps": [{"uses": INSTALL_LOCK}]}}
+        for on in ("workflow_run", ["push", "pull_request_target"],
+                   {"pull_request_target": {"branches": ["dev"]}}):
+            assert _dangerous_callers({"x.yml": {True: on, "jobs": calling}}) == ["x.yml"], on
+        assert _dangerous_callers({"x.yml": {"on": "workflow_run", "jobs": calling}}) == ["x.yml"]
+        other = {"j": {"steps": [{"uses": "actions/checkout@" + "a" * 40}]}}
+        assert not _dangerous_callers({"x.yml": {True: "workflow_run", "jobs": other}})
+
+
+class TestTheInstallActionInstallsTheLock:
+    """The action's own steps, read and RUN with stand-ins for ``docker`` and ``uv``."""
+
+    COPY = "Copy uv out of the Dockerfile's uv image"
+    CACHE = "Restore uv's cache"
+    INSTALL = "Install from the lock"
+
+    #: A stand-in ``docker``: it records each call, hands ``create`` a container id, and
+    #: writes a runnable ``uv`` where ``cp`` is told to; ``FAIL_PULL`` fails the pull.
+    DOCKER = (
+        "#!/bin/sh\n"
+        'echo "$*" >> "${LOG}"\n'
+        'case "$1" in\n'
+        '    pull) [ -z "${FAIL_PULL:-}" ] || exit 1 ;;\n'
+        "    create) echo c0ffee ;;\n"
+        '    cp) printf \'#!/bin/sh\\necho "uv 9.9.9"\\n\' > "$3" && chmod +x "$3" ;;\n'
+        'esac\n'
+    )
+
+    def test_its_inputs_steps_and_pins(self):
+        """Two required inputs; its three steps in order; every third-party action pinned by
+        sha; GitHub's own cache action, run only when the caller asks for exactly
+        ``true``, keyed on the install set, uv's digest, the lock and ``.python-version``;
+        and the install step's interpreter uv's own build, never the runner's."""
+        action = yaml.safe_load(INSTALL_LOCK_FILE.read_text(encoding="utf-8"))
+        assert action["inputs"].keys() == {"install", "cache"}
+        assert all(spec["required"] is True for spec in action["inputs"].values())
+        assert action["runs"]["using"] == "composite"
+        steps = _action_steps()
+        assert list(steps) == [self.COPY, self.CACHE, self.INSTALL]
+        for step in steps.values():
+            if "uses" in step:
+                assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", step["uses"]), step["name"]
+            else:
+                assert step["shell"] == "bash", step["name"]
+        cache = steps[self.CACHE]
+        assert cache["uses"].startswith("actions/cache@")
+        assert cache["if"] == "inputs.cache == 'true'"
+        key = "uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.uv.outputs.digest }}-"
+        assert cache["with"] == {
+            "path": "${{ steps.uv.outputs.cache }}",
+            "key": key + "${{ hashFiles('uv.lock', '.python-version') }}",
+            "restore-keys": key + "\n",
+        }
+        assert "if" not in steps[self.COPY] and "if" not in steps[self.INSTALL]
+        assert steps[self.INSTALL]["env"] == {
+            "UV": "${{ steps.uv.outputs.bin }}",
+            "INSTALL": "${{ inputs.install }}",
+            "UV_CACHE_DIR": "${{ steps.uv.outputs.cache }}",
+            "UV_PYTHON_PREFERENCE": "only-managed",
+        }
+
+    def test_only_the_install_step_writes_the_path_and_zizmor_is_ignored_there_alone(self):
+        """No step writes GITHUB_ENV, only the install step writes GITHUB_PATH, and the
+        file's one zizmor ignore is the github-env one on that step's ``run`` line (ruling
+        plan#2376).  No step reads a secret or a token."""
+        for name, step in _action_steps().items():
+            text = yaml.safe_dump(step)
+            assert "GITHUB_ENV" not in text, name
+            assert ("GITHUB_PATH" in text) is (name == self.INSTALL), name
+            assert not re.search(r"\bsecrets\b|\btoken\b", text), name
+        lines = INSTALL_LOCK_FILE.read_text(encoding="utf-8").splitlines()
+        ignores = [i for i, line in enumerate(lines) if "zizmor:" in line]
+        assert len(ignores) == 1
+        assert lines[ignores[0]] == "      run: | # zizmor: ignore[github-env]"
+        names = [line for line in lines[:ignores[0]] if line.startswith("    - name: ")]
+        assert names[-1] == f"    - name: {self.INSTALL}"
+
+    def _copy(self, tmp_path: Path, dockerfile: str, **env: str):
+        """RUN the copy step in a directory holding ``dockerfile``: the result, what
+        ``docker`` was asked, and what the step wrote to its outputs."""
+        work, bindir, temp = tmp_path / "work", tmp_path / "bin", tmp_path / "temp"
+        for folder in (work, bindir, temp):
+            folder.mkdir(exist_ok=True)
+        (work / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+        (bindir / "docker").write_text(self.DOCKER, encoding="utf-8")
+        (bindir / "docker").chmod(0o755)
+        log, output = tmp_path / "docker.log", tmp_path / "github_output"
+        for file in (log, output):
+            file.write_text("", encoding="utf-8")
+        result = _run_step(_action_steps()[self.COPY]["run"], {
+            "PATH": f"{bindir}:/usr/bin:/bin", "LOG": str(log), "RUNNER_TEMP": str(temp),
+            "GITHUB_OUTPUT": str(output), **env}, cwd=work)
+        return result, log.read_text(encoding="utf-8").splitlines(), output.read_text(
+            encoding="utf-8")
+
+    def test_uv_is_copied_from_the_dockerfiles_own_uv_image_by_its_digest(self, tmp_path):
+        """With the real Dockerfile the step pulls its uv image by tag and digest, copies
+        ``/uv`` out of it, and hands the binary, the digest and the cache directory on."""
+        dockerfile = (arcs.REPO / "Dockerfile").read_text(encoding="utf-8")
+        # Read here by splitting the line, not by the step's expression.
+        line, = (row for row in dockerfile.splitlines()
+                 if row.startswith("FROM ghcr.io/astral-sh/uv:"))
+        image = line.split()[1]
+        digest = image.split("@sha256:")[1]
+        result, calls, output = self._copy(tmp_path, dockerfile)
+        assert result.returncode == 0, result.stderr
+        uv = tmp_path / "temp" / "uv" / "uv"
+        assert calls == [f"pull --quiet {image}", f"create {image} /uv",
+                         f"cp c0ffee:/uv {uv}", "rm c0ffee"]
+        assert result.stdout.splitlines()[-1] == "uv 9.9.9"
+        assert output == (f"bin={uv}\ndigest={digest}\n"
+                          f"cache={tmp_path / 'temp' / 'uv-cache'}\n")
+
+    def test_a_dockerfile_without_exactly_one_pinned_uv_line_is_refused(self, tmp_path):
+        """No uv line, two, a tag with no digest, a short digest or a line that names no
+        ``uv`` stage: the step refuses before calling ``docker`` and hands nothing on; and
+        a pull that fails fails the step, handing nothing on."""
+        pinned = "FROM ghcr.io/astral-sh/uv:0.1.0@sha256:" + "a" * 64 + " AS uv\n"
+        refused = {
+            "FROM python:3.14-slim\n": "it holds 0",
+            pinned + pinned: "it holds 2",
+            "FROM ghcr.io/astral-sh/uv:0.1.0 AS uv\n": "it holds 0",
+            pinned.replace("a" * 64, "a" * 63): "it holds 0",
+            pinned.replace(" AS uv", ""): "it holds 0",
+            pinned.replace(" AS uv", " AS tools"): "it holds 0",
+        }
+        for dockerfile, reason in refused.items():
+            result, calls, output = self._copy(tmp_path, dockerfile)
+            assert result.returncode == 1, dockerfile
+            assert reason in result.stderr, (dockerfile, result.stderr)
+            assert calls == [] and output == "", dockerfile
+        result, calls, output = self._copy(tmp_path, pinned, FAIL_PULL="1")
+        assert result.returncode != 0
+        assert calls == ["pull --quiet " + pinned.split()[1]] and output == ""
+
+    def test_each_install_set_runs_its_one_uv_command_then_puts_the_venv_first(self, tmp_path):
+        """Each set runs its one uv command, every sync ``--locked --require-build-hashes``,
+        then writes the workspace's ``.venv/bin`` to GITHUB_PATH.  A set the step does not
+        name, and a uv that fails, run nothing more and write no PATH."""
+        uv, log, path = tmp_path / "uv", tmp_path / "uv.log", tmp_path / "github_path"
+        run = _action_steps()[self.INSTALL]["run"]
+        sync = "sync --locked --require-build-hashes"
+        cases = {
+            "all": (0, [sync]),
+            "runtime": (0, [f"{sync} --no-dev"]),
+            "landing": (0, [f"{sync} --only-group landing"]),
+            "python": (0, ["venv"]),
+            "dev": (1, []), "": (1, []), "all ": (1, []), "ALL": (1, []),
+        }
+        for status in ("0", "3"):
+            uv.write_text(f'#!/bin/sh\necho "$*" >> "{log}"\nexit {status}\n', encoding="utf-8")
+            uv.chmod(0o755)
+            for install, (expected, calls) in cases.items():
+                log.write_text("", encoding="utf-8")
+                path.write_text("", encoding="utf-8")
+                result = _run_step(run, {"UV": str(uv), "INSTALL": install,
+                                         "GITHUB_PATH": str(path),
+                                         "GITHUB_WORKSPACE": str(tmp_path / "ws")})
+                assert log.read_text(encoding="utf-8").splitlines() == calls, install
+                if expected == 0 and status == "0":
+                    assert result.returncode == 0, (install, result.stderr)
+                    assert path.read_text(encoding="utf-8") == f"{tmp_path / 'ws'}/.venv/bin\n"
+                else:
+                    assert result.returncode != 0, (install, status)
+                    assert path.read_text(encoding="utf-8") == "", (install, status)
+                if expected == 1:
+                    assert "No install set" in result.stderr, install

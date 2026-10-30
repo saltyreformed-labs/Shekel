@@ -113,13 +113,21 @@ dev = [
     "pylint-flask>=0.6,<0.7",
     "pylint-flask-sqlalchemy>=0.2.0,<0.3.0",
     # The pip-installable polyglot linters.  The binary tools (shellcheck,
-    # shfmt, biome, actionlint, typos, gitleaks, hadolint) are installed on
-    # the host and pinned by download in CI; these four come from the lock,
-    # and the pre-commit hooks run them as ``.venv/bin/<tool>``, so the lock
-    # is the ONE home of each version and the host's own package, if any, is
-    # never what a commit is graded by.  Pinning guards against a new release
+    # shfmt, biome, typos, gitleaks, hadolint) are installed on the host and
+    # pinned by download in CI; these five come from the lock, and the
+    # pre-commit hooks run them as ``.venv/bin/<tool>``, so the lock is the
+    # ONE home of each version and the host's own package, if any, is never
+    # what a commit is graded by.  Pinning guards against a new release
     # flagging unchanged files.
     "yamllint>=1.38.0,<2.0.0",
+    # jactionlint replaced rhysd/actionlint, a host binary pinned by download
+    # in CI, on 2026-10-30 (ruling plan#2355): actionlint's last release,
+    # 1.7.12 of 2026-03-30, knows no ``ubuntu-26.04`` runner label, and its
+    # repository has had no commit since 2026-04-19.  jactionlint is its
+    # maintained fork (jdx/jactionlint, MIT); ``.github/jactionlint.yaml``
+    # selects its ``correctness`` profile, which runs actionlint's checks and
+    # adds correctness rules of its own.
+    "jactionlint>=2.3.0,<3.0.0",
     "zizmor>=1.30.1,<2.0.0",
     "djlint>=1.46.4,<2.0.0",
     # rumdl is the Markdown lint and format gate (living docs only; see
@@ -160,6 +168,15 @@ server = [
 build = [
     "setuptools==83.0.0",
     "wheel>=0.37,<1.0",
+]
+# The two packages CI's landing check imports (``requests``, and
+# ``cryptography`` through quill's GitHub client), installed alone in the
+# job that holds the tracker's token, so it runs no other third-party code.
+# No range: each is held by its entry in ``dependencies``, and the lock
+# gives both one version.
+landing = [
+    "requests",
+    "cryptography",
 ]
 
 [tool.uv]

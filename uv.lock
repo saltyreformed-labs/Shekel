@@ -775,6 +775,19 @@ wheels = [
 ]
 
 [[package]]
+name = "jactionlint"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/d1/bd954f279ad7ad096582026d35fef7f46ba2c06856c70505a77d8633fa17/jactionlint-2.3.0-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:e855f3d01a55f1a7aecafa93e86908acccb4adb4aa2d5b550823494fd4ff09ce", size = 17636775, upload-time = "2026-10-21T11:00:28.412Z" },
+    { url = "https://files.pythonhosted.org/packages/09/d0/def4cdd73c8d80c17e36393d38d8d25aaa3559702deb59eaff4efce18c27/jactionlint-2.3.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:8fc69af70b22858031130737e1f86c7e04870ae6b6146dc4fe53bb0753236378", size = 16428427, upload-time = "2026-10-21T11:00:30.755Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/00/ec741f589bd03cfa7700b5d276c213cadf2eeb64f261732ed5f680485fcd/jactionlint-2.3.0-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:bfda081c2313c1ba9b17244f784a1e11e09e274021e26fdff3e3c76f094b48d0", size = 15997724, upload-time = "2026-10-21T11:00:33.446Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/8f/3748cb6b8d0a3aa2020e073172f94e434860e95896583db60665e679cd6d/jactionlint-2.3.0-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:4293053b50800cf5899fca39c2e10a84c4b2926aa68fc2a7610114e37825836f", size = 17316638, upload-time = "2026-10-21T11:00:35.917Z" },
+    { url = "https://files.pythonhosted.org/packages/12/6f/01a6b8e8e99f2227bf2b7dc81041dd2b436dd9602a54cdc6610d94a38494/jactionlint-2.3.0-py3-none-win_amd64.whl", hash = "sha256:afd9feaf72a7abef7a5f72b393158d0bc5b67ac636d4ae41ca59406181b83d1c", size = 17825917, upload-time = "2026-10-21T11:00:38.269Z" },
+    { url = "https://files.pythonhosted.org/packages/19/9e/b650df3d10142b6db03cbc49eb96f7bb7f964acb991a0c28d1271e0d09ff/jactionlint-2.3.0-py3-none-win_arm64.whl", hash = "sha256:271f6002142a0c6de705eb289b6978f2a2d7be3f3d9ed5a1ed3882ccfbe546c3", size = 16283773, upload-time = "2026-10-21T11:00:41.44Z" },
+]
+
+[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1490,6 +1503,7 @@ build = [
 dev = [
     { name = "djlint" },
     { name = "factory-boy" },
+    { name = "jactionlint" },
     { name = "playwright" },
     { name = "pre-commit" },
     { name = "pylint" },
@@ -1505,6 +1519,10 @@ dev = [
     { name = "time-machine" },
     { name = "yamllint" },
     { name = "zizmor" },
+]
+landing = [
+    { name = "cryptography" },
+    { name = "requests" },
 ]
 server = [
     { name = "gunicorn" },
@@ -1541,6 +1559,7 @@ build = [
 dev = [
     { name = "djlint", specifier = ">=1.46.4,<2.0.0" },
     { name = "factory-boy", specifier = ">=3.3.3,<4.0.0" },
+    { name = "jactionlint", specifier = ">=2.3.0,<3.0.0" },
     { name = "playwright", specifier = ">=1.63.0,<2.0.0" },
     { name = "pre-commit", specifier = ">=4.7.0,<5.0.0" },
     { name = "pylint", specifier = ">=4.1.3,<5.0.0" },
@@ -1556,6 +1575,10 @@ dev = [
     { name = "time-machine", specifier = ">=3.5.1,<4.0.0" },
     { name = "yamllint", specifier = ">=1.38.0,<2.0.0" },
     { name = "zizmor", specifier = ">=1.30.1,<2.0.0" },
+]
+landing = [
+    { name = "cryptography" },
+    { name = "requests" },
 ]
 server = [{ name = "gunicorn", specifier = ">=26.2.0,<27.0.0" }]
 

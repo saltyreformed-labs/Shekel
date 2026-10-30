@@ -62,7 +62,9 @@ updates:
   # The application image's base (Dockerfile FROM ... @sha256).  A digest
   # PR rewrites the two FROM lines only: the hand-maintained version block
   # above them (Python, Debian, OpenSSL, pip) is re-measured by whoever
-  # merges it, from the image, before the merge.
+  # merges it, from the image, before the merge.  The uv stage's FROM line
+  # moves here too: it is the one home of uv's version and digest, which
+  # every CI job's .github/actions/install-lock reads.
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -75,8 +77,8 @@ updates:
       default-days: 7
     ignore:
       # The Python version moves only in its own deliberate change: the
-      # Dockerfile, the workflows' eleven python-version settings and the
-      # local venv in ONE pull request, after X-bi-6-4d's release
+      # Dockerfile's FROM tags and .python-version, which every CI job and
+      # the local venv read, in ONE pull request, after X-bi-6-4d's release
       # (developer rulings R-BAL292 and R-BAL297, 2026-10-14).  A tag move
       # proposed here alone would ship one Python while CI tests another.
       # Digest updates within the current tag still arrive.
@@ -109,9 +111,11 @@ updates:
       prefix: "chore(deps)"
 
   # GitHub Actions: SHA-pinned ``uses:`` lines with a version comment;
-  # Dependabot updates both.  jactionlint and zizmor gate the result.
+  # Dependabot updates both.  jactionlint and zizmor gate the result.  ``/``
+  # reaches the workflows alone (and a root action.yml, which there is
+  # not), so the local composite actions' directories are listed too.
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: weekly
       day: monday

@@ -42,11 +42,14 @@
 # THE TIME LIMITS (rulings plan#2328, plan#2330).  Every job carries a
 # ``timeout-minutes`` of twice its longest successful run, rounded up to a
 # whole five minutes, so a stalled runner fails its job rather than holding a
-# merge for GitHub's default of 360 minutes (run 38541852835, 2026-10-14: a
-# shard still crawling when it was cancelled by hand at 37.9 min).  The
+# pull request's check, which its enqueue waits on, for GitHub's default of
+# 360 minutes (run 38541852835, 2026-10-14: a shard still crawling when it was
+# cancelled by hand at 37.9 min).  The merge queue already drops a group
+# whose checks take 60 minutes (rulesets dev-queue and main-queue).  The
 # longest runs are every successful job of every run of this workflow created
-# 2026-10-01 to 2026-10-30 (212 runs, every attempt, read from GitHub's jobs
-# API), each job's figure on its own limit's line.
+# 2026-10-01 to 2026-10-30, on ubuntu-24.04 (212 runs, every attempt, read
+# from GitHub's jobs API; a job GitHub lists again, unchanged, under a re-run
+# attempt counts once), each job's figure on its own limit's line.
 
 name: CI
 
@@ -105,7 +108,7 @@ env:
 jobs:
   landing:
     runs-on: ubuntu-26.04
-    timeout-minutes: 5  # longest of 115 runs: 0.52 min
+    timeout-minutes: 5  # longest of 114 runs: 0.52 min
     # The job's own token reads the pull request it judges (its base, head
     # branch and head commit), so this job alone adds ``pull-requests: read``
     # to the workflow's least privilege.  A job's permissions replace the
@@ -283,7 +286,7 @@ jobs:
 
   tax-law:
     runs-on: ubuntu-26.04
-    timeout-minutes: 5  # longest of 216 runs: 1.12 min
+    timeout-minutes: 5  # longest of 212 runs: 1.12 min
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -339,7 +342,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-26.04
-    timeout-minutes: 20  # longest of 207 runs: 8.47 min
+    timeout-minutes: 20  # longest of 203 runs: 8.47 min
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -464,7 +467,7 @@ jobs:
 
   test:
     runs-on: ubuntu-26.04
-    timeout-minutes: 40  # longest of 1,221 shard runs: 18.68 min (shard 3)
+    timeout-minutes: 40  # longest of 1,201 shard runs: 18.68 min (shard 3)
     strategy:
       # One red shard must not cancel the others: a failing merge gate should
       # report every failure it has, not the first shard's.
@@ -643,7 +646,7 @@ jobs:
   # lint-and-test, so the floor blocks merges.
   polyglot-lint:
     runs-on: ubuntu-26.04
-    timeout-minutes: 5  # longest of 212 runs: 1.65 min
+    timeout-minutes: 5  # longest of 208 runs: 1.65 min
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -705,9 +708,11 @@ jobs:
       - name: yamllint
         run: git ls-files -z '*.yml' '*.yaml' | xargs -0 -r yamllint
 
-      # Its profile is .github/jactionlint.yaml's (ruling plan#2355).
+      # Its profile is .github/jactionlint.yaml's (ruling plan#2355).  Naming
+      # shellcheck makes a missing one exit 3, where jactionlint would
+      # otherwise skip its shellcheck rule without a word.
       - name: jactionlint (GitHub workflows)
-        run: jactionlint
+        run: jactionlint --shellcheck=shellcheck
 
       - name: zizmor (workflow security)
         env:

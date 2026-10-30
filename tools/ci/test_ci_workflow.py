@@ -89,8 +89,9 @@ class TestTheWorkflowIsWiredToTheAnswer:
             assert "needs" not in job, name
 
     def test_every_job_carries_a_time_limit(self):
-        """Every job carries a whole ``timeout-minutes`` under GitHub's default (rulings
-        plan#2328, plan#2330).
+        """Every job carries a whole ``timeout-minutes`` under GitHub's default (ruling
+        plan#2328; its size, twice the job's longest recorded run, is plan#2330's, which
+        this test does not grade).
 
         Every job here holds a merge: the five graders through the aggregate, and the
         aggregate and the polyglot linters as the required checks.  One with no limit waits

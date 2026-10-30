@@ -38,7 +38,7 @@ pylint-flask-sqlalchemy==0.2.0
 
 # Polyglot-cleanup Phase 5 linters (pip-installable). The binary tools
 # (shellcheck, shfmt, biome, typos, gitleaks, hadolint) are
-# installed on the host and pinned by download in CI; these five ship
+# installed on the host and pinned by download in CI; these ship
 # via pip, so they live here and CI installs them with this file, and the
 # pre-commit hooks invoke them as `.venv/bin/<tool>` (since 2026-09-20), so
 # this file is the ONE home of each version and the host's own package, if

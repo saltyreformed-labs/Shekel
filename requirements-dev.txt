@@ -83,8 +83,8 @@ pylint-flask-sqlalchemy==0.2.0
 # same way) rather than PATH's binary.  The version the host happens to ship
 # no longer matters to any gate.
 yamllint==1.38.0
-zizmor==1.30.1
-djlint==1.46.4
+zizmor==1.31.1
+djlint==1.47.0
 rumdl==0.2.78
 # jactionlint replaced rhysd/actionlint, a host binary pinned by download in
 # CI, on 2026-10-30 (ruling plan#2355): actionlint's last release, 1.7.12 of
@@ -109,4 +109,4 @@ pre-commit==4.7.0
 # ``playwright install chromium`` (writes to ~/.cache/ms-playwright,
 # ~150 MiB).  Used by tests/manual/save_dev_session.py and
 # tests/manual/verify_mobile_grid_*.py.
-playwright==1.63.0
+playwright==1.64.1

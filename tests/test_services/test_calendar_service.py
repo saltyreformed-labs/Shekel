@@ -16,7 +16,6 @@ from app.services.cash_flow_set import CashFlowSet
 from app.exceptions import BaselineMissingError
 from app.enums import StatusEnum, TxnTypeEnum
 from app.models.salary_profile import SalaryProfile
-from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from unittest.mock import patch
 
@@ -1961,45 +1960,6 @@ class TestATransferIsALegOfItsParent:
             assert 6 not in view.day_entries
             assert view.total_expenses == Decimal("0")
 
-    def test_the_predicate_guards_a_leg_on_both_surfaces(
-        self, app, seed_user, seed_periods, db, monkeypatch,
-    ):
-        """C10-4's lock over a LEG: drop the predicate from the SQL filter and
-        the Python re-check together and the cancelled transfer's leg leaks
-        into the day cell; either alone keeps it out (the belt-and-suspenders
-        design), so this is the one mutation that can grade the SQL arm over
-        ``Transfer``."""
-        with app.app_context():
-            checking = seed_user["account"]
-            savings = create_savings_account(
-                seed_user, db.session, "Savings", Decimal("0.00"),
-            )
-            transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[0],
-                amount=Decimal("250.00"), due_date=date(2026, 1, 6),
-            )
-            db.session.commit()
-            transfer_service.update_transfer(
-                transfer.id, seed_user["user"].id,
-                status_id=ref_cache.status_id(StatusEnum.CANCELLED),
-            )
-            db.session.commit()
-
-            from app.services import calendar_service as cs
-            monkeypatch.setattr(
-                cs, "balance_contributing_clause",
-                lambda model_class=Transaction: model_class.is_deleted.is_(False),
-            )
-            monkeypatch.setattr(cs, "is_balance_contributing", lambda _txn: True)
-
-            leaked = calendar_service.get_month_detail(
-                user_id=seed_user["user"].id, year=2026, month=1,
-                user_settings=None,
-            )
-            assert [e.item_key for e in leaked.day_entries[6]] == [
-                (transfer.id, checking.id),
-            ]
-
 
 # ── F-3 / W-065 balance-contributing predicate ─────────────────────
 
@@ -2010,10 +1970,13 @@ class TestBalanceContributingPredicate:
     excludes Cancelled + Credit).
 
     Locks the post-Commit-10 (follow-up) behaviour so a future change
-    that drops the predicate from either the SQL filter in
-    ``_query_transactions_for_range`` or the Python re-check in
-    ``_assign_transactions_to_days`` fails loud with a concrete
-    arithmetic divergence rather than a silent display regression.
+    that drops the predicate from the SQL filter in
+    ``_query_transactions_for_range`` fails loud with a concrete
+    arithmetic divergence rather than a silent display regression.  C10-2
+    sees that directly since ruling plan#2262 deleted the Python re-check in
+    ``_assign_transactions_to_days``, which hid the SQL filter from it; C10-4,
+    which stubbed both statements of the predicate to see it, went with the
+    re-check, as did its leg twin in ``TestATransferIsALegOfItsParent``.
     """
 
     def test_c10_1_projected_and_settled_both_contribute(
@@ -2182,102 +2145,6 @@ class TestBalanceContributingPredicate:
             # $100 and the Credit $50 contribute nothing to either half.
             assert column.expense == Decimal("700.00")
             assert column.income == Decimal("0.00")
-
-    def test_c10_4_regression_lock_predicate_drop_visible(
-        self, app, seed_user, seed_periods, db, monkeypatch,
-    ):
-        """F-3 / W-065 C10-4: regression lock for predicate removal.
-
-        Simulates the regression where the locked predicate is
-        dropped from BOTH the SQL filter and the Python re-check by
-        monkey-patching ``balance_contributing_clause`` to a
-        trivially-true predicate (only ``is_deleted=False``, the
-        pre-fix gate) and ``is_balance_contributing`` to ignore the
-        excludes_from_balance flag.  With the predicate dropped the
-        Cancelled and Credit rows leak into ``day_entries[5]`` and
-        the day cell renders four entries instead of the two the
-        locked Choice-2 semantic mandates.
-
-        The post-Commit-10-follow-up code MUST reject this
-        regression: with the production predicate in place this test
-        confirms the day shows exactly two contributing entries.
-        Then the monkey-patched regression run confirms the locked
-        behaviour: with the predicate removed, four entries appear.
-        A diff between the two locks the predicate's contribution.
-
-        Hand arithmetic on the four totals through ``effective_amount``:
-            Projected $500: effective = 500
-            Settled $200: effective = 200
-            Cancelled $100: excludes_from_balance=True, effective = 0
-            Credit $50: excludes_from_balance=True, effective = 0
-            Sum = 700.00 either way; the visible regression is the
-            entry-count contract (2 vs 4), which this test locks.
-        """
-        with app.app_context():
-            p0 = seed_periods[0]
-            _add_transaction(
-                db.session, seed_user, p0, "Projected Bill", "500.00",
-                due_date=date(2026, 1, 5),
-                status=StatusEnum.PROJECTED,
-            )
-            _add_transaction(
-                db.session, seed_user, p0, "Paid Bill", "200.00",
-                due_date=date(2026, 1, 5),
-                status=StatusEnum.DONE, settled_amount="200.00",
-            )
-            _add_transaction(
-                db.session, seed_user, p0, "Cancelled Bill", "100.00",
-                due_date=date(2026, 1, 5),
-                status=StatusEnum.CANCELLED,
-            )
-            _add_transaction(
-                db.session, seed_user, p0, "Credit Bill", "50.00",
-                due_date=date(2026, 1, 5),
-                status=StatusEnum.CREDIT,
-            )
-            db.session.commit()
-
-            # Production predicate: exactly two entries on Jan 5.
-            real = calendar_service.get_month_detail(
-                user_id=seed_user["user"].id,
-                year=2026,
-                month=1,
-                user_settings=None,
-            )
-            assert len(real.day_entries[5]) == 2
-            assert real.total_expenses == Decimal("700.00")
-
-            # Simulated regression: drop the predicate from both
-            # surfaces.  The SQL filter degrades to is_deleted-only;
-            # the Python re-check is short-circuited to always
-            # contribute.
-            from app.services import calendar_service as cs
-            # The stub takes the model class the real clause takes since leaf
-            # balance:X-bi-6-1b (the calendar asks it over ``Transfer`` too).
-            monkeypatch.setattr(
-                cs, "balance_contributing_clause",
-                lambda model_class=Transaction: model_class.is_deleted.is_(False),
-            )
-            monkeypatch.setattr(
-                cs, "is_balance_contributing", lambda _txn: True,
-            )
-
-            regressed = calendar_service.get_month_detail(
-                user_id=seed_user["user"].id,
-                year=2026,
-                month=1,
-                user_settings=None,
-            )
-            # Predicate dropped: all four rows leak into the day cell.
-            assert len(regressed.day_entries[5]) == 4
-            # The visible-totals regression for a hypothetical future
-            # change that ALSO replaces effective_amount with
-            # estimated_amount would be 500 + 200 + 100 + 50 = 850;
-            # today's effective_amount zeroes Cancelled + Credit so
-            # the total stays 700.00 even with the predicate dropped.
-            # The entry-count contract above is the load-bearing
-            # regression lock.
-            assert regressed.total_expenses == Decimal("700.00")
 
 
 # ── Anchor-None contract (F-2 / Commit 11) ──────────────────────────

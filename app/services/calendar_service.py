@@ -49,10 +49,7 @@ from app.services.pay_calendar import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.transfer_legs import PlanItem, cell_key
-from app.utils.balance_predicates import (
-    balance_contributing_clause,
-    is_balance_contributing,
-)
+from app.utils.balance_predicates import balance_contributing_clause
 
 logger = logging.getLogger(__name__)
 
@@ -536,17 +533,17 @@ def _assign_transactions_to_days(
     :data:`MAX_VISIBLE_DAY_FLOWS` are the visible named lines and any beyond
     are summarized in :class:`DayOverflow` (count plus signed residual net).
 
-    Per F-3 / W-065, every transaction is re-checked against
-    :func:`~app.utils.balance_predicates.is_balance_contributing`
-    before being assigned to a day.  This is the belt-and-suspenders
-    half of the locked Choice-2 predicate: the SQL filter in
-    :func:`_query_transactions_for_range` already constrains the row
-    set, but reapplying the Python predicate here ensures a future
-    regression that drops the SQL filter alone (or routes a different
-    query into this helper) cannot leak Cancelled / Credit rows into
-    the day-cell display.  ``is_balance_contributing`` is generated
-    from the same ``ref_cache`` accessors as the SQL clause so the
-    two predicates cannot disagree.
+    **Which items count is the SQL's alone** (F-3 / W-065's locked Choice-2
+    predicate, in :func:`_query_transactions_for_range`, the one query whose
+    items this folds).  Every item was re-checked here against
+    :func:`~app.utils.balance_predicates.is_balance_contributing` until ruling
+    **plan#2262** deleted that -- the remediation's belt-and-suspenders, a
+    second statement of the predicate over items the SQL had already
+    filtered.  It could drop only what the SQL dropped, so no figure moved;
+    what it did was hide the SQL filter from every behaviour test (switching
+    the filter off left them green), so the filter was graded only by two
+    tests that stubbed both statements of it.  The cancelled and credit
+    tests grade the one statement now.
 
     **It takes the CONTEXT rather than the five settings it reads off it**
     (plan step X-au-c2).  Adding ``contributions`` -- what each row is WORTH,
@@ -581,8 +578,6 @@ def _assign_transactions_to_days(
     for txn in ctx.transactions:
         key = cell_key(txn)
         if key in seen:
-            continue
-        if not is_balance_contributing(txn):
             continue
         display_day = _get_display_day(
             txn, spans[txn.pay_period_id], month, ctx.year,

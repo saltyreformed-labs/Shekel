@@ -95,7 +95,7 @@ env:
 # ── Jobs ──────────────────────────────────────────────────────────
 jobs:
   landing:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # The job's own token reads the pull request it judges (its base, head
     # branch and head commit), so this job alone adds ``pull-requests: read``
     # to the workflow's least privilege.  A job's permissions replace the
@@ -209,7 +209,7 @@ jobs:
         run: python -m tools.quill.landing "${EVENT_NAME}" "${MERGE_SHA}" "${PULL}"
 
   tools:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       # ── 1. Check out the repository ──────────────────────────────
       - name: Checkout code
@@ -271,7 +271,7 @@ jobs:
           pytest tools/rehearsal -c /dev/null -q -m "not cluster"
 
   tax-law:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -326,7 +326,7 @@ jobs:
         run: python scripts/check_tax_law.py refuse
 
   lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -450,7 +450,7 @@ jobs:
         run: pylint app/ scripts/ --disable=all --enable=duplicate-code --disable=unknown-option-value,bad-option-value --output-format=colorized
 
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       # One red shard must not cancel the others: a failing merge gate should
       # report every failure it has, not the first shard's.
@@ -596,7 +596,7 @@ jobs:
   lint-and-test:
     needs: [landing, tools, tax-law, lint, test]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -627,7 +627,7 @@ jobs:
   # its own in-repo config file. The dev and main rulesets require it beside
   # lint-and-test, so the floor blocks merges.
   polyglot-lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

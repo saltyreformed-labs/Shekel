@@ -824,9 +824,11 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         field values left as they are: REST's add of the one value (measured 2026-10-27 on
         plan#1811, ``build_1811/first_write.out``; never its "set" (PUT), which replaces every
         value, Priority and Effort too), read back from GitHub's answer, the card's values
-        after it.  ``quill sync``'s fill of a card filed by older quill with its arc label
-        alone (ruling plan#1856, :mod:`_relabel`); the Arc's id is read first
-        (:meth:`_arc_field_id`).
+        after it.  The add replaces an Arc the card already holds (measured 2026-10-30 on
+        plan#2225, balance to salary and back: one value each time, its node id kept).
+        ``quill sync``'s fill of a card filed by older quill with its arc label alone (ruling
+        plan#1856, :mod:`_relabel`), and ``quill arc``'s move of a card (ruling plan#2221,
+        :mod:`_arc_label`); the Arc's id is read first (:meth:`_arc_field_id`).
 
         Raises:
             TrackerError: When that answer does not show ``arc`` as the card's Arc, or is not
@@ -900,8 +902,9 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         labels left as they are: an add sends only what it names, and a removal one label
         (GitHub's REST description; never its "set labels", which replaces them all and so
         would undo a label a person added since the card was read).  ``quill sync``'s put-back
-        of a card's arc labels (:mod:`_relabel`), read back from GitHub's last answer, which
-        is the card's labels after it (measured on the filing mark's removal,
+        of a card's arc labels (:mod:`_relabel`), and ``quill arc``'s and ``quill label``'s
+        writes (:mod:`_arc_label`), read back from GitHub's last answer, which is the card's
+        labels after it (measured on the filing mark's removal,
         ``recorded/tracker.json``).  A removal of a label the card no longer carries is
         answered 404 "Label does not exist" (:meth:`unmark`), and fails the run.
 

@@ -78,13 +78,30 @@ def test_each_card_whose_arc_a_person_must_fix_is_named_as_sync_reports_it():
     setup_tracker.check_card_arcs(github, report)
     assert report.lines == [
         "DIFFERS card shekel-plan#7 holds no Arc, its arc's one home (R-BAL349), so no arc "
-        "label can display it: set its Arc on the web (its labels: [])",
+        "label can display it: set it with `quill arc plan#7 --to ARC` (its labels: [])",
         "DIFFERS card shekel-plan#8 holds the Arc 'tracker', none of quill's arcs (balance, "
-        "recurrence, pay_calendar, credit_card, bank_import, salary), so no arc label can "
-        "display it: set its Arc on the web to one of them",
+        "recurrence, pay_calendar, credit_card, bank_import, salary, tooling), so no arc "
+        "label can display it: set it with `quill arc plan#8 --to ARC`",
         "DIFFERS card shekel-plan#9 is a task, whose arc is its card's (R-BAL386), and holds "
         "the Arc 'balance': clear it on the web"]
     assert report.differences == 3
+
+
+def test_a_typeless_card_s_remedy_sets_its_type_before_its_arc():
+    """Review of plan#2165, MEDIUM 3: ``quill arc`` refuses a card with no type, as every
+    written card's check does, so the remedy for one holding no Arc, or an Arc none of quill's,
+    sets its type on the web first."""
+    report = Report()
+    setup_tracker.check_card_arcs(_GitHub(_node(7, (), None, None),
+                                          _node(8, (), "tracker", None)), report)
+    assert report.lines == [
+        "DIFFERS card shekel-plan#7 holds no Arc, its arc's one home (R-BAL349), so no arc "
+        "label can display it: give it a type on the web, then set it with `quill arc plan#7 "
+        "--to ARC` (its labels: [])",
+        "DIFFERS card shekel-plan#8 holds the Arc 'tracker', none of quill's arcs (balance, "
+        "recurrence, pay_calendar, credit_card, bank_import, salary, tooling), so no arc "
+        "label can display it: give it a type on the web, then set it with `quill arc plan#8 "
+        "--to ARC`"]
 
 
 def test_every_card_displaying_its_arc_is_one_ok_line():

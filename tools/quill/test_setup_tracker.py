@@ -12,10 +12,12 @@ from tools.quill import _board_fields, setup_tracker
 from tools.quill._github import GitHubError, app_credentials, app_jwt
 from tools.quill.setup_tracker import (
     APP_PERMISSIONS,
+    CHOSEN_LABELS,
     FILING,
     ISSUE_TYPES,
     LABELS,
     REPOSITORY,
+    SECURITY_LABEL,
     Report,
     issue_type_differences,
     label_changes,
@@ -157,6 +159,23 @@ def test_every_arc_is_a_label():
     """Every arc in ``tools.ci.arcs.ARCS``, the arcs' one home, is a label."""
     assert set(ARCS) <= set(LABELS)
     assert len(ARCS) == len(set(ARCS))
+
+
+def test_each_declared_label_has_a_colour_of_its_own():
+    """Ruling plan#2219 ("as long as they are unique"): no two labels share a colour, so the
+    seventh arc, tooling, no longer wraps round to balance's green."""
+    colours = [color for color, _ in LABELS.values()]
+    assert len(colours) == len(set(colours))
+    assert LABELS["tooling"] == ("793625", "The tooling arc")
+
+
+def test_the_labels_a_person_chooses_are_declared_and_none_displays_an_arc():
+    """``quill file step --label`` takes them: security among them (ruling plan#2179), as the
+    developer made it on the web, and never an arc label, which displays a card's Arc, or the
+    filing mark, which is quill's."""
+    assert set(CHOSEN_LABELS) <= set(LABELS)
+    assert not set(CHOSEN_LABELS) & {*ARCS, FILING}
+    assert LABELS[SECURITY_LABEL] == ("d90466", "Security related issues")
 
 
 def test_the_filing_mark_is_a_label_the_tracker_keeps():

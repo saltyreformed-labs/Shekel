@@ -54,7 +54,9 @@ claimed card's next session starts and prints its prompt (rulings plan#1921, pla
 :mod:`_notes`).
 ``pr`` opens a card's pull request into ``dev``, its text naming the card so the card links it,
 and ``file question --owner`` links a question to the step it is asked for, a link its ruling
-keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).
+keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).  ``arc`` sets a card's Arc and puts
+its arc label back to display it, and ``label`` adds or removes a label a person chooses
+(ruling plan#2221, :mod:`_arc_label`).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -77,6 +79,8 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill hand plan#F --to plan#S
     python -m tools.quill.quill edit plan#N [--title NAME] [--body-file TEXT]
     python -m tools.quill.quill comment plan#N --body-file TEXT
+    python -m tools.quill.quill arc plan#N --to ARC
+    python -m tools.quill.quill label plan#N (--add LABEL | --remove LABEL)
     python -m tools.quill.quill answer plan#N --body-file TEXT
     python -m tools.quill.quill note plan#N --body-file NOTE
     python -m tools.quill.quill block plan#N --by plan#M [--remove]
@@ -121,6 +125,7 @@ import requests
 from tools.ci.arcs import ARCS, REPO
 from tools.ci.gitcmd import DEV, MAIN, GitError, tracking
 from tools.quill import (
+    _arc_label,
     _comments,
     _filing,
     _findings,
@@ -183,10 +188,9 @@ from tools.quill.check import (
     violations,
 )
 from tools.quill.setup_tracker import (
-    DEPLOY_TOGETHER_LABEL,
+    CHOSEN_LABELS,
     FILING,
     IN_ORDER,
-    MOVES_MONEY_LABEL,
     PLAN,
     TASK,
 )
@@ -844,42 +848,16 @@ def cmd_spec_revert(args, tracker: Tracker, _root: Path) -> int:
 
 # -- the command line -----------------------------------------------------------------
 
-def _file_parser(commands) -> None:
-    """``file step|finding|ruling|question|task`` and each kind's arguments."""
-    kinds = commands.add_parser("file", help="file a step, finding, ruling, question or task")
-    sub = kinds.add_subparsers(dest="kind", required=True)
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--arc", required=True, choices=ARCS)
-    common.add_argument("--title", required=True, help="a short name (R-BAL178)")
-    step = sub.add_parser("step", parents=[common], help="a step, or a leaf of one")
-    step.add_argument("--body-file", required=True, help="its spec")
-    step.add_argument("--parent", type=card_number, help="the step this leaf splits")
-    step.add_argument("--label", action="append",
-                      choices=(MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL))
-    finding = sub.add_parser("finding", parents=[common], help="a defect in the code")
-    finding.add_argument("--owner", type=card_number, required=True, help="its owner step")
-    finding.add_argument("--text", required=True, help="one sentence, at most 400 characters")
-    ruling = sub.add_parser("ruling", parents=[common], help="the developer's decision")
-    ruling.add_argument("--owner", type=card_number,
-                        help="its owner step; from a question that names one, that one")
-    asked = ruling.add_mutually_exclusive_group(required=True)
-    asked.add_argument("--question-file", help="his question, word for word")
-    asked.add_argument("--from-question", type=card_number,
-                       help="the question card he answered; it becomes the ruling")
-    ruling.add_argument("--answer-file", required=True, help="his answer, word for word")
-    question = sub.add_parser("question", parents=[common], help="for the developer to answer")
-    question.add_argument("--body-file", required=True, help="the question")
-    question.add_argument("--owner", type=card_number,
-                          help="the step it is asked for, if one, which its ruling keeps")
-    task = sub.add_parser(TASK, help="a piece of one step or finding: a commit in its card's "
-                                     "pull request (its arc is its card's)")
-    task.add_argument("--parent", type=card_number, required=True,
-                      help="the step or finding it is a piece of")
-    task.add_argument("--title", required=True, help="a short name (R-BAL178)")
-    task.add_argument("--body-file", required=True, help="what the piece builds")
-    task.add_argument("--before", type=card_number,
-                      help="the open task under the same card it is built before; else it goes "
-                           "above the card's finishing tasks")
+def _arc_label_parser(commands) -> None:
+    """``arc`` and ``label`` and their arguments (ruling plan#2221)."""
+    arc = commands.add_parser("arc", help="set a card's Arc, its arc label following it")
+    arc.add_argument("card", type=card_number)
+    arc.add_argument("--to", required=True, choices=ARCS, help="the arc it moves to")
+    label = commands.add_parser("label", help="add or remove a label a person chooses")
+    label.add_argument("card", type=card_number)
+    which = label.add_mutually_exclusive_group(required=True)
+    which.add_argument("--add", choices=CHOSEN_LABELS)
+    which.add_argument("--remove", choices=CHOSEN_LABELS)
 
 
 def _text_parser(commands) -> None:
@@ -921,8 +899,9 @@ def parser() -> argparse.ArgumentParser:
     release.add_argument("card", type=card_number)
     commands.add_parser("show", help="a card, its comments and its git history").add_argument(
         "card")
-    _file_parser(commands)
+    _filing.file_parser(commands)
     _text_parser(commands)
+    _arc_label_parser(commands)
     block = commands.add_parser("block", help="record a blocked-by edge")
     block.add_argument("card", type=card_number)
     block.add_argument("--by", type=card_number, required=True)
@@ -965,7 +944,8 @@ def parser() -> argparse.ArgumentParser:
 
 COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
-    "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment,
+    "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment, "arc": _arc_label.cmd_arc,
+    "label": _arc_label.cmd_label,
     "answer": _comments.cmd_answer, "note": _notes.cmd_note, "block": cmd_block,
     "move": cmd_move, "drop": cmd_drop, "start": _tasks.cmd_start,
     "task-file": _tasks.cmd_task_file,

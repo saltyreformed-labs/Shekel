@@ -14,11 +14,13 @@ from app.models.transfer import Transfer
 from app.exceptions import AmountUnresolvable
 from app.services.cash_flow_set import (
     CashFlowSet,
-    PlanItems,
+    Paychecks,
+    PlanScope,
+    StatusBand,
     leg_accounts_shown,
+    load_plan_items,
     own_rows_clause,
     set_transfer_legs,
-    set_transfer_legs_in_periods,
     touched_transfers_clause,
 )
 from app.services.cash_ledger import (
@@ -46,7 +48,6 @@ from app.services.transfer_service import (
     settle_transfer,
     update_transfer,
 )
-from app.utils.balance_predicates import is_projected_clause
 from app.services.account_resolver import resolve_cash_flow_set
 from tests._test_helpers import (
     basis_for,
@@ -582,7 +583,13 @@ class TestALegsSettleDayAndTimeliness:
 
 
 class TestTheSetsTransferHalf:
-    """``touched_transfers_clause``, ``set_transfer_legs`` and ``PlanItems``."""
+    """``touched_transfers_clause``, ``set_transfer_legs`` and ``load_plan_items``' paychecks.
+
+    ``PlanItems`` and ``set_transfer_legs_in_periods`` were graded here until
+    plan step plan#2130 deleted both: a screen's plan items are one list from
+    the one loader, which windows the transfers by paycheck as the folded
+    loader did (ruling plan#2218).
+    """
 
     def test_the_clause_selects_a_transfer_touching_any_member_and_no_other(
         self, app, db, seed_user, seed_periods,
@@ -609,9 +616,15 @@ class TestTheSetsTransferHalf:
             assert {row.id for row in selected} == {touching.id}
             assert elsewhere.id not in {row.id for row in selected}
 
-    def test_set_transfer_legs_draws_the_sets_side_and_plan_items_derives_items(
+    def test_set_transfer_legs_draws_the_sets_side_keyed_beside_the_rows(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
+        """One $250.00 checking -> savings transfer: the expense leg on checking.
+
+        The rows then the legs are one list (ruling plan#2218: built here
+        where ``PlanItems.of`` built it until plan step plan#2130), and
+        ``cell_key`` keys each row by its id and the leg by its pair.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = _savings(seed_user)
@@ -629,9 +642,8 @@ class TestTheSetsTransferHalf:
             rows = db.session.query(Transaction).filter(
                 own_rows_clause(cash_flow), Transaction.is_deleted.is_(False),
             ).all()
-            items = PlanItems.of(rows, legs)
-            assert items.items == [*rows, *legs]
-            assert [cell_key(item) for item in items.items] == [
+            items = [*rows, *legs]
+            assert [cell_key(item) for item in items] == [
                 *[row.id for row in rows], (transfer.id, checking.id),
             ]
 
@@ -699,9 +711,18 @@ class TestTheSetsTransferHalf:
                 for leg in set_transfer_legs(cash_flow, [into_card, into_savings])
             ] == [(card.id, True), (checking.id, False)]
 
-    def test_the_period_loader_windows_by_membership_and_takes_the_readers_filter(
+    def test_the_loader_windows_by_paycheck_and_takes_the_screens_band(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
+        """Three transfers out of checking: two in the window, one outside it.
+
+        The window's planned and cancelled transfers are drawn in transfer id
+        order, the one in a later period is not; the PROJECTED band keeps
+        the planned one alone; an empty window draws nothing.  The three
+        cases ``set_transfer_legs_in_periods`` was graded on, run against the
+        loader that folded it (plan step plan#2130, ruling plan#2218), over
+        one list checked by ``cell_key``.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = _savings(seed_user)
@@ -721,15 +742,25 @@ class TestTheSetsTransferHalf:
             )
             db.session.commit()
             cash_flow = CashFlowSet.single(checking)
-            scenario_id = seed_user["scenario"].id
-            period_ids = [seed_periods[2].id]
 
-            every = set_transfer_legs_in_periods(cash_flow, scenario_id, period_ids)
-            assert [leg.transfer.id for leg in every] == sorted(
-                [in_window.id, cancelled.id],
-            )
-            projected = set_transfer_legs_in_periods(
-                cash_flow, scenario_id, period_ids, is_projected_clause(Transfer),
-            )
-            assert [leg.transfer.id for leg in projected] == [in_window.id]
-            assert set_transfer_legs_in_periods(cash_flow, scenario_id, []) == []
+            def scope(period_ids, band):
+                """The scope of *period_ids* under *band*: checking's, every type."""
+                return PlanScope(
+                    cash_flow=cash_flow,
+                    scenario_id=seed_user["scenario"].id,
+                    window=Paychecks(period_ids),
+                    band=band,
+                    expenses_only=False,
+                )
+
+            window = (seed_periods[2].id,)
+            every = load_plan_items(scope(window, StatusBand.EVERY), ())
+            assert [cell_key(item) for item in every] == [
+                (transfer_id, checking.id)
+                for transfer_id in sorted([in_window.id, cancelled.id])
+            ]
+            projected = load_plan_items(scope(window, StatusBand.PROJECTED), ())
+            assert [cell_key(item) for item in projected] == [
+                (in_window.id, checking.id),
+            ]
+            assert load_plan_items(scope((), StatusBand.EVERY), ()) == []

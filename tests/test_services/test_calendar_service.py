@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from app import ref_cache
 from app.services.cash_flow_set import CashFlowSet
+from app.services.transfer_legs import cell_key
 from app.exceptions import BaselineMissingError
 from app.enums import StatusEnum, TxnTypeEnum
 from app.models.salary_profile import SalaryProfile
@@ -1803,12 +1804,12 @@ class TestATransferIsALegOfItsParent:
     """The calendar draws a transfer as a LEG read off its parent (leaf X-bi-6-1b).
 
     ``_query_transactions_for_range`` answers the set's OWN rows -- no
-    shadow -- beside one leg per transfer the set touches, on the side the
-    set shows, and the day fold prices a leg through ``contributions_by_key``
-    keyed by ``cell_key``.  The money cases above (R-CC23, the far leg)
-    already grade what a transfer is WORTH here; these grade what it IS, and
-    the two states a display leg adds to the fold's: settled with a record,
-    and excluded.
+    shadow -- then one leg per transfer the set touches, on the side the
+    set shows, as one list (plan step plan#2130), and the day fold prices a
+    leg through ``contributions_by_key`` keyed by ``cell_key``.  The money
+    cases above (R-CC23, the far leg) already grade what a transfer is WORTH
+    here; these grade what it IS, and the two states a display leg adds to
+    the fold's: settled with a record, and excluded.
     """
 
     def test_the_loader_answers_own_rows_and_both_sides_legs(
@@ -1820,6 +1821,9 @@ class TestATransferIsALegOfItsParent:
         checking -> savings transfer; savings holds no row of its own.
         Checking's load answers the Rent row alone and one EXPENSE leg on
         checking; savings' answers no row and one INCOME leg on savings.
+        Each is one list, checked by ``cell_key`` (ruling plan#2218, where it
+        read the two halves of ``PlanItems``): the same items, in the same
+        order, rows then legs.
         Until plan step ``balance:X-bi-6-4d-2`` the case also read that no row
         checking's load answered named a transfer (a shadow); no row can since
         (``ck_transactions_names_no_transfer`` refused one until plan step
@@ -1831,7 +1835,7 @@ class TestATransferIsALegOfItsParent:
             savings = create_savings_account(
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
-            _add_transaction(
+            rent = _add_transaction(
                 db.session, seed_user, seed_periods[0], "Rent", "300.00",
                 due_date=date(2026, 1, 5),
             )
@@ -1846,20 +1850,19 @@ class TestATransferIsALegOfItsParent:
             on_checking = _query_transactions_for_range(
                 CashFlowSet.single(checking), ctx.scenario_id, periods,
             )
-            assert [row.name for row in on_checking.rows] == ["Rent"]
-            assert [
-                (leg.transfer.id, leg.account_id, leg.is_income)
-                for leg in on_checking.legs
-            ] == [(transfer.id, checking.id, False)]
+            assert [cell_key(item) for item in on_checking] == [
+                rent.id, (transfer.id, checking.id),
+            ]
+            assert on_checking[0].name == "Rent"
+            assert on_checking[1].is_income is False
 
             on_savings = _query_transactions_for_range(
                 CashFlowSet.single(savings), ctx.scenario_id, periods,
             )
-            assert on_savings.rows == []
-            assert [
-                (leg.transfer.id, leg.account_id, leg.is_income)
-                for leg in on_savings.legs
-            ] == [(transfer.id, savings.id, True)]
+            assert [cell_key(item) for item in on_savings] == [
+                (transfer.id, savings.id),
+            ]
+            assert on_savings[0].is_income is True
 
     def test_a_settled_leg_is_a_paid_cell_worth_its_record(
         self, app, seed_user, seed_periods, db,

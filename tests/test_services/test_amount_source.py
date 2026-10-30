@@ -119,7 +119,6 @@ from tests._test_helpers import (
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY
 from app.services.balance_at import BalanceContext
-from app.services.cash_flow_set import PlanItems
 from app.routes.grid._items import build_amount_maps
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import parent_of
@@ -1597,9 +1596,7 @@ class TestTheBatchTier:
         legs = _legs_of(xfer)
         basis = _basis_for(seed_user)
 
-        shown = build_amount_maps(
-            PlanItems.of([paycheck, repriced], legs), basis,
-        ).budgets
+        shown = build_amount_maps([paycheck, repriced, *legs], basis).budgets
 
         assert set(shown) == {
             paycheck.id, repriced.id, *(leg.cell_key for leg in legs),

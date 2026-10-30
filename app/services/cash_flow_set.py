@@ -80,8 +80,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
+from typing import TypeVar
 
 from sqlalchemy import or_
+from sqlalchemy.orm import Query
+from sqlalchemy.orm.interfaces import LoaderOption
+from sqlalchemy.sql.expression import ColumnElement
 
 from app import ref_cache
 from app.enums import TxnTypeEnum
@@ -92,6 +96,7 @@ from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services.transfer_legs import (
     PlanItem,
+    PlanParent,
     TransferLeg,
     expense_legs,
     grid_transfer_legs,
@@ -391,6 +396,11 @@ def set_transfer_legs(
     )
 
 
+#: The parent table a scope's query is rooted at, ``Transaction`` or
+#: ``Transfer``: a query narrowed here comes back rooted at the same one.
+_Parent = TypeVar("_Parent", bound=PlanParent)
+
+
 class StatusBand(Enum):
     """Which statuses a screen draws its plan items from.
 
@@ -414,7 +424,7 @@ class StatusBand(Enum):
     SETTLED = "settled"
     BALANCE_CONTRIBUTING = "balance_contributing"
 
-    def clauses(self, model) -> tuple:
+    def clauses(self, model: type[PlanParent]) -> tuple[ColumnElement[bool], ...]:
         """Return the band's filters over *model*.
 
         Args:
@@ -453,7 +463,7 @@ class Paychecks:
         """``True`` for no periods: the loader answers ``[]`` with no statement."""
         return not self.period_ids
 
-    def narrow(self, query, model):
+    def narrow(self, query: Query[_Parent], model: type[_Parent]) -> Query[_Parent]:
         """Return *query* over *model* narrowed to the window.
 
         Args:
@@ -489,7 +499,7 @@ class AttributionSpan:
         """``False``: which days an item is attributed to only the database answers."""
         return False
 
-    def narrow(self, query, model):
+    def narrow(self, query: Query[_Parent], model: type[_Parent]) -> Query[_Parent]:
         """Return *query* over *model* narrowed to the items attributed to the span.
 
         **The joined period must be the item's OWN owner's**, which is a fact
@@ -552,7 +562,8 @@ class PlanScope:
 
 
 def load_plan_items(
-    scope: PlanScope, row_loads: tuple, *, side_records: bool = False,
+    scope: PlanScope, row_loads: tuple[LoaderOption, ...], *,
+    side_records: bool = False,
 ) -> list[PlanItem]:
     """Load the plan items *scope* selects: bill rows, then transfer sides.
 
@@ -563,8 +574,9 @@ def load_plan_items(
     :func:`touched_transfers_clause`; expenses only as the rows'
     ``transaction_type_id`` and the sides' :func:`~app.services.transfer_legs
     .expense_legs` -- so a screen's rows and its transfers cannot disagree on
-    scope.  When a bill becomes a transfer, the row query goes and no screen
-    changes.
+    scope.  Were every bill a transfer, the row query would go, and with it
+    each screen's *row_loads*, the one argument a screen passes that is a
+    row's alone; no screen's :class:`PlanScope` would change.
 
     **The list is in one order, a function of the data**: rows by id, then
     the sides in transfer id then side order -- exactly
@@ -623,7 +635,7 @@ def load_plan_items(
     return [*loaded_rows, *sides]
 
 
-def _scoped(scope: PlanScope, model):
+def _scoped(scope: PlanScope, model: type[_Parent]) -> Query[_Parent]:
     """Return the query of *model*'s live rows in *scope*'s scenario, window and band.
 
     The parts of a scope both tables state alike, stated once; the set and

@@ -1940,6 +1940,21 @@ class TestATransferIsALegOfItsParent:
     def test_a_cancelled_transfers_leg_is_not_a_cell(
         self, app, seed_user, seed_periods, db,
     ):
+        """A $250.00 checking -> savings transfer due 01-06, then cancelled: no cell on the 6th.
+
+        The calendar loads the balance-contributing band
+        (``StatusBand.BALANCE_CONTRIBUTING``), and since ruling plan#2262
+        deleted the Python re-check in ``_assign_transactions_to_days`` the
+        band's clause over ``Transfer`` is the one thing that keeps a
+        cancelled transfer's leg off the calendar.  This is the calendar's
+        only grade of that clause.  Measured 2026-10-30 with the clause
+        removed for ``Transfer`` alone: this case failed and no other in the
+        13 test files that drive the calendar did, beside the loader's own
+        band case (``test_plan_item_loader.py``) under it.  It failed on the
+        cell -- the 6th held a $0.00 "Transfer to Savings" entry -- while the
+        month's expenses still read $0.00, because a cancelled leg is worth
+        nothing, so the cell assertion is the one that grades the filter.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = create_savings_account(

@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import StatusEnum
+from app.enums import StatusEnum, TxnTypeEnum
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.exceptions import AmountUnresolvable
@@ -55,6 +55,7 @@ from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
     create_transfer,
+    one_off_row_of,
     side_records_by_key,
     transfer_side_settle_day,
     typed as typed_figure,
@@ -619,15 +620,24 @@ class TestTheSetsTransferHalf:
     def test_set_transfer_legs_draws_the_sets_side_keyed_beside_the_rows(
         self, app, db, seed_user, seed_periods,
     ):  # pylint: disable=unused-argument
-        """One $250.00 checking -> savings transfer: the expense leg on checking.
+        """A $300.00 Rent row and a $250.00 checking -> savings transfer, both on checking.
 
-        The rows then the legs are one list (ruling plan#2218: built here
-        where ``PlanItems.of`` built it until plan step plan#2130), and
-        ``cell_key`` keys each row by its id and the leg by its pair.
+        The transfer draws one expense leg, on checking.  The rows then the
+        legs are one list (ruling plan#2218: built here where ``PlanItems.of``
+        built it until plan step plan#2130), and ``cell_key`` keys the Rent
+        row by its id and the leg by its ``(transfer id, account id)`` pair.
+        The case seeded no row until the step's adversarial review, so the
+        row's half of that claim was graded over an empty list.
         """
         with app.app_context():
             checking = seed_user["account"]
             savings = _savings(seed_user)
+            rent = one_off_row_of(
+                seed_periods[2], name="Rent", amount=Decimal("300.00"),
+                user_id=seed_user["user"].id, account_id=checking.id,
+                scenario_id=seed_user["scenario"].id,
+                transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
+            )
             transfer = create_transfer(
                 seed_user, db.session, checking, savings, seed_periods[2],
                 amount=_AMOUNT,
@@ -642,9 +652,10 @@ class TestTheSetsTransferHalf:
             rows = db.session.query(Transaction).filter(
                 own_rows_clause(cash_flow), Transaction.is_deleted.is_(False),
             ).all()
+            assert rows == [rent]
             items = [*rows, *legs]
             assert [cell_key(item) for item in items] == [
-                *[row.id for row in rows], (transfer.id, checking.id),
+                rent.id, (transfer.id, checking.id),
             ]
 
 

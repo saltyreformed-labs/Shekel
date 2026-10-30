@@ -14,7 +14,7 @@
 # for a Promtail-era log pipeline; the deployed collector (Grafana
 # Alloy) discovers containers over the Docker socket and needs no
 # shared network, so that coupling was removed (parity audit
-# 2026-06-12, finding M06 in docs/audits/dev-prod-parity/findings.md).
+# 2026-06-12, finding M06 in shekel-audits/dev-prod-parity/findings.md).
 
 services:
   app:

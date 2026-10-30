@@ -85,7 +85,7 @@ login_manager.login_message_category = "warning"
 # already resists classic fixation) but is load-bearing once the
 # project migrates to a server-side session store (planned remediation
 # Commit C-53) where stolen session IDs would otherwise be replayable
-# from any origin.  See docs/audits/security-2026-04-15/
+# from any origin.  See shekel-audits/security-2026-04-15/
 # remediation-plan.md "Commit C-07".
 login_manager.session_protection = "strong"
 

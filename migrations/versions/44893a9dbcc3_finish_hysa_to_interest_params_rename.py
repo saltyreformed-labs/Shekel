@@ -1,6 +1,6 @@
 """finish hysa_params -> interest_params rename: PK, FK, sequence, idx, audit trigger
 
-Closes M-1 of docs/audits/security-2026-04-15/model-migration-drift.md.
+Closes M-1 of shekel-audits/security-2026-04-15/model-migration-drift.md.
 The earlier ``b4a6bb55f78b_rename_hysa_params_to_interest_params``
 migration renamed the table itself plus its check constraint and the
 unique index on ``account_id``, but left five legacy artifacts on a

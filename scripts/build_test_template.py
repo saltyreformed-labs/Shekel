@@ -5,7 +5,7 @@ Builds the per-pytest-worker template database (``shekel_test_template``
 by default).  The script drops and rebuilds the database on every run
 so two invocations produce a byte-identical end state; this is the
 required property for the Phase 2 work in
-``docs/audits/security-2026-04-15/per-worker-database-plan.md``.
+``docs/audits/test_improvements/per-worker-database-plan.md``.
 
 The template is the source for PostgreSQL ``CREATE DATABASE ...
 TEMPLATE shekel_test_template`` clones made at the start of each

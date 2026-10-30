@@ -12,7 +12,7 @@ are safe; `docs/testing-standards.md` and `CLAUDE.md` reflect the new flow.
 |---|---|---|---|
 | Phase 0: add pytest-xdist dependency | **Done** | `e41d136` | `pytest-xdist==3.8.0` in `requirements-dev.txt`.  Verified: `tests/test_config.py` 55 passed. |
 | Phase 1: consolidate ref-table seed | **Done** | `073c548` | New `app.ref_seeds.seed_reference_data(session, *, verbose=False)`; all three call sites (conftest, `app/__init__.py`, `scripts/seed_ref_tables.py`) rerouted.  Verified: 163 targeted tests pass; pylint 9.50/10 unchanged. |
-| Drift findings doc | **Done** | `d5baf4a` | `docs/audits/security-2026-04-15/model-migration-drift.md` catalogues every divergence with file references and recommended fixes (model edit vs new migration). |
+| Drift findings doc | **Done** | `d5baf4a` | `shekel-audits/security-2026-04-15/model-migration-drift.md` catalogues every divergence with file references and recommended fixes (model edit vs new migration). |
 | Plan saved into repo | **Done** | `7c6af1e` | This file -- mirrored from `~/.claude/plans/`. |
 | Drift fix (H-1..H-5, M-1, L-1) | **Done** | `9a5cca1`..`49fa13b` | All seven findings closed: H-1 (`9a5cca1`), H-2 (`709786a`), H-3 (`6384c77`), H-4 (`d6f31b5`), M-1 (`2a28f8e`), L-1 (`cfc8572`), H-5 (`7939c8a`), doc update (`49fa13b`).  Re-verification on 2026-05-11 confirmed only EXPECTED divergences remain (alembic_version, FK names, column ordering, `\restrict` tokens). |
 | Phase 2: template builder + drift pre-flight | **Done** | `2aa3d17` | `scripts/build_test_template.py` (335 lines, pylint 10/10) drops + recreates `shekel_test_template`, runs the Alembic chain to head, applies audit infra, seeds reference data, then truncates `system.audit_log` so the template ships with a zeroed log.  Verified end-to-end with `EXPECTED_TRIGGER_COUNT` imported from the code (currently 31, not the plan's stale "45"). |
@@ -192,7 +192,7 @@ four high-severity, one medium-severity, and one low-severity divergence between
 and `flask db upgrade head` outputs. All seven findings (H-1..H-5 + M-1 + L-1) closed before Phase 2
 resumed; the 2026-05-11 re-verification of the comparison script returned only the EXPECTED
 divergences (alembic_version, FK names, column ordering, `\restrict`). Catalogue:
-`model-migration-drift.md`.
+`shekel-audits/security-2026-04-15/model-migration-drift.md`.
 
 **Original spec (kept for reference -- now historical):**
 
@@ -675,7 +675,7 @@ or unexpected-passed lines are tolerated.
 - Phase 0: 10 minutes -- **Done in ~5 min; commit `e41d136`**
 - Phase 1: 1 hour -- **Done in ~45 min; commit `073c548`**
 - Drift fix (out-of-original-scope insertion): ~5-6 hours estimate --
-  **Done in ~3 hours across seven commits `9a5cca1`..`49fa13b`; see `model-migration-drift.md`**
+  **Done in ~3 hours across seven commits `9a5cca1`..`49fa13b`; see `shekel-audits/security-2026-04-15/model-migration-drift.md`**
 - Phase 2: 1.5 hours -- **Done in ~1 hour; commit `2aa3d17`**
 - Phase 3: 2 hours --
   **Done in ~1.5 hours including the Flask-SQLAlchemy 3.x app-context deviation; commit `db95461`**
@@ -700,7 +700,7 @@ Phases 0 through 4 are complete on `dev`. The only remaining work is Phase 5 (CI
 Entry points:
 
 - This document (status table at the top).
-- `docs/audits/security-2026-04-15/model-migration-drift.md`
+- `shekel-audits/security-2026-04-15/model-migration-drift.md`
   (drift fix retrospective; all seven findings resolved).
 - `docs/audits/test_improvements/test-performance-research.md`
   (Phase 4.5 profile + community research; operator decision

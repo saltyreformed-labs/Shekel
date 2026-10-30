@@ -3741,7 +3741,7 @@ def pytest_sessionfinish(session, exitstatus):  # pylint: disable=unused-argumen
         SQLAlchemy connections to release -- and the
         ``WITH (FORCE)`` clause severs any backend that did
         escape, at the protocol level.  See
-        ``docs/audits/security-2026-04-15/per-worker-database-plan.md``
+        ``docs/audits/test_improvements/per-worker-database-plan.md``
         Phase 3 for the broader context.
 
     Survives SIGKILL imperfectly: a process killed before this hook

@@ -1,7 +1,7 @@
 # Shekel Budget App -- Continuous Integration
 #
-# Six jobs grade a pull request, and a seventh -- lint-and-test -- answers
-# for the five it needs (polyglot-lint is a required check of its own).
+# Seven jobs grade a pull request, and an eighth -- lint-and-test -- answers
+# for the six it needs (polyglot-lint is a required check of its own).
 # Every pull request runs every one of them: ruling balance:R-BAL399 deleted
 # the scope that let a change set touching only planning documents skip lint
 # and the shards.
@@ -16,9 +16,11 @@
 #   test           the suite in six shards, each on its own runner through
 #                  ``scripts/test.sh`` (steps 5d-7b), and the rehearsal kit's
 #                  cluster tests on one of them (step 7c).
+#   image          builds the app image from the Dockerfile, never pushed,
+#                  and checks what it holds (step 8).
 #   polyglot-lint  the non-Python linters (its own check).
 #   lint-and-test  the check the ``dev`` and ``main`` rulesets require.  It
-#                  NEEDS the first five and runs ``if: always()``, because a
+#                  NEEDS the first six and runs ``if: always()``, because a
 #                  SKIPPED required check counts as passing and a job that
 #                  merely depended on a failed shard would be skipped --
 #                  green.  tools/ci/ci_verdict.py judges every result.
@@ -553,8 +555,95 @@ jobs:
         if: strategy.job-index == 3
         run: pytest tools/rehearsal -c /dev/null -q -m cluster
 
+  # ── 8. The app image, built and checked before a merge ───────────
+  # docker-publish.yml builds the release image only on a push to main, so
+  # without this job a change that breaks the build -- a lock moving
+  # psycopg-c past what compiles here, a base or uv image a digest update
+  # moves -- would land in dev and fail only at the release (task plan#2366;
+  # a version-only update lands with no card once CI is green, ruling
+  # plan#2351).  The image is built from the Dockerfile as the release builds
+  # it, loaded into this runner's docker, never pushed; the job holds no
+  # secret.
+  #
+  # THE LAYER CACHE IS READ, NEVER WRITTEN.  ``cache-from`` reads the release
+  # build's layers, which a run on any branch may restore from the default
+  # branch.  A cache a pull request or a queue group writes is restorable by
+  # that one ref alone, so writing one would only spend the repository's
+  # cache space, where uv's caches and the release's live too; and a push to
+  # main writing one would put layers this workflow built in the scope the
+  # release workflow restores.
+  #
+  # Its time limit has no run of its own to be sized from yet (rulings
+  # plan#2328, plan#2330): it is twice the release build's longest
+  # (docker-publish.yml's build-and-push: this build plus its push and
+  # signing, longest of 200 successful runs to 2026-10-30), rounded up to a
+  # whole five minutes, until this job's own runs re-size it.
+  image:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10  # no run of its own; the release build's longest of 200: 3.38 min
+    env:
+      # The local name the build loads the image under; it is never pushed.
+      IMAGE: shekel:ci
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+
+      # uv for the package check, from the Dockerfile's own uv stage: the
+      # binary the build ran, which the image never carries.
+      - name: Export the Dockerfile's uv
+        shell: bash
+        run: docker buildx build --target uv --output "type=local,dest=${RUNNER_TEMP}/uv" .
+
+      # The Dockerfile's PSYCOPG_IMPL=c (ruling balance:R-BAL209) already makes
+      # the import fail without psycopg-c; the implementation is also read and
+      # compared, so the check does not rest on that one line.
+      - name: The image runs psycopg's C implementation
+        shell: bash
+        run: |
+          docker run --rm --network none --entrypoint python "${IMAGE}" -c '
+          import sys
+          import psycopg
+          impl = psycopg.pq.__impl__
+          print(f"psycopg implementation: {impl}")
+          sys.exit(impl != "c")
+          '
+
+      # The image's venv holds EXACTLY the lock's runtime set and its server
+      # group: uv, run inside the image against /opt/venv with the checkout
+      # read-only and no network, refuses a package missing, extra or at
+      # another version, and ``--check`` changes nothing.  The set is spelled
+      # here, not read from the Dockerfile, so a build that installs the wrong
+      # set is caught rather than agreed with.
+      - name: The image holds exactly the lock's runtime and server set
+        shell: bash
+        run: |
+          docker run --rm --network none \
+              --volume "${RUNNER_TEMP}/uv/uv:/usr/local/bin/uv:ro" \
+              --volume "${GITHUB_WORKSPACE}:/src:ro" \
+              --env UV_PROJECT_ENVIRONMENT=/opt/venv \
+              --env UV_PYTHON_DOWNLOADS=never \
+              --env UV_NO_CACHE=1 \
+              --env UV_OFFLINE=1 \
+              --entrypoint uv "${IMAGE}" \
+              sync --project /src --locked --check --no-install-project \
+              --no-default-groups --group server
+
   lint-and-test:
-    needs: [landing, tools, tax-law, lint, test]
+    needs: [landing, tools, tax-law, lint, test, image]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5  # longest of 197 runs: 0.55 min

@@ -55,9 +55,9 @@ STEP_CONDITIONS = {
     ("landing", "Mint the tracker read token"): "env.PLAN_READER_KEY_PRESENT == 'true'",
 }
 
-#: The jobs whose every step grades: the five ``lint-and-test`` needs, and the
+#: The jobs whose every step grades: the six ``lint-and-test`` needs, and the
 #: aggregate itself.
-GRADED_JOBS = ("landing", "tools", "tax-law", "lint", "test", "lint-and-test")
+GRADED_JOBS = ("landing", "tools", "tax-law", "lint", "test", "image", "lint-and-test")
 
 #: The tools job's one grading step.
 TOOLS_STEP = "Lint and test every tools package"
@@ -74,9 +74,10 @@ INSTALL_LOCK_FILE = arcs.REPO / ".github/actions/install-lock/action.yml"
 INSTALL_STEP = "Install the lock"
 
 #: What each job that runs Python installs from the lock, and whether it keeps uv's cache:
-#: every job of every workflow but the release image's build, which runs no Python.  The
-#: landing job holds a token and the release workflow publishes, so neither restores a
-#: cache; the scheduled runs keep none, as they kept no pip cache.
+#: every job of every workflow but the two that build the app image (ci.yml's ``image`` and
+#: the release's), which run no Python on the runner.  The landing job holds a token and the
+#: release workflow publishes, so neither restores a cache; the scheduled runs keep none, as
+#: they kept no pip cache.
 INSTALLS = {
     ("ci.yml", "landing"): {"install": "landing", "cache": "false"},
     ("ci.yml", "tools"): {"install": "all", "cache": "true"},
@@ -175,7 +176,7 @@ class TestTheWorkflowIsWiredToTheAnswer:
         plan#2328; its size, twice the job's longest recorded run, is plan#2330's, which
         this test does not grade).
 
-        Every job here holds a merge: the five graders through the aggregate, and the
+        Every job here holds a merge: the six graders through the aggregate, and the
         aggregate and the polyglot linters as the required checks.  One with no limit waits
         out GitHub's 360 minutes behind a stalled runner, and a limit of 360 or more is no
         limit.  ``True`` is an ``int`` to Python but no number of minutes to GitHub.

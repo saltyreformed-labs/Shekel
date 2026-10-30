@@ -162,8 +162,10 @@ class TestDockerfileDigestPin:
         balance:R-BAL294): uv, CI and the local venv read it.  A FROM line
         cannot read a file, so this is where the image is held to it.  The
         build itself also refuses a mismatch (``UV_PYTHON_DOWNLOADS=never``
-        leaves uv no interpreter to fetch), but no CI job builds the image
-        before a merge, so the text check is what review sees first.
+        leaves uv no interpreter to fetch), and ci.yml's ``image`` job builds
+        the image before every merge (task plan#2366), so a mismatch is a red
+        build there too; this check is the one naming the two files to move
+        together.
         """
         wanted = PYTHON_VERSION_FILE.read_text(encoding="utf-8").strip()
         versions = [version for version, _digest in PYTHON_BASE_PATTERN.findall(text)]
@@ -381,10 +383,11 @@ class TestDockerfileRequiresPsycopgC:
     libpq, and psycopg falls back to its pure-Python implementation silently
     when the C one will not import.  ``PSYCOPG_IMPL=c`` turns that fallback
     into an import failure, so an image without psycopg-c cannot start
-    rather than running slower unnoticed.  No test builds the image (the
-    publish workflow builds it only on a push to ``main`` or a ``v*`` tag),
-    so this text assertion is what stops the line being dropped before review
-    sees it.
+    rather than running slower unnoticed.  ci.yml's ``image`` job builds the
+    image before every merge and refuses one that does not run the C
+    implementation (task plan#2366), but an image that holds psycopg-c runs it
+    with this line or without it, so that job cannot see the line dropped:
+    this text assertion is what holds it.
     """
 
     def test_the_runtime_stage_sets_psycopg_impl_c(self) -> None:

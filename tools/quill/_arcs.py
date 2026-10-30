@@ -143,9 +143,10 @@ def _arc_fault(card: ArcCard, is_task: bool) -> str | None:
     name; None when nothing.  A card but a task holding none whose arc labels, none or
     several, cannot give it one (views_spec s.3, :func:`_fill`): its labels are named.  One
     holding an Arc that is none of :data:`tools.ci.arcs.ARCS`: no arc label displays it, so
-    no put-back would ever settle.  And a task (``is_task``) holding one: its arc is its
-    card's (ruling ``balance:R-BAL386``), so a value of its own would be a second home of it
-    (rule 14)."""
+    no put-back would ever settle.  Each is set with ``quill arc`` (ruling plan#2221).  And a
+    task (``is_task``) holding one: its arc is its card's (ruling ``balance:R-BAL386``), so a
+    value of its own would be a second home of it (rule 14); ``quill arc`` sets no task's, so
+    it is cleared on the web."""
     if is_task:
         if card.arc is None:
             return None
@@ -153,10 +154,12 @@ def _arc_fault(card: ArcCard, is_task: bool) -> str | None:
                 f"{card.arc!r}: clear it on the web")
     if card.arc is None:
         return (f"holds no Arc, its arc's one home (R-BAL349), so no arc label can display "
-                f"it: set its Arc on the web (its labels: {list(card.labels)})")
+                f"it: set it with `quill arc plan#{card.number} --to ARC` (its labels: "
+                f"{list(card.labels)})")
     if card.arc not in ARCS:
         return (f"holds the Arc {card.arc!r}, none of quill's arcs ({', '.join(ARCS)}), so no "
-                "arc label can display it: set its Arc on the web to one of them")
+                f"arc label can display it: set it to one of them with `quill arc "
+                f"plan#{card.number} --to ARC`")
     return None
 
 

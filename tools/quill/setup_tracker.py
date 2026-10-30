@@ -235,8 +235,8 @@ MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL = "moves-money", "deploy-together"
 #: The label marking security work, in whatever arc it is (ruling plan#2179).
 SECURITY_LABEL = "security"
 #: The labels a person chooses for a card: every declared label but the arc labels, which
-#: display its Arc, and quill's :data:`FILING` mark.  ``quill file step --label`` takes its
-#: choices from here.
+#: display its Arc, and quill's :data:`FILING` mark.  ``quill file step --label`` and
+#: ``quill label`` take their choices from here (ruling plan#2221).
 CHOSEN_LABELS = (MOVES_MONEY_LABEL, DEPLOY_TOGETHER_LABEL, SECURITY_LABEL)
 
 #: Every label the tracker carries: one per arc, the ones a person chooses, and

@@ -65,8 +65,8 @@ def test_a_question_becomes_a_ruling_in_the_arc_its_field_holds(code, tmp_path, 
 
 def test_a_question_holding_no_arc_is_refused_with_what_fixes_it(code, tmp_path, capsys):
     """A question holding no Arc (filed before the one-time pass, or by older code) matches no
-    ``--arc``, so its refusal names the fix, its Arc set on the web, never another --arc
-    (plan#1811's review, L2); nothing is written."""
+    ``--arc``, so its refusal names the fix, its Arc set with ``quill arc`` (ruling plan#2221),
+    never another --arc (plan#1811's review, L2); nothing is written."""
     answer = tmp_path / "a"
     answer.write_text("Yes.")
     tracker = FakeTracker()
@@ -77,7 +77,7 @@ def test_a_question_holding_no_arc_is_refused_with_what_fixes_it(code, tmp_path,
                "balance") == 1
     assert capsys.readouterr().err == (
         "refused: plan#2 [question, no arc] Ship holds no Arc, its arc's one home (R-BAL349): "
-        "set its Arc on the web, then convert it\n")
+        "set it with `quill arc plan#2 --to ARC`, then convert it\n")
     assert not tracker.writes
 
 

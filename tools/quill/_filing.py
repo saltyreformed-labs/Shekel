@@ -18,9 +18,11 @@ since the tool's rename).
 """
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
+from tools.ci.arcs import ARCS
 from tools.quill import _findings, _git, _tasks
 from tools.quill._arcs import other_labels
 from tools.quill._command import (
@@ -28,6 +30,7 @@ from tools.quill._command import (
     _one,
     _outside_parent,
     _read,
+    card_number,
     on_board,
     with_closure,
 )
@@ -57,7 +60,7 @@ from tools.quill.check import (
     ruling_question,
     violations,
 )
-from tools.quill.setup_tracker import FILING, TASK, unmarked
+from tools.quill.setup_tracker import CHOSEN_LABELS, FILING, TASK, unmarked
 
 
 @dataclass(frozen=True)
@@ -555,6 +558,46 @@ def _standing(tracker: Tracker, filing: _Filing, root: Path) -> Card | None:
     return fresh
 
 
+def file_parser(commands) -> None:
+    """``file step|finding|ruling|question|task`` and each kind's arguments: the command
+    line of :func:`cmd_file`, moved here beside it from the command module, which ``quill
+    arc`` and ``quill label`` (ruling plan#2221) would take past the 1,000 lines
+    ``too-many-lines`` allows."""
+    kinds = commands.add_parser("file", help="file a step, finding, ruling, question or task")
+    sub = kinds.add_subparsers(dest="kind", required=True)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--arc", required=True, choices=ARCS)
+    common.add_argument("--title", required=True, help="a short name (R-BAL178)")
+    step = sub.add_parser("step", parents=[common], help="a step, or a leaf of one")
+    step.add_argument("--body-file", required=True, help="its spec")
+    step.add_argument("--parent", type=card_number, help="the step this leaf splits")
+    step.add_argument("--label", action="append", choices=CHOSEN_LABELS)
+    finding = sub.add_parser("finding", parents=[common], help="a defect in the code")
+    finding.add_argument("--owner", type=card_number, required=True, help="its owner step")
+    finding.add_argument("--text", required=True, help="one sentence, at most 400 characters")
+    ruling = sub.add_parser("ruling", parents=[common], help="the developer's decision")
+    ruling.add_argument("--owner", type=card_number,
+                        help="its owner step; from a question that names one, that one")
+    asked = ruling.add_mutually_exclusive_group(required=True)
+    asked.add_argument("--question-file", help="his question, word for word")
+    asked.add_argument("--from-question", type=card_number,
+                       help="the question card he answered; it becomes the ruling")
+    ruling.add_argument("--answer-file", required=True, help="his answer, word for word")
+    question = sub.add_parser("question", parents=[common], help="for the developer to answer")
+    question.add_argument("--body-file", required=True, help="the question")
+    question.add_argument("--owner", type=card_number,
+                          help="the step it is asked for, if one, which its ruling keeps")
+    task = sub.add_parser(TASK, help="a piece of one step or finding: a commit in its card's "
+                                     "pull request (its arc is its card's)")
+    task.add_argument("--parent", type=card_number, required=True,
+                      help="the step or finding it is a piece of")
+    task.add_argument("--title", required=True, help="a short name (R-BAL178)")
+    task.add_argument("--body-file", required=True, help="what the piece builds")
+    task.add_argument("--before", type=card_number,
+                      help="the open task under the same card it is built before; else it goes "
+                           "above the card's finishing tasks")
+
+
 def cmd_file(args, tracker: Tracker, root: Path) -> int:
     """File a step, finding, ruling, question or task, after :func:`check.violations` passes;
     finish one a failure cut short (R-BAL186); write nothing over one the earlier run
@@ -743,8 +786,8 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
         raise Refused(f"{_label(question)}'s filing has not finished (R-BAL202): finish it with "
                       "the `quill file` command that filed it first, then convert it")
     if question.arc is None:
-        raise Refused(f"{_label(question)} holds no Arc, its arc's one home (R-BAL349): set its "
-                      "Arc on the web, then convert it")
+        raise Refused(f"{_label(question)} holds no Arc, its arc's one home (R-BAL349): set it "
+                      f"with `quill arc plan#{question.number} --to ARC`, then convert it")
     if question.arc != args.arc:
         raise Refused(f"{_label(question)} is not in the {args.arc} arc; pass its own --arc")
     _refuse_rehoming(question, "ruling", to)

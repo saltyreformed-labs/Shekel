@@ -78,10 +78,10 @@ def test_each_card_whose_arc_a_person_must_fix_is_named_as_sync_reports_it():
     setup_tracker.check_card_arcs(github, report)
     assert report.lines == [
         "DIFFERS card shekel-plan#7 holds no Arc, its arc's one home (R-BAL349), so no arc "
-        "label can display it: set its Arc on the web (its labels: [])",
+        "label can display it: set it with `quill arc plan#7 --to ARC` (its labels: [])",
         "DIFFERS card shekel-plan#8 holds the Arc 'tracker', none of quill's arcs (balance, "
         "recurrence, pay_calendar, credit_card, bank_import, salary, tooling), so no arc "
-        "label can display it: set its Arc on the web to one of them",
+        "label can display it: set it to one of them with `quill arc plan#8 --to ARC`",
         "DIFFERS card shekel-plan#9 is a task, whose arc is its card's (R-BAL386), and holds "
         "the Arc 'balance': clear it on the web"]
     assert report.differences == 3

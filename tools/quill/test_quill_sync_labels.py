@@ -70,10 +70,11 @@ def test_a_card_whose_arc_no_label_can_fix_is_reported_and_left_as_it_is(code, c
     assert run(tracker, code, "sync") == 1
     assert capsys.readouterr().out == (
         "REPORT: plan#1 [step, no arc] card 1 holds no Arc, its arc's one home (R-BAL349), so "
-        "no arc label can display it: set its Arc on the web (its labels: ['recurrence', "
-        "'salary'])\n"
+        "no arc label can display it: set it with `quill arc plan#1 --to ARC` (its labels: "
+        "['recurrence', 'salary'])\n"
         "REPORT: plan#2 [ruling, no arc] card 2 holds no Arc, its arc's one home (R-BAL349), so "
-        "no arc label can display it: set its Arc on the web (its labels: [])\n"
+        "no arc label can display it: set it with `quill arc plan#2 --to ARC` (its labels: "
+        "[])\n"
         "REPORT: plan#3 [task, balance] card 3 is a task, whose arc is its card's (R-BAL386), "
         "and holds the Arc 'balance': clear it on the web\n")
     assert not tracker.writes
@@ -118,7 +119,8 @@ def test_a_card_holding_an_arc_none_of_quills_is_reported_and_never_relabelled(c
     assert capsys.readouterr().out == (
         "REPORT: plan#1 [step, tracker] card 1 holds the Arc 'tracker', none of quill's arcs "
         "(balance, recurrence, pay_calendar, credit_card, bank_import, salary, tooling), so no "
-        "arc label can display it: set its Arc on the web to one of them\n")
+        "arc label can display it: set it to one of them with `quill arc plan#1 --to "
+        "ARC`\n")
     assert not tracker.writes
 
 

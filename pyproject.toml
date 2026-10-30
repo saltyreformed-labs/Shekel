@@ -150,9 +150,26 @@ dev = [
 server = [
     "gunicorn>=26.2.0,<27.0.0",
 ]
+# The tools that build the two packages the lock holds only as source:
+# psycopg-c (the image's C driver) and pylint-flask (a dev linter).  They are
+# built WITHOUT build isolation (below), against these locked, hashed
+# versions, so no build anywhere fetches an unhashed tool.  setuptools is
+# exact because psycopg-c's own ``build-system.requires`` is exactly
+# ``setuptools == 83.0.0``: when its next release moves that pin, this one
+# moves with it in the same change.
+build = [
+    "setuptools==83.0.0",
+    "wheel>=0.37,<1.0",
+]
 
 [tool.uv]
 # Shekel is an application, not a library: uv installs its dependencies and
 # never builds or installs the project itself.
 package = false
+# Build the source-only packages with the ``build`` group's locked tools,
+# not with tools fetched for an isolated build that no hash covers.
+# ``--require-build-hashes`` (the Dockerfile, CI) then refuses any future
+# source-only package until it is added here.
+no-build-isolation-package = ["psycopg-c", "pylint-flask"]
+default-groups = ["dev", "build"]
 exclude-newer = "7 days"

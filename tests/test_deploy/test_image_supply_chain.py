@@ -51,14 +51,17 @@ DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy.sh"
 DEPLOY_README = REPO_ROOT / "deploy" / "README.md"
 DOCKER_PUBLISH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-publish.yml"
 
-# Pattern matching ``FROM <image>@sha256:<64 hex chars>``.  We do not
-# pin to a specific digest here because the digest is expected to
-# rotate over time; the assertion is that the digest pin EXISTS on
-# every FROM line, not that it points at one specific image.
-DIGEST_PIN_PATTERN = re.compile(
-    r"^FROM\s+[^\s]+@sha256:[0-9a-f]{64}\b",
+# The Python base image's FROM lines.  We do not pin to a specific
+# digest here because the digest is expected to rotate over time; the
+# assertion is that the digest pin EXISTS, not that it points at one
+# specific image.
+#: A FROM line on the Python base image: its ``X.Y`` tag and its digest.
+PYTHON_BASE_PATTERN = re.compile(
+    r"^FROM\s+python:(\d+\.\d+)-slim@sha256:([0-9a-f]{64})\b",
     re.MULTILINE,
 )
+#: The one home of the Python version (ruling balance:R-BAL294).
+PYTHON_VERSION_FILE = REPO_ROOT / ".python-version"
 
 # Pattern matching the ``SHEKEL_IMAGE_DIGEST`` interpolation in the
 # prod override.  Required-form (``:?``) is what makes the missing-
@@ -93,7 +96,7 @@ def _docker_available() -> bool:
 
 # ──────────────────────────────────────────────────────────────────
 # F-025 + F-062 + F-120: Dockerfile pins by digest, runs OpenSSL
-#   upgrade in both stages, upgrades pip past CVE-2026-1703.
+#   upgrade in both stages, and runs no pip (it installs uv.lock).
 # ──────────────────────────────────────────────────────────────────
 
 
@@ -113,18 +116,19 @@ class TestDockerfileDigestPin:
         return DOCKERFILE.read_text(encoding="utf-8")
 
     def test_both_stages_pin_by_digest(self, text: str) -> None:
-        """Both FROM lines must include ``@sha256:<digest>``.
+        """Both Python FROM lines must include ``@sha256:<digest>``.
 
         The Dockerfile is multi-stage: a builder stage that installs
         psycopg-c build deps and a runtime stage that copies only the
-        venv.  A digest pin on only one stage would let the other
-        stage drift to whatever ``:latest`` resolves to at build
-        time -- defeating reproducibility.
+        venv, both on the Python base image (the uv stage before them
+        supplies only the installer binary).  A digest pin on only one
+        Python stage would let the other drift to whatever its tag
+        resolves to at build time -- defeating reproducibility.
         """
-        matches = DIGEST_PIN_PATTERN.findall(text)
-        # The Dockerfile has exactly two FROM lines (builder + runtime).
+        matches = PYTHON_BASE_PATTERN.findall(text)
+        # Exactly two FROM lines are on the Python base (builder + runtime).
         assert len(matches) == 2, (
-            f"expected exactly 2 FROM lines pinned by ``@sha256:`` digest "
+            f"expected exactly 2 ``FROM python:<X.Y>-slim@sha256:`` lines "
             f"in Dockerfile, got {len(matches)}.  Both stages must pin "
             f"to the same digest for reproducible builds (audit "
             f"findings F-025, F-060)."
@@ -138,24 +142,35 @@ class TestDockerfileDigestPin:
         revision than the one stage 1 linked psycopg-c against.  The
         symmetry is the load-bearing invariant.
         """
-        from_lines = [
-            line for line in text.splitlines()
-            if line.startswith("FROM ")
-        ]
-        digests = []
-        for line in from_lines:
-            match = re.search(r"@(sha256:[0-9a-f]{64})", line)
-            if match is not None:
-                digests.append(match.group(1))
-        assert len(digests) >= 2, (
-            f"Dockerfile has fewer than 2 digest-pinned FROM lines: "
-            f"{from_lines}"
+        stages = PYTHON_BASE_PATTERN.findall(text)
+        assert len(stages) >= 2, (
+            f"Dockerfile has fewer than 2 digest-pinned Python FROM lines: "
+            f"{stages}"
         )
-        unique = set(digests)
+        unique = {digest for _version, digest in stages}
         assert len(unique) == 1, (
-            f"Dockerfile FROM lines pin to different digests: {unique}.  "
-            f"Stage 1 (builder) and stage 2 (runtime) must use the same "
-            f"base image digest so OpenSSL revisions match across stages."
+            f"Dockerfile Python FROM lines pin to different digests: "
+            f"{unique}.  Stage 1 (builder) and stage 2 (runtime) must use "
+            f"the same base image digest so OpenSSL revisions match "
+            f"across stages."
+        )
+
+    def test_both_stages_run_the_python_version_file(self, text: str) -> None:
+        """Both Python FROM tags name the minor version ``.python-version`` holds.
+
+        ``.python-version`` is the one home of the Python version (ruling
+        balance:R-BAL294): uv, CI and the local venv read it.  A FROM line
+        cannot read a file, so this is where the image is held to it.  The
+        build itself also refuses a mismatch (``UV_PYTHON_DOWNLOADS=never``
+        leaves uv no interpreter to fetch), but no CI job builds the image
+        before a merge, so the text check is what review sees first.
+        """
+        wanted = PYTHON_VERSION_FILE.read_text(encoding="utf-8").strip()
+        versions = [version for version, _digest in PYTHON_BASE_PATTERN.findall(text)]
+        assert versions and all(version == wanted for version in versions), (
+            f"Dockerfile Python FROM tags {versions} do not all name "
+            f"``.python-version``'s {wanted!r}; move the FROM lines (tag "
+            f"and digest) and ``.python-version`` in the same change."
         )
 
     def test_no_floating_tag_only_from(self, text: str) -> None:
@@ -229,13 +244,15 @@ class TestDockerfileOpenSSLUpgrade:
         )
 
 
-class TestDockerfilePipUpgrade:
-    """The Dockerfile upgrades pip past the CVE-2026-1703 fix.
+class TestDockerfileInstallsTheLock:
+    """The image installs ``uv.lock`` with uv, and no pip runs in the build.
 
-    Audit finding F-120: pip 25.3 has a path-traversal CVE (low
-    impact because pip only runs at build time).  Fixed in pip 26.0+.
-    The base image already ships pip 26.0.1 but the explicit upgrade
-    in the Dockerfile defends against a future base-image regression.
+    Ruling balance:R-BAL294: every package, indirect ones included, is
+    installed at the version and sha256 the lock records.  This replaces
+    audit finding F-120's control (a pip upgraded past CVE-2026-1703 before
+    ``pip install -r requirements.txt``): with no pip invoked in the build
+    and none seeded into ``/opt/venv``, that CVE has no build-time pip to
+    reach, which the old control only narrowed.
     """
 
     @pytest.fixture(scope="class")
@@ -244,52 +261,51 @@ class TestDockerfilePipUpgrade:
         """Return the full Dockerfile source as a string."""
         return DOCKERFILE.read_text(encoding="utf-8")
 
-    def test_pip_upgrade_to_at_least_26(self, text: str) -> None:
-        """A ``pip install --upgrade`` line constrains pip to >= 26.0.
+    def test_no_pip_runs_in_the_build(self, text: str) -> None:
+        """No ``pip`` command appears in any RUN line.
 
-        We accept ``pip>=26.0``, ``pip==26.0``, ``pip==26.0.1``, or
-        any equivalent constraint -- the binding constraint is
-        "fixes CVE-2026-1703".  pip 26.0 is the minimum.
+        A ``pip install`` would install outside the lock's hashes; uv
+        installs everything.
         """
-        # Match common forms.  ``pip>=26`` is acceptable too (>=26
-        # implies >=26.0).
-        pattern = re.compile(
-            r"pip\s+install\s+(?:--no-cache-dir\s+)?--upgrade\s+"
-            r"['\"]?pip(?:[<>=!~]+|==)\s*26",
-        )
-        assert pattern.search(text) is not None, (
-            "Dockerfile does not run ``pip install --upgrade pip>=26`` "
-            "(audit finding F-120 -- CVE-2026-1703 path-traversal fix "
-            "lands in pip 26.0).  Add the upgrade BEFORE "
-            "``pip install -r requirements.txt`` so requirements are "
-            "installed with the patched pip."
+        commands = re.findall(r"^RUN\b(?:.*\\\n)*.*$", text, re.MULTILINE)
+        pip_runs = [command for command in commands if re.search(r"\bpip\b", command)]
+        assert not pip_runs, (
+            f"Dockerfile runs pip: {pip_runs}.  The image installs only "
+            f"``uv.lock``, through ``uv sync --locked`` (ruling "
+            f"balance:R-BAL294)."
         )
 
-    def test_pip_upgrade_runs_before_requirements_install(
+    def test_the_builder_syncs_the_lock_with_its_build_hashes(
         self, text: str,
     ) -> None:
-        """The pip upgrade appears in source order before the
-        ``pip install -r requirements.txt`` line so the requirements
-        are resolved with the patched pip, not the pre-CVE pip.
+        """The builder runs ``uv sync --locked`` with ``--require-build-hashes``.
+
+        ``--locked`` refuses a lock that no longer matches pyproject.toml,
+        and ``--require-build-hashes`` refuses a source build whose tools no
+        hash covers (pyproject.toml's ``no-build-isolation-package``).
         """
-        upgrade_match = re.search(
-            r"pip\s+install\s+(?:--no-cache-dir\s+)?--upgrade\s+['\"]?pip",
-            text,
+        builder = text.split("\nFROM ")[2]
+        assert "uv sync --locked --require-build-hashes" in builder, (
+            "the Dockerfile's builder stage no longer installs with "
+            "``uv sync --locked --require-build-hashes``; the image would "
+            "not be held to uv.lock's versions and hashes (ruling "
+            "balance:R-BAL294)."
         )
-        requirements_match = re.search(
-            r"pip\s+install\s+(?:--no-cache-dir\s+)?-r\s+requirements\.txt",
-            text,
+
+    def test_uv_never_reaches_the_runtime_stage(self, text: str) -> None:
+        """The runtime stage copies the venv from the builder and no uv.
+
+        The installer is a build tool; an image that carried it would
+        hand anything with code execution in the container a way to
+        install packages.
+        """
+        runtime_stage = text.rsplit("\nFROM ", 1)[1]
+        assert "--from=uv" not in runtime_stage, (
+            "the runtime stage copies from the uv stage; uv must stay in "
+            "the builder."
         )
-        assert upgrade_match is not None, (
-            "no ``pip install --upgrade pip`` line in Dockerfile"
-        )
-        assert requirements_match is not None, (
-            "no ``pip install -r requirements.txt`` line in Dockerfile"
-        )
-        assert upgrade_match.start() < requirements_match.start(), (
-            "Dockerfile installs requirements.txt BEFORE upgrading pip; "
-            "the requirements would be resolved with the pre-CVE pip "
-            "(audit finding F-120)."
+        assert "COPY --from=builder /opt/venv /opt/venv" in runtime_stage, (
+            "the runtime stage no longer copies /opt/venv from the builder."
         )
 
 

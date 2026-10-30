@@ -622,9 +622,9 @@ jobs:
   # (shell, JS/CSS, Jinja templates, workflows, Dockerfile, YAML,
   # secrets, spelling). Mirrors the local .pre-commit-config.yaml hooks.
   # Binary tools are pinned by version and downloaded (no extra
-  # third-party actions to SHA-pin); the pip tools (yamllint, zizmor,
-  # djlint) come from requirements-dev.txt. Each tool reads its own
-  # in-repo config file. The dev and main rulesets require it beside
+  # third-party actions to SHA-pin); the pip tools (yamllint, jactionlint,
+  # zizmor, djlint, rumdl) come from requirements-dev.txt. Each tool reads
+  # its own in-repo config file. The dev and main rulesets require it beside
   # lint-and-test, so the floor blocks merges.
   polyglot-lint:
     runs-on: ubuntu-24.04
@@ -647,8 +647,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      # pip-installable linters (yamllint, zizmor, djlint) + jinja2 for the
-      # template parse check, all pinned in requirements-dev.txt.
+      # pip-installable linters (yamllint, jactionlint, zizmor, djlint, rumdl)
+      # + jinja2 for the template parse check, all pinned in
+      # requirements-dev.txt.
       - name: Install pip linters
         run: |
           python -m pip install --upgrade pip
@@ -667,13 +668,12 @@ jobs:
           echo "${bin}" >> "${GITHUB_PATH}"
           tmp="$(mktemp -d)"
           curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz | tar -xJf - -C "${tmp}"
-          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz | tar -xzf - -C "${tmp}"
           curl -fsSL https://github.com/crate-ci/typos/releases/download/v1.50.2/typos-v1.50.2-x86_64-unknown-linux-musl.tar.gz | tar -xzf - -C "${tmp}"
           curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xzf - -C "${tmp}"
           curl -fsSL -o "${tmp}/shfmt" https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_amd64
           curl -fsSL -o "${tmp}/biome" "https://github.com/biomejs/biome/releases/download/@biomejs/biome@2.5.14/biome-linux-x64"
           curl -fsSL -o "${tmp}/hadolint" https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-Linux-x86_64
-          for t in shellcheck actionlint typos gitleaks; do
+          for t in shellcheck typos gitleaks; do
               install -m 0755 "$(find "${tmp}" -type f -name "${t}" | head -1)" "${bin}/${t}"
           done
           install -m 0755 "${tmp}/shfmt" "${bin}/shfmt"
@@ -689,8 +689,9 @@ jobs:
       - name: yamllint
         run: git ls-files -z '*.yml' '*.yaml' | xargs -0 -r yamllint
 
-      - name: actionlint (GitHub workflows)
-        run: actionlint
+      # Its profile is .github/jactionlint.yaml's (ruling plan#2355).
+      - name: jactionlint (GitHub workflows)
+        run: jactionlint
 
       - name: zizmor (workflow security)
         env:

@@ -38,12 +38,12 @@ from app.services import (
     template_amount_service,
     transfer_service,
 )
-from app.services.cash_flow_set import CashFlowSet
+from app.services.cash_flow_set import AttributionSpan, CashFlowSet, Paychecks
 from app.services.pay_calendar import PayCalendar
 from app.utils.dates import display_today
 from app.services.cash_ledger import derived_amount_basis, resolve_amount
 from app.services.row_valuation import settled_contribution
-from app.services.transfer_legs import leg_of, parent_of
+from app.services.transfer_legs import cell_key, leg_of, parent_of
 from app.services.spending_report_service import (
     Comparison,
     SpendingWindow,
@@ -169,9 +169,9 @@ def _pay_period_selects(engine):
     deliberate and was measured at plan step C2-f3e: a query JOINing the table
     is captured as ZERO statements even while it hydrates ten ``PayPeriod``
     entities.  That is the right scope for the question here -- the assertions
-    below count reads of the table as a SUBJECT, and
-    ``query_settled_expenses_in_span`` KEEPS its join for the COALESCE
-    attribution filter -- but it means this probe cannot grade a
+    below count reads of the table as a SUBJECT, and the settled-spend
+    loader's calendar span (``AttributionSpan``) KEEPS its join for the
+    COALESCE attribution filter -- but it means this probe cannot grade a
     join-filtered read, and :func:`~tests._test_helpers.pay_periods_hydrated`
     beside it is what sees those.
 
@@ -607,7 +607,7 @@ def _calendar_scope(paydays, cadence_days=14, user_id=1):
     placeholder ``account_id=1`` was until plan step CC-4-3.
     """
     return _ScopeIds(
-        user_id=user_id, cash_flow=CashFlowSet.single(Account(id=1)),
+        cash_flow=CashFlowSet.single(Account(id=1)),
         scenario_id=1,
         calendar=PayCalendar.from_paydays(paydays, eras_of(paydays, cadence_days), user_id, history_opens_on=None),
     )
@@ -942,23 +942,25 @@ class TestTheChartReadsTheDerivedOrdinal:
             cash_flow = CashFlowSet.single(seed_user["account"])
             with pay_periods_hydrated() as hydrated:
                 by_period = spending_analysis.query_settled_expenses(
-                    seed_user["scenario"].id,
-                    [seed_periods[0].id, seed_periods[1].id],
-                    cash_flow,
+                    cash_flow, seed_user["scenario"].id,
+                    Paychecks((seed_periods[0].id, seed_periods[1].id)),
                 )
-                by_span = spending_analysis.query_settled_expenses_in_span(
-                    seed_user["scenario"].id, cash_flow,
-                    seed_user["user"].id,
-                    seed_periods[0].start_date, last_covered_day(seed_periods[1]),
+                by_span = spending_analysis.query_settled_expenses(
+                    cash_flow, seed_user["scenario"].id,
+                    AttributionSpan(
+                        seed_periods[0].start_date,
+                        last_covered_day(seed_periods[1]),
+                    ),
                 )
 
             # Both loads must actually return rows, or "nothing was
             # hydrated" is true of a query that loaded nothing at all.  Each
-            # answers a PlanItems since leaf balance:X-bi-6-1b; no transfer
-            # is seeded, so the legs half loads nothing and the claim below
-            # is about the ROW query (a leg's parent carries its period by
-            # design: rule 4's derive arm reads it).
-            assert len(by_period.items) == 2 and len(by_span.items) == 2
+            # answers its rows then its legs since leaf balance:X-bi-6-1b, as
+            # one list since plan step plan#2130; no transfer is seeded, so
+            # it holds rows alone and the claim below is about the ROW query
+            # (a leg's parent carries its period by design: rule 4's derive
+            # arm reads it).
+            assert len(by_period) == 2 and len(by_span) == 2
             assert hydrated == [], (
                 "a settled-expense query hydrated a PayPeriod.  This asserts "
                 "the QUERY's loader, not that nothing downstream reads the "
@@ -1600,7 +1602,7 @@ class TestATransferIsALegOfItsParent:
             savings = create_savings_account(
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
-            _txn(db, seed_user, seed_periods[0], "Rent", "Rent", "100.00")
+            rent = _txn(db, seed_user, seed_periods[0], "Rent", "Rent", "100.00")
             settled = create_settled_transfer(
                 seed_user, db.session, checking, savings, seed_periods[0],
                 amount=Decimal("250.00"),
@@ -1619,23 +1621,28 @@ class TestATransferIsALegOfItsParent:
             cash_flow = CashFlowSet.single(checking)
 
             by_period = spending_analysis.query_settled_expenses(
-                seed_user["scenario"].id, [seed_periods[0].id], cash_flow,
+                cash_flow, seed_user["scenario"].id,
+                Paychecks((seed_periods[0].id,)),
             )
-            by_span = spending_analysis.query_settled_expenses_in_span(
-                seed_user["scenario"].id, cash_flow, seed_user["user"].id,
-                seed_periods[0].start_date, last_covered_day(seed_periods[0]),
+            by_span = spending_analysis.query_settled_expenses(
+                cash_flow, seed_user["scenario"].id,
+                AttributionSpan(
+                    seed_periods[0].start_date,
+                    last_covered_day(seed_periods[0]),
+                ),
             )
             # "No shadow" is the database's since plan step
             # balance:X-bi-6-4d-2: a row naming a transfer is refused at the
             # write (ruling R-BAL258), so a per-row ``transfer_id is None``
             # check here passed with ``own_rows_clause``'s ``IS NULL`` term
-            # deleted (measured 10-15) and is gone.
+            # deleted (measured 10-15) and is gone.  Each load is one list,
+            # checked by ``cell_key`` (ruling plan#2218, where it read the two
+            # halves of ``PlanItems``): the same items, in the same order.
             for items in (by_period, by_span):
-                assert [row.name for row in items.rows] == ["Rent"]
-                assert [
-                    (leg.transfer.id, leg.account_id, leg.is_expense)
-                    for leg in items.legs
-                ] == [(settled.id, checking.id, True)]
+                assert [cell_key(item) for item in items] == [
+                    rent.id, (settled.id, checking.id),
+                ]
+                assert items[0].name == "Rent" and items[1].is_expense
 
     def test_every_figure_the_report_derives_from_a_leg(
         self, app, seed_user, seed_periods, db,
@@ -1746,13 +1753,14 @@ class TestATransferIsALegOfItsParent:
             cash_flow = CashFlowSet.single(checking)
 
             by_period = spending_analysis.query_settled_expenses(
-                seed_user["scenario"].id, [period.id], cash_flow,
+                cash_flow, seed_user["scenario"].id, Paychecks((period.id,)),
             )
-            by_span = spending_analysis.query_settled_expenses_in_span(
-                seed_user["scenario"].id, cash_flow, seed_user["user"].id,
-                period.start_date, last_covered_day(period),
+            by_span = spending_analysis.query_settled_expenses(
+                cash_flow, seed_user["scenario"].id,
+                AttributionSpan(period.start_date, last_covered_day(period)),
             )
-            assert by_period.legs == [] and by_span.legs == []
+            # No row is seeded, so the one list is the legs (ruling plan#2218).
+            assert by_period == [] and by_span == []
             report = compute_spending_report(
                 seed_user["user"].id, _pp_window(period), user_settings=None,
             )
@@ -1783,9 +1791,11 @@ class TestATransferIsALegOfItsParent:
             )
             db.session.commit()
 
+            # No row is seeded, so the one list is the legs (ruling plan#2218).
             [leg] = spending_analysis.query_settled_expenses(
-                seed_user["scenario"].id, [period.id], CashFlowSet.single(checking),
-            ).legs
+                CashFlowSet.single(checking), seed_user["scenario"].id,
+                Paychecks((period.id,)),
+            )
             assert leg.transfer.id == zero.id and leg.record is None
             assert settled_contribution(parent_of(leg)) == Decimal("0")
             assert leg.settled_on is None and leg.days_paid_before_due is None
@@ -1892,8 +1902,9 @@ class TestATransferIsALegOfItsParent:
             )
             db.session.commit()
             items = spending_analysis.query_settled_expenses(
-                seed_user["scenario"].id, [period.id], CashFlowSet.single(checking),
-            ).items
+                CashFlowSet.single(checking), seed_user["scenario"].id,
+                Paychecks((period.id,)),
+            )
             basis = derived_amount_basis(
                 seed_user["user"].id, seed_user["scenario"].id,
             )

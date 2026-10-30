@@ -39,6 +39,7 @@ from app.services.pay_calendar import PayCadence
 from app.services import transfer_service
 from app.services import balance_at, savings_dashboard_service
 from app.services.balance_at import BalanceContext
+from app.services.transfer_legs import cell_key
 from tests._test_helpers import (
     create_account_of_type,
     create_transfer,
@@ -1237,8 +1238,8 @@ class TestTheBillsAreLegsReadOffTheParent:
     ):
         """$300.00 Rent and a $400.00 checking -> Sweep Target transfer, one period.
 
-        The unpaid loader answers Rent as the one row and the transfer as its
-        one EXPENSE leg on checking, and ``items`` is the rows then the legs.
+        The unpaid loader answers one list: Rent, the one row, then the
+        transfer's one EXPENSE leg on checking.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -1246,7 +1247,7 @@ class TestTheBillsAreLegsReadOffTheParent:
             savings = create_savings_account(
                 seed_user, db.session, "Sweep Target", Decimal("0.00"),
             )
-            self._expense_on(
+            rent = self._expense_on(
                 seed_user, period, checking, "Rent", "300.00", date(2026, 3, 22),
             )
             transfer = create_transfer(
@@ -1265,12 +1266,10 @@ class TestTheBillsAreLegsReadOffTheParent:
             # write (ruling R-BAL258), so a per-row ``transfer_id is None``
             # check here passed with ``own_rows_clause``'s ``IS NULL`` term
             # deleted (measured 10-15) and is gone.
-            assert [row.name for row in unpaid.rows] == ["Rent"]
-            assert [
-                (leg.transfer.id, leg.account_id, leg.is_expense)
-                for leg in unpaid.legs
-            ] == [(transfer.id, checking.id, True)]
-            assert unpaid.items == [*unpaid.rows, *unpaid.legs]
+            assert [cell_key(item) for item in unpaid] == [
+                rent.id, (transfer.id, checking.id),
+            ]
+            assert unpaid[0].name == "Rent" and unpaid[1].is_expense
 
     def test_a_leg_bill_is_keyed_by_the_pair_and_named_from_its_endpoints(
         self, app, seed_user, seed_periods, db,
@@ -1332,7 +1331,7 @@ class TestTheBillsAreLegsReadOffTheParent:
             unpaid = _bills._query_unpaid_expense_rows(  # pylint: disable=protected-access
                 section.cash_flow, seed_user["scenario"].id, [period.id],
             )
-            assert unpaid.legs == []
+            assert unpaid == []
             result = dashboard_service.compute_pulse_section(section)
             assert result["still_due"]["current_period"] == Decimal("0.00")
             assert result["due_soon"] == []
@@ -1360,7 +1359,7 @@ class TestTheBillsAreLegsReadOffTheParent:
             unpaid = _bills._query_unpaid_expense_rows(  # pylint: disable=protected-access
                 section.cash_flow, seed_user["scenario"].id, [period.id],
             )
-            assert unpaid.legs == [] and unpaid.rows == []
+            assert unpaid == []
             result = dashboard_service.compute_pulse_section(section)
             assert result["still_due"]["current_period"] == Decimal("0.00")
             assert result["due_soon"] == []

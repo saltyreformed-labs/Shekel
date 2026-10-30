@@ -92,7 +92,7 @@ def _build_surprises(
         # 116 settled rows the cutovers declared, the 78 EXPENSE ones -- 59
         # template-priced and 19 transfer shadows -- ALL reproduce their stored
         # plan, with no refusals.  The seven that differ are salary INCOME,
-        # which neither query feeding this list can return (both filter
+        # which the loader feeding this list cannot return (it filters
         # ``transaction_type_id`` to the expense type), and they differ because
         # ``salary.calibration_overrides`` is REPLACED in place rather than
         # effective-dated, so a past paycheck re-derives under today's
@@ -140,8 +140,9 @@ def _build_surprises(
     # (finding **P74**, developer ruling 2026-08-25).  Keyed on ``abs(delta)``
     # alone, two rows that missed their estimate by the same amount were
     # separated only by the order ``query_settled_expenses`` happened to
-    # return them in -- which carries no ``ORDER BY`` -- so at the boundary the
-    # database decided WHICH ROW IS ON THE SCREEN, not merely in what order.
+    # return them in -- which carried no ``ORDER BY`` until plan step
+    # plan#2130 -- so at the boundary the database decided WHICH ROW IS ON THE
+    # SCREEN, not merely in what order.
     # ``item_key`` is the item's identity, so the five shown are now a
     # function of the data -- through ``key_order``, the one total order over
     # a row's id and a leg's pair, since a leg joined the list (X-bi-6-1b).

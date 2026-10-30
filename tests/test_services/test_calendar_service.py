@@ -13,10 +13,10 @@ from decimal import Decimal
 
 from app import ref_cache
 from app.services.cash_flow_set import CashFlowSet
+from app.services.transfer_legs import cell_key
 from app.exceptions import BaselineMissingError
 from app.enums import StatusEnum, TxnTypeEnum
 from app.models.salary_profile import SalaryProfile
-from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from unittest.mock import patch
 
@@ -1804,12 +1804,12 @@ class TestATransferIsALegOfItsParent:
     """The calendar draws a transfer as a LEG read off its parent (leaf X-bi-6-1b).
 
     ``_query_transactions_for_range`` answers the set's OWN rows -- no
-    shadow -- beside one leg per transfer the set touches, on the side the
-    set shows, and the day fold prices a leg through ``contributions_by_key``
-    keyed by ``cell_key``.  The money cases above (R-CC23, the far leg)
-    already grade what a transfer is WORTH here; these grade what it IS, and
-    the two states a display leg adds to the fold's: settled with a record,
-    and excluded.
+    shadow -- then one leg per transfer the set touches, on the side the
+    set shows, as one list (plan step plan#2130), and the day fold prices a
+    leg through ``contributions_by_key`` keyed by ``cell_key``.  The money
+    cases above (R-CC23, the far leg) already grade what a transfer is WORTH
+    here; these grade what it IS, and the two states a display leg adds to
+    the fold's: settled with a record, and excluded.
     """
 
     def test_the_loader_answers_own_rows_and_both_sides_legs(
@@ -1821,6 +1821,9 @@ class TestATransferIsALegOfItsParent:
         checking -> savings transfer; savings holds no row of its own.
         Checking's load answers the Rent row alone and one EXPENSE leg on
         checking; savings' answers no row and one INCOME leg on savings.
+        Each is one list, checked by ``cell_key`` (ruling plan#2218, where it
+        read the two halves of ``PlanItems``): the same items, in the same
+        order, rows then legs.
         Until plan step ``balance:X-bi-6-4d-2`` the case also read that no row
         checking's load answered named a transfer (a shadow); no row can since
         (``ck_transactions_names_no_transfer`` refused one until plan step
@@ -1832,7 +1835,7 @@ class TestATransferIsALegOfItsParent:
             savings = create_savings_account(
                 seed_user, db.session, "Savings", Decimal("0.00"),
             )
-            _add_transaction(
+            rent = _add_transaction(
                 db.session, seed_user, seed_periods[0], "Rent", "300.00",
                 due_date=date(2026, 1, 5),
             )
@@ -1847,20 +1850,19 @@ class TestATransferIsALegOfItsParent:
             on_checking = _query_transactions_for_range(
                 CashFlowSet.single(checking), ctx.scenario_id, periods,
             )
-            assert [row.name for row in on_checking.rows] == ["Rent"]
-            assert [
-                (leg.transfer.id, leg.account_id, leg.is_income)
-                for leg in on_checking.legs
-            ] == [(transfer.id, checking.id, False)]
+            assert [cell_key(item) for item in on_checking] == [
+                rent.id, (transfer.id, checking.id),
+            ]
+            assert on_checking[0].name == "Rent"
+            assert on_checking[1].is_income is False
 
             on_savings = _query_transactions_for_range(
                 CashFlowSet.single(savings), ctx.scenario_id, periods,
             )
-            assert on_savings.rows == []
-            assert [
-                (leg.transfer.id, leg.account_id, leg.is_income)
-                for leg in on_savings.legs
-            ] == [(transfer.id, savings.id, True)]
+            assert [cell_key(item) for item in on_savings] == [
+                (transfer.id, savings.id),
+            ]
+            assert on_savings[0].is_income is True
 
     def test_a_settled_leg_is_a_paid_cell_worth_its_record(
         self, app, seed_user, seed_periods, db,
@@ -1938,6 +1940,21 @@ class TestATransferIsALegOfItsParent:
     def test_a_cancelled_transfers_leg_is_not_a_cell(
         self, app, seed_user, seed_periods, db,
     ):
+        """A $250.00 checking -> savings transfer due 01-06, then cancelled: no cell on the 6th.
+
+        The calendar loads the balance-contributing band
+        (``StatusBand.BALANCE_CONTRIBUTING``), and since ruling plan#2262
+        deleted the Python re-check in ``_assign_transactions_to_days`` the
+        band's clause over ``Transfer`` is the one thing that keeps a
+        cancelled transfer's leg off the calendar.  This is the calendar's
+        only grade of that clause.  Measured 2026-10-30 with the clause
+        removed for ``Transfer`` alone: this case failed and no other in the
+        13 test files that drive the calendar did, beside the loader's own
+        band case (``test_plan_item_loader.py``) under it.  It failed on the
+        cell -- the 6th held a $0.00 "Transfer to Savings" entry -- while the
+        month's expenses still read $0.00, because a cancelled leg is worth
+        nothing, so the cell assertion is the one that grades the filter.
+        """
         with app.app_context():
             checking = seed_user["account"]
             savings = create_savings_account(
@@ -1961,45 +1978,6 @@ class TestATransferIsALegOfItsParent:
             assert 6 not in view.day_entries
             assert view.total_expenses == Decimal("0")
 
-    def test_the_predicate_guards_a_leg_on_both_surfaces(
-        self, app, seed_user, seed_periods, db, monkeypatch,
-    ):
-        """C10-4's lock over a LEG: drop the predicate from the SQL filter and
-        the Python re-check together and the cancelled transfer's leg leaks
-        into the day cell; either alone keeps it out (the belt-and-suspenders
-        design), so this is the one mutation that can grade the SQL arm over
-        ``Transfer``."""
-        with app.app_context():
-            checking = seed_user["account"]
-            savings = create_savings_account(
-                seed_user, db.session, "Savings", Decimal("0.00"),
-            )
-            transfer = create_transfer(
-                seed_user, db.session, checking, savings, seed_periods[0],
-                amount=Decimal("250.00"), due_date=date(2026, 1, 6),
-            )
-            db.session.commit()
-            transfer_service.update_transfer(
-                transfer.id, seed_user["user"].id,
-                status_id=ref_cache.status_id(StatusEnum.CANCELLED),
-            )
-            db.session.commit()
-
-            from app.services import calendar_service as cs
-            monkeypatch.setattr(
-                cs, "balance_contributing_clause",
-                lambda model_class=Transaction: model_class.is_deleted.is_(False),
-            )
-            monkeypatch.setattr(cs, "is_balance_contributing", lambda _txn: True)
-
-            leaked = calendar_service.get_month_detail(
-                user_id=seed_user["user"].id, year=2026, month=1,
-                user_settings=None,
-            )
-            assert [e.item_key for e in leaked.day_entries[6]] == [
-                (transfer.id, checking.id),
-            ]
-
 
 # ── F-3 / W-065 balance-contributing predicate ─────────────────────
 
@@ -2010,10 +1988,13 @@ class TestBalanceContributingPredicate:
     excludes Cancelled + Credit).
 
     Locks the post-Commit-10 (follow-up) behaviour so a future change
-    that drops the predicate from either the SQL filter in
-    ``_query_transactions_for_range`` or the Python re-check in
-    ``_assign_transactions_to_days`` fails loud with a concrete
-    arithmetic divergence rather than a silent display regression.
+    that drops the predicate from the SQL filter in
+    ``_query_transactions_for_range`` fails loud with a concrete
+    arithmetic divergence rather than a silent display regression.  C10-2
+    sees that directly since ruling plan#2262 deleted the Python re-check in
+    ``_assign_transactions_to_days``, which hid the SQL filter from it; C10-4,
+    which stubbed both statements of the predicate to see it, went with the
+    re-check, as did its leg twin in ``TestATransferIsALegOfItsParent``.
     """
 
     def test_c10_1_projected_and_settled_both_contribute(
@@ -2182,102 +2163,6 @@ class TestBalanceContributingPredicate:
             # $100 and the Credit $50 contribute nothing to either half.
             assert column.expense == Decimal("700.00")
             assert column.income == Decimal("0.00")
-
-    def test_c10_4_regression_lock_predicate_drop_visible(
-        self, app, seed_user, seed_periods, db, monkeypatch,
-    ):
-        """F-3 / W-065 C10-4: regression lock for predicate removal.
-
-        Simulates the regression where the locked predicate is
-        dropped from BOTH the SQL filter and the Python re-check by
-        monkey-patching ``balance_contributing_clause`` to a
-        trivially-true predicate (only ``is_deleted=False``, the
-        pre-fix gate) and ``is_balance_contributing`` to ignore the
-        excludes_from_balance flag.  With the predicate dropped the
-        Cancelled and Credit rows leak into ``day_entries[5]`` and
-        the day cell renders four entries instead of the two the
-        locked Choice-2 semantic mandates.
-
-        The post-Commit-10-follow-up code MUST reject this
-        regression: with the production predicate in place this test
-        confirms the day shows exactly two contributing entries.
-        Then the monkey-patched regression run confirms the locked
-        behaviour: with the predicate removed, four entries appear.
-        A diff between the two locks the predicate's contribution.
-
-        Hand arithmetic on the four totals through ``effective_amount``:
-            Projected $500: effective = 500
-            Settled $200: effective = 200
-            Cancelled $100: excludes_from_balance=True, effective = 0
-            Credit $50: excludes_from_balance=True, effective = 0
-            Sum = 700.00 either way; the visible regression is the
-            entry-count contract (2 vs 4), which this test locks.
-        """
-        with app.app_context():
-            p0 = seed_periods[0]
-            _add_transaction(
-                db.session, seed_user, p0, "Projected Bill", "500.00",
-                due_date=date(2026, 1, 5),
-                status=StatusEnum.PROJECTED,
-            )
-            _add_transaction(
-                db.session, seed_user, p0, "Paid Bill", "200.00",
-                due_date=date(2026, 1, 5),
-                status=StatusEnum.DONE, settled_amount="200.00",
-            )
-            _add_transaction(
-                db.session, seed_user, p0, "Cancelled Bill", "100.00",
-                due_date=date(2026, 1, 5),
-                status=StatusEnum.CANCELLED,
-            )
-            _add_transaction(
-                db.session, seed_user, p0, "Credit Bill", "50.00",
-                due_date=date(2026, 1, 5),
-                status=StatusEnum.CREDIT,
-            )
-            db.session.commit()
-
-            # Production predicate: exactly two entries on Jan 5.
-            real = calendar_service.get_month_detail(
-                user_id=seed_user["user"].id,
-                year=2026,
-                month=1,
-                user_settings=None,
-            )
-            assert len(real.day_entries[5]) == 2
-            assert real.total_expenses == Decimal("700.00")
-
-            # Simulated regression: drop the predicate from both
-            # surfaces.  The SQL filter degrades to is_deleted-only;
-            # the Python re-check is short-circuited to always
-            # contribute.
-            from app.services import calendar_service as cs
-            # The stub takes the model class the real clause takes since leaf
-            # balance:X-bi-6-1b (the calendar asks it over ``Transfer`` too).
-            monkeypatch.setattr(
-                cs, "balance_contributing_clause",
-                lambda model_class=Transaction: model_class.is_deleted.is_(False),
-            )
-            monkeypatch.setattr(
-                cs, "is_balance_contributing", lambda _txn: True,
-            )
-
-            regressed = calendar_service.get_month_detail(
-                user_id=seed_user["user"].id,
-                year=2026,
-                month=1,
-                user_settings=None,
-            )
-            # Predicate dropped: all four rows leak into the day cell.
-            assert len(regressed.day_entries[5]) == 4
-            # The visible-totals regression for a hypothetical future
-            # change that ALSO replaces effective_amount with
-            # estimated_amount would be 500 + 200 + 100 + 50 = 850;
-            # today's effective_amount zeroes Cancelled + Credit so
-            # the total stays 700.00 even with the predicate dropped.
-            # The entry-count contract above is the load-bearing
-            # regression lock.
-            assert regressed.total_expenses == Decimal("700.00")
 
 
 # ── Anchor-None contract (F-2 / Commit 11) ──────────────────────────

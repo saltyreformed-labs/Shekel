@@ -198,11 +198,11 @@ def compute_spending_report(
         return None
 
     ids = _ScopeIds(
-        user_id=user_id, cash_flow=cash_flow, scenario_id=scenario.id,
+        cash_flow=cash_flow, scenario_id=scenario.id,
         calendar=calendar_for(user_id),
     )
     resolved = _resolve_window(ids, window)
-    txns = _window_transactions(ids, resolved).items
+    txns = _window_transactions(ids, resolved)
 
     # The chart's twelve windows are DERIVED once, off the calendar the
     # scope already carries (plan step C2-f3d): the prior window is the

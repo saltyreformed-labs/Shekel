@@ -119,7 +119,6 @@ from tests._test_helpers import (
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY
 from app.services.balance_at import BalanceContext
-from app.services.cash_flow_set import PlanItems
 from app.routes.grid._items import build_amount_maps
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import parent_of
@@ -1597,9 +1596,7 @@ class TestTheBatchTier:
         legs = _legs_of(xfer)
         basis = _basis_for(seed_user)
 
-        shown = build_amount_maps(
-            PlanItems.of([paycheck, repriced], legs), basis,
-        ).budgets
+        shown = build_amount_maps([paycheck, repriced, *legs], basis).budgets
 
         assert set(shown) == {
             paycheck.id, repriced.id, *(leg.cell_key for leg in legs),
@@ -1813,7 +1810,8 @@ class TestTheBasisIsOneDerivationPerReadPass:
         # the refinement's one-profile read from the projection's.
         basis = built["basis"]
         touched = [text for text, _params in statements]
-        assert basis.salary._profiles is None, (  # pylint: disable=protected-access -- the derivation's memo IS the fact
+        # Pylint: ``protected-access`` -- the derivation's memo IS the fact.
+        assert basis.salary._profiles is None, (  # pylint: disable=protected-access
             "pricing an ordinary expense row must not resolve the paycheck "
             f"derivation; got {touched}"
         )
@@ -1821,8 +1819,10 @@ class TestTheBasisIsOneDerivationPerReadPass:
         # step recurrence:R25 (it was ``LoanPricing._loans``); its params memo
         # is the first thing any loan price loads, and the calendar is built
         # over it, so both empty is "no loan resolved".
-        terms = basis.loans._terms  # pylint: disable=protected-access -- likewise
-        assert not terms._params and not terms._calendars, (  # pylint: disable=protected-access -- likewise
+        # Pylint: ``protected-access`` -- the loan derivation's memo IS the fact.
+        terms = basis.loans._terms  # pylint: disable=protected-access
+        # Pylint: ``protected-access`` -- its two memos ARE the fact.
+        assert not terms._params and not terms._calendars, (  # pylint: disable=protected-access
             "pricing an ordinary expense row must not resolve the loan "
             f"derivation; got {touched}"
         )
@@ -1969,15 +1969,19 @@ class TestTheBasisIsOneDerivationPerReadPass:
 
         assert booked == displayed == Decimal("1499.10")
 
-    def test_one_read_pass_hands_out_the_SAME_basis(
+    def test_one_read_pass_hands_out_the_SAME_basis(  # pylint: disable=unused-argument
         self, app, db, seed_user, seed_periods,
-    ):  # pylint: disable=unused-argument
+    ):
         """``BalanceContext.amounts()`` memoizes, so a render holds one.
 
         Identity, not equality: two bases with the same pins ARE equal (the
         derivations are excluded from the comparison, exactly as
         ``BalanceContext``'s own memo caches are), so an equality assertion
         would pass on two objects that each resolve the projection separately.
+
+        Pylint: ``unused-argument`` -- ``app``, ``db`` and ``seed_periods``
+        are requested for the state they set up (the app context, the
+        database, the periods the read pass is built over), never read.
         """
         ctx = BalanceContext.build(seed_user["user"].id)
 
@@ -2407,6 +2411,7 @@ class TestTheAmountModelReadsNoClock:
         # Pylint: import-outside-toplevel -- the file-wide test convention.
         import pathlib  # pylint: disable=import-outside-toplevel
 
+        # Pylint: import-outside-toplevel -- the file-wide test convention.
         import app.services.cash_ledger as package  # pylint: disable=import-outside-toplevel
 
         return pathlib.Path(package.__file__).parent
@@ -2423,6 +2428,7 @@ class TestTheAmountModelReadsNoClock:
         # Pylint: import-outside-toplevel -- the file-wide test convention.
         import pathlib  # pylint: disable=import-outside-toplevel
 
+        # Pylint: import-outside-toplevel -- the file-wide test convention.
         import app.services.loan_payment_service as package  # pylint: disable=import-outside-toplevel
 
         found = _clock_calls_in(pathlib.Path(package.__file__).parent)

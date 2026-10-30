@@ -13,23 +13,22 @@ defined once rather than re-implemented per surface (coding-standards rule
 13; the T-P3 ``projection_inputs`` precedent, which closed a cross-file
 ``duplicate-code`` finding the same way):
 
-* :func:`query_settled_expenses` -- the settled-expense load selected by
-  a PERIOD SET (settled status, expense type, not deleted, scoped to the
-  owner's cash-flow set / scenario / period set).  Its one caller is the Spending report's
-  pay-period arm, which no route reaches today; the sibling below is what a
-  live render runs.  The two share their filters, so a change to what
-  "settled spending" selects is still a single edit.  **Each answers the
-  set's OWN rows beside the EXPENSE LEG of every settled transfer the set
-  touches, read off the parent in ``budget.transfers``** (leaf
-  ``balance:X-bi-6-1b``, ruling **R-BAL86**): a
-  :class:`~app.services.cash_flow_set.PlanItems`, where it was the rows
-  with the settled transfer-out shadow among them.
-* :func:`query_settled_expenses_in_span` -- the same filters selected
-  by the attribution rule instead of a period set: COALESCE(due_date,
-  owning period start) inside a calendar span, across ALL the user's pay
-  periods, over both tables.  The Spending report's calendar windows read
-  through it so a bill due in month M is attributed to M even when its
-  funding period does not overlap M.
+* :func:`query_settled_expenses` -- the settled-expense load (settled
+  status, expense type, not deleted, scoped to the owner's cash-flow set and
+  scenario) over the window its caller chooses: a PERIOD SET, or a calendar
+  span selected by the attribution rule -- COALESCE(due_date, owning period
+  start) inside the span, across ALL the owner's pay periods, so a bill due
+  in month M is attributed to M even when its funding period does not
+  overlap M.  The Spending report's calendar windows read the span, and its
+  pay-period arm, which no route reaches today, the period set.  **ONE
+  loader since plan step plan#2130** (ruling **plan#2218**), where two --
+  this and ``query_settled_expenses_in_span`` -- differed only in that
+  window, so a change to what "settled spending" selects is one edit by
+  construction rather than by two that agree.  It answers the set's OWN rows
+  beside the EXPENSE LEG of every settled transfer the set touches, read off
+  the parent in ``budget.transfers`` (leaf ``balance:X-bi-6-1b``, ruling
+  **R-BAL86**), as one list, where it was the rows with the settled
+  transfer-out shadow among them.
 * :func:`resolved_actual_amount` -- the settled-surprises kernel's
   plan-at-entry vs recorded-at-settle rule, a question about an item's
   PARENT (ruling **plan#1983**): a settled parent is worth what it RECORDED
@@ -52,9 +51,8 @@ defined once rather than re-implemented per surface (coding-standards rule
   ``balance:X-bi-6-4a``): a row-or-leg router for a predicate rather than a
   figure.
 
-Pure-function module -- no Flask imports; the only side effects are the two
-read queries, :func:`query_settled_expenses` and
-:func:`query_settled_expenses_in_span`.
+Pure-function module -- no Flask imports; the only side effects are
+:func:`query_settled_expenses`' reads.
 """
 
 import calendar as cal_mod
@@ -63,32 +61,19 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy.orm import joinedload, selectinload
 
-from app import ref_cache
-from app.enums import TxnTypeEnum
-from app.extensions import db
-from app.models.pay_period import PayPeriod
 from app.models.transaction import Transaction
-from app.models.transfer import Transfer
 from app.services.cash_flow_set import (
+    AttributionSpan,
     CashFlowSet,
-    PlanItems,
-    own_rows_clause,
-    set_transfer_legs,
-    set_transfer_legs_in_periods,
-    touched_transfers_clause,
+    Paychecks,
+    PlanScope,
+    StatusBand,
+    load_plan_items,
 )
 from app.services.pay_calendar import DerivedPeriod
 from app.services.cash_ledger import AmountBasis, resolve_amount
 from app.services.row_valuation import settled_figure
-from app.services.transfer_legs import (
-    PlanItem,
-    PlanParent,
-    TransferLeg,
-    expense_legs,
-    preload_side_records,
-)
-from app.utils.amount_relationships import transfer_pricing_load_options
-from app.utils.balance_predicates import settled_status_ids
+from app.services.transfer_legs import PlanItem, PlanParent, TransferLeg
 from app.utils.dates import pay_period_range_label
 from app.utils.money import CENTS, HUNDRED, ZERO
 
@@ -137,16 +122,41 @@ def validate_window(
 
 
 def query_settled_expenses(
-    scenario_id: int,
-    period_ids: list[int],
     cash_flow: CashFlowSet,
-) -> PlanItems:
-    """Load the settled expense items across the cash-flow set over given periods.
+    scenario_id: int,
+    window: Paychecks | AttributionSpan,
+) -> list[PlanItem]:
+    """Load the settled expense items across the cash-flow set in *window*.
 
-    Filters: settled status only (Paid/Received -- so Cancelled and
-    Credit, which are not settled, are excluded), expense type only, not
-    deleted, the owner's cash-flow set, one scenario, and ``pay_period_id``
-    in *period_ids* -- over the rows, and over the parents of the legs.
+    **The Spending report's scope, stated once** (plan step **plan#2130**,
+    ruling **plan#2218**): the set, the scenario, the window its caller
+    chooses, settled, expenses only -- which
+    :func:`~app.services.cash_flow_set.load_plan_items` turns into the rows'
+    query and the transfers' alike.  Settled status only (Paid/Received -- so
+    Cancelled and Credit, which are not settled, are excluded), expense type
+    only, not deleted.  Until that step two loaders, this and
+    ``query_settled_expenses_in_span``, each stated every one of those
+    filters over both tables and differed only in the window, under a
+    ``duplicate-code`` disable admitting the copy.
+
+    **The window is the caller's choice** (``spending_report_service._window
+    ._window_transactions``):
+
+    * :class:`~app.services.cash_flow_set.Paychecks` selects by period
+      MEMBERSHIP, ``pay_period_id IN (...)`` -- the report's pay-period arm.
+    * :class:`~app.services.cash_flow_set.AttributionSpan` selects by the
+      attribution rule: rows, and parents, whose ``COALESCE(due_date, owning
+      period start)`` falls inside the span, across ALL the owner's pay
+      periods.  The former period-overlap pre-filter under-fetched at window
+      boundaries: a settled bill due in month M whose funding period did not
+      overlap M was attributed to NO month window at all (its own period's
+      months excluded it by date; M never loaded its period).  Selecting by
+      the attribution day itself makes every settled expense belong to
+      exactly one calendar window, and the result no longer depends on which
+      window is viewed.  The COALESCE runs in SQL on the joined period row --
+      the same rule consumers previously applied in Python -- so the filter
+      and the attribution stay one definition, over a transfer's own
+      ``due_date`` (a leg's is its parent's) as over a row's.
 
     **The items are the PAYCHECK's across the set -- checking and its cards
     -- not one account's** (developer ruling ``credit_card:R-CC16``, plan
@@ -154,10 +164,9 @@ def query_settled_expenses(
     they are the set's OWN rows plus one LEG per settled transfer, read off
     the parent in ``budget.transfers`` rather than off a shadow row:
     :func:`~app.services.cash_flow_set.own_rows_clause` selects every
-    member's rows and no shadow, and :func:`~app.services.cash_flow_set
-    .set_transfer_legs_in_periods` draws each transfer the set touches from
-    the side :func:`~app.services.cash_flow_set.leg_accounts_shown` names
-    (ruling ``R-CC23``: once, from the balance line's side, when both
+    member's rows and no shadow, and each transfer the set touches is drawn
+    from the side :func:`~app.services.cash_flow_set.leg_accounts_shown`
+    names (ruling ``R-CC23``: once, from the balance line's side, when both
     endpoints are members), kept where it is the EXPENSE leg -- money that
     left, which is what spending is; the income leg on the far endpoint is
     not spend, as the income shadow's type never was.  A card payment is
@@ -165,18 +174,26 @@ def query_settled_expenses(
     ``Transaction.account_id == account_id``, then the paycheck-rows clause
     that carried the settled transfer-out shadow in as a row.
 
-    **It eager-loads ``category`` and NOT ``pay_period``**, and the second half
-    of that changed at pay-calendar plan step **C2-f3d** -- in BOTH queries,
-    for one reason: an AST and grep census over everything reachable from
-    ``compute_spending_report`` found no read of ``txn.pay_period`` anywhere.
-    The period IS the window on this path, so its identity is already resolved
-    (:func:`._window._resolve_window`), and neither the breakdown, the hero nor
-    ``settled_contribution`` asks a row which paycheck it sits in.  The load's
-    stated reason was that a caller "attributes by period", which no caller
-    does.
+    **Every side's record is pre-loaded** (``side_records``).  The timeliness
+    metric (:func:`payment_timeliness_from_txns`) reads every settled item's
+    RECORD: a row's through its ``entries``, which the row query loads
+    (``selectinload``), and a side's off its transfer's side list, loaded for
+    every side in ONE statement (``transfer_legs.preload_side_records``,
+    ruling **plan#2136**), where it would otherwise cost a query per side.
+
+    **It eager-loads ``category`` and NOT ``pay_period`` on a row**, and the
+    second half of that changed at pay-calendar plan step **C2-f3d** -- in
+    both windows' row queries, for one reason: an AST and grep census over
+    everything reachable from ``compute_spending_report`` found no read of
+    ``txn.pay_period`` anywhere.  The period IS the window on the pay-period
+    path, so its identity is already resolved
+    (:func:`._window._resolve_window`), and neither the breakdown, the hero
+    nor ``settled_contribution`` asks a row which paycheck it sits in.  The
+    load's stated reason was that a caller "attributes by period", which no
+    caller does.
 
     **THAT CENSUS STOPPED BEING TOTAL on 2026-09-05, and it is recorded here
-    rather than re-run because what changed was reachability, not this
+    rather than re-run because what changed was reachability, not the row
     query.**  The surprises list prices a row through
     ``cash_ledger.resolve_transaction_amount`` as of 2026-09-05 (the
     ``/analytics/spending`` fix), and rule 4's arm --
@@ -184,25 +201,27 @@ def query_settled_expenses(
     ``pay_period`` on every call, because that producer takes the period start
     eagerly.  **From plan step balance:X-au-f-2 it was the PARENT TRANSFER's
     period rather than the shadow's** (ruling R-BAL10 moved the answer to the
-    parent), so the chain this query would have had to load was
+    parent), so the chain the row query would have had to load was
     ``Transaction.transfer -> pay_period``; the count was unchanged and the
     relationship was not.  A row reached that arm only as a transfer's
     shadow, through rule 5: plan step ``balance:X-bi-6-4d-2`` deleted the
-    shadows and plan step ``balance:X-bi-6-5`` the rule, so no row this query
-    loads reaches it (a transaction's dispatch holds no rule 4); whether the
-    census is total again is not re-measured here.  The removal is not
-    re-litigated here, and whether this query should adopt
+    shadows and plan step ``balance:X-bi-6-5`` the rule, so no row this
+    loader loads reaches it (a transaction's dispatch holds no rule 4);
+    whether the census is total again is not re-measured here.  The removal
+    is not re-litigated here, and whether the row query should adopt
     ``amount_relationships.pricing_load_options`` -- which would re-add the
     ``pay_period`` load C2-f3d removed -- is finding **N-296**'s, whose census
-    of unguarded batch pricing callers this reader joined.
+    of unguarded batch pricing callers this reader joined.  A transfer
+    carries its pricing chain, its period among it, as every screen's does.
 
     **What the removal actually costs, said conditionally because the two
-    queries differ in whether they run.**  This one is reached only from the
-    pay-period arm, which no route builds (see :func:`._window._series_windows`),
-    so its ``joinedload`` executed on zero live renders; what it did there was
-    hydrate a ``PayPeriod`` per window into the identity map, which is what hid
-    the ``db.session.get`` the retired ordinal walk beside it ran.  The sibling
-    is the one every ``/analytics/spending`` render runs twelve times, and its
+    windows differ in whether they run.**  The period set is reached only
+    from the pay-period arm, which no route builds (see
+    :func:`._window._series_windows`), so its ``joinedload`` executed on zero
+    live renders; what it did there was hydrate a ``PayPeriod`` per window
+    into the identity map, which is what hid the ``db.session.get`` the
+    retired ordinal walk beside it ran.  The span is the one every
+    ``/analytics/spending`` render runs twelve times, and its
     ``contains_eager`` went too -- **its JOIN is load-bearing and its
     hydration was not**, which an earlier draft of this paragraph conflated:
     the COALESCE attribution filter runs on the join, so the join stays and
@@ -210,30 +229,27 @@ def query_settled_expenses(
     production: the same 29 rows with the same ids, six fewer columns each.
 
     Args:
+        cash_flow: The owner's cash-flow set, whose members' items to load.
         scenario_id: The budget scenario to scope to (the caller's
             baseline).
-        period_ids: The pay-period ids to include.  An empty list yields
-            an empty result.
-        cash_flow: The owner's cash-flow set, whose members' items to load.
+        window: The :class:`~app.services.cash_flow_set.Paychecks` (an empty
+            one loads nothing and issues no statement) or the
+            :class:`~app.services.cash_flow_set.AttributionSpan` to load.
 
     Returns:
-        The :class:`~app.services.cash_flow_set.PlanItems`: the matching
-        settled expense :class:`Transaction` rows and the expense legs of
-        the matching settled transfers, records loaded.
+        The settled expense :class:`Transaction` rows by id, ``category`` and
+        ``entries`` loaded, then the expense legs of the settled transfers,
+        their records loaded.
     """
-    expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-
-    # Pylint: ``duplicate-code`` -- the settled-expense query core.  The
-    # account / scenario / period / expense-type filter prefix coincides
-    # with ``dashboard_service``'s expense query, but the two diverge on the
-    # parts that matter (eager-loads and the settled-vs-projected status
-    # gate), so a shared builder would need both as parameters and save no
-    # logic (coding-standards rule 13).  One-sided ``duplicate-code``
-    # disable, mirroring the journal_entry/transfer FK-block precedent.
-    # pylint: disable=duplicate-code
-    rows = (
-        db.session.query(Transaction)
-        .options(
+    return load_plan_items(
+        PlanScope(
+            cash_flow=cash_flow,
+            scenario_id=scenario_id,
+            window=window,
+            band=StatusBand.SETTLED,
+            expenses_only=True,
+        ),
+        (
             joinedload(Transaction.category),
             # ``resolved_actual_amount`` asks ``row_valuation.settled_figure``,
             # which sums EVERY settled row's entries rather than reading a
@@ -242,144 +258,9 @@ def query_settled_expenses(
             # Spending report issues one SELECT per settled row where it
             # used to read a column; production carries 29 such rows.
             selectinload(Transaction.entries),
-        )
-        .filter(
-            own_rows_clause(cash_flow),
-            Transaction.scenario_id == scenario_id,
-            Transaction.pay_period_id.in_(period_ids),
-            Transaction.is_deleted.is_(False),
-            Transaction.transaction_type_id == expense_type_id,
-            Transaction.status_id.in_(settled_status_ids()),
-        )
-        .all()
+        ),
+        side_records=True,
     )
-    # pylint: enable=duplicate-code
-    return _settled_items(rows, set_transfer_legs_in_periods(
-        cash_flow, scenario_id, period_ids,
-        Transfer.status_id.in_(settled_status_ids()),
-    ))
-
-
-def query_settled_expenses_in_span(
-    scenario_id: int,
-    cash_flow: CashFlowSet,
-    user_id: int,
-    first_day: date,
-    last_day: date,
-) -> PlanItems:
-    """Load the settled expense items ATTRIBUTED to a calendar span.
-
-    The same filters as :func:`query_settled_expenses` -- the cash-flow
-    set's own rows and its settled transfers' expense legs, plan steps
-    CC-4-3 and ``balance:X-bi-6-1b`` -- selected by the attribution rule
-    instead of a period set: rows, and parents, whose ``COALESCE(due_date,
-    owning period start)`` falls inside ``[first_day, last_day]``, across
-    ALL the user's pay periods.  The former period-overlap pre-filter
-    under-fetched at window boundaries: a settled bill due in month M whose
-    funding period did not overlap M was attributed to NO month window at
-    all (its own period's months excluded it by date; M never loaded its
-    period).  Selecting by the attribution day itself makes every settled
-    expense belong to exactly one calendar window, and the result no longer
-    depends on which window is viewed.
-
-    The COALESCE runs in SQL on the joined period row -- the same rule
-    consumers previously applied in Python -- so the filter and the
-    attribution stay one definition; the transfer query joins the same
-    table on ``Transfer.pay_period_id`` and states the same COALESCE over
-    the parent's ``due_date``, which is the leg's.  It builds its own
-    query rather than calling :func:`~app.services.cash_flow_set
-    .set_transfer_legs_in_periods`, because that loader windows by period
-    MEMBERSHIP and this reader does not.
-
-    Args:
-        scenario_id: The budget scenario to scope to (the caller's
-            baseline).
-        cash_flow: The owner's cash-flow set, whose members' items to load.
-        user_id: The owning user (scopes the pay-period join).
-        first_day: The span's first calendar day (inclusive).
-        last_day: The span's last calendar day (inclusive).
-
-    Returns:
-        The :class:`~app.services.cash_flow_set.PlanItems`: the matching
-        settled expense :class:`Transaction` rows, with ``category``
-        eager-loaded like the sibling query (``pay_period`` is JOINED and
-        not loaded: the join carries the COALESCE filter above, and no
-        consumer reads the relationship, plan step C2-f3d), and the expense
-        legs of the matching settled transfers, records loaded.
-    """
-    expense_type_id = ref_cache.txn_type_id(TxnTypeEnum.EXPENSE)
-    attribution_day = db.func.coalesce(
-        Transaction.due_date, PayPeriod.start_date,
-    )
-    rows = (
-        db.session.query(Transaction)
-        .join(PayPeriod, Transaction.pay_period_id == PayPeriod.id)
-        .options(
-            joinedload(Transaction.category),
-            # The sibling query's reason, and the same consumer: see
-            # :func:`query_settled_expenses` above.
-            selectinload(Transaction.entries),
-        )
-        .filter(
-            own_rows_clause(cash_flow),
-            Transaction.scenario_id == scenario_id,
-            PayPeriod.user_id == user_id,
-            Transaction.is_deleted.is_(False),
-            Transaction.transaction_type_id == expense_type_id,
-            Transaction.status_id.in_(settled_status_ids()),
-            attribution_day >= first_day,
-            attribution_day <= last_day,
-        )
-        .all()
-    )
-    transfer_attribution_day = db.func.coalesce(
-        Transfer.due_date, PayPeriod.start_date,
-    )
-    transfers = (
-        db.session.query(Transfer)
-        .join(PayPeriod, Transfer.pay_period_id == PayPeriod.id)
-        .options(*transfer_pricing_load_options())
-        .filter(
-            touched_transfers_clause(cash_flow),
-            Transfer.scenario_id == scenario_id,
-            PayPeriod.user_id == user_id,
-            Transfer.is_deleted.is_(False),
-            Transfer.status_id.in_(settled_status_ids()),
-            transfer_attribution_day >= first_day,
-            transfer_attribution_day <= last_day,
-        )
-        .order_by(Transfer.id)
-        .all()
-    )
-    return _settled_items(rows, set_transfer_legs(cash_flow, transfers))
-
-
-def _settled_items(rows: list[Transaction], legs: list[TransferLeg]) -> PlanItems:
-    """Return *rows* and the expense half of *legs* as the window's items, every record loaded.
-
-    Where the report's two settled loaders (:func:`query_settled_expenses`,
-    :func:`query_settled_expenses_in_span`) meet.  The timeliness metric
-    (:func:`payment_timeliness_from_txns`) reads every settled item's RECORD:
-    a row's through its ``entries``, which each loader's query loads
-    (``selectinload``), and a leg's off its transfer's side list, loaded here
-    for every leg in ONE statement
-    (``transfer_legs.preload_side_records``, ruling **plan#2136**), where it
-    would otherwise cost a query per leg.  The grid's leg loader loaded them
-    for every reader until that ruling, the grid, the dashboard and the
-    calendar included, which read none.
-
-    Args:
-        rows: The window's settled expense rows, ``entries`` loaded.
-        legs: The legs the set draws for the window's settled transfers,
-            either side.
-
-    Returns:
-        The :class:`~app.services.cash_flow_set.PlanItems`: *rows*, then the
-        EXPENSE legs (:func:`~app.services.transfer_legs.expense_legs`).
-    """
-    spent = expense_legs(legs)
-    preload_side_records(leg.transfer for leg in spent)
-    return PlanItems.of(rows, spent)
 
 
 def resolved_actual_amount(parent: PlanParent, basis: AmountBasis) -> Decimal:

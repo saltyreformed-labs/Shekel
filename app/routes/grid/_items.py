@@ -65,10 +65,21 @@ def load_grid_items(cash_flow, balance_ctx, all_periods) -> list[PlanItem]:
     sides (finding **plan#2186**): a cell holding two rows -- a
     carried-forward row beside its period's own -- lists them in that order
     on every render, where it listed them in whatever order the planner
-    returned.  ``cash_flow=None`` (the user-with-zero-accounts edge case)
-    loads nothing: it ran the row query with no account filter at all until
-    that step, an owner scope missing from a query, which answered nothing
-    only because such an owner can hold no row.
+    returned.
+
+    **No set draws nothing.**  ``cash_flow`` is ``None`` for an owner with no
+    ACTIVE grid-eligible account -- one who archived their only checking
+    account as much as one who never opened any -- and the grid draws the
+    set's items, so there are none: the empty balance view beside them says
+    the same, as does every other screen with no set (the dashboard's and the
+    Spending report's empty states, the calendar's 404).  Until plan step
+    **plan#2130** this arm ran the row query with no account filter at all,
+    an owner scope missing from a query, and for the owner who archived their
+    accounts it listed every live row of their scenario -- any account's,
+    the archived ones' included -- under a balance line with no account to
+    place them on.  Its docstring called that result "naturally empty", true
+    only for an owner holding no row.  The step's adversarial review found
+    the difference; the design was decided under ruling **R-BAL207**.
 
     ``all_periods`` is the pass's reported window, every member of which is
     MATERIALISED -- so ``period_id`` is never ``None`` and the ``IN`` clause

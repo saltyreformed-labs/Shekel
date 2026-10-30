@@ -53,7 +53,7 @@ _MIN_SECRET_KEY_LENGTH = 32
 # ``ValueError`` from ``_reject_sentinel`` below, rather than a
 # generic Postgres "password authentication failed" at connect time.
 # See audit finding F-109 and the C-38 follow-up Issue 3 in
-# ``docs/audits/security-2026-04-15/c-38-followups.md``.
+# ``shekel-audits/security-2026-04-15/c-38-followups.md``.
 #
 # The token is intentionally specific (uppercase, hyphen-delimited,
 # 37 chars) so that a real password is extremely unlikely to contain
@@ -308,7 +308,7 @@ class BaseConfig:
     # storage exception bubbles up to the 500 handler -- the operator
     # sees an auth outage, not a silent posture degradation.  This is
     # the developer's deliberate choice over the operator-friendly
-    # fail-open default; see docs/audits/security-2026-04-15/
+    # fail-open default; see shekel-audits/security-2026-04-15/
     # remediation-plan.md Phase D-12.
     RATELIMIT_IN_MEMORY_FALLBACK_ENABLED = False
     RATELIMIT_SWALLOW_ERRORS = False

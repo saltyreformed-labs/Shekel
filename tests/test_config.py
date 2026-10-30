@@ -844,7 +844,8 @@ class TestRateLimitConfig:
         Both flags must be False so that a storage outage surfaces as a
         request error (eventually 500) rather than silently degrading
         to per-worker memory counts (which would re-introduce F-034
-        drift mid-flight).  See remediation-plan.md Phase D-12.
+        drift mid-flight).  See
+        shekel-audits/security-2026-04-15/remediation-plan.md Phase D-12.
         """
         assert BaseConfig.RATELIMIT_IN_MEMORY_FALLBACK_ENABLED is False
         assert BaseConfig.RATELIMIT_SWALLOW_ERRORS is False

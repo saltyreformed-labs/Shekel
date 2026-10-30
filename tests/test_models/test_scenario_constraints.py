@@ -18,7 +18,7 @@ test), so the partial unique index is the database-tier backstop for a
 defective caller that bypasses the route.
 
 Audit reference: H-2 of
-docs/audits/security-2026-04-15/model-migration-drift.md.
+shekel-audits/security-2026-04-15/model-migration-drift.md.
 """
 # pylint: disable=redefined-outer-name  -- pytest fixture pattern
 from __future__ import annotations

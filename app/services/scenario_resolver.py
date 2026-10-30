@@ -9,7 +9,7 @@ that must NOT spill into what-if scenarios.
 
 Centralising the lookup in one helper closes the DRY violation that
 pylint R0801 flagged across those services (Issue 1 of the
-``docs/audits/security-2026-04-15/c-38-followups.md`` audit) and
+``shekel-audits/security-2026-04-15/c-38-followups.md`` audit) and
 gives a single place to extend the resolution logic (e.g. honouring
 a future ``UserSettings.default_scenario_id`` override) without
 chasing seven copies.

@@ -12,7 +12,7 @@ anyone who can read the cookie -- the user's browser, a malicious
 extension, or anyone with read access to a shared profile.
 
 If any of these tests starts failing, the F-031 fix has regressed.
-Related: ``docs/audits/security-2026-04-15/remediation-plan.md`` C-05.
+Related: ``shekel-audits/security-2026-04-15/remediation-plan.md`` C-05.
 """
 
 from datetime import datetime, timedelta, timezone

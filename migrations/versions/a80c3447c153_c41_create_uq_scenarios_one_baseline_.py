@@ -2,7 +2,7 @@
 
 Closes audit finding F-069 (commit C-41 of the 2026-04-15 security
 remediation plan) and the production side of H-2 in
-``docs/audits/security-2026-04-15/model-migration-drift.md``.
+``shekel-audits/security-2026-04-15/model-migration-drift.md``.
 
 The partial unique index ``uq_scenarios_one_baseline`` on
 ``budget.scenarios (user_id) WHERE is_baseline = TRUE`` was declared
@@ -50,7 +50,7 @@ by migration
 ``724d21236759_drop_redundant_transaction_check_.py`` (commit
 ``9a5cca1``, 2026-05-10), so this migration only handles the F-069
 side.  See
-``docs/audits/security-2026-04-15/model-migration-drift.md`` H-1 for
+``shekel-audits/security-2026-04-15/model-migration-drift.md`` H-1 for
 the duplicate-CHECK history.
 
 Pre-flight duplicate-baseline detection refuses the upgrade if any

@@ -40,7 +40,7 @@ NULL`` columns every row needs so that the INSERT reaches the CHECK under test
 rather than dying on a null.
 
 Audit reference: H-3 of
-docs/audits/security-2026-04-15/model-migration-drift.md.
+shekel-audits/security-2026-04-15/model-migration-drift.md.
 """
 # pylint: disable=redefined-outer-name  -- pytest fixture pattern
 from __future__ import annotations

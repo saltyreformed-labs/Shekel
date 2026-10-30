@@ -12,7 +12,7 @@
 # a safe project name regardless of directory.
 #
 # Primary workflow (operator decision 2026-06-12, parity audit
-# docs/audits/dev-prod-parity/findings.md): the CONTAINERIZED app is
+# shekel-audits/dev-prod-parity/findings.md): the CONTAINERIZED app is
 # the daily dev server -- full production parity (same entrypoint
 # pipeline incl. the audit-trigger boot gate, least-privilege
 # shekel_app role, redis-backed fail-closed rate limiting, hardened
@@ -47,7 +47,7 @@ services:
   db:
     # Digest-pinned to the SAME postgres build production runs (parity
     # audit 2026-06-12, finding D15 in
-    # docs/audits/dev-prod-parity/findings.md).  Tag-only pins let dev
+    # shekel-audits/dev-prod-parity/findings.md).  Tag-only pins let dev
     # and prod drift to different PG patch levels on pull timing; bump
     # this digest and the one in docker-compose.yml's db service in the
     # same commit.

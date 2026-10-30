@@ -28,7 +28,7 @@ negative-amount Transaction slip past the storage tier and into
 balance projections.
 
 Audit reference: H-1 of
-docs/audits/security-2026-04-15/model-migration-drift.md.
+shekel-audits/security-2026-04-15/model-migration-drift.md.
 """
 # pylint: disable=redefined-outer-name  -- pytest fixture pattern
 from __future__ import annotations

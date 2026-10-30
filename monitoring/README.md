@@ -21,7 +21,7 @@ network and no per-app scrape config are required on the Shekel side.
 Historical note: an earlier iteration of this document described a Promtail-based pipeline that
 required attaching the app container to a shared `monitoring` network. That pipeline was replaced by
 Alloy; the app-side network coupling was removed from `docker-compose.build.yml` in the same cleanup
-(parity audit 2026-06-12, finding M06 in `docs/audits/dev-prod-parity/findings.md`).
+(parity audit 2026-06-12, finding M06 in `shekel-audits/dev-prod-parity/findings.md`).
 
 ## What the Shekel side guarantees
 

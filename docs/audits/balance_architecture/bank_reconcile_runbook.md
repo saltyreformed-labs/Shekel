@@ -83,9 +83,16 @@ and the check then refuses the copy as one no act sheet describes.
 before an act, and a save from one posts what it rendered.
 
 **4. Run every block from the checkout holding `card/1192`**, outside `~/projects/Shekel` (a
-checkout inside it loads that folder's `.env`). The harness files are that checkout's. The app
-the rehearsal and the check run is PRODUCTION's: the CODE block exports the deployed revision's
-`app/` into the handoff folder, and every block runs it from there. The act sheet and the
+checkout inside it loads that folder's `.env`). The harness files are that checkout's, and **its
+tree must hold no change git sees**, no edit and no untracked file git does not ignore: the CODE
+block records its commit beside production's revision and refuses a tree that differs from it,
+and the REHEARSAL, PRE-ACT and POST blocks each stop unless both are still the ones recorded. So
+from the CODE block until the POST block has run, commit, pull or edit nothing in that checkout,
+let no session work in it (quill's own commands commit there), and deploy nothing to production:
+a change after act 1 has the POST block refuse with the money moved. What git ignores is not
+checked: the `.venv` the checkout links to, which other checkouts share, and an ignored `.env`.
+The app the rehearsal and the check run is PRODUCTION's: the CODE block exports the deployed
+revision's `app/` into the handoff folder, and every block runs it from there. The act sheet and the
 disagreement list run that checkout's own `app/`, which the sheet needs: it reads each
 movement's id from the day drill-down, which carries them since task plan#2372. **That
 checkout's models must read production's schema**: measured 2026-10-31, `migrations/` differs
@@ -120,11 +127,29 @@ on() { app=$1 db=$2 out=$3; shift 3
   echo "exit $rc  ($*)"; return $rc; }
 prod() { on "$D/app_$T" "$@"; }
 here() { on "$H" "$@"; }
+# The revision production's app runs, as its image names it.
+deployed() { docker inspect shekel-prod-app --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'; }
+# Stops unless git sees no change in $H: no edit, staged or not, and no untracked file it does
+# not ignore.
+clean() { s=$(git -C "$H" status --porcelain --untracked-files=normal) && [ -z "$s" ] ||
+  { printf '%s\n' "$s"; echo "STOPPED: $H holds changes no commit records"; return 1; }; }
+# Stops unless T names a run of today's, and production and $H still run the two revisions its
+# CODE block recorded in revision_$T.txt: production's, then $H's commit.
+same_code() { f="$D/revision_$T.txt"
+  [ "${T%%_*}" = "$(date +%F)" ] || { echo "STOPPED: T=$T is not a run of today's"; return 1; }
+  [ -f "$f" ] || { echo "STOPPED: no $f"; return 1; }
+  [ "$(deployed)" = "$(sed -n 1p "$f")" ] ||
+    { echo "STOPPED: production now runs $(deployed), not the revision rehearsed"; return 1; }
+  clean || return 1
+  [ "$(git -C "$H" rev-parse HEAD)" = "$(sed -n 2p "$f")" ] ||
+    { echo "STOPPED: $H is now at $(git -C "$H" rev-parse HEAD), not the commit rehearsed"; return 1; }
+  echo "SAME CODE: production still runs $(sed -n 1p "$f"), and $H the commit rehearsed"; }
 ```
 
-Then the CODE block: it names the run, records the deployed revision, exports that revision's
-`app/`, and takes the dump. **The dump is also the performance's backup**, and the REHEARSAL
-block restoring it is what proves it restores.
+Then the CODE block: it names the run, refuses a checkout `$H` git sees a change in, records the
+deployed revision and `$H`'s commit, exports that revision's `app/`, and takes the dump. **The
+dump is also the performance's backup**, and the REHEARSAL block restoring it is what proves it
+restores.
 
 ```bash
 T=$(date +%F_%H%M%S)                   # names every file this run writes
@@ -132,7 +157,8 @@ T=$(date +%F_%H%M%S)                   # names every file this run writes
   [ -d "$D" ] || { echo "STOPPED: no folder $D"; exit 1; }
   for f in "$SECU" "$CARD"; do [ -f "$D/$f" ] || { echo "STOPPED: no file $D/$f"; exit 1; }; done
   [ "$(git -C "$H" rev-parse --abbrev-ref HEAD)" = card/1192 ] || { echo "STOPPED: $H is not on card/1192"; exit 1; }
-  REV=$(docker inspect shekel-prod-app --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+  clean
+  REV=$(deployed)
   [ -n "$REV" ] || { echo "STOPPED: the deployed image names no revision"; exit 1; }
   printf '%s\n%s\n' "$REV" "$(git -C "$H" rev-parse HEAD)" > "$D/revision_$T.txt"   # production's, then the harness's
   mkdir "$D/app_$T" && git -C "$H" archive "$REV" app | tar -x -C "$D/app_$T"
@@ -143,10 +169,13 @@ T=$(date +%F_%H%M%S)                   # names every file this run writes
 ```
 
 Then the REHEARSAL block. Its steps run inside `( set -e ... )`, so the FIRST failure stops
-them, says why, and nothing after it runs. It drops and rebuilds `$B` and `$R`, and nothing else.
+them, says why, and nothing after it runs. Its first, `same_code`, stops unless `T` is today's
+(a CODE block run before midnight is run again) and production and `$H` still run the revisions
+the CODE block recorded. It drops and rebuilds `$B` and `$R`, and nothing else.
 
 ```bash
 ( set -e
+  same_code
   restore $B "$D/prod_$T.dump"; restore $R "$D/prod_$T.dump"
   here $B "$D/act_sheet_$T.out" reconcile_act_sheet.py --clone $B --account $A \
         --secu "$D/$SECU" --card "$D/$CARD" --out "$D/act_sheet_$T.json"
@@ -161,7 +190,8 @@ them, says why, and nothing after it runs. It drops and rebuilds `$B` and `$R`, 
 )
 ```
 
-**The block must end `REHEARSED`, or the performance does not start.** The act sheet refuses,
+**The block must end `REHEARSED`, or the performance does not start**; its last gate is the
+PRE-ACT block, pasted just before act 1 (The acts, below). The act sheet refuses,
 writing nothing, a movement no class takes, a day whose unanswered movements do not add up to
 its residue, an export the import would refuse, and a books day the comparison cannot take. The
 rehearsal refuses BEFORE any write a copy named `shekel` or one on which any act's pre-state has
@@ -247,6 +277,19 @@ rehearsed.
 ## The acts
 
 Each act is headed as the sheet heads it.
+
+**First, the moment before act 1, the PRE-ACT block.** Paste the SETUP block if this terminal
+does not still hold it, then the PRE-ACT block with `T` set to the stamp in the name of the sheet
+you perform from, never the terminal's own `T`: a CODE block run again since names a run whose
+sheet you are not performing. A release deployed since the rehearsal leaves the sheet describing
+code production no longer runs, and a change in `$H` would have the POST block refuse after the
+money has moved, so the block reads both revisions again, and refuses a `T` not of today, before
+anything moves. **It must print `SAME CODE`, or the performance does not start.**
+
+```bash
+T=STAMP                                # from the name of the sheet you perform from: sheet_STAMP.md
+same_code
+```
 
 ### The import (act 1)
 
@@ -338,22 +381,19 @@ sheet's last two sections name.
 
 **On production, after the last act (the same day as the rehearsal).** Paste the SETUP block if
 this terminal does not still hold it, set `T` to the stamp in the rehearsal's sheet name, then
-paste the POST block. It compares against FILES the rehearsal wrote, never a live copy, and
-rebuilds `$P` only.
+paste the POST block. Its first step, `same_code`, stops unless `T` is today's and production
+and `$H` still run the revisions the CODE block recorded. It compares against FILES the
+rehearsal wrote, never a live copy, and rebuilds `$P` only.
 
 ```bash
 T=STAMP                                # from the sheet name of the rehearsal: sheet_STAMP.md
 ( set -e
-  [ "${T%%_*}" = "$(date +%F)" ] || { echo "STOPPED: T=$T is not a rehearsal of today's"; exit 1; }
-  for f in revision_$T.txt act_sheet_$T.json sheet_$T.md snapshot_$T.json check_rehearsed_$T.out \
+  same_code
+  for f in act_sheet_$T.json sheet_$T.md snapshot_$T.json check_rehearsed_$T.out \
            baseline_rehearsed_$T.json disagreements_rehearsed_$T.txt; do
     [ -f "$D/$f" ] || { echo "STOPPED: no $f in $D"; exit 1; }; done
   [ "$(tail -n 1 "$D/check_rehearsed_$T.out")" = "check complete; every connection was read-only" ] ||
     { echo "STOPPED: the rehearsed copy's check did not complete"; exit 1; }
-  REV=$(docker inspect shekel-prod-app --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
-  [ "$REV" = "$(head -n 1 "$D/revision_$T.txt")" ] ||
-    { echo "STOPPED: production now runs $REV, not the revision rehearsed"; exit 1; }
-  echo "SAME CODE: production still runs $REV"
   dump_prod "$D/prod_after_$T.dump"
   restore $P "$D/prod_after_$T.dump"
   prod $P "$D/check_performed_$T.out" reconcile_rehearsal.py --check --clone $P --account $A \
@@ -453,6 +493,23 @@ rendered; the post-state and the check, task plan#2416). Its door-driving half i
   nine of the sixteen pages a payback row in the "Credit Card" section shares the row's label.
   On a fresh restore of the same dump, the whole act sheet so performed printed plan#2451's
   check output exactly, and every balance figure was byte-identical to its baseline.
+* **2026-10-31 14:39, both revisions read again** (task plan#2453): the CODE block records
+  `$H`'s commit only from a tree git sees no change in, and the REHEARSAL, PRE-ACT and POST
+  blocks each read both revisions again through `same_code`. The five blocks, extracted verbatim
+  and run in an interactive zsh against a clone of `card/1192` holding this change as a commit
+  (the CODE block refused the checkout itself, which held it uncommitted), with two stand-ins
+  for production's dumps: the CODE block's dump was the dump of 2026-10-30, and the POST
+  block's after-dump was a dump of the rehearsed copy itself, so its three comparisons compared
+  that copy with itself and show only that the POST block runs to them (the 08:52 run above
+  compared two copies rehearsed apart). They printed `REHEARSED`, `SAME CODE` at the
+  REHEARSAL, PRE-ACT and POST blocks, and all three "AS REHEARSED" lines, every harness step
+  exiting 0; the rehearsal left the clone with no change git sees. Each refusal fired and wrote
+  nothing: an unstaged edit and an untracked file at the CODE block; a staged edit, and a
+  commit made after the rehearsal, at the PRE-ACT block; that commit at the POST block, before
+  its after-dump; and at the PRE-ACT block, a revision file naming a production revision other
+  than the deployed one, a `T` of another day, the block pasted with `STAMP` not filled in, a
+  `T` with no revision file, and the stamp of an earlier rehearsal whose recorded harness
+  commit was not the clone's.
 * **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
   full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
   turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a

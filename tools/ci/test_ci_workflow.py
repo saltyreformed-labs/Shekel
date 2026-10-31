@@ -77,7 +77,7 @@ INSTALL_STEP = "Install the lock"
 #: every job of every workflow but the two that build the app image (ci.yml's ``image`` and
 #: the release's), which run no Python on the runner.  The landing job holds a token and the
 #: release workflow publishes, so neither restores a cache; the scheduled runs keep none, as
-#: they kept no pip cache.
+#: they kept no pip cache, and the update workflow's keyed jobs hold a token too.
 INSTALLS = {
     ("ci.yml", "landing"): {"install": "landing", "cache": "false"},
     ("ci.yml", "tools"): {"install": "all", "cache": "true"},
@@ -89,6 +89,9 @@ INSTALLS = {
     ("calendar-sweep.yml", "sweep"): {"install": "all", "cache": "false"},
     ("tax-law.yml", "watch"): {"install": "runtime", "cache": "false"},
     ("docker-publish.yml", "tax-law"): {"install": "runtime", "cache": "false"},
+    ("updates.yml", "refresh"): {"install": "refresh", "cache": "false"},
+    ("updates.yml", "publish"): {"install": "landing", "cache": "false"},
+    ("updates.yml", "queue"): {"install": "landing", "cache": "false"},
 }
 
 #: The triggers under which a step's PATH write lets a pull request's code run with the
@@ -857,7 +860,8 @@ class TestTheInstallActionInstallsTheLock:
             "all": (0, [sync]),
             "runtime": (0, [f"{sync} --no-dev"]),
             "landing": (0, [f"{sync} --only-group landing"]),
-            "build": (0, [f"{sync} --only-group build"]),
+            "refresh": (0, [f"{sync} --only-group build --only-group landing"]),
+            "build": (1, []),
             "python": (0, ["venv"]),
             "dev": (1, []), "": (1, []), "all ": (1, []), "ALL": (1, []),
         }
@@ -880,3 +884,90 @@ class TestTheInstallActionInstallsTheLock:
                     assert path.read_text(encoding="utf-8") == "", (install, status)
                 if expected == 1:
                     assert "No install set" in result.stderr, install
+
+
+#: The update workflow (rulings plan#2448-plan#2450), its jobs that hold the App's key, and the
+#: module each of those runs.
+UPDATES = "updates.yml"
+KEYED = {"publish": "tools.update.publish", "queue": "tools.update.queue"}
+#: GitHub's own action that mints an App's installation token.
+MINT = "actions/create-github-app-token@"
+
+
+class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
+    """``updates.yml``: the job that runs package code sees no secret, each job holding the
+    App's key runs main's own code with the landing group alone and keeps no credential, and
+    each job runs only on the schedule its condition names, from main."""
+
+    @staticmethod
+    def _workflow() -> dict:
+        """The update workflow, read."""
+        return _workflows()[UPDATES]
+
+    def test_the_refresh_reads_dev_and_sees_no_secret(self):
+        """The refresh checks out ``dev`` and names no secret, variable or mint; no job widens
+        the workflow's read-only token."""
+        workflow = self._workflow()
+        refresh = workflow["jobs"]["refresh"]
+        text = yaml.safe_dump(refresh)
+        assert "secrets." not in text and "vars." not in text and MINT not in text
+        assert refresh["steps"][0]["with"] == {"ref": "dev", "persist-credentials": False}
+        assert workflow["permissions"] == {"contents": "read"}
+        assert not any("permissions" in job for job in workflow["jobs"].values())
+
+    def test_each_keyed_job_runs_mains_code_and_hands_its_token_to_one_step(self):
+        """Each keyed job checks out the workflow's own commit; the key goes to the mint alone,
+        narrowed to the two permissions the App holds, and the token to the one step after
+        it, which runs the job's module."""
+        for name, module in KEYED.items():
+            steps = self._workflow()["jobs"][name]["steps"]
+            assert steps[0]["uses"].startswith("actions/checkout@")
+            assert steps[0]["with"] == {"persist-credentials": False}, name
+            mint, use = steps[-2], steps[-1]
+            assert mint["uses"].startswith(MINT) and mint["id"] == "token", name
+            assert mint["with"] == {
+                "client-id": "${{ vars.UPDATE_APP_CLIENT_ID }}",
+                "private-key": "${{ secrets.UPDATE_APP_KEY }}",
+                "permission-contents": "write", "permission-pull-requests": "write"}, name
+            assert use["env"]["UPDATE_TOKEN"] == "${{ steps.token.outputs.token }}", name
+            assert use["run"].startswith(f"python -m {module}"), name
+            for step in steps[:-2]:
+                text = yaml.safe_dump(step)
+                assert "secrets." not in text and "steps.token" not in text, (name, step)
+
+    def test_each_job_runs_only_from_main_on_the_schedule_its_condition_names(self):
+        """The refresh on Monday's schedule or a dispatch, the queue on the daily one, each
+        only from main, whose code alone may hold the key; the publish only after the
+        refresh."""
+        workflow = self._workflow()
+        on = workflow.get(True, workflow.get("on"))
+        monday, daily = (entry["cron"] for entry in on["schedule"])
+        assert "workflow_dispatch" in on
+        jobs = workflow["jobs"]
+        main = "github.ref == 'refs/heads/main'"
+        assert " ".join(jobs["refresh"]["if"].split()) == (
+            f"{main} && (github.event_name == 'workflow_dispatch' || "
+            f"github.event.schedule == '{monday}')")
+        assert jobs["queue"]["if"] == f"{main} && github.event.schedule == '{daily}'"
+        assert jobs["publish"]["needs"] == "refresh" and "if" not in jobs["publish"]
+
+    def test_the_publish_reads_what_the_refresh_wrote_from_the_commit_it_read(self):
+        """The artifact the refresh uploads, which must hold a file, is the one the publish
+        downloads, to the folder each command names; the commit it is made on is the one the
+        refresh checked out."""
+        jobs = self._workflow()["jobs"]
+        refresh = {step["name"]: step for step in jobs["refresh"]["steps"]}
+        publish = {step["name"]: step for step in jobs["publish"]["steps"]}
+        upload = refresh["Upload what the refresh prepared"]["with"]
+        download = publish["Download what the refresh prepared"]["with"]
+        assert (upload["name"], upload["path"], upload["if-no-files-found"]) == (
+            download["name"], download["path"], "error")
+        assert upload["path"] == "${{ runner.temp }}/update"
+        assert refresh["Refresh the lock"]["run"].startswith(
+            'python -m tools.update.refresh "${RUNNER_TEMP}/update"\n')
+        assert publish["Publish each change"]["run"] == (
+            'python -m tools.update.publish "${RUNNER_TEMP}/update" "${BASE}"')
+        assert publish["Publish each change"]["env"]["BASE"] == (
+            "${{ needs.refresh.outputs.base }}")
+        assert jobs["refresh"]["outputs"] == {"base": "${{ steps.checkout.outputs.commit }}"}
+        assert jobs["refresh"]["steps"][0]["id"] == "checkout"

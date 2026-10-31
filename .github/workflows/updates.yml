@@ -1,0 +1,168 @@
+# Shekel Budget App -- The weekly dependency update
+#
+# Every package the lock holds is kept current with no session to start
+# (rulings plan#2351, plan#2448, plan#2449, plan#2450): a change that moves
+# pinned versions alone, none across a major, lands with no card, and anything
+# else, a new major included, waits for one.
+#
+#   refresh  Mondays, and on a dispatch from main: checks out dev and runs
+#            the Monday lock refresh (tools/update/refresh.py).  `uv lock`
+#            builds the metadata of the packages the lock holds only as source,
+#            which runs their code, so this job holds no secret and its token
+#            reads only.  What it prepares is uploaded as the run's artifact,
+#            beside the dev commit it read.
+#   publish  after refresh: holds the update App's key and runs main's own
+#            code, installing the landing group alone and running no package
+#            code (tools/update/publish.py).  It reads the artifact as data,
+#            refused whole where it holds anything outside its layout
+#            (tools/update/folder.py), so the most a poisoned refresh can do is
+#            open a pull request, which the landing check and the queue judge
+#            like any other.  Each change becomes one commit on the dev commit
+#            the refresh read: update/lock, and update/major/<package> for each
+#            package that waits for a card.
+#   queue    every day: holds the key and runs main's own code with the
+#            landing group (tools/update/queue.py).  Each open pull request by
+#            Dependabot or the App is judged on its trial merge by the landing
+#            check's own walk, and put in dev's merge queue at the head it
+#            judged when it moves pinned versions alone and its checks passed.
+#
+# THE KEY.  The App "Shekel updates" (Contents and Pull requests read and
+# write, installed on Shekel alone; ruling plan#2448), its private key the
+# UPDATE_APP_KEY secret and its Client ID the UPDATE_APP_CLIENT_ID variable.
+# GitHub's own action mints an installation token for one job, scoped to this
+# repository and those two permissions, and revokes it when the job ends, as
+# CI's landing job mints the tracker's (ruling balance:R-BAL311).  Only the
+# mint is handed the key and only the step that uses it the token.  The
+# workflow's own GITHUB_TOKEN could not do this: a pull request it opens or a
+# queue entry it makes starts no workflow run.
+#
+# WHOSE CODE.  GitHub runs a schedule only from main, so this workflow runs
+# from the release that brings it: refresh runs dev's refresh, publish and
+# queue main's own code (each keyed job checks out the workflow's commit).  A
+# dispatch from any other branch runs nothing: a branch's code never holds the
+# key here.
+#
+# WHEN.  The refresh at 11:17 UTC on Mondays (07:17 New York in summer), after
+# Dependabot's 06:00 New York run; the queue at 13:47 UTC every day, so the
+# Monday pull requests' checks have finished by its run.  Both off the top of
+# the hour, when GitHub may drop queued scheduled runs.  A job's condition
+# names its schedule as the trigger list spells it (tools/ci/test_ci_workflow.py
+# holds the two equal).
+
+name: Updates
+
+on:
+  schedule:
+    - cron: "17 11 * * 1"
+    - cron: "47 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 11 * * 1')
+    runs-on: ubuntu-26.04
+    outputs:
+      base: ${{ steps.checkout.outputs.commit }}
+    steps:
+      - name: Checkout dev
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          persist-credentials: false
+
+      # The build group, whose tools uv builds a source-only package's metadata
+      # with, and the landing group, which the refresh imports through quill.
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
+        with:
+          install: refresh
+          cache: "false"
+
+      # Its report, summary.md, is written once it has finished, whether or not
+      # anything moved, and goes on this run's page too.
+      - name: Refresh the lock
+        run: |
+          python -m tools.update.refresh "${RUNNER_TEMP}/update"
+          cat "${RUNNER_TEMP}/update/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload what the refresh prepared
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: update
+          path: ${{ runner.temp }}/update
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: refresh
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
+        with:
+          install: landing
+          cache: "false"
+
+      - name: Download what the refresh prepared
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: update
+          path: ${{ runner.temp }}/update
+
+      - name: Mint the update token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.UPDATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.UPDATE_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Publish each change
+        env:
+          UPDATE_TOKEN: ${{ steps.token.outputs.token }}
+          BASE: ${{ needs.refresh.outputs.base }}
+        run: python -m tools.update.publish "${RUNNER_TEMP}/update" "${BASE}"
+
+  queue:
+    if: github.ref == 'refs/heads/main' && github.event.schedule == '47 13 * * *'
+    runs-on: ubuntu-26.04
+    steps:
+      # The queue fetches each trial merge it judges from origin by its sha,
+      # with no credential: the repository is public.
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the lock
+        uses: $/.github/actions/install-lock
+        with:
+          install: landing
+          cache: "false"
+
+      - name: Mint the update token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.UPDATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.UPDATE_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Queue each version-only bot pull request
+        env:
+          UPDATE_TOKEN: ${{ steps.token.outputs.token }}
+          UPDATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        run: python -m tools.update.queue

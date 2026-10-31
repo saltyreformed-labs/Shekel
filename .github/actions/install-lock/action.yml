@@ -33,8 +33,10 @@ inputs:
       installs: the runtime set and the dev and build groups), ``runtime``
       (the runtime set and the build group, which psycopg-c compiles
       against; no dev tools), ``landing`` (the landing check's packages
-      alone, pyproject.toml's ``landing`` group) or ``python`` (the
-      interpreter and no package).
+      alone, pyproject.toml's ``landing`` group), ``build`` (the build group
+      alone, the tools ``uv lock`` builds a source-only package's metadata
+      with, for the Monday lock refresh) or ``python`` (the interpreter and
+      no package).
     required: true
   cache:
     description: >-
@@ -115,9 +117,10 @@ runs:
             all) "${sync[@]}" ;;
             runtime) "${sync[@]}" --no-dev ;;
             landing) "${sync[@]}" --only-group landing ;;
+            build) "${sync[@]}" --only-group build ;;
             python) "${UV}" venv ;;
             *)
-                echo "No install set '${INSTALL}': all, runtime, landing or python." >&2
+                echo "No install set '${INSTALL}': all, runtime, landing, build or python." >&2
                 exit 1
                 ;;
         esac

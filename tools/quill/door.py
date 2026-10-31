@@ -48,6 +48,11 @@ Each name, and who reads it:
   patterns the landing check reads a move with (``_versions``; ruling plan#2351).  ``NotVersions``:
   ``tools/release.release``, which reports a pinned file it cannot read (a lock that is no
   TOML, a link) as a listing made of nothing, and its tests.
+- ``lock_change``, ``LockChange``, ``lock_unversioned``, ``ceiling``, ``Move`` and ``LOCK``:
+  ``tools/update.refresh``, the Monday lock refresh, which holds back each package whose
+  move needs a card (a move across a major, below its next major; a move adding or
+  removing a package, at its version) and judges its lock by the landing check's own walk
+  before any pull request carries it (``_versions``; rulings plan#2351, plan#2450).
 - ``GitHubError``, ``TrackerError`` and ``CredentialsError``: ``tools/release.release``,
   which reports a failed read of the tracker, or App credentials it cannot use, as a
   release judged on nothing; ``described``, by which it prints that failure, as every
@@ -84,9 +89,11 @@ from tools.quill._state import (
     owner,
 )
 from tools.quill._tracker import Card, OutsideLink, Tracker, TrackerError
-from tools.quill._versions import NotVersions, Pin, pinned, pins_versions
+from tools.quill._versions import LOCK, LockChange, Move, NotVersions, Pin, ceiling
+from tools.quill._versions import lock_change, lock_unversioned, pinned, pins_versions
 
 __all__ = [
+    "LOCK",
     "MARKERS",
     "SHIPPABLE",
     "Card",
@@ -94,7 +101,9 @@ __all__ = [
     "FakeTracker",
     "GitHubError",
     "IgnoreFileError",
+    "LockChange",
     "MarkerConflict",
+    "Move",
     "NotVersions",
     "OWNED",
     "OutsideLink",
@@ -103,12 +112,15 @@ __all__ = [
     "TrackerError",
     "above",
     "card_of",
+    "ceiling",
     "changed",
     "changes",
     "described",
     "dropped",
     "dropped_above",
     "leaves_below",
+    "lock_change",
+    "lock_unversioned",
     "marker_changes",
     "markers_in",
     "merged_tree",

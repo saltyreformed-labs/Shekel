@@ -263,6 +263,27 @@ repos:
         files: ^tools/(rehearsal|ci)/.*\.py$
         pass_filenames: false
         args: [tools/rehearsal, -c, /dev/null, -q, -m, not cluster]
+      # tools/update: the Monday lock refresh (ruling plan#2351).  The same
+      # 10.00/10 floor and the same tests ci.yml step 4b runs.  It judges its
+      # lock through quill's door, so an edit to quill runs its tests too.
+      - id: pylint-update
+        name: pylint tools/update (10.00/10 floor)
+        entry: pylint
+        language: system
+        types: [python]
+        files: ^tools/update/.*\.py$
+        pass_filenames: false
+        args:
+          - tools/update/
+          - --fail-under=10
+          - --fail-on=E,F
+      - id: update-tests
+        name: tools/update unit tests
+        entry: pytest
+        language: system
+        files: ^tools/(update|quill)/.*\.py$
+        pass_filenames: false
+        args: [tools/update, -c, /dev/null, -q]
 
       # Every archived document says so on its first line (tools/ci/archive.py,
       # moved out of the plan gate when step X-cx's S3b deleted it): graded

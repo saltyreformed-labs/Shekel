@@ -247,8 +247,9 @@ jobs:
       # archive banner and the arc list the tools read; step X-cx's L4),
       # ``tools/release`` (what a release carries; step X-cx's L9a),
       # ``tools/split`` (the proved test-file split; step balance:X-er, ruling
-      # R-BAL301) and ``tools/rehearsal`` (the release rehearsal kit; step
-      # X-cx's K1, rulings R-BAL314 and R-BAL315).  A job of its own, beside
+      # R-BAL301), ``tools/rehearsal`` (the release rehearsal kit; step X-cx's
+      # K1, rulings R-BAL314 and R-BAL315) and ``tools/update`` (the Monday lock
+      # refresh; ruling plan#2351).  A job of its own, beside
       # lint and the shards rather than ahead of them.  ``yaml`` (PyYAML, in
       # the lock's dev group) is what ``tools/ci/test_ci_workflow.py`` reads
       # THIS file with, which is why the step follows the install.
@@ -268,6 +269,8 @@ jobs:
           pytest tools/split -c /dev/null -q
           pylint tools/rehearsal/ --fail-under=10 --fail-on=E,F --output-format=colorized
           pytest tools/rehearsal -c /dev/null -q -m "not cluster"
+          pylint tools/update/ --fail-under=10 --fail-on=E,F --output-format=colorized
+          pytest tools/update -c /dev/null -q
 
   tax-law:
     runs-on: ubuntu-26.04

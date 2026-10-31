@@ -64,8 +64,9 @@ from __future__ import annotations
 import re
 import tomllib
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
@@ -180,6 +181,20 @@ def _major(version: str) -> tuple[int, ...] | None:
         release.pop()
     end = next((at + 1 for at, number in enumerate(release) if number), 0)
     return (int(match["epoch"] or 0), *release[:end])
+
+
+def ceiling(version: str) -> str | None:
+    """The first release of the major after ``version``'s (:func:`_major`), as a ``<``
+    bound holds a package below it: ``14`` for ``13.0.1``, ``0.7`` for ``0.6.3``, ``2027``
+    for ``2026.5`` and ``1!3`` for ``1!2.0``, so every version from ``version`` up to it
+    names ``version``'s major; None where no such release follows (a version starting with
+    no release, or a release of zeros alone, whose every successor crosses a major)."""
+    if (major := _major(version)) is None or len(major) < 2:
+        return None
+    epoch, *release = major
+    release[-1] += 1
+    text = ".".join(map(str, release))
+    return f"{epoch}!{text}" if epoch else text
 
 
 def _exact(root: Path, path: str, oid: str) -> list[str]:
@@ -300,26 +315,71 @@ def _packages(lock: dict[str, object]) -> dict[str, dict[str, object]]:
     return {package["name"]: package for package in packages}
 
 
-def _lock(old: str, new: str) -> tuple[Move, ...]:
-    """Each version the change from the lock text ``old`` to ``new`` moves, by package name.
+@dataclass(frozen=True)
+class LockChange:
+    """What a change to the lock does (:func:`lock_change`): ``moves``, each package it moves,
+    by name; ``added`` and ``removed``, each package it adds or removes, by name; and
+    ``bringing``, each package whose move adds or removes one, by name, at its version
+    before (a package's new version needing a package the lock did not hold, or no longer
+    needing one only it needed)."""
+
+    moves: tuple[Move, ...]
+    added: tuple[str, ...]
+    removed: tuple[str, ...]
+    bringing: Mapping[str, str]
+
+
+def _needs(package: dict[str, object]) -> frozenset[str]:
+    """The packages a lock's ``package`` needs, each by name, its extras' included."""
+    extras = package.get("optional-dependencies", {})
+    entries = [*package.get("dependencies", []),
+               *(entry for needed in (extras.values() if isinstance(extras, dict) else ())
+                 for entry in needed)]
+    return frozenset(entry["name"] for entry in entries
+                     if isinstance(entry, dict) and isinstance(entry.get("name"), str))
+
+
+def lock_change(old: str, new: str) -> LockChange:
+    """What the change from the lock text ``old`` to ``new`` does (:class:`LockChange`), each
+    package both hold judged by the module's rules (:func:`_package`).
 
     Raises:
         NotVersions: when either is no TOML or holds a package :func:`_packages` refuses, or
-            the change moves more than versions (the module's rules), or one it moves names
-            no version :func:`_major` reads.
+            the change moves more than versions in a package both hold, or changes the
+            lock's header (the module's rules), or one it moves names no version
+            :func:`_major` reads.
     """
     before, after = _read(old), _read(new)
     if header := sorted(key for key in before.keys() | after.keys()
                         if key != "package" and before.get(key) != after.get(key)):
         raise NotVersions(f"{LOCK} changes its {', '.join(header)}")
     was, now = _packages(before), _packages(after)
-    if added := sorted(now.keys() - was.keys()):
-        raise NotVersions(f"{LOCK} adds {', '.join(added)}, a package of no version before")
-    if removed := sorted(was.keys() - now.keys()):
-        raise NotVersions(f"{LOCK} removes {', '.join(removed)}")
+    added, removed = now.keys() - was.keys(), was.keys() - now.keys()
     homes = _homes(was.values())
-    return tuple(move for name in sorted(was)
-                 if (move := _package(name, was[name], now[name], homes)) is not None)
+    both = sorted(was.keys() & now.keys())
+    return LockChange(
+        tuple(move for name in both
+              if (move := _package(name, was[name], now[name], homes)) is not None),
+        tuple(sorted(added)), tuple(sorted(removed)),
+        {name: str(was[name].get("version")) for name in both
+         if (_needs(now[name]) - _needs(was[name])) & added
+         or (_needs(was[name]) - _needs(now[name])) & removed})
+
+
+def _lock(old: str, new: str) -> tuple[Move, ...]:
+    """Each version the change from the lock text ``old`` to ``new`` moves, by package name.
+
+    Raises:
+        NotVersions: as :func:`lock_change` raises it, or when the change adds or removes a
+            package.
+    """
+    change = lock_change(old, new)
+    if change.added:
+        raise NotVersions(f"{LOCK} adds {', '.join(change.added)}, a package of no version "
+                          "before")
+    if change.removed:
+        raise NotVersions(f"{LOCK} removes {', '.join(change.removed)}")
+    return change.moves
 
 
 def _registry(package: dict[str, object]) -> str | None:
@@ -471,14 +531,31 @@ def unversioned(root: Path, changed: Mapping[str, tuple[str | None, str | None]]
     Raises:
         tools.ci.gitcmd.GitError: when git cannot read a file it changes.
     """
-    reasons: list[str] = []
-    for path, (was, now) in changed.items():
-        try:
-            reasons += [f"{path} moves {move.what} from {move.old} to {move.new}, a new major "
-                        "version" for move in moves(root, path, was, now, where) if move.major]
-        except NotVersions as error:
-            reasons.append(str(error))
-    return tuple(reasons)
+    return tuple(reason for path, (was, now) in changed.items()
+                 for reason in _why(path, partial(moves, root, path, was, now, where)))
+
+
+def lock_unversioned(old: str, new: str) -> tuple[str, ...]:
+    """Why the change from the lock text ``old`` to ``new`` is no change that moves pinned
+    versions alone, none across a major, each as a clause; none when it is one: the walk of
+    :func:`unversioned` over the lock alone, which the Monday refresh judges its lock by
+    before any pull request carries it."""
+    return _why(LOCK, partial(_lock, old, new))
+
+
+def _why(path: str, moved: Callable[[], tuple[Move, ...]]) -> tuple[str, ...]:
+    """Why the change ``moved`` reads in ``path`` is no change that moves pinned versions
+    alone, none across a major: each move across a major, or the reason ``moved`` refuses
+    it (:class:`NotVersions`), as a clause; none when it is one.
+
+    Raises:
+        tools.ci.gitcmd.GitError: when ``moved`` cannot read a file.
+    """
+    try:
+        return tuple(f"{path} moves {move.what} from {move.old} to {move.new}, a new major "
+                     "version" for move in moved() if move.major)
+    except NotVersions as error:
+        return (str(error),)
 
 
 def unversioned_between(root: Path, old: str, new: str) -> tuple[str, ...]:

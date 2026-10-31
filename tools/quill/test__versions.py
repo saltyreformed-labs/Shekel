@@ -16,7 +16,8 @@ from tools.ci.gitcmd import git
 from tools.ci.scratch import commit, commit_files, repository
 from tools.quill._production import COMPOSE, DOCKERFILE, PUBLISH
 from tools.quill._versions import LOCK, Move, NotVersions, Pin, moves, pinned, pins_versions
-from tools.quill._versions import unversioned, unversioned_between
+from tools.quill._versions import ceiling, lock_change, lock_unversioned, unversioned
+from tools.quill._versions import unversioned_between
 
 #: PyPI's simple index, every locked package's registry.
 _REGISTRY = '{ registry = "https://pypi.org/simple" }'
@@ -528,3 +529,45 @@ def test_a_change_between_two_commits_is_judged_over_every_file_it_changes(repo)
     assert (unversioned_between(repo, base, alone), unversioned_between(repo, alone, more)) == (
         (), ("plan/ships/9 pins no version",
              "uv.lock moves pillow from 12.4.1 to 13.0.0, a new major version"))
+
+
+# -- what the Monday refresh reads (tools/update/refresh.py) --------------------------------
+
+@pytest.mark.parametrize(("version", "below"), [
+    ("13.0.1", "14"), ("0.6.3", "0.7"), ("0.0.3", "0.0.4"), ("2026.5", "2027"),
+    ("1!2.0", "1!3"), ("3.20.1.post1", "4"), ("0.0.0", None), ("banana", None),
+], ids=["a major", "a 0.x minor", "a 0.0.x patch", "a calendar year", "an epoch",
+        "a post release", "zeros alone", "no release"])
+def test_the_ceiling_is_the_first_release_of_the_next_major(version, below):
+    """A package held below :func:`ceiling` keeps its major as :func:`_major` reads it, the
+    epoch included; a version whose every successor crosses a major has none."""
+    assert ceiling(version) == below
+
+
+def test_a_move_needing_a_package_the_lock_lacked_brings_it():
+    """qrcode's new version needs olefile, which the lock did not hold: the change adds
+    olefile, and qrcode, at its version before, brings it."""
+    new = _lock(_at("qrcode", "8.3", ("pillow", "olefile")) | {"olefile": ("0.47", ())})
+    change = lock_change(_lock(), new)
+    assert (change.added, change.removed, dict(change.bringing), change.moves) == (
+        ("olefile",), (), {"qrcode": "8.2"}, (Move("qrcode", "8.2", "8.3", False),))
+
+
+def test_a_move_no_longer_needing_a_package_only_it_needed_drops_it():
+    """qrcode's new version no longer needs zeta, which only it needed: the change removes
+    zeta, and qrcode, at its version before, drops it; pillow, still needed, stays."""
+    old = _lock(_at("qrcode", "8.2", ("pillow", "zeta")))
+    new = _lock({"pillow": ("12.3.0", ()), "qrcode": ("8.3", ("pillow",))})
+    change = lock_change(old, new)
+    assert (change.added, change.removed, dict(change.bringing)) == ((), ("zeta",),
+                                                                      {"qrcode": "8.2"})
+
+
+def test_the_lock_alone_is_judged_by_the_walk_of_every_file():
+    """:func:`lock_unversioned` names a major and a refusal as :func:`unversioned` does, and
+    nothing for versions alone."""
+    assert (lock_unversioned(_lock(), _lock(_at("pillow", "13.0.0"))),
+            lock_unversioned(_lock(), _lock(_PACKAGES | {"olefile": ("0.47", ())})),
+            lock_unversioned(_lock(), _lock(_at("pillow", "12.4.1")))) == (
+        ("uv.lock moves pillow from 12.3.0 to 13.0.0, a new major version",),
+        ("uv.lock adds olefile, a package of no version before",), ())

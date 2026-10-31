@@ -235,6 +235,13 @@ class TestTheWorkflowIsWiredToTheAnswer:
         assert "pylint tools/rehearsal/ --fail-under=10 --fail-on=E,F" in run
         assert 'pytest tools/rehearsal -c /dev/null -q -m "not cluster"' in run
 
+    def test_the_update_tool_is_linted_and_tested(self):
+        """``tools/update`` (the Monday lock refresh, ruling plan#2351) holds the same floor
+        in the same step."""
+        run = _steps("tools")[TOOLS_STEP]["run"]
+        assert "pylint tools/update/ --fail-under=10 --fail-on=E,F" in run
+        assert "pytest tools/update -c /dev/null -q" in run
+
     def test_the_rehearsal_kit_s_cluster_tests_run_on_one_shard(self):
         """The ``cluster`` tests the tools job deselects run in the test job, on ONE
         shard, which must be one the matrix still has: a shard index past its end would skip
@@ -850,6 +857,7 @@ class TestTheInstallActionInstallsTheLock:
             "all": (0, [sync]),
             "runtime": (0, [f"{sync} --no-dev"]),
             "landing": (0, [f"{sync} --only-group landing"]),
+            "build": (0, [f"{sync} --only-group build"]),
             "python": (0, ["venv"]),
             "dev": (1, []), "": (1, []), "all ": (1, []), "ALL": (1, []),
         }

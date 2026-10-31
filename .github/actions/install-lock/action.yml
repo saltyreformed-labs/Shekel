@@ -5,8 +5,9 @@
 # ``.python-version`` names and the packages ``uv.lock`` pins, every file
 # checked against its sha256 (``--locked`` also refuses a lock that no longer
 # matches pyproject.toml), into ``.venv``, whose ``bin`` the job's later steps
-# then find first on PATH.  One recipe, so no job states a Python version or a
-# package version of its own.
+# then find first on PATH, beside the uv that installed it (the release
+# rehearsal's bench runs uv itself).  One recipe, so no job states a Python
+# version or a package version of its own.
 #
 # UV IS THE DOCKERFILE'S.  Its ``FROM ghcr.io/astral-sh/uv:<version>@sha256:...
 # AS uv`` line is the one home of uv's version and digest (Dependabot's docker
@@ -98,7 +99,8 @@ runs:
     # ``workflow_run``.  It is ignored on that step alone (ruling plan#2376),
     # and tools/ci/test_ci_workflow.py refuses any workflow that calls this
     # action under either trigger, so the reason is checked, not only stated.
-    # The directory written is the workspace's own venv, no input's value.
+    # The directories written are the workspace's own venv and the one the
+    # first step copied uv into, no input's value.
     - name: Install from the lock
       shell: bash
       env:
@@ -119,4 +121,7 @@ runs:
                 exit 1
                 ;;
         esac
-        echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
+        {
+            echo "${GITHUB_WORKSPACE}/.venv/bin"
+            dirname "${UV}"
+        } >> "${GITHUB_PATH}"

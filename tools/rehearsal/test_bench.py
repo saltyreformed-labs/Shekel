@@ -10,7 +10,10 @@ conftest says where they run.  The rest grade the bench's pure parts on planted 
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -86,41 +89,63 @@ def test_states_are_name_revision_pairs_each_named_once():
         bench.parse_states([])
 
 
-def _side(root: Path, dev: str = "pytest==9.0.0\ntime-machine==3.5.1\n") -> Path:
-    """A planted side's tree: two pins in ``requirements.txt`` and ``dev`` as its dev pins."""
+def _side(root: Path) -> Path:
+    """A planted side's tree: this checkout's own ``pyproject.toml`` and ``uv.lock``, which
+    ``uv export --frozen`` reads with no network."""
     root.mkdir(parents=True, exist_ok=True)
-    (root / "requirements.txt").write_text("Flask==3.1.2\npsycopg[c]==3.3.6\n", encoding="utf-8")
-    (root / "requirements-dev.txt").write_text("-r requirements.txt\n" + dev, encoding="utf-8")
+    for name in ("pyproject.toml", "uv.lock"):
+        shutil.copyfile(arcs.REPO / name, root / name)
     return root
 
 
-def test_a_side_s_pins_are_its_requirements_and_its_time_machine_pin(tmp_path):
-    """Exactly ``requirements.txt`` and the one ``time-machine`` line; no pin, or no file, is
-    refused by name."""
-    assert bench.side_pins(_side(tmp_path / "a")) == (
-        "Flask==3.1.2\npsycopg[c]==3.3.6\ntime-machine==3.5.1\n")
-    with pytest.raises(BenchError, match="pins no time-machine"):
-        bench.side_pins(_side(tmp_path / "b", dev="pytest==9.0.0\n"))
-    with pytest.raises(BenchError, match="cannot give its pins"):
+def test_a_side_s_pins_are_its_locked_runtime_set_and_its_build_and_rehearsal_groups(tmp_path):
+    """The side's lock's pins for its runtime set, its ``build`` tools and its ``rehearsal``
+    group, every pin with its sha256, and none of the dev tools or the server.  The text names
+    no path, so two sides with one lock give one text, and one cache key."""
+    pins = bench.side_pins(_side(tmp_path / "a"))
+    names = set(re.findall(r"^([a-z0-9][a-z0-9._-]*)==", pins, re.MULTILINE))
+    assert {"flask", "psycopg", "psycopg-c", "time-machine", "setuptools", "wheel"} <= names
+    assert names.isdisjoint({"pytest", "pylint", "playwright", "pre-commit", "gunicorn"})
+    entries = re.split(r"\n(?=\S)", pins.strip())
+    assert len(entries) == len(names)
+    assert all("--hash=sha256:" in entry for entry in entries)
+    assert str(tmp_path) not in pins
+    assert bench.side_pins(_side(tmp_path / "b")) == pins
+
+
+def test_a_side_with_no_lock_or_one_uv_cannot_read_is_refused_by_name(tmp_path):
+    """A tree with no ``uv.lock`` is a revision before the lock, and one whose lock uv cannot
+    export is quoted."""
+    with pytest.raises(BenchError, match="holds no uv.lock, so it is a revision before the lock"):
         bench.side_pins(tmp_path / "c")
+    broken = _side(tmp_path / "d")
+    (broken / "uv.lock").write_text("not a lock\n", encoding="utf-8")
+    with pytest.raises(BenchError, match="uv could not export .* \\(exit 2\\): "):
+        bench.side_pins(broken)
 
 
 class _Builds:
-    """A stand-in for :func:`bench.run` that records each command and makes a venv's
-    directory as ``python -m venv`` would; pip exits ``pip_status``."""
+    """A stand-in for :func:`bench.run` that records each ``uv sync`` and the venv it was
+    pointed at, and makes that venv's directory as uv would; each sync exits ``status``.  Any
+    other command (``uv export``) runs for real."""
 
-    def __init__(self, pip_status: int = 0) -> None:
-        """No command run yet; pip will exit ``pip_status``."""
-        self.argvs: list[list[str]] = []
-        self.pip_status = pip_status
+    def __init__(self, status: int = 0) -> None:
+        """No sync run yet; each will exit ``status``."""
+        self.syncs: list[list[str]] = []
+        self.into: list[str] = []
+        self.status = status
+        self._real = bench.run
 
-    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
-        """Record ``argv`` and answer as ``python -m venv`` or pip would."""
-        self.argvs.append(argv)
-        if argv[1:3] == ["-m", "venv"]:
-            (Path(argv[3]) / "bin").mkdir(parents=True)
-            return subprocess.CompletedProcess(argv, 0, "", "")
-        return subprocess.CompletedProcess(argv, self.pip_status, "", "pip said no\n")
+    def __call__(self, argv: list[str], env: dict[str, str] | None = None,
+                 **given: object) -> subprocess.CompletedProcess[str]:
+        """Record a sync and answer as uv would; run anything else."""
+        if argv[:2] != ["uv", "sync"]:
+            return self._real(argv, env, **given)
+        assert env is not None
+        self.syncs.append(argv)
+        self.into.append(env["UV_PROJECT_ENVIRONMENT"])
+        (Path(env["UV_PROJECT_ENVIRONMENT"]) / "bin").mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(argv, self.status, "", "uv said no\n")
 
 
 @pytest.fixture(name="builds")
@@ -133,14 +158,22 @@ def _builds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Builds:
 
 
 def test_a_venv_is_built_once_for_its_pins_and_then_reused_untouched(tmp_path, builds):
-    """The first call builds (venv, then pip on the pins) and marks it built; the second, for
-    a side with the same pins, runs nothing."""
-    python = bench.venv_for(_side(tmp_path / "base"))
-    assert [argv[1:3] for argv in builds.argvs] == [["-m", "venv"], ["-m", "pip"]]
-    assert (python.parent.parent / "rehearsal-requirements.txt").read_text(encoding="utf-8") \
-        == bench.side_pins(tmp_path / "base")
+    """The first call builds: uv syncs the side's lock into the cached venv under this
+    interpreter, with the ``build`` and ``rehearsal`` groups and then with ``rehearsal``
+    alone, and marks it built with its pins.  The second, for a side with the same pins,
+    syncs nothing."""
+    base = _side(tmp_path / "base")
+    python = bench.venv_for(base)
+    venv = python.parent.parent
+    sync = ["uv", "sync", "--locked", "--require-build-hashes", "--no-install-project",
+            "--no-default-groups"]
+    side = ["--python", sys.executable, "--project", str(base)]
+    assert builds.syncs == [[*sync, "--group", "build", "--group", "rehearsal", *side],
+                            [*sync, "--group", "rehearsal", *side]]
+    assert builds.into == [str(venv), str(venv)]
+    assert (venv / ".rehearsal-built").read_text(encoding="utf-8") == bench.side_pins(base)
     assert bench.venv_for(_side(tmp_path / "cut")) == python
-    assert len(builds.argvs) == 2
+    assert len(builds.syncs) == 2
 
 
 def test_a_venv_whose_build_did_not_finish_is_built_again(tmp_path, builds):
@@ -150,15 +183,17 @@ def test_a_venv_whose_build_did_not_finish_is_built_again(tmp_path, builds):
     (venv / ".rehearsal-built").unlink()
     (venv / "half-installed").write_text("", encoding="utf-8")
     assert bench.venv_for(_side(tmp_path / "base")) == python
-    assert len(builds.argvs) == 4 and not (venv / "half-installed").exists()
+    assert len(builds.syncs) == 4 and not (venv / "half-installed").exists()
     assert (venv / ".rehearsal-built").is_file()
 
 
-def test_a_venv_pip_could_not_install_is_named_and_never_marked_built(tmp_path, builds):
-    """pip's refusal is quoted, and the venv is left unmarked, so the next run rebuilds it."""
-    builds.pip_status = 1
-    with pytest.raises(BenchError, match="pip could not install .* \\(exit 1\\):\npip said no"):
+def test_a_venv_uv_could_not_install_is_named_and_never_marked_built(tmp_path, builds):
+    """uv's refusal is quoted, no second sync runs, and the venv is left unmarked, so the
+    next run rebuilds it."""
+    builds.status = 1
+    with pytest.raises(BenchError, match="uv could not install .* \\(exit 1\\):\nuv said no"):
         bench.venv_for(_side(tmp_path / "base"))
+    assert len(builds.syncs) == 1
     assert not list((tmp_path / "cache").rglob(".rehearsal-built"))
 
 
@@ -207,18 +242,29 @@ def _left_nothing(made: Bench) -> None:
         assert f"worktree {state.worktree}\n" not in listed
 
 
+def _commit_of_head_s_tree() -> str:
+    """A second commit the bench can build, which every checkout holds whatever its depth: a
+    commit of HEAD's own tree, HEAD its parent, on no branch.  Not ``HEAD~1``: a revision
+    before the lock is refused, and so is ``dev``'s tip in the pull request that brings it."""
+    return gitcmd.git(arcs.REPO, "-c", "user.name=rehearsal bench case",
+                      "-c", "user.email=rehearsal@invalid", "commit-tree", "--no-gpg-sign",
+                      "-p", "HEAD", "-m", "the bench case's cut", "HEAD^{tree}").strip()
+
+
 @pytest.mark.cluster
 def test_a_bench_restores_the_dump_clones_it_per_state_and_leaves_nothing(dump):
-    """Each state's clone holds the dump's rows and its worktree the state's commit; after
-    it, nothing is left, and every part was timed."""
+    """Each state's clone holds the dump's rows and its worktree the state's commit; the two
+    states' pins are one, so they share one venv; after it, nothing is left, and every part
+    was timed."""
     head = gitcmd.git(arcs.REPO, "rev-parse", "HEAD").strip()
-    parent = gitcmd.git(arcs.REPO, "rev-parse", "HEAD~1").strip()
-    made = Bench(dump, {"base": parent, "cut": head})
+    cut = _commit_of_head_s_tree()
+    made = Bench(dump, {"base": head, "cut": cut})
     with made:
         assert made.listing is not None
         assert abs(datetime.now(timezone.utc) - made.listing.created) < timedelta(hours=1)
         assert {name: state.commit for name, state in made.made.items()} == {
-            "base": parent, "cut": head}
+            "base": head, "cut": cut}
+        assert made.made["base"].python == made.made["cut"].python
         for state in made.made.values():
             assert gitcmd.git(state.worktree, "rev-parse", "HEAD").strip() == state.commit
             assert gitcmd.git(state.worktree, "status", "--porcelain") == ""

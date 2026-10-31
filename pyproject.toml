@@ -178,6 +178,14 @@ landing = [
     "requests",
     "cryptography",
 ]
+# The one package the release rehearsal adds to the runtime set: its side
+# probe (``tools/rehearsal/side/``) pins each side's clock with it, and the
+# bench builds each side's venv from that side's lock, the runtime set and
+# this group (ruling plan#2404).  No range: it is held by its entry in
+# ``dev``, and the lock gives both one version.
+rehearsal = [
+    "time-machine",
+]
 
 [tool.uv]
 # Shekel is an application, not a library: uv installs its dependencies and

@@ -228,7 +228,7 @@ jobs:
         with:
           # The default depth-1 checkout: no tools test reads this checkout's
           # history (the plan gate's git arms did, until step X-cx's S3b deleted
-          # the gate; the rehearsal bench's HEAD~1 case runs in the test job).
+          # the gate).
           # Nothing here pushes, so the GITHUB_TOKEN need not persist in
           # .git/config.  Avoids the credential-persistence vector (zizmor
           # artipacked).
@@ -439,12 +439,9 @@ jobs:
         # so a check named ``test (0)`` runs shard 0.
         shard: [0, 1, 2, 3, 4, 5]
     steps:
-      # Depth 2, not the default 1: step 7c's bench case checks out ``HEAD~1``
-      # as its base state, and a depth-1 clone does not hold that commit.
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
           persist-credentials: false
 
       - name: Install the lock
@@ -549,8 +546,9 @@ jobs:
       #
       # Shard 3 because it had the lowest mean wall time of the six over the
       # six newest green runs (449-693 s, against 704-742 s for shard 0, which
-      # carries step 7b), measured 2026-10-20.  The bench case's base state is
-      # ``HEAD~1``: hence the checkout's depth of 2.
+      # carries step 7b), measured 2026-10-20.  The bench case's second state
+      # is a commit it makes of HEAD's own tree, so the default depth-1 clone
+      # holds both; the bench runs uv, which the install step put on PATH.
       - name: Run the rehearsal kit's cluster tests (shard 3)
         if: strategy.job-index == 3
         run: pytest tools/rehearsal -c /dev/null -q -m cluster

@@ -235,19 +235,18 @@ class TestTheWorkflowIsWiredToTheAnswer:
         assert "pylint tools/rehearsal/ --fail-under=10 --fail-on=E,F" in run
         assert 'pytest tools/rehearsal -c /dev/null -q -m "not cluster"' in run
 
-    def test_the_rehearsal_kit_s_cluster_tests_run_on_one_shard_that_holds_their_base(self):
+    def test_the_rehearsal_kit_s_cluster_tests_run_on_one_shard(self):
         """The ``cluster`` tests the tools job deselects run in the test job, on ONE
         shard, which must be one the matrix still has: a shard index past its end would skip
         the step on every run, and a skipped step reads green (ruling balance:R-BAL327).  The
-        job's checkout fetches depth 2, since the bench case's base state is ``HEAD~1``, which
-        a depth-1 clone does not hold."""
+        job's checkout is the default depth of 1: the bench case's second state is a commit
+        it makes of HEAD's own tree, never an older one."""
         job = _jobs()["test"]
         step = _steps("test")[REHEARSAL_STEP]
         assert step["run"] == "pytest tools/rehearsal -c /dev/null -q -m cluster"
         assert step["if"] == f"strategy.job-index == {REHEARSAL_SHARD}"
         assert REHEARSAL_SHARD in job["strategy"]["matrix"]["shard"]
-        assert _steps("test")["Checkout code"]["with"] == {"fetch-depth": 2,
-                                                            "persist-credentials": False}
+        assert _steps("test")["Checkout code"]["with"] == {"persist-credentials": False}
 
     def test_no_step_in_a_graded_job_carries_a_condition_of_its_own(self):
         """Every step of a graded job runs, bar the serial-benchmark leg and the landing mint.
@@ -841,8 +840,9 @@ class TestTheInstallActionInstallsTheLock:
 
     def test_each_install_set_runs_its_one_uv_command_then_puts_the_venv_first(self, tmp_path):
         """Each set runs its one uv command, every sync ``--locked --require-build-hashes``,
-        then writes the workspace's ``.venv/bin`` to GITHUB_PATH.  A set the step does not
-        name, and a uv that fails, run nothing more and write no PATH."""
+        then writes the workspace's ``.venv/bin`` and uv's own directory to GITHUB_PATH.  A
+        set the step does not name, and a uv that fails, run nothing more and write no
+        PATH."""
         uv, log, path = tmp_path / "uv", tmp_path / "uv.log", tmp_path / "github_path"
         run = _action_steps()[self.INSTALL]["run"]
         sync = "sync --locked --require-build-hashes"
@@ -865,7 +865,8 @@ class TestTheInstallActionInstallsTheLock:
                 assert log.read_text(encoding="utf-8").splitlines() == calls, install
                 if expected == 0 and status == "0":
                     assert result.returncode == 0, (install, result.stderr)
-                    assert path.read_text(encoding="utf-8") == f"{tmp_path / 'ws'}/.venv/bin\n"
+                    assert path.read_text(encoding="utf-8") == (
+                        f"{tmp_path / 'ws'}/.venv/bin\n{tmp_path}\n")
                 else:
                     assert result.returncode != 0, (install, status)
                     assert path.read_text(encoding="utf-8") == "", (install, status)

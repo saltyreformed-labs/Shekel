@@ -16,7 +16,7 @@ from tools.ci.gitcmd import git
 from tools.ci.scratch import commit, commit_files, repository
 from tools.quill._production import COMPOSE, DOCKERFILE, PUBLISH
 from tools.quill._versions import LOCK, Move, NotVersions, Pin, moves, pinned, pins_versions
-from tools.quill._versions import ceiling, lock_change, lock_unversioned, unversioned
+from tools.quill._versions import ceiling, lock_change, lock_moves, lock_unversioned, unversioned
 from tools.quill._versions import unversioned_between
 
 #: PyPI's simple index, every locked package's registry.
@@ -561,6 +561,20 @@ def test_a_move_no_longer_needing_a_package_only_it_needed_drops_it():
     change = lock_change(old, new)
     assert (change.added, change.removed, dict(change.bringing)) == ((), ("zeta",),
                                                                       {"qrcode": "8.2"})
+
+
+def test_a_lock_made_from_an_edited_pyproject_is_read_for_its_versions_alone():
+    """qrcode's range moved to its new major with the lock: the project's own entry changes
+    with it, which :func:`lock_change` refuses, and :func:`lock_moves` reads past to the
+    versions, each move by the one reading of a major, an added package named."""
+    old = _lock()
+    new = _lock(_at("qrcode", "9.0", ("pillow", "olefile")) | {"olefile": ("0.47", ())}).replace(
+        'specifier = ">=8.2,<9.0"', 'specifier = ">=9.0,<10"')
+    with pytest.raises(NotVersions, match="^uv.lock changes shekel's metadata$"):
+        lock_change(old, new)
+    change = lock_moves(old, new)
+    assert (change.moves, change.added, change.removed, dict(change.bringing)) == (
+        (Move("qrcode", "8.2", "9.0", True),), ("olefile",), (), {"qrcode": "8.2"})
 
 
 def test_the_lock_alone_is_judged_by_the_walk_of_every_file():

@@ -58,6 +58,12 @@ version as the line spells it, the tag's version through the digest
 (``3.14-slim@sha256:<digest>``) or the commit through the release (``<commit> # v7.0.1``).
 A line pinning by any other form (a tag alone, a tag naming no version, an action of this
 repository's own) pins none this module reads.
+
+**What a lock change does to versions alone** (:func:`lock_moves`) is :func:`lock_change`'s
+reading with no judgment: the Monday refresh's reading of each lock it makes from an edited
+``pyproject.toml`` (a new major prepared as a change of its own, ruling plan#2450), whose
+own entry in the lock moves with the edit and which needs a card anyway.  Both build each
+:class:`Move` by the one reading of a major.
 """
 from __future__ import annotations
 
@@ -341,7 +347,7 @@ def _needs(package: dict[str, object]) -> frozenset[str]:
 
 def lock_change(old: str, new: str) -> LockChange:
     """What the change from the lock text ``old`` to ``new`` does (:class:`LockChange`), each
-    package both hold judged by the module's rules (:func:`_package`).
+    package both hold judged by the module's rules (:func:`_judge`).
 
     Raises:
         NotVersions: when either is no TOML or holds a package :func:`_packages` refuses, or
@@ -354,12 +360,37 @@ def lock_change(old: str, new: str) -> LockChange:
                         if key != "package" and before.get(key) != after.get(key)):
         raise NotVersions(f"{LOCK} changes its {', '.join(header)}")
     was, now = _packages(before), _packages(after)
-    added, removed = now.keys() - was.keys(), was.keys() - now.keys()
     homes = _homes(was.values())
+    for name in sorted(was.keys() & now.keys()):
+        _judge(name, was[name], now[name], homes)
+    return _change(was, now)
+
+
+def lock_moves(old: str, new: str) -> LockChange:
+    """What the change from the lock text ``old`` to ``new`` does to the versions the lock
+    holds (:class:`LockChange`), judging nothing else it changes: the Monday refresh's reading
+    of a lock it made from an edited ``pyproject.toml``, whose own entry in the lock (the
+    project's requirements) :func:`lock_change` refuses to see change.
+
+    Raises:
+        NotVersions: when either is no TOML or holds a package :func:`_packages` refuses, or
+            one it moves names no version :func:`_major` reads.
+    """
+    return _change(_packages(_read(old)), _packages(_read(new)))
+
+
+def _change(was: dict[str, dict[str, object]],
+            now: dict[str, dict[str, object]]) -> LockChange:
+    """What the change from the lock holding the packages ``was`` to the one holding ``now``
+    (each by name, :func:`_packages`) does to versions (:class:`LockChange`).
+
+    Raises:
+        NotVersions: when a package both hold moves a version :func:`_major` cannot read.
+    """
+    added, removed = now.keys() - was.keys(), was.keys() - now.keys()
     both = sorted(was.keys() & now.keys())
     return LockChange(
-        tuple(move for name in both
-              if (move := _package(name, was[name], now[name], homes)) is not None),
+        tuple(move for name in both if (move := _move(name, was[name], now[name])) is not None),
         tuple(sorted(added)), tuple(sorted(removed)),
         {name: str(was[name].get("version")) for name in both
          if (_needs(now[name]) - _needs(was[name])) & added
@@ -423,22 +454,22 @@ def _homes(packages: Iterable[dict[str, object]]) -> dict[str, frozenset[str]]:
     return {registry: frozenset(hosts) for registry, hosts in found.items()}
 
 
-def _canonical(project: str) -> str:
+def canonical(project: str) -> str:
     """A project's name as PEP 503 compares it: lower case, each run of ``-``, ``_`` and
     ``.`` one ``-``."""
     return _SEPARATORS.sub("-", project).lower()
 
 
 def _release_named(file_name: str) -> tuple[str, str] | None:
-    """The project (:func:`_canonical`) and version a distribution's ``file_name`` names, a
+    """The project (:func:`canonical`) and version a distribution's ``file_name`` names, a
     wheel's or a source distribution's; None where it is neither's."""
     if file_name.endswith(_WHEEL_ENDING):
         fields = file_name.removesuffix(_WHEEL_ENDING).split("-")
-        return (_canonical(fields[0]), fields[1]) if len(fields) in _WHEEL_FIELDS else None
+        return (canonical(fields[0]), fields[1]) if len(fields) in _WHEEL_FIELDS else None
     for ending in _SOURCE_ENDINGS:
         if file_name.endswith(ending):
             project, dash, version = file_name.removesuffix(ending).rpartition("-")
-            return (_canonical(project), version) if project and dash and version else None
+            return (canonical(project), version) if project and dash and version else None
     return None
 
 
@@ -464,22 +495,22 @@ def _released(name: str, version: str, package: dict[str, object],
         if (host := _host(url)) != home:
             raise NotVersions(f"{LOCK} moves {name}'s file {file_name} to {host}, not {home}, "
                               "where its registry's files lay")
-        if _release_named(file_name) != (_canonical(name), version):
+        if _release_named(file_name) != (canonical(name), version):
             raise NotVersions(f"{LOCK} gives {name} {version} the file {file_name}, which is "
                               "no file of that release")
 
 
-def _package(name: str, old: dict[str, object], new: dict[str, object],
-             homes: dict[str, frozenset[str]]) -> Move | None:
-    """The version the change from the lock's entry ``old`` for package ``name`` to ``new``
-    moves, None where it moves none: a package from a registry may change only its files,
-    each that release's on the registry (:func:`_released`, its hosts from ``homes``, by
-    registry, as :func:`_homes` reads them before the change), and where its version moves,
-    that version and the dependencies it declares too; one from no registry nothing.
+def _judge(name: str, old: dict[str, object], new: dict[str, object],
+           homes: dict[str, frozenset[str]]) -> None:
+    """Refuse the change from the lock's entry ``old`` for package ``name`` to ``new`` unless
+    it moves only versions: a package from a registry may change only its files, each that
+    release's on the registry (:func:`_released`, its hosts from ``homes``, by registry, as
+    :func:`_homes` reads them before the change), and where its version moves, that version
+    and the dependencies it declares too; one from no registry nothing.
 
     Raises:
-        NotVersions: when the change moves more than that, names a file that is not the
-            release's, or moves a version :func:`_major` cannot read.
+        NotVersions: when the change moves more than that, or names a file that is not the
+            release's.
     """
     was, now = old.get("version"), new.get("version")
     registry = _registry(old)
@@ -489,6 +520,16 @@ def _package(name: str, old: dict[str, object], new: dict[str, object],
         raise NotVersions(f"{LOCK} changes {name}'s {', '.join(changed)}")
     if registry is not None and any(old.get(key) != new.get(key) for key in _DISTRIBUTIONS):
         _released(name, str(now), new, homes.get(registry, frozenset()))
+
+
+def _move(name: str, old: dict[str, object], new: dict[str, object]) -> Move | None:
+    """The version the change from the lock's entry ``old`` for package ``name`` to ``new``
+    moves, None where it moves none.
+
+    Raises:
+        NotVersions: when it moves a version :func:`_major` cannot read.
+    """
+    was, now = old.get("version"), new.get("version")
     if was == now:
         return None
     majors = [_major(version) if isinstance(version, str) else None for version in (was, now)]

@@ -53,6 +53,10 @@ Each name, and who reads it:
   move needs a card (a move across a major, below its next major; a move adding or
   removing a package, at its version) and judges its lock by the landing check's own walk
   before any pull request carries it (``_versions``; rulings plan#2351, plan#2450).
+  ``lock_moves`` and ``canonical``: ``tools/update.refresh`` again, for what each new major
+  it prepares as a change of its own moves, from a lock made with ``pyproject.toml`` edited,
+  which ``lock_change`` refuses (ruling plan#2450), and for the package each requirement of
+  ``pyproject.toml`` names, by PEP 503's one reading of a project's name.
 - ``GitHubError``, ``TrackerError`` and ``CredentialsError``: ``tools/release.release``,
   which reports a failed read of the tracker, or App credentials it cannot use, as a
   release judged on nothing; ``described``, by which it prints that failure, as every
@@ -89,8 +93,20 @@ from tools.quill._state import (
     owner,
 )
 from tools.quill._tracker import Card, OutsideLink, Tracker, TrackerError
-from tools.quill._versions import LOCK, LockChange, Move, NotVersions, Pin, ceiling
-from tools.quill._versions import lock_change, lock_unversioned, pinned, pins_versions
+from tools.quill._versions import (
+    LOCK,
+    LockChange,
+    Move,
+    NotVersions,
+    Pin,
+    canonical,
+    ceiling,
+    lock_change,
+    lock_moves,
+    lock_unversioned,
+    pinned,
+    pins_versions,
+)
 
 __all__ = [
     "LOCK",
@@ -111,6 +127,7 @@ __all__ = [
     "Tracker",
     "TrackerError",
     "above",
+    "canonical",
     "card_of",
     "ceiling",
     "changed",
@@ -120,6 +137,7 @@ __all__ = [
     "dropped_above",
     "leaves_below",
     "lock_change",
+    "lock_moves",
     "lock_unversioned",
     "marker_changes",
     "markers_in",

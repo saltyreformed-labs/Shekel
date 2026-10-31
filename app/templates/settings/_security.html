@@ -1,8 +1,8 @@
 {% from "_form_macros.html" import form_card %}
 
-{# Security section: three form_cards, one concern per card (Change
-   Password / Two-Factor Authentication / Sessions), replacing the bare
-   h5 + hr + fields anatomy (polish audit P-ST3; the missing Active
+{# Security section: one form_card per concern (Change Password /
+   Two-Factor Authentication / Trusted Devices / Sessions), replacing the
+   bare h5 + hr + fields anatomy (polish audit P-ST3; the missing Active
    Sessions separator was P-ST6).  gap-3 spaces the stack. #}
 <div class="d-flex flex-column gap-3">
 
@@ -74,9 +74,66 @@
   {% include "settings/_mfa_setup.html" %}
   {% endcall %}
 
+  {# Trusted devices (plan#2173, ruling plan#2406): the route hands each
+     live device as a row to display; the dates are stored UTC and shown as
+     display-timezone days by local_datetime. #}
+  {% call form_card("Trusted Devices", "bi-laptop") %}
+  <p class="text-muted small">
+    Signing in on a trusted device takes your password but not a two-factor
+    code. A device stays trusted for 30 days after the code was typed on it.
+    Changing your password, logging out all other sessions, turning off
+    two-factor authentication or signing in with a backup code forgets every
+    device.
+  </p>
+  {% if trusted_devices %}
+  <div class="list-group">
+    {% for device in trusted_devices %}
+    <div class="list-group-item">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <div class="fw-semibold">
+            {{ device.browser }}
+            {% if device.is_this_browser %}
+            <span class="flag-chip flag-chip--neutral ms-1">This browser</span>
+            {% endif %}
+          </div>
+          <div class="text-muted small">
+            Trusted {{ device.trusted_at | local_datetime }}; expires
+            {{ device.expires_at | local_datetime }}
+          </div>
+        </div>
+        <form method="POST"
+              action="{{ url_for('auth.forget_trusted_device', device_id=device.id) }}"
+              class="d-inline"
+              data-confirm="Forget this device? Signing in on it will ask for your two-factor code again.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {# Amber outline per the D5 convention: forgetting a device is a
+             deactivate-genus control. #}
+          <button type="submit" class="btn btn-sm btn-outline-warning">
+            <i class="bi bi-x-circle"></i> Forget
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif mfa_enabled %}
+  <p class="small mb-0">
+    No trusted devices. When you type a two-factor code at sign-in, tick
+    &quot;Trust this device for 30 days&quot; to skip the code on that browser.
+  </p>
+  {% else %}
+  <p class="small mb-0">
+    No trusted devices. A device can be trusted once two-factor
+    authentication is on.
+  </p>
+  {% endif %}
+  {% endcall %}
+
   {% call form_card("Sessions", "bi-box-arrow-right") %}
   <p class="text-muted small">
-    Log out of all other browser sessions. Your current session will remain active.
+    Log out of all other browser sessions and forget every trusted device,
+    this one included. Your current session will remain active.
   </p>
   <form method="POST" action="{{ url_for('auth.invalidate_sessions') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

@@ -202,6 +202,10 @@ EVT_TRUSTED_DEVICE_SIGN_IN = _register(
     "trusted_device_sign_in", AUTH,
     "User signed in with a password on a trusted device, skipping the code.",
 )
+EVT_TRUSTED_DEVICE_FORGOTTEN = _register(
+    "trusted_device_forgotten", AUTH,
+    "User forgot one of their trusted devices in Settings > Security.",
+)
 EVT_BACKUP_CODES_REGENERATED = _register(
     "backup_codes_regenerated", AUTH,
     "User issued themselves a new set of MFA backup codes.",

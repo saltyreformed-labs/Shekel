@@ -4,7 +4,8 @@ Shekel Budget App -- Trusted Device Service
 A trusted device skips only the two-factor code, never the password (plan#2173,
 ruling plan#2406).  This module owns the record's four acts: trust a device,
 find the live device a browser's token names, list a user's live devices, and
-forget one.
+forget one.  Beside them, :func:`device_named_by` picks a browser's device out
+of a list already read, so the token's hash is spelled in this module alone.
 
 **When a device is live is stated once**, in :func:`_live`: trusted less than
 :data:`~app.models.trusted_device.TRUST_LIFETIME` ago, and not before its
@@ -168,6 +169,34 @@ def list_live_devices(user_id: int) -> list[TrustedDevice]:
         .where(TrustedDevice.user_id == user_id, _live(now))
         .order_by(TrustedDevice.trusted_at.desc(), TrustedDevice.id.desc())
     ).scalars())
+
+
+def device_named_by(
+    devices: list[TrustedDevice], token: str | None,
+) -> TrustedDevice | None:
+    """Return the device in *devices* that *token* names, or ``None``.
+
+    Settings marks the browser it is rendered on among the devices it lists.
+    It asks this of the list it already holds rather than looking the token up
+    again, so the mark and the list are judged at one moment: a second query
+    could find the device dead an instant after the list found it live.
+
+    Args:
+        devices: Devices already read, as :func:`list_live_devices` returns
+            them.
+        token: The token this browser's cookie carries, or ``None`` when it
+            sent none.
+
+    Returns:
+        The one device whose stored hash is *token*'s, or ``None``.
+    """
+    if token is None:
+        return None
+    token_hash = _token_hash(token)
+    return next(
+        (device for device in devices if device.token_hash == token_hash),
+        None,
+    )
 
 
 def forget_device(user_id: int, device_id: int) -> None:

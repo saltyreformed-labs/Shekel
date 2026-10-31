@@ -70,11 +70,12 @@ class _Acts:
 
     def listed(self, moment, user_id):
         """List *user_id*'s live devices at *moment*, as their ids in order."""
+        return [device.id for device in self.devices(moment, user_id)]
+
+    def devices(self, moment, user_id):
+        """List *user_id*'s live devices at *moment*, as the rows."""
         self._at(moment)
-        return [
-            device.id
-            for device in trusted_device_service.list_live_devices(user_id)
-        ]
+        return trusted_device_service.list_live_devices(user_id)
 
     def forget(self, moment, user_id, device_id):
         """Forget *device_id* for *user_id* at *moment*."""
@@ -348,6 +349,47 @@ class TestTheList:
 
         assert acts.listed(_T0, user_id) == [mine]
         assert acts.listed(_T0, other_id) == [theirs]
+
+
+class TestTheBrowsersDevice:
+    """``device_named_by`` picks the device a token names out of a list held."""
+
+    def test_the_token_picks_its_own_device(self, app, db, acts, seed_user):
+        """Two devices listed; each token picks its own, by identity."""
+        user_id = seed_user["user"].id
+        first = acts.trust(_T0, user_id)
+        second = acts.trust(_T0 + _ONE_DAY, user_id)
+        devices = acts.devices(_T0 + _ONE_DAY, user_id)
+
+        named_first = trusted_device_service.device_named_by(devices, first)
+        named_second = trusted_device_service.device_named_by(devices, second)
+
+        assert named_first is _device_of(db, first)
+        assert named_second is _device_of(db, second)
+
+    def test_no_token_names_nothing(self, app, db, acts, seed_user):
+        """A browser that sent no cookie: ``None``, though devices are listed."""
+        user_id = seed_user["user"].id
+        acts.trust(_T0, user_id)
+        devices = acts.devices(_T0, user_id)
+
+        assert devices
+        assert trusted_device_service.device_named_by(devices, None) is None
+
+    def test_a_token_naming_no_listed_device_names_nothing(
+        self, app, db, acts, seed_user, seed_second_user,
+    ):
+        """An unknown token, and another user's real one: both ``None``."""
+        user_id = seed_user["user"].id
+        acts.trust(_T0, user_id)
+        theirs = acts.trust(_T0, seed_second_user["user"].id)
+        devices = acts.devices(_T0, user_id)
+
+        assert devices
+        assert trusted_device_service.device_named_by(
+            devices, "not-a-token",
+        ) is None
+        assert trusted_device_service.device_named_by(devices, theirs) is None
 
 
 class TestForgettingADevice:

@@ -33,10 +33,13 @@ from app.services import (
     pay_period_gates,
     pay_period_locks,
     pay_schedule_service,
+    trusted_device_service,
 )
 from app.services.auth_service import hash_password
 from app.services.pay_calendar import calendar_at_schedule
+from app.utils.browser_label import browser_label
 from app.utils.dates import display_today
+from app.utils.trusted_device_cookie import device_token
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +386,7 @@ def _empty_section_context():
         "group_names": [],
         "icon_choices": [],
         "mfa_enabled": False,
+        "trusted_devices": [],
         "active_companions": [],
         "inactive_companions": [],
         "edit_companion_id": None,
@@ -465,13 +469,42 @@ def _load_account_types_context():
 
 
 def _load_security_context():
-    """Load the security section: whether MFA is enabled for the user."""
+    """Load the security section: MFA's state and the live trusted devices.
+
+    Each trusted device (plan#2173, ruling plan#2406) is a row the template
+    only displays: the browser's name read from its stored User-Agent, the
+    two instants it is dated by (stored UTC; the template's
+    ``local_datetime`` filter shows each as a display-timezone day), and
+    whether it is the browser this page is rendered on, judged against the
+    list already read rather than by a second lookup.
+
+    Returns:
+        ``mfa_enabled``, and ``trusted_devices``: one dict per live device,
+        most recently trusted first, with ``id``, ``browser``, ``trusted_at``,
+        ``expires_at`` and ``is_this_browser``.
+    """
     mfa_config = (
         db.session.query(MfaConfig)
         .filter_by(user_id=current_user.id)
         .first()
     )
-    return {"mfa_enabled": mfa_config.is_enabled if mfa_config else False}
+    devices = trusted_device_service.list_live_devices(current_user.id)
+    this_browser = trusted_device_service.device_named_by(
+        devices, device_token(current_user.id),
+    )
+    return {
+        "mfa_enabled": mfa_config.is_enabled if mfa_config else False,
+        "trusted_devices": [
+            {
+                "id": device.id,
+                "browser": browser_label(device.user_agent),
+                "trusted_at": device.trusted_at,
+                "expires_at": device.expires_at,
+                "is_this_browser": device is this_browser,
+            }
+            for device in devices
+        ],
+    }
 
 
 # --- Companion account management ----------------------------------------

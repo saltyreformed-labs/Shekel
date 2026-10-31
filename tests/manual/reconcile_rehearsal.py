@@ -18,15 +18,17 @@ presses, in the order the doors force:
    itself proposes for SECU's line once the import has recorded it, then each TRANSFER line
    but the one ruling plan#2433 holds back (:data:`reconcile_post_state.HELD_BACK`).
 3. **The never-moved rows** (:func:`_cancel`, :func:`_delete`): each row cancelled, which is
-   TWO presses of its full edit, Status to Projected and then to Cancelled, because the cancel
-   door takes only a Projected row and every one of these is Paid; and each envelope line
-   deleted by its X.  **The line list renders no X under a Paid envelope**
+   TWO presses of its full edit, Status to Projected and then the card's Cancel button, because
+   the cancel door takes only a Projected row and every one of these is Paid; and each envelope
+   line deleted by its X.  **The line list renders no X under a Paid envelope**
    (``purchases_closed`` in ``grid/_transaction_entries.html``), and 6 of the sheet's 7 lines
    sit under one, so on ruling **plan#2439** such a line is removed as that list's own notice
-   says: Status to Projected, the X, Status to Paid, then "Money moved on" set back to the day
-   the envelope carried.  Measured 2026-10-31 on copies of the acts-1-16 restore: the round
-   trip moves no other line, re-dates only the envelope's own settle day, and with the day
-   typed back ends exactly where a DELETE of the line alone does.
+   says: Status to Projected, the X, the card's Paid button, then "Money moved on" set back to
+   the day the envelope carried.  Measured 2026-10-31 on copies of the acts-1-16 restore: the
+   round trip moves no other line, re-dates only the envelope's own settle day, and with the
+   day typed back ends exactly where a DELETE of the line alone does.  **A Projected row's
+   card shows those two doors as BUTTONS**, and its Status selector only under "More options"
+   (:func:`_press_on_card`), so the run presses the buttons the owner sees.
 
 The CARD items, and the act ruling plan#2433 holds back, are named on the sheet, and no act
 touches them: their state is read into the snapshot before the first act and graded after
@@ -374,9 +376,41 @@ def _save_full_edit(run: Run, txn_id: int, control: str, value: str) -> None:
 
 
 def _save_status(run: Run, txn_id: int, status: StatusEnum) -> None:
-    """Save row *txn_id*'s full edit with Status set to *status*."""
+    """Save row *txn_id*'s full edit with Status set to *status*.
+
+    Only from a LOCKED row (Paid, among others), whose card renders the
+    Status selector open; a Projected row's card folds it under "More
+    options" and shows the status doors as buttons (:func:`_press_on_card`).
+    """
     run.sheet.typed("Status", status.value)
     _save_full_edit(run, txn_id, "status_id", str(ref_cache.status_id(status)))
+
+
+def _press_on_card(run: Run, txn_id: int, door: str, words: str) -> None:
+    """Press the button on row *txn_id*'s card that posts to its *door*.
+
+    **What a Projected row's card shows is the button, not the Status
+    selector**: the selector sits under the collapsed "More options", which
+    renders open only on a locked row, and the card's top row carries the
+    green Paid (``transactions.mark_done``) and the red Cancel
+    (``transactions.cancel_transaction``) instead
+    (``grid/_transaction_full_edit.html``, measured 2026-10-31 at the
+    deployed ``fc9dcfba7``).  Cancel answers ``gridRefresh``, so the grid
+    reloads without the cancelled row, where a Status save by PATCH answers
+    ``balanceChanged`` and leaves its cell drawn until a reload; Paid
+    answers ``balanceChanged`` and swaps the settled cell in place
+    (``transactions._helpers._mark_done_success_response``).
+
+    Args:
+        run: The run.
+        txn_id: The row.
+        door: The door's last path segment, ``cancel`` or ``mark-done``.
+        words: The button as the sheet names it.
+    """
+    run.sheet.say(f"- PRESS {words}")
+    run.operator.press(run.operator.button(
+        f"/transactions/{txn_id}/full-edit", "post", f"/transactions/{txn_id}/{door}",
+    ))
 
 
 def _paycheck_of(txn_id: int) -> date:
@@ -403,13 +437,16 @@ def _account_name(run: Run) -> str:
 
 
 def _cancel(run: Run, number: int, row: dict) -> None:
-    """Cancel one never-moved row: Status to Projected, then to Cancelled, in its full edit."""
+    """Cancel one never-moved row: Status to Projected in its full edit, then its Cancel."""
     txn_id = row["transaction_id"]
     page = f"/transactions/{txn_id}/full-edit"
-    run.sheet.act(number, f"Cancel {named(row)}", f"{page} (the row's full edit: Status)")
+    run.sheet.act(number, f"Cancel {named(row)}",
+                  f"{page} (the row's full edit: Status, then its Cancel button)")
     _say_where_on_the_grid(run, txn_id, row["row"])
-    for status in (StatusEnum.PROJECTED, StatusEnum.CANCELLED):
-        _save_status(run, txn_id, status)
+    _save_status(run, txn_id, StatusEnum.PROJECTED)
+    _press_on_card(run, txn_id, "cancel",
+                   "the red Cancel on the reopened card's top row, NOT the green Paid "
+                   "beside it")
     run.read(_cancelled, run, txn_id)
 
 
@@ -458,7 +495,8 @@ def _delete(run: Run, number: int, row: dict, gone: "frozenset[int]") -> None:
                   "and confirm")
     run.operator.press(button)
     if closed_on is not None:
-        _save_status(run, txn_id, StatusEnum.DONE)
+        _press_on_card(run, txn_id, "mark-done",
+                       "the green Paid on the card's top row, NOT the red Cancel beside it")
         run.sheet.typed("Money moved on", closed_on.isoformat())
         _save_full_edit(run, txn_id, "settled_on", closed_on.isoformat())
     problems = run.read(delete_problems, txn_id, entry_id, gone, before)

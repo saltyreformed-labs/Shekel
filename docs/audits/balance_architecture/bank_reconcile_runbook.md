@@ -182,12 +182,14 @@ rehearsal ran some other `app/` than production's.
 
 **Perform every act in ONE sitting, in the sheet's order, and finish each act before the next.**
 
-* **Inside a cancel: two saves.** Between them the row is Projected, and its cell shows a
-  check-mark button on hover: **do NOT press it**, it marks the row Paid again, dated today.
-  Click the row's amount to reopen the card instead.
+* **Inside a cancel: a save, then a press.** Between them the row is Projected: its cell shows a
+  check-mark button on hover, and its reopened card a green **Paid** beside the red **Cancel**.
+  **Press neither the check mark nor Paid**: each marks the row Paid again, dated today. Click
+  the row's amount to reopen the card, and press **Cancel**.
 * **Inside a delete under a Paid envelope: four presses.** Between the third (Paid) and the
   fourth (the day typed back) the envelope stands settled on TODAY for its whole figure; between
-  the first and the third it is Projected, with the same check-mark button not to press.
+  the first and the third it is Projected, with the same check-mark button not to press, and its
+  card's red **Cancel** not to press either: it cancels the whole envelope.
 * **One Reconcile card per Apply.** The rehearsal applied each card alone, and the receipt then
   speaks for that one card.
 * **Do not explain anything else on the Reconcile page**, including the lines the sheet leaves
@@ -219,8 +221,10 @@ rehearsed.
   gives the day its money moved, and a row's column is the paycheck it was budgeted in, which
   can be another. The sheet's `FIND` line names the column ("the paycheck starting ...") and the
   row.
-* **Clicking a row's amount opens its card**, the full edit: Status, and once a row is settled,
-  **Money moved on**. An envelope's card also lists its purchases under **Purchases**, each with
+* **Clicking a row's amount opens its card**, the full edit. On a Paid row it shows **Status**
+  and **Money moved on**. On a Projected row it shows a green **Paid** and a red **Cancel** on its
+  top row, and Status only under **More options**, which no act here opens: the acts press those
+  two buttons instead. An envelope's card also lists its purchases under **Purchases**, each with
   its day bought (month/day), its description and its figure (unsigned); under a settled
   envelope the list renders no X and says to set Status to Projected first.
 * **The Reconcile page** is the **Reconcile** button on Checking's Import statements page
@@ -269,11 +273,11 @@ it on SECU's day.
 
 `FIND` it on Checking's grid. Click its amount, set **Status** to **Projected**, **Save**. The
 card closes and the cell shows a check-mark button: **do NOT press it**. Click the amount again,
-set **Status** to **Cancelled**, **Save**.
+and press the red **Cancel** on the card's top row, **not** the green **Paid** beside it.
 
-*Success:* the row's cell is gone from its column (the grid draws no Cancelled row). *Why:*
-neither export holds it, so its money never moved (ruling plan#2359); the Status list offers
-Cancelled only from Projected, so a Paid row goes back to Projected first.
+*Success:* the grid reloads, and the row's cell is gone from its column (the grid draws no
+Cancelled row). *Why:* neither export holds it, so its money never moved (ruling plan#2359); the
+Cancel door takes only a Projected row, so a Paid row goes back to Projected first.
 
 ### A delete
 
@@ -281,8 +285,10 @@ Cancelled only from Projected, so a Paid row goes back to Projected first.
 
 * **Under a Paid envelope** (the sheet's act says TYPE Status: Projected first): set **Status**
   to **Projected**, **Save**; click the amount again. Under **Purchases**, press the **X** of the
-  purchase the sheet names, and confirm "Delete this entry?". Set **Status** to **Paid**,
-  **Save**; click the amount again, set **Money moved on** to the day the sheet gives, **Save**.
+  purchase the sheet names, and confirm "Delete this entry?". Click the amount again and press
+  the green **Paid** on the card's top row, **not** the red **Cancel** beside it; the cell
+  redraws as settled. Click the amount again, set **Money moved on** to the day the sheet gives,
+  **Save**.
 * **Under an envelope still Projected**: press the X of the purchase the sheet names, and
   confirm.
 
@@ -408,6 +414,11 @@ rendered; the post-state and the check, task plan#2416). Its door-driving half i
   neither the balances nor the list; and a cancelled row set back to Projected with its check
   mark pressed (Paid, today) failed the check on that cancel and the balances on Checking, and
   did not move the list.
+* **2026-10-31, the buttons a Projected row's card shows** (task plan#2451): the card folds
+  Status under More options and shows a green Paid and a red Cancel instead, so each cancel's
+  second press and each Paid envelope's re-close are made by those buttons. On a fresh restore of
+  the same dump, the whole act sheet so performed printed the earlier rehearsal's check output
+  exactly, and every balance figure was byte-identical to its baseline.
 * **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
   full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
   turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a

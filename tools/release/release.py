@@ -12,8 +12,9 @@ carries, each step's money flag and deploy-together group, the migrations it add
 or deletes; what refuses it; what the developer's approval question must name; and, on a
 refusal or two added migrations, the newest earlier cut to offer him.  ``production``
 lists what the release ``<base>..<cut>`` changes of what production runs, by each pull
-request's own change and apart what none of them changed (:mod:`tools.release._changes`),
-for the approval question to name where no rehearsal kit covered it (R-BAL281's interim).
+request's own change and apart what none of them changed, and each version it moves in the
+files that pin versions (:mod:`tools.release._changes`), for the approval question to name
+where no rehearsal kit or card covered it (R-BAL281's interim, ruling plan#2351).
 ``census`` lists every worktree, every branch ``main`` already holds or a kit names, and
 every dev database, marking what this release made: its ``release/<date>`` branch and what
 each rehearsal kit's manifest names (:mod:`tools.release._census`).
@@ -35,8 +36,8 @@ line per thing the kit made, written before it made it.
 Exit status, ``plan``: 0 clean; 1 refused, each reason printed with the cut to offer;
 3 the approval question must name what is printed; 2 nothing was judged (the command
 line, git, the tracker, or an unrehearsed name that names nothing).  ``production``: 0
-listed; 2 nothing was judged (the command line, git, or an ignore file holding a pattern
-Docker refuses).  ``census``: 0
+listed; 2 nothing was judged (the command line, git, an ignore file holding a pattern
+Docker refuses, or a file pinning versions this listing cannot read).  ``census``: 0
 listed, every kit's manifest accepted; 4 listed, but a kit was refused (each reason
 printed), so the cleanup is NOT proven and nothing that kit names is marked, whoever
 else names it; 2 git, the compose file or the docker listing failed.
@@ -59,6 +60,7 @@ from tools.quill.door import (
     CredentialsError,
     GitHubError,
     IgnoreFileError,
+    NotVersions,
     Tracker,
     TrackerError,
     described,
@@ -170,7 +172,8 @@ def production_lines(base: str, cut: str, found: Changes) -> list[str]:
     """``production``'s report over ``<base>..<cut>``, ending with its verdict: each pull
     request whose own change changes a file the release changes of what production runs,
     newest first, with each such path; then each path the release changes that no pull
-    request's own change does."""
+    request's own change does; then each version the release moves, by file and what it
+    pins, ``none`` for a side that pins it at none."""
     lines = [f"release production: base {base}, cut {cut}"]
     changing = [pull for pull in found.pulls if pull.paths]
     for pull in changing:
@@ -182,6 +185,10 @@ def production_lines(base: str, cut: str, found: Changes) -> list[str]:
                      "merge's resolution, or an ignore-file edit meeting a file the other "
                      "branch brought:")
         lines += [f"  {path}" for path in found.unowned]
+    if found.versions:
+        lines.append(f"versions moved ({len(found.versions)}), from the base's to the cut's:")
+        lines += [f"  {moved.path}: {moved.what} {', '.join(moved.old) or 'none'} -> "
+                  f"{', '.join(moved.new) or 'none'}" for moved in found.versions]
     lines.append(f"verdict: {len(found.net)} of production's files change; {len(changing)} "
                  f"of {len(found.pulls)} pull requests change them, {len(found.unowned)} "
                  "by none (exit 0)")
@@ -238,9 +245,9 @@ def main(argv: list[str] | None = None, root: Path = REPO,
         found = census(root, args.main, Made(args.release_branch, tuple(args.kit)), listing)
         print("\n".join(census_lines(found)))
         return 0 if found.proven else UNPROVEN
-    except (ReleaseError, GitError, IgnoreFileError, OSError, UnicodeDecodeError,
-            yaml.YAMLError, subprocess.CalledProcessError, GitHubError, TrackerError,
-            CredentialsError, requests.RequestException) as error:
+    except (ReleaseError, GitError, IgnoreFileError, NotVersions, OSError,
+            UnicodeDecodeError, yaml.YAMLError, subprocess.CalledProcessError, GitHubError,
+            TrackerError, CredentialsError, requests.RequestException) as error:
         print(f"release {args.command}: nothing was judged: {described(error)}",
               file=sys.stderr)
         return CANNOT

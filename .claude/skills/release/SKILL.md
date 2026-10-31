@@ -224,8 +224,8 @@ grade to the lane.
 First list what the release changes of what production runs: the cut's tree against the base's,
 which is what step 6 releases, read as CI's write rule reads it (`tools/quill/_production.py`: the
 files the image holds, by Docker's own reading of `.dockerignore`, and the files outside it that
-build or run production), with each pull request's own part of it and, apart, each file no pull
-request's own change made:
+build or run production), with each pull request's own part of it, apart each file no pull request's
+own change made, and each version it moves in the files that pin versions:
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -250,6 +250,12 @@ Header "Release ok". The question lists, in plain words with each id after its w
   `git diff "$BASE" "$CUT" -- <file>` shows the release does to it: a merge's resolution kept or
   dropped a side there, and a hotfix a resync dropped leaves production. This skill keeps no list
   of production's files: its last one missed `docker-compose.yml`;
+- every version the release moves, each line under `production.txt`'s `versions moved` heading, in
+  plain words: what moves (a package, an image, an action) from which version to which, `none` on a
+  side being one added or removed, and a digest or commit cut to its first 12 characters; past what
+  the question holds (the lock's first release adds every package), say how many of each file and
+  that `production.txt` lists each. A change moving pinned versions alone lands with no card (ruling
+  plan#2351), so no card above names it;
 - each kit's verdict, or that nothing needed rehearsal.
 
 Options: "Approve this release" or "Not now". "Not now" merges nothing (step 0's early end).

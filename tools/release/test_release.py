@@ -9,7 +9,7 @@ from tools.ci.scratch import run
 from tools.quill.door import FakeTracker
 from tools.release import release
 from tools.release._census import COMPOSE, MANIFEST
-from tools.release.conftest import MONEY, migration, pull_request, ship
+from tools.release.conftest import MONEY, lock, migration, pull_request, ship
 
 COMPOSED = ("services:\n  db:\n    container_name: dev-db\n    environment:\n"
             "      POSTGRES_USER: someone\n      POSTGRES_DB: budget\n")
@@ -131,6 +131,36 @@ def test_production_names_apart_a_change_no_pull_request_made(repo, capsys):
         "  app.py",
         "verdict: 2 of production's files change; 1 of 2 pull requests change them, 1 by "
         "none (exit 0)"]
+
+
+def test_production_lists_each_version_the_release_moves(repo, capsys):
+    """A lock update moving one package and adding another: the report names each version
+    moved under its own heading, one added against none, before its verdict."""
+    base = repo.commit("base", {"app.py": "0", "uv.lock": lock(("flask", "3.1.0"))})
+    cut = pull_request(repo, base, files={"uv.lock": lock(("flask", "3.1.1"),
+                                                          ("olefile", "0.47"))})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {cut}",
+        f"{cut} 'Merge pull request' changes 1 of production's files:",
+        "  uv.lock",
+        "versions moved (2), from the base's to the cut's:",
+        "  uv.lock: flask 3.1.0 -> 3.1.1",
+        "  uv.lock: olefile none -> 0.47",
+        "verdict: 1 of production's files change; 1 of 1 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
+def test_production_exits_2_and_lists_nothing_on_a_lock_no_pin_of_which_can_be_named(
+        repo, capsys):
+    """A cut whose lock is no TOML is an error, never a release moving no version."""
+    base = repo.commit("base", {"app.py": "0", "uv.lock": lock()})
+    cut = pull_request(repo, base, files={"uv.lock": "[[package\n"})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("release production: nothing was judged: uv.lock is no "
+                                   "TOML: ")
 
 
 def test_production_exits_2_and_lists_nothing_on_an_ignore_file_docker_refuses(repo, capsys):

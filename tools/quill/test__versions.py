@@ -15,7 +15,7 @@ import pytest
 from tools.ci.gitcmd import git
 from tools.ci.scratch import repository
 from tools.quill._production import COMPOSE, DOCKERFILE, PUBLISH
-from tools.quill._versions import LOCK, Move, NotVersions, moves
+from tools.quill._versions import LOCK, Move, NotVersions, Pin, moves, pinned
 
 #: PyPI's simple index, every locked package's registry.
 _REGISTRY = '{ registry = "https://pypi.org/simple" }'
@@ -295,3 +295,87 @@ def test_a_pinning_file_added_deleted_or_no_file_is_refused(repo, was, now, why)
         moves(repo, LOCK, was and _blob(repo, _lock(), was),
               now and _blob(repo, _lock(_at("pillow", "12.4.1")), now))
     assert str(refused.value) == why
+
+
+# -- what one side pins ---------------------------------------------------------------------
+
+def _pins(repo, path, text, mode="100644"):
+    """What :func:`pinned` says ``path`` pins where production holds the text ``text``."""
+    return pinned(repo, path, _blob(repo, text, mode))
+
+
+def test_a_lock_pins_each_package_at_its_version(repo):
+    """Every package the lock holds pins its version, the project's own included."""
+    assert _pins(repo, LOCK, _lock()) == {Pin("pillow", "12.3.0"), Pin("qrcode", "8.2"),
+                                          Pin("zeta", "0.6.3"), Pin("shekel", "0")}
+
+
+def test_a_forked_lock_pins_each_version_a_name_holds(repo):
+    """A resolution forked by environment holds zeta twice, which :func:`moves` refuses: what
+    a side pins asks nothing of a move, so each version is pinned."""
+    forked = _lock(extra=f'\n[[package]]\nname = "zeta"\nversion = "0.7.0"\n'
+                         f'source = {_REGISTRY}\n')
+    assert _pins(repo, LOCK, forked) == {Pin("pillow", "12.3.0"), Pin("qrcode", "8.2"),
+                                         Pin("zeta", "0.6.3"), Pin("zeta", "0.7.0"),
+                                         Pin("shekel", "0")}
+
+
+def test_a_package_of_no_version_pins_none(repo):
+    """A project whose version is dynamic is locked with no version, and pins none."""
+    dynamic = _lock().replace('name = "shekel"\nversion = "0"\n', 'name = "shekel"\n')
+    assert _pins(repo, LOCK, dynamic) == {Pin("pillow", "12.3.0"), Pin("qrcode", "8.2"),
+                                          Pin("zeta", "0.6.3")}
+
+
+@pytest.mark.parametrize(("text", "why"), [
+    (_lock() + "[[package\n", "uv.lock is no TOML: "),
+    (_lock(extra='\n[[package]]\nversion = "1.0"\n'), "uv.lock holds a package with no name"),
+], ids=["no TOML", "a package with no name"])
+def test_a_lock_no_pin_of_which_can_be_named_is_refused(repo, text, why):
+    """A lock TOML cannot read, or holding a package with no name, names no pin."""
+    with pytest.raises(NotVersions) as refused:
+        _pins(repo, LOCK, text)
+    assert str(refused.value).startswith(why)
+
+
+def test_a_dockerfile_pins_each_image_its_from_lines_pin(repo):
+    """Each ``FROM`` line pinning by tag and digest pins its image at the tag's version
+    through its digest, two lines pinning one image alike pinning it once; a stage from
+    nothing, and an image under a tag naming no version, pin none."""
+    text = _DOCKERFILE + f"\nFROM scratch\nFROM nginx:alpine@sha256:{_NEW}\n"
+    assert _pins(repo, DOCKERFILE, text) == {
+        Pin("ghcr.io/astral-sh/uv", f"0.13.6@sha256:{_OLD}"),
+        Pin("python", f"3.14-slim@sha256:{_OLD}")}
+
+
+def test_a_dockerfile_of_other_line_endings_pins_alike(repo):
+    """What a side pins asks nothing of its line endings, which :func:`moves` refuses."""
+    assert (_pins(repo, DOCKERFILE, _DOCKERFILE.replace("\n", "\r\n"))
+            == _pins(repo, DOCKERFILE, _DOCKERFILE))
+
+
+def test_a_compose_file_pins_each_image_pinned_by_tag_and_digest(repo):
+    """postgres is pinned at its tag's version through its digest; the app's own image,
+    under a tag alone, pins none."""
+    text = _COMPOSE + "  app:\n    image: ghcr.io/saltyreformed-labs/shekel:latest\n"
+    assert _pins(repo, COMPOSE, text) == {Pin("postgres", f"18-alpine@sha256:{_OLD}")}
+
+
+def test_the_publish_workflow_pins_each_action_at_its_commit_and_release(repo):
+    """Each action is pinned at its commit through its release; an action of the
+    repository's own pins none."""
+    text = _PUBLISH + "      - uses: $/.github/actions/install-lock\n"
+    assert _pins(repo, PUBLISH, text) == {Pin("actions/checkout", f"{_SHA} # v7.0.1"),
+                                          Pin("docker/login-action", f"{_SHA} # v4.6.0")}
+
+
+def test_a_file_production_does_not_hold_pins_none(repo):
+    """A side holding no such file pins nothing."""
+    assert pinned(repo, LOCK, None) == frozenset()
+
+
+def test_a_link_where_a_pinning_file_was_is_refused(repo):
+    """A link's text is not the file's, so it names no pin."""
+    with pytest.raises(NotVersions,
+                       match="^uv.lock is no file, but a link or a submodule's commit$"):
+        _pins(repo, LOCK, _lock(), mode="120000")

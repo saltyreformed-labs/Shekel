@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
-from tools.quill.door import IgnoreFileError
-from tools.release._changes import Change, Changes, changes
-from tools.release.conftest import pull_request
+from tools.quill.door import IgnoreFileError, NotVersions
+from tools.release._changes import Change, Changes, Moved, changes
+from tools.release.conftest import lock, pull_request
 
 #: An ignore file leaving out itself, the documentation, the workflows, the scripts, the
 #: deploy directory, the compose files and every environment file but the template, as this
@@ -123,4 +123,100 @@ def test_an_ignore_file_docker_refuses_refuses_the_listing(repo):
     base = production(repo)
     cut = pull_request(repo, base, files={".dockerignore": "!\n"})
     with pytest.raises(IgnoreFileError):
+        changes(repo.root, base, cut)
+
+
+# -- the versions a release moves -----------------------------------------------------------
+
+#: Two digests and two commits, each one side's.
+_OLD, _NEW, _SHA, _LATER = "a" * 64, "b" * 64, "1" * 40, "2" * 40
+#: A Dockerfile pinning uv and Python by tag and digest, Python twice, as the repository's
+#: does.
+DOCKERFILE = (f"FROM ghcr.io/astral-sh/uv:0.13.6@sha256:{_OLD} AS uv\n"
+              f"FROM python:3.14-slim@sha256:{_OLD} AS builder\n"
+              f"FROM python:3.14-slim@sha256:{_OLD}\nCOPY . .\n")
+COMPOSE = f"services:\n  db:\n    image: postgres:18-alpine@sha256:{_OLD}\n"
+PUBLISH = f"jobs:\n  build:\n    steps:\n      - uses: actions/checkout@{_SHA} # v7.0.1\n"
+
+
+def pinning(repo):
+    """A base holding each file that pins versions, among the files production runs."""
+    return repo.commit("base", {
+        ".dockerignore": IGNORE, "app.py": "0", "Dockerfile": DOCKERFILE,
+        "docker-compose.yml": COMPOSE, ".github/workflows/docker-publish.yml": PUBLISH,
+        "uv.lock": lock(("flask", "3.1.0"), ("zeta", "0.6.3"))})
+
+
+def test_each_version_a_release_moves_is_named_from_the_base_to_the_cut(repo):
+    """An update moving versions alone, then a card's own change to the Dockerfile and the
+    lock, more than versions: the release names each version moved from the base's to the
+    cut's, by file and then what it pins, a package added or removed against none, and
+    never the app's code."""
+    base = pinning(repo)
+    update = pull_request(repo, base, files={
+        "uv.lock": lock(("flask", "3.1.1"), ("zeta", "0.6.3")),
+        "docker-compose.yml": COMPOSE.replace(f"18-alpine@sha256:{_OLD}",
+                                              f"18.7-alpine@sha256:{_NEW}"),
+        ".github/workflows/docker-publish.yml": PUBLISH.replace(
+            f"{_SHA} # v7.0.1", f"{_LATER} # v7.1.0")})
+    card = pull_request(repo, update, files={
+        "app.py": "1",
+        "Dockerfile": DOCKERFILE.replace(f"uv:0.13.6@sha256:{_OLD}", f"uv:0.13.9@sha256:{_NEW}")
+        + "RUN uv sync --locked\n",
+        "uv.lock": lock(("flask", "3.1.1"), ("olefile", "0.47"))})
+    assert changes(repo.root, base, card).versions == (
+        Moved(".github/workflows/docker-publish.yml", "actions/checkout",
+              (f"{_SHA} # v7.0.1",), (f"{_LATER} # v7.1.0",)),
+        Moved("Dockerfile", "ghcr.io/astral-sh/uv",
+              (f"0.13.6@sha256:{_OLD}",), (f"0.13.9@sha256:{_NEW}",)),
+        Moved("docker-compose.yml", "postgres",
+              (f"18-alpine@sha256:{_OLD}",), (f"18.7-alpine@sha256:{_NEW}",)),
+        Moved("uv.lock", "flask", ("3.1.0",), ("3.1.1",)),
+        Moved("uv.lock", "olefile", (), ("0.47",)),
+        Moved("uv.lock", "zeta", ("0.6.3",), ()))
+
+
+def test_what_is_pinned_at_more_than_one_version_is_named_with_each(repo):
+    """One of the Dockerfile's two Python lines moved, and a lock forked by environment
+    holding zeta twice: each side's versions of what moved are named, in order."""
+    base = pinning(repo)
+    cut = pull_request(repo, base, files={
+        "Dockerfile": DOCKERFILE.replace(f"{_OLD}\nCOPY", f"{_NEW}\nCOPY"),
+        "uv.lock": lock(("flask", "3.1.0"), ("zeta", "0.6.3"), ("zeta", "0.7.0"))})
+    assert changes(repo.root, base, cut).versions == (
+        Moved("Dockerfile", "python", (f"3.14-slim@sha256:{_OLD}",),
+              (f"3.14-slim@sha256:{_OLD}", f"3.14-slim@sha256:{_NEW}")),
+        Moved("uv.lock", "zeta", ("0.6.3",), ("0.6.3", "0.7.0")))
+
+
+def test_a_pinning_file_entering_or_leaving_production_names_each_of_its_pins(repo):
+    """The publish workflow deleted and a compose file brought in: each pin of either is
+    named against none on the side that holds no such file."""
+    base = repo.commit("base", {".dockerignore": IGNORE, "app.py": "0",
+                                ".github/workflows/docker-publish.yml": PUBLISH})
+    cut = pull_request(repo, base, files={".github/workflows/docker-publish.yml": None,
+                                          "docker-compose.yml": COMPOSE})
+    assert changes(repo.root, base, cut).versions == (
+        Moved(".github/workflows/docker-publish.yml", "actions/checkout",
+              (f"{_SHA} # v7.0.1",), ()),
+        Moved("docker-compose.yml", "postgres", (), (f"18-alpine@sha256:{_OLD}",)))
+
+
+def test_a_pinning_file_changed_in_no_pin_moves_no_version(repo):
+    """A card's edit to the Dockerfile and the lock's header changes production and moves no
+    version: the release names the files and no version."""
+    base = pinning(repo)
+    cut = pull_request(repo, base, files={
+        "Dockerfile": DOCKERFILE + "RUN uv sync --locked\n",
+        "uv.lock": lock(("flask", "3.1.0"), ("zeta", "0.6.3")).replace("revision = 5",
+                                                                        "revision = 6")})
+    found = changes(repo.root, base, cut)
+    assert (found.net, found.versions) == (("Dockerfile", "uv.lock"), ())
+
+
+def test_a_lock_no_pin_of_which_can_be_named_refuses_the_listing(repo):
+    """A cut whose lock is no TOML names no version, never one moved as none."""
+    base = pinning(repo)
+    cut = pull_request(repo, base, files={"uv.lock": "[[package\n"})
+    with pytest.raises(NotVersions):
         changes(repo.root, base, cut)

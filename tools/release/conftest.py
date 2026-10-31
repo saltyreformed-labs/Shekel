@@ -1,5 +1,5 @@
 """The fixture the release tool's tests share: a throwaway repository whose commits carry
-files (migrations, ship markers), built with :mod:`tools.ci.scratch`'s isolated git;
+files (migrations, ship markers, locks), built with :mod:`tools.ci.scratch`'s isolated git;
 and the histories the card reader's tests build on it (a cut after the cutover, a pull
 request merged as ``dev`` takes one writing ship markers, a deploy-together group in
 quill's own fake)."""
@@ -16,6 +16,13 @@ from tools.ci.scratch import run
 from tools.quill.door import MARKERS, FakeTracker
 from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, MOVES_MONEY_LABEL
 from tools.release._plan import Inputs, plan
+
+
+def lock(*packages: tuple[str, str]) -> str:
+    """A lock's text holding each of ``packages``, a name and a version, from PyPI."""
+    return "version = 1\nrevision = 5\n" + "".join(
+        f'\n[[package]]\nname = "{name}"\nversion = "{version}"\n'
+        'source = { registry = "https://pypi.org/simple" }\n' for name, version in packages)
 
 
 def migration(revision: str, down: str | None) -> str:

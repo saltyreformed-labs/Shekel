@@ -33,6 +33,16 @@ indirect ones included: ``uv lock --upgrade`` moves an indirect package across a
 without any ``pyproject.toml`` edit (pillow ``12.3.0`` to ``13.0.0`` through
 ``qrcode[pil]``, measured 2026-10-30 at plan#2325).  A version this module cannot read moves
 no version it can vouch for, so it is refused.
+
+**What one side pins** (:func:`pinned`, read by the release tool's listing of the versions a
+release moves, ``tools/release/_changes.py``) asks nothing of what a change moves, since a
+release carries cards' own edits to these files beside the versions an update moved: each
+package the lock holds at its version, a lock forked by environment pinning each version a
+name holds, and each line of the other three files that pins one, by what it pins and its
+version as the line spells it, the tag's version through the digest
+(``3.14-slim@sha256:<digest>``) or the commit through the release (``<commit> # v7.0.1``).
+A line pinning by any other form (a tag alone, a tag naming no version, an action of this
+repository's own) pins none this module reads.
 """
 from __future__ import annotations
 
@@ -80,6 +90,17 @@ class Move:
     old: str
     new: str
     major: bool
+
+
+@dataclass(frozen=True)
+class Pin:
+    """One version a file production runs pins (:func:`pinned`): ``what`` (a package, an
+    image, an action) at ``version``, a package's as the lock holds it, an image's as its
+    line spells its tag's version through its digest, an action's its commit through its
+    release."""
+
+    what: str
+    version: str
 
 
 @dataclass(frozen=True)
@@ -134,12 +155,39 @@ def _exact(root: Path, path: str, oid: str) -> list[str]:
     return text.split("\n")
 
 
+def _object(path: str, held: str) -> str:
+    """The object of ``path``, held as ``held`` (its mode and object, as
+    :func:`_production.changed` gives them).
+
+    Raises:
+        NotVersions: when it is no file, but a link or a submodule's commit, whose text is
+            not the file's.
+    """
+    mode, oid = held.split(" ")
+    if mode not in _FILE_MODES:
+        raise NotVersions(f"{path} is no file, but a link or a submodule's commit")
+    return oid
+
+
+def _spans(pin: re.Match[str]) -> list[tuple[int, int]]:
+    """Where a pinning line's (:class:`_Pins`) ``version`` and ``exact`` groups lie in it,
+    the earlier first."""
+    return sorted((pin.span("version"), pin.span("exact")))
+
+
 def _frame(pin: re.Match[str]) -> tuple[str, ...]:
     """A pinning line (:class:`_Pins`) without what a version-only change may move: its text
     around its ``version`` and ``exact`` groups."""
-    (start, end), (later, last) = sorted((pin.span("version"), pin.span("exact")))
+    (start, end), (later, last) = _spans(pin)
     line = pin.string
     return line[:start], line[end:later], line[last:]
+
+
+def _version(pin: re.Match[str]) -> str:
+    """The version a pinning line (:class:`_Pins`) pins, as it spells it: its text from the
+    first of its ``version`` and ``exact`` groups through the last."""
+    (start, _), (_, last) = _spans(pin)
+    return pin.string[start:last]
 
 
 def _lines(root: Path, path: str, old: str, new: str) -> tuple[Move, ...]:
@@ -182,18 +230,29 @@ def _read(text: str) -> dict[str, object]:
         raise NotVersions(f"{LOCK} is no TOML: {error}") from error
 
 
-def _packages(lock: dict[str, object]) -> dict[str, dict[str, object]]:
-    """Each package ``lock`` holds, by its name.
+def _named(lock: dict[str, object]) -> list[dict[str, object]]:
+    """Each package ``lock`` holds, in its order.
 
     Raises:
-        NotVersions: when one has no name, or a name is held more than once (a resolution
-            forked by environment), which a version-only change cannot be told by.
+        NotVersions: when one has no name.
     """
     packages = lock.get("package", [])
     if not isinstance(packages, list) or not all(
             isinstance(package, dict) and isinstance(package.get("name"), str)
             for package in packages):
         raise NotVersions(f"{LOCK} holds a package with no name")
+    return packages
+
+
+def _packages(lock: dict[str, object]) -> dict[str, dict[str, object]]:
+    """Each package ``lock`` holds (:func:`_named`), by its name.
+
+    Raises:
+        NotVersions: as :func:`_named` raises it, or when a name is held more than once (a
+            resolution forked by environment), which a version-only change cannot be told
+            by.
+    """
+    packages = _named(lock)
     if twice := sorted(name for name, count in Counter(
             package["name"] for package in packages).items() if count > 1):
         raise NotVersions(f"{LOCK} holds {', '.join(twice)} more than once")
@@ -260,11 +319,34 @@ def moves(root: Path, path: str, was: str | None, now: str | None) -> tuple[Move
         raise NotVersions(f"{path} pins no version")
     if was is None or now is None:
         raise NotVersions(f"{path} {'enters' if was is None else 'leaves'} production")
-    (old_mode, old), (new_mode, new) = was.split(" "), now.split(" ")
-    if old_mode != new_mode:
+    if was.split(" ")[0] != now.split(" ")[0]:
         raise NotVersions(f"{path} changes its mode")
-    if old_mode not in _FILE_MODES:
-        raise NotVersions(f"{path} is no file, but a link or a submodule's commit")
+    old, new = _object(path, was), _object(path, now)
     if path == LOCK:
         return _lock(git(root, "cat-file", "blob", old), git(root, "cat-file", "blob", new))
     return _lines(root, path, old, new)
+
+
+def pinned(root: Path, path: str, held: str | None) -> frozenset[Pin]:
+    """Every version ``path``, a file that pins versions (:data:`PINNED`), pins where
+    production holds it as ``held`` (its mode and object, as :func:`_production.changed`
+    gives them; None where that production holds no such file, which pins none): in the
+    lock each package at its version, a package of no version (a project whose version is
+    dynamic) pinning none; in any other file what each line that pins one (:data:`_LINES`)
+    pins, at its version as the line spells it (:func:`_version`).  It asks nothing of what
+    a change moves, so a lock forked by environment pins each version a name holds.
+
+    Raises:
+        NotVersions: when it is no file (:func:`_object`), or a lock that is no TOML
+            (:func:`_read`) or holds a package with no name (:func:`_named`).
+        tools.ci.gitcmd.GitError: when git cannot read its object.
+    """
+    if held is None:
+        return frozenset()
+    text = git(root, "cat-file", "blob", _object(path, held))
+    if path == LOCK:
+        return frozenset(Pin(package["name"], str(package["version"]))
+                         for package in _named(_read(text)) if "version" in package)
+    line = _LINES[path].line
+    return frozenset(Pin(pin["what"], _version(pin))
+                     for pin in map(line.fullmatch, text.split("\n")) if pin is not None)

@@ -57,14 +57,22 @@ class Hero:
         to_explain: How many lines the inbox holds.
         unpriced_after: How many drawn days after :attr:`day` the books state
             a balance for and the bank's own record cannot price -- a later
-            import placing no balance, or the gap before one.  **Zero is what
+            import placing no balance, the gap before one, or the days after
+            every statement through the books' last record.  **Zero is what
             makes the hero current**, and the other four do not imply it, so
             :attr:`~._reconcile.ReconcilePage.is_done` refuses done over it
-            and the page says *priced through <day>*.  Drawn days end at the
-            last statement line, so a record AFTER every statement is not
-            counted: statements stopping three weeks before the records read
-            zero and can be done (finding **BAL-651**).  Named by adversarial
-            review 2026-08-29.
+            and the page says *priced through <day>*.  Named by adversarial
+            review 2026-08-29.  *The days after every statement were not
+            drawn until finding* **BAL-651** *was fixed (ruling plan#2346), so
+            statements stopping three weeks before the records read zero here
+            and the page read Done.*
+        records_through: The books' last record -- a settled row or a true-up
+            (ruling plan#2400), on or before NOW -- where it falls AFTER
+            :attr:`day`, else ``None``.  What the page names beside *priced
+            through <day>* (ruling plan#2346): the records a statement has
+            yet to price run that far.  ``None`` with :attr:`day`, and where
+            the records end on or before it, since then no record waits on a
+            statement.
 
     **The three money figures are all-or-nothing**, and that is the point of
     carrying the day beside them: a hero that printed two of three would be
@@ -77,6 +85,7 @@ class Hero:
     off_by: "Decimal | None"
     to_explain: int
     unpriced_after: int
+    records_through: "date | None"
 
 
 def hero(agreement: "BankAgreement | None", to_explain: int) -> Hero:
@@ -98,8 +107,9 @@ def hero(agreement: "BankAgreement | None", to_explain: int) -> Hero:
     if day is None:
         return Hero(
             day=None, bank=None, books=None, off_by=None,
-            to_explain=to_explain, unpriced_after=0,
+            to_explain=to_explain, unpriced_after=0, records_through=None,
         )
+    last_record_on = agreement.last_record_on
     return Hero(
         day=day.day,
         bank=day.bank_balance,
@@ -109,4 +119,9 @@ def hero(agreement: "BankAgreement | None", to_explain: int) -> Hero:
         # Each later day has a books balance (the hero's is on or after the
         # opening) and no bank one (the hero is the LATEST carrying both).
         unpriced_after=sum(1 for other in agreement.days if other.day > day.day),
+        records_through=(
+            last_record_on
+            if last_record_on is not None and last_record_on > day.day
+            else None
+        ),
     )

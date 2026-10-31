@@ -99,9 +99,10 @@ class SpanAgreement:
             step ``balance:X-f3c-2b-2c``, ruling **R-BAL291**).  Fewer than
             :attr:`day_count` for a day outside the drawn range
             (``bank_agreement`` draws from the account's first recorded line
-            to its last, never past the reader's NOW and at most two years
-            back), for a day on or before the day the books opened, whose bank
-            lines the opening already holds (finding **N-314**) -- which no day
+            to the later of its last and the books' last record, never past
+            the reader's NOW and at most two years back), for a day on or
+            before the day the books opened, whose bank lines the opening
+            already holds (finding **N-314**) -- which no day
             of the books span is, since that span starts the day after -- and
             for a day inside no import's window, which nothing the bank said
             reaches (finding **BAL-650**).  So every compared day is an
@@ -141,8 +142,9 @@ class SpanAgreement:
             refuses more than it must and never less.  A feed sync will
             declare the window it requested, quiet days included -- and the
             comparison, which draws only from the account's first recorded
-            line to its last, would then hold imported days it never compares
-            (finding **bank_import:BI-513**).
+            line to the later of its last and the books' last record, would
+            then hold imported days it never compares (finding
+            **bank_import:BI-513**).
     """
 
     first_day: date
@@ -184,9 +186,9 @@ class SpanAgreement:
         Returns:
             ``imported - compared``: imported days the comparison did not take
             -- days it did not draw (before the account's first recorded line,
-            after its last or after the reader's NOW, or beyond the two-year
-            bound), and days on or before the books opened, whose movement the
-            opening holds (none of which is in the books span).
+            after both its last and the books' last record, after the reader's
+            NOW, or beyond the two-year bound), and days on or before the
+            books opened, whose movement the opening holds (none of which is in the books span).
         """
         return self.imported - self.compared
 
@@ -243,21 +245,23 @@ class SpanAgreement:
         share no day.  An imported day goes uncompared where the report does
         not draw it -- before the ACCOUNT's first recorded line across every
         import (finding **bank_import:BI-513**, for a window declared wider
-        than its lines), after its last line or the reader's NOW, or beyond
-        the two-year bound -- or on or before the day the books opened
-        (finding **N-314**), which no day of the books span is.  So
-        :attr:`unimported` names the REASON a day was not compared and no
-        longer guards the verdict alone: ``unchecked == 0`` already forces it
-        to zero.  The card states the two parts as two sentences for that
-        reason, neither recounting the other.  *Until that step the counts
-        OVERLAPPED: a drawn day between two imports was compared against a
-        bank movement of ``0.00`` nobody imported, and only the imported-days
-        term kept such a span from reading as reconciled.*
+        than its lines), after both its last line and the books' last
+        record, after the reader's NOW, or beyond the two-year bound -- or
+        on or before the day the books opened (finding **N-314**), which no
+        day of the books span is.  So :attr:`unimported` names the REASON a
+        day was not compared and no longer guards the verdict alone:
+        ``unchecked == 0`` already forces it to zero.  The card states the
+        two parts as two sentences for that reason, neither recounting the
+        other.  *Until that step the counts OVERLAPPED: a drawn day between
+        two imports was compared against a bank movement of ``0.00`` nobody
+        imported, and only the imported-days term kept such a span from
+        reading as reconciled.*
         A first draft tested the imports' two END DAYS instead, and that term
-        was DEAD: ``bank_agreement`` draws only days between the first and last
-        recorded line, so ``unchecked == 0`` already implied it and it could
-        never fire.  A defensive term that cannot fire is the *born dead* shape
-        ``lessons.md`` names, and it reads as protection nobody has.
+        was DEAD: ``bank_agreement`` drew only days between the first and last
+        recorded line then, so ``unchecked == 0`` already implied it and it
+        could never fire.  A defensive term that cannot fire is the *born
+        dead* shape ``lessons.md`` names, and it reads as protection nobody
+        has.
 
         Returns:
             True when the bank's own record accounts for every day the
@@ -314,8 +318,9 @@ class StretchKind(Enum):
     NO_STATEMENT = "no statement yet"
     #: Inside an imported window, yet the comparison could not take it: the
     #: day lies outside the range ``bank_agreement`` draws -- from the first
-    #: recorded LINE to the last (finding **bank_import:BI-513**), never past
-    #: the reader's NOW, and at most two years back.  *Until plan step
+    #: recorded LINE (finding **bank_import:BI-513**) to the later of the last
+    #: and the books' last record, never past the reader's NOW, and at most
+    #: two years back.  *Until plan step
     #: balance:X-f3c-2b-2c a books day before the account's first cash fact
     #: was this kind too (finding **balance:BAL-616**); the comparison now
     #: takes every day after the books open that an import covers, so a drawn

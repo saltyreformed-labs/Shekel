@@ -828,3 +828,35 @@ class TestTheStatementsPageLinksHere:
         )
 
         assert _url(seed_user["account"].id).encode() in response.data
+
+
+class TestRecordsPastTheLastStatementAreListed:
+    """Finding **BAL-651**, ruling plan#2399, through a real render."""
+
+    def test_the_days_are_listed_and_the_level_reads_the_banks_last_day(
+        self, auth_client, db, seed_user, seed_periods,
+    ):
+        """Records after every statement are listed, and the summary stays as it was.
+
+        The statement ends Feb 2 and a ``40.00`` row settles Feb 15: the
+        Feb 15 row says no statement covers it and shows the books' movement,
+        and the standing gap is still captioned with Feb 2, the bank's last
+        drawn day, rather than with Feb 15, which the bank cannot price.
+        """
+        _seed_import(
+            db, seed_user["account"], stated="1000.00",
+            effective_on=date(2026, 2, 2), evidence=_FILE_CHAIN,
+            lines=[(date(2026, 2, 2), "-20.00")],
+        )
+        _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
+        db.session.commit()
+
+        body = auth_client.get(_url(seed_user["account"].id)).data.decode()
+
+        tail = _row_for(body, date(2026, 2, 15))
+        assert "no statement imported" in tail
+        assert "-$40.00" in _money_cells(tail)
+        assert "table-warning" not in tail
+        assert re.search(
+            r"your books against your bank's on\s+2026-02-02</div>", body,
+        ), "the standing gap is not captioned with the bank's last day"

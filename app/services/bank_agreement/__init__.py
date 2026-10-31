@@ -70,6 +70,21 @@ imports read ``0.00`` for the bank and was compared against it, so the
 counts and totals took a figure the bank never stated, and the reconcile
 verdict came out right only through a separate count of imported days.
 
+**The drawn days run to whichever record reaches LATER** (plan step
+``balance:X-bk-2``, plan#1192; finding **BAL-651**, rulings plan#2346,
+plan#2399 and plan#2400): the bank's last recorded line, or the books' last
+RECORD -- a settled row or a true-up
+(:func:`~app.services.balance_at.cash_last_record_on`) -- and never past the
+reader's NOW.  *They stopped at the last statement line until then*, so a
+record made after every statement was never drawn, the Reconcile page's hero
+counted none of those days unpriced, and the page read Done over days no
+statement had priced.  The days past the bank's record are shown with the
+bank's side unknown and are counted in :attr:`BankAgreement.unpriced_days`;
+the LEVEL summary (:attr:`BankAgreement.standing_gap`,
+:attr:`BankAgreement.constant_offset`) still reads through the bank's last
+drawn day (:attr:`ComparedSpan.bank_through`), as it did before (ruling
+plan#2399).
+
 **Two halves, and this module is the first** (plan step ``balance:X-bk-2``,
 plan#1192, which split the 988-line module before adding to it): the
 agreement FOLD here prices every drawn day, and the one-day DRILL-DOWN behind
@@ -254,11 +269,13 @@ class ComparedSpan:
 
     Attributes:
         first_day: The earliest day DRAWN.
-        last_day: The latest day drawn -- never past the reader's NOW, so no
-            still-Projected row can land inside the range (ruling R-G clamps
-            one to ``as_of + 1``).  **It precedes :attr:`first_day` exactly
-            when the whole statement postdates that NOW**: nothing was
-            comparable, which is a different fact from holding no statement.
+        last_day: The latest day drawn: the later of the bank's last
+            recorded line and the books' last record, never past the
+            reader's NOW, so no still-Projected row can land inside the range
+            (ruling R-G clamps one to ``as_of + 1``).  **It precedes
+            :attr:`first_day` exactly when the whole statement postdates that
+            NOW**: nothing was comparable, which is a different fact from
+            holding no statement.
         recorded_from: The FIRST day the account has a recorded line for.
         recorded_through: The last day it has one for.
     """
@@ -267,6 +284,21 @@ class ComparedSpan:
     last_day: date
     recorded_from: date
     recorded_through: date
+
+    @property
+    def bank_through(self) -> date:
+        """Return the last drawn day the bank's recorded lines reach.
+
+        :attr:`recorded_through` or, where lines run past the reader's NOW,
+        that NOW; :attr:`last_day` is the later of this day and the books'
+        last record, so the minimum of the two stored ends recovers it.  It was
+        :attr:`last_day` itself until the drawn days ran on past the bank's
+        record to the books' last one (finding **BAL-651**); the LEVEL
+        summary reads through this day (ruling plan#2399).  It precedes
+        :attr:`first_day` where :attr:`last_day` does, and where the books'
+        records run more than the two-year draw past the last line.
+        """
+        return min(self.recorded_through, self.last_day)
 
     @property
     def starts_late(self) -> bool:
@@ -304,6 +336,13 @@ class BankAgreement:
             on every :class:`AgreementDay`, and before it their balance is
             too.  Never ``None``: an account's fold cannot be built without
             its opening.
+        last_record_on: The latest day on or before the reader's NOW the
+            books hold a record -- a settled row or a true-up
+            (:func:`~app.services.balance_at.cash_last_record_on`) -- or
+            ``None`` where they hold none.  The drawn days run to it when it
+            is later than the bank's record (finding **BAL-651**), and the
+            Reconcile page's hero says how far the records run from it
+            (ruling plan#2346).
         runs: The account's imported spans merged into contiguous runs, each
             with what prices it: a
             :class:`~app.services.statement_import.RecordedRun` carrying the
@@ -334,6 +373,7 @@ class BankAgreement:
     account_id: int
     span: ComparedSpan
     books_opened_on: date
+    last_record_on: "date | None"
     runs: "list[statement_import.RecordedRun]"
     days: "list[AgreementDay]"
 
@@ -484,9 +524,9 @@ class BankAgreement:
 
         **It is not** :attr:`standing_gap`\'s **day, and the difference is not
         cosmetic.**  That property answers *how far apart are the two running
-        totals at the END of the span*, so it reads
-        :attr:`ComparedSpan.last_day` whether or not an anchor reaches it and
-        returns ``None`` when it does not.  A hero built on it would print a
+        totals at the END of the bank's record*, so it reads
+        :attr:`ComparedSpan.bank_through` whether or not an anchor reaches it
+        and returns ``None`` when it does not.  A hero built on it would print a
         dash for an account whose statements simply stop before the span does
         -- which is :attr:`unpriced_days`, a state this report already
         measures and already expects.  This walks BACK to the last day that
@@ -520,20 +560,24 @@ class BankAgreement:
         """Return how far the two running balances stand apart at the END.
 
         The LEVEL, as one number: what the app says the account held on the
-        span's last day (:attr:`ComparedSpan.last_day`, the day the page
-        captions it with), less what the bank's own record says.  Reported
-        because the residue cannot say it -- a residue is per day, and the
-        question "how far apart are my books and my bank right now" is about
-        the running totals.
+        bank's last drawn day (:attr:`ComparedSpan.bank_through`, the day the
+        page captions it with), less what the bank's own record says.
+        Reported because the residue cannot say it -- a residue is per day,
+        and the question "how far apart are my books and my bank right now"
+        is about the running totals.  **Not the last drawn day**, which it was
+        until the drawn days ran past the bank's record to the books' last
+        one (finding **BAL-651**): the bank prices none of those later days,
+        so this would read ``None`` wherever the records run past the
+        statements, and ruling plan#2399 kept the summary as it stood.
 
         Returns:
-            The last drawn day's :attr:`~AgreementDay.gap`, or ``None`` when no
-            day was drawn, when no anchor places a bank balance on that day, or
-            when that day falls before the books open (ruling **R-BAL286**: the
-            books state a balance from their opening day's close, the opening
-            day included).
+            That day's :attr:`~AgreementDay.gap`, or ``None`` when it was not
+            drawn, when no anchor places a bank balance on it, or when it falls
+            before the books open (ruling **R-BAL286**: the books state a
+            balance from their opening day's close, the opening day included).
         """
-        return self.days[-1].gap if self.days else None
+        through = self.span.bank_through
+        return next((day.gap for day in self.days if day.day == through), None)
 
     @property
     def constant_offset(self) -> "Decimal | None":
@@ -551,11 +595,14 @@ class BankAgreement:
         gap is exactly as consistent with one being wrong as the other.
 
         **The days are those the books state a balance for** -- the opening
-        day and every later drawn day (ruling **R-BAL286**) -- and **a day
-        among them the bank cannot price makes the answer** ``None``: the
-        offset was not seen to hold there, so it is not called constant.  A
-        day before the books open is not among them, since the books state no
-        level there to be offset.  *Until plan step balance:X-f3c-2b-2c the
+        day and every later drawn day (ruling **R-BAL286**) through the bank's
+        last drawn day (:attr:`ComparedSpan.bank_through`), which is where the
+        drawn days ended until they ran on to the books' last record (finding
+        **BAL-651**, ruling plan#2399 keeping this summary as it stood) -- and
+        **a day among them the bank cannot price makes the answer** ``None``:
+        the offset was not seen to hold there, so it is not called constant.
+        A day before the books open is not among them, since the books state
+        no level there to be offset.  *Until plan step balance:X-f3c-2b-2c the
         days were those on and after the account's first cash fact (finding*
         **BAL-616** *), so books restated back before that fact left out
         their opening day and the quiet days after it.*
@@ -574,12 +621,16 @@ class BankAgreement:
         days are therefore required.
 
         **A further guard on "some money actually MOVED" was written and then
-        dropped**, because the span's own endpoints are line days: the last
+        dropped**, because the days read end on a line day: the bank's last
         drawn day carries a line in every reachable case, so the guard could
         not be constructed and would have been an untested branch standing for
         a case that does not arise.
         """
-        stated = [day for day in self.days if day.app_balance is not None]
+        through = self.span.bank_through
+        stated = [
+            day for day in self.days
+            if day.day <= through and day.app_balance is not None
+        ]
         if len(stated) < _MIN_DAYS_FOR_A_CONSTANT:
             return None
         gaps = {day.gap for day in stated}
@@ -615,19 +666,26 @@ def bank_agreement(
     Raises:
         BaselineMissingError: When *ctx* carries no scenario.
 
-    **The span ends at the recorded lines' last day or the reader's NOW,
-    whichever is earlier**, and the bound is load-bearing rather than
-    defensive: a still-Projected row lands at ``as_of + 1`` (ruling R-G), so a
-    range stopping at ``as_of`` cannot contain one.  Past that day the app's
-    balance carries PLAN, and setting a plan beside a bank line would report
-    agreement where the app has merely predicted what the bank did -- or a
-    disagreement about money nobody has spent.  When it truncates,
-    :attr:`BankAgreement.recorded_through` says so.
+    **The span ends at the later of the recorded lines' last day and the
+    books' last record, and never past the reader's NOW**, and the NOW bound
+    is load-bearing rather than defensive: a still-Projected row lands at
+    ``as_of + 1`` (ruling R-G), so a range stopping at ``as_of`` cannot
+    contain one.  Past that day the app's balance carries PLAN, and setting a
+    plan beside a bank line would report agreement where the app has merely
+    predicted what the bank did -- or a disagreement about money nobody has
+    spent.  When it truncates, :attr:`ComparedSpan.recorded_through` says so.
+    **The books' last record moves the end** (finding **BAL-651**, rulings
+    plan#2346 and plan#2399): a day the books describe after every statement
+    is drawn, unpriced, rather than hidden -- which is the Reconcile page's
+    reason not to read Done over it.
     """
     span = statement_import.recorded_span(account.id)
     if span.first_day is None or span.last_day is None:
         return None
+    last_record_on = balance_at.cash_last_record_on(account, ctx)
     last_day = min(span.last_day, ctx.as_of)
+    if last_record_on is not None:
+        last_day = max(last_day, last_record_on)
     first_day = max(
         span.first_day, last_day - (_MAX_COMPARED_DAYS - 1) * _ONE_DAY,
     )
@@ -652,6 +710,7 @@ def bank_agreement(
             recorded_through=span.last_day,
         ),
         books_opened_on=series.opened_on,
+        last_record_on=last_record_on,
         runs=folded.runs,
         days=[
             _agreement_day(day, series, bank_moves, folded) for day in days

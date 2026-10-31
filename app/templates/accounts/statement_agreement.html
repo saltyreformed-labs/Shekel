@@ -120,8 +120,11 @@
           {% if agreement.standing_gap is none %}--
           {% else %}{{ money(agreement.standing_gap) }}{% endif %}
         </div>
+        {# The bank's last drawn day, not the last drawn day: the days after
+           it are your records no statement covers yet, which the bank cannot
+           price (finding BAL-651, ruling plan#2399). #}
         <div class="text-muted small">your books against your bank's on
-          {{ agreement.span.last_day }}</div>
+          {{ agreement.span.bank_through }}</div>
       </div>
     </div>
 
@@ -191,15 +194,18 @@
     <p class="mb-0 small text-muted">
       <span class="badge text-bg-warning">{{ agreement.unpriced_days }} day(s) not priced</span>
       Those days show <span class="font-mono">--</span> in the bank column:
-      they lie between your imports, where nobody has recorded the lines, or
-      in a stretch no statement places a balance on. Import the missing span,
-      or a statement stating a balance its own lines reach, and they fill in.
+      they lie between your imports, where nobody has recorded the lines,
+      after your latest statement, where you have recorded what no statement
+      covers yet, or in a stretch no statement places a balance on. Import the
+      missing span, or a statement stating a balance its own lines reach, and
+      they fill in.
     </p>
     {% endif %}
     {% if agreement.constant_offset is not none and agreement.constant_offset != 0 %}
     <p class="mb-0 small text-muted">
       <span class="badge text-bg-warning">the offset is constant</span>
-      Every day here that your books state a balance for is out by exactly
+      Every day through {{ agreement.span.bank_through }} that your books
+      state a balance for is out by exactly
       <span class="font-mono">{{ money(agreement.constant_offset) }}</span>.
       That is the signature of a wrong starting figure rather than of anything
       in your records: an anchor is one number, so an error in it shifts every

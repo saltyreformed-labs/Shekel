@@ -48,6 +48,7 @@ from app.services import (
 )
 from app.services.balance_at import BalanceContext
 from app.services.scenario_resolver import get_baseline_scenario
+from app.services.statement_match._hero import hero as statement_hero
 from tests._test_helpers import (
     add_entry,
     an_entered_day,
@@ -344,6 +345,201 @@ class TestTheSpanStopsAtTheReadersNow:
             agreement = _agreement(seed_user)
 
             assert not agreement.span.ends_early
+
+
+class TestTheDrawnDaysRunToTheBooksLastRecord:
+    """Finding **BAL-651**, rulings plan#2346, plan#2399 and plan#2400.
+
+    The drawn days stopped at the last statement line, so a record made after
+    every statement was never drawn and the Reconcile page read Done over it.
+    They run to the later of the bank's last line and the books' last record
+    now, never past NOW, while the LEVEL summary still reads through the
+    bank's last drawn day.
+    """
+
+    #: The finding's own dates: the statement ends Feb 2, rows settle Feb 15
+    #: and Feb 23, and the reader's NOW is Mar 20.
+    _LAST_LINE = date(2026, 2, 2)
+    _NOW = date(2026, 3, 20)
+
+    def _agreement_at(self, seed_user, as_of):
+        """Return the seed account's comparison with NOW pinned to *as_of*."""
+        return bank_agreement.bank_agreement(
+            seed_user["account"],
+            BalanceContext.build(seed_user["user"].id, as_of=as_of),
+        )
+
+    def _statement(self, db, seed_user, *lines):
+        """Record one anchored statement on the seed account.
+
+        Args:
+            db: The session fixture.
+            seed_user: The seeded user bundle.
+            *lines: ``(day, amount)`` pairs; the figure is placed on the last.
+        """
+        _seed_import(
+            db, seed_user["account"], stated="1000.00",
+            effective_on=lines[-1][0], evidence=_FILE_CHAIN, lines=list(lines),
+        )
+
+    def test_rows_settled_after_every_statement_are_drawn_UNPRICED(
+        self, app, seed_user, seed_periods, db,
+    ):
+        """The finding's shape: Feb 15 and Feb 23 are drawn, and the hero counts them.
+
+        Before the fix the span ended on Feb 2, so the hero's ``unpriced_after``
+        was 0 and the page read Done.  Feb 3 through Feb 23 is 21 days, every
+        one past the only import's window, so the bank neither moves nor
+        prices any of them, and none is compared.
+        """
+        with app.app_context():
+            self._statement(
+                db, seed_user, (date(2026, 1, 30), "-10.00"),
+                (self._LAST_LINE, "-20.00"),
+            )
+            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
+            _settle(seed_user, db, seed_periods[4], "60.00", date(2026, 2, 23))
+            db.session.commit()
+
+            agreement = self._agreement_at(seed_user, self._NOW)
+
+            assert agreement.last_record_on == date(2026, 2, 23)
+            assert agreement.span.last_day == date(2026, 2, 23)
+            assert agreement.span.bank_through == self._LAST_LINE
+            tail = [row for row in agreement.days if row.day > self._LAST_LINE]
+            assert [row.day for row in tail] == [
+                self._LAST_LINE + timedelta(days=offset)
+                for offset in range(1, 22)
+            ]
+            assert all(
+                row.bank_lines is None and row.bank_balance is None
+                and not row.compared
+                for row in tail
+            )
+            # Signed positive money IN: two expenses leave the account.
+            assert _day(agreement, date(2026, 2, 15)).recorded == Decimal("-40.00")
+            assert _day(agreement, date(2026, 2, 23)).recorded == Decimal("-60.00")
+            assert agreement.unpriced_days == 21
+            assert agreement.headline.day == self._LAST_LINE
+
+            hero = statement_hero(agreement, 0)
+
+            assert hero.day == self._LAST_LINE
+            assert hero.unpriced_after == 21
+            assert hero.records_through == date(2026, 2, 23)
+
+    def test_a_TRUE_UP_after_every_statement_is_a_record(
+        self, app, seed_user, seed_periods, db,
+    ):
+        """Ruling plan#2400: a true-up changes the books on a day no statement priced.
+
+        No row is recorded after Feb 2, only a true-up on Feb 20, and the
+        drawn days run to it: Feb 3 through Feb 20 is 18 unpriced days.
+        """
+        with app.app_context():
+            self._statement(db, seed_user, (self._LAST_LINE, "-20.00"))
+            append_balance_assertion(
+                db.session, seed_user["account"],
+                Decimal("980.00"), _instant(2026, 2, 20),
+            )
+            db.session.commit()
+
+            agreement = self._agreement_at(seed_user, self._NOW)
+
+            assert agreement.last_record_on == date(2026, 2, 20)
+            assert agreement.span.last_day == date(2026, 2, 20)
+            assert statement_hero(agreement, 0).unpriced_after == 18
+
+    def test_records_that_end_before_the_last_line_leave_the_end_ON_the_line(
+        self, app, seed_user, seed_periods, db,
+    ):
+        """The mirror: a statement reaching past the last record is drawn as before.
+
+        The row on Feb 15 is the books' last record and the statement runs to
+        Feb 25, so the drawn days end on Feb 25, the bank's last drawn day is
+        the same day, and the hero names no records running past it.
+        """
+        with app.app_context():
+            self._statement(
+                db, seed_user, (self._LAST_LINE, "-20.00"),
+                (date(2026, 2, 25), "-5.00"),
+            )
+            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
+            db.session.commit()
+
+            agreement = self._agreement_at(seed_user, self._NOW)
+
+            assert agreement.last_record_on == date(2026, 2, 15)
+            assert agreement.span.last_day == date(2026, 2, 25)
+            assert agreement.span.bank_through == date(2026, 2, 25)
+            hero = statement_hero(agreement, 0)
+            assert hero.day == date(2026, 2, 25)
+            assert hero.unpriced_after == 0
+            assert hero.records_through is None
+
+    def test_a_record_dated_after_NOW_does_not_move_the_end(
+        self, app, seed_user, seed_periods, db,
+    ):
+        """The NOW bound is load-bearing (ruling R-G), and it binds the records too.
+
+        With NOW pinned to Feb 20, the row settled Feb 23 is not a record yet,
+        so the books' last record is Feb 15 and the drawn days end there.
+        """
+        with app.app_context():
+            self._statement(db, seed_user, (self._LAST_LINE, "-20.00"))
+            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
+            _settle(seed_user, db, seed_periods[4], "60.00", date(2026, 2, 23))
+            db.session.commit()
+
+            agreement = self._agreement_at(seed_user, date(2026, 2, 20))
+
+            assert agreement.last_record_on == date(2026, 2, 15)
+            assert agreement.span.last_day == date(2026, 2, 15)
+            assert all(row.day <= date(2026, 2, 20) for row in agreement.days)
+
+    def test_the_LEVEL_summary_still_reads_through_the_banks_last_day(
+        self, app, seed_user, seed_periods, db,
+    ):
+        """Ruling plan#2399: the summary numbers stay as they were.
+
+        A row settled after the statement draws an unpriced day past it.  Read
+        on the last DRAWN day, the standing gap would be ``None`` there and the
+        constant offset would refuse over it; both read through the bank's last
+        drawn day instead, so the offset the statement's two days share is
+        still reported, and the standing gap is that offset.
+        """
+        with app.app_context():
+            walk = cash_ledger.walk_cash_ledger(
+                seed_user["account"].id,
+                get_baseline_scenario(seed_user["user"].id).id,
+            )
+            opening = walk.anchor_facts[0].observed_on
+            first, second = (
+                opening + timedelta(days=1), opening + timedelta(days=2),
+            )
+            _seed_import(
+                db, seed_user["account"], stated="500.00",
+                effective_on=second, evidence=_UNCORROBORATED,
+                lines=[(first, "-40.00"), (second, "-10.00")],
+            )
+            _settled(
+                db, seed_user, seed_periods[0], "Groceries", "40.00", first,
+            )
+            _settled(
+                db, seed_user, seed_periods[0], "Coffee", "10.00", second,
+            )
+            later = second + timedelta(days=5)
+            _settled(db, seed_user, seed_periods[0], "Lunch", "12.00", later)
+            db.session.commit()
+
+            agreement = _agreement(seed_user)
+
+            assert agreement.span.last_day == later
+            assert agreement.span.bank_through == second
+            assert _day(agreement, later).gap is None
+            assert agreement.constant_offset is not None
+            assert agreement.constant_offset != _ZERO
+            assert agreement.standing_gap == agreement.constant_offset
 
 
 class TestDaysBeforeTheRecordsBeginAreLabelledNotCounted:

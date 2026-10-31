@@ -346,6 +346,45 @@ def cash_daily_facts_series(
     )
 
 
+def cash_last_record_on(
+    account: Account, ctx: BalanceContext,
+) -> "date | None":
+    """Return the latest day, on or before the reader's NOW, the books hold a record.
+
+    A RECORD is a settled source fact (a row or a transfer leg marked done, a
+    purchase dated against one) or a balance assertion (a true-up), by its own
+    day, whatever it moved -- one netting to ``$0.00`` included.  Ruling
+    plan#2400 put the true-up in: it changes the books on a day a statement
+    must price before the Reconcile page may read Done (ruling plan#2346,
+    finding **BAL-651**).  :func:`app.services.bank_agreement.bank_agreement`
+    draws its comparison through this day, so the days after the last
+    statement line that the books describe are shown and counted unpriced
+    rather than never drawn (ruling plan#2399).
+
+    **A reading of the pass's one assembled fold**, as
+    :func:`records_balance_at` is: the walk already holds both kinds of fact,
+    so this issues no query of its own.
+
+    Args:
+        account: The account to read.  Caller owns the ownership check.
+        ctx: The read pass's :class:`~app.services.balance_at.BalanceContext`,
+            whose ``as_of`` bounds the answer: a fact dated after NOW is not a
+            record yet.
+
+    Returns:
+        The day, or ``None`` when the account's books hold no record on or
+        before NOW.
+
+    Raises:
+        BaselineMissingError: When ``ctx`` carries no scenario.
+    """
+    _require_scenario(ctx)
+    walk = _cash_fold.assembled_fold(account, ctx).walk
+    days = [fact.settled_on for fact in walk.source_facts]
+    days.extend(fact.observed_on for fact in walk.anchor_facts)
+    return max((day for day in days if day <= ctx.as_of), default=None)
+
+
 def records_balance_at(
     account: Account, ctx: BalanceContext, as_of: date,
 ) -> "Decimal | None":

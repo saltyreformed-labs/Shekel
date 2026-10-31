@@ -296,11 +296,15 @@
     {# NOT IMPLIED BY THE OTHER THREE, and stated because of that: the
        comparison walks BACK to the last day both records speak for, so drawn
        days after it that the bank cannot price (a later import placing no
-       balance, or the gap before one) would otherwise sit behind a balanced
-       figure.  Drawn days end at the last statement line, so records AFTER
-       every statement are not counted here: statements stopping three weeks
-       before the records do read as current (finding BAL-651). #}
-    This comparison is priced through {{ page.hero.day }};
+       balance, the gap before one, or the days after every statement through
+       your last record) would otherwise sit behind a balanced figure.  HOW
+       FAR THE RECORDS RUN is named beside how far the comparison is priced
+       (ruling plan#2346); the service leaves it None where no record falls
+       after the priced day.  Until finding BAL-651 was fixed the drawn days
+       ended at the last statement line, so statements stopping three weeks
+       before the records read as current. #}
+    This comparison is priced through {{ page.hero.day }}{% if page.hero.records_through %},
+    and your records run through {{ page.hero.records_through }}{% endif %};
     {{ page.hero.unpriced_after }} later day(s) your books state a balance for
     cannot be priced from your bank's own figures.
     {% endif %}

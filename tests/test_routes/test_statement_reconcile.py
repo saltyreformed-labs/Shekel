@@ -25,7 +25,11 @@ from decimal import Decimal
 import pytest
 from werkzeug.datastructures import MultiDict
 
-from app.enums import SettledDayBasisEnum, StatusEnum
+from app.enums import (
+    SettledDayBasisEnum,
+    StatementBalanceEvidenceEnum,
+    StatusEnum,
+)
 from app.models.account import Account
 from app.models.category import Category
 from app.models.merchant_rule import MerchantRule
@@ -61,6 +65,8 @@ from tests.test_routes._statement_forms import (
     reconcile_offerable,
 )
 from tests._test_helpers import open_owner_calendar, payback_row_of
+from tests.test_services.test_outstanding_difference import _settle
+from tests.test_services.test_statement_import.test_anchor import _seed_import
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_later_period,
@@ -4822,3 +4828,34 @@ def _card_markup(page, line_id):
     opened = page.index(f'id="rec-card-{line_id}"')
     nxt = page.find('id="rec-card-', opened + 1)
     return page[opened:] if nxt == -1 else page[opened:nxt]
+
+
+class TestTheHeroSaysHowFarTheRecordsRun:
+    """Finding **BAL-651**, ruling plan#2346, through a real render."""
+
+    def test_records_past_the_last_statement_are_named_beside_the_priced_day(
+        self, auth_client, db, seed_user, seed_periods,
+    ):
+        """The page says how far it is priced and how far the records run.
+
+        The statement ends Feb 2 and a row settles Feb 15, so the comparison
+        is priced through Feb 2 while the records run through Feb 15: Feb 3
+        through Feb 15 is 13 unpriced days.
+        """
+        _seed_import(
+            db, seed_user["account"], stated="1000.00",
+            effective_on=date(2026, 2, 2),
+            evidence=StatementBalanceEvidenceEnum.FILE_CHAIN,
+            lines=[(date(2026, 2, 2), "-20.00")],
+        )
+        _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
+        db.session.commit()
+
+        body = auth_client.get(_url(seed_user["account"].id)).data.decode()
+
+        assert re.search(
+            r"This comparison is priced through 2026-02-02,\s+and your records"
+            r" run through 2026-02-15;\s+13 later day\(s\)",
+            body,
+        ), "the hero did not name how far the records run"
+        assert "Done:" not in body

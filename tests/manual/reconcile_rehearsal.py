@@ -20,7 +20,8 @@ presses, in the order the doors force:
    through the MATCH pane the owner's browser loads** (:func:`_open_card`, task plan#2455),
    the line's own pay period, searched by the line's figure where the row is not in it; and
    OK'd as the card offers it, by the OK on its summary or, on a card with none (every
-   Transfers card), by the Match button at the opened card's foot (:class:`_OkPresses`).
+   Transfers card), by the Match button at the opened card's foot
+   (:class:`reconcile_pages.OkPresses`).
    Measured 2026-10-31 on a restore of the dry run's dump: every act's row is in its line's
    pay period, and the held-back match's is not.
 3. **The never-moved rows** (:func:`_cancel`, :func:`_delete`): each row cancelled, which is
@@ -67,8 +68,10 @@ structure only -- ids, the one held-back act, the order.  **So does where each a
 screen**, a ``FIND`` line per act (task plan#2371, the runbook
 ``docs/audits/balance_architecture/bank_reconcile_runbook.md``): a row's full edit and an
 envelope's lines are fragments only a click on the grid opens, so the sheet names the grid
-column and row, and a match names the Reconcile tab, what to type in the pane's search where
-it must, the row in the words the pane prints, and the press that OKs the card.
+column and the row as the grid prints it, with the headers above it that tell it from a
+payback row of the same label (task plan#2452), and a match names the Reconcile tab, what to
+type in the pane's search where it must, the row in the words the pane prints, and the press
+that OKs the card.
 
 **It runs PRODUCTION's ``app/``**, because the owner performs these acts on production: export
 the deployed revision's ``app/`` outside every checkout and put it first on ``PYTHONPATH``.  This
@@ -101,7 +104,6 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from html.parser import HTMLParser
 from pathlib import Path
 
 from flask import Flask
@@ -119,6 +121,7 @@ from app.models.statement_match import (
 )
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
+from app.services.balance_at import BalanceContext
 from app.services.statement_match import Tab, Verb
 
 from door_rehearsal import (
@@ -130,6 +133,7 @@ from door_rehearsal import (
     forms_in,
     new_file,
 )
+from reconcile_pages import GridRows, OkPresses, PaneRows, PaneSpan
 from reconcile_post_state import (
     HELD_BACK,
     MatchAct,
@@ -244,220 +248,6 @@ def _description(line_id: int) -> str:
     ).order_by(StatementLineSighting.import_id)).scalars().first()
 
 
-class _PaneSpan(HTMLParser):
-    """Find where one card's MATCH pane stands in a page, and where it posts.
-
-    **The pane is what htmx swaps, start tag to end tag**: the card's one
-    element of class ``rec-match``, which is first the placeholder the page
-    renders (``verb_pane`` in ``accounts/_statement_reconcile_macros.html``)
-    and then each pane that replaces it (``accounts/_statement_reconcile_match
-    .html``), every one swapped ``outerHTML``.  The first ``hx-post`` inside it
-    is where each sends: the placeholder's own, then the pane's
-    ``rec-match-picks``.
-
-    Attributes:
-        line_id: The bank line the card is about.
-        span: ``(start, end)`` of the pane in the page's text, ``end`` ``None``
-            until its end tag is read; ``None`` while no pane is found.
-        fetch: The URL the pane posts to, or ``None``.
-    """
-
-    def __init__(self, line_id: int, html: str):
-        super().__init__(convert_charrefs=True)
-        self.line_id = line_id
-        self.span: "tuple[int, int | None] | None" = None
-        self.fetch: "str | None" = None
-        self._html = html
-        # Lines counted as the parser counts them, at each "\n" only
-        # (``_markupbase.ParserBase.updatepos``): ``splitlines`` also breaks at
-        # "\r", "\f", " " and others, which a row's name can carry, and
-        # would put every offset after one a line early.
-        self._lines = [0]
-        for line in html.split("\n")[:-1]:
-            self._lines.append(self._lines[-1] + len(line) + 1)
-        self._in_card = False
-        self._divs = 0
-        self.feed(html)
-        self.close()
-
-    def _at(self) -> int:
-        """Return where the tag being read starts, in the page's text."""
-        line, column = self.getpos()
-        return self._lines[line - 1] + column
-
-    def handle_starttag(self, tag, attrs):
-        """Enter the card, start its pane, count a div inside it, or take where it posts."""
-        attr = dict(attrs)
-        if tag == "details":
-            self._in_card = attr.get("id") == f"rec-card-{self.line_id}"
-        elif tag == "div" and self._divs:
-            self._divs += 1
-        elif tag == "div" and self._in_card and self.span is None \
-                and "rec-match" in (attr.get("class") or "").split():
-            self.span, self._divs = (self._at(), None), 1
-        if tag == "div" and self._divs and self.fetch is None and attr.get("hx-post"):
-            self.fetch = attr["hx-post"]
-
-    def handle_endtag(self, tag):
-        """Leave the card, or close a div of the pane and, with its last, the pane."""
-        if tag == "details":
-            self._in_card = False
-        elif tag == "div" and self._divs:
-            self._divs -= 1
-            if not self._divs:
-                self.span = (self.span[0], self._html.index(">", self._at()) + 1)
-
-
-class _PaneRows(HTMLParser):
-    """Read one MATCH pane as the owner reads it: the rows it lists, and whether it adds up.
-
-    **The sheet names a row in the pane's own words**, because the owner finds
-    it by reading the pane: its name, the days printed under it and its figure
-    (the ``pick`` macro's ``rec-row-name``, each ``rec-row-day`` and
-    ``rec-row-figure``).  A row another shares words with is one the owner
-    cannot tell apart, so :meth:`words_of` refuses it.
-
-    Attributes:
-        line_id: The bank line the card is about.
-        rows: Each row the pane lists, in its order:
-            ``{"token", "checked", "name", "days", "figure"}``.
-        adds_up: Whether the pane carries the figure it was priced at as a
-            hidden field: its arm for ticked rows that come to the bank's
-            figure, which leaves nothing to choose.  The placeholder carries a
-            proposal's figure hidden too, unpriced, so only a loaded pane's
-            counts.
-    """
-
-    #: The ``pick`` macro's spans, and the field each one's words go to.
-    _WORDS = {"rec-row-name": "name", "rec-row-day": "days", "rec-row-figure": "figure"}
-
-    def __init__(self, line_id: int, pane: str):
-        super().__init__(convert_charrefs=True)
-        self.line_id = line_id
-        self.rows: "list[dict]" = []
-        self.adds_up = False
-        self._waiting: "bool | None" = None
-        self._spans = 0
-        self._words: "tuple[str, int, list[str]] | None" = None
-        self.feed(pane)
-        self.close()
-
-    def handle_starttag(self, tag, attrs):
-        """Note what the pane is, record a row's box or a hidden figure, or start words."""
-        attr = dict(attrs)
-        classes = (attr.get("class") or "").split()
-        if tag == "div" and self._waiting is None:
-            self._waiting = "rec-match-waiting" in classes
-        elif tag == "input" and attr.get("name") == f"rows-{self.line_id}" \
-                and attr.get("type") == "checkbox":
-            self.rows.append({"token": attr["value"], "checked": "checked" in attr,
-                              "name": "", "days": [], "figure": ""})
-        elif tag == "input" and attr.get("name") == f"consent-{self.line_id}" \
-                and attr.get("type") == "hidden" and not self._waiting:
-            self.adds_up = True
-        elif tag == "span":
-            self._spans += 1
-            field = next((self._WORDS[name] for name in classes if name in self._WORDS), None)
-            if field and self.rows and self._words is None:
-                self._words = (field, self._spans, [])
-
-    def handle_data(self, data):
-        """Keep the words of a row's span."""
-        if self._words is not None:
-            self._words[2].append(data)
-
-    def handle_endtag(self, tag):
-        """Close a row's span, keeping its words."""
-        if tag != "span" or not self._spans:
-            return
-        if self._words is not None and self._words[1] == self._spans:
-            field, _, text = self._words
-            words = " ".join("".join(text).split())
-            if field == "days":
-                self.rows[-1]["days"].append(words)
-            else:
-                self.rows[-1][field] = words
-            self._words = None
-        self._spans -= 1
-
-    def words_of(self, row: dict) -> str:
-        """Return *row* as the sheet names it: its name, its days, its figure, as printed.
-
-        Raises:
-            AssertionError: When another row the pane lists prints the same words.
-        """
-        def words(each: dict) -> str:
-            return f"\"{each['name']}\", {', '.join(each['days'])}, {each['figure']}"
-        alike = [each["token"] for each in self.rows if words(each) == words(row)]
-        assert alike == [row["token"]], \
-            f"the MATCH pane of line {self.line_id} prints {words(row)} for {alike}"
-        return words(row)
-
-
-class _OkPresses(HTMLParser):
-    """Read what presses one card's OK, off the card as rendered.
-
-    **Never assumed**: the summary's own OK (``rec-ok-btn``) is rendered only
-    where the card offers one (``offers_ok``), and every Transfers card has
-    none, because its sentence opens on TRANSFER, a verb with no door; the
-    opened card's foot button named after the MATCH verb (``rec-cta``) is on
-    every card a match is open on.  Both are labels for the card's one hidden
-    OK checkbox (``accounts/_statement_reconcile_macros.html``), so a second
-    press of either takes the OK back.
-
-    Attributes:
-        line_id: The bank line the card is about.
-        summary: The summary's OK button's words, or ``None``.
-        panel: The opened card's MATCH button's words, or ``None``.
-    """
-
-    def __init__(self, line_id: int, html: str):
-        super().__init__(convert_charrefs=True)
-        self.line_id = line_id
-        self.summary: "str | None" = None
-        self.panel: "str | None" = None
-        self._label: "tuple[str, list[str]] | None" = None
-        self.feed(html)
-        self.close()
-
-    def handle_starttag(self, tag, attrs):
-        """Enter a label for the card's OK box: the summary's, or the MATCH button."""
-        attr = dict(attrs)
-        if tag != "label" or attr.get("for") != f"ok-{self.line_id}":
-            return
-        classes = (attr.get("class") or "").split()
-        if "rec-ok-btn" in classes:
-            self._label = ("summary", [])
-        elif "rec-cta" in classes and attr.get("data-verb") == Verb.MATCH.value:
-            self._label = ("panel", [])
-
-    def handle_data(self, data):
-        """Keep the words of the label being read."""
-        if self._label is not None:
-            self._label[1].append(data)
-
-    def handle_endtag(self, tag):
-        """Close the label being read, keeping its words."""
-        if tag == "label" and self._label is not None:
-            setattr(self, self._label[0], " ".join("".join(self._label[1]).split()))
-            self._label = None
-
-    def words(self) -> str:
-        """Return what the owner presses, once, to OK this card, as the sheet says it.
-
-        Raises:
-            AssertionError: When the opened card renders no MATCH button for its OK.
-        """
-        assert self.panel, f"the card of line {self.line_id} renders no MATCH button"
-        if self.summary:
-            return (f"{self.summary} on the card's summary line, once, NOT also "
-                    f"{self.panel} at the foot of the opened card: both press one box, "
-                    "so a second press takes the OK back")
-        return (f"{self.panel} at the foot of the opened card, once: this card's summary "
-                "line shows no OK, the button shows no pressed state, and a second press "
-                "takes it back; the Apply button then reads \"Apply 1 of the cards you OK'd\"")
-
-
 @dataclass
 class _OpenedCard:
     """One card on the Reconcile page, its MATCH tab open, as the owner's browser holds it.
@@ -478,14 +268,17 @@ class _OpenedCard:
     html: str
     outside: "tuple[tuple[str, str], ...]"
 
-    def pane(self) -> _PaneRows:
+    def pane(self) -> PaneRows:
         """Return the card's MATCH pane as the browser now holds it."""
-        start, end = _PaneSpan(self.line_id, self.html).span
-        return _PaneRows(self.line_id, self.html[start:end])
+        start, end = PaneSpan(self.line_id, self.html).span
+        return PaneRows(self.line_id, self.html[start:end])
 
     def ok_press(self) -> str:
-        """Return what the owner presses, once, to OK the card (:class:`_OkPresses`)."""
-        return _OkPresses(self.line_id, self.html).words()
+        """Return what the owner presses, once, to OK the card.
+
+        Read off the card as rendered (:class:`reconcile_pages.OkPresses`).
+        """
+        return OkPresses(self.line_id, self.html).words()
 
     def form(self) -> dict:
         """Return the Apply form holding the card, as the browser would submit it now."""
@@ -509,7 +302,7 @@ class _OpenedCard:
             typed: What the owner typed into the pane, by control.
             ticked: The boxes the owner ticked in the pane.
         """
-        found = _PaneSpan(self.line_id, self.html)
+        found = PaneSpan(self.line_id, self.html)
         assert found.span and found.span[1] and found.fetch, \
             f"the card of line {self.line_id} renders no MATCH pane"
         response = run.operator.submit(dict(self.form(), method="post", url=found.fetch),
@@ -584,7 +377,7 @@ def _match(run: Run, number: int, act: MatchAct) -> None:
     must reach the sheet's row (:func:`_tick_row`) and then add up: a match on
     this sheet is an exact pair, so a pane asking what to do with a difference
     stops the run before anything is pressed.  Then the card's OK, pressed as
-    the card offers it (:class:`_OkPresses`), and Apply.
+    the card offers it (:class:`reconcile_pages.OkPresses`), and Apply.
     """
     line_id = run.read(line_id_of, run.account_id, act.line)
     assert line_id is not None, f"{named(act.line)} is not recorded"
@@ -666,22 +459,46 @@ def _press_on_card(run: Run, txn_id: int, door: str, words: str) -> None:
     ))
 
 
-def _paycheck_of(txn_id: int) -> date:
-    """Return the first day of the pay period row *txn_id* is budgeted in: its grid column."""
-    return db.session.get(Transaction, txn_id).pay_period.start_date
+def _grid_column(run: Run, txn_id: int) -> "tuple[date, int]":
+    """Return row *txn_id*'s grid column: its paycheck's first day, and its offset.
+
+    The column is the row's pay period, read off the calendar the grid itself
+    reads (``BalanceContext.calendar``, ``routes/grid/_shared
+    ._resolve_visible_window``), and the offset is how many paychecks it lies
+    from the one the grid opens on: the page whose first column it is.
+    """
+    with run.app.app_context():
+        context = BalanceContext.build(run.operator.user_id)
+        calendar = context.calendar()
+        period_id = db.session.get(Transaction, txn_id).pay_period_id
+        column = next(each for each in calendar.periods if each.period_id == period_id)
+        offset = column.period_index - calendar.period_containing(context.as_of).period_index
+        return column.start_date, offset
 
 
-def _say_where_on_the_grid(run: Run, txn_id: int, name: str) -> None:
-    """Tell the owner where row *txn_id* is: the account's grid, its column, its row's name.
+def _say_where_on_the_grid(run: Run, txn_id: int) -> None:
+    """Tell the owner where row *txn_id* is: the account's grid, its column, its row.
 
     A row's column is its pay period, not the day its money moved, which can
     fall in another (``_transaction_full_edit.html``'s day box says why), so
-    the column is read rather than inferred from the sheet's day.  The page
-    the act is pressed on is a fragment that only a click on the grid opens.
+    the column is read rather than inferred from the sheet's day.  **The row
+    is named as the grid prints it** (:class:`reconcile_pages.GridRows`), read
+    off the grid page whose FIRST column is the row's (task plan#2452): the
+    act sheet's name for a row is its own, where the grid prints a recurring
+    row's template name and strips a payback's prefix.  **The FIND names that
+    page**, because the headers above a row are the page's: stepping back
+    from today the owner meets each past column first as the leftmost, but
+    from one act to the next can land on another page.  The page the act is
+    pressed on is a fragment that only a click on the grid opens.
     """
-    run.sheet.say(f"- FIND it: the grid of {run.read(_account_name, run)}, the column of the "
-                  f"paycheck starting {run.read(_paycheck_of, txn_id)}, the row \"{name}\"; "
-                  "click its amount")
+    start, offset = _grid_column(run, txn_id)
+    page = f"/grid?account_id={run.account_id}&offset={offset}"
+    response = run.operator.client.get(page)
+    assert response.status_code == 200, f"GET {page} -> {response.status_code}"
+    row = GridRows(response.get_data(as_text=True)).words_of(txn_id)
+    run.sheet.say(f"- FIND it: the grid of {run.read(_account_name, run)}, stepped with its "
+                  f"arrows until the paycheck starting {start} is its FIRST column; there, the "
+                  f"row {row}; click its amount in that first column")
 
 
 def _account_name(run: Run) -> str:
@@ -695,7 +512,7 @@ def _cancel(run: Run, number: int, row: dict) -> None:
     page = f"/transactions/{txn_id}/full-edit"
     run.sheet.act(number, f"Cancel {named(row)}",
                   f"{page} (the row's full edit: Status, then its Cancel button)")
-    _say_where_on_the_grid(run, txn_id, row["row"])
+    _say_where_on_the_grid(run, txn_id)
     _save_status(run, txn_id, StatusEnum.PROJECTED)
     _press_on_card(run, txn_id, "cancel",
                    "the red Cancel on the reopened card's top row, NOT the green Paid "
@@ -735,7 +552,7 @@ def _delete(run: Run, number: int, row: dict, gone: "frozenset[int]") -> None:
     if closed_on is not None:
         door = f"/transactions/{txn_id}/full-edit (Status, Money moved on) and {door}"
     run.sheet.act(number, f"Delete {named(row)}", door)
-    _say_where_on_the_grid(run, txn_id, row["row"])
+    _say_where_on_the_grid(run, txn_id)
     before = run.read(lambda: jsonable(envelope_state(txn_id, gone)))
     if closed_on is not None:
         _save_status(run, txn_id, StatusEnum.PROJECTED)

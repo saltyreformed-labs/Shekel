@@ -219,8 +219,13 @@ rehearsed.
   ("Show earlier periods") steps back one paycheck at a time; the books span reaches back to
   March 2026. **Find a row by its column, not by the day on the sheet's heading**: the heading
   gives the day its money moved, and a row's column is the paycheck it was budgeted in, which
-  can be another. The sheet's `FIND` line names the column ("the paycheck starting ...") and the
-  row.
+  can be another. The sheet's `FIND` line names the page: step with the arrows until the
+  paycheck it names is the grid's FIRST column, the page the rehearsal read. On that page it
+  names the row as the grid prints it, which can differ from the act's heading (a recurring row
+  prints its template's name), with the headers above it: the section, and the category where
+  the page holds two rows or more of it, so the headers can differ from page to page. A payback
+  row prints the name of what it pays back, so on the 2026-03-26 page "Groceries" heads a row in
+  the "Family" section and another in the "Credit Card" section.
 * **Clicking a row's amount opens its card**, the full edit. On a Paid row it shows **Status**
   and **Money moved on**. On a Projected row it shows a green **Paid** and a red **Cancel** on its
   top row, and Status only under **More options**, which no act here opens: the acts press those
@@ -441,6 +446,13 @@ rendered; the post-state and the check, task plan#2416). Its door-driving half i
   reaching it (never applying it) typed the line's figure into the search and found it. On a
   fresh restore of the same dump, the whole act sheet so performed printed plan#2451's check
   output exactly, and every balance figure was byte-identical to its baseline.
+* **2026-10-31, the row the grid prints** (task plan#2452): each cancel's and delete's `FIND`
+  line names the grid page whose first column is the row's, and the row as that page prints
+  it, with its section. Of the sixteen rows, two print otherwise than the act sheet names them
+  ("Kayla" is "Kayla's Spending Money", the template's name; "Vitamins " is "Vitamins"), and on
+  nine of the sixteen pages a payback row in the "Credit Card" section shares the row's label.
+  On a fresh restore of the same dump, the whole act sheet so performed printed plan#2451's
+  check output exactly, and every balance figure was byte-identical to its baseline.
 * **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
   full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
   turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a

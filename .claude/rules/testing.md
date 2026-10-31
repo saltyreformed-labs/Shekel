@@ -28,10 +28,10 @@ this file has not loaded; a change here updates that mirror in the same commit.
   every container on it. Start the isolated one with
   `systemctl --user start docker.service`; `SHEKEL_ALLOW_HOST_DOCKER=1` accepts the churn
   deliberately, and CI sanctions its own throwaway daemon.
-- **It also defaults to `-m "not docker"`, which DESELECTS 28 container-spawning
+- **It also defaults to `-m "not docker"`, which DESELECTS the container-spawning
   `tests/test_deploy` tests** -- deselected, not skipped, so they leave NO line in the
   report and a green run says nothing about them; CI's shards pass `-m ""` to the wrapper
-  and execute all 28. Locally the opt-in is now just `PYTEST_MARKER_EXPR=docker ./scripts/test.sh
+  and execute them all. Locally the opt-in is now just `PYTEST_MARKER_EXPR=docker ./scripts/test.sh
   tests/test_deploy`, because the wrapper already exports an isolated `DOCKER_HOST` and the
   conftest guard sees it. Measured 2026-09-05: 25 passed, 3 skipped on the rootless daemon
   against 28 skipped on the system one; the 3 are a published-port collision in the nginx

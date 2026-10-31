@@ -1,3 +1,5 @@
-"""The weekly dependency update (rulings plan#2351, plan#2448-plan#2450): the Monday lock
-refresh, run by the update workflow's job that holds no secret.  Nothing here writes to
-GitHub; the workflow's keyed job posts what it prepares."""
+"""The weekly dependency update (rulings plan#2351, plan#2448-plan#2450), each module run by a
+job of ``.github/workflows/updates.yml``: the Monday lock refresh (``refresh``), by the job
+that holds no secret and runs package code, writing the folder ``folder`` lays out; the
+publish of that folder (``publish``) and the daily queue (``queue``), by the jobs that hold
+the update App's token (``app``) and run main's own code and no package's."""

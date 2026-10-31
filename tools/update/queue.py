@@ -58,7 +58,7 @@ from pathlib import Path
 import requests
 
 from tools.ci.arcs import REPO
-from tools.ci.gitcmd import DEV, MAIN, GitError, git
+from tools.ci.gitcmd import MAIN, GitError, git
 from tools.quill.door import (
     GitHub,
     GitHubError,
@@ -67,17 +67,14 @@ from tools.quill.door import (
     reading,
     unversioned_between,
 )
+from tools.update.app import INTO, REPOSITORY_VARIABLE, TOKEN_VARIABLE, unset
 
-#: The variable holding the update App's token.
-TOKEN_VARIABLE = "UPDATE_TOKEN"
 #: The variable holding the App's slug, as GraphQL names the bot it acts as.
 APP_VARIABLE = "UPDATE_APP_SLUG"
-#: The variable naming the repository, ``<owner>/<name>``, as GitHub Actions sets it.
-REPOSITORY_VARIABLE = "GITHUB_REPOSITORY"
 #: Dependabot, as GraphQL names its bot (measured on #626, 2026-10-31).
 DEPENDABOT = "dependabot"
-#: The branch a pull request is queued into, and the one a security update is moved off.
-INTO, OFF = (branch.partition("/")[2] for branch in (DEV, MAIN))
+#: The branch a security update is moved off.
+OFF = MAIN.partition("/")[2]
 #: How many times a trial merge GitHub has not made is read again, and how many seconds apart.
 REREADS = 6
 REREAD_SECONDS = 10
@@ -295,14 +292,12 @@ def main(argv: Sequence[str] | None = None, root: Path = REPO,
     argparse.ArgumentParser(prog="python -m tools.update.queue",
                             description="The daily update queue (ruling plan#2449).",
                             ).parse_args(argv)
-    values = {name: os.environ.get(name, "")
-              for name in (TOKEN_VARIABLE, APP_VARIABLE, REPOSITORY_VARIABLE)}
-    if missing := [name for name, value in values.items() if not value]:
+    if missing := unset(TOKEN_VARIABLE, APP_VARIABLE, REPOSITORY_VARIABLE):
         print(f"update queue: {', '.join(missing)} unset, so nothing was read",
               file=sys.stderr)
         return 1
-    return run(GitHub(values[TOKEN_VARIABLE]), values[REPOSITORY_VARIABLE],
-               values[APP_VARIABLE], root, sleep)
+    return run(GitHub(os.environ[TOKEN_VARIABLE]), os.environ[REPOSITORY_VARIABLE],
+               os.environ[APP_VARIABLE], root, sleep)
 
 
 if __name__ == "__main__":

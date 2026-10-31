@@ -25,10 +25,13 @@ import tomllib
 import pytest
 
 from tools.quill.door import Move
+from tools.update.folder import SUMMARY
+from tools.update.folder import read as read_folder
 from tools.update.refresh import (
     Hold,
     RefreshError,
     Refreshed,
+    main,
     prepared,
     refreshed,
     run,
@@ -612,3 +615,40 @@ def test_uv_runs_in_the_checkout_with_the_files_it_is_given(tmp_path, monkeypatc
     assert (refused.value.returncode, refused.value.stderr) == (
         1, "error: No solution found\n")
     assert capsys.readouterr().err == "Resolved\nerror: No solution found\n"
+
+
+def test_the_command_writes_its_report_beside_the_week_for_the_publish(tmp_path, monkeypatch,
+                                                                      capsys):
+    """``main`` writes the week's change, pillow held back and prepared alone, and then its
+    report, ``summary.md``, which it also prints: the folder the publish reads holds the
+    report once the refresh has finished."""
+    _checked_out(tmp_path, _PILLOW, _BASE)
+    monkeypatch.chdir(tmp_path)
+    uv, _ = _resolver(_MINORS | {"pillow": [*_MINORS["pillow"], ("13.0.0", ())]})
+    assert main(["out"], uv=_checkout(uv)) == 0
+    report = (tmp_path / "out" / SUMMARY).read_text(encoding="utf-8")
+    assert report == capsys.readouterr().out
+    assert report.startswith("The Monday lock refresh moved 3 packages and held back 1.\n\n"
+                             "- pillow, held to `<13`: 13.0.0 is a new major.\n")
+    assert [change.branch for change in read_folder(tmp_path / "out")] == [
+        "update/lock", "update/major/pillow"]
+
+
+def test_the_command_writes_its_report_alone_when_nothing_moved(tmp_path, monkeypatch):
+    """Nothing moved and nothing needs a card: the report alone, which the publish reads as a
+    week with nothing to publish, never as a refresh that did not finish."""
+    _checked_out(tmp_path, _PILLOW, _BASE)
+    monkeypatch.chdir(tmp_path)
+    uv, _ = _resolver({name: [(version, needs)] for name, (version, needs) in _BASE.items()})
+    assert main(["out"], uv=_checkout(uv)) == 0
+    assert sorted(path.name for path in (tmp_path / "out").iterdir()) == [SUMMARY]
+    assert not read_folder(tmp_path / "out")
+
+
+def test_a_failed_refresh_writes_no_report(tmp_path, monkeypatch):
+    """A refresh that fails writes no report, so the publish refuses its folder whole."""
+    _checked_out(tmp_path, _PILLOW, _BASE)
+    monkeypatch.chdir(tmp_path)
+    uv, _ = _resolver(_MINORS, revision=6)
+    assert main(["out"], uv=_checkout(uv)) == 1
+    assert not (tmp_path / "out" / SUMMARY).exists()

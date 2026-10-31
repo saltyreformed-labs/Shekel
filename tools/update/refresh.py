@@ -39,12 +39,12 @@ Usage, at the checkout's root::
 
     python -m tools.update.refresh <out>
 
-It writes ``<out>/lock/uv.lock``, ``<out>/lock/title.txt`` and ``<out>/lock/body.md`` when
-the lock moves, and nothing when it does not; and for each package prepared alone,
-``<out>/major/<package>/`` holding ``pyproject.toml`` where its requirement moves,
-``uv.lock`` where uv locks it, ``title.txt`` and ``body.md``.  The checkout's own lock and
-``pyproject.toml`` are left as they were.  Exit status: 0 refreshed (or nothing to move); 1
-the refresh failed, saying why.
+It writes each change it prepares under ``<out>`` as :mod:`tools.update.folder` lays it out:
+``lock/`` when the lock moves, and ``major/<package>/`` for each package prepared alone, each
+holding the files it changes, ``title.txt`` and ``body.md``.  Its command (:func:`main`) then
+writes its report there, ``summary.md``, whether or not anything moved.  The checkout's own
+lock and ``pyproject.toml`` are left as they were.  Exit status: 0 refreshed (or nothing to
+move); 1 the refresh failed, saying why.
 """
 from __future__ import annotations
 
@@ -65,6 +65,7 @@ from tools.quill.door import (
     lock_moves,
     lock_unversioned,
 )
+from tools.update import folder
 from tools.update.pyproject import (
     PYPROJECT,
     Requirement,
@@ -318,18 +319,15 @@ def _body(week: Refreshed) -> str:
 
 
 def write(out: Path, week: Refreshed) -> None:
-    """``week``'s lock and its pull request's title and text under ``out/lock``, when it
-    moves a package; nothing when it moves none."""
+    """``week``'s lock and its pull request's title and text under ``out``
+    (:mod:`tools.update.folder`), when it moves a package; nothing when it moves none."""
     if not week.moves:
         return
-    folder = out / "lock"
-    folder.mkdir(parents=True)
-    (folder / LOCK).write_text(week.text, encoding="utf-8")
     count = len(week.moves)
-    (folder / "title.txt").write_text(
-        f"chore(deps): the Monday lock refresh moves {count} "
-        f"package{'s' if count != 1 else ''}\n", encoding="utf-8")
-    (folder / "body.md").write_text(_body(week), encoding="utf-8")
+    folder.write(out, folder.Change(
+        folder.WEEK, {LOCK: week.text},
+        f"chore(deps): the Monday lock refresh moves {count} package{'s' if count != 1 else ''}",
+        _body(week)))
 
 
 def _alone_body(alone: Alone, week: Refreshed) -> str:
@@ -362,18 +360,14 @@ def _alone_body(alone: Alone, week: Refreshed) -> str:
 
 def write_alone(out: Path, alone: Alone, week: Refreshed) -> None:
     """``alone``'s change, prepared on top of ``week``'s lock, and its pull request's title
-    and text under ``out/major/<package>``: ``pyproject.toml`` where it moves a
+    and text under ``out`` (:mod:`tools.update.folder`): ``pyproject.toml`` where it moves a
     requirement, and the lock where uv locked it."""
-    folder = out / "major" / alone.move.what
-    folder.mkdir(parents=True)
-    if alone.pyproject is not None:
-        (folder / PYPROJECT).write_text(alone.pyproject, encoding="utf-8")
-    if alone.lock is not None:
-        (folder / LOCK).write_text(alone.lock, encoding="utf-8")
-    (folder / "title.txt").write_text(
+    files = {name: text for name, text in ((PYPROJECT, alone.pyproject), (LOCK, alone.lock))
+             if text is not None}
+    folder.write(out, folder.Change(
+        folder.alone(alone.move.what), files,
         f"chore(deps): {alone.move.what} from {alone.move.old} to {alone.move.new}, waiting "
-        "for a card\n", encoding="utf-8")
-    (folder / "body.md").write_text(_alone_body(alone, week), encoding="utf-8")
+        "for a card", _alone_body(alone, week)))
 
 
 def run(root: Path, out: Path, uv: Callable[[Path], Uv] = _uv) -> Monday:
@@ -404,14 +398,31 @@ def run(root: Path, out: Path, uv: Callable[[Path], Uv] = _uv) -> Monday:
     return Monday(week, alone)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Refresh the lock of the checkout at the working directory into the folder named."""
+def report(monday: Monday) -> str:
+    """What the refresh did, as Markdown: what moved and what was held back, then each
+    package prepared alone."""
+    week = monday.week
+    lines = [f"The Monday lock refresh moved {len(week.moves)} packages and held back "
+             f"{len(week.held)}.", "",
+             *(f"- {name}, held to `{hold.spec}`: {hold.why}."
+               for name, hold in sorted(week.held.items())),
+             "", f"It prepared {len(monday.alone)} changes alone, each waiting for a card.", "",
+             *(f"- {alone.move.what} {alone.move.old} to {alone.move.new}: {alone.why}"
+               + ("; uv cannot lock it alone." if alone.change is None else ".")
+               for alone in monday.alone)]
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def main(argv: Sequence[str] | None = None, uv: Callable[[Path], Uv] = _uv) -> int:
+    """Refresh the lock of the checkout at the working directory into the folder named, by
+    ``uv`` (:func:`run`), then write its report there (:func:`report`,
+    :func:`folder.write_summary`), which the publish requires, and print it."""
     parser = argparse.ArgumentParser(prog="python -m tools.update.refresh",
                                      description="The Monday lock refresh (ruling plan#2351).")
     parser.add_argument("out", type=Path, help="the folder the week's change is written to")
     args = parser.parse_args(argv)
     try:
-        monday = run(Path.cwd(), args.out)
+        monday = run(Path.cwd(), args.out, uv)
     except RefreshError as error:
         print(f"The refresh settled on no lock that lands with no card: {error}",
               file=sys.stderr)
@@ -423,14 +434,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except subprocess.CalledProcessError as error:
         print(f"uv failed ({error.returncode}): {' '.join(error.cmd)}", file=sys.stderr)
         return 1
-    week = monday.week
-    print(f"Moved {len(week.moves)} packages; held back {len(week.held)}.")
-    for name, hold in sorted(week.held.items()):
-        print(f"  held {name} to {hold.spec}: {hold.why}")
-    print(f"Prepared {len(monday.alone)} changes alone, each waiting for a card.")
-    for alone in monday.alone:
-        print(f"  {alone.move.what} {alone.move.old} to {alone.move.new}: {alone.why}"
-              + ("; uv cannot lock it alone" if alone.change is None else ""))
+    text = report(monday)
+    folder.write_summary(args.out, text)
+    print(text, end="")
     return 0
 
 

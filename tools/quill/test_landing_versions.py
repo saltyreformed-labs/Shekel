@@ -29,7 +29,7 @@ _BASE = {
     "uv.lock": ('version = 1\nrevision = 5\nrequires-python = ">=3.14"\n\n'
                 '[[package]]\nname = "pillow"\nversion = "12.3.0"\n'
                 'source = { registry = "https://pypi.org/simple" }\n'
-                f'sdist = {{ url = "https://files.pythonhosted.org/p-12.3.0.tar.gz", '
+                f'sdist = {{ url = "https://files.pythonhosted.org/pillow-12.3.0.tar.gz", '
                 f'hash = "sha256:{_OLD}" }}\n'),
     "pyproject.toml": '[project]\nname = "shekel"\ndependencies = ["qrcode>=8.2,<9.0"]\n',
     "Dockerfile": f"FROM python:3.14-slim@sha256:{_OLD} AS builder\nRUN uv sync --locked\n",

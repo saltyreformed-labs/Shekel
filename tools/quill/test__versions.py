@@ -64,11 +64,12 @@ def _refusal(repo, path, old, new):
 
 def _files(name, version, files):
     """The lines naming package ``name`` at ``version``'s files, its ``files`` there: a
-    source distribution, and that many wheels, each hashed by its name."""
+    source distribution, and that many wheels, each named as a registry names that
+    release's (one platform tag each) and hashed by its name."""
     def hashed(file):
         return f'hash = "sha256:{hashlib.sha256(file.encode()).hexdigest()}"'
     host = "https://files.pythonhosted.org/packages"
-    wheels = "".join(f'    {{ url = "{host}/{name}-{version}-{n}.whl", '
+    wheels = "".join(f'    {{ url = "{host}/{name}-{version}-py3-none-platform{n}.whl", '
                      f'{hashed(f"{name}-{version}-{n}")} }},\n' for n in range(files))
     return (f'sdist = {{ url = "{host}/{name}-{version}.tar.gz", '
             f'{hashed(f"{name}-{version}")} }}\nwheels = [\n{wheels}]\n')
@@ -163,6 +164,59 @@ def test_a_lock_change_moving_more_than_versions_is_refused(repo, new, why):
     no package of which is told by its name, and a version this check cannot read: each is
     more than a version moved."""
     assert _refusal(repo, LOCK, _lock(), new) == why
+
+
+#: Where every file of the lock :func:`_lock` writes lies.
+_HOST = "https://files.pythonhosted.org/packages"
+#: pillow's first wheel at 12.3.0, as :func:`_files` names it.
+_WHEEL = "pillow-12.3.0-py3-none-platform0.whl"
+
+
+@pytest.mark.parametrize(("new", "why"), [
+    (_lock().replace(f"{_HOST}/pillow", "https://example.invalid/packages/pillow"),
+     "uv.lock moves pillow's file pillow-12.3.0.tar.gz to https://example.invalid, not "
+     "https://files.pythonhosted.org, where its registry's files lay"),
+    (_lock().replace(_WHEEL, "evil-12.3.0-py3-none-platform0.whl"),
+     "uv.lock gives pillow 12.3.0 the file evil-12.3.0-py3-none-platform0.whl, which is no "
+     "file of that release"),
+    (_lock(_at("pillow", "12.4.1")).replace(_WHEEL.replace("12.3.0", "12.4.1"), _WHEEL),
+     f"uv.lock gives pillow 12.4.1 the file {_WHEEL}, which is no file of that release"),
+    (_lock().replace(_WHEEL, "pillow-12.3.0.egg"),
+     "uv.lock gives pillow 12.3.0 the file pillow-12.3.0.egg, which is no file of that "
+     "release"),
+    (_lock().replace(_WHEEL, "pillow-12.3.0-any.whl"),
+     "uv.lock gives pillow 12.3.0 the file pillow-12.3.0-any.whl, which is no file of that "
+     "release"),
+    (_lock().replace(f'sdist = {{ url = "{_HOST}/pillow-12.3.0.tar.gz"',
+                     'sdist = { path = "pillow-12.3.0.tar.gz"'),
+     "uv.lock names a file of pillow by no URL"),
+], ids=["another host", "another project's file", "another release's file",
+        "no distribution's name", "a wheel of too few fields", "no URL"])
+def test_a_file_that_is_not_the_releases_on_its_registry_is_refused(repo, new, why):
+    """``uv sync --locked`` downloads each file from the URL the lock names (measured
+    2026-10-31), so a change moving no version may still repoint one: each file of a package
+    whose files change must lie where the registry's files lay and be named for that package
+    at its version, a moved version's included."""
+    assert _refusal(repo, LOCK, _lock(), new) == why
+
+
+def test_a_registry_whose_files_lay_on_two_hosts_has_no_home(repo):
+    """Where the lock's files from a registry lay on two hosts before the change, no host is
+    the registry's own, so a change to any of its packages' files is refused."""
+    elsewhere = f"{_HOST}/zeta", "https://mirror.example/packages/zeta"
+    assert _refusal(repo, LOCK, _lock().replace(*elsewhere),
+                    _lock(_at("pillow", "12.4.1")).replace(*elsewhere)) == (
+        "uv.lock's files from pillow's registry lay on 2 hosts before, not one")
+
+
+def test_a_file_name_is_read_as_pep_503_compares_a_project(repo):
+    """A wheel spells a project's ``-`` as ``_`` and an old source distribution keeps it,
+    and either is the release's file: the project is compared as PEP 503 compares names."""
+    old = _lock({"typing-extensions": ("4.15.0", ())})
+    new = _lock({"typing-extensions": ("4.15.1", ())}).replace(
+        "typing-extensions-4.15.1-py3", "typing_extensions-4.15.1-py3")
+    assert _moved(repo, LOCK, old, new) == (
+        Move("typing-extensions", "4.15.0", "4.15.1", False),)
 
 
 def test_a_lock_that_is_no_toml_is_refused(repo):

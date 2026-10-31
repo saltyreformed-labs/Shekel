@@ -13,6 +13,14 @@ version included, still needs one.
   (the project's own) as it was.  A package added or removed is no version moved, and
   neither is an edit to ``pyproject.toml``, which the image holds and which pins nothing,
   so a new package, direct or indirect, or a new range needs a card.
+- **and each file of a package whose files change is that release's on its registry**
+  (:func:`_released`): on the one host the lock's files from that registry were on before
+  the change, and named for that package at the version the lock gives it (PyPI refuses an
+  upload whose file name names another project or release, so the name ties the file to
+  the release).  ``uv sync --locked`` downloads each file from the URL the lock names and
+  checks only the hash the lock names beside it (measured 2026-10-31), so a change that
+  repointed a file, moving no version, would install whatever that URL serves, land with
+  no card and appear in no release's listing of the versions it moves.
 - a ``FROM`` line of the ``Dockerfile`` and an ``image:`` line of ``docker-compose.yml``,
   each pinning an image by tag and digest (``name:<version><variant>@sha256:<digest>``): only
   the tag's version and the digest move, the image's name, the tag's variant (``-alpine``)
@@ -49,8 +57,10 @@ from __future__ import annotations
 import re
 import tomllib
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from tools.ci.gitcmd import git
 from tools.quill._production import COMPOSE, DOCKERFILE, PUBLISH
@@ -72,6 +82,16 @@ _DISTRIBUTIONS = frozenset({"sdist", "wheels"})
 #: What a package from a registry may change where its version moves: that version, its
 #: files and the dependencies it declares.
 _MOVED = _DISTRIBUTIONS | {"version", "dependencies", "optional-dependencies"}
+#: The endings of a source distribution's file name a registry serves: PEP 625's
+#: ``.tar.gz``, and the ``.zip`` older releases on PyPI still carry.
+_SOURCE_ENDINGS = (".tar.gz", ".zip")
+#: The ending of a wheel's file name, which holds five or six fields split by ``-`` (its
+#: project, version, an optional build number, then its Python, ABI and platform tags).
+_WHEEL_ENDING = ".whl"
+#: How many fields a wheel's file name holds, without and with a build number.
+_WHEEL_FIELDS = (5, 6)
+#: A run of the characters PEP 503 reads as one ``-`` in a project's name.
+_SEPARATORS = re.compile(r"[-_.]+")
 
 
 class NotVersions(ValueError):
@@ -276,26 +296,118 @@ def _lock(old: str, new: str) -> tuple[Move, ...]:
         raise NotVersions(f"{LOCK} adds {', '.join(added)}, a package of no version before")
     if removed := sorted(was.keys() - now.keys()):
         raise NotVersions(f"{LOCK} removes {', '.join(removed)}")
+    homes = _homes(was.values())
     return tuple(move for name in sorted(was)
-                 if (move := _package(name, was[name], now[name])) is not None)
+                 if (move := _package(name, was[name], now[name], homes)) is not None)
 
 
-def _package(name: str, old: dict[str, object], new: dict[str, object]) -> Move | None:
-    """The version the change from the lock's entry ``old`` for package ``name`` to ``new``
-    moves, None where it moves none: a package from a registry may change only its files,
-    and where its version moves, that version and the dependencies it declares too; one from
-    no registry nothing.
+def _registry(package: dict[str, object]) -> str | None:
+    """The URL of the registry a lock's ``package`` comes from, None where it comes from
+    none (the project's own, a path, a URL)."""
+    source = package.get("source")
+    if not isinstance(source, dict) or set(source) != {"registry"}:
+        return None
+    return str(source["registry"])
+
+
+def _distributions(package: dict[str, object]) -> list[object]:
+    """Each file a lock's ``package`` names: its source distribution, then each wheel; a
+    ``wheels`` that is no list counts as one file, which names no URL."""
+    wheels = package.get("wheels", [])
+    return [*([package["sdist"]] if "sdist" in package else []),
+            *(wheels if isinstance(wheels, list) else [wheels])]
+
+
+def _url(file: object) -> str | None:
+    """The URL a lock's ``file`` entry names, None where it names none."""
+    url = file.get("url") if isinstance(file, dict) else None
+    return url if isinstance(url, str) else None
+
+
+def _host(url: str) -> str:
+    """The scheme and host ``url`` is served from, as a URL spells them."""
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _homes(packages: Iterable[dict[str, object]]) -> dict[str, frozenset[str]]:
+    """The hosts each registry's files lie on in a lock holding ``packages``, by the
+    registry's URL: the host (:func:`_host`) of every file a package from it names."""
+    found: dict[str, set[str]] = {}
+    for package in packages:
+        if (registry := _registry(package)) is not None:
+            found.setdefault(registry, set()).update(
+                _host(url) for file in _distributions(package)
+                if (url := _url(file)) is not None)
+    return {registry: frozenset(hosts) for registry, hosts in found.items()}
+
+
+def _canonical(project: str) -> str:
+    """A project's name as PEP 503 compares it: lower case, each run of ``-``, ``_`` and
+    ``.`` one ``-``."""
+    return _SEPARATORS.sub("-", project).lower()
+
+
+def _release_named(file_name: str) -> tuple[str, str] | None:
+    """The project (:func:`_canonical`) and version a distribution's ``file_name`` names, a
+    wheel's or a source distribution's; None where it is neither's."""
+    if file_name.endswith(_WHEEL_ENDING):
+        fields = file_name.removesuffix(_WHEEL_ENDING).split("-")
+        return (_canonical(fields[0]), fields[1]) if len(fields) in _WHEEL_FIELDS else None
+    for ending in _SOURCE_ENDINGS:
+        if file_name.endswith(ending):
+            project, dash, version = file_name.removesuffix(ending).rpartition("-")
+            return (_canonical(project), version) if project and dash and version else None
+    return None
+
+
+def _released(name: str, version: str, package: dict[str, object],
+              hosts: frozenset[str]) -> None:
+    """Refuse the lock's entry ``package``, for package ``name`` from a registry at
+    ``version``, unless each file it names is that release's on the registry (the module's
+    rules): on the one host of ``hosts``, where the registry's files lay before the change,
+    and named for that package at that version.
 
     Raises:
-        NotVersions: when the change moves more than that, or moves a version :func:`_major`
-            cannot read.
+        NotVersions: when the registry's files lay on no one host before, or a file names no
+            URL, lies on another host, or is named for no file of that release.
+    """
+    if len(hosts) != 1:
+        raise NotVersions(f"{LOCK}'s files from {name}'s registry lay on {len(hosts)} hosts "
+                          "before, not one")
+    (home,) = hosts
+    for file in _distributions(package):
+        if (url := _url(file)) is None:
+            raise NotVersions(f"{LOCK} names a file of {name} by no URL")
+        file_name = urlsplit(url).path.rpartition("/")[2]
+        if (host := _host(url)) != home:
+            raise NotVersions(f"{LOCK} moves {name}'s file {file_name} to {host}, not {home}, "
+                              "where its registry's files lay")
+        if _release_named(file_name) != (_canonical(name), version):
+            raise NotVersions(f"{LOCK} gives {name} {version} the file {file_name}, which is "
+                              "no file of that release")
+
+
+def _package(name: str, old: dict[str, object], new: dict[str, object],
+             homes: dict[str, frozenset[str]]) -> Move | None:
+    """The version the change from the lock's entry ``old`` for package ``name`` to ``new``
+    moves, None where it moves none: a package from a registry may change only its files,
+    each that release's on the registry (:func:`_released`, its hosts from ``homes``, by
+    registry, as :func:`_homes` reads them before the change), and where its version moves,
+    that version and the dependencies it declares too; one from no registry nothing.
+
+    Raises:
+        NotVersions: when the change moves more than that, names a file that is not the
+            release's, or moves a version :func:`_major` cannot read.
     """
     was, now = old.get("version"), new.get("version")
-    registry = set(old.get("source", {})) == {"registry"}
-    free = (_MOVED if was != now else _DISTRIBUTIONS) if registry else frozenset()
+    registry = _registry(old)
+    free = (_MOVED if was != now else _DISTRIBUTIONS) if registry is not None else frozenset()
     if changed := sorted(key for key in old.keys() | new.keys()
                          if key not in free and old.get(key) != new.get(key)):
         raise NotVersions(f"{LOCK} changes {name}'s {', '.join(changed)}")
+    if registry is not None and any(old.get(key) != new.get(key) for key in _DISTRIBUTIONS):
+        _released(name, str(now), new, homes.get(registry, frozenset()))
     if was == now:
         return None
     majors = [_major(version) if isinstance(version, str) else None for version in (was, now)]

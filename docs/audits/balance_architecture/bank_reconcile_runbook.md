@@ -572,6 +572,23 @@ rendered; the post-state and the check, task plan#2416). Its door-driving half i
   unsigned, so it now fails every movement's arm: on the rehearsed copy, 47 arms for one
   plan#2454's commit wrote, and 77 for the 14:39 run's (the 30 above among them). The blocks
   never meet one: `same_code` holds `$H` at the commit that wrote the day's snapshot.
+* **2026-10-31 16:03, the five blocks and the two controls again on the changed harness** (task
+  plan#2457, after plan#2451, plan#2455, plan#2452, plan#2453, plan#2454 and plan#2463): the
+  five blocks, extracted verbatim and run in an interactive zsh from `card/1192` itself, its
+  tree clean at the task's start commit, with the 08:52 run's two stand-ins: the CODE block's
+  dump was the dump of 2026-10-30, and the POST block's after-dump was a dump of a second copy
+  the rehearsal performed every act on apart, standing in for the owner's performance. Every
+  step of the blocks exited 0; they printed `REHEARSED`, `SAME CODE` at the REHEARSAL, PRE-ACT
+  and POST blocks, and all three "AS REHEARSED" lines, and neither they nor the controls left
+  a change git sees in the checkout. The act sheet was the 14:39 run's but for its
+  database and time, and the rehearsed copy's check output and every balance figure were the
+  14:39 run's exactly. The 08:52 run's two controls, each through the owner's own doors on a
+  fresh restore of that after-dump and then the POST block's three comparisons, printed the
+  08:52 controls' check output byte for byte, with the same three verdicts: envelope 2281's day
+  typed back one day early failed the check on that envelope alone and moved neither the
+  balances nor the list; row 1299, cancelled, set back to Projected and its check mark pressed
+  on the grid (Paid, today) failed the check on that cancel and the balances on Checking alone,
+  at the same 837 figures, and did not move the list.
 * **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
   full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
   turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a

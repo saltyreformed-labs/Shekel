@@ -34,6 +34,7 @@ from app.models.ref import (
 
 # Authentication
 from app.models.user import MfaConfig, User, UserSettings
+from app.models.trusted_device import TrustedDevice
 
 # Budget domain
 from app.models.pay_period import PayPeriod
@@ -146,6 +147,7 @@ __all__ = [
     "WithholdingKind",
     # Authentication
     "MfaConfig",
+    "TrustedDevice",
     "User",
     "UserSettings",
     # Budget domain

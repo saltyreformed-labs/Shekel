@@ -14,6 +14,14 @@ runs, every existing session becomes older than the new
 ``session_invalidated_at`` and is rejected on the next request,
 forcing every active user to log in again.
 
+It also forgets every trusted device, of every user.  A device is
+trusted only while it was trusted at or after its user's
+``session_invalidated_at`` (``app.services.trusted_device_service``,
+plan#2173), so the bump leaves every device older than it, and the
+next sign-in on each one asks for the two-factor code again.  The
+script writes nothing to ``auth.trusted_devices``: the rows stay
+until their user's next trust purges them, trusted by nothing.
+
 This docstring once said the script also revokes remember-me tokens.  It
 never did: Flask-Login's remember-me restore starts a session with no
 ``_session_created_at``, which the comparison above skipped.  Since

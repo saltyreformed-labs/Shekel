@@ -65,6 +65,7 @@ from typing import Callable, Iterable
 AUDITED_TABLES: tuple[tuple[str, str], ...] = (
     # ── auth schema ──────────────────────────────────────────────────
     ("auth", "mfa_configs"),
+    ("auth", "trusted_devices"),
     ("auth", "user_settings"),
     ("auth", "users"),
     # ── budget schema ────────────────────────────────────────────────

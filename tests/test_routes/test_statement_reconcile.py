@@ -53,11 +53,6 @@ from app.services.statement_match import (
     place_token,
     skip_line,
 )
-# Pylint: ``shekel-private-module-import`` -- a route test naming the CARD
-# KIND a tab holds reaches the service's own value rather than restating its
-# three names here, which is the convention this module's siblings keep.
-# pylint: disable=shekel-private-module-import
-from app.services.statement_match._cards import CardKind
 from tests.test_routes._statement_forms import (
     controls_inside_the_trigger,
     form_fields,
@@ -65,14 +60,17 @@ from tests.test_routes._statement_forms import (
     reconcile_offerable,
 )
 from tests._test_helpers import open_owner_calendar, payback_row_of
-from tests.test_services.test_outstanding_difference import _settle
+from tests.test_services.test_outstanding_difference import _opened_on, _settle
 from tests.test_services.test_statement_import.test_anchor import _seed_import
+# Pylint: ``shekel-private-module-import`` -- the statement-match builders are
+# the one way a test stages a bank line, a scope and an accepted act as the
+# app does, the convention this module's siblings keep.
+# pylint: disable=shekel-private-module-import
 from tests.test_services.test_statement_match._builders import (
     a_bank_line,
     a_later_period,
     a_one_off_envelope,
     an_account_whose_books_hide_a_line,
-    a_later_period,
     a_purchase,
     a_rule,
     a_transaction,
@@ -1027,8 +1025,6 @@ def _row_tokens(pane, line_id):
     Returns:
         The reviewed-row tokens, in document order.
     """
-    import re  # pylint: disable=import-outside-toplevel
-
     return re.findall(
         rf'name="rows-{line_id}" value="([^"]+)"', pane,
     )
@@ -4831,31 +4827,77 @@ def _card_markup(page, line_id):
 
 
 class TestTheHeroSaysHowFarTheRecordsRun:
-    """Finding **BAL-651**, ruling plan#2346, through a real render."""
+    """Finding **BAL-651**, ruling plan#2346, through a real render.
 
-    def test_records_past_the_last_statement_are_named_beside_the_priced_day(
+    On the books and statement ruling **R-BAL286**'s service test reaches
+    Done with (``test_reconcile``'s
+    ``test_the_statement_the_opening_was_TYPED_FROM_can_be_done``): an
+    account opened Feb 2 at ``$500.00`` from a statement stating ``$500.00``
+    that day, both its lines inside the opening, so nothing is off and
+    nothing waits to be explained.  A row settled after the statement is
+    then the one difference between the page that reads Done and the page
+    that refuses it.
+    """
+
+    #: The page's Done line, which only a Done page renders.
+    _DONE = "Done: your books and your bank agree"
+
+    def _body(self, auth_client, db, seed_user, seed_periods, late):
+        """Render the Reconcile page for the fixture, a row settled on *late*.
+
+        Args:
+            auth_client: The logged-in client.
+            db: The session fixture.
+            seed_user: The seeded user bundle.
+            seed_periods: The seeded pay periods.
+            late: The day a ``$40.00`` row settles after the statement, or
+                ``None`` for no such row.
+
+        Returns:
+            The rendered page, as text.
+        """
+        account = _opened_on(seed_user, date(2026, 2, 2))
+        _seed_import(
+            db, account, stated="500.00", effective_on=date(2026, 2, 2),
+            evidence=StatementBalanceEvidenceEnum.FILE_CHAIN,
+            lines=[(date(2026, 1, 30), "-25.00"),
+                   (date(2026, 2, 2), "-10.00")],
+        )
+        if late is not None:
+            _settle(seed_user, db, seed_periods[4], "40.00", late,
+                    account=account)
+        db.session.commit()
+        response = auth_client.get(_url(account.id))
+        assert response.status_code == 200, (
+            f"the page did not render: {response.status_code}"
+        )
+        return response.get_data(as_text=True)
+
+    def test_with_no_record_past_the_statement_the_page_reads_DONE(
+        self, auth_client, db, seed_user, seed_periods,
+    ):
+        """The control: the same books and statement, nothing after Feb 2."""
+        body = self._body(auth_client, db, seed_user, seed_periods, None)
+
+        assert self._DONE in body
+        assert "This comparison is priced through" not in body
+
+    def test_records_past_the_last_statement_refuse_DONE_and_are_named(
         self, auth_client, db, seed_user, seed_periods,
     ):
         """The page says how far it is priced and how far the records run.
 
-        The statement ends Feb 2 and a row settles Feb 15, so the comparison
-        is priced through Feb 2 while the records run through Feb 15: Feb 3
-        through Feb 15 is 13 unpriced days.
+        A row settles Feb 15, so the comparison is priced through Feb 2
+        while the records run through Feb 15: Feb 3 through Feb 15 is 13
+        unpriced days, and the page that read Done without it does not.
         """
-        _seed_import(
-            db, seed_user["account"], stated="1000.00",
-            effective_on=date(2026, 2, 2),
-            evidence=StatementBalanceEvidenceEnum.FILE_CHAIN,
-            lines=[(date(2026, 2, 2), "-20.00")],
+        body = self._body(
+            auth_client, db, seed_user, seed_periods, date(2026, 2, 15),
         )
-        _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 2, 15))
-        db.session.commit()
 
-        body = auth_client.get(_url(seed_user["account"].id)).data.decode()
-
+        assert self._DONE not in body, "the page read Done over Feb 3 - Feb 15"
         assert re.search(
             r"This comparison is priced through 2026-02-02,\s+and your records"
             r" run through 2026-02-15;\s+13 later day\(s\)",
             body,
         ), "the hero did not name how far the records run"
-        assert "Done:" not in body

@@ -352,11 +352,15 @@ def cash_last_record_on(
     """Return the latest day, on or before the reader's NOW, the books hold a record.
 
     A RECORD is a settled source fact (a row or a transfer leg marked done, a
-    purchase dated against one) or a balance assertion (a true-up), by its own
-    day, whatever it moved -- one netting to ``$0.00`` included.  Ruling
-    plan#2400 put the true-up in: it changes the books on a day a statement
-    must price before the Reconcile page may read Done (ruling plan#2346,
-    finding **BAL-651**).  :func:`app.services.bank_agreement.bank_agreement`
+    purchase dated against one) or a balance assertion (a true-up), read by
+    its own day and never by what it moved.  A source fact always moves money
+    (a movement is never ``$0.00``, ``ck_transaction_entries_positive_amount``,
+    and a transfer closed at ``$0.00`` records no side); a true-up may move
+    none, and one agreeing with the records to the cent is still a record,
+    because it states a balance for its day.  Ruling plan#2400 put the
+    true-up in: it speaks for the books on a day a statement must price
+    before the Reconcile page may read Done (ruling plan#2346, finding
+    **BAL-651**).  :func:`app.services.bank_agreement.bank_agreement`
     draws its comparison through this day, so the days after the last
     statement line that the books describe are shown and counted unpriced
     rather than never drawn (ruling plan#2399).

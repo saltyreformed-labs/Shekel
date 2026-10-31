@@ -22,6 +22,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app import ref_cache
@@ -44,7 +45,6 @@ from app.models.statement_import import (
 from app.models.journal_entry import Posting
 from app.models.transaction import Transaction
 from app.services import account_service
-from app.models.statement_import import BankStatementLine
 from app.services.statement_import import plan_statement, record_statement
 from app.services.statement_import._balance import bank_levels
 from app.models.ref import AccountType
@@ -95,6 +95,37 @@ def _counts(db, account_id):
         import_id: (sighted, first)
         for import_id, sighted, first in db.session.execute(
             StatementLineSighting.counts_by_import(account_id),
+        )
+    }
+
+
+def _audit_watermark(db):
+    """Return the newest ``system.audit_log`` id, ``0`` while it is empty."""
+    return db.session.execute(
+        text("SELECT coalesce(max(id), 0) FROM system.audit_log"),
+    ).scalar_one()
+
+
+def _audited_writes_since(db, watermark):
+    """Return ``{(table, operation): rows}`` the audit trigger logged after *watermark*.
+
+    Args:
+        db: The session fixture.
+        watermark: An id :func:`_audit_watermark` returned.
+
+    Returns:
+        The count of each operation on each ``schema.table``, empty when
+        nothing was written.
+    """
+    return {
+        (f"{schema}.{table}", operation): count
+        for schema, table, operation, count in db.session.execute(
+            text(
+                "SELECT table_schema, table_name, operation, count(*) "
+                "FROM system.audit_log WHERE id > :watermark "
+                "GROUP BY table_schema, table_name, operation"
+            ),
+            {"watermark": watermark},
         )
     }
 
@@ -644,12 +675,19 @@ class TestItsDecisionIsReadable:
     def test_it_stages_nothing_and_writes_nothing(self, app, db, seed_user):
         """A plan of a first import leaves the database as it found it.
 
-        Committed and re-read rather than read off the session: a session's
-        own state cannot tell a write that was rolled back from one never
-        made.  A first import is the plan with the most to record -- the
-        identity, every line, the import act and its level -- so nothing it
-        leaves unwritten is a write a smaller plan would make.
+        Graded by ``system.audit_log``, whose trigger logs every INSERT,
+        UPDATE and DELETE on every table the import writes (each is in
+        ``AUDITED_TABLES``): a census of writes, where a count per table
+        sees only the tables someone thought to list.  Committed first, so
+        anything the plan staged and did not flush (an object added, changed
+        or deleted) is written, and logged, before the census.  A first
+        import is the plan with the most to record, so nothing it leaves
+        unwritten is a write a smaller plan would make; the import itself,
+        performed afterwards, is the control that the census sees each of
+        those writes -- the identity, the import act, its level, every line,
+        its sighting and the merchant each names.
         """
+        watermark = _audit_watermark(db)
         plan = plan_statement(
             seed_user["account"].id, seed_user["user"].id, _SOURCE, _file(),
         )
@@ -657,11 +695,20 @@ class TestItsDecisionIsReadable:
         assert len(plan.fresh_lines) == 3
         assert not db.session.new
         db.session.commit()
-        db.session.expire_all()
 
-        assert db.session.query(BankStatementLine).count() == 0
-        assert db.session.query(StatementImport).count() == 0
-        assert db.session.query(StatementLineSighting).count() == 0
+        assert not _audited_writes_since(db, watermark)
+
+        _record(seed_user, _file())
+        db.session.commit()
+
+        assert _audited_writes_since(db, watermark) == {
+            ("budget.account_external_identities", "INSERT"): 1,
+            ("budget.statement_imports", "INSERT"): 1,
+            ("budget.account_anchor_history", "INSERT"): 1,
+            ("budget.bank_statement_lines", "INSERT"): 3,
+            ("budget.statement_line_sightings", "INSERT"): 3,
+            ("budget.merchants", "INSERT"): 3,
+        }
 
     def test_it_refuses_what_the_import_refuses(self, app, db, seed_user):
         """The refusal is the decision's, so the plan raises it too.

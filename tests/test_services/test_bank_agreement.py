@@ -428,19 +428,30 @@ class TestTheDrawnDaysRunToTheBooksLastRecord:
             assert hero.unpriced_after == 21
             assert hero.records_through == date(2026, 2, 23)
 
+    @pytest.mark.parametrize(("declared", "moved"), [
+        ("980.00", "-20.00"),
+        ("1000.00", "0.00"),
+    ])
     def test_a_TRUE_UP_after_every_statement_is_a_record(
-        self, app, seed_user, seed_periods, db,
+        self, app, seed_user, seed_periods, db, declared, moved,
     ):
-        """Ruling plan#2400: a true-up changes the books on a day no statement priced.
+        """Ruling plan#2400: a true-up speaks for the books on a day no statement priced.
 
-        No row is recorded after Feb 2, only a true-up on Feb 20, and the
-        drawn days run to it: Feb 3 through Feb 20 is 18 unpriced days.
+        No row is recorded after Feb 2, only a true-up on Feb 20 declaring
+        *declared*, and the drawn days run to it: Feb 3 through Feb 20 is 18
+        unpriced days.  The seeded books hold ``1000.00`` throughout (the
+        bank's Feb 2 line is the bank's alone), so the true-up moves
+        ``declared - 1000.00``: ``980.00 - 1000.00 = -20.00``, or
+        ``1000.00 - 1000.00 = 0.00`` for one agreeing with the records to the
+        cent, which is a record all the same because a record is read by its
+        day.  The hero stays on the bank's last line, Feb 2, and names Feb 20
+        as how far the records run.
         """
         with app.app_context():
             self._statement(db, seed_user, (self._LAST_LINE, "-20.00"))
             append_balance_assertion(
                 db.session, seed_user["account"],
-                Decimal("980.00"), _instant(2026, 2, 20),
+                Decimal(declared), _instant(2026, 2, 20),
             )
             db.session.commit()
 
@@ -448,7 +459,11 @@ class TestTheDrawnDaysRunToTheBooksLastRecord:
 
             assert agreement.last_record_on == date(2026, 2, 20)
             assert agreement.span.last_day == date(2026, 2, 20)
-            assert statement_hero(agreement, 0).unpriced_after == 18
+            assert _day(agreement, date(2026, 2, 20)).asserted == Decimal(moved)
+            hero = statement_hero(agreement, 0)
+            assert hero.day == self._LAST_LINE
+            assert hero.unpriced_after == 18
+            assert hero.records_through == date(2026, 2, 20)
 
     def test_records_that_end_before_the_last_line_leave_the_end_ON_the_line(
         self, app, seed_user, seed_periods, db,

@@ -55,7 +55,11 @@ reads the database and the app's services, never a page.
 
 **Every figure goes to the PERFORMANCE SHEET** (ruling **R-BAL249**), a file outside every
 checkout (:func:`door_rehearsal.new_file`), saved even when a run stops; this file states
-structure only -- ids, the one held-back act, the order.
+structure only -- ids, the one held-back act, the order.  **So does where each act is on
+screen**, a ``FIND`` line per act (task plan#2371, the runbook
+``docs/audits/balance_architecture/bank_reconcile_runbook.md``): a row's full edit and an
+envelope's lines are fragments only a click on the grid opens, so the sheet names the grid
+column and row, and a match names the Reconcile tab and the row as the page itself labels it.
 
 **It runs PRODUCTION's ``app/``**, because the owner performs these acts on production: export
 the deployed revision's ``app/`` outside every checkout and put it first on ``PYTHONPATH``.  This
@@ -87,6 +91,8 @@ import io
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from decimal import Decimal
+from html.parser import HTMLParser
 from pathlib import Path
 
 from flask import Flask
@@ -229,11 +235,62 @@ def _description(line_id: int) -> str:
     ).order_by(StatementLineSighting.import_id)).scalars().first()
 
 
-def _card_form(run: Run, line_id: int) -> "tuple[dict, str]":
-    """Return the Apply form holding line *line_id*'s card opened, and its page.
+class _RowLabels(HTMLParser):
+    """Collect what the MATCH pane calls each row the owner can tick.
+
+    **The sheet names a row in the page's own words**, because the owner finds
+    it by reading the pane: a row's checkbox and its ``<label for=...>``
+    are tied by the box's id, and the words are the label's ``rec-row-name``
+    span (``accounts/_statement_reconcile_match.html``, its ``pick`` macro).
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.boxes: "dict[str, tuple[str, str]]" = {}
+        self.names: "dict[str, str]" = {}
+        self._label: "str | None" = None
+        self._name: "list[str] | None" = None
+
+    def handle_starttag(self, tag, attrs):
+        """Record a checkbox's id, enter a label, or start a row's name."""
+        attr = dict(attrs)
+        if tag == "input" and attr.get("type") == "checkbox" and attr.get("id"):
+            self.boxes[attr["id"]] = (attr.get("name", ""), attr.get("value", ""))
+        elif tag == "label":
+            self._label = attr.get("for")
+        elif tag == "span" and self._label and "rec-row-name" in attr.get("class", "").split():
+            self._name = []
+
+    def handle_data(self, data):
+        """Keep a row name's text."""
+        if self._name is not None:
+            self._name.append(data)
+
+    def handle_endtag(self, tag):
+        """Close a row's name, or leave its label."""
+        if tag == "span" and self._name is not None:
+            self.names[self._label] = " ".join("".join(self._name).split())
+            self._name = None
+        elif tag == "label":
+            self._label = None
+
+    def label_of(self, name: str, value: str) -> str:
+        """Return the row name the page prints beside box *name* = *value*.
+
+        Raises:
+            AssertionError: When the page renders no such box, or no name for it.
+        """
+        ids = [box for box, control in self.boxes.items() if control == (name, value)]
+        assert ids and ids[0] in self.names, f"the page names no row for {name}={value}"
+        return self.names[ids[0]]
+
+
+def _card_form(run: Run, line_id: int) -> "tuple[dict, str, Tab, _RowLabels]":
+    """Return the Apply form holding line *line_id*'s card opened, its page and tab.
 
     The card is on whichever tab the page puts it; each is asked in turn, with
-    the card's MATCH pane rendered in the document (``?open=``).
+    the card's MATCH pane rendered in the document (``?open=``).  The page's
+    row names come with it, for the sheet (:class:`_RowLabels`).
 
     Raises:
         AssertionError: When no tab renders an OK box for the line.
@@ -243,9 +300,12 @@ def _card_form(run: Run, line_id: int) -> "tuple[dict, str]":
                 f"?tab={tab.value}&open={line_id}")
         response = run.operator.client.get(page)
         assert response.status_code == 200, f"GET {page} -> {response.status_code}"
-        for form in forms_in(response.get_data(as_text=True)):
+        html = response.get_data(as_text=True)
+        for form in forms_in(html):
             if ("ok", str(line_id)) in form["unticked"]:
-                return form, page
+                labels = _RowLabels()
+                labels.feed(html)
+                return form, page, tab, labels
     raise AssertionError(f"no Reconcile tab renders a card for line {line_id}")
 
 
@@ -259,8 +319,10 @@ def _match(run: Run, number: int, act: MatchAct) -> None:
     """
     line_id = run.read(line_id_of, run.account_id, act.line)
     assert line_id is not None, f"{named(act.line)} is not recorded"
-    form, page = _card_form(run, line_id)
+    form, page, tab, labels = _card_form(run, line_id)
     run.sheet.act(number, act.title, f"{page} (Reconcile: the line's card, MATCH)")
+    run.sheet.say(f"- FIND it: the Reconcile page's \"{tab.label}\" tab, the card of "
+                  "SECU's line above; open its MATCH")
     rows = f"rows-{line_id}"
     proposed = [value for name, value in form["controls"] if name == rows]
     wanted = [value for value in proposed if act.offered_as(value)] or \
@@ -269,11 +331,13 @@ def _match(run: Run, number: int, act: MatchAct) -> None:
     stray = [value for value in proposed if not act.offered_as(value)]
     assert not stray, f"the page also proposes {stray} for line {line_id}"
     ticked = [("ok", str(line_id))]
+    label = labels.label_of(rows, wanted[0])
     if wanted[0] in proposed:
-        run.sheet.say(f"- The page proposes the row, ticked: {wanted[0]}")
+        run.sheet.say(f"- The page proposes the row, ticked: \"{label}\" ({wanted[0]}); "
+                      "tick no other")
     else:
         ticked.append((rows, wanted[0]))
-        run.sheet.say(f"- TICK the row: {wanted[0]}")
+        run.sheet.say(f"- TICK the row \"{label}\" ({wanted[0]}), and no other")
     if ("match" not in [value for name, value in form["controls"] if name == f"verb-{line_id}"]):
         ticked.append((f"verb-{line_id}", "match"))
     run.sheet.say("- TICK OK on the card, then press Apply")
@@ -315,11 +379,35 @@ def _save_status(run: Run, txn_id: int, status: StatusEnum) -> None:
     _save_full_edit(run, txn_id, "status_id", str(ref_cache.status_id(status)))
 
 
+def _paycheck_of(txn_id: int) -> date:
+    """Return the first day of the pay period row *txn_id* is budgeted in: its grid column."""
+    return db.session.get(Transaction, txn_id).pay_period.start_date
+
+
+def _say_where_on_the_grid(run: Run, txn_id: int, name: str) -> None:
+    """Tell the owner where row *txn_id* is: the account's grid, its column, its row's name.
+
+    A row's column is its pay period, not the day its money moved, which can
+    fall in another (``_transaction_full_edit.html``'s day box says why), so
+    the column is read rather than inferred from the sheet's day.  The page
+    the act is pressed on is a fragment that only a click on the grid opens.
+    """
+    run.sheet.say(f"- FIND it: the grid of {run.read(_account_name, run)}, the column of the "
+                  f"paycheck starting {run.read(_paycheck_of, txn_id)}, the row \"{name}\"; "
+                  "click its amount")
+
+
+def _account_name(run: Run) -> str:
+    """Return the reconciled account's name, as the grid's account picker shows it."""
+    return db.session.get(Account, run.account_id).name
+
+
 def _cancel(run: Run, number: int, row: dict) -> None:
     """Cancel one never-moved row: Status to Projected, then to Cancelled, in its full edit."""
     txn_id = row["transaction_id"]
     page = f"/transactions/{txn_id}/full-edit"
     run.sheet.act(number, f"Cancel {named(row)}", f"{page} (the row's full edit: Status)")
+    _say_where_on_the_grid(run, txn_id, row["row"])
     for status in (StatusEnum.PROJECTED, StatusEnum.CANCELLED):
         _save_status(run, txn_id, status)
     run.read(_cancelled, run, txn_id)
@@ -357,13 +445,17 @@ def _delete(run: Run, number: int, row: dict, gone: "frozenset[int]") -> None:
     if closed_on is not None:
         door = f"/transactions/{txn_id}/full-edit (Status, Money moved on) and {door}"
     run.sheet.act(number, f"Delete {named(row)}", door)
+    _say_where_on_the_grid(run, txn_id, row["row"])
     before = run.read(lambda: jsonable(envelope_state(txn_id, gone)))
     if closed_on is not None:
         _save_status(run, txn_id, StatusEnum.PROJECTED)
     button = run.operator.button(page, "delete", f"{page}/{entry_id}")
     assert not button["vals"].get("shown_lines"), \
         f"the X on line {entry_id} would free bank line(s) {button['vals']['shown_lines']}"
-    run.sheet.say("- PRESS the line's X, and confirm")
+    # The list prints a purchase's own figure, which is unsigned.
+    run.sheet.say(f"- PRESS the X of the purchase \"{row['line']}\" bought "
+                  f"{row['purchased_on']} for {abs(Decimal(row['amount']))}, under Purchases, "
+                  "and confirm")
     run.operator.press(button)
     if closed_on is not None:
         _save_status(run, txn_id, StatusEnum.DONE)

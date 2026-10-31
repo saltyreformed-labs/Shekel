@@ -36,7 +36,8 @@ from app.services import (
 from app.services.outstanding_difference import StretchKind
 from app.utils.dates import days_in_range
 
-ZERO = Decimal("0.00")
+from reconcile_residue import ZERO, residue_of
+
 CENT = Decimal("0.01")
 
 #: The Capital One export's columns this reads, bound by NAME as the SECU
@@ -211,9 +212,8 @@ class ClassedDay:
         False when a match pairs a movement here with one on another day, so
         the day's difference holds money no act on this day answers.
         """
-        return (
-            sum((row.amount for row in self.rows), ZERO)
-            - sum((line.amount for line in self.lines), ZERO)
+        return residue_of(
+            (row.amount for row in self.rows), (line.amount for line in self.lines),
         ) == self.residue
 
 
@@ -417,10 +417,10 @@ def _picked_days(
             # Before the import a day no statement covers holds the app's rows
             # alone; a covered day off the list agrees.
             residue = (
-                sum((row.amount for row in detail.rows), ZERO)
+                residue_of((row.amount for row in detail.rows), ())
                 if day in uncovered else ZERO
             )
-        residue -= sum((line.amount for line in fresh_on[day]), ZERO)
+        residue += residue_of((), (line.amount for line in fresh_on[day]))
         if day in listed or residue != ZERO:
             picked.append(_Picked(day, residue, detail, fresh_on[day]))
     return picked

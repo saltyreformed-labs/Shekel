@@ -67,6 +67,15 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
+from app.extensions import db
+from app.models.account import Account
+from app.services import (
+    balance_at,
+    outstanding_difference,
+    statement_import,
+    statement_match,
+)
+
 from door_rehearsal import connect_read_only, new_file
 from reconcile_inputs import (
     CENT,
@@ -79,15 +88,6 @@ from reconcile_inputs import (
     fresh_lines,
     plan_import,
     read_card_export,
-)
-
-from app.extensions import db
-from app.models.account import Account
-from app.services import (
-    balance_at,
-    outstanding_difference,
-    statement_import,
-    statement_match,
 )
 
 

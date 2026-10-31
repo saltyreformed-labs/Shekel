@@ -16,7 +16,7 @@ presses, in the order the doors force:
    than left waiting; none of the five TIMING lines.  The sheet records what it filed.
 2. **The matches**, on the Reconcile page (:func:`_match`): each TIMING pair, the row the page
    itself proposes for SECU's line once the import has recorded it, then each TRANSFER line
-   but the one ruling plan#2433 holds back (:data:`HELD_BACK`).
+   but the one ruling plan#2433 holds back (:data:`reconcile_post_state.HELD_BACK`).
 3. **The never-moved rows** (:func:`_cancel`, :func:`_delete`): each row cancelled, which is
    TWO presses of its full edit, Status to Projected and then to Cancelled, because the cancel
    door takes only a Projected row and every one of these is Paid; and each envelope line
@@ -29,17 +29,29 @@ presses, in the order the doors force:
    typed back ends exactly where a DELETE of the line alone does.
 
 The CARD items, and the act ruling plan#2433 holds back, are named on the sheet, and no act
-touches them: their state is read before the first act and after the last
-(:func:`_standing`), and a difference stops the run.
+touches them: their state is read into the snapshot before the first act and graded after
+the last, and a difference stops the run.
 
 **IT WRITES.**  Before its first write it refuses the name ``shekel``
 (:func:`door_rehearsal.connect`) and any copy on which an act's pre-state has moved, whatever
-it is called (:func:`_moved`), naming every moved marker -- nothing here is idempotent, so a
-partly performed copy is refused at act zero.  Then it writes a SNAPSHOT of the copy's ids
-(:class:`Snapshot`), which plan#2416's read-only check of a copy the owner performed the acts
-on reads, and after each act it asserts the act LANDED, reading the database rather than the
-response: the Reconcile page answers a refused card with a 200 and a receipt saying so
-(measured 2026-10-30 on the April Van Loan match).
+it is called (:func:`reconcile_post_state.moved_markers`), naming every moved marker --
+nothing here is idempotent, so a partly performed copy is refused at act zero.  Then it writes
+a SNAPSHOT of the copy before act 1 (:class:`reconcile_post_state.Snapshot`), and after each
+act it asserts the act LANDED, reading the database rather than the response: the Reconcile
+page answers a refused card with a 200 and a receipt saying so (measured 2026-10-30 on the
+April Van Loan match).
+
+**After the last act it grades the POST-STATE** (:func:`reconcile_post_state
+.post_state_problems`, task plan#2416): every act's own arm again, the untouched items
+against the snapshot, and plan#1192's DONE TEST -- every books day Checking's disagreement
+list still calls apart is apart by exactly the card items and the held-back act the sheet
+names on it, and every other books day agrees.
+
+**``--check`` grades a copy the owner PERFORMED the acts on, and writes nothing**
+(:func:`_check`): the same post-state arms, the one set both modes call, on a copy opened
+READ-ONLY (:func:`door_rehearsal.connect_read_only`), against the snapshot the rehearsal wrote
+of the same dump.  It refuses a copy no act has touched, and it serves no request: every arm
+reads the database and the app's services, never a page.
 
 **Every figure goes to the PERFORMANCE SHEET** (ruling **R-BAL249**), a file outside every
 checkout (:func:`door_rehearsal.new_file`), saved even when a run stops; this file states
@@ -59,6 +71,14 @@ the owner's session is forged (:class:`door_rehearsal.Operator`)::
         --secu <SECU's CSV export> \\
         --sheet ~/projects/shekel-handoffs/<folder>/performance_sheet.md \\
         --snapshot ~/projects/shekel-handoffs/<folder>/snapshot.json
+
+Then the check of the copy the owner performed the acts on, restored from a dump taken after
+them, against the snapshot the rehearsal of the same morning's dump wrote::
+
+    ... python tests/manual/reconcile_rehearsal.py --check \\
+        --clone <the performed copy> --account <its id> \\
+        --acts <the same act sheet> --secu <the same export> \\
+        --snapshot <the rehearsal's snapshot>
 """
 
 import argparse
@@ -67,9 +87,7 @@ import io
 import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from decimal import Decimal
 from pathlib import Path
-from typing import NamedTuple
 
 from flask import Flask
 
@@ -78,11 +96,7 @@ from app import ref_cache
 from app.enums import StatementSourceEnum, StatusEnum
 from app.extensions import db
 from app.models.account import Account
-from app.models.statement_import import (
-    BankStatementLine,
-    StatementImport,
-    StatementLineSighting,
-)
+from app.models.statement_import import BankStatementLine, StatementLineSighting
 from app.models.statement_match import (
     StatementMatch,
     StatementMatchCreation,
@@ -90,265 +104,38 @@ from app.models.statement_match import (
 )
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.models.transfer import Transfer
 from app.services.statement_match import Tab
 
-from door_rehearsal import Operator, RefusedError, Sheet, connect, forms_in, new_file
-
-
-#: The one act ruling **plan#2433** holds back, by its transfer: SECU's
-#: 2026-04-22 Van Loan line, whose match to transfer 322 moves the payment
-#: onto the day Van Loan's books open, which the accept door refuses and no
-#: door can move (measured 2026-10-30).  Step plan#2436 performs it.
-HELD_BACK = {322: "step plan#2436 (ruling plan#2433)"}
-
-#: The kinds of the Reconcile page's row token that carry a MOVEMENT's id
-#: (``kind:id:figure:revision``): an envelope's purchase line, and a row's or
-#: a settled transfer's own payment.  A still-Projected transfer is offered as
-#: its ``leg`` (measured 2026-10-30 on the copy's MATCH panes).
-_MOVEMENT_TOKENS = frozenset({"purchase", "settlement"})
-_LEG_TOKEN = "leg"
-
-
-@dataclass(frozen=True)
-class MatchAct:
-    """One SECU line matched on the Reconcile page to what the sheet names.
-
-    Attributes:
-        title: The act, as the sheet prints it.
-        line: The act sheet's line.
-        row: The act sheet's row, or ``None`` for a transfer still Projected.
-        transfer_id: The transfer, or ``None`` for a TIMING pair.
-    """
-
-    title: str
-    line: dict
-    row: "dict | None"
-    transfer_id: "int | None"
-
-    def offered_as(self, token: str) -> bool:
-        """Return whether the page's row *token* is this act's row."""
-        kind, ident = token.split(":")[:2]
-        if self.row is None:
-            return kind == _LEG_TOKEN and int(ident) == self.transfer_id
-        return kind in _MOVEMENT_TOKENS and int(ident) == self.row["entry_id"]
-
-
-class Snapshot(NamedTuple):
-    """Every id the copy held before the first act, and the database's clock.
-
-    What the acts CREATED -- the import's lines, the purchases the owner's
-    rules filed, the matches -- is the difference against this, and plan#2416's
-    check of a copy the owner performed the acts on reads this file of the
-    same dump rather than trusting any id an operator types (the account-10
-    rehearsal's snapshot, commit ``01ebee2b8``).
-
-    Attributes:
-        transactions: Every ``budget.transactions`` id, deleted rows too.
-        deleted: The ``transactions`` already soft-deleted.
-        entries: Every ``budget.transaction_entries`` id.
-        lines: Every ``budget.bank_statement_lines`` id.
-        matches: Every ``budget.statement_matches`` id.
-        captured_at: The database's ``now()`` when it was taken.
-    """
-
-    transactions: frozenset
-    deleted: frozenset
-    entries: frozenset
-    lines: frozenset
-    matches: frozenset
-    captured_at: datetime
-
-    @classmethod
-    def capture(cls) -> "Snapshot":
-        """Read this copy's ids now."""
-        def ids(column, *where):
-            return frozenset(db.session.execute(db.select(column).where(*where)).scalars())
-        return cls(
-            ids(Transaction.id), ids(Transaction.id, Transaction.is_deleted.is_(True)),
-            ids(TransactionEntry.id), ids(BankStatementLine.id), ids(StatementMatch.id),
-            db.session.execute(db.select(db.func.now())).scalar_one(),
-        )
-
-    def write(self, path: Path) -> None:
-        """Write it for the check to read.
-
-        Args:
-            path: Where, from :func:`door_rehearsal.new_file`.
-        """
-        path.write_text(json.dumps({
-            "transactions": sorted(self.transactions), "deleted": sorted(self.deleted),
-            "entries": sorted(self.entries), "lines": sorted(self.lines),
-            "matches": sorted(self.matches),
-            "captured_at": self.captured_at.isoformat(),
-        }) + "\n", encoding="utf-8")
-
-
-def _named(movement: dict) -> str:
-    """Return a sheet row or line as the performance sheet names it."""
-    if "posted_on" in movement:
-        return (f"SECU line {movement['posted_on']} {movement['amount']} "
-                f"\"{movement['description']}\"")
-    # A transfer's side has no row of its own, only its line's name.
-    parts = list(dict.fromkeys(part for part in (movement["row"], movement["line"]) if part))
-    return f"\"{': '.join(parts)}\" {movement['day']} {movement['amount']}"
-
-
-def _acts(sheet: dict) -> "tuple[list[MatchAct], list[dict], list[dict], list[dict]]":
-    """Return the sheet's acts: matches, cancels, deletes, and the held back.
-
-    Raises:
-        SystemExit: When :data:`HELD_BACK` names a transfer the sheet does not
-            match, or the sheet matches a SETTLED transfer it does not hold
-            back -- both mean this file and the sheet disagree about what
-            ruling plan#2433 holds back, and neither is guessed.
-    """
-    matches = [
-        MatchAct(f"Match {_named(pair['line'])} to {_named(pair['row'])}",
-                 pair["line"], pair["row"], None)
-        for pair in sheet["timing"]
-    ]
-    held = [pair for pair in sheet["transfer"] if pair["transfer_id"] in HELD_BACK]
-    if {pair["transfer_id"] for pair in held} != set(HELD_BACK):
-        raise SystemExit(f"the act sheet matches none of {sorted(HELD_BACK)}: is it the "
-                         "sheet ruling plan#2433 was made on?")
-    for pair in sheet["transfer"]:
-        if pair in held:
-            continue
-        if pair["row"] is not None:
-            raise SystemExit(f"the act sheet matches settled transfer {pair['transfer_id']}, "
-                             "which no ruling has rehearsed; derive the sheet again or ask")
-        matches.append(MatchAct(
-            f"Match {_named(pair['line'])} to transfer {pair['transfer_id']}",
-            pair["line"], None, pair["transfer_id"],
-        ))
-    rows = [item["row"] for item in sheet["never_moved"]]
-    cancels = [row for row in rows if not row["envelope_line"]]
-    deletes = [row for row in rows if row["envelope_line"]]
-    return matches, cancels, deletes, held
-
-
-def _line_id(account_id: int, line: dict) -> "int | None":
-    """Return the recorded id of the sheet's *line*, or ``None`` when unrecorded.
-
-    A line only the export held carries no id on the sheet; once the import
-    records it, it is the one line of the account on its day and figure that a
-    sighting describes as the sheet does.
-
-    Raises:
-        AssertionError: When more than one recorded line answers to it.
-    """
-    if line["line_id"] is not None:
-        return line["line_id"]
-    found = db.session.execute(
-        db.select(BankStatementLine.id).distinct().join(
-            StatementLineSighting, StatementLineSighting.line_id == BankStatementLine.id,
-        ).where(
-            BankStatementLine.account_id == account_id,
-            BankStatementLine.posted_on == date.fromisoformat(line["posted_on"]),
-            BankStatementLine.amount == Decimal(line["amount"]),
-            StatementLineSighting.description == line["description"],
-        )
-    ).scalars().all()
-    assert len(found) <= 1, f"{_named(line)} answers to lines {found}"
-    return found[0] if found else None
-
-
-def _match_of(line_id: int) -> "int | None":
-    """Return the match line *line_id* is a member of, or ``None``."""
-    return db.session.execute(
-        db.select(StatementMatchMember.match_id).where(
-            StatementMatchMember.bank_statement_line_id == line_id,
-        )
-    ).scalar_one_or_none()
-
-
-def _entry_matched(entry_id: int) -> bool:
-    """Return whether movement *entry_id* is a member of any match."""
-    return db.session.execute(
-        db.select(StatementMatchMember.id).where(
-            StatementMatchMember.transaction_entry_id == entry_id,
-        )
-    ).first() is not None
-
-
-def _status_is(txn_or_transfer, status: StatusEnum) -> bool:
-    """Return whether a row or transfer holds *status*."""
-    return txn_or_transfer.status_id == ref_cache.status_id(status)
-
-
-def _moved(account_id: int, digest: str, acts: tuple) -> "list[str]":
-    """Return every act whose PRE-STATE has moved on this copy, one sentence each.
-
-    The markers a partly performed copy trips: the export already imported
-    (by its digest, which the import stores), a timing row already matched or
-    re-dated, a transfer no longer Projected, a row no longer Paid, an envelope
-    line gone or matched.  Markers, not a proof of the whole pre-state.
-
-    Returns:
-        Empty on a copy no act has touched.
-    """
-    matches, cancels, deletes, _ = acts
-    problems = [
-        f"the SECU export is already imported (import {found})"
-        for found in db.session.execute(db.select(StatementImport.id).where(
-            StatementImport.account_id == account_id,
-            StatementImport.file_digest == digest,
-        )).scalars()
-    ]
-    for act in matches:
-        line_id = _line_id(account_id, act.line)
-        if line_id is not None and _match_of(line_id) is not None:
-            problems.append(f"{_named(act.line)} is already matched")
-        if act.row is None:
-            transfer = db.session.get(Transfer, act.transfer_id)
-            if transfer is None or transfer.is_deleted or \
-                    not _status_is(transfer, StatusEnum.PROJECTED):
-                problems.append(f"transfer {act.transfer_id} is not a live Projected one")
-            continue
-        entry = db.session.get(TransactionEntry, act.row["entry_id"])
-        if entry is None or _entry_matched(entry.id) or \
-                entry.settled_on != date.fromisoformat(act.row["day"]):
-            problems.append(f"movement {act.row['entry_id']} is gone, matched or re-dated")
-    for row in cancels:
-        txn = db.session.get(Transaction, row["transaction_id"])
-        if txn is None or txn.is_deleted or not _status_is(txn, StatusEnum.DONE):
-            problems.append(f"row {row['transaction_id']} is not a live Paid row")
-    for row in deletes:
-        if db.session.get(TransactionEntry, row["entry_id"]) is None or \
-                _entry_matched(row["entry_id"]):
-            problems.append(f"envelope line {row['entry_id']} is gone or matched")
-    return problems
-
-
-def _standing(sheet: dict, held: "list[dict]") -> dict:
-    """Return the state of every movement no act may touch: card items and the held back.
-
-    A row by its movement: whether it exists, its day, its figure and whether
-    it is matched; a line by its match.  Read before the first act and after
-    the last, and the two must be equal.
-    """
-    state = {}
-    for pair in held:
-        state[f"line {pair['line']['line_id']}"] = _match_of(pair["line"]["line_id"])
-        if pair["row"] is not None:
-            state[f"movement {pair['row']['entry_id']}"] = _movement_state(
-                pair["row"]["entry_id"])
-    for item in sheet["card"]:
-        if item["kind"] == "payment":
-            state[f"line {item['line']['line_id']}"] = _match_of(item["line"]["line_id"])
-        else:
-            state[f"movement {item['row']['entry_id']}"] = _movement_state(
-                item["row"]["entry_id"])
-    return state
-
-
-def _movement_state(entry_id: int) -> "tuple | None":
-    """Return what an act could change about movement *entry_id*."""
-    entry = db.session.get(TransactionEntry, entry_id)
-    if entry is None:
-        return None
-    return (entry.settled_on, entry.amount, _entry_matched(entry_id))
+from door_rehearsal import (
+    Operator,
+    RefusedError,
+    Sheet,
+    connect,
+    connect_read_only,
+    forms_in,
+    new_file,
+)
+from reconcile_post_state import (
+    HELD_BACK,
+    MatchAct,
+    Snapshot,
+    act_movements,
+    acts_of,
+    deleted_lines,
+    delete_problems,
+    envelope_state,
+    import_of,
+    import_problems,
+    jsonable,
+    left_residues,
+    line_id_of,
+    match_of,
+    match_problems,
+    cancel_problems,
+    moved_markers,
+    named,
+    post_state_problems,
+)
 
 
 @dataclass
@@ -360,13 +147,15 @@ class Run:
         operator: The owner's session.
         account_id: The account reconciled.
         books_last: The books span's last day, which the import must cover.
-        snapshot: The copy's ids before act 1, which tell what the acts made.
+        digest: SECU's export's SHA-256, which the import stores.
+        snapshot: The copy before act 1 (:class:`Snapshot`).
     """
 
     app: Flask
     operator: Operator
     account_id: int
     books_last: date
+    digest: str
     snapshot: Snapshot
 
     @property
@@ -396,17 +185,14 @@ def _import(run: Run, number: int, secu: Path) -> None:
     run.operator.submit(form, typed={"source": source, **payload})
     for category, message in run.operator.flashes:
         run.sheet.say(f"- The app said ({category}): {message}")
-    run.read(_imported, run, hashlib.sha256(secu.read_bytes()).hexdigest())
+    run.read(_imported, run)
 
 
-def _imported(run: Run, digest: str) -> None:
+def _imported(run: Run) -> None:
     """Assert the import landed and covers the books' last day; record what rules filed."""
-    found = db.session.execute(db.select(StatementImport).where(
-        StatementImport.account_id == run.account_id, StatementImport.file_digest == digest,
-    )).scalar_one_or_none()
-    assert found is not None, "the import recorded nothing"
-    assert found.declared_start <= run.books_last <= found.declared_end, \
-        f"import {found.id} does not cover the books' last day {run.books_last}"
+    problems = import_problems(run.account_id, run.digest, run.books_last)
+    assert not problems, problems[0]
+    found = import_of(run.account_id, run.digest)
     run.sheet.say(f"- LANDED: import {found.id}, {found.declared_start} to "
                   f"{found.declared_end}, covering the books' last day {run.books_last}")
     filed = db.session.execute(db.select(StatementMatch).where(
@@ -471,8 +257,8 @@ def _match(run: Run, number: int, act: MatchAct) -> None:
     untick it.  Where the page proposes nothing the owner ticks the row in the
     MATCH pane, which must offer it.  Then OK on the card, and Apply.
     """
-    line_id = run.read(_line_id, run.account_id, act.line)
-    assert line_id is not None, f"{_named(act.line)} is not recorded"
+    line_id = run.read(line_id_of, run.account_id, act.line)
+    assert line_id is not None, f"{named(act.line)} is not recorded"
     form, page = _card_form(run, line_id)
     run.sheet.act(number, act.title, f"{page} (Reconcile: the line's card, MATCH)")
     rows = f"rows-{line_id}"
@@ -492,34 +278,17 @@ def _match(run: Run, number: int, act: MatchAct) -> None:
         ticked.append((f"verb-{line_id}", "match"))
     run.sheet.say("- TICK OK on the card, then press Apply")
     run.operator.submit(form, ticked=tuple(ticked))
-    run.read(_matched, run, act, line_id)
+    run.read(_matched, run, act)
 
 
-def _matched(run: Run, act: MatchAct, line_id: int) -> None:
-    """Assert *line_id* is matched to the act's movement, now on the line's day."""
-    match_id = _match_of(line_id)
-    assert match_id is not None, f"line {line_id} is not matched: the page refused the card"
-    members = set(db.session.execute(db.select(StatementMatchMember.transaction_entry_id).where(
-        StatementMatchMember.match_id == match_id,
-        StatementMatchMember.transaction_entry_id.is_not(None),
-    )).scalars())
-    if act.row is not None:
-        entry_ids = {act.row["entry_id"]}
-    else:
-        entry_ids = set(db.session.execute(db.select(TransactionEntry.id).where(
-            TransactionEntry.account_id == run.account_id,
-            (TransactionEntry.expense_transfer_id == act.transfer_id)
-            | (TransactionEntry.income_transfer_id == act.transfer_id),
-        )).scalars())
-    assert members == entry_ids and entry_ids, \
-        f"line {line_id}'s match {match_id} holds {members}, not {entry_ids}"
-    posted_on = db.session.get(BankStatementLine, line_id).posted_on
-    for entry_id in entry_ids:
-        settled_on = db.session.get(TransactionEntry, entry_id).settled_on
-        assert settled_on == posted_on, \
-            f"movement {entry_id} is dated {settled_on}, not the bank's {posted_on}"
-    run.sheet.say(f"- LANDED: match {match_id}, movement(s) {sorted(entry_ids)} now dated "
-                  f"{posted_on}")
+def _matched(run: Run, act: MatchAct) -> None:
+    """Assert *act*'s line is matched to its movement, now on the line's day."""
+    problems = match_problems(run.account_id, act)
+    assert not problems, problems[0]
+    line_id = line_id_of(run.account_id, act.line)
+    run.sheet.say(f"- LANDED: match {match_of(line_id)}, movement(s) "
+                  f"{sorted(act_movements(run.account_id, act))} now dated "
+                  f"{db.session.get(BankStatementLine, line_id).posted_on}")
 
 
 def _save_full_edit(run: Run, txn_id: int, control: str, value: str) -> None:
@@ -550,7 +319,7 @@ def _cancel(run: Run, number: int, row: dict) -> None:
     """Cancel one never-moved row: Status to Projected, then to Cancelled, in its full edit."""
     txn_id = row["transaction_id"]
     page = f"/transactions/{txn_id}/full-edit"
-    run.sheet.act(number, f"Cancel {_named(row)}", f"{page} (the row's full edit: Status)")
+    run.sheet.act(number, f"Cancel {named(row)}", f"{page} (the row's full edit: Status)")
     for status in (StatusEnum.PROJECTED, StatusEnum.CANCELLED):
         _save_status(run, txn_id, status)
     run.read(_cancelled, run, txn_id)
@@ -558,12 +327,8 @@ def _cancel(run: Run, number: int, row: dict) -> None:
 
 def _cancelled(run: Run, txn_id: int) -> None:
     """Assert row *txn_id* is Cancelled and holds no movement."""
-    txn = db.session.get(Transaction, txn_id)
-    assert _status_is(txn, StatusEnum.CANCELLED), f"row {txn_id} is not Cancelled"
-    moving = db.session.execute(db.select(TransactionEntry.id).where(
-        TransactionEntry.transaction_id == txn_id, TransactionEntry.settled_on.is_not(None),
-    )).scalars().all()
-    assert not moving, f"row {txn_id} still holds movement(s) {moving}"
+    problems = cancel_problems(txn_id)
+    assert not problems, problems[0]
     run.sheet.say(f"- LANDED: row {txn_id} Cancelled, no movement left")
 
 
@@ -577,27 +342,7 @@ def _closed_on(txn_id: int) -> "date | None":
     return txn.settled_on if txn.status.is_settled else None
 
 
-def _envelope_state(txn_id: int, entry_id: int) -> tuple:
-    """Return what removing line *entry_id* must leave standing in envelope *txn_id*.
-
-    The envelope's status, its settle day with the day's basis and clearing
-    link, and every OTHER line's figure, days, basis, link and whether it is
-    matched: the reopen and re-close of ruling plan#2439 pass through all of
-    them, and the ruling was made on their ending exactly as they began.
-    """
-    txn = db.session.get(Transaction, txn_id)
-    others = db.session.execute(db.select(TransactionEntry).where(
-        TransactionEntry.transaction_id == txn_id, TransactionEntry.id != entry_id,
-    ).order_by(TransactionEntry.id)).scalars()
-    return (
-        txn.status_id, txn.settled_on, txn.settled_day_basis_id, txn.reconciled_by_id,
-        tuple((other.id, other.amount, other.purchased_on, other.settled_on,
-               other.settled_day_basis_id, other.reconciled_by_id, _entry_matched(other.id))
-              for other in others),
-    )
-
-
-def _delete(run: Run, number: int, row: dict) -> None:
+def _delete(run: Run, number: int, row: dict, gone: "frozenset[int]") -> None:
     """Delete one never-moved envelope line by its X, reopening a closed envelope around it.
 
     A closed envelope's list renders no X, so on ruling **plan#2439** the
@@ -611,8 +356,8 @@ def _delete(run: Run, number: int, row: dict) -> None:
     door = f"{page} (the envelope's lines: X)"
     if closed_on is not None:
         door = f"/transactions/{txn_id}/full-edit (Status, Money moved on) and {door}"
-    run.sheet.act(number, f"Delete {_named(row)}", door)
-    before = run.read(_envelope_state, txn_id, entry_id)
+    run.sheet.act(number, f"Delete {named(row)}", door)
+    before = run.read(lambda: jsonable(envelope_state(txn_id, gone)))
     if closed_on is not None:
         _save_status(run, txn_id, StatusEnum.PROJECTED)
     button = run.operator.button(page, "delete", f"{page}/{entry_id}")
@@ -624,16 +369,8 @@ def _delete(run: Run, number: int, row: dict) -> None:
         _save_status(run, txn_id, StatusEnum.DONE)
         run.sheet.typed("Money moved on", closed_on.isoformat())
         _save_full_edit(run, txn_id, "settled_on", closed_on.isoformat())
-    run.read(_deleted, run, txn_id, entry_id, before)
-
-
-def _deleted(run: Run, txn_id: int, entry_id: int, before: tuple) -> None:
-    """Assert line *entry_id* is gone and envelope *txn_id* otherwise stands as it did."""
-    assert db.session.get(TransactionEntry, entry_id) is None, \
-        f"envelope line {entry_id} is still there"
-    after = _envelope_state(txn_id, entry_id)
-    assert after == before, \
-        f"removing line {entry_id} moved envelope {txn_id}: {before} -> {after}"
+    problems = run.read(delete_problems, txn_id, entry_id, gone, before)
+    assert not problems, "\n".join(problems)
     run.sheet.say(f"- LANDED: envelope line {entry_id} deleted; envelope {txn_id} and its "
                   "other lines stand as they did")
 
@@ -657,15 +394,15 @@ def _named_untouched(sheet: Sheet, acts_sheet: dict, held: "list[dict]") -> None
     sheet.say("")
     sheet.say("## Not performed: held back by ruling plan#2433")
     for pair in held:
-        sheet.say(f"- {_named(pair['line'])} to transfer {pair['transfer_id']} "
-                  f"({_named(pair['row']) if pair['row'] else 'Projected'}): waits on "
+        sheet.say(f"- {named(pair['line'])} to transfer {pair['transfer_id']} "
+                  f"({named(pair['row']) if pair['row'] else 'Projected'}): waits on "
                   f"{HELD_BACK[pair['transfer_id']]}")
     sheet.say("")
     sheet.say(f"## Not performed: {len(acts_sheet['card'])} card item(s), left for plan#2348 "
               "(ruling plan#2343)")
     for item in acts_sheet["card"]:
         movement = item.get("row") or item["line"]
-        sheet.say(f"- {item['kind']}: {_named(movement)}")
+        sheet.say(f"- {item['kind']}: {named(movement)}")
 
 
 def _perform(run: Run, acts: tuple, secu: Path) -> None:
@@ -679,39 +416,51 @@ def _perform(run: Run, acts: tuple, secu: Path) -> None:
     for row in cancels:
         number += 1
         _cancel(run, number, row)
+    gone = deleted_lines(deletes)
     for row in deletes:
         number += 1
-        _delete(run, number, row)
+        _delete(run, number, row, gone)
     run.read(_left, run)
 
 
-def _begin(app, account_id: int, secu: Path, acts_sheet: dict, acts: tuple):
+def _begin(app, account_id: int, digest: str, acts_sheet: dict, acts: tuple):
     """Refuse a touched copy, then read what the run starts from.
 
     Returns:
-        ``(owner's id, snapshot, the untouched items' state)``.
+        ``(owner's id, snapshot)``.
 
     Raises:
-        SystemExit: When any act's pre-state has moved (:func:`_moved`).
+        SystemExit: When any act's pre-state has moved (:func:`moved_markers`).
     """
     with app.app_context():
         user_id = db.session.get(Account, account_id).user_id
-        problems = _moved(account_id, hashlib.sha256(secu.read_bytes()).hexdigest(), acts)
+        problems = moved_markers(account_id, digest, acts)
         if problems:
             raise SystemExit("this copy is not in the pre-act state:\n  "
                              + "\n  ".join(problems))
-        return user_id, Snapshot.capture(), _standing(acts_sheet, acts[3])
+        return user_id, Snapshot.capture(acts_sheet, acts)
 
 
-def _rehearse(run: Run, acts_sheet: dict, acts: tuple, secu: Path, before: dict) -> None:
-    """Perform every act, then assert nothing named untouched moved; save the sheet."""
+def _say_post_state(sheet: Sheet, acts_sheet: dict, acts: tuple) -> None:
+    """Record a post-state that holds, in counts: no figure, no id the acts made."""
+    sheet.say("")
+    sheet.say("## The post-state")
+    sheet.say(f"- every act's arm holds again: the import, {len(acts[0])} match(es), "
+              f"{len(acts[1])} cancel(s), {len(acts[2])} envelope line delete(s)")
+    sheet.say("- every card item and the held-back match stand as they did before act 1")
+    sheet.say(f"- the done test holds: {len(left_residues(acts_sheet, acts[3]))} books day(s) "
+              "still apart, each by exactly the card items and the held-back act on it; "
+              "every other books day agrees")
+
+
+def _rehearse(run: Run, acts_sheet: dict, acts: tuple, secu: Path) -> None:
+    """Perform every act, then grade the post-state; save the sheet."""
     try:
         _perform(run, acts, secu)
-        after = run.read(_standing, acts_sheet, acts[3])
-        moved = sorted(key for key, state in before.items() if state != after[key])
-        assert not moved, f"an act touched what no act may: {moved}"
-        run.sheet.say("")
-        run.sheet.say("Every card item and the held-back match stand as they did before act 1.")
+        problems = run.read(post_state_problems, run.account_id, acts_sheet, acts,
+                            run.snapshot, run.digest)
+        assert not problems, "the post-state fails:\n  " + "\n  ".join(problems)
+        _say_post_state(run.sheet, acts_sheet, acts)
         _named_untouched(run.sheet, acts_sheet, acts[3])
     except (AssertionError, RefusedError) as stop:
         run.sheet.say("")
@@ -721,25 +470,77 @@ def _rehearse(run: Run, acts_sheet: dict, acts: tuple, secu: Path, before: dict)
         run.sheet.save()
 
 
+def _check(args: argparse.Namespace, acts_sheet: dict, acts: tuple, digest: str) -> None:
+    """Grade a copy the owner PERFORMED the acts on, writing nothing: ``--check``.
+
+    The post-state arms the rehearsal grades after its own last act
+    (:func:`post_state_problems`), on a copy every connection of which is
+    read-only at the server, against the snapshot the rehearsal wrote of the
+    same dump.  **A copy no act has touched is refused rather than graded**:
+    every arm would fail and none would name the cause, and the likeliest
+    wrong target is a dump taken before the acts.  A PARTLY performed copy
+    passes that refusal and fails the arms its missing acts own, which is the
+    check's job.
+
+    Raises:
+        SystemExit: On a refusal, or when an arm fails -- every failed arm is
+            printed above the ``CHECK FAILED`` line.
+    """
+    snapshot = Snapshot.read(Path(args.snapshot).expanduser())
+    app = connect_read_only(args.clone)
+    sheet = Sheet(None)
+    sheet.say(f"# Reconcile check of a performed copy (read-only): account {args.account}")
+    with app.app_context():
+        moved = moved_markers(args.account, digest, acts)
+        if not moved:
+            raise SystemExit("this copy is UNTOUCHED: no act's marker has moved. --check "
+                             "grades a copy taken AFTER the acts; was its dump taken before "
+                             "them?")
+        sheet.say(f"precondition: {len(moved)} act marker(s) have moved on this copy")
+        problems = post_state_problems(args.account, acts_sheet, acts, snapshot, digest)
+    if problems:
+        for problem in problems:
+            sheet.say(f"FAILED: {problem}")
+        raise SystemExit(f"CHECK FAILED: {len(problems)} arm(s)")
+    _say_post_state(sheet, acts_sheet, acts)
+    sheet.say("check complete; every connection was read-only")
+
+
 def main() -> None:
-    """Parse the arguments, refuse a touched copy, snapshot it, perform every act."""
+    """Parse the arguments; rehearse every act on a copy, or ``--check`` a performed one."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--clone", required=True, help="the copy to perform on")
+    parser.add_argument("--clone", required=True,
+                        help="the copy: the one the rehearsal performs on, or the performed "
+                        "one --check reads")
     parser.add_argument("--account", required=True, type=int, help="the account reconciled")
     parser.add_argument("--acts", required=True, help="the act sheet reconcile_act_sheet wrote")
     parser.add_argument("--secu", required=True, help="the SECU export the sheet was derived from")
-    parser.add_argument("--sheet", required=True, help="the performance sheet to write")
-    parser.add_argument("--snapshot", required=True, help="the snapshot to write")
+    parser.add_argument("--sheet", help="the performance sheet to write: the rehearsal's, "
+                        "never --check's")
+    parser.add_argument("--snapshot", required=True,
+                        help="the copy before act 1: the rehearsal WRITES it, --check READS "
+                        "the one the rehearsal of the same dump wrote")
+    parser.add_argument("--check", action="store_true",
+                        help="grade a copy the owner PERFORMED the acts on, read-only, "
+                        "instead of rehearsing them")
     args = parser.parse_args()
-    out = new_file(args.sheet, "--sheet")
-    snapshot_path = new_file(args.snapshot, "--snapshot")
+    if args.check and args.sheet is not None:
+        parser.error("--check writes nothing: no --sheet")
+    if not args.check and args.sheet is None:
+        parser.error("the rehearsal needs --sheet")
     acts_sheet = json.loads(Path(args.acts).expanduser().read_text(encoding="utf-8"))
     secu = Path(args.secu).expanduser()
     if acts_sheet["account"]["id"] != args.account or acts_sheet["secu_export"] != secu.name:
         raise SystemExit("the act sheet was derived for another account or another export")
-    acts = _acts(acts_sheet)
+    acts = acts_of(acts_sheet)
+    digest = hashlib.sha256(secu.read_bytes()).hexdigest()
+    if args.check:
+        _check(args, acts_sheet, acts, digest)
+        return
+    out = new_file(args.sheet, "--sheet")
+    snapshot_path = new_file(args.snapshot, "--snapshot")
     app = connect(args.clone)
-    user_id, snapshot, before = _begin(app, args.account, secu, acts_sheet, acts)
+    user_id, snapshot = _begin(app, args.account, digest, acts_sheet, acts)
     snapshot.write(snapshot_path)
     sheet = Sheet(out)
     sheet.say(f"# Reconcile performance sheet: {acts_sheet['account']['name']} "
@@ -748,8 +549,8 @@ def main() -> None:
               f"app {Path(app_package.__file__).parent}; act sheet {Path(args.acts).name}; "
               f"written {datetime.now(timezone.utc).isoformat()}")
     run = Run(app, Operator(app, sheet, user_id), args.account,
-              date.fromisoformat(acts_sheet["books"]["last_day"]), snapshot)
-    _rehearse(run, acts_sheet, acts, secu, before)
+              date.fromisoformat(acts_sheet["books"]["last_day"]), digest, snapshot)
+    _rehearse(run, acts_sheet, acts, secu)
     print(f"wrote {out} and {snapshot_path}")
 
 

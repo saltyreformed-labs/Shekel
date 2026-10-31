@@ -34,7 +34,7 @@ from app.models.statement_match import StatementMatch, StatementMatchMember
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
-from app.services import balance_at, outstanding_difference
+from app.services import balance_at, cash_ledger, outstanding_difference, transfer_legs
 from app.services.outstanding_difference import StretchKind
 
 from reconcile_residue import ZERO, residue_of
@@ -373,11 +373,29 @@ def _standing(sheet: dict, held: "list[dict]") -> dict:
 
 
 def _movement_state(entry_id: int) -> "tuple | None":
-    """Return what an act could change about movement *entry_id*."""
+    """Return what an act could change about movement *entry_id*: its day, figure and match.
+
+    **The figure is the signed cash the movement moves through its account**:
+    :func:`app.services.cash_ledger.movement_cash_leg`, the producer the walk
+    books it by, of the parent the posting writer resolves for it
+    (:func:`app.services.transfer_legs.movement_parent`), which is the figure
+    the act sheet names the movement by.  A transfer side's record stores no
+    figure -- its transfer stores what moved, once (ruling **R-BAL366**) --
+    so its own ``amount``, which this read until task plan#2463, is NULL,
+    and the arm passed the held-back transfer's figure ungraded (movement
+    141 of transfer 322, the one null figure of the snapshot's 47).
+    Measured 2026-10-31 on a performed copy with that figure a cent higher:
+    the check failed only the done test, on 2026-04-23, naming no movement;
+    it now fails this arm too, naming movement 141.
+    """
     entry = db.session.get(TransactionEntry, entry_id)
     if entry is None:
         return None
-    return (entry.settled_on, entry.amount, _entry_matched(entry_id))
+    return (
+        entry.settled_on,
+        cash_ledger.movement_cash_leg(transfer_legs.movement_parent(entry), entry),
+        _entry_matched(entry_id),
+    )
 
 
 def imports_of(account_id: int, digest: str) -> "list[StatementImport]":

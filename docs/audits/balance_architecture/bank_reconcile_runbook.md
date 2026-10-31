@@ -435,12 +435,13 @@ check opens the copy read-only first.
 * **The CHECK** grades the post-state on production's copy: every act's own arm again (the
   import by its digest, imported once, each match, each Cancelled row, each envelope as it
   stood with only its line gone), every card item and the held-back act unmoved since the
-  snapshot, and the done test. A failing arm prints a `FAILED:` line naming its act and the
-  row, line or envelope, and so does an arm whose row or envelope is gone. `CHECK DIFFERS`
-  with no `FAILED:` line is either the act markers' count that moved (the `precondition:`
-  line), read beside the other two lines, or the check grading nothing: its refusal, or the
-  error it stopped on, is printed just above its `exit` line. Its passing output names no
-  database, time or id, so two copies of the same acts print it identically.
+  snapshot (a movement's day, figure and match; a line's match), and the done test. A failing
+  arm prints a `FAILED:` line naming its act and the row, line or envelope, and so does an arm
+  whose row or envelope is gone. `CHECK DIFFERS` with no `FAILED:` line is either the act
+  markers' count that moved (the `precondition:` line), read beside the other two lines, or the
+  check grading nothing: its refusal, or the error it stopped on, is printed just above its
+  `exit` line. Its passing output names no database, time or id, so two copies of the same acts
+  print it identically.
 * **The BALANCES** compare every figure the balance seam answers, for every account, with the
   rehearsed copy's: two copies on which the same acts were performed hold the same balances
   (measured, below). A difference names the account where money departed from the rehearsal: a
@@ -454,9 +455,10 @@ check opens the copy read-only first.
 
 **None of the three grades what moves no money and no act names**, such as a name, category or
 note changed on a card while an act holds its row Projected, a figure, pay period or due day
-changed on a row that ends Cancelled, or a standing rule stated in "Should any of these stand?",
-which the match section says to leave. The check reads only what the acts change, and the
-balances and the list compare figures.
+changed on a row that ends Cancelled, the held-back transfer's planned figure (once it is Paid,
+its money is the figure it settled at, which the check grades), or a standing rule stated in
+"Should any of these stand?", which the match section says to leave. The check reads only what
+the acts change, and the balances and the list compare figures.
 
 A failed line is read before anything else is done. **No remedy is rehearsed**: report what
 failed, with the three outputs, before performing anything more.
@@ -553,6 +555,23 @@ rendered; the post-state and the check, task plan#2416). Its door-driving half i
   rehearsed and checked clean. The whole act sheet rehearsed again printed the 14:39 run's
   check output exactly, every balance figure byte-identical, on a sheet differing only in its
   header and in act 1's Export kind, now the words its select shows.
+* **2026-10-31, the held-back transfer's figure** (task plan#2463): the check read a
+  movement's figure off its own record, and a transfer side's record holds none (its transfer
+  stores what moved), so the held-back act's movement stood in the snapshot with no figure and
+  the arm calling it unmoved never graded its money. The check reads the figure the balance walk
+  books now, signed as the act sheet gives it, and each of the snapshot's 47 movements carries
+  the sheet's own day and figure. On restores of the 14:39 run's dumps, with the act sheet
+  derived again (it differed from that run's only in its database and time), the whole act sheet
+  rehearsed again printed the 14:39 run's check output exactly, and so did the check of the
+  after-dump. On a restore of the after-dump with the transfer's settled figure a cent higher
+  (written in the database; the owner's door is the full edit's figure correction), the check
+  printed a `FAILED:` line naming that movement beside the done test's on 2026-04-23, the
+  balances differed on Checking and Van Loan, and the list on 2026-04-23; before this task the
+  check printed the done test's line alone. Its planned figure a cent higher moved no money, and
+  none of the three saw it. A snapshot an earlier harness commit wrote holds each figure
+  unsigned, so it now fails every movement's arm: on the rehearsed copy, 47 arms for one
+  plan#2454's commit wrote, and 77 for the 14:39 run's (the 30 above among them). The blocks
+  never meet one: `same_code` holds `$H` at the commit that wrote the day's snapshot.
 * **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
   full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
   turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a

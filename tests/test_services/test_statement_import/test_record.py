@@ -45,7 +45,7 @@ from app.models.journal_entry import Posting
 from app.models.transaction import Transaction
 from app.services import account_service
 from app.models.statement_import import BankStatementLine
-from app.services.statement_import import record_statement
+from app.services.statement_import import plan_statement, record_statement
 from app.services.statement_import._balance import bank_levels
 from app.models.ref import AccountType
 from app.services.row_valuation import settled_figure
@@ -598,6 +598,87 @@ class TestItMovesNoMoney:
         _record(seed_user, _file())
 
         assert money_on_the_books.settled_on == date(2026, 3, 3)
+
+
+class TestItsDecisionIsReadable:
+    """The decision half (``plan_statement``) is the import's, and writes nothing.
+
+    Plan step ``balance:X-bk-2`` (plan#1192): the reconcile's act sheet must
+    know which lines an import WOULD add before any act, on a copy it reads
+    only, so the door's decision is a public read the door itself performs.
+    """
+
+    def test_it_names_exactly_the_lines_the_import_then_adds(
+        self, app, db, seed_user,
+    ):
+        """An overlapping export: the plan's fresh lines are the one new line.
+
+        The first file's three lines are held; the later export adds one
+        line on 03-05, so the plan names that line alone -- and the import
+        performed afterwards records exactly it.
+        """
+        _record(seed_user, _file())
+        extended = _ENTRIES + [
+            (date(2026, 3, 5), "-12.79", "POINT OF SALE DEBIT L340 BJS"),
+        ]
+
+        plan = plan_statement(
+            seed_user["account"].id, seed_user["user"].id, _SOURCE,
+            _file(extended),
+        )
+
+        assert [
+            (line.posted_on, line.amount, line.description)
+            for line in plan.fresh_lines
+        ] == [(date(2026, 3, 5), Decimal("-12.79"),
+               "POINT OF SALE DEBIT L340 BJS")]
+        outcome = _record(seed_user, _file(extended), file_name="later.csv")
+        assert outcome.recorded_count == 1
+        newest = db.session.query(BankStatementLine).order_by(
+            BankStatementLine.id.desc(),
+        ).first()
+        assert (newest.posted_on, newest.amount) == (
+            date(2026, 3, 5), Decimal("-12.79"),
+        )
+
+    def test_it_stages_nothing_and_writes_nothing(self, app, db, seed_user):
+        """A plan of a first import leaves the database as it found it.
+
+        Committed and re-read rather than read off the session: a session's
+        own state cannot tell a write that was rolled back from one never
+        made.  A first import is the plan with the most to record -- the
+        identity, every line, the import act and its level -- so nothing it
+        leaves unwritten is a write a smaller plan would make.
+        """
+        plan = plan_statement(
+            seed_user["account"].id, seed_user["user"].id, _SOURCE, _file(),
+        )
+        assert plan.identity_is_new is True
+        assert len(plan.fresh_lines) == 3
+        assert not db.session.new
+        db.session.commit()
+        db.session.expire_all()
+
+        assert db.session.query(BankStatementLine).count() == 0
+        assert db.session.query(StatementImport).count() == 0
+        assert db.session.query(StatementLineSighting).count() == 0
+
+    def test_it_refuses_what_the_import_refuses(self, app, db, seed_user):
+        """The refusal is the decision's, so the plan raises it too.
+
+        The same self-contradicting file the door refuses above: its chain
+        implies 1534.19 where its header states 9999.99.
+        """
+        with pytest.raises(StatementBalanceUnexplained) as raised:
+            plan_statement(
+                seed_user["account"].id, seed_user["user"].id, _SOURCE,
+                build.build(build.chained("100.00", _ENTRIES),
+                            balance_as_of="03/09/2026",
+                            stated_balance="9999.99"),
+            )
+
+        assert raised.value.stated == Decimal("9999.99")
+        assert raised.value.implied == Decimal("1534.19")
 
 
 class TestItIsIdempotent:

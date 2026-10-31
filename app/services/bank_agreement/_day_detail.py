@@ -34,12 +34,18 @@ class DayLine:
     """One bank line on a day, as the drill-down shows it.
 
     Attributes:
+        line_id: The ``budget.bank_statement_lines`` row, so a reader that
+            must ACT on the line -- the one-time reconcile's act sheet (plan
+            step ``balance:X-bk-2``, plan#1192) -- names it rather than
+            re-finding it by day and figure, which two same-day lines of one
+            amount would make ambiguous.
         amount: The signed figure the bank posted.
         description: The bank's own prose.
         merchant: The merchant the adapter read, or ``None``.
         matched: Whether a statement match already claims this line.
     """
 
+    line_id: int
     amount: Decimal
     description: str
     merchant: "str | None"
@@ -51,6 +57,13 @@ class DayRow:
     """One of the app's own settled movements on a day.
 
     Attributes:
+        entry_id: The MOVEMENT (``budget.transaction_entries``) the walk
+            counted -- the fact's own
+            :attr:`~app.services.cash_ledger.CashSourceFact.entry_id`, carried
+            for the reason :attr:`DayLine.line_id` is: the reconcile's act
+            sheet cancels or matches exactly this movement, and a second walk
+            of the ledger to recover its id would be a second statement of
+            which movements are on the day.
         amount: The signed cash the row moved -- the same
             :attr:`~app.services.cash_ledger.CashSourceFact.delta` the fold
             counted, so the rows shown here sum to the day's ``recorded``.
@@ -58,6 +71,7 @@ class DayRow:
         matched: Whether a statement match already claims it.
     """
 
+    entry_id: int
     amount: Decimal
     description: str
     matched: bool
@@ -116,6 +130,7 @@ def day_detail(
         day=day,
         lines=[
             DayLine(
+                line_id=line.id,
                 amount=line.amount,
                 description=line.description,
                 merchant=line.merchant_name,
@@ -124,8 +139,12 @@ def day_detail(
             for line, matched in _lines_on(account.id, day)
         ],
         rows=[
-            DayRow(amount=amount, description=description, matched=matched)
-            for amount, description, matched in _rows_on(account, ctx, day)
+            DayRow(
+                entry_id=entry_id, amount=amount,
+                description=description, matched=matched,
+            )
+            for entry_id, amount, description, matched
+            in _rows_on(account, ctx, day)
         ],
     )
 
@@ -173,7 +192,7 @@ def _lines_on(
 
 def _rows_on(
     account: Account, ctx: balance_at.BalanceContext, day: date,
-) -> "list[tuple[Decimal, str, bool]]":
+) -> "list[tuple[int, Decimal, str, bool]]":
     """Return the app's own settled movements on one day, with match state.
 
     Args:
@@ -182,8 +201,9 @@ def _rows_on(
         day: The settle day.
 
     Returns:
-        ``[(amount, description, matched), ...]`` largest movement first, so
-        the item that explains most of a day's difference reads first.
+        ``[(entry_id, amount, description, matched), ...]`` largest movement
+        first, so the item that explains most of a day's difference reads
+        first.
 
     **Sourced from the WALK, so these sum to the day's ``recorded`` total.**
     Every fact there is a MOVEMENT
@@ -221,13 +241,14 @@ def _rows_on(
     return sorted(
         (
             (
+                fact.entry_id,
                 fact.delta,
                 names.get((fact.transaction_id, fact.entry_id), "(unnamed)"),
                 fact.entry_id in claimed,
             )
             for fact in facts
         ),
-        key=lambda row: abs(row[0]),
+        key=lambda row: abs(row[1]),
         reverse=True,
     )
 

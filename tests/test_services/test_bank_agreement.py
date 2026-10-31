@@ -1411,6 +1411,63 @@ class TestTheDrillDownNamesWhatMakesUpADay:
             ]
             assert detail.rows[0].matched is False
 
+    def test_each_item_names_the_record_it_is(
+        self, app, seed_user, seed_periods, db,
+    ):
+        """A line carries its statement line's id and a row its movement's.
+
+        Plan step ``balance:X-bk-2`` (plan#1192): the reconcile's act sheet
+        cancels or matches exactly the movement and the line this lists, so
+        each item names its own record -- two lines of one day and figure, or
+        two rows of one name, could not otherwise be told apart.  The second
+        line and the second row share the first's day and figure, so an id
+        read off the wrong record of a pair cannot pass.
+        """
+        with app.app_context():
+            _seed_import(
+                db, seed_user["account"], stated="1000.00",
+                effective_on=date(2026, 3, 3), evidence=_FILE_CHAIN,
+                lines=[(date(2026, 3, 3), "-40.00"),
+                       (date(2026, 3, 3), "-40.00")],
+            )
+            first = _settled(
+                db, seed_user, seed_periods[4], "Gas", "40.00",
+                date(2026, 3, 3),
+            )
+            second = _settled(
+                db, seed_user, seed_periods[4], "Gas", "40.00",
+                date(2026, 3, 3),
+            )
+            db.session.commit()
+            line_ids = [
+                line_id for (line_id,) in db.session.query(
+                    BankStatementLine.id,
+                ).filter(
+                    BankStatementLine.account_id == seed_user["account"].id,
+                ).order_by(BankStatementLine.id)
+            ]
+            entry_ids = {
+                movement.id
+                for txn in (first, second)
+                for movement in txn.covering_movements
+            }
+
+            detail = bank_agreement.day_detail(
+                seed_user["account"],
+                BalanceContext.build(seed_user["user"].id),
+                date(2026, 3, 3),
+            )
+
+            # The lines are listed in recording order (``_lines_on``), so the
+            # ids read back in the order the statement recorded them.
+            assert [line.line_id for line in detail.lines] == line_ids
+            assert len(line_ids) == 2
+            # The rows are ordered by size and the two tie, so the ids are
+            # compared as a set: each row names one movement, and together
+            # they name both.
+            assert {row.entry_id for row in detail.rows} == entry_ids
+            assert len(entry_ids) == 2
+
     def test_the_rows_it_lists_SUM_to_the_days_recorded_total(
         self, app, seed_user, seed_periods, db,
     ):

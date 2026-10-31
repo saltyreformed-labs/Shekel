@@ -27,7 +27,7 @@ The shapes under test, and what each would cost if writable:
   a sentence the door states in Python and the schema must state
   independently.  *The two CHECKs on the stored counts went with the counts*
   (ruling **R-IY**), and the external-id uniqueness went to the door
-  (``_record._refuse_moved_ids``, graded in ``test_record``).
+  (``_plan._refuse_moved_ids``, graded in ``test_record``).
 """
 
 from datetime import date

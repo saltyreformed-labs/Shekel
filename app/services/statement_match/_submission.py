@@ -571,7 +571,7 @@ class MatchSubmission:
         line_ids: The bank lines to explain.  They carry no reviewed state,
             and the reason is narrower than it looks: ``posted_on`` and
             ``amount`` are a line's IDENTITY in
-            ``statement_import._record._fresh_lines``, which pairs an incoming
+            ``statement_import._plan._reconcile``, which pairs an incoming
             line against a recorded one by exactly those, so neither can move
             under an open review.  What a re-import DOES write is the NULL
             provenance columns it can fill.

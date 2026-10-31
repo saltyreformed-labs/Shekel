@@ -23,7 +23,7 @@ the pairing that now decides:
   card debits by ascending magnitude and ties have no stated tiebreak;
 * a genuinely NEW line the bank INSERTED ahead of a recorded one.  The
   insertion behaviour is OBSERVED rather than hypothetical: it is why
-  ``_record._refuse_restatement`` stopped comparing running balances.
+  ``_plan._refuse_restatement`` stopped comparing running balances.
 
 What must still refuse is a genuine restatement, and that is graded here too.
 """

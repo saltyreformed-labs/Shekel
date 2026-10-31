@@ -210,12 +210,12 @@ statement_line_sighting_table_args = (
         ondelete="CASCADE",
     ),
     # The lookup the record door makes before it pairs: where THIS SOURCE
-    # already holds each id the file states (``_record._held_ids``).
+    # already holds each id the file states (``_plan._held_ids``).
     # Partial, because most adapters carry no external id.  **Not
     # unique, and the line-level index it replaces was**: a re-import
     # re-sights a line under the same id, which is two rows here and one
     # line there.  The rule that a source names ONE line per id is the
-    # door's (``_record._refuse_moved_ids``), pinned by its tests.
+    # door's (``_plan._refuse_moved_ids``), pinned by its tests.
     db.Index(
         "idx_statement_line_sightings_account_external_id",
         "account_id", "external_id",

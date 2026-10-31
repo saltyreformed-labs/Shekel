@@ -41,10 +41,12 @@ The CARD items, and the act ruling plan#2433 holds back, are named on the sheet,
 touches them: their state is read into the snapshot before the first act and graded after
 the last, and a difference stops the run.
 
-**IT WRITES.**  Before its first write it refuses the name ``shekel``
-(:func:`door_rehearsal.connect`) and any copy on which an act's pre-state has moved, whatever
-it is called (:func:`reconcile_post_state.moved_markers`), naming every moved marker --
-nothing here is idempotent, so a partly performed copy is refused at act zero.  Then it writes
+**IT WRITES.**  It refuses the name ``shekel`` before it builds the app
+(:func:`door_rehearsal.connect`), and before its first ACT any copy on which an act's pre-state
+has moved, whatever it is called (:func:`reconcile_post_state.moved_markers`), naming every
+moved marker -- nothing here is idempotent, so a partly performed copy is refused at act zero.
+Building the app is not free of writes: the development build it boots creates the schemas and
+seeds the reference tables (``create_app``) before that second refusal.  Then it writes
 a SNAPSHOT of the copy before act 1 (:class:`reconcile_post_state.Snapshot`), and after each
 act it asserts the act LANDED, reading the database rather than the response: the Reconcile
 page answers a refused card with a 200 and a receipt saying so (measured 2026-10-30 on the
@@ -143,8 +145,8 @@ from reconcile_post_state import (
     deleted_lines,
     delete_problems,
     envelope_state,
-    import_of,
     import_problems,
+    imports_of,
     jsonable,
     left_residues,
     line_id_of,
@@ -193,12 +195,18 @@ class Run:
 
 
 def _import(run: Run, number: int, secu: Path) -> None:
-    """Act 1: record SECU's export through the statements door, and read what it did."""
+    """Act 1: record SECU's export through the statements door, and read what it did.
+
+    The sheet names the Export kind as its select shows it, the option's words
+    rather than the value it submits.
+    """
     page = f"/accounts/{run.account_id}/statements"
     run.sheet.act(number, "Import SECU's export", f"{page} (Statements: Upload)")
     form = run.operator.form_posting_to(page, page)
     source = StatementSourceEnum.SECU_CHECKING_CSV.value
-    run.sheet.typed("Export kind", source)
+    label = form["labels"].get(("source", source))
+    assert label, f"{page}'s Export kind offers no option {source}"
+    run.sheet.typed("Export kind", label)
     run.sheet.typed("Statement file", secu.name)
     payload = {"statement_file": (io.BytesIO(secu.read_bytes()), secu.name)}
     run.operator.submit(form, typed={"source": source, **payload})
@@ -211,7 +219,7 @@ def _imported(run: Run) -> None:
     """Assert the import landed and covers the books' last day; record what rules filed."""
     problems = import_problems(run.account_id, run.digest, run.books_last)
     assert not problems, problems[0]
-    found = import_of(run.account_id, run.digest)
+    (found,) = imports_of(run.account_id, run.digest)
     run.sheet.say(f"- LANDED: import {found.id}, {found.declared_start} to "
                   f"{found.declared_end}, covering the books' last day {run.books_last}")
     filed = db.session.execute(db.select(StatementMatch).where(

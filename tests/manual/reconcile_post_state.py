@@ -260,6 +260,33 @@ def match_of(line_id: int) -> "int | None":
     ).scalar_one_or_none()
 
 
+def _line_match(account_id: int, line: dict) -> "int | None":
+    """Return the match the sheet's *line* is a member of, or ``None``.
+
+    ``None`` too while the line is unrecorded: a line only the export holds
+    has no id until act 1 records it (:func:`line_id_of`), and nothing is
+    matched to it before then.  So :func:`match_of` is never asked about a
+    missing id, whose ``IS NULL`` answers every movement-side member and
+    raised at :meth:`Snapshot.capture` (measured 2026-10-31).
+    """
+    line_id = line_id_of(account_id, line)
+    return None if line_id is None else match_of(line_id)
+
+
+def _live_row(txn_id: int) -> "Transaction | None":
+    """Return row *txn_id*, or ``None`` when it is gone: deleted outright, or soft-deleted.
+
+    The app deletes rows, softly or outright: the card's Delete, which the
+    owner could press beside Cancel (``transaction_service._delete``), the
+    recurrence engine's retire, a payback's revert.  So an arm answers a row's
+    absence as a sentence rather than raising on it: the check raised
+    ``AttributeError`` on a cancelled row deleted outright from a performed
+    copy (measured 2026-10-31).
+    """
+    txn = db.session.get(Transaction, txn_id)
+    return None if txn is None or txn.is_deleted else txn
+
+
 def _entry_matched(entry_id: int) -> bool:
     """Return whether movement *entry_id* is a member of any match."""
     return db.session.execute(
@@ -294,8 +321,7 @@ def moved_markers(account_id: int, digest: str, acts: tuple) -> "list[str]":
         )).scalars()
     ]
     for act in matches:
-        line_id = line_id_of(account_id, act.line)
-        if line_id is not None and match_of(line_id) is not None:
+        if _line_match(account_id, act.line) is not None:
             problems.append(f"{named(act.line)} is already matched")
         if act.row is None:
             transfer = db.session.get(Transfer, act.transfer_id)
@@ -308,8 +334,8 @@ def moved_markers(account_id: int, digest: str, acts: tuple) -> "list[str]":
                 entry.settled_on != date.fromisoformat(act.row["day"]):
             problems.append(f"movement {act.row['entry_id']} is gone, matched or re-dated")
     for row in cancels:
-        txn = db.session.get(Transaction, row["transaction_id"])
-        if txn is None or txn.is_deleted or not _status_is(txn, StatusEnum.DONE):
+        txn = _live_row(row["transaction_id"])
+        if txn is None or not _status_is(txn, StatusEnum.DONE):
             problems.append(f"row {row['transaction_id']} is not a live Paid row")
     for row in deletes:
         if db.session.get(TransactionEntry, row["entry_id"]) is None or \
@@ -322,18 +348,24 @@ def _standing(sheet: dict, held: "list[dict]") -> dict:
     """Return the state of every movement no act may touch: card items and the held back.
 
     A row by its movement: whether it exists, its day, its figure and whether
-    it is matched; a line by its match.  Read before the first act and after
-    the last, and the two must be equal.
+    it is matched; a line by its match (:func:`_line_match`), keyed by its
+    place on the sheet, because a line only the export holds has no id before
+    act 1 records it, and two such lines can share a day, a figure and a
+    description.  Read before the first act and after the last, and the two
+    must be equal.
     """
+    account_id = sheet["account"]["id"]
     state = {}
-    for pair in held:
-        state[f"line {pair['line']['line_id']}"] = match_of(pair["line"]["line_id"])
+    for index, pair in enumerate(held, 1):
+        state[f"held-back act {index}'s {named(pair['line'])}"] = _line_match(
+            account_id, pair["line"])
         if pair["row"] is not None:
             state[f"movement {pair['row']['entry_id']}"] = _movement_state(
                 pair["row"]["entry_id"])
-    for item in sheet["card"]:
+    for index, item in enumerate(sheet["card"], 1):
         if item["kind"] == "payment":
-            state[f"line {item['line']['line_id']}"] = match_of(item["line"]["line_id"])
+            state[f"card item {index}'s {named(item['line'])}"] = _line_match(
+                account_id, item["line"])
         else:
             state[f"movement {item['row']['entry_id']}"] = _movement_state(
                 item["row"]["entry_id"])
@@ -348,20 +380,30 @@ def _movement_state(entry_id: int) -> "tuple | None":
     return (entry.settled_on, entry.amount, _entry_matched(entry_id))
 
 
-def import_of(account_id: int, digest: str) -> "StatementImport | None":
-    """Return the import of the export whose digest is *digest*, or ``None``."""
-    return db.session.execute(db.select(StatementImport).where(
+def imports_of(account_id: int, digest: str) -> "list[StatementImport]":
+    """Return every import of the export whose digest is *digest*, oldest first.
+
+    More than one is the same file submitted again, which the import door
+    records as an import of its own that adds no line (measured 2026-10-31 on
+    a rehearsed copy: a second import, and "Nothing new: all 509 line(s) in
+    this file were already recorded").
+    """
+    return list(db.session.execute(db.select(StatementImport).where(
         StatementImport.account_id == account_id, StatementImport.file_digest == digest,
-    )).scalar_one_or_none()
+    ).order_by(StatementImport.id)).scalars())
 
 
 def import_problems(account_id: int, digest: str, books_last: date) -> "list[str]":
-    """Return why act 1 has not landed: SECU's export imported, covering the books' last day."""
-    found = import_of(account_id, digest)
-    if found is None:
+    """Return why act 1 has not landed: the export imported once, covering the books' last day."""
+    found = imports_of(account_id, digest)
+    if not found:
         return ["the import: SECU's export is not imported"]
-    if not found.declared_start <= books_last <= found.declared_end:
-        return [f"the import: import {found.id} does not cover the books' last day {books_last}"]
+    if len(found) > 1:
+        return [f"the import: SECU's export is imported {len(found)} times "
+                f"(imports {[each.id for each in found]}), where act 1 imports it once"]
+    if not found[0].declared_start <= books_last <= found[0].declared_end:
+        return [f"the import: import {found[0].id} does not cover the books' last day "
+                f"{books_last}"]
     return []
 
 
@@ -402,7 +444,10 @@ def match_problems(account_id: int, act: MatchAct) -> "list[str]":
 
 def cancel_problems(txn_id: int) -> "list[str]":
     """Return why row *txn_id*'s cancel has not landed: Cancelled, holding no movement."""
-    if not _status_is(db.session.get(Transaction, txn_id), StatusEnum.CANCELLED):
+    txn = _live_row(txn_id)
+    if txn is None:
+        return [f"the cancel of row {txn_id}: it is gone"]
+    if not _status_is(txn, StatusEnum.CANCELLED):
         return [f"the cancel of row {txn_id}: it is not Cancelled"]
     moving = db.session.execute(db.select(TransactionEntry.id).where(
         TransactionEntry.transaction_id == txn_id, TransactionEntry.settled_on.is_not(None),
@@ -424,15 +469,16 @@ def envelope_state(txn_id: int, gone: "frozenset[int]") -> dict:
     link, and each of its lines but those the sheet deletes (*gone*) by its
     figure, days, basis, link and whether it is matched: the reopen and
     re-close of ruling plan#2439 pass through all of them, and the ruling was
-    made on their ending exactly as they began.
+    made on their ending exactly as they began.  The envelope's own state is
+    ``None`` once it is gone (:func:`_live_row`).
     """
-    txn = db.session.get(Transaction, txn_id)
+    txn = _live_row(txn_id)
     others = db.session.execute(db.select(TransactionEntry).where(
         TransactionEntry.transaction_id == txn_id, TransactionEntry.id.not_in(gone),
     ).order_by(TransactionEntry.id)).scalars()
     return {
-        "row": (txn.status_id, txn.settled_on, txn.settled_day_basis_id,
-                txn.reconciled_by_id),
+        "row": None if txn is None else (
+            txn.status_id, txn.settled_on, txn.settled_day_basis_id, txn.reconciled_by_id),
         "lines": {
             other.id: (other.amount, other.purchased_on, other.settled_on,
                        other.settled_day_basis_id, other.reconciled_by_id,
@@ -462,6 +508,8 @@ def delete_problems(
     if db.session.get(TransactionEntry, entry_id) is not None:
         problems.append(f"the delete of line {entry_id}: it is still in envelope {txn_id}")
     after = jsonable(envelope_state(txn_id, gone))
+    if after["row"] is None:
+        return problems + [f"the delete of line {entry_id}: envelope {txn_id} is gone"]
     if after["row"] != before["row"]:
         problems.append(f"the delete of line {entry_id}: envelope {txn_id} moved from "
                         f"{before['row']} to {after['row']}")
@@ -573,9 +621,15 @@ def post_state_problems(
         problems += delete_problems(
             row["transaction_id"], row["entry_id"], gone,
             snapshot.envelopes[str(row["transaction_id"])])
-    standing = jsonable(_standing(acts_sheet, held))
+    standing, before = jsonable(_standing(acts_sheet, held)), snapshot.standing
+    # A key one side holds and the other does not is a snapshot this act sheet
+    # did not write, or one an older version of this file keyed otherwise; it
+    # fails rather than letting the item go ungraded.
     problems += [
-        f"no act may touch {key}, and it moved: {snapshot.standing[key]} -> {state}"
-        for key, state in standing.items() if snapshot.standing.get(key) != state
+        f"no act may touch {key}, and it moved: {before[key]} -> {state}" if key in before
+        else f"no act may touch {key}, and the snapshot does not hold it"
+        for key, state in standing.items() if key not in before or before[key] != state
     ]
+    problems += [f"the snapshot holds {key}, which the act sheet does not name"
+                 for key in sorted(set(before) - set(standing))]
     return problems + _done_test_problems(account_id, acts_sheet, held)

@@ -101,7 +101,10 @@ class _Forms(HTMLParser):
     task plan#2414): every enabled checkbox and radio rendered unticked
     (``unticked``, with the radios' names in ``radios``) and every single
     select's enabled options (``options``), so an act ticks and types only
-    what the page offers (:meth:`Operator.submit`).  And every ``<button>``
+    what the page offers (:meth:`Operator.submit`); and what each option SAYS
+    (``labels``, by ``(select name, value)``, its words with their whitespace
+    folded), so a sheet names an option as the owner reads it rather than by
+    the value it submits (plan task plan#2454).  And every ``<button>``
     carrying an htmx verb is kept apart (``buttons``), with its ``hx-vals``,
     for a press that is not a form's (:meth:`Operator.press`).
     """
@@ -119,6 +122,8 @@ class _Forms(HTMLParser):
         self._select: "dict | None" = None
         self._textarea: "str | None" = None
         self._text: "list[str]" = []
+        #: The open option: ``(select name, value)`` and its words so far.
+        self._label: "tuple[tuple[str, str], list[str]] | None" = None
 
     def handle_starttag(self, tag, attrs):
         """Open a form, record one control's submitted value, or a button."""
@@ -154,6 +159,7 @@ class _Forms(HTMLParser):
         self._form = {
             "method": "post", "url": attr.get("action", ""),
             "controls": [], "unticked": [], "radios": set(), "options": {},
+            "labels": {},
         }
         for verb in self._VERBS:
             if f"hx-{verb}" in attr:
@@ -221,14 +227,33 @@ class _Forms(HTMLParser):
                 self._select["first"] = value
         if "selected" in attr:
             self._select["selected"].append(value)
+        # An option's end tag may be omitted, so the next option closes it too,
+        # and so do its select and its form.  A ``label`` attribute is what a
+        # browser shows in place of the option's text.
+        self._commit_label()
+        self._label = ((self._select["name"], value), [])
+        if "label" in attr:
+            self._label[1].append(attr["label"])
+            self._commit_label()
+
+    def _commit_label(self):
+        """Record what the open option says, against its select's name and value."""
+        if self._label is not None and self._form is not None:
+            key, words = self._label
+            self._form["labels"][key] = " ".join("".join(words).split())
+        self._label = None
 
     def handle_data(self, data):
-        """Accumulate an open textarea's content."""
+        """Accumulate an open textarea's content, or an open option's words."""
         if self._textarea is not None:
             self._text.append(data)
+        elif self._label is not None:
+            self._label[1].append(data)
 
     def handle_endtag(self, tag):
-        """Close a form, a select or a textarea, committing its value."""
+        """Close a form, an option, a select or a textarea, committing its value."""
+        if tag in ("option", "select", "form"):
+            self._commit_label()
         if tag == "form":
             self._form = None
         elif tag == "select" and self._select is not None:
@@ -655,8 +680,11 @@ def connect(clone: str, config_name: "str | None" = None):
 
     **The name check is the weaker half**: a name can only refuse the databases
     somebody thought of.  So a harness that writes also refuses, before its
-    first write, any copy its own acts have already touched, whatever it is
-    called -- the account-10 rehearsal did so by that repair's markers.
+    first act, any copy its own acts have already touched, whatever it is
+    called -- the account-10 rehearsal did so by that repair's markers.  Not
+    before its first WRITE: the app built here can write as it boots, because
+    the development configuration creates the schemas and seeds the reference
+    tables (:func:`connect_read_only` says so, and how a check avoids it).
 
     Args:
         clone: The database this rehearsal is for.

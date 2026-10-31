@@ -194,10 +194,12 @@ the CODE block recorded. It drops and rebuilds `$B` and `$R`, and nothing else.
 PRE-ACT block, pasted just before act 1 (The acts, below). The act sheet refuses,
 writing nothing, a movement no class takes, a day whose unanswered movements do not add up to
 its residue, an export the import would refuse, and a books day the comparison cannot take. The
-rehearsal refuses BEFORE any write a copy named `shekel` or one on which any act's pre-state has
-moved (the export already imported, a row already matched or no longer Paid, a line gone), and
-an act sheet that holds back a transfer other than the one ruling plan#2433 names, or matches a
-settled transfer no ruling has rehearsed: **once plan#2436 has performed the Van Loan match,
+rehearsal refuses a copy named `shekel` before it boots the app, and BEFORE any act a copy on
+which any act's pre-state has moved (the export already imported, a row already matched or no
+longer Paid, a line gone); between the two, the app's development build it boots seeds the
+reference tables. It also refuses an act sheet that holds back a transfer other than the one
+ruling plan#2433 names, or matches a settled transfer no ruling has rehearsed: **once plan#2436
+has performed the Van Loan match,
 `HELD_BACK` in `tests/manual/reconcile_post_state.py` changes with it**. After each act it reads
 the database to see the act LANDED, because the Reconcile page answers a refused card with a
 200; after the last it grades the post-state and the done test. The check is that grading again
@@ -225,15 +227,29 @@ rehearsal ran some other `app/` than production's.
 * **Do not explain anything else on the Reconcile page**, including the lines the sheet leaves
   for you (below), until the check has passed.
 
-**A refused save wrote nothing, and every save before it stands. Stop and read it.** It shows as:
+**A refused save wrote nothing, and every save before it stands. Stop and read it, and press
+nothing again**, even where the screen says pressing again goes ahead: no retry is rehearsed.
+It shows as:
 
-* on the import page, a RED flash;
+* on the import page, a toast at the top right, which hides after five seconds: a RED one (the
+  file refused, with its reason, or "Something went wrong saving this statement"), or a YELLOW
+  one beginning neither "Recorded" nor "Nothing new" (the form refused, such as "Choose a file
+  to import."). "Nothing new" is not a refusal: it recorded the file again (act 1, below);
 * on the Reconcile page, the receipt at the top reading `0 applied, 1 refused` on an amber
-  border. A good Apply reads `1 applied` on a green border;
+  border; or a RED box at the top with an octagon icon and a sentence, the press refused before
+  it reached any card; or a YELLOW box with a triangle beginning "You pressed OK on", a card
+  OK'd with nothing chosen. A good Apply reads `1 applied` on a green border;
 * on a grid card, NO flash: the card closes as after a good save, and the CELL redraws in red
-  with a small octagon icon, its reason in the cell's tooltip. **After every save on a grid card,
-  look at the cell**;
-* on a purchase's X, the purchase still in the Purchases list after the confirm.
+  with a small octagon icon, its reason in the cell's tooltip, or in yellow with a small
+  triangle, "This transaction was changed by another action" in its tooltip: the card was
+  opened before a save that landed since. **After every save on a grid card, look at the
+  cell**. A press of Paid or a Status save refused as out of date instead leaves the card
+  OPEN, redrawn under a YELLOW banner with a triangle beginning "Nothing was saved";
+* on a purchase's X, the purchase still in the Purchases list after the confirm, under a banner
+  in the list: RED with an octagon and the reason, or YELLOW with a triangle saying the entry
+  or the list was changed by another action;
+* anywhere, a press that seems to do nothing at all: a row or line already gone answers "Not
+  found", which the page does not draw.
 
 **If the refused save is the day typed back on a reopened envelope** (a delete's fourth press),
 that envelope stands settled on TODAY: perform no other act, because that remedy has not been
@@ -296,10 +312,13 @@ same_code
 Accounts, Checking, **Import statements**. **Export kind**: *SECU checking -- CSV export*.
 **Statement file**: SECU's export from the handoff folder, the file the sheet names. **Import**.
 
-*Success:* a green flash beginning "Recorded", whose counts are the ones the sheet's act 1
-records the rehearsal's flash saying: the new lines, the lines already known, and what your
-standing rules filed. *Why:* the export holds lines no earlier import recorded, among them the
-days after the last statement, and the done test is read after an import covering the books'
+*Success:* a green toast at the top right beginning "Recorded", whose counts are the ones the
+sheet's act 1 records the rehearsal's toast saying: the new lines, the lines already known, and
+what your standing rules filed. It hides after five seconds; **press Import once**. A second
+press records the file again, as a second import of it adding no line, with a toast beginning
+"Nothing new": stop there, because the check fails a second import (measured, below). *Why:*
+the export holds lines no earlier import recorded, among them the days after the last
+statement, and the done test is read after an import covering the books'
 last day (ruling plan#2343). The rules filing new swipe lines is the import's own act (ruling
 R-GH), and the sheet lists each one.
 
@@ -414,12 +433,14 @@ because those boot the app's development build, which seeds the reference tables
 check opens the copy read-only first.
 
 * **The CHECK** grades the post-state on production's copy: every act's own arm again (the
-  import by its digest, each match, each Cancelled row, each envelope as it stood with only its
-  line gone), every card item and the held-back act unmoved since the snapshot, and the done
-  test. A failing arm prints a `FAILED:` line naming its act and the row, line or envelope;
-  `CHECK DIFFERS` with no `FAILED:` line is a count that moved (the act markers' count), read
-  beside the other two lines. Its passing output names no database, time or id, so two copies
-  of the same acts print it identically.
+  import by its digest, imported once, each match, each Cancelled row, each envelope as it
+  stood with only its line gone), every card item and the held-back act unmoved since the
+  snapshot, and the done test. A failing arm prints a `FAILED:` line naming its act and the
+  row, line or envelope, and so does an arm whose row or envelope is gone. `CHECK DIFFERS`
+  with no `FAILED:` line is either the act markers' count that moved (the `precondition:`
+  line), read beside the other two lines, or the check grading nothing: its refusal, or the
+  error it stopped on, is printed just above its `exit` line. Its passing output names no
+  database, time or id, so two copies of the same acts print it identically.
 * **The BALANCES** compare every figure the balance seam answers, for every account, with the
   rehearsed copy's: two copies on which the same acts were performed hold the same balances
   (measured, below). A difference names the account where money departed from the rehearsal: a
@@ -430,6 +451,12 @@ check opens the copy read-only first.
   database and the time written), with the rehearsed copy's. It sees only the days the list
   compares, which end at the export's last day; a row settled TODAY by a pressed check mark is
   past them (measured, below).
+
+**None of the three grades what moves no money and no act names**, such as a name, category or
+note changed on a card while an act holds its row Projected, a figure, pay period or due day
+changed on a row that ends Cancelled, or a standing rule stated in "Should any of these stand?",
+which the match section says to leave. The check reads only what the acts change, and the
+balances and the list compare figures.
 
 A failed line is read before anything else is done. **No remedy is rehearsed**: report what
 failed, with the three outputs, before performing anything more.
@@ -510,6 +537,22 @@ rendered; the post-state and the check, task plan#2416). Its door-driving half i
   than the deployed one, a `T` of another day, the block pasted with `STAMP` not filled in, a
   `T` with no revision file, and the stamp of an earlier rehearsal whose recorded harness
   commit was not the clone's.
+* **2026-10-31, what the check cannot read** (task plan#2454), on restores of the 14:39 run's
+  dumps with its act sheet, and a snapshot this task's harness wrote of the same dump (it keys
+  a card or held-back line by its place on the sheet, and the 14:39 snapshot, keyed by line
+  id, now fails 30 arms rather than passing them ungraded): the same export imported a second
+  time through the import door (a toast beginning "Nothing new", and a second import of the
+  file); a cancelled
+  row deleted outright from the performed copy, then an envelope too; and an act sheet whose
+  card payment line carries no id, as a line only the new export holds does, though this one
+  was recorded already and was found by its day, figure and description. Before this task
+  the check raised on the second import (`MultipleResultsFound`) and on the gone row
+  (`AttributeError`), and the rehearsal on the id-less line (`MultipleResultsFound`, in the
+  snapshot before act 1), none printing a `FAILED:` line. After it, the check printed `FAILED:`
+  lines naming the two imports, the gone row and the gone envelope, and the id-less line
+  rehearsed and checked clean. The whole act sheet rehearsed again printed the 14:39 run's
+  check output exactly, every balance figure byte-identical, on a sheet differing only in its
+  header and in act 1's Export kind, now the words its select shows.
 * **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
   full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
   turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a

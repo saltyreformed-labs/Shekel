@@ -38,7 +38,7 @@ sticky-footer rule is loaded and effective.
 Prerequisites:
 
 - Playwright installed in the venv
-  (``.venv/bin/pip install -r requirements-dev.txt``).
+  (the lock's dev group: ``uv sync``).
 - Chromium headless-shell downloaded
   (``.venv/bin/playwright install chromium``).
 - The dev Flask server running, bound to ``172.32.0.1:5000``

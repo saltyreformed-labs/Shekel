@@ -432,7 +432,6 @@ class TestDockerignoreCoverage:
         "amortization-fix.patch",
         "diagnostics/",
         "monitoring/",
-        "requirements-dev.txt",
         "pytest.ini",
         # Host-side configs not used by the app container
         "deploy/",
@@ -519,7 +518,11 @@ class TestDockerignoreCoverage:
         "entrypoint.sh",
         "gunicorn.conf.py",
         "run.py",
-        "requirements.txt",
+        # The lock the Dockerfile's builder stage copies from the
+        # context and installs; excluded, the build fails.
+        "pyproject.toml",
+        "uv.lock",
+        ".python-version",
     ])
     def test_dockerignore_does_not_exclude_runtime_path(
         self, dockerignore_lines: list[str], pattern: str,

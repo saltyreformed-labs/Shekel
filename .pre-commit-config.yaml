@@ -286,7 +286,7 @@ repos:
       # All run language:system. The host binaries (shellcheck, shfmt,
       # biome, typos, gitleaks, hadolint) come off PATH; the pip tools
       # (yamllint, jactionlint, zizmor, djlint, rumdl) are invoked as
-      # `.venv/bin/<tool>` -- the repo's pinned copy from requirements-dev.txt
+      # `.venv/bin/<tool>` -- the repo's locked copy from uv.lock
       # -- and NOT off PATH, because a shell without the venv first on PATH
       # would otherwise run the host's package at whatever version Arch
       # ships (measured 2026-09-20: rumdl 0.2.73 on the host against 0.2.74

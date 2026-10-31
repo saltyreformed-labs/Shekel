@@ -52,7 +52,7 @@ FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6
 # Apply Debian security upgrades to the OpenSSL packages and install
 # the build-only deps (libpq headers + ``pg_config`` + a C toolchain)
 # that ``psycopg-c`` -- psycopg 3's C speed-up, the ``[c]`` extra in
-# requirements.txt (ruling balance:R-BAL209) -- needs to compile from
+# pyproject.toml (ruling balance:R-BAL209) -- needs to compile from
 # source against Debian's libpq.  Combined into a single RUN so the apt
 # cache is removed in the same layer.
 RUN apt-get update \

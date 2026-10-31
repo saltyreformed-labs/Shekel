@@ -117,8 +117,9 @@ class TestTheOversizedPathSegment:
         """The import path this module depends on is the documented one.
 
         `RowIdConverter` subclasses a third-party class, so the narrower the
-        surface the better: ``requirements.txt`` pins Werkzeug (finding N-143),
-        and every bump of that pin still reaches this subclass.
+        surface the better: ``pyproject.toml`` declares Werkzeug and ``uv.lock``
+        pins it (finding N-143), and every bump of that pin still reaches this
+        subclass.
         Importing from the public ``werkzeug.routing`` rather than the
         ``werkzeug.routing.converters`` submodule costs nothing -- this
         asserts they really are the same object, so the choice is a free

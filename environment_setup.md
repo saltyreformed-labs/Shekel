@@ -38,14 +38,12 @@ PostgreSQL role with the same name -- no password needed for local development.
 
 ### Python
 
-Arch ships Python 3.x. Verify you have what you need:
+uv installs the Python version `.python-version` names (its own build of it when the system's Python
+is another minor) and every package `uv.lock` pins:
 
 ```bash
-python --version       # Should be 3.11+
-pip --version          # Should point to the same Python
-
-# If pip is missing:
-sudo pacman -S python-pip
+sudo pacman -S uv
+uv --version
 ```
 
 ### Other System Packages
@@ -79,8 +77,9 @@ git init
 ### Python Virtual Environment
 
 ```bash
-# Create the venv inside the project directory.
-python -m venv .venv
+# Create the venv inside the project directory and install the dependencies
+# into it (below).
+uv sync --locked
 
 # Activate it. You will do this every time you open a terminal
 # to work on this project.
@@ -88,18 +87,14 @@ source .venv/bin/activate
 
 # Verify the venv is active.
 which python    # Should show ~/projects/budget-app/.venv/bin/python
-which pip       # Should show ~/projects/budget-app/.venv/bin/pip
 ```
 
 ### Install Python Dependencies
 
-The repository's `requirements.txt` (production) and `requirements-dev.txt` (all of it, plus the
-test and lint tools) are the one statement of every pinned version. Install from them; this page
-used to carry a copy of the pins, and the copy went stale.
-
-```bash
-pip install -r requirements-dev.txt
-```
+The repository's `uv.lock` is the one statement of every pinned version. `uv sync --locked` (above)
+installs exactly what it pins, the runtime packages plus the test, lint and build tools, and refuses
+a lock that no longer matches `pyproject.toml`; run it again after a pull that moves the lock. This
+page used to carry a copy of the pins, and the copy went stale.
 
 ### Environment File
 
@@ -266,10 +261,11 @@ return {
 }
 ```
 
-SQLFluff is a Python tool, so install it in your project venv:
+SQLFluff is an editor tool, not one of the project's packages, and `uv sync` removes from `.venv`
+every package `uv.lock` does not pin, so install it as a uv tool of its own:
 
 ```bash
-pip install sqlfluff
+uv tool install sqlfluff
 ```
 
 ### Jinja / HTML + HTMX Support

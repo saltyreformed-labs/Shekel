@@ -160,7 +160,7 @@ def test_a_claim_recording_no_card_of_its_own_writes_no_findings_marker(check, c
     assert github.asked == [[12], [7]] and not github.blocks_asked
 
 
-@pytest.mark.parametrize("head", ["dependabot/pip/requests-2.33.0", None],
+@pytest.mark.parametrize("head", ["dependabot/uv/requests-2.33.0", None],
                          ids=["dependabot", "a fork"])
 def test_a_pull_request_that_is_no_claims_reads_nothing_and_writes_no_findings_marker(
         check, code, head):
@@ -168,7 +168,8 @@ def test_a_pull_request_that_is_no_claims_reads_nothing_and_writes_no_findings_m
     neither reads the tracker.  A change of its code alone lands; one writing a finding's
     marker is refused by rule 5, the tracker never read."""
     root, base = code
-    bump = commit_files(root, base, "bump", {"requirements.txt": "requests==2.33.0\n"})
+    bump = commit_files(root, base, "bump",
+                        {"uv.lock": '[[package]]\nname = "requests"\nversion = "2.33.0"\n'})
     who = head or "a branch of another repository"
     assert check(base, bump, head)[:2] == (0, verdict(who, 0, 0) + "\n")
     status, out, _ = check(base, _fixed(root, base, 12), head)

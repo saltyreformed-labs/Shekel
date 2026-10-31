@@ -27,10 +27,12 @@
 #   - alembic.ini               Alembic config
 #   - entrypoint.sh             ENTRYPOINT
 #   - gunicorn.conf.py          gunicorn config
-#   - requirements.txt          Pip metadata reference (deps already
-#                               built into /opt/venv in stage 1, but
-#                               kept for forensic ``pip freeze``-style
-#                               diffing inside a debugging exec)
+#   - pyproject.toml, uv.lock, .python-version
+#                               The lock the builder stage installs
+#                               into /opt/venv (the Dockerfile copies
+#                               them from this context); the runtime
+#                               stage's copy of the context carries
+#                               them too
 #   - run.py                    Flask app factory entrypoint
 #
 # Everything else listed below is dev-time tooling, host-side ops
@@ -93,7 +95,6 @@ conftest.py
 # ── Dev-only toolchain configs ─────────────────────────────────────
 # Read by the linters, pre-commit and CI on the host; nothing in the
 # container runs a linter.
-requirements-dev.txt
 .pylintrc
 .markdownlint.json
 .rumdl.toml

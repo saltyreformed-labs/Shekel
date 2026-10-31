@@ -334,11 +334,11 @@ Python application.
 ### 1. Prerequisites
 
 - **Docker Engine** -- provides the dev and test PostgreSQL databases
-- **Python 3.12+** and **pip**
+- **uv** -- installs the Python `.python-version` names and every package `uv.lock` pins
 
 ```bash
 docker compose version
-python --version
+uv --version
 ```
 
 ### 2. Clone & Set Up Python Environment
@@ -348,12 +348,10 @@ cd ~/projects  # or wherever you keep code
 git clone https://github.com/saltyreformed-labs/Shekel.git
 cd Shekel
 
-# Create a virtual environment
-python -m venv .venv
+# Create .venv and install exactly what uv.lock pins: the runtime packages plus
+# the test, lint and build tools (no new package without the developer's approval)
+uv sync --locked
 source .venv/bin/activate
-
-# Install dependencies (dev file includes production deps + test/lint tools)
-pip install -r requirements-dev.txt
 ```
 
 ### 3. Configure Environment
@@ -542,7 +540,8 @@ shekel/
 ├── Dockerfile                   # Multi-stage production container
 ├── gunicorn.conf.py             # Gunicorn WSGI server configuration
 ├── entrypoint.sh                # Container startup (DB init, migrate, seed)
-├── requirements.txt             # Production Python dependencies
-├── requirements-dev.txt         # Dev/test/lint dependencies (includes requirements.txt)
+├── .python-version              # The Python version uv, CI and the Dockerfile follow
+├── pyproject.toml               # Python dependencies and the ranges each may move in
+├── uv.lock                      # Every package's exact version and sha256
 └── run.py                       # Entry point
 ```

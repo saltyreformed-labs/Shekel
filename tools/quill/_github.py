@@ -9,9 +9,9 @@ tool write from the developer's own edit and never act on his.
 An App proves who it is with a JSON Web Token signed by its private key, and
 trades that token for an installation token, which quill narrows to the one
 repository it reads and writes (:func:`installation_token`).  The signing is
-done here with ``cryptography`` (pinned in ``requirements.txt``) rather than a
-JWT package, because RS256 over two JSON segments is the whole of what the App
-flow needs.
+done here with ``cryptography`` (pinned in ``uv.lock``) rather than a JWT
+package, because RS256 over two JSON segments is the whole of what the App flow
+needs.
 
 **A redirect is an error, never followed.**  GitHub answers 301 for an issue
 transferred to another repository and for a renamed repository; followed, a read

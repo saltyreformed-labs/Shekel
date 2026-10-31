@@ -125,7 +125,7 @@ hook_toolchain_root() {
 }
 
 # Put the repo venv's bin first on PATH so every hook resolves the PINNED
-# toolchain (pylint et al. from requirements.txt), not whatever the launching
+# toolchain (pylint et al. from uv.lock), not whatever the launching
 # shell happens to expose. Observed 2026-07-08: a session started without the
 # venv on PATH made bare `pylint` unresolvable inside the hooks, so the
 # fail-closed gates blocked every Python edit on infrastructure error rather

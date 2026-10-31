@@ -156,7 +156,7 @@ root; never silence it with a bare disable.
 
 - **Per-edit hooks (`scripts/hooks/`)** lint each `app/`/`scripts/` Python edit and hard-block on
   errors and the custom checkers `shekel-decimal-from-float` / `shekel-refname-compare`; templates
-  and `requirements.txt` have their own guards.
+  and the dependency files (`pyproject.toml`, `uv.lock`) have their own guards.
 - **SessionStart hook** (`scripts/hooks/session-start.sh`) prints the session's checkout and branch
   into context at session start, a warning when the shared main checkout is pinned to a release
   branch, a pointer to the Multi-session doctrine, and one to `python -m tools.quill.quill next` for
@@ -271,7 +271,8 @@ No status is terminal.
 `@login_required` (gate: `tests/test_arch/test_the_login_gate_has_one_home.py`), and a route that
 must be public is named in `PUBLIC_ENDPOINTS`. Ownership helpers in `app/utils/auth_helpers.py`.
 Security response rule: 404 for both "not found" and "not yours." Structured logging via
-`log_event()`. Dependencies pinned in `requirements.txt` -- no new packages without approval.
+`log_event()`. Dependencies are declared in `pyproject.toml` and locked in `uv.lock` -- no new
+packages without approval.
 
 **Reference tables: IDs for logic, strings for display only.** Enums in `app/enums.py`, cached in
 `app/ref_cache/`. NEVER compare against string `name` columns in Python or Jinja (gate:

@@ -127,8 +127,8 @@ class TestBaseComposeHardeningFields:
 
         ``yaml.safe_load`` is the standard tool here: we never need
         to construct arbitrary Python objects from this file, just
-        read its mapping/list shape.  PyYAML is in
-        ``requirements.txt`` (already used by the sibling C-33
+        read its mapping/list shape.  PyYAML is in the lock's dev
+        group (``pyproject.toml``; already used by the sibling C-33
         tests), so a missing import would surface as a suite-level
         failure rather than masking a hardening regression here.
         """

@@ -217,7 +217,7 @@ def test_production_changes_where_its_files_differ_and_nowhere_else(repo):
         "deploy's README": {"deploy/README.md": "r2\n"},
         "a comment": {".dockerignore": f"# what the image holds\n{ignored}"},
     }
-    found = {name: changed(repo, base, _files(repo, base, name, edit))
+    found = {name: tuple(changed(repo, base, _files(repo, base, name, edit)))
              for name, edit in edits.items()}
     assert found == {
         "an edit": ("app/a.py",), "an add": ("app/new.py",), "a delete": ("app/gone.py",),
@@ -225,7 +225,7 @@ def test_production_changes_where_its_files_differ_and_nowhere_else(repo):
         "the Dockerfile": ("Dockerfile",), "the publish workflow": (publish,),
         "a publish comment": (publish,), "a tools edit": (), "another workflow": (),
         "deploy's README": (), "a comment": ()}
-    assert changed(repo, base, _executable(repo, base, "app/a.py")) == ("app/a.py",)
+    assert tuple(changed(repo, base, _executable(repo, base, "app/a.py"))) == ("app/a.py",)
 
 
 def test_an_ignore_file_docker_refuses_refuses_the_comparison(repo):
@@ -235,3 +235,21 @@ def test_an_ignore_file_docker_refuses_refuses_the_comparison(repo):
     broken = _files(repo, base, "broken", {".dockerignore": "!\n"})
     with pytest.raises(IgnoreFileError):
         changed(repo, base, broken)
+
+
+def test_each_change_names_the_file_on_each_side(repo):
+    """Each path where production differs names its mode and object on each side, None on
+    the side production holds no such file: what the landing check reads to judge a change
+    moving versions alone (:mod:`tools.quill._versions`)."""
+    base = _files(repo, _commit(repo, "root"), "base", {"app/a.py": "a\n", "app/gone.py": "g\n"})
+    edited = _files(repo, base, "edit", {"app/a.py": "a2\n", "app/gone.py": None,
+                                         "app/new.py": "n\n"})
+
+    def held(sha, path):
+        """``path``'s mode and object at ``sha``, as production names them."""
+        return f"100644 {_run(repo, 'rev-parse', f'{sha}:{path}')}"
+
+    assert changed(repo, base, edited) == {
+        "app/a.py": (held(base, "app/a.py"), held(edited, "app/a.py")),
+        "app/gone.py": (held(base, "app/gone.py"), None),
+        "app/new.py": (None, held(edited, "app/new.py"))}

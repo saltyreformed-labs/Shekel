@@ -2,7 +2,8 @@
 ``R-BAL364``, ``R-BAL400`` and ``R-BAL401``): every file the image built from that commit
 holds, and the files outside the image that build or run it.  CI's write rule refuses a
 change to any of them that records no card (``tools/quill/landing.py``), so a release counts
-every change production gets from the cards it brings.
+every change production gets from the cards it brings, unless the change moves pinned
+versions alone (ruling plan#2351, :mod:`tools.quill._versions`), which the release lists.
 
 **The image holds what the ``Dockerfile``'s ``COPY . .`` copies of a clean checkout**
 (``.github/workflows/docker-publish.yml`` builds it with the repository's root as its
@@ -59,12 +60,14 @@ from tools.ci.gitcmd import git
 
 #: The image's recipe, which production's build reads from the context's root.
 DOCKERFILE = "Dockerfile"
+#: The compose file production keeps a byte-for-byte copy of (R-BAL400).
+COMPOSE = "docker-compose.yml"
 #: The workflow that builds the image on ``main`` and signs it (R-BAL401).
 PUBLISH = ".github/workflows/docker-publish.yml"
 #: The helper the deploy script sources from its own checkout, beside ``deploy/`` (R-BAL254).
 DEPLOY_HELPER = "scripts/_container_lib.sh"
 #: The files outside the image that build or run production, by path (R-BAL400, R-BAL401).
-RECIPE = (DOCKERFILE, "docker-compose.yml", PUBLISH, DEPLOY_HELPER)
+RECIPE = (DOCKERFILE, COMPOSE, PUBLISH, DEPLOY_HELPER)
 #: The directory of the deploy script and the settings production keeps copies of.
 DEPLOY = "deploy"
 #: A file under :data:`DEPLOY` that production never reads, by its name.
@@ -267,15 +270,16 @@ def files(root: Path, commit: str) -> dict[str, str]:
     return {path: what for path, what in held.items() if path in image or runs_it(path)}
 
 
-def changed(root: Path, old: str, new: str) -> tuple[str, ...]:
+def changed(root: Path, old: str, new: str) -> dict[str, tuple[str | None, str | None]]:
     """Each path, in order, where production built from ``new`` differs from production
     built from ``old`` (:func:`files`): in one and not the other, or a different mode or
-    object.
+    object; with its mode and object in each, None in the one that holds no such file.
 
     Raises:
         IgnoreFileError: as :func:`rules` raises it, for either.
         tools.ci.gitcmd.GitError: when git cannot read either.
     """
     before, after = files(root, old), files(root, new)
-    return tuple(sorted(path for path in before.keys() | after.keys()
-                        if before.get(path) != after.get(path)))
+    return {path: (before.get(path), after.get(path))
+            for path in sorted(before.keys() | after.keys())
+            if before.get(path) != after.get(path)}

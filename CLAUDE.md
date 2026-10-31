@@ -193,8 +193,9 @@ root; never silence it with a bare disable.
   file, from any branch, a release or a resync passing only with the done files it carries
   (R-BAL362): the files the image holds, as Docker reads its ignore file (`.dockerignore`,
   R-BAL364's one list of them), and the files outside the image that build or run production, which
-  `tools/quill/_production.py` lists, their one list (R-BAL400, R-BAL401). Its module docstring
-  states every rule.
+  `tools/quill/_production.py` lists, their one list (R-BAL400, R-BAL401); but a change that moves
+  pinned versions alone, none across a major, needs none (plan#2351, `tools/quill/_versions.py`).
+  Its module docstring states every rule.
 - **Archived documents** (`tools/ci/archive.py`): every document under an `archive/` or
   `historical/` directory opens with the `> **ARCHIVED.` banner, and CI refuses one that does not.
 - **Judgment the linters cannot mechanize** (float-on-money boundaries, IDOR, transfer invariants,

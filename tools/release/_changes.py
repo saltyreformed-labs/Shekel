@@ -65,7 +65,7 @@ def changes(root: Path, base: str, cut: str) -> Changes:
             side of a merge holds a pattern Docker refuses.
         tools.ci.gitcmd.GitError: when git cannot read the range or a commit.
     """
-    net = changed(root, base, cut)
+    net = tuple(changed(root, base, cut))
     pulls = tuple(Change(sha, subject,
                          tuple(path for path in changed(root, f"{sha}^1", sha) if path in net))
                   for sha, subject in first_parent_line(root, base, cut))

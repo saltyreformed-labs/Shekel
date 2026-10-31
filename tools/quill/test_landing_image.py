@@ -30,14 +30,18 @@ _PUBLISH = ".github/workflows/docker-publish.yml"
 _HELPER = "scripts/_container_lib.sh"
 
 
-def _refused(head, paths):
-    """Rule 9's sentence for a change from ``head`` to production's ``paths``, as named."""
+def _refused(head, paths, why=None):
+    """Rule 9's sentence for a change from ``head`` to production's ``paths``, as named, and
+    where it changes a file that pins versions, ``why`` it moves more than versions (ruling
+    plan#2351)."""
+    pinned = (", and only a change that moves pinned versions alone, writing no plan record, "
+              f"lands with none (ruling plan#2351): here {why}" if why else "")
     return (f"REFUSED -- {head} changes what production runs ({paths}), but adds, changes or "
             "deletes no ship marker, so no release would count it: a change to a file the "
             "production image holds, Dockerfile, docker-compose.yml, "
             ".github/workflows/docker-publish.yml, scripts/_container_lib.sh or deploy/ (a "
-            "README.md there excepted) lands from a card's claim (quill claim <card>), whose "
-            "marker records it")
+            f"README.md there excepted) lands from a card's claim (quill claim <card>), whose "
+            f"marker records it{pinned}")
 
 
 @pytest.fixture(name="image")
@@ -72,32 +76,37 @@ def _check(capsys, image):
     return _run
 
 
-@pytest.mark.parametrize(("change", "paths"), [
-    ({"app.py": "a money fix\n"}, "app.py"),
-    ({"app.py": None}, "app.py"),
-    ({"Dockerfile": "FROM python:slim\n"}, "Dockerfile"),
-    ({"deploy/run.sh": "deploy twice\n"}, "deploy/run.sh"),
-    ({_HELPER: "running, paused counted\n"}, _HELPER),
-    ({_PUBLISH: "on: [push, workflow_dispatch]\n"}, _PUBLISH),
-    ({_PUBLISH: "# builds the image\non: push\n"}, _PUBLISH),
-    ({".dockerignore": _IGNORED.replace("tools/\n", "")}, "tools/t.py"),
+@pytest.mark.parametrize(("change", "paths", "why"), [
+    ({"app.py": "a money fix\n"}, "app.py", None),
+    ({"app.py": None}, "app.py", None),
+    ({"Dockerfile": "FROM python:slim\n"}, "Dockerfile",
+     "Dockerfile changes line 1, which pins no version by the version in its image's tag and "
+     "its digest"),
+    ({"deploy/run.sh": "deploy twice\n"}, "deploy/run.sh", None),
+    ({_HELPER: "running, paused counted\n"}, _HELPER, None),
+    ({_PUBLISH: "on: [push, workflow_dispatch]\n"}, _PUBLISH,
+     f"{_PUBLISH} changes line 1, which pins no version by its action's commit and release"),
+    ({_PUBLISH: "# builds the image\non: push\n"}, _PUBLISH, f"{_PUBLISH} adds or deletes a line"),
+    ({".dockerignore": _IGNORED.replace("tools/\n", "")}, "tools/t.py", None),
     ({f"app/{n}.py": "new\n" for n in range(7)},
-     "app/0.py, app/1.py, app/2.py, app/3.py, app/4.py and 2 more"),
+     "app/0.py, app/1.py, app/2.py, app/3.py, app/4.py and 2 more", None),
 ], ids=["an app edit", "an app delete", "the Dockerfile", "the deploy script",
         "the deploy script's helper", "the publish workflow",
         "a comment in the publish workflow", "tools/ taken into the image", "seven files"])
 def test_a_change_to_what_production_runs_writing_no_marker_is_refused(check, image, change,
-                                                                       paths):
+                                                                       paths, why):
     """fix/grid-total, no card's claim, changes production: an image file edited or deleted,
     the Dockerfile, the deploy script, the helper it sources (R-BAL254) or the publish
     workflow (read whole, a comment included, R-BAL401) although the image excludes them, or
     the ignore file taking a file into the image.  It is refused, naming at most five paths,
-    and the tracker is not read."""
+    and where it edits a file that pins versions, why the edit moves more than versions
+    (ruling plan#2351; the developer confirmed the longer sentence 2026-10-30); the tracker
+    is not read."""
     root, base = image
     head = commit_files(root, base, "fix", change)
     status, out, _ = check(base, head, "fix/grid-total")
     assert (status, out.splitlines()) == (
-        1, [_refused("fix/grid-total", paths), verdict("fix/grid-total", 0, 1)])
+        1, [_refused("fix/grid-total", paths, why), verdict("fix/grid-total", 0, 1)])
 
 
 @pytest.mark.parametrize("change", [

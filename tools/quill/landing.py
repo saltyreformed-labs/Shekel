@@ -1,8 +1,9 @@
 """Refuse a pull request whose merge writes a ship marker, or a task's done file, it may not,
-or changes what production runs and writes none: CI's one write rule (ruling
-``balance:R-BAL359``, the ship marker; step X-cx's M2; ``R-BAL386``, a task's done file; and
-``R-BAL362``, production's files), judged at the one gate every change into ``dev`` or
-``main`` passes, since each takes a change only through its merge queue (``R-BAL322``).
+or changes what production runs, more than its pinned versions, and writes none: CI's one
+write rule (ruling ``balance:R-BAL359``, the ship marker; step X-cx's M2; ``R-BAL386``, a
+task's done file; and ``R-BAL362``, production's files, narrowed by plan#2351), judged at
+the one gate every change into ``dev`` or ``main`` passes, since each takes a change only
+through its merge queue (``R-BAL322``).
 
 **A card shipped when its marker ``plan/ships/N`` is on ``dev`` or ``main``**
 (:func:`_git.shipped`), and a release counts the money changes it carries from the markers
@@ -130,7 +131,7 @@ it leaves as it was (rule 8):**
    (:func:`_production.changed`: the files the image holds, read from its ignore file by
    Docker's own rules, and the files outside it that build or run production,
    :data:`_production.RECIPE` and ``deploy/`` but its ``README.md`` files), a change writing
-   no marker is refused (:func:`_unrecorded`).  Which marker it writes, and from which
+   no marker is refused (:func:`_unrecorded.refused`).  Which marker it writes, and from which
    branch, rules 1-8 judge.  A release and a resync change production only with the markers
    they bring, which rules 3 and 4 judge as carried; one that brings none and still changes
    production carries code ``dev`` kept after deleting its card's marker, which no release
@@ -145,6 +146,17 @@ it leaves as it was (rule 8):**
    the marker of a hotfix the branch merged in, keeping its code, is refused where that
    code is in the image, as ``dev`` then gains production code recording no card; resync
    first, then delete the marker on ``dev``'s own line (S3b's review, its finding 4).
+   **But a change that moves pinned versions alone lands with none** (ruling plan#2351,
+   which narrows ``R-BAL362`` so a weekly update needs no card; the release lists what
+   moved, plan#2353): one that changes no plan record (a marker passes rule 9 anyway; an
+   update writes no record, so a change that does is judged as any other), and whose every
+   path where production differs is a file that pins versions, changed in its versions
+   alone, none across a major: ``uv.lock`` with no package added or removed (so no
+   ``pyproject.toml`` edit beside it), a ``FROM`` line of the ``Dockerfile``, an ``image:``
+   line of ``docker-compose.yml`` and a ``uses:`` line of the publish workflow
+   (:mod:`tools.quill._versions` says what each may move).  Anything else, a major
+   included, still records a card, and where the change touches a file that pins versions
+   the refusal says what more it does.
 
 **A task's done file ``plan/tasks/T`` is judged by the same rules** (``R-BAL386``): a
 task is a piece of one card, a commit inside its one pull request, done when its file is in
@@ -212,7 +224,7 @@ import requests
 
 from tools.ci.arcs import REPO
 from tools.ci.gitcmd import DEV, FULL_ID, MAIN, GitError, git, is_ancestor, tracking
-from tools.quill import _doing, _findings, _git, _production, _stamps, _tasks
+from tools.quill import _doing, _findings, _git, _production, _stamps, _tasks, _unrecorded
 from tools.quill._command import with_closure
 from tools.quill._exits import described
 from tools.quill._github import GitHub, GitHubError, reading
@@ -235,11 +247,6 @@ _QUEUED = re.compile(r"(?:refs/heads/)?gh-readonly-queue/.+/pr-(?P<number>[1-9][
                      rf"-(?:{FULL_ID.pattern})")
 #: The verb each status of a written entry reads as.
 _VERBS = {"A": "adds", "M": "changes", "T": "changes the type of"}
-#: How many of production's changed paths rule 9's sentence names before it counts the rest.
-_NAMED = 5
-#: The files outside the image that rule 9's sentence names, as :mod:`_production` reads them.
-_OUTSIDE = (f"{', '.join(_production.RECIPE)} or {_production.DEPLOY}/ (a "
-            f"{_production.README} there excepted)")
 
 
 @dataclass(frozen=True)
@@ -353,6 +360,13 @@ class Landing:
         holds and each card whose file naming its task in progress it holds, with that file's
         line, by quill's one reading of a tree's records (:func:`_git.lines_in`)."""
         return {directory: _git.lines_in(self.root, self.merge, directory)[0]
+                for directory in _WALKED}
+
+    @cached_property
+    def records(self) -> Mapping[str, tuple[_git.Entry, ...]]:
+        """By directory, as :attr:`lines` reads them, each entry M changes there: an add, a
+        change or a delete of a record, or of a path there that is none (rule 1)."""
+        return {directory: tuple(entry for entry in self.entries if _under(entry.path, directory))
                 for directory in _WALKED}
 
     @cached_property
@@ -639,8 +653,7 @@ def _judged(landing: Landing) -> tuple[list[str], dict[str, set[int]]]:
             reasons.append(why)
         if number is not None:
             read[kind.directory].add(number)
-    reasons += _doing.refused(landing, [entry for entry in landing.entries
-                                        if _under(entry.path, _git.DOING)])
+    reasons += _doing.refused(landing, landing.records[_git.DOING])
     return reasons, read
 
 
@@ -790,29 +803,6 @@ def _unwritten(landing: Landing, after: _git.Merged,
             for reason in _unsettled(landing, kind, before, now[kind.directory])]
 
 
-def _unrecorded(landing: Landing) -> list[str]:
-    """Rule 9 (``R-BAL362``, ``R-BAL364``, ``R-BAL400``, ``R-BAL401``): one sentence when
-    ``landing`` writes or deletes no entry under :data:`_git.MARKERS` and production built
-    from M differs from production built from M's first parent (:func:`_production.changed`),
-    naming the paths where it does; none otherwise.
-
-    Raises:
-        _production.IgnoreFileError: when the ignore file either commit holds is one Docker
-            refuses.
-        tools.ci.gitcmd.GitError: when git cannot read either commit.
-    """
-    if any(_under(entry.path, _git.MARKERS) for entry in landing.entries):
-        return []
-    if not (paths := _production.changed(landing.root, landing.onto, landing.merge)):
-        return []
-    more = f" and {len(paths) - _NAMED} more" if len(paths) > _NAMED else ""
-    return [f"{landing.pull.head or 'a branch of another repository'} changes what production "
-            f"runs ({', '.join(paths[:_NAMED])}{more}), but adds, changes or deletes no ship "
-            "marker, so no release would count it: a change to a file the production image "
-            f"holds, {_OUTSIDE} lands from a card's claim (quill claim <card>), whose marker "
-            "records it"]
-
-
 def _wrong(number: int, card: BareCard | None, cards: Mapping[int, BareCard],
            shipped: Iterable[int]) -> str | None:
     """What the tracker says is wrong with a change recording card ``number``, whose card
@@ -915,7 +905,7 @@ def problems(root: Path, merge: str, pull: PullRequest,
             line or the claim's commits, or merge either tip with the other branch; or a
             marker or a task's done file conflicts AFTER where :func:`_unwritten` says, or a
             marker anywhere once a card or task must be read.
-        _production.IgnoreFileError: as :func:`_unrecorded` raises it.
+        _production.IgnoreFileError: as :func:`_unrecorded.refused` raises it.
         NotSet, _tracker.TrackerError, _github.GitHubError, requests.RequestException: as
             :func:`refusals` raises them.
     """
@@ -924,12 +914,11 @@ def problems(root: Path, merge: str, pull: PullRequest,
     after = _git.merge(root, (merge, landing.other))
     now = {kind.directory: _settled(root, after, kind) for kind in _KINDS}
     reasons += _unwritten(landing, after, now)
-    reasons += _unrecorded(landing)
+    reasons += _unrecorded.refused(landing)
     if any(read.values()):
         after.settled()  # rule 7 reads which leaves shipped, unknown where a marker conflicts
         reasons += refusals(landing, read, now[_git.MARKERS].keys(), connect)
-    return {directory: sum(1 for entry in landing.entries if _under(entry.path, directory))
-            for directory in _DIRECTORIES}, reasons
+    return {directory: len(landing.records[directory]) for directory in _DIRECTORIES}, reasons
 
 
 def _verdict(root: Path, merge: str, pull: PullRequest,

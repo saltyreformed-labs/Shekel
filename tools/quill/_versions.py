@@ -1,0 +1,270 @@
+"""The versions a change moves in the files production runs (ruling plan#2351, which narrows
+``balance:R-BAL362``): a change that moves nothing but pinned versions lands with no card, as
+CI's write rule reads it (``tools/quill/landing.py``, rule 9), and anything else, a major
+version included, still needs one.
+
+**A version-only change moves only version data in each file of production it changes**
+(:func:`moves`), and only in the files that pin versions (:data:`PINNED`):
+
+- ``uv.lock``, read as TOML, as uv reads it (:func:`_lock`): its header (all but its
+  packages) as it was, the same packages by name, each named once, and of each package from
+  a registry only its files (``sdist`` and ``wheels``, each with its hash) and, where its
+  version moves, that version and the dependencies it declares; a package from no registry
+  (the project's own) as it was.  A package added or removed is no version moved, and
+  neither is an edit to ``pyproject.toml``, which the image holds and which pins nothing,
+  so a new package, direct or indirect, or a new range needs a card.
+- a ``FROM`` line of the ``Dockerfile`` and an ``image:`` line of ``docker-compose.yml``,
+  each pinning an image by tag and digest (``name:<version><variant>@sha256:<digest>``): only
+  the tag's version and the digest move, the image's name, the tag's variant (``-alpine``)
+  and the rest of the line as they were.
+- a ``uses:`` line of the workflow that builds and signs the image, pinning an action by
+  commit with its release beside it (``owner/repo@<sha> # v<version>``): only the commit and
+  the release move.
+
+Every other line of those three files is as it was, byte for byte: each file is read as git
+holds it, and refused when its text does not hash back to its object (a line ending changed,
+or bytes no decoding keeps), so a line compared equal is equal.
+
+**A major is the release up to its first number that is not zero** (:func:`_major`, its
+epoch first), so ``12.3.0`` to ``13.0.0`` crosses one and a 0.x package's minor is its
+major, as ``pyproject.toml``'s ranges hold each direct package (``uv add --bounds major``'s
+form); a calendar version (``2026.5``) crosses one each year.  Every package is judged,
+indirect ones included: ``uv lock --upgrade`` moves an indirect package across a major
+without any ``pyproject.toml`` edit (pillow ``12.3.0`` to ``13.0.0`` through
+``qrcode[pil]``, measured 2026-10-30 at plan#2325).  A version this module cannot read moves
+no version it can vouch for, so it is refused.
+"""
+from __future__ import annotations
+
+import re
+import tomllib
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+
+from tools.ci.gitcmd import git
+from tools.quill._production import COMPOSE, DOCKERFILE, PUBLISH
+
+#: The lock every install reads (ruling ``balance:R-BAL294``).
+LOCK = "uv.lock"
+#: The modes of a file whose text a version-only change may move: a file, executable or not.
+_FILE_MODES = ("100644", "100755")
+#: A version's epoch and release (PEP 440), as uv writes them, any pre, post, dev or local
+#: part after.
+_RELEASE = re.compile(r"(?:(?P<epoch>[0-9]+)!)?(?P<release>[0-9]+(?:\.[0-9]+)*)")
+#: An image pinned by tag and digest, the tag a version and a variant: what it pins, the
+#: version, the variant and the digest.
+_IMAGE = (r"(?P<what>[^\s@]+):(?P<version>[0-9]+(?:\.[0-9]+)*)(?P<variant>[A-Za-z0-9_.-]*)"
+          r"@sha256:(?P<exact>[0-9a-f]{64})")
+#: What a package from a registry may change where its version does not move: its files, a
+#: source distribution and wheels, each with its hash.
+_DISTRIBUTIONS = frozenset({"sdist", "wheels"})
+#: What a package from a registry may change where its version moves: that version, its
+#: files and the dependencies it declares.
+_MOVED = _DISTRIBUTIONS | {"version", "dependencies", "optional-dependencies"}
+
+
+class NotVersions(ValueError):
+    """A change to a file production runs that moves more than its pinned versions; its
+    message says what more, as a clause naming the file."""
+
+
+@dataclass(frozen=True)
+class Move:
+    """One version a change moves in a file production runs: ``what`` (a package, an image,
+    an action) moves from ``old`` to ``new`` (a package's version, the version in an image's
+    tag, an action's release), across a ``major`` or not.  A digest or a commit moved under
+    the same tag or release is a move from that version to itself."""
+
+    what: str
+    old: str
+    new: str
+    major: bool
+
+
+@dataclass(frozen=True)
+class _Pins:
+    """How one file pins versions, a line each: ``line``, the expression a pinning line
+    matches whole, whose ``version`` and ``exact`` groups are what a version-only change may
+    move and whose ``what`` group is what it pins; ``slots``, how a sentence names the two."""
+
+    line: re.Pattern[str]
+    slots: str
+
+
+#: How each file that pins versions a line each pins them, by path.
+_LINES = {
+    DOCKERFILE: _Pins(re.compile(rf"\s*(?i:FROM)\s+(?:--\S+\s+)*{_IMAGE}(?:\s.*)?"),
+                      "the version in its image's tag and its digest"),
+    COMPOSE: _Pins(re.compile(rf"\s*image:\s*{_IMAGE}(?:\s.*)?"),
+                   "the version in its image's tag and its digest"),
+    PUBLISH: _Pins(re.compile(r"\s*(?:-\s+)?uses:\s*(?P<what>[^\s@]+)@(?P<exact>[0-9a-f]{40})"
+                              r"\s+#\s+v(?P<version>[0-9]+(?:\.[0-9]+)*)\s*"),
+                   "its action's commit and release"),
+}
+#: The files of production whose versions a change may move with no card, by path.
+PINNED = frozenset({LOCK, *_LINES})
+
+
+def _major(version: str) -> tuple[int, ...] | None:
+    """The major version ``version`` names: its epoch, then its release up to and including
+    its first number that is not zero, trailing zeros dropped first (so ``1`` and ``1.0.2``
+    name one major, and ``0.6.3`` names ``0.6``); None when it starts with no release."""
+    if (match := _RELEASE.match(version)) is None:
+        return None
+    release = [int(number) for number in match["release"].split(".")]
+    while release and not release[-1]:
+        release.pop()
+    end = next((at + 1 for at, number in enumerate(release) if number), 0)
+    return (int(match["epoch"] or 0), *release[:end])
+
+
+def _exact(root: Path, path: str, oid: str) -> list[str]:
+    """The lines of ``path``'s object ``oid``, as git holds it.
+
+    Raises:
+        NotVersions: when its text does not hash back to ``oid`` (a line ending, or bytes no
+            decoding keeps), so its lines are not the file's.
+        tools.ci.gitcmd.GitError: when git cannot read or hash it.
+    """
+    text = git(root, "cat-file", "blob", oid)
+    if git(root, "hash-object", "--stdin", stdin=text).strip() != oid:
+        raise NotVersions(f"{path} holds text this check cannot read byte for byte (a line "
+                          "ending, or bytes no decoding keeps)")
+    return text.split("\n")
+
+
+def _frame(pin: re.Match[str]) -> tuple[str, ...]:
+    """A pinning line (:class:`_Pins`) without what a version-only change may move: its text
+    around its ``version`` and ``exact`` groups."""
+    (start, end), (later, last) = sorted((pin.span("version"), pin.span("exact")))
+    line = pin.string
+    return line[:start], line[end:later], line[last:]
+
+
+def _lines(root: Path, path: str, old: str, new: str) -> tuple[Move, ...]:
+    """Each version the change from object ``old`` to ``new`` of ``path``, a file pinning
+    versions a line each (:data:`_LINES`), moves, in the file's order.
+
+    Raises:
+        NotVersions: when a line is added or deleted, or one changes that pins nothing, or
+            changes more than what it pins (the module's rules).
+        tools.ci.gitcmd.GitError: when git cannot read or hash either object.
+    """
+    pins = _LINES[path]
+    before, after = _exact(root, path, old), _exact(root, path, new)
+    if len(before) != len(after):
+        raise NotVersions(f"{path} adds or deletes a line")
+    found = []
+    for number, (was, now) in enumerate(zip(before, after), start=1):
+        if was == now:
+            continue
+        old_pin, new_pin = pins.line.fullmatch(was), pins.line.fullmatch(now)
+        if old_pin is None or new_pin is None:
+            raise NotVersions(f"{path} changes line {number}, which pins no version by "
+                              f"{pins.slots}")
+        if _frame(old_pin) != _frame(new_pin):
+            raise NotVersions(f"{path} changes more than {pins.slots} on line {number}")
+        found.append(Move(old_pin["what"], old_pin["version"], new_pin["version"],
+                          _major(old_pin["version"]) != _major(new_pin["version"])))
+    return tuple(found)
+
+
+def _read(text: str) -> dict[str, object]:
+    """The lock whose text is ``text``, as TOML reads it.
+
+    Raises:
+        NotVersions: when it is no TOML.
+    """
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise NotVersions(f"{LOCK} is no TOML: {error}") from error
+
+
+def _packages(lock: dict[str, object]) -> dict[str, dict[str, object]]:
+    """Each package ``lock`` holds, by its name.
+
+    Raises:
+        NotVersions: when one has no name, or a name is held more than once (a resolution
+            forked by environment), which a version-only change cannot be told by.
+    """
+    packages = lock.get("package", [])
+    if not isinstance(packages, list) or not all(
+            isinstance(package, dict) and isinstance(package.get("name"), str)
+            for package in packages):
+        raise NotVersions(f"{LOCK} holds a package with no name")
+    if twice := sorted(name for name, count in Counter(
+            package["name"] for package in packages).items() if count > 1):
+        raise NotVersions(f"{LOCK} holds {', '.join(twice)} more than once")
+    return {package["name"]: package for package in packages}
+
+
+def _lock(old: str, new: str) -> tuple[Move, ...]:
+    """Each version the change from the lock text ``old`` to ``new`` moves, by package name.
+
+    Raises:
+        NotVersions: when either is no TOML or holds a package :func:`_packages` refuses, or
+            the change moves more than versions (the module's rules), or one it moves names
+            no version :func:`_major` reads.
+    """
+    before, after = _read(old), _read(new)
+    if header := sorted(key for key in before.keys() | after.keys()
+                        if key != "package" and before.get(key) != after.get(key)):
+        raise NotVersions(f"{LOCK} changes its {', '.join(header)}")
+    was, now = _packages(before), _packages(after)
+    if added := sorted(now.keys() - was.keys()):
+        raise NotVersions(f"{LOCK} adds {', '.join(added)}, a package of no version before")
+    if removed := sorted(was.keys() - now.keys()):
+        raise NotVersions(f"{LOCK} removes {', '.join(removed)}")
+    return tuple(move for name in sorted(was)
+                 if (move := _package(name, was[name], now[name])) is not None)
+
+
+def _package(name: str, old: dict[str, object], new: dict[str, object]) -> Move | None:
+    """The version the change from the lock's entry ``old`` for package ``name`` to ``new``
+    moves, None where it moves none: a package from a registry may change only its files,
+    and where its version moves, that version and the dependencies it declares too; one from
+    no registry nothing.
+
+    Raises:
+        NotVersions: when the change moves more than that, or moves a version :func:`_major`
+            cannot read.
+    """
+    was, now = old.get("version"), new.get("version")
+    registry = set(old.get("source", {})) == {"registry"}
+    free = (_MOVED if was != now else _DISTRIBUTIONS) if registry else frozenset()
+    if changed := sorted(key for key in old.keys() | new.keys()
+                         if key not in free and old.get(key) != new.get(key)):
+        raise NotVersions(f"{LOCK} changes {name}'s {', '.join(changed)}")
+    if was == now:
+        return None
+    majors = [_major(version) if isinstance(version, str) else None for version in (was, now)]
+    if None in majors:
+        raise NotVersions(f"{LOCK} moves {name} from {was} to {now}, a version this check "
+                          "cannot read")
+    return Move(name, str(was), str(now), majors[0] != majors[1])
+
+
+def moves(root: Path, path: str, was: str | None, now: str | None) -> tuple[Move, ...]:
+    """Each version a change moves in ``path``, a file of production's whose mode and object
+    production before the change held as ``was`` and after it as ``now``, each as
+    :func:`_production.changed` gives them (None where that production holds no such file):
+    by package name in the lock, in the file's order in any other.
+
+    Raises:
+        NotVersions: when the change moves more than versions there (the module's rules).
+        tools.ci.gitcmd.GitError: when git cannot read or hash either object.
+    """
+    if path not in PINNED:
+        raise NotVersions(f"{path} pins no version")
+    if was is None or now is None:
+        raise NotVersions(f"{path} {'enters' if was is None else 'leaves'} production")
+    (old_mode, old), (new_mode, new) = was.split(" "), now.split(" ")
+    if old_mode != new_mode:
+        raise NotVersions(f"{path} changes its mode")
+    if old_mode not in _FILE_MODES:
+        raise NotVersions(f"{path} is no file, but a link or a submodule's commit")
+    if path == LOCK:
+        return _lock(git(root, "cat-file", "blob", old), git(root, "cat-file", "blob", new))
+    return _lines(root, path, old, new)

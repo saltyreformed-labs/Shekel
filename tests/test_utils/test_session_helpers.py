@@ -39,11 +39,17 @@ from app.utils.session_helpers import (
     FRESH_LOGIN_AT_KEY,
     SESSION_CREATED_AT_KEY,
     SESSION_LAST_ACTIVITY_KEY,
+    SESSION_USER_ID_KEY,
     invalidate_other_sessions,
+    sign_in_created_at,
     stamp_login_session,
     stamp_reauth_session,
     stamp_session_refresh,
 )
+
+#: A user id for the stamping tests that load no user: the stamp is written
+#: whatever the id, and only the loader tests below look one up.
+_STAMPED_USER_ID = 7
 
 
 class _LogCapture:
@@ -302,7 +308,7 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         user = seed_user["user"]
 
         with app.test_request_context("/"):
-            stamp_login_session(datetime.now(timezone.utc))
+            stamp_login_session(datetime.now(timezone.utc), user.id)
             invalidate_other_sessions(user, "current_passes_check")
             # The cookie the helper just wrote is still on the
             # request context's session.  Drive the loader.
@@ -338,7 +344,7 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         user = seed_user["user"]
 
         with app.test_request_context("/") as ctx:
-            stamp_login_session(datetime.now(timezone.utc))
+            stamp_login_session(datetime.now(timezone.utc), user.id)
             stale_value = (
                 datetime.now(timezone.utc) - timedelta(hours=1)
             ).isoformat()
@@ -375,12 +381,19 @@ class TestStampLoginSession:
         """
         with app.test_request_context("/") as ctx:
             now = datetime.now(timezone.utc)
-            stamp_login_session(now)
+            stamp_login_session(now, _STAMPED_USER_ID)
 
             iso = now.isoformat()
             assert ctx.session[SESSION_CREATED_AT_KEY] == iso
             assert ctx.session[SESSION_LAST_ACTIVITY_KEY] == iso
             assert ctx.session[FRESH_LOGIN_AT_KEY] == iso
+
+    def test_writes_the_user_as_flask_login_spells_the_id(self, app):
+        """The user stamp is the id's string, as ``load_user`` is handed it."""
+        with app.test_request_context("/") as ctx:
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+
+            assert ctx.session[SESSION_USER_ID_KEY] == str(_STAMPED_USER_ID)
 
     def test_overwrites_existing_values(self, app):
         """Subsequent calls overwrite, never append.
@@ -393,14 +406,48 @@ class TestStampLoginSession:
             ctx.session[SESSION_CREATED_AT_KEY] = "stale-1"
             ctx.session[SESSION_LAST_ACTIVITY_KEY] = "stale-2"
             ctx.session[FRESH_LOGIN_AT_KEY] = "stale-3"
+            ctx.session[SESSION_USER_ID_KEY] = "stale-4"
 
             now = datetime.now(timezone.utc)
-            stamp_login_session(now)
+            stamp_login_session(now, _STAMPED_USER_ID)
 
             iso = now.isoformat()
             assert ctx.session[SESSION_CREATED_AT_KEY] == iso
             assert ctx.session[SESSION_LAST_ACTIVITY_KEY] == iso
             assert ctx.session[FRESH_LOGIN_AT_KEY] == iso
+            assert ctx.session[SESSION_USER_ID_KEY] == str(_STAMPED_USER_ID)
+
+
+class TestSignInCreatedAt:
+    """``sign_in_created_at`` answers only for the user the sign-in stamped."""
+
+    def test_the_stamped_user_gets_the_creation_stamp(self, app):
+        """Asked for the user the sign-in named: its ``_session_created_at``."""
+        with app.test_request_context("/"):
+            now = datetime.now(timezone.utc)
+            stamp_login_session(now, _STAMPED_USER_ID)
+
+            assert sign_in_created_at(str(_STAMPED_USER_ID)) == now.isoformat()
+
+    def test_another_user_gets_nothing(self, app):
+        """Asked for any other user, as a remember-cookie restore asks: ``None``."""
+        with app.test_request_context("/"):
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
+
+            assert sign_in_created_at(str(_STAMPED_USER_ID + 1)) is None
+
+    def test_timestamps_without_a_user_stamp_get_nothing(self, app):
+        """A session with the timestamps but no user stamp: ``None``.
+
+        The shape of every session signed in before the user stamp existed,
+        so each is signed out once by the deploy that adds it.
+        """
+        with app.test_request_context("/") as ctx:
+            ctx.session[SESSION_CREATED_AT_KEY] = (
+                datetime.now(timezone.utc).isoformat()
+            )
+
+            assert sign_in_created_at(str(_STAMPED_USER_ID)) is None
 
 
 class TestStampReauthSession:
@@ -501,7 +548,7 @@ class TestStampHelpersWriteIsoStrings:
     def test_stamp_login_session_writes_iso_strings(self, app):
         """All three keys parse with ``datetime.fromisoformat``."""
         with app.test_request_context("/") as ctx:
-            stamp_login_session(datetime.now(timezone.utc))
+            stamp_login_session(datetime.now(timezone.utc), _STAMPED_USER_ID)
             for key in (
                 SESSION_CREATED_AT_KEY,
                 SESSION_LAST_ACTIVITY_KEY,

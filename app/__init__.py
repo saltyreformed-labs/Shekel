@@ -22,8 +22,8 @@ from app.routes.static_pass import static_file_version
 from app.url_converters import register_url_converters
 from app.utils.logging_config import setup_logging
 from app.utils.session_helpers import (
-    SESSION_CREATED_AT_KEY,
     SESSION_LAST_ACTIVITY_KEY,
+    sign_in_created_at,
 )
 
 
@@ -95,9 +95,9 @@ def create_app(config_name=None, *, init_ref_cache=True):
         """Load a user by ID for Flask-Login session hydration.
 
         Returns None (forcing re-login) for any of:
-          * No ``_session_created_at``: a session the app's own sign-in
-            did not start, such as Flask-Login's remember-me restore
-            (plan#2173; ``app.utils.session_helpers`` says why).
+          * No sign-in of THIS user stamped the session: none at all, or
+            another user's, as a remember-cookie restore lands on
+            (plan#2173; ``sign_in_created_at`` in session_helpers).
           * Unknown user ID.
           * Deactivated user (``is_active=False``).
           * Session created before the most recent
@@ -109,7 +109,7 @@ def create_app(config_name=None, *, init_ref_cache=True):
         A None return triggers Flask-Login's "logged out" flow on the
         next request, redirecting to the configured ``login_view``.
         """
-        session_created = flask_session.get(SESSION_CREATED_AT_KEY)
+        session_created = sign_in_created_at(user_id)
         if session_created is None:
             return None
         user = db.session.get(User, int(user_id))

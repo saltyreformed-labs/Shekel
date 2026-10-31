@@ -104,8 +104,9 @@ def _complete_sign_in(user, next_page: str | None) -> Response:
     ``/login`` password with no second factor, ``/mfa/verify``'s code, or
     the ``/login`` password on a trusted device (plan#2173).  It clears any
     pending code state (a completed sign-in leaves none behind), calls
-    ``login_user``, stamps every lifecycle key from one instant so the idle
-    and fresh-login checks start where the session did (commit C-10), and
+    ``login_user``, stamps the user and every lifecycle key from one instant
+    so the idle and fresh-login checks start where the session did (commit
+    C-10) and no other user's id can be loaded on it (plan#2173), and
     chooses the landing page.  What differs per proof stays with its caller:
     the log event, a backup code's sign-out of every other session, and a
     device's trust, each written to the response this returns.
@@ -121,7 +122,7 @@ def _complete_sign_in(user, next_page: str | None) -> Response:
     """
     _clear_mfa_pending_state()
     login_user(user)
-    stamp_login_session(datetime.now(timezone.utc))
+    stamp_login_session(datetime.now(timezone.utc), user.id)
     if user.role_id == ref_cache.role_id(RoleEnum.COMPANION):
         return redirect(url_for("companion.index"))
     if not _is_safe_redirect(next_page):

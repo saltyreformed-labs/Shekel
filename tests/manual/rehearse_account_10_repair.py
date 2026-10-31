@@ -677,9 +677,11 @@ class _Operator:
             session["_user_id"] = str(self.user_id)
             session["_fresh"] = True
             session["_id"] = None
-            # The stamps a sign-in writes: ``load_user`` refuses a session
-            # without them (plan#2173).
-            session.update(login_session_stamps(datetime.now(timezone.utc)))
+            # The stamps a sign-in writes, the user's among them: ``load_user``
+            # refuses a session without them (plan#2173).
+            session.update(login_session_stamps(
+                datetime.now(timezone.utc), self.user_id,
+            ))
         self.acts = 0
 
     def _drain_flashes(self) -> "list[tuple[str, str]]":

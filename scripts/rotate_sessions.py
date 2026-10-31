@@ -23,11 +23,14 @@ script writes nothing to ``auth.trusted_devices``: the rows stay
 until their user's next trust purges them, trusted by nothing.
 
 This docstring once said the script also revokes remember-me tokens.  It
-never did: Flask-Login's remember-me restore starts a session with no
-``_session_created_at``, which the comparison above skipped.  Since
-plan#2173 ``load_user`` refuses any session without that stamp, so every
-remember-me cookie ever issued is refused whatever this script does, and
-the app issues none (ruling plan#2406).
+never did: Flask-Login's remember-me restore loads the cookie's user on
+whatever session the request carries, an empty one with no
+``_session_created_at`` (which the comparison above skipped) or another
+user's, stamps and all.  Since plan#2173 ``load_user`` refuses any session
+whose stamps no sign-in of the loaded user wrote
+(``app.utils.session_helpers.sign_in_created_at``), so every remember-me
+cookie ever issued is refused whatever this script does, and the app
+issues none (ruling plan#2406).
 
 Usage:
     python scripts/rotate_sessions.py --confirm

@@ -6,19 +6,25 @@ plan#2406).  A "Remember me" cookie is Flask-Login's
 ``encode_cookie(str(user.id))`` -- ``"<id>|HMAC(SECRET_KEY, '<id>')"``, the
 SAME value for every remembered sign-in of a user, with no server-side
 expiry -- and Flask-Login restores a session from one on any request that
-carries it, whether or not the app ever issues one again.  The restore calls
-``load_user`` on an EMPTY session, so the ``session_invalidated_at`` check,
-which ran only when ``_session_created_at`` was present, never ran: measured
-on the real app on 2026-10-29, a client sending only a copied cookie stayed
-signed in after "log out all sessions", three requests of three.
+carries it, whether or not the app ever issues one again.  Whenever the
+loader refuses the session's own user, or the session names none, the restore
+writes the cookie's user id into the CURRENT session and calls ``load_user``
+again.  On an empty session the ``session_invalidated_at`` check, which ran
+only when ``_session_created_at`` was present, never ran: measured on the real
+app on 2026-10-29, a client sending only a copied cookie stayed signed in
+after "log out all sessions", three requests of three.
 
 Deleting the checkbox could not reach a cookie already copied, so
-``load_user`` now refuses any session the app's own sign-in did not start
-(no ``_session_created_at``) and reads a session without
-``_session_last_activity_at`` as stale.  These tests drive the real app: a
-cookie minted exactly as Flask-Login minted every remember cookie is refused
-before and after a sign-out of all sessions, and a signed-in session that
-loses either stamp is signed out.
+``load_user`` now refuses any session no sign-in of the loaded user stamped
+(``app.utils.session_helpers.sign_in_created_at``) and reads a session without
+``_session_last_activity_at`` as stale.  The user stamp is the half a first
+fix lacked: with the timestamps alone, a copied cookie riding ANOTHER user's
+refused session (signed out elsewhere, or deactivated) borrowed that user's
+timestamps and was signed in as the cookie's user (the 2026-10-31 review,
+measured three of three).  These tests drive the real app: a cookie minted
+exactly as Flask-Login minted every remember cookie is refused alone, before
+and after a sign-out of all sessions, and on another user's refused session;
+and a signed-in session that loses a stamp is signed out.
 """
 
 from flask_login.config import COOKIE_NAME
@@ -27,15 +33,37 @@ from flask_login.utils import decode_cookie, encode_cookie
 from app.utils.session_helpers import (
     SESSION_CREATED_AT_KEY,
     SESSION_LAST_ACTIVITY_KEY,
+    SESSION_USER_ID_KEY,
 )
+from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
+
+_SECOND_EMAIL = "second@shekel.local"
+_SECOND_PASSWORD = "secondpass12"
+
+
+def _minted_cookie(app, user_id):
+    """Return a remember-me cookie value for *user_id*, as Flask-Login minted one.
+
+    The minted value is checked to be one Flask-Login accepts, so a refusal
+    below is the loader's and not a malformed cookie's.
+
+    Args:
+        app: The Flask application under test.
+        user_id: The user whose remembered sign-in the cookie stands for.
+
+    Returns:
+        The cookie's value.
+    """
+    with app.test_request_context():
+        token = encode_cookie(str(user_id))
+        assert decode_cookie(token) == str(user_id), (
+            "Setup failed: the minted cookie is not one Flask-Login accepts"
+        )
+    return token
 
 
 def _remembered_client(app, user_id):
     """Return a fresh client carrying only a remember-me cookie for *user_id*.
-
-    The cookie is minted the way Flask-Login minted every remember cookie this
-    app ever issued, and the minted value is checked to be one Flask-Login
-    accepts, so a refusal below is the loader's and not a malformed cookie's.
 
     Args:
         app: The Flask application under test.
@@ -44,14 +72,24 @@ def _remembered_client(app, user_id):
     Returns:
         A test client with no session and the one remember-me cookie.
     """
-    with app.test_request_context():
-        token = encode_cookie(str(user_id))
-        assert decode_cookie(token) == str(user_id), (
-            "Setup failed: the minted cookie is not one Flask-Login accepts"
-        )
     remembered = app.test_client()
-    remembered.set_cookie(COOKIE_NAME, token)
+    remembered.set_cookie(COOKIE_NAME, _minted_cookie(app, user_id))
     return remembered
+
+
+def _signed_in_client(app, email, password):
+    """Return a fresh client signed in through the real form (no two-factor)."""
+    browser = app.test_client()
+    response = browser.post("/login", data={
+        "email": email, "password": password,
+    })
+    assert response.status_code == 302, (
+        f"Setup failed: sign-in as {email} returned {response.status_code}"
+    )
+    assert browser.get("/dashboard").status_code == 200, (
+        f"Setup failed: {email} is not signed in"
+    )
+    return browser
 
 
 def _assert_signed_out(response):
@@ -111,6 +149,77 @@ class TestARememberCookieSignsNobodyIn:
         assert auth_client.get("/dashboard").status_code == 200
 
 
+class TestACookieOnAnotherUsersRefusedSessionSignsNobodyIn:
+    """Another user's refused session lends the cookie's user nothing.
+
+    Each case is a session the loader refuses for its own user, sent with the
+    first user's cookie: the restore then asks the loader for the cookie's
+    user on that same session.  No case needs a control that the session is
+    refused for its own user: were it not, the page would answer 200 as that
+    user and the signed-out assertion would fail.
+    """
+
+    def test_another_users_session_signed_out_elsewhere(
+        self, app, seed_user, seed_second_user,
+    ):
+        """B is signed out from another browser; A's cookie on B's session is refused."""
+        browser = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
+        elsewhere = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
+        assert elsewhere.post("/invalidate-sessions").status_code == 302
+
+        browser.set_cookie(COOKIE_NAME, _minted_cookie(app, seed_user["user"].id))
+
+        for _ in range(3):
+            _assert_signed_out(browser.get("/dashboard"))
+
+    def test_after_the_cookies_user_signed_out_everywhere(
+        self, app, auth_client, seed_user, seed_second_user,
+    ):
+        """A signs out of every session, then B signs in: still refused.
+
+        The order the review measured: A's ``session_invalidated_at`` is OLDER
+        than B's ``_session_created_at``, so the timestamp comparison passes
+        for A on B's session, and only the user stamp refuses it.
+        """
+        assert auth_client.post("/invalidate-sessions").status_code == 302
+        assert seed_user["user"].session_invalidated_at is not None
+        browser = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
+        elsewhere = _signed_in_client(app, _SECOND_EMAIL, _SECOND_PASSWORD)
+        assert elsewhere.post("/invalidate-sessions").status_code == 302
+
+        browser.set_cookie(COOKIE_NAME, _minted_cookie(app, seed_user["user"].id))
+
+        for _ in range(3):
+            _assert_signed_out(browser.get("/dashboard"))
+
+    def test_a_deactivated_companions_session(
+        self, app, auth_client, seed_user, seed_companion, companion_client,
+    ):
+        """The owner deactivates the companion; the owner's cookie on her session is refused."""
+        companion_id = seed_companion["user"].id
+        response = auth_client.post(
+            f"/settings/companions/{companion_id}/deactivate",
+        )
+        assert response.status_code == 302
+        assert seed_companion["user"].is_active is False, (
+            "Setup failed: the companion was not deactivated"
+        )
+
+        companion_client.set_cookie(
+            COOKIE_NAME, _minted_cookie(app, seed_user["user"].id),
+        )
+
+        for _ in range(3):
+            _assert_signed_out(companion_client.get("/dashboard"))
+
+    def test_the_sign_in_stamps_its_user(self, app, seed_user):
+        """The real sign-in writes the user stamp, as the id's string."""
+        browser = _signed_in_client(app, SEED_USER_EMAIL, SEED_USER_PASSWORD)
+
+        with browser.session_transaction() as sess:
+            assert sess[SESSION_USER_ID_KEY] == str(seed_user["user"].id)
+
+
 class TestASessionMissingAStampIsSignedOut:
     """A signed-in session that loses either stamp is no longer signed in."""
 
@@ -126,4 +235,14 @@ class TestASessionMissingAStampIsSignedOut:
         assert auth_client.get("/dashboard").status_code == 200
         with auth_client.session_transaction() as sess:
             del sess[SESSION_LAST_ACTIVITY_KEY]
+        _assert_signed_out(auth_client.get("/dashboard"))
+
+    def test_no_user_stamp(self, auth_client):
+        """Without ``_session_user_id`` the session is refused.
+
+        The shape of every session signed in before the stamp existed.
+        """
+        assert auth_client.get("/dashboard").status_code == 200
+        with auth_client.session_transaction() as sess:
+            del sess[SESSION_USER_ID_KEY]
         _assert_signed_out(auth_client.get("/dashboard"))

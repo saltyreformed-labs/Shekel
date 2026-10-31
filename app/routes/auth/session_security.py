@@ -98,7 +98,7 @@ def change_password():
             current_user, SecurityEventKind.PASSWORD_CHANGED, now=now,
         )
         db.session.commit()
-        stamp_login_session(now)
+        stamp_login_session(now, current_user.id)
         log_event(logger, logging.INFO, EVT_PASSWORD_CHANGED, AUTH,
                   "Password changed", user_id=current_user.id)
         flash("Password changed successfully.", "success")

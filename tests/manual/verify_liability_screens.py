@@ -399,9 +399,11 @@ def _forged_client(app, user_id):
         session["_user_id"] = str(user_id)
         session["_fresh"] = True
         session["_id"] = None
-        # The stamps a sign-in writes: ``load_user`` refuses a session without
-        # them (plan#2173).
-        session.update(login_session_stamps(datetime.now(timezone.utc)))
+        # The stamps a sign-in writes, the user's among them: ``load_user``
+        # refuses a session without them (plan#2173).
+        session.update(login_session_stamps(
+            datetime.now(timezone.utc), user_id,
+        ))
     return client
 
 

@@ -122,7 +122,10 @@ __all__ = [
 _ZERO_MONEY = Decimal("0.00")
 _ONE_DAY = timedelta(days=1)
 
-#: The most days this report will DRAW, counted back from the most recent.
+#: The most days this report will COMPARE, counted back from the bank's last
+#: drawn day (:attr:`ComparedSpan.bank_through`); the days the books' records
+#: run past it are drawn too, and bounded by the same count apart, so the tail
+#: never pushes compared days off the start (ruling plan#2399).
 #:
 #: **A bound rather than a preference, because the span is user-supplied
 #: and nothing else bounds it.** ``bank_statement_lines.posted_on`` carries
@@ -294,9 +297,10 @@ class ComparedSpan:
         last record, so the minimum of the two stored ends recovers it.  It was
         :attr:`last_day` itself until the drawn days ran on past the bank's
         record to the books' last one (finding **BAL-651**); the LEVEL
-        summary reads through this day (ruling plan#2399).  It precedes
-        :attr:`first_day` where :attr:`last_day` does, and where the books'
-        records run more than the two-year draw past the last line.
+        summary reads through this day (ruling plan#2399), and the two-year
+        bound counts back from it, so the books' records running past the
+        last line move no compared day.  It precedes :attr:`first_day` where
+        :attr:`last_day` does.
         """
         return min(self.recorded_through, self.last_day)
 
@@ -667,7 +671,8 @@ def bank_agreement(
         BaselineMissingError: When *ctx* carries no scenario.
 
     **The span ends at the later of the recorded lines' last day and the
-    books' last record, and never past the reader's NOW**, and the NOW bound
+    books' last record (at most two years past the lines), and never past the
+    reader's NOW**, and the NOW bound
     is load-bearing rather than defensive: a still-Projected row lands at
     ``as_of + 1`` (ruling R-G), so a range stopping at ``as_of`` cannot
     contain one.  Past that day the app's balance carries PLAN, and setting a
@@ -683,12 +688,22 @@ def bank_agreement(
     if span.first_day is None or span.last_day is None:
         return None
     last_record_on = balance_at.cash_last_record_on(account, ctx)
-    last_day = min(span.last_day, ctx.as_of)
-    if last_record_on is not None:
-        last_day = max(last_day, last_record_on)
+    bank_end = min(span.last_day, ctx.as_of)
+    # The two-year draw counts back from the BANK's end, as it did before the
+    # tail existed, so the days the books run past the last line never push
+    # compared days off the start (ruling plan#2399: the summary stays).  The
+    # tail is bounded apart by the same constant, for the bound's own reason:
+    # one line dated 1900 beside records through today would otherwise draw
+    # every day between them.
     first_day = max(
-        span.first_day, last_day - (_MAX_COMPARED_DAYS - 1) * _ONE_DAY,
+        span.first_day, bank_end - (_MAX_COMPARED_DAYS - 1) * _ONE_DAY,
     )
+    last_day = bank_end
+    if last_record_on is not None:
+        last_day = max(
+            bank_end,
+            min(last_record_on, bank_end + _MAX_COMPARED_DAYS * _ONE_DAY),
+        )
     # BOTH ends can leave the drawn range, and an inverted one is legal: a
     # statement entirely in the future yields no comparable day and still
     # reports what it holds.

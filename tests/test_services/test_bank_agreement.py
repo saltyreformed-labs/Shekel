@@ -537,9 +537,60 @@ class TestTheDrawnDaysRunToTheBooksLastRecord:
             assert agreement.span.last_day == later
             assert agreement.span.bank_through == second
             assert _day(agreement, later).gap is None
-            assert agreement.constant_offset is not None
-            assert agreement.constant_offset != _ZERO
-            assert agreement.standing_gap == agreement.constant_offset
+            # The seeded books open at 1000.00: 1000.00 - 40.00 = 960.00 on
+            # the first day and 960.00 - 10.00 = 950.00 on the second; the
+            # bank states 500.00 on the second, so 500.00 + 10.00 = 510.00 on
+            # the first.  960.00 - 510.00 = 950.00 - 500.00 = 450.00 each day.
+            assert agreement.constant_offset == Decimal("450.00")
+            assert agreement.standing_gap == Decimal("450.00")
+
+    def test_a_record_past_the_last_line_moves_NO_compared_day(
+        self, app, seed_user, seed_periods, db,
+    ):
+        """Ruling plan#2399, past two years: the window counts back from the bank's end.
+
+        The lines run 2024-01-10 to 2026-03-20, longer than the two-year
+        bound, and a row settles 2026-04-19, after both.  The window starts
+        731 days before the bank's last line: 2026-03-20 less 730 days is
+        2024-03-20 (no Feb 29 falls between).  Counted back from the books'
+        last record instead it started 2024-04-19, and thirty compared days
+        fell off the start of the summary.
+        """
+        with app.app_context():
+            self._statement(
+                db, seed_user, (date(2024, 1, 10), "-10.00"),
+                (date(2026, 3, 20), "-20.00"),
+            )
+            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 4, 19))
+            db.session.commit()
+
+            agreement = self._agreement_at(seed_user, date(2026, 5, 1))
+
+            assert agreement.span.first_day == date(2024, 3, 20)
+            assert agreement.span.bank_through == date(2026, 3, 20)
+            assert agreement.span.last_day == date(2026, 4, 19)
+            assert agreement.span.starts_late is True
+
+    def test_the_days_past_the_last_line_are_BOUNDED_apart(
+        self, app, seed_user, seed_periods, db,
+    ):
+        """The two-year bound's own reason holds for the tail.
+
+        One line on 2024-01-10 and a row settled 2026-04-19: drawn to the
+        row, the report would draw 831 days past the line.  The tail stops 731
+        days after it: 2024-01-10 plus 366 days (2024 is a leap year) is
+        2025-01-10, plus 365 is 2026-01-10.
+        """
+        with app.app_context():
+            self._statement(db, seed_user, (date(2024, 1, 10), "-10.00"))
+            _settle(seed_user, db, seed_periods[4], "40.00", date(2026, 4, 19))
+            db.session.commit()
+
+            agreement = self._agreement_at(seed_user, date(2026, 5, 1))
+
+            assert agreement.span.first_day == date(2024, 1, 10)
+            assert agreement.span.last_day == date(2026, 1, 10)
+            assert len(agreement.days) == 732
 
 
 class TestDaysBeforeTheRecordsBeginAreLabelledNotCounted:

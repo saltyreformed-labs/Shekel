@@ -35,7 +35,7 @@ from urllib.parse import urlencode, urlsplit
 from werkzeug.datastructures import MultiDict
 
 from app import create_app
-from app.extensions import db, login_manager
+from app.extensions import db, limiter, login_manager
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
 
 #: The flash categories that mean a door REFUSED.  Read after every submission,
@@ -319,7 +319,7 @@ class Operator:
 
         Args:
             app: The Flask application, from :func:`connect`, which disables
-                what refuses a forged session.
+                what refuses a forged session or a machine's pace.
             sheet: The performance sheet every act records into.
             user_id: The owner whose session it is: whoever owns what the
                 acts touch.
@@ -683,6 +683,14 @@ def connect(clone: str, config_name: "str | None" = None):
     # whose identifier was not minted inside a request.
     app.config["WTF_CSRF_ENABLED"] = False
     login_manager.session_protection = None
+    # The rate limiter is off for the same reason: it counts one address's
+    # requests to one page, and a rehearsal presses at a machine's pace where
+    # the owner presses at a person's.  Measured 2026-10-31: the reconcile
+    # rehearsal's 31st full-edit open inside a minute answered 429, against
+    # the default ceiling of 30 a minute (``RATELIMIT_DEFAULT``), with a
+    # Retry-After of 900 s.  It guards no money rule, and the flag is read on
+    # every request, so switching it here takes effect after ``init_app``.
+    limiter.enabled = False
     with app.app_context():
         live = db.session.execute(
             db.text("select current_database()")

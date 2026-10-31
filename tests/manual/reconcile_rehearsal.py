@@ -20,10 +20,13 @@ presses, in the order the doors force:
 3. **The never-moved rows** (:func:`_cancel`, :func:`_delete`): each row cancelled, which is
    TWO presses of its full edit, Status to Projected and then to Cancelled, because the cancel
    door takes only a Projected row and every one of these is Paid; and each envelope line
-   deleted by its X.  **Open, measured 2026-10-30**: the envelope's line list renders no X
-   under a Paid envelope (``purchases_closed`` in ``grid/_transaction_entries.html``), and 6
-   of the sheet's 7 lines sit under one, so the run stops at the first of them (act 17); the
-   presses that remove them are a question for the developer (plan#2414's stop note).
+   deleted by its X.  **The line list renders no X under a Paid envelope**
+   (``purchases_closed`` in ``grid/_transaction_entries.html``), and 6 of the sheet's 7 lines
+   sit under one, so on ruling **plan#2439** such a line is removed as that list's own notice
+   says: Status to Projected, the X, Status to Paid, then "Money moved on" set back to the day
+   the envelope carried.  Measured 2026-10-31 on copies of the acts-1-16 restore: the round
+   trip moves no other line, re-dates only the envelope's own settle day, and with the day
+   typed back ends exactly where a DELETE of the line alone does.
 
 The CARD items, and the act ruling plan#2433 holds back, are named on the sheet, and no act
 touches them: their state is read before the first act and after the last
@@ -70,8 +73,6 @@ from typing import NamedTuple
 
 from flask import Flask
 
-from door_rehearsal import Operator, RefusedError, Sheet, connect, forms_in, new_file
-
 import app as app_package
 from app import ref_cache
 from app.enums import StatementSourceEnum, StatusEnum
@@ -91,6 +92,8 @@ from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services.statement_match import Tab
+
+from door_rehearsal import Operator, RefusedError, Sheet, connect, forms_in, new_file
 
 
 #: The one act ruling **plan#2433** holds back, by its transfer: SECU's
@@ -519,17 +522,37 @@ def _matched(run: Run, act: MatchAct, line_id: int) -> None:
                   f"{posted_on}")
 
 
+def _save_full_edit(run: Run, txn_id: int, control: str, value: str) -> None:
+    """Save row *txn_id*'s full edit once, with the one control the owner changes.
+
+    The caller records the change on the sheet in the screen's words first.
+
+    Args:
+        run: The run.
+        txn_id: The row.
+        control: The control's name in the form.
+        value: What the owner types or picks, as the form submits it.
+    """
+    page = f"/transactions/{txn_id}/full-edit"
+    form = run.operator.form(page)
+    assert (form["method"], form["url"]) == ("patch", f"/transactions/{txn_id}"), \
+        f"{page}'s first form is {form['method']} {form['url']}"
+    run.operator.submit(form, typed={control: value})
+
+
+def _save_status(run: Run, txn_id: int, status: StatusEnum) -> None:
+    """Save row *txn_id*'s full edit with Status set to *status*."""
+    run.sheet.typed("Status", status.value)
+    _save_full_edit(run, txn_id, "status_id", str(ref_cache.status_id(status)))
+
+
 def _cancel(run: Run, number: int, row: dict) -> None:
     """Cancel one never-moved row: Status to Projected, then to Cancelled, in its full edit."""
     txn_id = row["transaction_id"]
     page = f"/transactions/{txn_id}/full-edit"
     run.sheet.act(number, f"Cancel {_named(row)}", f"{page} (the row's full edit: Status)")
     for status in (StatusEnum.PROJECTED, StatusEnum.CANCELLED):
-        form = run.operator.form(page)
-        assert (form["method"], form["url"]) == ("patch", f"/transactions/{txn_id}"), \
-            f"{page}'s first form is {form['method']} {form['url']}"
-        run.sheet.typed("Status", status.value)
-        run.operator.submit(form, typed={"status_id": str(ref_cache.status_id(status))})
+        _save_status(run, txn_id, status)
     run.read(_cancelled, run, txn_id)
 
 
@@ -544,24 +567,75 @@ def _cancelled(run: Run, txn_id: int) -> None:
     run.sheet.say(f"- LANDED: row {txn_id} Cancelled, no movement left")
 
 
+def _closed_on(txn_id: int) -> "date | None":
+    """Return the day envelope *txn_id* closed on, or ``None`` while it is open.
+
+    Closed is the settled band, the predicate the line list withdraws its X on
+    (``purchases_closed`` in ``grid/_transaction_entries.html``).
+    """
+    txn = db.session.get(Transaction, txn_id)
+    return txn.settled_on if txn.status.is_settled else None
+
+
+def _envelope_state(txn_id: int, entry_id: int) -> tuple:
+    """Return what removing line *entry_id* must leave standing in envelope *txn_id*.
+
+    The envelope's status, its settle day with the day's basis and clearing
+    link, and every OTHER line's figure, days, basis, link and whether it is
+    matched: the reopen and re-close of ruling plan#2439 pass through all of
+    them, and the ruling was made on their ending exactly as they began.
+    """
+    txn = db.session.get(Transaction, txn_id)
+    others = db.session.execute(db.select(TransactionEntry).where(
+        TransactionEntry.transaction_id == txn_id, TransactionEntry.id != entry_id,
+    ).order_by(TransactionEntry.id)).scalars()
+    return (
+        txn.status_id, txn.settled_on, txn.settled_day_basis_id, txn.reconciled_by_id,
+        tuple((other.id, other.amount, other.purchased_on, other.settled_on,
+               other.settled_day_basis_id, other.reconciled_by_id, _entry_matched(other.id))
+              for other in others),
+    )
+
+
 def _delete(run: Run, number: int, row: dict) -> None:
-    """Delete one never-moved envelope line by its X in the envelope's list."""
+    """Delete one never-moved envelope line by its X, reopening a closed envelope around it.
+
+    A closed envelope's list renders no X, so on ruling **plan#2439** the
+    owner reopens it in its full edit, presses the X, closes it again, and
+    types back the day it closed on, which the re-close would otherwise move
+    to the day of the act.
+    """
     txn_id, entry_id = row["transaction_id"], row["entry_id"]
     page = f"/transactions/{txn_id}/entries"
-    run.sheet.act(number, f"Delete {_named(row)}", f"{page} (the envelope's lines: X)")
+    closed_on = run.read(_closed_on, txn_id)
+    door = f"{page} (the envelope's lines: X)"
+    if closed_on is not None:
+        door = f"/transactions/{txn_id}/full-edit (Status, Money moved on) and {door}"
+    run.sheet.act(number, f"Delete {_named(row)}", door)
+    before = run.read(_envelope_state, txn_id, entry_id)
+    if closed_on is not None:
+        _save_status(run, txn_id, StatusEnum.PROJECTED)
     button = run.operator.button(page, "delete", f"{page}/{entry_id}")
     assert not button["vals"].get("shown_lines"), \
         f"the X on line {entry_id} would free bank line(s) {button['vals']['shown_lines']}"
     run.sheet.say("- PRESS the line's X, and confirm")
     run.operator.press(button)
-    run.read(_deleted, run, entry_id)
+    if closed_on is not None:
+        _save_status(run, txn_id, StatusEnum.DONE)
+        run.sheet.typed("Money moved on", closed_on.isoformat())
+        _save_full_edit(run, txn_id, "settled_on", closed_on.isoformat())
+    run.read(_deleted, run, txn_id, entry_id, before)
 
 
-def _deleted(run: Run, entry_id: int) -> None:
-    """Assert envelope line *entry_id* is gone."""
+def _deleted(run: Run, txn_id: int, entry_id: int, before: tuple) -> None:
+    """Assert line *entry_id* is gone and envelope *txn_id* otherwise stands as it did."""
     assert db.session.get(TransactionEntry, entry_id) is None, \
         f"envelope line {entry_id} is still there"
-    run.sheet.say(f"- LANDED: envelope line {entry_id} deleted")
+    after = _envelope_state(txn_id, entry_id)
+    assert after == before, \
+        f"removing line {entry_id} moved envelope {txn_id}: {before} -> {after}"
+    run.sheet.say(f"- LANDED: envelope line {entry_id} deleted; envelope {txn_id} and its "
+                  "other lines stand as they did")
 
 
 def _left(run: Run) -> None:

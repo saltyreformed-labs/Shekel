@@ -13,9 +13,10 @@ import hashlib
 import pytest
 
 from tools.ci.gitcmd import git
-from tools.ci.scratch import repository
+from tools.ci.scratch import commit, commit_files, repository
 from tools.quill._production import COMPOSE, DOCKERFILE, PUBLISH
-from tools.quill._versions import LOCK, Move, NotVersions, Pin, moves, pinned
+from tools.quill._versions import LOCK, Move, NotVersions, Pin, moves, pinned, pins_versions
+from tools.quill._versions import unversioned, unversioned_between
 
 #: PyPI's simple index, every locked package's registry.
 _REGISTRY = '{ registry = "https://pypi.org/simple" }'
@@ -433,3 +434,97 @@ def test_a_link_where_a_pinning_file_was_is_refused(repo):
     with pytest.raises(NotVersions,
                        match="^uv.lock is no file, but a link or a submodule's commit$"):
         _pins(repo, LOCK, _lock(), mode="120000")
+
+
+# -- every file Dependabot and the update move (the daily queue's reading) ------------------
+
+#: A workflow pinning one action by commit, its release beside it, as ci.yml does.
+_WORKFLOW = (f"jobs:\n  test:\n    steps:\n      - uses: actions/checkout@{_SHA} # v7.0.1\n"
+             "      - run: pytest\n")
+#: A local action of this repository's own, pinning one action as install-lock does.
+_ACTION = (f"runs:\n  using: composite\n  steps:\n"
+           f"    - uses: actions/cache@{_SHA} # v6.1.0\n")
+
+
+@pytest.mark.parametrize(("path", "pinning"), [
+    (LOCK, True), (DOCKERFILE, True), (COMPOSE, True), ("docker-compose.dev.yml", True),
+    ("docker-compose.build.yml", True), (PUBLISH, True), (".github/workflows/ci.yml", True),
+    (".github/actions/install-lock/action.yml", True), ("pyproject.toml", False),
+    ("app/__init__.py", False), (".github/dependabot.yml", False),
+    ("deploy/docker-compose.yml", False), (".github/workflows/old/ci.yml", False),
+    (".github/actions/a/b/action.yml", False), ("plan/ships/1183", False),
+])
+def test_the_files_that_pin_versions_are_the_lock_and_each_line_rules_file(path, pinning):
+    """The lock and every file Dependabot moves a version in: the Dockerfile, each compose
+    file at the root, each workflow and each of this repository's actions.  A pattern's
+    ``*`` crosses no directory, so a compose file elsewhere, or a workflow in a directory
+    below, pins none this module reads."""
+    assert pins_versions(path) is pinning
+
+
+@pytest.mark.parametrize(("path", "old", "new", "found"), [
+    ("docker-compose.dev.yml", _COMPOSE,
+     _COMPOSE.replace(f"18-alpine@sha256:{_OLD}", f"18.7-alpine@sha256:{_NEW}"),
+     (Move("postgres", "18", "18.7", False),)),
+    (".github/workflows/ci.yml", _WORKFLOW,
+     _WORKFLOW.replace(f"{_SHA} # v7.0.1", f"{_LATER} # v8.0.0"),
+     (Move("actions/checkout", "7.0.1", "8.0.0", True),)),
+    (".github/actions/install-lock/action.yml", _ACTION,
+     _ACTION.replace(f"{_SHA} # v6.1.0", f"{_LATER} # v6.2.0"),
+     (Move("actions/cache", "6.1.0", "6.2.0", False),)),
+], ids=["the dev compose file", "a test workflow's major", "a local action"])
+def test_a_file_production_never_runs_moves_its_versions_by_its_kind(repo, path, old, new,
+                                                                    found):
+    """A compose file, workflow or action production never runs pins versions by the same
+    rule as production's own of its kind."""
+    assert _moved(repo, path, old, new) == found
+
+
+def test_a_workflow_line_that_pins_nothing_is_refused(repo):
+    """Any other line of a workflow is more than a version moved."""
+    assert _refusal(repo, ".github/workflows/ci.yml", _WORKFLOW,
+                    _WORKFLOW.replace("run: pytest", "run: pytest -x")) == (
+        ".github/workflows/ci.yml changes line 5, which pins no version by its action's commit "
+        "and release")
+
+
+def test_a_file_pinning_no_version_names_no_pin(repo):
+    """What a side pins is asked only of a file that pins versions."""
+    with pytest.raises(NotVersions, match="^pyproject.toml pins no version$"):
+        pinned(repo, "pyproject.toml", _blob(repo, "a\n"))
+
+
+def test_the_walk_names_every_reason_and_nothing_for_versions_alone(repo):
+    """:func:`unversioned` names each major and each refusal, a clause each, in the order of
+    the paths it is given, and nothing for a change moving versions alone; the side a file
+    is added to is the one the walk is told it reads."""
+    major = _lock(_at("pillow", "13.0.0"))
+    changed = {LOCK: (_blob(repo, _lock()), _blob(repo, major)),
+               "app/x.py": (_blob(repo, "a\n"), _blob(repo, "b\n")),
+               ".github/workflows/new.yml": (None, _blob(repo, _WORKFLOW))}
+    assert unversioned(repo, changed, "the tree") == (
+        "uv.lock moves pillow from 12.3.0 to 13.0.0, a new major version",
+        "app/x.py pins no version", ".github/workflows/new.yml enters the tree")
+    assert not unversioned(repo, {LOCK: (_blob(repo, _lock()),
+                                         _blob(repo, _lock(_at("pillow", "12.4.1"))))})
+
+
+def _tree_of(root, base, files):
+    """A commit on ``base`` (an empty commit when None) writing ``files``; its sha."""
+    return commit_files(root, base or commit(root, "start"), "files", files)
+
+
+def test_a_change_between_two_commits_is_judged_over_every_file_it_changes(repo):
+    """:func:`unversioned_between` reads each file the tree changes, production's or not: a
+    Dependabot-like change moving a workflow's action and the dev compose file's digest
+    moves versions alone; one also writing a plan record, or crossing a major, is not."""
+    base = _tree_of(repo, None, {LOCK: _lock(), ".github/workflows/ci.yml": _WORKFLOW,
+                                 "docker-compose.dev.yml": _COMPOSE, "app/x.py": "a\n"})
+    alone = _tree_of(repo, base, {
+        ".github/workflows/ci.yml": _WORKFLOW.replace(f"{_SHA} # v7.0.1", f"{_LATER} # v7.1.0"),
+        "docker-compose.dev.yml": _COMPOSE.replace(_OLD, _NEW),
+        LOCK: _lock(_at("pillow", "12.4.1"))})
+    more = _tree_of(repo, alone, {"plan/ships/9": "x\n", LOCK: _lock(_at("pillow", "13.0.0"))})
+    assert (unversioned_between(repo, base, alone), unversioned_between(repo, alone, more)) == (
+        (), ("plan/ships/9 pins no version",
+             "uv.lock moves pillow from 12.4.1 to 13.0.0, a new major version"))

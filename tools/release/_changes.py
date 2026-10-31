@@ -34,7 +34,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.quill.door import PINNED, Pin, changed, pinned
+from tools.quill.door import Pin, changed, pinned, pins_versions
 from tools.release._model import first_parent_line
 
 
@@ -118,6 +118,6 @@ def changes(root: Path, base: str, cut: str) -> Changes:
     pulls = tuple(Change(sha, subject,
                          tuple(path for path in changed(root, f"{sha}^1", sha) if path in net))
                   for sha, subject in first_parent_line(root, base, cut))
-    versions = tuple(moved for path, (was, now) in production.items() if path in PINNED
+    versions = tuple(moved for path, (was, now) in production.items() if pins_versions(path)
                      for moved in _moved(root, path, was, now))
     return Changes(net, pulls, versions)

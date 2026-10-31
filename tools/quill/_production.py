@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import posixpath
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -263,23 +263,38 @@ def files(root: Path, commit: str) -> dict[str, str]:
         tools.ci.gitcmd.GitError: when git cannot read ``commit``.
     """
     found = rules(ignore_file(root, commit))
-    listed = git(root, "ls-tree", "-r", "-z", "--full-tree",
-                 "--format=%(objectmode) %(objectname)%x09%(path)", commit)
-    held = dict(reversed(record.split("\t", 1)) for record in listed.split("\0") if record)
+    held = tree(root, commit)
     image = kept(found, held)
     return {path: what for path, what in held.items() if path in image or runs_it(path)}
 
 
+def tree(root: Path, commit: str) -> dict[str, str]:
+    """Every file ``commit``'s tree holds, by its path, each its mode and object.
+
+    Raises:
+        tools.ci.gitcmd.GitError: when git cannot read ``commit``.
+    """
+    listed = git(root, "ls-tree", "-r", "-z", "--full-tree",
+                 "--format=%(objectmode) %(objectname)%x09%(path)", commit)
+    return dict(reversed(record.split("\t", 1)) for record in listed.split("\0") if record)
+
+
+def differences(before: Mapping[str, str],
+                after: Mapping[str, str]) -> dict[str, tuple[str | None, str | None]]:
+    """Each path, in order, where two sets of files (each a path's mode and object, as
+    :func:`tree` gives them) differ: in one and not the other, or a different mode or
+    object; with its mode and object in each, None in the one that holds no such file."""
+    return {path: (before.get(path), after.get(path))
+            for path in sorted(before.keys() | after.keys())
+            if before.get(path) != after.get(path)}
+
+
 def changed(root: Path, old: str, new: str) -> dict[str, tuple[str | None, str | None]]:
     """Each path, in order, where production built from ``new`` differs from production
-    built from ``old`` (:func:`files`): in one and not the other, or a different mode or
-    object; with its mode and object in each, None in the one that holds no such file.
+    built from ``old`` (:func:`files`, :func:`differences`).
 
     Raises:
         IgnoreFileError: as :func:`rules` raises it, for either.
         tools.ci.gitcmd.GitError: when git cannot read either.
     """
-    before, after = files(root, old), files(root, new)
-    return {path: (before.get(path), after.get(path))
-            for path in sorted(before.keys() | after.keys())
-            if before.get(path) != after.get(path)}
+    return differences(files(root, old), files(root, new))

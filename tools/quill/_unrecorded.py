@@ -38,21 +38,14 @@ def _unversioned(landing: Landing,
     is no change that moves versions alone (ruling plan#2351), each as a clause; none when it
     is one: it changes no plan record (:attr:`landing.Landing.records`), and each path it
     changes there moves pinned versions alone, none across a major
-    (:func:`_versions.moves`).
+    (:func:`_versions.unversioned`, the walk the daily update queue judges by too).
 
     Raises:
         tools.ci.gitcmd.GitError: when git cannot read a file it changes there.
     """
-    reasons = [f"it changes {entry.path} too, a plan record"
-               for entries in landing.records.values() for entry in entries]
-    for path, (was, now) in changed.items():
-        try:
-            reasons += [f"{path} moves {move.what} from {move.old} to {move.new}, a new major "
-                        "version" for move in _versions.moves(landing.root, path, was, now)
-                        if move.major]
-        except _versions.NotVersions as error:
-            reasons.append(str(error))
-    return tuple(reasons)
+    return (*(f"it changes {entry.path} too, a plan record"
+              for entries in landing.records.values() for entry in entries),
+            *_versions.unversioned(landing.root, changed))
 
 
 def refused(landing: Landing) -> list[str]:
@@ -60,7 +53,7 @@ def refused(landing: Landing) -> list[str]:
     production built from M differs from production built from M's first parent
     (:func:`_production.changed`), and the change does more than move pinned versions
     (:func:`_unversioned`), naming the paths where production differs and, where one of them
-    is a file that pins versions (:data:`_versions.PINNED`), what more it does; none
+    is a file that pins versions (:func:`_versions.pins_versions`), what more it does; none
     otherwise.
 
     Raises:
@@ -76,7 +69,7 @@ def refused(landing: Landing) -> list[str]:
         return []
     pinned = (f", and only a change that moves pinned versions alone, writing no plan record, "
               f"lands with none (ruling plan#2351): here {_named(reasons, '; ')}"
-              if _versions.PINNED & changed.keys() else "")
+              if any(map(_versions.pins_versions, changed)) else "")
     return [f"{landing.pull.head or 'a branch of another repository'} changes what production "
             f"runs ({_named(tuple(changed), ', ')}), but adds, changes or deletes no ship "
             "marker, so no release would count it: a change to a file the production image "

@@ -1,10 +1,13 @@
-"""The versions a change moves in the files production runs (ruling plan#2351, which narrows
+"""The versions a change moves in the files that pin them (ruling plan#2351, which narrows
 ``balance:R-BAL362``): a change that moves nothing but pinned versions lands with no card, as
 CI's write rule reads it (``tools/quill/landing.py``, rule 9), and anything else, a major
-version included, still needs one.
+version included, still needs one.  Two readers judge by the one walk here
+(:func:`unversioned`): the landing check, over each file of production a change moves, and
+the daily update queue, over every file a pull request moves, which it puts in the merge
+queue only when the walk finds no reason (ruling plan#2449).
 
-**A version-only change moves only version data in each file of production it changes**
-(:func:`moves`), and only in the files that pin versions (:data:`PINNED`):
+**A version-only change moves only version data in each file it changes** (:func:`moves`),
+and only in the files that pin versions (:func:`pins_versions`):
 
 - ``uv.lock``, read as TOML, as uv reads it (:func:`_lock`): its header (all but its
   packages) as it was, the same packages by name, each named once, and of each package from
@@ -21,17 +24,21 @@ version included, still needs one.
   checks only the hash the lock names beside it (measured 2026-10-31), so a change that
   repointed a file, moving no version, would install whatever that URL serves, land with
   no card and appear in no release's listing of the versions it moves.
-- a ``FROM`` line of the ``Dockerfile`` and an ``image:`` line of ``docker-compose.yml``,
-  each pinning an image by tag and digest (``name:<version><variant>@sha256:<digest>``): only
-  the tag's version and the digest move, the image's name, the tag's variant (``-alpine``)
-  and the rest of the line as they were.
-- a ``uses:`` line of the workflow that builds and signs the image, pinning an action by
-  commit with its release beside it (``owner/repo@<sha> # v<version>``): only the commit and
-  the release move.
+- a ``FROM`` line of the ``Dockerfile`` and an ``image:`` line of a compose file
+  (``docker-compose*.yml``), each pinning an image by tag and digest
+  (``name:<version><variant>@sha256:<digest>``): only the tag's version and the digest
+  move, the image's name, the tag's variant (``-alpine``) and the rest of the line as they
+  were.
+- a ``uses:`` line of a workflow or of one of this repository's own actions (the files
+  Dependabot's ``github-actions`` entry moves), pinning an action by commit with its
+  release beside it (``owner/repo@<sha> # v<version>``): only the commit and the release
+  move.
 
-Every other line of those three files is as it was, byte for byte: each file is read as git
-holds it, and refused when its text does not hash back to its object (a line ending changed,
-or bytes no decoding keeps), so a line compared equal is equal.
+Every other line of those files is as it was, byte for byte: each file is read as git holds
+it, and refused when its text does not hash back to its object (a line ending changed, or
+bytes no decoding keeps), so a line compared equal is equal.  Which of them production runs
+is :mod:`tools.quill._production`'s to say, never this module's: today the ``Dockerfile``,
+``docker-compose.yml`` and the workflow that builds and signs the image.
 
 **A major is the release up to its first number that is not zero** (:func:`_major`, its
 epoch first), so ``12.3.0`` to ``13.0.0`` crosses one and a 0.x package's minor is its
@@ -46,7 +53,7 @@ no version it can vouch for, so it is refused.
 release moves, ``tools/release/_changes.py``) asks nothing of what a change moves, since a
 release carries cards' own edits to these files beside the versions an update moved: each
 package the lock holds at its version, a lock forked by environment pinning each version a
-name holds, and each line of the other three files that pins one, by what it pins and its
+name holds, and each line of any other such file that pins one, by what it pins and its
 version as the line spells it, the tag's version through the digest
 (``3.14-slim@sha256:<digest>``) or the commit through the release (``<commit> # v7.0.1``).
 A line pinning by any other form (a tag alone, a tag naming no version, an action of this
@@ -57,13 +64,13 @@ from __future__ import annotations
 import re
 import tomllib
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from tools.ci.gitcmd import git
-from tools.quill._production import COMPOSE, DOCKERFILE, PUBLISH
+from tools.quill._production import DOCKERFILE, differences, tree
 
 #: The lock every install reads (ruling ``balance:R-BAL294``).
 LOCK = "uv.lock"
@@ -133,18 +140,33 @@ class _Pins:
     slots: str
 
 
-#: How each file that pins versions a line each pins them, by path.
-_LINES = {
-    DOCKERFILE: _Pins(re.compile(rf"\s*(?i:FROM)\s+(?:--\S+\s+)*{_IMAGE}(?:\s.*)?"),
-                      "the version in its image's tag and its digest"),
-    COMPOSE: _Pins(re.compile(rf"\s*image:\s*{_IMAGE}(?:\s.*)?"),
-                   "the version in its image's tag and its digest"),
-    PUBLISH: _Pins(re.compile(r"\s*(?:-\s+)?uses:\s*(?P<what>[^\s@]+)@(?P<exact>[0-9a-f]{40})"
-                              r"\s+#\s+v(?P<version>[0-9]+(?:\.[0-9]+)*)\s*"),
-                   "its action's commit and release"),
-}
-#: The files of production whose versions a change may move with no card, by path.
-PINNED = frozenset({LOCK, *_LINES})
+#: An action pinned by commit, its release beside it: a ``uses:`` line of a workflow or an
+#: action.
+_USES = _Pins(re.compile(r"\s*(?:-\s+)?uses:\s*(?P<what>[^\s@]+)@(?P<exact>[0-9a-f]{40})"
+                         r"\s+#\s+v(?P<version>[0-9]+(?:\.[0-9]+)*)\s*"),
+              "its action's commit and release")
+#: How each file that pins versions a line each pins them: the rule of the first pattern its
+#: path matches whole (``PurePath.full_match``, whose ``*`` crosses no ``/``).
+_LINES = (
+    (DOCKERFILE, _Pins(re.compile(rf"\s*(?i:FROM)\s+(?:--\S+\s+)*{_IMAGE}(?:\s.*)?"),
+                       "the version in its image's tag and its digest")),
+    ("docker-compose*.yml", _Pins(re.compile(rf"\s*image:\s*{_IMAGE}(?:\s.*)?"),
+                                  "the version in its image's tag and its digest")),
+    (".github/workflows/*.yml", _USES),
+    (".github/actions/*/action.yml", _USES),
+)
+
+
+def _rule(path: str) -> _Pins | None:
+    """How ``path`` pins versions a line each (:data:`_LINES`), None where it pins none so."""
+    return next((rule for pattern, rule in _LINES if PurePosixPath(path).full_match(pattern)),
+                None)
+
+
+def pins_versions(path: str) -> bool:
+    """Whether ``path`` is a file that pins versions: the lock, or a file that pins them a
+    line each (:data:`_LINES`)."""
+    return path == LOCK or _rule(path) is not None
 
 
 def _major(version: str) -> tuple[int, ...] | None:
@@ -210,16 +232,15 @@ def _version(pin: re.Match[str]) -> str:
     return pin.string[start:last]
 
 
-def _lines(root: Path, path: str, old: str, new: str) -> tuple[Move, ...]:
+def _lines(root: Path, path: str, rule: _Pins, old: str, new: str) -> tuple[Move, ...]:
     """Each version the change from object ``old`` to ``new`` of ``path``, a file pinning
-    versions a line each (:data:`_LINES`), moves, in the file's order.
+    versions a line each by ``rule`` (:data:`_LINES`), moves, in the file's order.
 
     Raises:
         NotVersions: when a line is added or deleted, or one changes that pins nothing, or
             changes more than what it pins (the module's rules).
         tools.ci.gitcmd.GitError: when git cannot read or hash either object.
     """
-    pins = _LINES[path]
     before, after = _exact(root, path, old), _exact(root, path, new)
     if len(before) != len(after):
         raise NotVersions(f"{path} adds or deletes a line")
@@ -227,12 +248,12 @@ def _lines(root: Path, path: str, old: str, new: str) -> tuple[Move, ...]:
     for number, (was, now) in enumerate(zip(before, after), start=1):
         if was == now:
             continue
-        old_pin, new_pin = pins.line.fullmatch(was), pins.line.fullmatch(now)
+        old_pin, new_pin = rule.line.fullmatch(was), rule.line.fullmatch(now)
         if old_pin is None or new_pin is None:
             raise NotVersions(f"{path} changes line {number}, which pins no version by "
-                              f"{pins.slots}")
+                              f"{rule.slots}")
         if _frame(old_pin) != _frame(new_pin):
-            raise NotVersions(f"{path} changes more than {pins.slots} on line {number}")
+            raise NotVersions(f"{path} changes more than {rule.slots} on line {number}")
         found.append(Move(old_pin["what"], old_pin["version"], new_pin["version"],
                           _major(old_pin["version"]) != _major(new_pin["version"])))
     return tuple(found)
@@ -417,30 +438,62 @@ def _package(name: str, old: dict[str, object], new: dict[str, object],
     return Move(name, str(was), str(now), majors[0] != majors[1])
 
 
-def moves(root: Path, path: str, was: str | None, now: str | None) -> tuple[Move, ...]:
-    """Each version a change moves in ``path``, a file of production's whose mode and object
-    production before the change held as ``was`` and after it as ``now``, each as
-    :func:`_production.changed` gives them (None where that production holds no such file):
-    by package name in the lock, in the file's order in any other.
+def moves(root: Path, path: str, was: str | None, now: str | None,
+          where: str = "production") -> tuple[Move, ...]:
+    """Each version a change moves in ``path``, a file whose mode and object ``where`` (the
+    files the change is read in: production, as :func:`_production.changed` gives them, or
+    the whole tree) held as ``was`` before the change and as ``now`` after it (None where it
+    holds no such file): by package name in the lock, in the file's order in any other.
 
     Raises:
         NotVersions: when the change moves more than versions there (the module's rules).
         tools.ci.gitcmd.GitError: when git cannot read or hash either object.
     """
-    if path not in PINNED:
+    if not pins_versions(path):
         raise NotVersions(f"{path} pins no version")
     if was is None or now is None:
-        raise NotVersions(f"{path} {'enters' if was is None else 'leaves'} production")
+        raise NotVersions(f"{path} {'enters' if was is None else 'leaves'} {where}")
     if was.split(" ")[0] != now.split(" ")[0]:
         raise NotVersions(f"{path} changes its mode")
     old, new = _object(path, was), _object(path, now)
-    if path == LOCK:
+    if (rule := _rule(path)) is None:
         return _lock(git(root, "cat-file", "blob", old), git(root, "cat-file", "blob", new))
-    return _lines(root, path, old, new)
+    return _lines(root, path, rule, old, new)
+
+
+def unversioned(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
+                where: str = "production") -> tuple[str, ...]:
+    """Why a change is no change that moves pinned versions alone, none across a major, each
+    as a clause naming its file; none when it is one.  ``changed`` holds each path where
+    ``where`` differs (:func:`moves`), with its mode and object before and after.  The one
+    walk the landing check (rule 9) and the daily update queue both judge by.
+
+    Raises:
+        tools.ci.gitcmd.GitError: when git cannot read a file it changes.
+    """
+    reasons: list[str] = []
+    for path, (was, now) in changed.items():
+        try:
+            reasons += [f"{path} moves {move.what} from {move.old} to {move.new}, a new major "
+                        "version" for move in moves(root, path, was, now, where) if move.major]
+        except NotVersions as error:
+            reasons.append(str(error))
+    return tuple(reasons)
+
+
+def unversioned_between(root: Path, old: str, new: str) -> tuple[str, ...]:
+    """Why the change from commit ``old`` to commit ``new`` is no change that moves pinned
+    versions alone, none across a major, over every file of the tree it changes
+    (:func:`unversioned`); none when it is one.
+
+    Raises:
+        tools.ci.gitcmd.GitError: when git cannot read either commit, or a file it changes.
+    """
+    return unversioned(root, differences(tree(root, old), tree(root, new)), "the tree")
 
 
 def pinned(root: Path, path: str, held: str | None) -> frozenset[Pin]:
-    """Every version ``path``, a file that pins versions (:data:`PINNED`), pins where
+    """Every version ``path``, a file that pins versions (:func:`pins_versions`), pins where
     production holds it as ``held`` (its mode and object, as :func:`_production.changed`
     gives them; None where that production holds no such file, which pins none): in the
     lock each package at its version, a package of no version (a project whose version is
@@ -449,16 +502,17 @@ def pinned(root: Path, path: str, held: str | None) -> frozenset[Pin]:
     a change moves, so a lock forked by environment pins each version a name holds.
 
     Raises:
-        NotVersions: when it is no file (:func:`_object`), or a lock that is no TOML
-            (:func:`_read`) or holds a package with no name (:func:`_named`).
+        NotVersions: when it pins no version, is no file (:func:`_object`), or is a lock
+            that is no TOML (:func:`_read`) or holds a package with no name (:func:`_named`).
         tools.ci.gitcmd.GitError: when git cannot read its object.
     """
+    if not pins_versions(path):
+        raise NotVersions(f"{path} pins no version")
     if held is None:
         return frozenset()
     text = git(root, "cat-file", "blob", _object(path, held))
-    if path == LOCK:
+    if (rule := _rule(path)) is None:
         return frozenset(Pin(package["name"], str(package["version"]))
                          for package in _named(_read(text)) if "version" in package)
-    line = _LINES[path].line
     return frozenset(Pin(pin["what"], _version(pin))
-                     for pin in map(line.fullmatch, text.split("\n")) if pin is not None)
+                     for pin in map(rule.line.fullmatch, text.split("\n")) if pin is not None)

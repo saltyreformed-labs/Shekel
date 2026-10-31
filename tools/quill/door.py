@@ -43,7 +43,7 @@ Each name, and who reads it:
   (``_production``; rulings ``balance:R-BAL362`` and ``R-BAL400``).  ``IgnoreFileError``:
   ``tools/release.release``, which reports an ignore file holding a pattern Docker refuses as
   a listing made of nothing, and its tests.
-- ``pinned``, ``Pin`` and ``PINNED``: ``tools/release._changes``, for the versions a
+- ``pinned``, ``Pin`` and ``pins_versions``: ``tools/release._changes``, for the versions a
   release moves in the files that pin versions, each side read by the lock reader and the line
   patterns the landing check reads a move with (``_versions``; ruling plan#2351).  ``NotVersions``:
   ``tools/release.release``, which reports a pinned file it cannot read (a lock that is no
@@ -84,11 +84,10 @@ from tools.quill._state import (
     owner,
 )
 from tools.quill._tracker import Card, OutsideLink, Tracker, TrackerError
-from tools.quill._versions import PINNED, NotVersions, Pin, pinned
+from tools.quill._versions import NotVersions, Pin, pinned, pins_versions
 
 __all__ = [
     "MARKERS",
-    "PINNED",
     "SHIPPABLE",
     "Card",
     "CredentialsError",
@@ -115,5 +114,6 @@ __all__ = [
     "merged_tree",
     "owner",
     "pinned",
+    "pins_versions",
     "with_closure",
 ]

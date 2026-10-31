@@ -176,9 +176,9 @@ def _is_authenticated(page: Page, base_url: str) -> bool:
 def _perform_login(page: Page, base_url: str, email: str, password: str) -> bool:
     """Fill and submit the login form, returning whether it authenticated.
 
-    Ticks "remember me" so a persistent remember-cookie is issued alongside the
-    session cookie, widening the reuse window past a single browser lifetime.
-    CSRF needs no special handling: the real browser submits the rendered form's
+    The form has no "Remember me" box since plan#2173 deleted it; the saved
+    storage state carries the session cookie itself, which is what reuse rests
+    on.  CSRF needs no special handling: the real browser submits the rendered form's
     hidden token with the matching session cookie.
 
     Args:
@@ -194,7 +194,6 @@ def _perform_login(page: Page, base_url: str, email: str, password: str) -> bool
     page.goto(base_url + LOGIN_PATH, wait_until="domcontentloaded")
     page.fill("#email", email)
     page.fill("#password", password)
-    page.check("#remember")
     page.click('button[type="submit"]')
     try:
         page.wait_for_url(lambda url: LOGIN_PATH not in url, timeout=NAV_TIMEOUT_MS)

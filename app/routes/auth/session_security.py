@@ -2,8 +2,9 @@
 Shekel Budget App -- Auth route package: session security.
 
 The authenticated-session security surface: password change,
-bulk session invalidation, step-up re-authentication (``/reauth``),
-and the security-event banner acknowledgement.  Each route registers
+bulk session invalidation, forgetting one trusted device, step-up
+re-authentication (``/reauth``), and the security-event banner
+acknowledgement.  Each route registers
 against the shared ``auth_bp`` from :mod:`~app.routes.auth._bp`; the
 TOTP replay-prevention helper, open-redirect guard, and form-error
 flattener come from :mod:`~app.routes.auth._helpers` so ``/reauth``
@@ -14,7 +15,7 @@ import logging
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user
 
 from marshmallow import ValidationError as MarshmallowValidationError
@@ -22,20 +23,22 @@ from marshmallow import ValidationError as MarshmallowValidationError
 from app.extensions import db, limiter
 from app.models.user import MfaConfig
 from app.schemas.validation import ChangePasswordSchema, ReauthSchema
-from app.services import auth_service
-from app.exceptions import AuthError, ValidationError
+from app.services import auth_service, trusted_device_service
+from app.exceptions import AuthError, NotFoundError, ValidationError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     _first_validation_message,
     _is_safe_redirect,
     _totp_accepted_or_key_failure,
 )
+from app.utils.auth_helpers import log_refused_lookup
 from app.utils.log_events import (
     AUTH,
     EVT_PASSWORD_CHANGED,
     EVT_REAUTH_FAILED,
     EVT_REAUTH_SUCCESS,
     EVT_SESSIONS_INVALIDATED,
+    EVT_TRUSTED_DEVICE_FORGOTTEN,
     log_event,
 )
 from app.utils.security_events import (
@@ -95,7 +98,7 @@ def change_password():
             current_user, SecurityEventKind.PASSWORD_CHANGED, now=now,
         )
         db.session.commit()
-        stamp_login_session(now)
+        stamp_login_session(now, current_user.id)
         log_event(logger, logging.INFO, EVT_PASSWORD_CHANGED, AUTH,
                   "Password changed", user_id=current_user.id)
         flash("Password changed successfully.", "success")
@@ -127,7 +130,43 @@ def invalidate_sessions():
     stamp_session_refresh(now)
     log_event(logger, logging.INFO, EVT_SESSIONS_INVALIDATED, AUTH,
               "All sessions invalidated", user_id=current_user.id)
-    flash("All other sessions have been logged out.", "success")
+    flash(
+        "All other sessions have been logged out, and every trusted device "
+        "forgotten.",
+        "success",
+    )
+    return redirect(url_for("settings.show", section="security"))
+
+
+@auth_bp.route("/trusted-devices/<int:device_id>/forget", methods=["POST"])
+def forget_trusted_device(device_id):
+    """Forget one of the signed-in user's trusted devices (ruling plan#2406).
+
+    The next sign-in on that browser asks for the two-factor code again.  A
+    device of another user and an id no device holds are one 404, the
+    security response rule, and the refusal is logged the way every
+    owner-scoped lookup's is (:func:`~app.utils.auth_helpers.log_refused_lookup`):
+    the service looks the id up within the user's own devices, so it cannot
+    tell the two apart, and neither can the response.
+
+    No step-up re-auth, as ``invalidate_sessions`` asks none: forgetting a
+    device takes a privilege away and grants none.  No owner gate either:
+    a device is its own user's, whatever their role.
+    """
+    try:
+        trusted_device_service.forget_device(current_user.id, device_id)
+    except NotFoundError:
+        log_refused_lookup("TrustedDevice", device_id)
+        abort(404)
+    db.session.commit()
+    log_event(logger, logging.INFO, EVT_TRUSTED_DEVICE_FORGOTTEN, AUTH,
+              "Trusted device forgotten", user_id=current_user.id,
+              device_id=device_id)
+    flash(
+        "Device forgotten. Signing in on it will ask for your two-factor "
+        "code again.",
+        "success",
+    )
     return redirect(url_for("settings.show", section="security"))
 
 

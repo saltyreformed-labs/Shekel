@@ -94,6 +94,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so the repository root is added explicitly -- the same line every
@@ -111,6 +112,7 @@ from app.models.account import Account  # noqa: E402
 from app.models.loan_params import LoanParams  # noqa: E402
 from app.models.user import User  # noqa: E402
 from app.services.account_category import is_liability_account  # noqa: E402
+from app.utils.session_helpers import login_session_stamps  # noqa: E402
 # pylint: enable=wrong-import-position
 
 #: The whole-page and fragment GETs that render a liability figure.
@@ -397,6 +399,11 @@ def _forged_client(app, user_id):
         session["_user_id"] = str(user_id)
         session["_fresh"] = True
         session["_id"] = None
+        # The stamps a sign-in writes, the user's among them: ``load_user``
+        # refuses a session without them (plan#2173).
+        session.update(login_session_stamps(
+            datetime.now(timezone.utc), user_id,
+        ))
     return client
 
 

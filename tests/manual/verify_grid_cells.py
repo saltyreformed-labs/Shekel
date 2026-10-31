@@ -54,6 +54,7 @@ paychecks BEFORE today (where every settled leg sits).
 import json
 import pathlib
 import sys
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
@@ -61,13 +62,27 @@ from html.parser import HTMLParser
 # harness in this directory carries.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from app import create_app  # noqa: E402  pylint: disable=wrong-import-position
-from app.extensions import db, login_manager  # noqa: E402  pylint: disable=wrong-import-position
-from app.models.account import Account  # noqa: E402  pylint: disable=wrong-import-position
-from app.models.user import User  # noqa: E402  pylint: disable=wrong-import-position
+# Pylint: ``wrong-import-position`` -- these imports must FOLLOW the
+# ``sys.path`` line above, which is what makes this checkout's ``app`` the one
+# imported at all.
+# pylint: disable=wrong-import-position
+from app import create_app  # noqa: E402
+from app.extensions import db, login_manager  # noqa: E402
+from app.models.account import Account  # noqa: E402
+from app.models.user import User  # noqa: E402
+from app.utils.session_helpers import login_session_stamps  # noqa: E402
+# pylint: enable=wrong-import-position
 
 
 def _classes(attrs) -> set:
+    """Return the CSS classes an HTMLParser attribute list names.
+
+    Args:
+        attrs: The ``(name, value)`` pairs ``handle_starttag`` receives.
+
+    Returns:
+        The set of class names, empty when the tag has no ``class``.
+    """
     return set((dict(attrs).get("class") or "").split())
 
 
@@ -220,6 +235,15 @@ class _GridCells(HTMLParser):
 
 
 def _snapshot(client, route: str) -> dict:
+    """Render *route* and return what its cells and cards say.
+
+    Args:
+        client: The Flask test client, already carrying a session.
+        route: The ``/grid`` view to render.
+
+    Returns:
+        The parsed snapshot, or ``{"status": code}`` for a non-200 answer.
+    """
     response = client.get(route)
     if response.status_code != 200:
         return {"status": response.status_code}
@@ -251,6 +275,11 @@ def main(out_path):
         session["_user_id"] = str(user_id)
         session["_fresh"] = True
         session["_id"] = None
+        # The stamps a sign-in writes, the user's among them: ``load_user``
+        # refuses a session without them (plan#2173).
+        session.update(login_session_stamps(
+            datetime.now(timezone.utc), user_id,
+        ))
     snapshot = {}
     # Three windows per account: the default (today forward), the same with
     # every row shown, and a PAST window -- a settled transfer's legs sit in

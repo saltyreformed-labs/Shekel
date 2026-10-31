@@ -34,16 +34,23 @@ real owner; a companion role holds no accounts and would measure nothing.
 import json
 import pathlib
 import sys
+from datetime import datetime, timezone
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so the repository root is added explicitly -- the same line every
 # harness in this directory carries.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from app import create_app  # noqa: E402  pylint: disable=wrong-import-position
-from app.extensions import db, login_manager  # noqa: E402  pylint: disable=wrong-import-position
-from app.models.account import Account  # noqa: E402  pylint: disable=wrong-import-position
-from app.models.user import User  # noqa: E402  pylint: disable=wrong-import-position
+# Pylint: ``wrong-import-position`` -- these imports must FOLLOW the
+# ``sys.path`` line above, which is what makes this checkout's ``app`` the one
+# imported at all.
+# pylint: disable=wrong-import-position
+from app import create_app  # noqa: E402
+from app.extensions import db, login_manager  # noqa: E402
+from app.models.account import Account  # noqa: E402
+from app.models.user import User  # noqa: E402
+from app.utils.session_helpers import login_session_stamps  # noqa: E402
+# pylint: enable=wrong-import-position
 
 #: The whole-page and self-refresh surfaces that read a per-period balance.
 ROUTES = [
@@ -122,6 +129,11 @@ def main(out_path):
         session["_user_id"] = str(user_id)
         session["_fresh"] = True
         session["_id"] = None
+        # The stamps a sign-in writes, the user's among them: ``load_user``
+        # refuses a session without them (plan#2173).
+        session.update(login_session_stamps(
+            datetime.now(timezone.utc), user_id,
+        ))
     snapshot = {route: _probe(client, route) for route in ROUTES}
     for account_id in account_ids:
         for template in ACCOUNT_ROUTES:

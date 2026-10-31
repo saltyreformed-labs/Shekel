@@ -28,7 +28,13 @@ from sqlalchemy import exc as sa_exc
 
 from app.enums import BusinessDayShiftEnum, FilingStatusEnum, TaxTypeEnum
 from app.models.amount_ownership import AmountOwnership
-from app.services import pay_era_write, pay_rhythm, pay_schedule_service
+from app.models.user import MfaConfig
+from app.services import (
+    mfa_service,
+    pay_era_write,
+    pay_rhythm,
+    pay_schedule_service,
+)
 from app.tax_law import (
     FederalRules,
     FicaRules,
@@ -2904,6 +2910,33 @@ def load_migration_module(filename):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def enable_mfa(db_session, user_id, backup_codes=()):
+    """Turn two-factor on for *user_id* with a fresh secret, and commit.
+
+    A FRESH secret per call, so two users (or two tests) never share a
+    replay-prevention step.  Nine files carried a private copy of this before
+    plan#2173 wrote it here; they still do.
+
+    Args:
+        db_session: The test ``db.session``.
+        user_id: The ``auth.users.id`` to enrol.
+        backup_codes: Plaintext backup codes to store hashed; none by default.
+
+    Returns:
+        The plaintext base32 secret, for ``pyotp.TOTP(secret)`` codes.
+    """
+    secret = mfa_service.generate_totp_secret()
+    db_session.add(MfaConfig(
+        user_id=user_id,
+        is_enabled=True,
+        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+        backup_codes=mfa_service.hash_backup_codes(list(backup_codes), rounds=4),
+        confirmed_at=_real_datetime.now(_real_timezone.utc),
+    ))
+    db_session.commit()
+    return secret
 
 
 def step_down_through_the_journal_link_drop(db_session):

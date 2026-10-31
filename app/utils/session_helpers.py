@@ -39,6 +39,39 @@ session cookie:
     successful ``/reauth``, and on ``change_password`` -- every code
     path that requires the user to type a password.
 
+Beside them the session carries ``_session_user_id``
+(``SESSION_USER_ID_KEY``): the id of the user whose sign-in wrote the
+stamps.
+
+**A session is signed in only by the app's own sign-in, and only as the
+user that sign-in named** (plan#2173, finding S-02 of the 2026-10-29
+security review).  Every sign-in writes the user stamp and the three
+timestamps in the request that calls ``login_user``
+(:func:`stamp_login_session`, from ``_complete_sign_in``, the one
+``login_user`` site).  ``load_user`` reads ``_session_created_at`` only
+through :func:`sign_in_created_at`, which answers ``None`` unless the user
+stamp is the user being loaded, and refuses the session then; it reads a
+session without ``_session_last_activity_at`` as stale.
+
+What the rule exists to refuse is Flask-Login's remember-me restore.  A
+"Remember me" cookie is the same ``<id>|HMAC(SECRET_KEY, id)`` value for
+every remembered sign-in, and Flask-Login honours it whether or not the
+app ever issues one again: whenever the loader refuses the session's own
+user, or the session names none, Flask-Login writes the cookie's user id
+into the CURRENT session and calls the loader again.  That session may be
+empty, or it may be another user's, refused for that user but still
+carrying that user's timestamps, which would pass for the cookie's user.
+Before the user stamp both happened: a copied cookie signed a browser in
+past every "log out all sessions" (the 2026-10-29 review), and then, with
+the timestamps required, a copied cookie riding another user's
+signed-out or deactivated session signed in as the cookie's user (the
+2026-10-31 review of plan#2173, measured).  Flask-Login's own
+``_user_id`` cannot say whose sign-in wrote the stamps, because the
+restore rewrites it; the user stamp is written by the app's sign-in
+alone.  The rule refuses every such cookie ever issued, with no
+``SECRET_KEY`` rotation (ruling plan#2406, which also deleted the
+checkbox).
+
 The three keys are deliberately distinct.  An idle-but-not-stale
 session can still complete a benign GET (``_session_last_activity_at``
 keeps refreshing as the user clicks around), but a high-value POST
@@ -55,7 +88,8 @@ to a single semantic event so the caller cannot accidentally write
 the wrong subset:
 
   * :func:`stamp_login_session` -- new login (password POST,
-    successful MFA verify, password change).  Writes all three keys.
+    successful MFA verify, password change).  Writes the user stamp and
+    all three timestamps, the set :func:`login_session_stamps` names.
 
   * :func:`stamp_reauth_session` -- ``/reauth`` success on an
     existing session.  Writes activity + fresh; ``_session_created_at``
@@ -137,25 +171,79 @@ logger = logging.getLogger(__name__)
 SESSION_CREATED_AT_KEY = "_session_created_at"
 SESSION_LAST_ACTIVITY_KEY = "_session_last_activity_at"
 FRESH_LOGIN_AT_KEY = "_fresh_login_at"
+SESSION_USER_ID_KEY = "_session_user_id"
 
 
-def stamp_login_session(now: datetime) -> None:
-    """Stamp every lifecycle timestamp on a freshly authenticated session.
+def login_session_stamps(now: datetime, user_id: int) -> dict[str, str]:
+    """Return the stamps a sign-in writes, keyed by session key.
+
+    The one statement of WHICH keys a new sign-in carries:
+    :func:`stamp_login_session` writes exactly these, and a script that
+    builds a signed-in session by hand (``tests/manual``) writes them too,
+    so ``load_user`` cannot tell the two apart and a key added here
+    reaches both.
+
+    Args:
+        now: Single timezone-aware UTC datetime for all three timestamps.
+        user_id: The ``auth.users.id`` being signed in.
+
+    Returns:
+        ``{key: value}``: ``_session_user_id`` as the id's string, the
+        spelling Flask-Login hands ``load_user`` (``User.get_id()``), and
+        ``_session_created_at``, ``_session_last_activity_at`` and
+        ``_fresh_login_at`` as ISO timestamps.
+    """
+    iso = now.isoformat()
+    return {
+        SESSION_USER_ID_KEY: str(user_id),
+        SESSION_CREATED_AT_KEY: iso,
+        SESSION_LAST_ACTIVITY_KEY: iso,
+        FRESH_LOGIN_AT_KEY: iso,
+    }
+
+
+def sign_in_created_at(user_id: str) -> str | None:
+    """Return when this session's sign-in of *user_id* happened, or ``None``.
+
+    The ONE door ``load_user`` reads ``_session_created_at`` through: it
+    answers only when the app's own sign-in of *user_id* wrote the session's
+    stamps, so a session another user's sign-in stamped, or none did, reads
+    as never signed in.  The module docstring says why Flask-Login's own
+    ``_user_id`` cannot answer this.
+
+    Args:
+        user_id: The id Flask-Login asks ``load_user`` for, as a string.
+
+    Returns:
+        The session's ``_session_created_at`` ISO timestamp when its user
+        stamp is *user_id*, else ``None``.
+
+    Raises:
+        RuntimeError: No active Flask request context.
+    """
+    if flask_session.get(SESSION_USER_ID_KEY) != user_id:
+        return None
+    return flask_session.get(SESSION_CREATED_AT_KEY)
+
+
+def stamp_login_session(now: datetime, user_id: int) -> None:
+    """Stamp the user and every lifecycle timestamp on a fresh sign-in.
 
     Use at every call site that completes a primary credential check:
-    the ``/login`` POST when no MFA is configured, the ``/mfa/verify``
-    POST that consumes the second factor, and ``change_password``
-    (which re-authenticates via the user's current password).  All
-    three keys share a single ``now`` value so a later subtraction
-    against ``datetime.now(timezone.utc)`` cannot accidentally
-    distinguish them.
+    ``_complete_sign_in`` (every ``/login`` and ``/mfa/verify`` that signs
+    a user in) and ``change_password`` (which re-authenticates via the
+    user's current password).  All three timestamps share a single
+    ``now`` value so a later subtraction against
+    ``datetime.now(timezone.utc)`` cannot accidentally distinguish them.
 
     Args:
         now: Single timezone-aware UTC datetime to write into all
-            three keys.  Reusing one value (rather than calling
+            three timestamps.  Reusing one value (rather than calling
             :func:`datetime.now` three times) avoids microsecond
             drift between the writes that an audit comparison would
             see as clock skew.
+        user_id: The ``auth.users.id`` this sign-in is for, written as
+            the session's user stamp (:func:`sign_in_created_at`).
 
     Raises:
         RuntimeError: No active Flask request context (raised by
@@ -164,10 +252,7 @@ def stamp_login_session(now: datetime) -> None:
             were called from a CLI command or a background job by
             mistake.
     """
-    iso = now.isoformat()
-    flask_session[SESSION_CREATED_AT_KEY] = iso
-    flask_session[SESSION_LAST_ACTIVITY_KEY] = iso
-    flask_session[FRESH_LOGIN_AT_KEY] = iso
+    flask_session.update(login_session_stamps(now, user_id))
 
 
 def stamp_reauth_session(now: datetime) -> None:

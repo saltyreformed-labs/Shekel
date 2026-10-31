@@ -4,7 +4,7 @@ the pinned instant, and one query answered, so a rollback is known to come up on
 release left (the K1b plan's item 1).
 
 Run BY PATH under the side's venv, with the side's worktree as its directory, in the
-environment :func:`tools.rehearsal.rows.side_environment` builds::
+environment :func:`tools.rehearsal.sides.side_environment` builds::
 
     <side venv>/bin/python <kit>/tools/rehearsal/side/boot.py <ISO 8601 instant>
 

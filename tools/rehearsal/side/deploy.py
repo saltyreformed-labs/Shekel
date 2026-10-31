@@ -3,7 +3,7 @@ step 3, run as the image runs it, under the instant the rehearsal pins every sid
 (``design.md`` s.3 item 4; the K1b plan's D2).
 
 Run BY PATH under the side's venv, with the side's worktree as its directory, in the
-environment :func:`tools.rehearsal.rows.side_environment` builds::
+environment :func:`tools.rehearsal.sides.side_environment` builds::
 
     <side venv>/bin/python <kit>/tools/rehearsal/side/deploy.py <ISO 8601 instant>
 

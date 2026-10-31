@@ -7,6 +7,13 @@ here, from the runbook as rehearsed that day; its record is
 file used to carry (rehearsed 2026-09-01, superseded by R-BAL3 on 2026-09-05) is in git history,
 and so are its measurements; read it there as evidence, never as instructions.
 
+**The rehearsal harness these blocks run is RETIRED** (ruling plan#2412, 2026-10-30): it refuses
+every copy the repair touched, which every copy of production now is.
+`tests/manual/rehearse_account_10_repair.py` is deleted, and its last version is at commit
+`01ebee2b8` (`git show 01ebee2b8:tests/manual/rehearse_account_10_repair.py`). Its door-driving
+half, the owner's session and the page's own forms, lives on as `tests/manual/door_rehearsal.py`.
+The scorer and the two `verify_*` instruments the blocks also run are kept.
+
 ## What this is
 
 Account 10 (*Fidelity Money Market Savings*) and archived account 2 (*Fidelity Savings*) are the
@@ -703,7 +710,8 @@ and submits the rest as rendered. The exceptions are presses of buttons that car
 archive flips post nothing, and act 1's cancel posts only the leg's account id its button carries.
 Act 9's category group is also supplied, because the page sets that field by script.
 
-* `tests/manual/rehearse_account_10_repair.py`: reconciles the map, performs the acts, verifies
+* `tests/manual/rehearse_account_10_repair.py` (retired, last version at `01ebee2b8`; see the
+  status above): reconciles the map, performs the acts, verifies
   the post-state and writes the sheet. No production figure or payee is written in it (R-BAL249).
   With `--check` it writes nothing and runs the same post-state verification on a performed copy,
   against the snapshot of row and paycheck ids the rehearsal wrote before its first act.

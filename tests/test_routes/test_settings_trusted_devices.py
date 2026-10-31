@@ -246,6 +246,29 @@ class TestTheList:
         ) in _text(page)
 
 
+class TestTheTrustLength:
+    """The card states the trust length from its one constant."""
+
+    def test_the_card_follows_the_constant(
+        self, auth_client, seed_user, monkeypatch,
+    ):
+        """With the lifetime at 7 days, both sentences say 7 and none says 30.
+
+        Two-factor is on, so the empty state that quotes the box's label is
+        the one rendered beside the card's opening sentence.
+        """
+        enable_mfa(db.session, seed_user["user"].id)
+        monkeypatch.setattr(
+            "app.routes.settings.TRUST_LIFETIME", timedelta(days=7),
+        )
+
+        card = _text(_card(auth_client.get(_SECURITY_PAGE).get_data(as_text=True)))
+
+        assert "A device stays trusted for 7 days" in card
+        assert "&quot;Trust this device for 7 days&quot;" in card
+        assert "30 days" not in card
+
+
 class TestForgetting:
     """A user forgets their own device, and nobody else's."""
 

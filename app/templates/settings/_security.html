@@ -80,7 +80,8 @@
   {% call form_card("Trusted Devices", "bi-laptop") %}
   <p class="text-muted small">
     Signing in on a trusted device takes your password but not a two-factor
-    code. A device stays trusted for 30 days after the code was typed on it.
+    code. A device stays trusted for {{ trust_days }} days after the code was
+    typed on it.
     Changing your password, logging out all other sessions, turning off
     two-factor authentication or signing in with a backup code forgets every
     device.
@@ -120,7 +121,8 @@
   {% elif mfa_enabled %}
   <p class="small mb-0">
     No trusted devices. When you type a two-factor code at sign-in, tick
-    &quot;Trust this device for 30 days&quot; to skip the code on that browser.
+    &quot;Trust this device for {{ trust_days }} days&quot; to skip the code on
+    that browser.
   </p>
   {% else %}
   <p class="small mb-0">

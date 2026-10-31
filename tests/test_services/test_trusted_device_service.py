@@ -20,6 +20,7 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import sqlalchemy
 
 from app.exceptions import NotFoundError
 from app.models.trusted_device import TrustedDevice
@@ -231,6 +232,26 @@ class TestTheThirtyDays:
 
         assert acts.find(moment, user_id, token) is None
         assert acts.listed(moment, user_id) == []
+
+    def test_thirty_days_is_exact_whatever_the_database_timezone(
+        self, app, db, acts, seed_user,
+    ):
+        """Under ``America/New_York``, across its March clock change: still exact.
+
+        T0 is 2026-03-01 12:00 UTC and the clocks went forward on 2026-03-08,
+        so thirty calendar days in New York is 719 hours, not 720.  A bound
+        that added the lifetime as an SQL interval counted those calendar
+        days in the database session's TimeZone and found the device dead an
+        hour early; the bound must not depend on that setting.  ``SET LOCAL``
+        holds for this test's one transaction (the service flushes and never
+        commits).
+        """
+        db.session.execute(sqlalchemy.text("SET LOCAL TIME ZONE 'America/New_York'"))
+        user_id = seed_user["user"].id
+        token = acts.trust(_T0, user_id)
+
+        assert acts.find(_T0 + _THIRTY_DAYS - _ONE_SECOND, user_id, token) is not None
+        assert acts.find(_T0 + _THIRTY_DAYS, user_id, token) is None
 
     def test_expires_at_is_thirty_days_after_the_trust(
         self, app, db, acts, seed_user,

@@ -196,7 +196,7 @@ EVT_MFA_DISABLED = _register(
 )
 EVT_DEVICE_TRUSTED = _register(
     "device_trusted", AUTH,
-    "User typed an authenticator code and trusted the browser for 30 days.",
+    "User typed an authenticator code and trusted the browser.",
 )
 EVT_TRUSTED_DEVICE_SIGN_IN = _register(
     "trusted_device_sign_in", AUTH,

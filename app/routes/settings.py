@@ -26,6 +26,7 @@ from app.schemas.validation import (
 )
 from app.models.category import Category
 from app.models.ref import AccountType, AccountTypeCategory
+from app.models.trusted_device import TRUST_LIFETIME
 from app.models.user import MfaConfig, User, UserSettings
 from app.services import (
     account_resolver,
@@ -386,6 +387,9 @@ def _empty_section_context():
         "group_names": [],
         "icon_choices": [],
         "mfa_enabled": False,
+        # Not a default but the one value: how long a trusted device stays
+        # trusted, which the Security section states in its sentences.
+        "trust_days": TRUST_LIFETIME.days,
         "trusted_devices": [],
         "active_companions": [],
         "inactive_companions": [],

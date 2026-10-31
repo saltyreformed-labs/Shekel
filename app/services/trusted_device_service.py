@@ -37,7 +37,11 @@ from sqlalchemy import ColumnElement, and_, delete, or_, select
 
 from app.exceptions import NotFoundError
 from app.extensions import db
-from app.models.trusted_device import USER_AGENT_MAX_LENGTH, TrustedDevice
+from app.models.trusted_device import (
+    TRUST_LIFETIME,
+    USER_AGENT_MAX_LENGTH,
+    TrustedDevice,
+)
 from app.models.user import User
 
 
@@ -64,10 +68,14 @@ def _token_hash(token: str) -> str:
 def _live(now: datetime) -> ColumnElement[bool]:
     """Return the ONE statement of when a trusted device is live, as SQL.
 
-    Live while :attr:`~app.models.trusted_device.TrustedDevice.expires_at` is
-    strictly later than *now* (so a device thirty days old to the second is
-    dead), AND its user's ``session_invalidated_at`` is NULL or not later than
-    the device's ``trusted_at``.  The user's column is read by a correlated
+    Live while it was trusted strictly after *now* less
+    :data:`~app.models.trusted_device.TRUST_LIFETIME` (so a device thirty
+    days old to the second is dead), AND its user's ``session_invalidated_at``
+    is NULL or not later than the device's ``trusted_at``.  The age bound is
+    computed here, in Python, where subtracting a ``timedelta`` is exact;
+    adding the lifetime as an SQL interval would count calendar days in the
+    database session's TimeZone instead (the model's ``expires_at`` says
+    more).  The user's column is read by a correlated
     subquery rather than a join, so the clause stands alone: it filters a
     SELECT and, negated, a DELETE, and the negation is exact because neither
     arm can be NULL (``trusted_at`` is NOT NULL, and the NULL invalidation is
@@ -85,7 +93,7 @@ def _live(now: datetime) -> ColumnElement[bool]:
         .scalar_subquery()
     )
     return and_(
-        TrustedDevice.expires_at > now,
+        TrustedDevice.trusted_at > now - TRUST_LIFETIME,
         or_(
             invalidated_at.is_(None),
             TrustedDevice.trusted_at >= invalidated_at,

@@ -29,14 +29,13 @@ Related service: app/services/trusted_device_service.py
 
 from datetime import timedelta
 
-from sqlalchemy.ext.hybrid import hybrid_property
-
 from app.extensions import db
 
 
 #: How long a device stays trusted after the code was typed on it (ruling
-#: plan#2406).  The one statement of the length: :attr:`TrustedDevice.expires_at`
-#: reads it, and the device cookie's lifetime is to read it too.
+#: plan#2406).  The one statement of the length: the liveness bound
+#: (``app.services.trusted_device_service._live``), :attr:`TrustedDevice.expires_at`,
+#: the device cookie's lifetime and every sentence that names it read this.
 TRUST_LIFETIME = timedelta(days=30)
 
 #: The longest User-Agent a record keeps.  It is kept only to name the device
@@ -86,18 +85,24 @@ class TrustedDevice(db.Model):
     user_agent = db.Column(db.String(USER_AGENT_MAX_LENGTH), nullable=False)
     trusted_at = db.Column(db.DateTime(timezone=True), nullable=False)
 
-    @hybrid_property
+    @property
     def expires_at(self):
         """Return the moment this device stops being trusted by age.
 
-        :attr:`trusted_at` plus :data:`TRUST_LIFETIME`, and ONE body for both
-        levels: on a row it is a ``datetime``, and at class level the same
-        expression is SQL (``trusted_at + interval``), so the liveness
-        predicate and the date Settings shows are one spelling.  A device is
-        alive by age while this is strictly later than now, so at exactly
-        thirty days it is dead.  It does not say whether the device was
-        forgotten by a ``session_invalidated_at`` bump: only the predicate in
-        ``app.services.trusted_device_service`` says that.
+        :attr:`trusted_at` plus :data:`TRUST_LIFETIME`, in Python, for display.
+        A device is alive by age while this is strictly later than now, so at
+        exactly thirty days it is dead; the service's liveness bound says the
+        same as ``trusted_at > now - TRUST_LIFETIME``, its exact inverse.
+
+        **Not SQL.**  This was a hybrid whose class-level form,
+        ``trusted_at + interval '30 days'``, the bound filtered on, and
+        PostgreSQL adds an interval's days in the session's TimeZone: thirty
+        calendar days in that zone, not 720 hours, so across a daylight-saving
+        change the database and this value parted by an hour (plan#2173's
+        review, measured under ``America/New_York``).  The bound now subtracts
+        in Python, where a ``timedelta`` is exact.  It does not say whether
+        the device was forgotten by a ``session_invalidated_at`` bump: only
+        the predicate in ``app.services.trusted_device_service`` says that.
 
         Returns:
             The expiry moment, timezone-aware.

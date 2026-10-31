@@ -5,31 +5,13 @@
 #
 # BASE-IMAGE PINNING (audit findings F-025, F-060, F-062, F-120 / Commit C-36)
 # ---------------------------------------------------------------------------
-# Both stages pin the base image by sha256 digest, not by floating tag.
-# The digest references the multi-arch image index for ``python:3.14-slim``
-# that Dependabot moved it to on 2026-10-16 (#569), which carries, measured
-# from the image 2026-10-30:
-#   * Python 3.14.8
-#   * Debian 13.7 (trixie) with libssl3t64 / openssl / openssl-provider-legacy
-#     at 3.5.7-1~deb13u3 -- past the CVE-2026-28390 (HIGH) fix that the
-#     2026-05-08 digest first carried (audit F-025).
-#   * pip 26.2.1 -- past the CVE-2026-1703 path-traversal fix
-#     (audit F-120); the build itself runs no pip (uv installs the lock).
-#
-# The digest is the immutable identity; the ``:3.14-slim`` tag in the
-# reference is informational so a casual reader can tell the line
-# refers to the rolling 3.14.x slim variant.  When refreshing the
-# digest:
-#   1. Pull the new image:
-#        docker pull python:3.14-slim
-#   2. Capture the new index digest:
-#        docker buildx imagetools inspect python:3.14-slim
-#      The line ``Digest: sha256:...`` at the top is the OCI image
-#      index digest; that is the value to paste below.
-#   3. Verify the openssl/pip versions in the new image match or
-#      exceed the constraints documented above.
-#   4. Update the digest on BOTH FROM lines below in the same commit
-#      so the builder and runtime stages stay in lockstep.
+# Both Python stages pin the base image by its multi-arch index's sha256
+# digest, not by floating tag: the digest is the immutable identity, and
+# the tag names the Python minor ``.python-version`` holds.  The FROM lines
+# are the one home of what the image pins, so no comment restates it: an
+# update moves them with nothing else to re-measure (ruling plan#2443),
+# and both move in one change, the builder and the runtime in lockstep
+# (tests/test_deploy/test_image_supply_chain.py holds them to one digest).
 #
 # OPENSSL DEFENSE-IN-DEPTH
 # ------------------------
@@ -37,7 +19,9 @@
 # openssl libssl3t64 openssl-provider-legacy`` so a CVE that lands in
 # Debian's trixie repos between digest refreshes is picked up on the
 # next image build.  Belt-and-braces: the digest gives reproducibility,
-# the apt upgrade gives currency.
+# the apt upgrade gives currency.  The upgrade, not the digest, is what
+# holds the image past a Debian OpenSSL fix (audit F-025): every build
+# takes Debian's newest.
 
 # -- Stage 0: uv ------------------------------------------------------
 # uv installs ``uv.lock`` (ruling balance:R-BAL294): every package, indirect
@@ -68,8 +52,8 @@ COPY --from=uv /uv /usr/local/bin/uv
 # Python, the one ``.python-version`` names: with downloads off, a
 # ``.python-version`` this base image does not satisfy fails the build
 # instead of fetching another interpreter.  No pip runs in this build and
-# none is seeded into the venv, so the pip CVE fix audit finding F-120
-# pinned here has nothing left to guard in /opt/venv.
+# none is seeded into the venv (audit finding F-120); the runtime stage
+# deletes the base image's own.
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_PYTHON_DOWNLOADS=never \
     UV_LINK_MODE=copy \
@@ -111,6 +95,21 @@ RUN apt-get update \
         libpq5 postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
+# NO PIP IN THE RUNTIME IMAGE (ruling plan#2443; audit finding F-120).  The
+# base image ships pip for its own interpreter: installed, as its commands,
+# and as the wheel ensurepip installs it from.  Nothing here runs it -- the
+# venv below holds every package, from the lock, and no installer -- so it
+# is deleted rather than kept past each pip CVE.  ``rm`` deletes it, so no
+# pip runs (ruling plan#2446); each path is read from this stage's own
+# interpreter, before the venv's comes first on PATH, and with no ``-f`` a
+# path the base image stops holding fails the build rather than leaving a
+# pip behind.  CI's ``image`` job checks the built image holds none.
+RUN purelib="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')" \
+    && scripts="$(python -c 'import sysconfig; print(sysconfig.get_path("scripts"))')" \
+    && bundled="$(python -c 'import ensurepip, pathlib; print(pathlib.Path(ensurepip.__file__).parent / "_bundled")')" \
+    && rm -r "${purelib}"/pip "${purelib}"/pip-*.dist-info \
+        "${scripts}"/pip "${scripts}"/pip3* "${bundled}"/pip-*.whl
+
 # Create the non-root user at a FIXED uid/gid.  1000 is what Debian's
 # useradd handed out anyway (production has run as uid 1000 since the
 # first deploy), and pinning it lets the USER line below be numeric,
@@ -120,8 +119,9 @@ RUN groupadd --gid 1000 shekel && useradd --create-home --uid 1000 --gid 1000 sh
 WORKDIR /home/shekel/app
 
 # Copy virtualenv from builder.  The venv carries the lock's runtime
-# set and gunicorn and no installer at all -- uv stayed in the builder
-# and no pip was seeded -- and the runtime stage installs nothing.
+# set and gunicorn and no installer at all -- uv stayed in the builder,
+# no pip was seeded and the base image's pip is deleted above -- and the
+# runtime stage installs nothing.
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

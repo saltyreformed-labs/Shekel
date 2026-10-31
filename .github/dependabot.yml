@@ -55,9 +55,10 @@ updates:
       prefix: "chore(deps)"
 
   # The application image's base (Dockerfile FROM ... @sha256).  A digest
-  # PR rewrites the two FROM lines only: the hand-maintained version block
-  # above them (Python, Debian, OpenSSL, pip) is re-measured by whoever
-  # merges it, from the image, before the merge.  The uv stage's FROM line
+  # PR rewrites the FROM lines only, and no comment beside them restates
+  # what they pin, so nothing is left to re-measure (ruling plan#2443): the
+  # build's own upgrade keeps OpenSSL at Debian's newest, and the runtime
+  # image deletes the base image's pip.  The uv stage's FROM line
   # moves here too: it is the one home of uv's version and digest, which
   # every CI job's .github/actions/install-lock reads.
   - package-ecosystem: docker

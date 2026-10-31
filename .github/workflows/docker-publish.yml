@@ -27,20 +27,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # Pin Cosign to the GitHub-Actions-installer's matching version so
-  # an unexpected upstream API change cannot silently break signing
-  # in steady state.  Update this in the same commit as any cosign
-  # CLI flag change.
-  #
-  # Bumped 2026-05-14 from v2.6.4 (no longer downloadable -- the 2.x
-  # release line was pruned from sigstore's distribution channel,
-  # causing back-to-back "Install Cosign" failures on 2026-05-13 and
-  # 2026-05-14 runs).  v3.x is the current major; the sign + verify
-  # CLI surface used here (cosign sign / cosign verify with
-  # --certificate-identity-regexp + --certificate-oidc-issuer) is
-  # backward-compatible with v2.x, so the operator-side verify
-  # commands in deploy/README.md continue to work unchanged.
-  COSIGN_VERSION: v3.0.6
 
 jobs:
   # ── Next year's tax law, before any image is built ──────────────
@@ -166,18 +152,13 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Cosign
-        # sigstore/cosign-installer pins a specific cosign version on
-        # the runner.  The same cosign version then runs both the
-        # ``sign`` step below and any operator-side ``verify``, so
-        # signature-format compatibility is a known constant.
-        #
-        # Bumped 2026-05-14 from v3.7.0 (which only supports cosign
-        # 2.x) to v4.1.2 (cosign 3.x).  The 2.x releases were pruned
-        # from sigstore's distribution channel; pinning to a 2.x
-        # version under v3.7.0 of this Action fails at download.
+        # The installer's pinned commit is cosign's one home (ruling
+        # plan#2442): given no ``cosign-release``, it installs its own
+        # default cosign, the binary it checks against the sha256 the
+        # action holds at that commit (read 2026-10-31), so an update of
+        # this line moves cosign with it and nothing else names a version
+        # to fall behind.  The same cosign runs the ``sign`` step below.
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: ${{ env.COSIGN_VERSION }}
 
       - name: Extract metadata (tags, labels)
         id: meta

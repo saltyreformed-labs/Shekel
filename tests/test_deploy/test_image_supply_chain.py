@@ -249,6 +249,22 @@ class TestDockerfileOpenSSLUpgrade:
         )
 
 
+#: Where a shell command starts in a RUN line: the instruction itself, after an operator, or
+#: inside a subshell or a command substitution, line continuations included.
+_COMMAND_START = r"(?:^RUN|&&|\|\||[;|(`]|\$\()[\s\\]*"
+#: A RUN line that runs pip (ruling plan#2446): the word ``pip`` anywhere but as a path's
+#: segment after a ``/`` (``pip install``, ``pip3``, ``python -m pip``, ``uv pip``,
+#: ``pip-compile``), ``-mpip``, and a path to pip where a command starts
+#: (``/usr/local/bin/pip install``).  A path naming pip's files as an argument runs
+#: nothing: the runtime stage's ``rm`` of the base image's pip (ruling plan#2443).
+PIP_RUN = re.compile(rf"(?<![/\w])pip|-m\s*pip|{_COMMAND_START}\S*/pip", re.MULTILINE)
+
+
+def _run_lines(text: str) -> list[str]:
+    """Each RUN instruction of the Dockerfile ``text``, its continuation lines included."""
+    return re.findall(r"^RUN\b(?:.*\\\n)*.*$", text, re.MULTILINE)
+
+
 class TestDockerfileInstallsTheLock:
     """The image installs ``uv.lock`` with uv, and no pip runs in the build.
 
@@ -257,7 +273,9 @@ class TestDockerfileInstallsTheLock:
     audit finding F-120's control (a pip upgraded past CVE-2026-1703 before
     ``pip install -r requirements.txt``): with no pip invoked in the build
     and none seeded into ``/opt/venv``, that CVE has no build-time pip to
-    reach, which the old control only narrowed.
+    reach, which the old control only narrowed.  The runtime stage deletes
+    the base image's own pip with ``rm`` (rulings plan#2443, plan#2446), and
+    ci.yml's ``image`` job checks the built image holds none.
     """
 
     @pytest.fixture(scope="class")
@@ -267,18 +285,48 @@ class TestDockerfileInstallsTheLock:
         return DOCKERFILE.read_text(encoding="utf-8")
 
     def test_no_pip_runs_in_the_build(self, text: str) -> None:
-        """No ``pip`` command appears in any RUN line.
+        """No RUN line runs pip (:data:`PIP_RUN`).
 
         A ``pip install`` would install outside the lock's hashes; uv
         installs everything.
         """
-        commands = re.findall(r"^RUN\b(?:.*\\\n)*.*$", text, re.MULTILINE)
-        pip_runs = [command for command in commands if re.search(r"\bpip\b", command)]
+        pip_runs = [command for command in _run_lines(text) if PIP_RUN.search(command)]
         assert not pip_runs, (
             f"Dockerfile runs pip: {pip_runs}.  The image installs only "
             f"``uv.lock``, through ``uv sync --locked`` (ruling "
             f"balance:R-BAL294)."
         )
+
+    @pytest.mark.parametrize("command", [
+        "RUN pip install requests",
+        "RUN pip3 install requests",
+        "RUN python -m pip install requests",
+        "RUN python3 -I -mpip install requests",
+        "RUN uv pip install requests",
+        "RUN pip-compile requirements.in",
+        "RUN apt-get update && pip install requests",
+        "RUN apt-get update \\\n    && pip install requests",
+        "RUN /usr/local/bin/pip install requests",
+        "RUN apt-get update \\\n    && /usr/local/bin/pip3 install requests",
+        'RUN "${scripts}"/pip install requests',
+        "RUN version=\"$(/usr/local/bin/pip --version)\"",
+    ], ids=["pip", "pip3", "python -m pip", "-mpip", "uv pip", "pip-compile",
+            "after an operator", "on a continuation line", "by its path",
+            "by its path on a continuation line", "by a variable's path",
+            "in a command substitution"])
+    def test_the_pip_check_refuses_each_way_a_build_runs_pip(self, command: str) -> None:
+        """Each way a RUN line runs pip is refused, by name or by a path to it."""
+        assert PIP_RUN.search(command), command
+
+    def test_the_pip_check_passes_a_line_naming_pip_s_files_it_runs_nothing_of(
+            self, text: str) -> None:
+        """The runtime stage's ``rm`` of the base image's pip names pip's files and runs no
+        pip, so it passes; it is a RUN line of the Dockerfile, so the check over the real
+        file reads it."""
+        deleting = [command for command in _run_lines(text) if "rm -r " in command
+                    and '"${purelib}"/pip ' in command]
+        assert len(deleting) == 1, deleting
+        assert not PIP_RUN.search(deleting[0]), deleting[0]
 
     def test_the_builder_syncs_the_lock_with_its_build_hashes(
         self, text: str,
@@ -960,10 +1008,15 @@ class TestDockerPublishWorkflowSignsImage:
         )
 
     def test_workflow_installs_cosign(self, parsed: dict) -> None:
-        """A step uses sigstore/cosign-installer with a pinned version.
+        """A step installs cosign by sigstore/cosign-installer pinned by commit, and
+        installs the installer's own default cosign.
 
-        Pinning the cosign version prevents an upstream API change
-        from silently breaking signing in steady state.
+        The installer's pinned commit is cosign's one home (ruling plan#2442): its
+        default cosign is the binary it checks against the sha256 the action holds at
+        that commit, so an update of the installer's line moves cosign with it and an
+        upstream release cannot change what signs without a change here.  A
+        ``cosign-release`` of the workflow's own would be a second home, which an
+        update of the installer's line leaves behind.
         """
         steps = parsed["jobs"]["build-and-push"]["steps"]
         installer_step = next(
@@ -975,13 +1028,16 @@ class TestDockerPublishWorkflowSignsImage:
             "cosign via sigstore/cosign-installer; the sign step "
             "below would fail with ``cosign: not found``."
         )
-        # Assert the installer pins a cosign release.
-        with_args = installer_step.get("with") or {}
-        cosign_release = with_args.get("cosign-release")
-        assert cosign_release, (
-            "sigstore/cosign-installer step does not pin "
-            "cosign-release; an upstream cosign API change could "
-            "break signing without a code change."
+        assert re.fullmatch(r"sigstore/cosign-installer@[0-9a-f]{40}",
+                            installer_step["uses"]), (
+            f"sigstore/cosign-installer is not pinned by commit "
+            f"({installer_step['uses']!r}); the cosign it installs would move "
+            f"with whatever the reference names."
+        )
+        assert "cosign-release" not in (installer_step.get("with") or {}), (
+            "sigstore/cosign-installer is given a cosign-release; the installer's "
+            "pinned commit is cosign's one home (ruling plan#2442), and an update "
+            "of the installer's line would leave this one behind."
         )
 
     def test_workflow_signs_with_keyless_oidc(self, text: str) -> None:

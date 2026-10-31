@@ -640,6 +640,21 @@ jobs:
               sync --project /src --locked --check --no-install-project \
               --no-default-groups --group server
 
+      # The runtime stage deletes the base image's pip (rulings plan#2443,
+      # plan#2446): its whole filesystem is searched, as root so no directory is
+      # unreadable, for every name pip's files take (the package and its
+      # dist-info, the commands, the wheel ensurepip keeps), and one found fails
+      # the step.  Measured 2026-10-31: the pinned base image holds seven, each
+      # pip's, and the built image none.
+      - name: The image holds no pip
+        shell: bash
+        run: |
+          docker run --rm --network none --user 0 --entrypoint sh "${IMAGE}" -c '
+          found="$(find / -xdev \( -name pip -o -name "pip[0-9]*" -o -name "pip-*" \) -print)" || exit 1
+          echo "${found:-no pip}"
+          test -z "${found}"
+          '
+
   lint-and-test:
     needs: [landing, tools, tax-law, lint, test, image]
     if: always()

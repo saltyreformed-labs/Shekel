@@ -26,14 +26,13 @@ name: shekel-prod
 services:
   # ── PostgreSQL Database ──────────────────────────────────────────
   db:
-    # Pinned to postgres:18-alpine 18.6 (digest sha256:77f585...).  The
-    # tag-plus-digest form documents the human-readable version and
-    # guarantees the immutable bytes.  Update both halves together when
-    # bumping minor versions; see deploy/README.md "Image digest pinning"
-    # for the workflow.  docker-compose.dev.yml pins the same digest so
-    # dev and prod always test the identical postgres build -- bump both
-    # files in the same commit.  PG 18+ changed PGDATA from
-    # /var/lib/postgresql/data to /var/lib/postgresql/$PG_MAJOR/docker
+    # Pinned by tag and digest: the tag documents the human-readable
+    # version and the digest guarantees the immutable bytes, and no
+    # comment restates either; update both halves together.
+    # docker-compose.dev.yml pins the same digest so dev and prod always
+    # test the identical postgres build -- bump both files in the same
+    # commit.  PG 18+ changed PGDATA from /var/lib/postgresql/data to
+    # /var/lib/postgresql/$PG_MAJOR/docker
     # (PR docker-library/postgres#1259) and refuses to start when a
     # legacy mount sits at the old path; the volumes block below mounts
     # the named volume at the parent /var/lib/postgresql so the per-
@@ -150,13 +149,13 @@ services:
   # rate-limit counters are short-lived state, and deploy/valkey/
   # start.sh, which starts the server, holds each flag and its reason.
   valkey:
-    # Valkey 9.1.2 by tag and digest: the tag documents the version and
-    # the digest pins the bytes (deploy/README.md "Image digest
-    # pinning").  Update both halves together.
+    # Pinned by tag and digest: the tag documents the version and the
+    # digest pins the bytes, and no comment restates either; update both
+    # halves together, here and in docker-compose.dev.yml.
     image: valkey/valkey:9.1.2-alpine@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11
     container_name: shekel-prod-valkey
     restart: unless-stopped
-    # Match the exact-version alpine tags (9.1.3-alpine, 10.0.0-alpine)
+    # Match the exact-version alpine tags (``<major>.<minor>.<patch>-alpine``)
     # the pin above uses.
     labels:
       - "wud.tag.include=^\\d+\\.\\d+\\.\\d+-alpine$$"
@@ -500,11 +499,10 @@ services:
 
   # ── Nginx Reverse Proxy ──────────────────────────────────────────
   nginx:
-    # Pinned to nginx:1.31-alpine 1.31.8 (multi-arch index digest
-    # sha256:785835..., read 2026-10-30 with ``docker buildx imagetools
-    # inspect``; finding BAL-653).  The tag documents the version line
-    # the wud label below watches, and the digest pins the bytes; update
-    # both halves together (deploy/README.md "Image digest pinning").
+    # Pinned by tag and digest (finding BAL-653): the tag documents the
+    # version line the wud label below watches, and the digest (the
+    # multi-arch index's) pins the bytes, the line below their one home;
+    # update both halves together.
     # The deploy tests run this image too (tests/test_deploy/_compose.py).
     image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
     container_name: shekel-prod-nginx

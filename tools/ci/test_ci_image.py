@@ -3,8 +3,8 @@
 ``docker-publish.yml`` builds the release image only on a push to ``main``, so before task
 plan#2366 a change that broke the build landed in ``dev`` and failed only at the release.  The
 job builds the image on every pull request, queue group and push to ``main``, never pushes it,
-and checks that it runs psycopg's C implementation and holds exactly the lock's runtime set and
-its ``server`` group; ``lint-and-test`` grades it (:mod:`tools.ci.ci_verdict`).
+and checks that it runs psycopg's C implementation, holds exactly the lock's runtime set and
+its ``server`` group, and holds no pip; ``lint-and-test`` grades it (:mod:`tools.ci.ci_verdict`).
 """
 from __future__ import annotations
 
@@ -25,9 +25,11 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
     queue group and push to ``main``, never pushed, and what it holds checked (task
     plan#2366).
 
-    Its three ``run`` steps are RUN here with a stand-in ``docker``; that each check refuses
+    Its four ``run`` steps are RUN here with a stand-in ``docker``; that each check refuses
     a wrong image is measured against real images (built 2026-10-30: an extra package, a
-    missing one and no psycopg-c each refused) and is graded on every run by the job itself.
+    missing one and no psycopg-c each refused; 2026-10-31: the pinned base image's seven pip
+    files each found, and none in the built image) and is graded on every run by the job
+    itself.
     """
 
     BUILDX = "Set up Docker Buildx"
@@ -35,20 +37,33 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
     EXPORT = "Export the Dockerfile's uv"
     IMPL = "The image runs psycopg's C implementation"
     PACKAGES = "The image holds exactly the lock's runtime and server set"
+    PIP = "The image holds no pip"
     #: The local name the image is loaded under.
     IMAGE = "shekel:ci"
 
     #: A stand-in ``docker``: it writes its arguments to ``LOG`` as JSON, runs the code a
-    #: ``-c`` hands it with this Python, and otherwise exits ``DOCKER_STATUS`` (0 unset).
+    #: ``-c`` hands it with the ``--entrypoint`` it names (this Python for ``python``), and
+    #: otherwise exits ``DOCKER_STATUS`` (0 unset).
     DOCKER = (
         "import json, os, subprocess, sys\n"
         "args = sys.argv[1:]\n"
         "with open(os.environ['LOG'], 'w', encoding='utf-8') as log:\n"
         "    json.dump(args, log)\n"
         "if '-c' in args:\n"
-        "    sys.exit(subprocess.run([sys.executable, '-c', args[args.index('-c') + 1]],\n"
+        "    entry = args[args.index('--entrypoint') + 1]\n"
+        "    program = sys.executable if entry == 'python' else entry\n"
+        "    sys.exit(subprocess.run([program, '-c', args[args.index('-c') + 1]],\n"
         "                            check=False).returncode)\n"
         "sys.exit(int(os.environ.get('DOCKER_STATUS', '0')))\n"
+    )
+    #: A stand-in ``find``: it writes its arguments to ``FIND_LOG`` as JSON, prints
+    #: ``FOUND`` and exits ``FIND_STATUS``.
+    FIND = (
+        "import json, os, sys\n"
+        "with open(os.environ['FIND_LOG'], 'w', encoding='utf-8') as log:\n"
+        "    json.dump(sys.argv[1:], log)\n"
+        "print(os.environ['FOUND'], end='')\n"
+        "sys.exit(int(os.environ['FIND_STATUS']))\n"
     )
 
     def _docker(self, tmp_path: Path) -> dict[str, str]:
@@ -75,6 +90,7 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         assert job["env"] == {"IMAGE": self.IMAGE}
         assert [step["name"] for step in job["steps"]] == [
             "Checkout code", self.BUILDX, self.BUILD, self.EXPORT, self.IMPL, self.PACKAGES,
+            self.PIP,
         ]
         steps = _steps("image")
         assert steps["Checkout code"]["with"] == {"persist-credentials": False}
@@ -164,3 +180,28 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         project = tomllib.loads((arcs.REPO / "pyproject.toml").read_text(encoding="utf-8"))
         assert "server" in project["dependency-groups"]
         assert _run_step(run, {**step_env, "DOCKER_STATUS": "1"}).returncode != 0
+
+
+    def test_the_pip_check_fails_on_any_pip_the_image_holds(self, tmp_path):
+        """The pip step, RUN: in the image, offline and as root, ``find`` searches its whole
+        filesystem for pip's names, and the step passes only where it finds none; a path
+        found, or a search that fails, fails it.  A stand-in ``find`` reports each case."""
+        env = self._docker(tmp_path)
+        find = tmp_path / "bin" / "find"
+        find.write_text(f"#!{sys.executable}\n{self.FIND}", encoding="utf-8")
+        find.chmod(0o755)
+        run = _steps("image")[self.PIP]["run"]
+        searched = tmp_path / "find.json"
+        for found, status, expected, said in (
+                ("", 0, 0, "no pip"), ("/usr/local/bin/pip\n", 0, 1, "/usr/local/bin/pip"),
+                ("", 1, 1, "")):
+            result = _run_step(run, {**env, "FIND_LOG": str(searched), "FOUND": found,
+                                     "FIND_STATUS": str(status)})
+            assert result.returncode == expected, (found, status, result.stdout, result.stderr)
+            assert result.stdout.strip() == said, (found, status)
+            assert self._called(tmp_path)[:10] == [
+                "run", "--rm", "--network", "none", "--user", "0", "--entrypoint", "sh",
+                self.IMAGE, "-c"]
+            assert json.loads(searched.read_text(encoding="utf-8")) == [
+                "/", "-xdev", "(", "-name", "pip", "-o", "-name", "pip[0-9]*", "-o", "-name",
+                "pip-*", ")", "-print"]

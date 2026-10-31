@@ -41,9 +41,10 @@ PROD_COMPOSE_OVERRIDE = DEPLOY_DIR / "docker-compose.prod.yml"
 BUNDLED_NGINX_CONF = DEPLOY_DIR / "nginx-bundled" / "nginx.conf"
 
 # Production services that must carry the full hardening bundle.
-# redis was hardened in an earlier commit; including it here pins
-# the regression surface so the existing fields cannot be removed.
-HARDENED_SERVICES = ("db", "app", "nginx", "redis")
+# valkey (redis before ruling R-BAL298) was hardened in an earlier
+# commit; including it here pins the regression surface so the
+# existing fields cannot be removed.
+HARDENED_SERVICES = ("db", "app", "nginx", "valkey")
 
 # Bytes-per-MiB conversion used to normalise compose's mixed
 # representation of mem_limit (raw bytes from ``compose config``,
@@ -113,9 +114,10 @@ class TestBaseComposeHardeningFields:
     """Parse ``docker-compose.yml`` directly and assert each Shekel
     service carries the C-35 hardening bundle.
 
-    All four services (db, app, nginx, redis) are checked because:
+    All four services (db, app, nginx, valkey) are checked because:
       * db, app, and nginx are the focus of Commit C-35;
-      * redis was hardened in an earlier commit (Commit C-15-era)
+      * valkey (redis before ruling R-BAL298) was hardened in an
+        earlier commit (Commit C-15-era)
         and including it here prevents a future change from quietly
         regressing the existing fields.
     """
@@ -210,7 +212,7 @@ class TestBaseComposeHardeningFields:
         tmpfs = service.get("tmpfs") or []
         assert "/tmp" in tmpfs, (
             f"service {service_name!r} read-only rootfs without /tmp "
-            f"tmpfs would break Python tempfile, redis temp writes, "
+            f"tmpfs would break Python tempfile, valkey temp writes, "
             f"and nginx pid path: {tmpfs}"
         )
 
@@ -249,7 +251,7 @@ class TestBaseComposeHardeningFields:
             ("db", 256),
             ("app", 256),
             ("nginx", 64),
-            ("redis", 64),
+            ("valkey", 64),
         ],
     )
     def test_mem_limit_set_and_reasonable(
@@ -342,7 +344,7 @@ class TestBaseComposeHardeningFields:
         [
             ("db", "postgres"),
             ("nginx", "nginx"),
-            ("redis", "redis"),
+            ("valkey", "valkey"),
         ],
     )
     def test_non_root_user_pinned(
@@ -352,7 +354,7 @@ class TestBaseComposeHardeningFields:
         expected_user: str,
     ) -> None:
         """Pinning ``user:`` to a non-root identity is what lets the
-        upstream postgres / nginx / redis entrypoints take their
+        upstream postgres / nginx / valkey entrypoints take their
         ``[ "$(id -u)" != '0' ]`` branches and skip the chown +
         gosu-drop steps.  Without that, ``cap_drop: [ALL]`` would
         starve the entrypoints of CAP_CHOWN/CAP_SETUID/CAP_SETGID
@@ -695,12 +697,12 @@ class TestMergedComposeHardeningSurvivesOverride:
             # value never reaches a real pull because ``compose config``
             # only renders the merged YAML.
             "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # Phase B3 Redis ACL hardening: the bundled redis service's
-            # ``--user shekel`` ACL line interpolates
-            # ``${SHEKEL_REDIS_PASSWORD:?...}`` from .env.  Synthetic
+            # The Valkey password: the app's RATELIMIT_STORAGE_URI and
+            # the valkey service's VALKEY_PASSWORD interpolate
+            # ``${SHEKEL_VALKEY_PASSWORD:?...}`` from .env.  Synthetic
             # value satisfies the required-form check; the test never
-            # actually starts the redis container.
-            "SHEKEL_REDIS_PASSWORD": "test-redis-password",
+            # actually starts the valkey container.
+            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
         }
         result = subprocess.run(
             [

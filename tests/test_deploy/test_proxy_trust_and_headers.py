@@ -600,8 +600,8 @@ class TestProdComposeNetworkTopology:
         assert "shekel-frontend" in app_networks
 
     def test_app_still_joins_backend(self, parsed: dict) -> None:
-        """The internal-only ``backend`` bridge (db, redis) is still
-        required.  Removing it would break Gunicorn's DB/Redis
+        """The internal-only ``backend`` bridge (db, valkey) is still
+        required.  Removing it would break Gunicorn's DB/Valkey
         connections.
         """
         app_networks = parsed["services"]["app"].get("networks") or []
@@ -701,7 +701,7 @@ class TestBaseComposeNetworkPinning:
 
     def test_backend_still_internal(self, yaml_text: str) -> None:
         """``backend`` must remain ``internal: true`` so the db /
-        redis / app cannot reach the public internet.  Audit finding
+        valkey / app cannot reach the public internet.  Audit finding
         F-020 mitigations require this.
         """
         # Robustly match the YAML structure: "backend:" header

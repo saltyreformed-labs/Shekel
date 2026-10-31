@@ -68,13 +68,15 @@ dependencies = [
     "python-dotenv>=1.2.4,<2.0.0",
     # Logging
     "python-json-logger>=4.2.0,<5.0.0",
-    # Rate limiting -- the Redis client Flask-Limiter's storage layer
+    # Rate limiting -- the Valkey client Flask-Limiter's storage layer
     # (``limits.storage.redis``) uses in production, where the limiter
-    # writes its counters to the bundled compose ``redis`` service so they
+    # writes its counters to the bundled compose ``valkey`` service so they
     # are shared across Gunicorn workers and survive app restarts (audit
-    # finding F-034).  ``limits`` declares ``redis<8.0.0`` in its ``redis``
-    # extra, an extra nothing here requests, so this line holds the cap.
-    "redis>=7.4.1,<8.0.0",
+    # finding F-034; Valkey replaced Redis under ruling R-BAL298).  limits
+    # picks this client by the URI's ``valkey://`` scheme; a ``redis://``
+    # URI asks for the ``redis`` package, which the lock does not hold, and
+    # fails at startup by name.
+    "valkey>=6.2.0,<7.0.0",
     # HTTP client -- ``app/services/auth_service.py`` queries the Have I Been
     # Pwned k-anonymity API at password-set time (audit finding F-086, commit
     # C-11), its one outbound endpoint (``api.pwnedpasswords.com``);

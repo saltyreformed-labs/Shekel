@@ -1,0 +1,38 @@
+# Valkey's users and the commands each may run: the ONE home of these rules
+# (ruling plan#2350).  The bundled compose file, the dev compose file and
+# production's override all mount this file, and the real-store test runs the
+# pinned Valkey image under it.  deploy/valkey/start.sh reads it at boot: it
+# drops these comment lines, which Valkey's ACL file format refuses, and adds
+# the shekel user's password as its SHA-256 hash from the password each
+# compose file hands the container (start.sh says how), so no password is
+# written here.
+#
+# The default user is off.  A file that did not name it would leave Valkey's
+# built-in default user on, with no password and every command.
+user default off
+#
+# The app's user, granted exactly the commands the rate limiter runs (ruling
+# R-BAL298: least privilege, fail-closed).  The limiter is Flask-Limiter on
+# limits' moving-window strategy (app/config.py, RATELIMIT_STRATEGY), and
+# limits runs it as two Lua scripts:
+#   evalsha       runs a script by its digest: acquire_moving_window.lua on
+#                 each limited request, moving_window.lua for the window read
+#                 behind the X-RateLimit-* headers.
+#   script|load   loads a script the server does not hold: valkey-py's Script
+#                 answers a NOSCRIPT refusal (a fresh or restarted Valkey) by
+#                 loading it and running it again.
+#   lindex, lpush, ltrim, expire
+#                 what the two scripts call.  A command a script calls is
+#                 checked against this user too.
+# Keys: limits writes every key under the prefix LIMITS: (its
+# RedisStorage.PREFIX).  No channels: the limiter uses no pub/sub.
+# Not granted: CLIENT SETINFO, which valkey-py sends on each new connection
+# and whose refusal it ignores, so ACL LOG counts two refusals for each new
+# connection; DEL, which only Flask-Limiter's CLI reaches (flask limiter clear);
+# PING, which only that CLI and the in-memory fallback (off in this app)
+# reach; TTL, which only the fixed-window strategy reads; and KEYS, which
+# limits' reset() runs and nothing in this app calls.
+user shekel on ~LIMITS:* resetchannels -@all +evalsha +script|load +lindex +lpush +ltrim +expire
+#
+# The compose healthcheck's user: no password, and PING only.
+user healthcheck on nopass resetchannels -@all +ping

@@ -140,101 +140,70 @@ services:
       - /tmp
       - /var/run/postgresql
 
-  # ── Redis (Flask-Limiter Storage) ────────────────────────────────
+  # ── Valkey (Flask-Limiter Storage) ───────────────────────────────
   # Holds rate-limit counters that must be shared across Gunicorn
   # workers and survive app-container restarts.  See audit finding
-  # F-034 and remediation Commit C-06.  No password is set because the
-  # backend network (internal: true, see networks block at end of
-  # file) is unreachable from the host or any other container outside
-  # this compose stack -- only the app and nginx services can talk to
-  # Redis.  Persistence is intentionally disabled (--save "" and
-  # --appendonly no): rate-limit counters are short-lived state and
-  # writing them to disk would (a) increase IO with no security
-  # benefit, (b) risk persisting cleartext counter keys to disk where
-  # the operator might forget about them, (c) slow Redis restarts.
-  redis:
-    image: redis:7.4-alpine
-    container_name: shekel-prod-redis
+  # F-034 and remediation Commit C-06; Valkey replaced Redis under
+  # ruling R-BAL298.  Only the services on the backend network
+  # (internal: true, see networks block at end of file) can reach it,
+  # nothing on the host or outside this stack.  Persistence is off:
+  # rate-limit counters are short-lived state, and deploy/valkey/
+  # start.sh, which starts the server, holds each flag and its reason.
+  valkey:
+    # Valkey 9.1.2 by tag and digest: the tag documents the version and
+    # the digest pins the bytes (deploy/README.md "Image digest
+    # pinning").  Update both halves together.
+    image: valkey/valkey:9.1.2-alpine@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11
+    container_name: shekel-prod-valkey
     restart: unless-stopped
-    # Stay on the Redis 7.x-alpine line. Redis 8 (and 8-rc) introduce
-    # the BSD-vs-AGPL relicensing branch and ACL/CONFIG behavior
-    # changes that would need re-validation against the ACL block
-    # below before any bump.
+    # Match the exact-version alpine tags (9.1.3-alpine, 10.0.0-alpine)
+    # the pin above uses.
     labels:
-      - "wud.tag.include=^7\\.\\d+-alpine$$"
+      - "wud.tag.include=^\\d+\\.\\d+\\.\\d+-alpine$$"
     networks:
       - backend
-    # Redis CLI flags:
-    #   --save ""           Disable RDB snapshots.
-    #   --appendonly no     Disable AOF persistence.
-    #   --maxmemory 64mb    Cap RAM at 64 MiB; this is far above the
-    #                       working set for per-IP rate-limit counters
-    #                       in a single-user app but provides
-    #                       headroom if the limiter ever stores
-    #                       per-user lockout state under C-11.
-    #   --maxmemory-policy allkeys-lru  Evict the least-recently used
-    #                       key on OOM rather than returning errors
-    #                       (which the limiter would surface as 500s
-    #                       under fail-closed posture).
-    command:
-      - "redis-server"
-      - "--save"
-      - ""
-      - "--appendonly"
-      - "no"
-      - "--maxmemory"
-      - "64mb"
-      - "--maxmemory-policy"
-      - "allkeys-lru"
-      # ── Phase B3 ACL hardening (2026-05-09) ────────────────────────
-      # Defense-in-depth: even though the backend network is internal,
-      # an attacker who lands code execution in the app container
-      # (Gunicorn RCE, container-escape from a sibling, etc.) gets
-      # network access to Redis.  ACLs limit what that pivot can do.
-      #
-      # Disable the default user (was: on, nopass, ~* &* +@all).
-      # Anyone connecting without explicit AUTH gets no commands.
-      - "--user"
-      - "default"
-      - "off"
-      # Per-app user.  Key pattern is `~LIMITS*` -- the observed key
-      # format from the limits library (Flask-Limiter's storage
-      # backend) is `LIMITS:LIMITER/<ip>/<endpoint>/<limit>/<value>/
-      # <window>`.  `~LIMITS*` matches every Flask-Limiter key while
-      # still blocking access to any other namespace a co-tenant
-      # might try to enumerate.  RATELIMIT_KEY_PREFIX on the app side
-      # does NOT propagate down to the limits lib's hardcoded key
-      # prefix, so we match the actual format the lib emits.  `&*`
-      # allows pubsub on any channel (Flask-Limiter doesn't use
-      # pubsub today).  `-@dangerous` blocks FLUSHDB/FLUSHALL/CONFIG/
-      # DEBUG/MIGRATE/MONITOR/SAVE/SHUTDOWN/KEYS.
-      - "--user"
-      - "shekel"
-      - "on"
-      - ">${SHEKEL_REDIS_PASSWORD:?Set SHEKEL_REDIS_PASSWORD in .env}"
-      - "resetkeys"
-      - "~LIMITS*"
-      - "&*"
-      - "+@all"
-      - "-@dangerous"
-      # Healthcheck user: nopass + PING only.  Lets the Compose
-      # `service_healthy` gate work without exposing a password to
-      # `ps`/healthcheck-eval contexts.
-      - "--user"
-      - "healthcheck"
-      - "on"
-      - "nopass"
-      - "resetkeys"
-      - "+ping"
+    # ACL hardening (Phase B3, 2026-05-09; narrowed from "everything
+    # but @dangerous" to an allowlist under ruling R-BAL298).  Even
+    # though the backend network is internal, an attacker who lands
+    # code execution in the app container (Gunicorn RCE, a container
+    # escape from a sibling) gets network access to Valkey, and the ACL
+    # limits what that pivot can do.  The users and the commands each
+    # may run are deploy/valkey/users.acl, the ONE home of those rules
+    # (ruling plan#2350), which the dev compose file and the production
+    # override mount too.  start.sh adds the shekel user's password to
+    # them as its hash, from VALKEY_PASSWORD below, and starts the
+    # server.
+    command: ["sh", "/etc/valkey/start.sh"]
+    volumes:
+      # create_host_path: false makes a missing directory (a production
+      # host whose copy of deploy/valkey/ was never made) refuse the
+      # start by name, instead of mounting an empty directory Docker
+      # created.
+      - type: bind
+        source: ./deploy/valkey
+        target: /etc/valkey
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      # The password the app's RATELIMIT_STORAGE_URI carries (below),
+      # from .env; start.sh hashes it and unsets it before the server
+      # starts.  It sits in this container's stored environment
+      # (``docker inspect``), as it sits in the app's URI and as it sat
+      # in the command line before.  A file would keep it out, but
+      # compose cannot write a secret into a read-only container
+      # without a file on the host behind it, so the production
+      # override mounts its password file instead and blanks this.
+      VALKEY_PASSWORD: ${SHEKEL_VALKEY_PASSWORD:?Set SHEKEL_VALKEY_PASSWORD in .env}
     healthcheck:
-      # PING via the dedicated healthcheck ACL user.  `-a ''` is
-      # required because redis-cli's --user flag does NOT auto-send
-      # an AUTH frame unless -a is also present (even with empty
-      # password for nopass users).  Without -a the connection stays
-      # unauthenticated and PING returns NOAUTH but redis-cli exits
-      # 0 -- a silent false-healthy.  Grep for PONG to make the
-      # exit code reflect the actual response.
-      test: ["CMD-SHELL", "redis-cli --user healthcheck -a '' --no-auth-warning ping | grep -q PONG"]
+      # PING via the dedicated healthcheck ACL user (no password, PING
+      # only).  `-a ''` is required because valkey-cli's --user flag
+      # does NOT send an AUTH frame unless -a is also present (even
+      # with an empty password for a nopass user).  Without -a the
+      # connection stays unauthenticated and PING returns NOAUTH but
+      # valkey-cli exits 0 -- a silent false-healthy.  Grep for PONG
+      # to make the exit code reflect the actual response.
+      test: ["CMD-SHELL", "valkey-cli --user healthcheck -a '' --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -244,7 +213,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    # Resource caps -- Redis is a tightly-bounded service so we cap
+    # Resource caps -- Valkey is a tightly-bounded service so we cap
     # both memory and process count to limit blast radius if the
     # container is ever exploited.  Migrated 2026-05-14 from legacy
     # mem_limit/pids_limit to the Compose-Spec deploy.resources form.
@@ -253,22 +222,18 @@ services:
         limits: { cpus: '0.5', memory: 96M, pids: 100 }
     # Container hardening: drop every Linux capability, prevent
     # privilege escalation, and run with a read-only root filesystem.
-    # Redis only needs to write to /tmp (for any temp files it might
-    # create) and /data (which we mount as tmpfs since persistence
-    # is disabled anyway).
+    # Valkey writes only to /tmp (start.sh's generated ACL file) and
+    # /data (its working directory, a tmpfs since persistence is off).
     #
-    # ``user: redis`` is load-bearing alongside ``cap_drop: ALL``.  The
-    # redis:7.4-alpine entrypoint, when it sees uid 0, runs
-    # ``chown -R redis /data`` and then drops to the redis user via
-    # ``gosu``.  With ``cap_drop: ALL`` the chown lacks ``CAP_CHOWN`` and
-    # exits non-zero, taking the container with it.  Starting as the
-    # redis user from the outset makes the entrypoint's ``id -u != 0``
-    # branch fire instead -- chown is skipped entirely and ``redis-server``
-    # exec's with the same uid the chown would have switched to.  The
-    # tmpfs /data mount is owned by root:root at creation, but Redis
-    # never tries to chown it in this branch and only writes to it when
-    # AOF / RDB are enabled (both disabled above).
-    user: redis
+    # ``user: valkey`` is load-bearing.  The image's entrypoint, when it
+    # sees uid 0 and the command ``valkey-server``, chowns /data and
+    # drops to the valkey user with ``setpriv``; with ``cap_drop: ALL``
+    # the chown would fail and take the container with it.  The command
+    # here is ``sh /etc/valkey/start.sh``, which that branch never
+    # matches, so without this line start.sh and the server would run
+    # as root.  Starting as valkey (uid 999 in the alpine image) from
+    # the outset runs both as the user the drop would have switched to.
+    user: valkey
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -324,11 +289,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        # service_healthy ensures Redis answers PING before Gunicorn
+      valkey:
+        # service_healthy ensures Valkey answers PING before Gunicorn
         # starts.  This matters because the app runs with
         # in_memory_fallback_enabled=False and swallow_errors=False
-        # (fail-closed posture) -- if Gunicorn boots before Redis is
+        # (fail-closed posture) -- if Gunicorn boots before Valkey is
         # ready, the very first auth attempt would return 500 instead
         # of the user's expected 200/302.
         condition: service_healthy
@@ -410,19 +375,21 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SLOW_REQUEST_THRESHOLD_MS: ${SLOW_REQUEST_THRESHOLD_MS:-500}
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
-      # Flask-Limiter storage.  Defaults to the bundled redis service
-      # above; override with a managed Redis URI (e.g. Upstash, ElastiCache)
-      # if not running redis as a sibling container.  See audit finding
-      # F-034 and remediation Commit C-06.
+      # Flask-Limiter storage.  Defaults to the bundled valkey service
+      # above; override with another store's URI if not running Valkey
+      # as a sibling container.  See audit finding F-034 and
+      # remediation Commit C-06.  The ``valkey://`` scheme is what makes
+      # limits use the valkey client, the only one the lock holds.
       #
-      # 2026-05-14: the bundled redis now uses ACLs (default user
-      # disabled, see redis.command above).  The URI must include the
-      # per-app user `shekel` and its password from .env.
-      # RATELIMIT_KEY_PREFIX is informational -- the limits library's
-      # Lua script uses its own internal key format (LIMITS:...) that
-      # doesn't propagate this prefix -- but is kept for any code
-      # paths that DO honour it.
-      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-redis://shekel:${SHEKEL_REDIS_PASSWORD}@redis:6379/0}
+      # The bundled Valkey runs under ACLs (default user disabled, see
+      # deploy/valkey/users.acl).  The URI carries the per-app user
+      # `shekel` and its password from .env, the value the valkey
+      # service's VALKEY_PASSWORD reads; ``:?`` fails the parse loudly
+      # when it is unset.  RATELIMIT_KEY_PREFIX is informational -- the limits
+      # library's Lua scripts use its own key prefix (LIMITS:...), which
+      # this setting does not change -- but is kept for any code paths
+      # that DO honour it.
+      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-valkey://shekel:${SHEKEL_VALKEY_PASSWORD:?Set SHEKEL_VALKEY_PASSWORD in .env}@valkey:6379/0}
       RATELIMIT_KEY_PREFIX: ${RATELIMIT_KEY_PREFIX:-shekel}
       # Gunicorn proxy trust.  Pinned to the ``backend`` bridge subnet
       # below (172.31.0.0/24) so Gunicorn honours X-Forwarded-* only

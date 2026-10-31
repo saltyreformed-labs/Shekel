@@ -206,7 +206,7 @@ A gate is a floor, not a ceiling: the judgment rules (2, 3, 6, 8, 10, 13) still 
 
 ```bash
 # Dev server (containerized -- the primary workflow since 2026-06-12;
-# full prod parity: entrypoint pipeline, shekel_app role, redis
+# full prod parity: entrypoint pipeline, shekel_app role, valkey
 # rate limiting, hardened rootfs; live reload via the bind mount)
 docker compose -f docker-compose.dev.yml up -d && docker logs -f shekel-dev-app
 

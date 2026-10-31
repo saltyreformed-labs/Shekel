@@ -73,7 +73,7 @@ Usage:
     python tests/manual/verify_recurrence_form.py
 
 Exit code 0 when every check passes, 1 on a failure, 2 when the preconditions
-are not met.  It is paced: the dev app runs the real Redis limiter (30/minute
+are not met.  It is paced: the dev app runs the real Valkey limiter (30/minute
 per IP, prod behaviour), and a burst meets 429s.
 """
 import os
@@ -116,7 +116,7 @@ MARK = "ZZVERIFY-RECURRENCE"
 #: How long to wait after a field change that fires a preview fetch.
 #:
 #: **The limiter being REAL is the point**, so the run is paced to it rather
-#: than the other way round: the dev app runs prod's Redis limiter at 30
+#: than the other way round: the dev app runs prod's Valkey limiter at 30
 #: requests a minute per IP, ``recurrence_form.js`` fetches the occurrence
 #: preview on every field change, and this script changes a field about sixty
 #: times.  At 2.5s that is 24 a minute, the same headroom

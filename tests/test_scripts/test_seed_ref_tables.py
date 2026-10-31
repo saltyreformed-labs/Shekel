@@ -52,7 +52,7 @@ def _production_env(database_url: str) -> dict:
         "DATABASE_URL": database_url,
         "DATABASE_URL_APP": "",
         "SECRET_KEY": secrets.token_hex(32),
-        "RATELIMIT_STORAGE_URI": "redis://127.0.0.1:6379/0",
+        "RATELIMIT_STORAGE_URI": "valkey://127.0.0.1:6379/0",
     })
     return env
 

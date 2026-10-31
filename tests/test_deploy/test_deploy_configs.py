@@ -268,8 +268,9 @@ class TestDeployComposeParses:
             # value never reaches a real pull because ``compose config``
             # only renders the merged YAML.
             "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # Phase B3 Redis ACL hardening interpolation.
-            "SHEKEL_REDIS_PASSWORD": "test-redis-password",
+            # The Valkey password the app's URI and the valkey service
+            # interpolate (``${SHEKEL_VALKEY_PASSWORD:?...}``).
+            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
         }
         result = subprocess.run(
             [

@@ -144,7 +144,7 @@ In bundled mode the repo's `docker-compose.yml` mounts `deploy/nginx-bundled/ngi
 bundled `shekel-prod-nginx` container. Nothing under `deploy/nginx-shared/` is read.
 
 In shared mode the bundled `shekel-prod-nginx` is parked in the `disabled` profile by
-`deploy/docker-compose.prod.yml`, so only `db`, `redis`, and `app` start. The shared Nginx (defined
+`deploy/docker-compose.prod.yml`, so only `db`, `valkey`, and `app` start. The shared Nginx (defined
 and managed outside this stack) reaches the app over an external `homelab` Docker network.
 
 For full details and the file layout under `deploy/`, see [`deploy/README.md`](deploy/README.md).

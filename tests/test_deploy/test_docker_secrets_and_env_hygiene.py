@@ -905,7 +905,7 @@ class TestProdConfigRejectsDockerSecretPlaceholder:
         # exception in the test body still rolls the env back.
         monkeypatch.setenv("SECRET_KEY", placeholder_value)
         monkeypatch.setenv("DATABASE_URL", "postgresql://x:x@x:5432/x")
-        monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://x:6379/0")
+        monkeypatch.setenv("RATELIMIT_STORAGE_URI", "valkey://x:6379/0")
         try:
             reload(config_module)
             with pytest.raises(ValueError, match="known placeholder"):
@@ -1626,8 +1626,9 @@ class TestProdComposeMergedConfig:
             "SECRET_KEY": "test-secret-key",
             "APP_ROLE_PASSWORD": "test-app-role-password",
             "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # Phase B3 Redis ACL hardening interpolation.
-            "SHEKEL_REDIS_PASSWORD": "test-redis-password",
+            # The Valkey password the app's URI and the valkey service
+            # interpolate (``${SHEKEL_VALKEY_PASSWORD:?...}``).
+            "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
         }
         result = subprocess.run(
             [

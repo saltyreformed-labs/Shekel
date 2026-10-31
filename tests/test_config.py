@@ -819,7 +819,7 @@ class TestRateLimitConfig:
         """BaseConfig.RATELIMIT_STORAGE_URI falls back to memory://.
 
         DevConfig inherits this fallback so a developer running
-        ``flask run`` does not need a Redis container.  Production
+        ``flask run`` does not need a Valkey container.  Production
         overrides explicitly via ProdConfig.
         """
         # The class attribute is captured at import time from os.getenv,
@@ -865,7 +865,7 @@ class TestRateLimitConfig:
         """BaseConfig opts in to X-RateLimit-* response headers.
 
         Without these headers a front-end retry library or operator
-        diagnostic has to inspect Redis directly to learn current
+        diagnostic has to inspect Valkey directly to learn current
         consumption.  Enabling them costs nothing on the hot path.
         """
         assert BaseConfig.RATELIMIT_HEADERS_ENABLED is True
@@ -873,7 +873,7 @@ class TestRateLimitConfig:
     def test_devconfig_inherits_memory_storage(self):
         """DevConfig leaves RATELIMIT_STORAGE_URI at the BaseConfig default.
 
-        ``flask run`` against a local checkout has no Redis container
+        ``flask run`` against a local checkout has no Valkey container
         available, so the in-memory backend is the only sensible
         default for development.
         """
@@ -886,8 +886,8 @@ class TestRateLimitConfig:
         ``RATELIMIT_STORAGE_URI`` set in the developer's shell or .env.
         Without this override the test suite would attempt to connect
         to whatever URI is in the environment (likely a developer's
-        local Redis or the docker-compose redis service), making the
-        suite hostile to CI without a Redis instance.
+        local Valkey or the docker-compose valkey service), making the
+        suite hostile to CI without a Valkey instance.
         """
         assert TestConfig.RATELIMIT_STORAGE_URI == "memory://"
 
@@ -902,12 +902,13 @@ class TestRateLimitConfig:
         """
         assert TestConfig.RATELIMIT_ENABLED is False
 
-    def test_prodconfig_defaults_to_redis(self, monkeypatch):
-        """ProdConfig.RATELIMIT_STORAGE_URI defaults to the bundled redis service.
+    def test_prodconfig_defaults_to_valkey(self, monkeypatch):
+        """ProdConfig.RATELIMIT_STORAGE_URI defaults to the bundled valkey service.
 
-        The default URI ``redis://redis:6379/0`` matches the
-        ``redis`` service name in docker-compose.yml.  An operator
-        using a managed Redis (Upstash, ElastiCache, etc.) overrides
+        The default URI ``valkey://valkey:6379/0`` matches the
+        ``valkey`` service name in docker-compose.yml, and its scheme
+        makes limits use the valkey client, the one the lock holds
+        (ruling R-BAL298).  An operator using another store overrides
         via the ``RATELIMIT_STORAGE_URI`` environment variable.
         """
         # Because ProdConfig.RATELIMIT_STORAGE_URI is captured at
@@ -921,8 +922,8 @@ class TestRateLimitConfig:
         # var set, the class attribute would not match -- the assertion
         # protects the documented default from accidental change.
         assert (
-            ProdConfig.RATELIMIT_STORAGE_URI == "redis://redis:6379/0"
-            or ProdConfig.RATELIMIT_STORAGE_URI.startswith("redis://")
+            ProdConfig.RATELIMIT_STORAGE_URI == "valkey://valkey:6379/0"
+            or ProdConfig.RATELIMIT_STORAGE_URI.startswith("valkey://")
         )
 
     def test_prodconfig_rejects_memory_storage(self, monkeypatch):
@@ -943,11 +944,11 @@ class TestRateLimitConfig:
         with pytest.raises(ValueError, match="RATELIMIT_STORAGE_URI"):
             ProdConfig()
 
-    def test_prodconfig_accepts_redis_storage(self, monkeypatch):
-        """ProdConfig.__init__ accepts a redis:// URI.
+    def test_prodconfig_accepts_valkey_storage(self, monkeypatch):
+        """ProdConfig.__init__ accepts a valkey:// URI.
 
         Closes the loop on the rejection test above by proving that a
-        properly-shaped Redis URI is accepted.  Without this test a
+        properly-shaped Valkey URI is accepted.  Without this test a
         buggy validator could reject everything and still pass the
         rejection test.
         """
@@ -956,10 +957,10 @@ class TestRateLimitConfig:
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
         monkeypatch.setattr(
-            ProdConfig, "RATELIMIT_STORAGE_URI", "redis://redis:6379/0"
+            ProdConfig, "RATELIMIT_STORAGE_URI", "valkey://valkey:6379/0"
         )
         config = ProdConfig()
-        assert config.RATELIMIT_STORAGE_URI == "redis://redis:6379/0"
+        assert config.RATELIMIT_STORAGE_URI == "valkey://valkey:6379/0"
 
     def test_prodconfig_validates_storage_uri_after_secret_key(
         self, monkeypatch

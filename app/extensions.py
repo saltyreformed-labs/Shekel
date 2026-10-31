@@ -99,7 +99,7 @@ csrf = CSRFProtect()
 # preferentially uses the constructor's storage_uri over the value in
 # app.config[ConfigVars.STORAGE_URI], which means a value set here would
 # silently override TestConfig's "memory://" override and ProdConfig's
-# Redis URI.  Keeping the constructor minimal lets each environment
+# Valkey URI.  Keeping the constructor minimal lets each environment
 # (DevConfig / TestConfig / ProdConfig) own its own posture without
 # touching this file.  See audit finding F-034 and remediation Commit
 # C-06.

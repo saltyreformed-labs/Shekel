@@ -11,10 +11,10 @@ Asserts that the rate-limit posture introduced by audit Commit C-06
   loops do not burn through the per-IP budget every 30 seconds.
 - The configured key_func is ``get_remote_address`` so per-IP
   separation actually works.
-- A storage backend outage (Redis unreachable in production)
+- A storage backend outage (Valkey unreachable in production)
   fail-closed surfaces as a server error, NOT a silent degradation
   to per-worker memory or to allowing the request through (which
-  would let an attacker brute-force auth during a Redis outage).
+  would let an attacker brute-force auth during a Valkey outage).
 - 429 responses include the ``Retry-After`` header so a well-behaved
   client knows when to retry.
 - ``X-RateLimit-*`` headers are emitted when the limiter is active.
@@ -26,9 +26,9 @@ in all rate-limit suites at once.
 
 Storage backend: TestConfig forces ``memory://`` regardless of the
 operator's environment, so these tests run on any laptop without a
-Redis instance.  The behavior under Redis unreachability is verified
+Valkey instance.  The behavior under Valkey unreachability is verified
 by patching the storage's ``incr`` method to raise -- this exercises
-the same code path Flask-Limiter takes when redis-py raises a real
+the same code path Flask-Limiter takes when valkey-py raises a real
 ConnectionError (see flask_limiter._extension.py:1142-1169).
 """
 
@@ -280,7 +280,7 @@ class TestFailClosedOnStorageOutage:
     error handler.  This is the developer's deliberate fail-closed
     posture (Phase D-12 architectural decision) -- the alternative
     (silent fall-through) would let an attacker brute-force auth
-    during a Redis outage.
+    during a Valkey outage.
     """
 
     def test_storage_outage_returns_5xx_not_200(self, app, seed_user):
@@ -289,7 +289,7 @@ class TestFailClosedOnStorageOutage:
         Patches the active limiter storage's ``acquire_entry`` and
         ``get_moving_window`` methods (the moving-window strategy's
         write/read paths -- see limits/strategies.py:85-117) to raise
-        a ConnectionError.  This mirrors what redis-py raises when its
+        a ConnectionError.  This mirrors what valkey-py raises when its
         socket is closed.  The request to /login must NOT succeed
         because that would mean the rate-limit check was silently
         skipped, which is exactly the failure mode F-034's fail-closed
@@ -328,7 +328,7 @@ class TestFailClosedOnStorageOutage:
         rate_client = rate_app.test_client()
 
         def raise_connection_error(*_args, **_kwargs):
-            """Simulate a Redis socket failure on every counter write."""
+            """Simulate a Valkey socket failure on every counter write."""
             raise ConnectionError("Simulated rate-limit storage outage")
 
         try:
@@ -397,7 +397,7 @@ class TestRateLimitHeaders:
     """``X-RateLimit-*`` response headers are emitted when the limiter
     is active.  BaseConfig sets ``RATELIMIT_HEADERS_ENABLED = True``
     so a front-end retry library or operator diagnostic does not have
-    to inspect Redis directly to learn current consumption.
+    to inspect Valkey directly to learn current consumption.
     """
 
     def test_x_ratelimit_headers_present_on_limited_route(
@@ -440,7 +440,7 @@ class TestStorageBackendIsConfigDriven:
 
     This is the linchpin behavior that lets TestConfig force the
     in-memory backend regardless of the operator's environment, and
-    lets ProdConfig default to Redis without code changes.  Flask-
+    lets ProdConfig default to Valkey without code changes.  Flask-
     Limiter v4 (_extension.py:371-376) gives the constructor's
     storage_uri precedence over app.config -- so a constructor URI
     would silently override every environment's choice.
@@ -469,10 +469,10 @@ class TestStorageBackendIsConfigDriven:
         # called init_app(testing), which sets _storage_uri to the
         # TestConfig override ("memory://").  A regression that pins
         # the constructor URI would manifest as _storage_uri being a
-        # production URI (redis://...) instead.
+        # production URI (valkey://...) instead.
         assert limiter._storage_uri is None or limiter._storage_uri == "memory://", (
             "Limiter._storage_uri should be None (constructor) or "
-            "memory:// (TestConfig override).  A redis:// or other "
+            "memory:// (TestConfig override).  A valkey:// or other "
             "production URI here means app/extensions.py is pinning "
             "storage at construction, which would break "
             "TestConfig.RATELIMIT_STORAGE_URI override."

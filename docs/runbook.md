@@ -41,7 +41,7 @@ also `docs/runbook_secrets.md`.
        v
 [Flask Application]        -- Shekel budget app, structured JSON logging
        |
-       +------> [Redis :6379]     -- Docker container, Flask-Limiter counters
+       +------> [Valkey :6379]    -- Docker container, Flask-Limiter counters
        |                              (no persistence; counters evaporate on
        |                              restart by design)
        v
@@ -75,7 +75,7 @@ Measured against the running maintainer host 2026-08-08. The nginx row differs b
 | Container | Image | Network(s) | Health Check |
 |-----------|-------|------------|--------------|
 | `shekel-prod-db` | `postgres:18-alpine` (digest-pinned; server 18.4) | backend | `pg_isready` every 10s |
-| `shekel-prod-redis` | `redis:7.4-alpine` | backend | `redis-cli ping` every 10s |
+| `shekel-prod-valkey` | `valkey/valkey:<version>-alpine` (digest-pinned in `docker-compose.yml`; Valkey replaced Redis under ruling R-BAL298) | backend | `valkey-cli ping` as the `healthcheck` ACL user every 10s |
 | `shekel-prod-app` | `ghcr.io/saltyreformed-labs/shekel@sha256:...`, the digest `shekel-deploy` pins in `.env` | backend, monitoring | `GET /health` every 30s |
 | `shekel-prod-nginx` | the `nginx:<minor>-alpine` tag `docker-compose.yml` pins (`1.29-alpine` since #434) -- **bundled mode only**. In shared mode (this host) there is no such container; the shared `nginx` reverse proxy fronts it | frontend, backend | `wget /health` every 30s |
 
@@ -591,16 +591,18 @@ The script:
 1. Generates the Postgres TLS cert if not present (`deploy/postgres/server.{crt,key}`)
 2. Creates `/opt/docker/shekel/{secrets,deploy/postgres}` directories
 3. Migrates the four high-sensitivity secrets from the current `.env` into per-file entries under
-   `secrets/` (mode 0600)
+   `secrets/` (mode 0600), and writes Valkey's password file `secrets/valkey_password` (mode 0640,
+   for the valkey container's gid) from `.env`'s `SHEKEL_VALKEY_PASSWORD`
 4. Rewrites `/opt/docker/shekel/.env` with `replaced_by_docker_secret` placeholders for the four
-   secrets, plus `SHEKEL_IMAGE_DIGEST`, `SHEKEL_REDIS_PASSWORD`, and `REGISTRATION_ENABLED=false`.
+   secrets, plus `SHEKEL_IMAGE_DIGEST`, `SHEKEL_VALKEY_PASSWORD`, and `REGISTRATION_ENABLED=false`.
    Backs up the old `.env` to `.env.bak.<timestamp>`.
 5. Creates the `shekel-frontend` bridge with the pinned subnet (172.32.0.0/24) if missing
 6. Snapshots `/opt/docker/nginx/nginx.conf` and prints critical- directive presence (limit_req_zone,
    set_real_ip_from, timeouts) before overwriting from `deploy/nginx-shared/`. The pre-overwrite
    diff is saved to `/opt/docker/nginx/.reconcile-snapshot-<ts>/`.
 7. Copies the repo's `docker-compose.yml` and `deploy/docker-compose.prod.yml` to
-   `/opt/docker/shekel/`. Snapshots the old files for rollback.
+   `/opt/docker/shekel/`, and `deploy/valkey/` to `/opt/docker/shekel/deploy/valkey/`. Snapshots the
+   old files for rollback.
 
 The script STOPS short of `docker compose down && up -d` so you can review the merged config before
 pulling the trigger. Its trailing output prints the exact post-script commands.
@@ -1722,8 +1724,8 @@ curl -s https://<domain>/health
 | Cloudflare 502 Bad Gateway | Nginx or app container unhealthy | `docker compose ps` to check health; `docker logs shekel-prod-nginx` and `docker logs shekel-prod-app` for errors |
 | Cloudflare 522 Connection Timed Out | cloudflared cannot reach Nginx | Verify Nginx is running: `docker compose ps`. Check cloudflared logs: `journalctl -u cloudflared -n 20` |
 | 429 on first login attempt | Cloudflare rate limit too aggressive | Check WAF rules in Cloudflare dashboard (Security > WAF > Rate limiting rules); increase threshold |
-| 429 after a few login attempts | Flask-Limiter rate limit (5/15min) | Wait 15 minutes. To clear immediately: `docker exec shekel-prod-redis redis-cli FLUSHDB` -- counters are stored in Redis, not in app memory, so restarting the app does NOT reset them |
-| 500 on every login attempt | Redis container down or unreachable | App is configured fail-closed: rate-limit storage outage rejects every limited request. `docker compose ps redis` to check status; `docker logs shekel-prod-redis --tail 50` for errors; `docker compose up -d redis` to restart. Login resumes immediately once Redis answers PING |
+| 429 after a few login attempts | Flask-Limiter rate limit (5/15min) | Wait 15 minutes. To clear immediately: `docker restart shekel-prod-valkey` -- counters are stored in Valkey's memory alone (persistence off), so restarting it clears them, while restarting the app does NOT. No Valkey user may flush: the app's ACL user runs only the limiter's commands (`deploy/valkey/users.acl`). Limited requests fail closed for the seconds it is down |
+| 500 on every login attempt | Valkey container down or unreachable, or the app's Valkey password wrong | App is configured fail-closed: rate-limit storage outage rejects every limited request. `docker compose ps valkey` to check status; `docker logs shekel-prod-valkey --tail 50` for errors (start.sh names an empty password or a missing `user shekel` rule); `docker compose up -d valkey` to restart. A healthy Valkey with 500s still is a password mismatch: `.env`'s `SHEKEL_VALKEY_PASSWORD` and `secrets/valkey_password` must match (two homes until plan#2168). Login resumes immediately once Valkey accepts the app's login |
 | Wrong IP in logs (127.0.0.1) | Nginx real IP config issue | Verify `set_real_ip_from` and `real_ip_header CF-Connecting-IP` in the active Nginx config: `deploy/nginx-bundled/nginx.conf` (bundled mode) or `deploy/nginx-shared/nginx.conf` (shared mode -- the runtime copy is `/opt/docker/nginx/nginx.conf`) |
 | No logs in Grafana | Promtail not scraping | `docker logs promtail`. Verify `monitoring` network exists. Verify app is on the network: `docker network inspect monitoring` |
 | CSS/JS not loading | Static files volume issue | `docker exec shekel-prod-nginx ls /var/www/static/` to verify files exist. Rebuild app: `docker compose build app && docker compose up -d` |

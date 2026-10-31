@@ -276,16 +276,18 @@ class BaseConfig:
     #
     # Storage backend URI for rate-limit counters.  BaseConfig defaults
     # to "memory://" so that a developer running ``flask run`` against
-    # a local checkout does not need a Redis container.  ProdConfig
-    # overrides to ``redis://redis:6379/0`` so that counters are shared
+    # a local checkout does not need a Valkey container.  ProdConfig
+    # overrides to ``valkey://valkey:6379/0`` so that counters are shared
     # across Gunicorn workers and survive ``docker compose restart app``
     # cycles -- see audit finding F-034 and remediation Commit C-06.
     # TestConfig forces ``memory://`` so the test suite does not require
-    # a running Redis instance.
+    # a running Valkey instance.
     #
     # The env-var override always wins, in any environment, so an
-    # operator can point dev or staging at a real Redis without code
-    # changes.
+    # operator can point dev or staging at a real Valkey without code
+    # changes.  A store URI's scheme is ``valkey://``: limits picks its
+    # client by scheme, and the valkey client is the one the lock holds
+    # (ruling R-BAL298).
     RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
 
     # Default per-IP ceiling applied to every route that does NOT carry
@@ -300,9 +302,9 @@ class BaseConfig:
     # individual Limit objects.
     RATELIMIT_DEFAULT = "200 per hour;30 per minute"
 
-    # Fail-closed posture: if Redis becomes unreachable, do NOT silently
+    # Fail-closed posture: if Valkey becomes unreachable, do NOT silently
     # drop rate-limit checks (which would let an attacker brute-force
-    # auth during a Redis outage), and do NOT fall back to per-worker
+    # auth during a Valkey outage), and do NOT fall back to per-worker
     # in-memory counting (which re-introduces the multi-worker drift
     # documented in F-034).  Both flags are explicitly False so the
     # storage exception bubbles up to the 500 handler -- the operator
@@ -315,7 +317,7 @@ class BaseConfig:
 
     # Emit X-RateLimit-* headers on every limited response.  Helps the
     # operator (and any front-end retry logic) understand current
-    # consumption without inspecting Redis directly.
+    # consumption without inspecting Valkey directly.
     RATELIMIT_HEADERS_ENABLED = True
 
     # Use the moving-window strategy so that bursts spread across the
@@ -509,9 +511,9 @@ class TestConfig(BaseConfig):
     # Force the in-memory backend in the test suite regardless of any
     # ``RATELIMIT_STORAGE_URI`` set in the developer's shell or .env.
     # The few tests that flip ``RATELIMIT_ENABLED`` back on (test_errors,
-    # test_auth lockout suite) test rate-limit *behavior*, not Redis
+    # test_auth lockout suite) test rate-limit *behavior*, not Valkey
     # plumbing -- so an unconditional override here keeps the suite
-    # hermetic and runnable on any laptop without a Redis container.
+    # hermetic and runnable on any laptop without a Valkey container.
     RATELIMIT_STORAGE_URI = "memory://"
 
     # Lower bcrypt cost for faster test execution. Default is 12;
@@ -594,16 +596,16 @@ class ProdConfig(BaseConfig):
     REMEMBER_COOKIE_HTTPONLY = True
     REMEMBER_COOKIE_SAMESITE = "Lax"
 
-    # Production rate-limit storage: shared Redis on the backend Docker
-    # network.  Defaults assume the bundled docker-compose ``redis``
-    # service; an operator using a managed Redis can override via
+    # Production rate-limit storage: shared Valkey on the backend Docker
+    # network.  Defaults assume the bundled docker-compose ``valkey``
+    # service; an operator using another store can override via
     # ``RATELIMIT_STORAGE_URI`` in the environment.  See audit finding
     # F-034 and remediation Commit C-06.  ProdConfig.__init__ rejects
     # the ``memory://`` backend at import time -- a memory backend in
     # production silently re-introduces the multi-worker drift this
     # commit set out to close.
     RATELIMIT_STORAGE_URI = os.getenv(
-        "RATELIMIT_STORAGE_URI", "redis://redis:6379/0"
+        "RATELIMIT_STORAGE_URI", "valkey://valkey:6379/0"
     )
 
     # Production registration posture: defaults to disabled even when
@@ -655,7 +657,7 @@ class ProdConfig(BaseConfig):
         if self.RATELIMIT_STORAGE_URI.startswith("memory:"):
             raise ValueError(
                 "RATELIMIT_STORAGE_URI must point to a shared backend "
-                "(e.g. redis://redis:6379/0) in production. The in-memory "
+                "(e.g. valkey://valkey:6379/0) in production. The in-memory "
                 "backend silently fragments rate-limit counters across "
                 "Gunicorn workers -- see audit finding F-034."
             )

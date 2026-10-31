@@ -194,6 +194,14 @@ EVT_MFA_DISABLED = _register(
     "mfa_disabled", AUTH,
     "User removed their MFA enrolment via /mfa/disable.",
 )
+EVT_DEVICE_TRUSTED = _register(
+    "device_trusted", AUTH,
+    "User typed an authenticator code and trusted the browser for 30 days.",
+)
+EVT_TRUSTED_DEVICE_SIGN_IN = _register(
+    "trusted_device_sign_in", AUTH,
+    "User signed in with a password on a trusted device, skipping the code.",
+)
 EVT_BACKUP_CODES_REGENERATED = _register(
     "backup_codes_regenerated", AUTH,
     "User issued themselves a new set of MFA backup codes.",

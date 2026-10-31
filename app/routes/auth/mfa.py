@@ -24,28 +24,28 @@ from flask import (
     session as flask_session,
     url_for,
 )
-from flask_login import current_user, login_user
+from flask_login import current_user
+from werkzeug.wrappers import Response
 
 from cryptography.fernet import InvalidToken
 from marshmallow import ValidationError as MarshmallowValidationError
 
-from app import ref_cache
 from app.db_transaction import bind_sign_in_owner, write_transaction
-from app.enums import RoleEnum
 from app.extensions import db, limiter
+from app.models.trusted_device import TRUST_LIFETIME
 from app.models.user import MfaConfig, User
 from app.schemas.validation import (
     MfaConfirmSchema,
     MfaDisableSchema,
     MfaVerifySchema,
 )
-from app.services import auth_service, mfa_service
+from app.services import auth_service, mfa_service, trusted_device_service
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
     MFA_SETUP_PENDING_TTL,
     _clear_mfa_pending_state,
+    _complete_sign_in,
     _consume_backup_code,
-    _is_safe_redirect,
     _mfa_pending_is_fresh,
     _totp_accepted_or_key_failure,
     _verify_totp_with_replay_logging,
@@ -53,6 +53,7 @@ from app.routes.auth._helpers import (
 from app.utils.log_events import (
     AUTH,
     EVT_BACKUP_CODES_REGENERATED,
+    EVT_DEVICE_TRUSTED,
     EVT_MFA_DISABLED,
     EVT_MFA_ENABLED,
     EVT_MFA_LOGIN_SUCCESS,
@@ -62,10 +63,8 @@ from app.utils.security_events import (
     SecurityEventKind,
     record_security_event,
 )
-from app.utils.session_helpers import (
-    invalidate_other_sessions,
-    stamp_login_session,
-)
+from app.utils.session_helpers import invalidate_other_sessions
+from app.utils.trusted_device_cookie import set_device_cookie
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +93,42 @@ def _check_mfa_code(mfa_config, user_id, totp_code, backup_code):
     return False, False
 
 
+def _render_verify_form():
+    """Render the code form, from its three render sites.
+
+    Passes the trust's length in days, so the "Trust this device" box states
+    :data:`~app.models.trusted_device.TRUST_LIFETIME` rather than a second
+    spelling of it.
+
+    Returns:
+        The rendered ``/mfa/verify`` page.
+    """
+    return render_template(
+        "auth/mfa_verify.html", trust_days=TRUST_LIFETIME.days,
+    )
+
+
+def _trust_this_browser(response: Response, user: User) -> None:
+    """Trust the signing-in browser for *user*: the record, then its cookie.
+
+    Called only on an authenticator-code success with the box ticked
+    (plan#2173, ruling plan#2406).  The record is committed before the
+    cookie rides the response, so a browser never holds a token whose record
+    a failed commit lost.
+
+    Args:
+        response: The redirect completing the sign-in; it takes the cookie.
+        user: The user who typed the code.
+    """
+    token = trusted_device_service.trust_device(
+        user.id, request.headers.get("User-Agent", ""),
+    )
+    db.session.commit()
+    set_device_cookie(response, user.id, token)
+    log_event(logger, logging.INFO, EVT_DEVICE_TRUSTED, AUTH,
+              "Device trusted", user_id=user.id)
+
+
 @auth_bp.route("/mfa/verify", methods=["GET", "POST"])
 @limiter.limit("5 per 15 minutes", methods=["POST"])
 def mfa_verify():  # pylint: disable=too-many-return-statements
@@ -101,7 +136,9 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
 
     Requires a pending MFA user_id in the session (set by the login
     route after successful password verification). Completes the login
-    on valid TOTP or backup code.
+    on valid TOTP or backup code.  An authenticator code with "Trust this
+    device" ticked also trusts this browser for the user (plan#2173); a
+    backup code never does, whatever the form posts.
 
     Pending state freshness is enforced on every entry to this view
     (both GET and POST) via :func:`_mfa_pending_is_fresh`.  A pending
@@ -109,10 +146,10 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     is bounced back to /login with a flash message -- the F-002
     cookie-replay window closes at exactly this gate.
 
-    Pylint: ``too-many-return-statements`` (9/6) -- each early return is a
+    Pylint: ``too-many-return-statements`` (8/6) -- each early return is a
     distinct semantic exit (no pending state, stale state, GET render,
-    missing user-or-config, key failure, invalid code, companion success,
-    owner success), each with its own clear/flash/redirect side effects, so
+    malformed form, missing user-or-config, key failure, invalid code,
+    success), each with its own clear/flash/redirect side effects, so
     they cannot be collapsed without merging distinct security messaging.
     The explicit returns are the readable form.  (``too-many-branches`` is
     no longer suppressed -- the TOTP/backup-code branching was extracted to
@@ -140,7 +177,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         return redirect(url_for("auth.login"))
 
     if request.method == "GET":
-        return render_template("auth/mfa_verify.html")
+        return _render_verify_form()
 
     # POST -- validate shape, then verify the submitted code.  F-163:
     # MfaVerifySchema caps backup_code at 32 characters so a
@@ -153,7 +190,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         verify_data = MfaVerifySchema().load(request.form)
     except MarshmallowValidationError:
         flash("Invalid verification code.", "danger")
-        return render_template("auth/mfa_verify.html")
+        return _render_verify_form()
     totp_code = verify_data["totp_code"]
     backup_code = verify_data["backup_code"]
 
@@ -206,29 +243,19 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
 
     if not valid:
         flash("Invalid verification code.", "danger")
-        return render_template("auth/mfa_verify.html")
+        return _render_verify_form()
 
     # Login completion -- both password and TOTP/backup code are verified.
-    # Read the value we still need from pending state before clearing.
-    # Validate again at redirect time (defense in depth -- the value was
-    # also validated at storage time in the login route).
-    next_page = flask_session.get("_mfa_pending_next")
-    if not _is_safe_redirect(next_page):
-        next_page = None
-
-    _clear_mfa_pending_state()
-
-    login_user(user)
-    # Stamp every lifecycle key in one call so the idle-timeout check
-    # (commit C-10 / F-006) and the fresh-login check (commit C-10 /
-    # F-045) start from the same instant the MFA-protected session
-    # was completed.  The backup-code branch below ALSO calls
-    # ``invalidate_other_sessions``, which writes ``_session_created_at``
-    # again with its own internal ``now`` -- the small microsecond
-    # drift is harmless because the load_user check is strict less-
-    # than, not equality, and the cookie's later value is still > the
-    # DB's earlier session_invalidated_at.
-    stamp_login_session(datetime.now(timezone.utc))
+    # The pending ``next`` is read here, before the completion clears the
+    # pending state, and validated again there (defense in depth -- it was
+    # also validated at storage time in the login route).  The completion
+    # stamps every lifecycle key from one instant.  The backup-code branch
+    # below ALSO calls ``invalidate_other_sessions``, which writes
+    # ``_session_created_at`` again with its own internal ``now`` -- the
+    # small microsecond drift is harmless because the load_user check is
+    # strict less-than, not equality, and the cookie's later value is still
+    # > the DB's earlier session_invalidated_at.
+    response = _complete_sign_in(user, flask_session.get("_mfa_pending_next"))
 
     if used_backup_code:
         # Backup-code consumption is the canonical "I lost my
@@ -242,17 +269,15 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         # refreshes the cookie (with its single ``now``) AFTER
         # Flask-Login has populated the session, ensuring the
         # current request survives the bump.
+        # It also forgets every trusted device of the user (the bump
+        # outdates them), so it never trusts this one.
         invalidate_other_sessions(user, "backup_code_consumed")
+    elif verify_data["trust_device"]:
+        _trust_this_browser(response, user)
 
     log_event(logger, logging.INFO, EVT_MFA_LOGIN_SUCCESS, AUTH,
               "MFA login succeeded", user_id=user.id)
-
-    # Companions always go to companion.index (ignore next_page).
-    companion_id = ref_cache.role_id(RoleEnum.COMPANION)
-    if user.role_id == companion_id:
-        return redirect(url_for("companion.index"))
-
-    return redirect(next_page or url_for("dashboard.page"))
+    return response
 
 
 @auth_bp.route("/mfa/setup", methods=["GET"])

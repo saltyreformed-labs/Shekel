@@ -2,10 +2,11 @@
 Shekel Budget App -- Auth route package: primary credentials.
 
 The password-credential lifecycle: login (including the handoff into
-the MFA pending state that :mod:`~app.routes.auth.mfa` consumes),
-registration, and logout.  Each route registers against the shared
-``auth_bp`` from :mod:`~app.routes.auth._bp`; the open-redirect guard
-and form-error flattener come from
+the MFA pending state that :mod:`~app.routes.auth.mfa` consumes, and the
+skip of that state on a trusted device), registration, and logout.  Each
+route registers against the shared ``auth_bp`` from
+:mod:`~app.routes.auth._bp`; the sign-in completion, the open-redirect
+guard and the form-error flattener come from
 :mod:`~app.routes.auth._helpers`.
 """
 
@@ -22,7 +23,7 @@ from flask import (
     session as flask_session,
     url_for,
 )
-from flask_login import current_user, login_user, logout_user
+from flask_login import current_user, logout_user
 
 from marshmallow import ValidationError as MarshmallowValidationError
 
@@ -30,12 +31,18 @@ from app import ref_cache
 from app.db_transaction import bind_sign_in_owner
 from app.enums import RoleEnum
 from app.extensions import db, limiter
-from app.models.user import MfaConfig
+from app.models.trusted_device import TrustedDevice
+from app.models.user import MfaConfig, User
 from app.schemas.validation import LoginSchema, RegisterSchema
-from app.services import auth_service, registration_service
+from app.services import (
+    auth_service,
+    registration_service,
+    trusted_device_service,
+)
 from app.exceptions import AuthError, ConflictError, ValidationError
 from app.routes.auth._bp import auth_bp
 from app.routes.auth._helpers import (
+    _complete_sign_in,
     _first_validation_message,
     _is_safe_redirect,
 )
@@ -44,10 +51,11 @@ from app.utils.log_events import (
     EVT_LOGIN_FAILED,
     EVT_LOGIN_SUCCESS,
     EVT_LOGOUT,
+    EVT_TRUSTED_DEVICE_SIGN_IN,
     EVT_USER_REGISTERED,
     log_event,
 )
-from app.utils.session_helpers import stamp_login_session
+from app.utils.trusted_device_cookie import device_token
 
 logger = logging.getLogger(__name__)
 
@@ -77,15 +85,37 @@ def _render_register_form():
     return render_template("auth/register.html")
 
 
+def _trusted_device_of(user: User) -> TrustedDevice | None:
+    """Return the live trusted device this browser holds for *user*, or ``None``.
+
+    Read only once *user*'s password was correct (plan#2173, ruling
+    plan#2406): the browser's cookie for THAT user, judged by
+    :func:`~app.services.trusted_device_service.find_live_device`, so a
+    cookie alone, another user's cookie, and a device past its thirty days
+    or forgotten by a ``session_invalidated_at`` bump all answer ``None``.
+
+    Args:
+        user: The user whose password was just accepted.
+
+    Returns:
+        The live :class:`~app.models.trusted_device.TrustedDevice`, or
+        ``None``.
+    """
+    token = device_token(user.id)
+    if token is None:
+        return None
+    return trusted_device_service.find_live_device(user.id, token)
+
+
 @auth_bp.route("/login", methods=["GET", "POST"])
 @limiter.limit("5 per 15 minutes", methods=["POST"])
 def login():
     """Display the login form and handle authentication.
 
     Design note: each early return is a distinct semantic exit
-    (companion-already-logged-in, owner-already-logged-in, MFA-pending
-    redirect, companion-success redirect, owner-success redirect,
-    generic failure render).  Consolidating these into one return path
+    (companion-already-logged-in, owner-already-logged-in, trusted-device
+    sign-in, MFA-pending redirect, no-MFA sign-in, generic failure
+    render).  Consolidating these into one return path
     would force a state-machine in the function body that hides
     per-mode behaviour; the explicit returns are the readable form.
     """
@@ -125,6 +155,17 @@ def login():
                 .first()
             )
             if mfa_config:
+                # A trusted device skips only the code, never this
+                # password (plan#2173, ruling plan#2406).
+                device = _trusted_device_of(user)
+                if device is not None:
+                    response = _complete_sign_in(user, request.args.get("next"))
+                    log_event(
+                        logger, logging.INFO, EVT_TRUSTED_DEVICE_SIGN_IN, AUTH,
+                        "User logged in on a trusted device",
+                        user_id=user.id, device_id=device.id,
+                    )
+                    return response
                 # Store pending auth state in session (user is NOT logged in yet).
                 flask_session["_mfa_pending_user_id"] = user.id
                 # Validate the next parameter at storage time (defense in depth).
@@ -142,27 +183,13 @@ def login():
                 )
                 return redirect(url_for("auth.mfa_verify"))
 
-            # No MFA -- complete login immediately.  Stamp all three
-            # session lifecycle timestamps in one call so the
-            # idle-timeout check (commit C-10 / F-006) and the
-            # fresh-login check (commit C-10 / F-045) start from the
-            # same instant the session was created.
-            login_user(user)
-            stamp_login_session(datetime.now(timezone.utc))
+            # No MFA -- complete login immediately, through the one
+            # completion every sign-in shares (it stamps the lifecycle
+            # keys and validates ``next``).
+            response = _complete_sign_in(user, request.args.get("next"))
             log_event(logger, logging.INFO, EVT_LOGIN_SUCCESS, AUTH,
                       "User logged in", user_id=user.id, email=email)
-
-            # Companions always go to companion.index (ignore next param).
-            companion_id = ref_cache.role_id(RoleEnum.COMPANION)
-            if user.role_id == companion_id:
-                return redirect(url_for("companion.index"))
-
-            # Redirect to the page they originally wanted, or the dashboard.
-            # Validate the next parameter to prevent open redirect attacks.
-            next_page = request.args.get("next")
-            if not _is_safe_redirect(next_page):
-                next_page = None
-            return redirect(next_page or url_for("dashboard.page"))
+            return response
 
         except MarshmallowValidationError:
             # F-163 / F-041: schema layer rejected payload shape or

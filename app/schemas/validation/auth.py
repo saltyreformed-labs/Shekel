@@ -379,6 +379,11 @@ class MfaVerifySchema(BaseSchema):
     sized backup code from reaching bcrypt verification.  The route
     layer handles the "neither field present" case (renders "Invalid
     verification code.").
+
+    ``trust_device`` is the code form's "Trust this device" box (plan#2173,
+    ruling plan#2406), false when unticked.  The route honours it only on
+    an authenticator-code success: a backup-code success never trusts a
+    device, whatever the form posts.
     """
 
     totp_code = fields.String(
@@ -389,6 +394,7 @@ class MfaVerifySchema(BaseSchema):
         load_default="",
         validate=validate.Length(max=_BACKUP_CODE_MAX_LENGTH),
     )
+    trust_device = fields.Boolean(load_default=False)
 
     @pre_load
     def strip_codes(self, data, **kwargs):

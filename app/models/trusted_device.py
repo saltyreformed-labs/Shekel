@@ -11,7 +11,8 @@ less than :data:`TRUST_LIFETIME` ago AND not before its user's
 ``session_invalidated_at``.  Both halves are derived from facts stored once
 elsewhere, so every existing writer of ``session_invalidated_at`` (log out all
 sessions, a password change, the owner's companion password reset or
-deactivation, turning two-factor off, a backup-code sign-in,
+deactivation, turning two-factor off (``/mfa/disable`` or the emergency
+``scripts/reset_mfa.py``), a backup-code sign-in,
 ``scripts/rotate_sessions.py``) forgets every trusted device with no write of
 its own.  The one statement of that predicate is
 ``app.services.trusted_device_service._live``.

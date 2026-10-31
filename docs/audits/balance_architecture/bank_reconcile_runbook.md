@@ -231,8 +231,11 @@ rehearsed.
   (Accounts, Checking, **Import statements**). Its tabs are To explain, Explained, Filed by
   rules, Transfers and Skipped; the sheet's `FIND` line names the card's tab. A card is SECU's
   line: its day, description and figure, as the act's heading gives them. A card's own tabs
-  name what the line is (MATCH among them); MATCH lists the rows the line could be, each with a
-  checkbox.
+  name what the line is (MATCH among them); a Transfers card opens on TRANSFER, so click
+  **MATCH**. MATCH lists the rows budgeted in the line's own pay period, each with a checkbox,
+  its name, the days under it and its figure. Its search box ("Search your rows for this
+  account") widens the list to every unexplained row on the account whose name or figure holds
+  what is typed.
 
 ---
 
@@ -255,15 +258,26 @@ R-GH), and the sheet lists each one.
 ### A match (TIMING, then TRANSFER)
 
 The Reconcile page, on the tab the sheet's `FIND` line names; find the card of SECU's line by
-the act's heading, and open its **MATCH**. Then:
+the act's heading, open it, and open its **MATCH** tab. Where the sheet says **TYPE** into the
+MATCH tab's search box, the row is not in the line's own pay period: type the figure it gives
+there first, and **do NOT press Enter**: the box sits inside the Apply form, so Enter presses
+Apply. The list changes a moment after you stop typing. The sheet names the row as the tab
+prints it: its name, the days under it, its figure. Then:
 
 * where the sheet says **the page proposes the row, ticked**, check that the ticked row is the
   one the sheet names and that NO other row is ticked;
 * where it says **TICK the row**, tick that row, and no other.
 
-Tick the card's **OK**, and press **Apply** ("Apply ... the cards you OK'd"). *Success:* the
-receipt at the top reads `1 applied`. If the page then asks "Should any of
-these stand?", press nothing there: it states a standing rule for the future and moves no money.
+The tab then reads "These add up. Nothing is left over." **If it shows a difference instead,
+stop**: every match here is an exact pair.
+
+Press the one control the sheet's **PRESS** line names, **once**: the card's **OK** on its
+summary line where the card shows one, else **Match** at the foot of the opened card (a
+Transfers card's summary shows no OK). The two are one box, so a second press of either takes
+the OK back; while it holds, the Apply button counts it ("Apply 1 of the cards you OK'd"), the
+only sign on a Transfers card, whose **Match** shows no pressed state. Press **Apply**. *Success:* the receipt at the top reads `1 applied`. If the page then asks "Should any
+of these stand?", press nothing there: it states a standing rule for the future and moves no
+money.
 
 *Why:* a TIMING pair is a row the app dated otherwise than SECU posted it, and the match moves
 the row onto SECU's day; a TRANSFER line is a Projected transfer SECU paid, and the match settles
@@ -419,6 +433,14 @@ rendered; the post-state and the check, task plan#2416). Its door-driving half i
   second press and each Paid envelope's re-close are made by those buttons. On a fresh restore of
   the same dump, the whole act sheet so performed printed the earlier rehearsal's check output
   exactly, and every balance figure was byte-identical to its baseline.
+* **2026-10-31, the MATCH tab the owner opens** (task plan#2455): each match opens its card's
+  MATCH tab as the browser loads it, the line's own pay period, rather than the page's
+  every-row render (`?open=`), and OKs the card by the press the card renders: OK on each To
+  explain card's summary, Match at the foot of the Transfers card, whose summary shows none.
+  Every act's row was in its line's own pay period; the held-back match's row is not, and
+  reaching it (never applying it) typed the line's figure into the search and found it. On a
+  fresh restore of the same dump, the whole act sheet so performed printed plan#2451's check
+  output exactly, and every balance figure was byte-identical to its baseline.
 * **Two measured traps the harness answers**: the rate limiter answered the rehearsal's 31st
   full-edit open inside a minute with a 429 (a person's pace never reaches it, and the rehearsal
   turns it off: `door_rehearsal.connect`), and the Reconcile page answers a refused card with a

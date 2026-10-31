@@ -16,7 +16,13 @@ presses, in the order the doors force:
    than left waiting; none of the five TIMING lines.  The sheet records what it filed.
 2. **The matches**, on the Reconcile page (:func:`_match`): each TIMING pair, the row the page
    itself proposes for SECU's line once the import has recorded it, then each TRANSFER line
-   but the one ruling plan#2433 holds back (:data:`reconcile_post_state.HELD_BACK`).
+   but the one ruling plan#2433 holds back (:data:`reconcile_post_state.HELD_BACK`).  **Each
+   through the MATCH pane the owner's browser loads** (:func:`_open_card`, task plan#2455),
+   the line's own pay period, searched by the line's figure where the row is not in it; and
+   OK'd as the card offers it, by the OK on its summary or, on a card with none (every
+   Transfers card), by the Match button at the opened card's foot (:class:`_OkPresses`).
+   Measured 2026-10-31 on a restore of the dry run's dump: every act's row is in its line's
+   pay period, and the held-back match's is not.
 3. **The never-moved rows** (:func:`_cancel`, :func:`_delete`): each row cancelled, which is
    TWO presses of its full edit, Status to Projected and then the card's Cancel button, because
    the cancel door takes only a Projected row and every one of these is Paid; and each envelope
@@ -61,7 +67,8 @@ structure only -- ids, the one held-back act, the order.  **So does where each a
 screen**, a ``FIND`` line per act (task plan#2371, the runbook
 ``docs/audits/balance_architecture/bank_reconcile_runbook.md``): a row's full edit and an
 envelope's lines are fragments only a click on the grid opens, so the sheet names the grid
-column and row, and a match names the Reconcile tab and the row as the page itself labels it.
+column and row, and a match names the Reconcile tab, what to type in the pane's search where
+it must, the row in the words the pane prints, and the press that OKs the card.
 
 **It runs PRODUCTION's ``app/``**, because the owner performs these acts on production: export
 the deployed revision's ``app/`` outside every checkout and put it first on ``PYTHONPATH``.  This
@@ -112,7 +119,7 @@ from app.models.statement_match import (
 )
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.services.statement_match import Tab
+from app.services.statement_match import Tab, Verb
 
 from door_rehearsal import (
     Operator,
@@ -237,113 +244,359 @@ def _description(line_id: int) -> str:
     ).order_by(StatementLineSighting.import_id)).scalars().first()
 
 
-class _RowLabels(HTMLParser):
-    """Collect what the MATCH pane calls each row the owner can tick.
+class _PaneSpan(HTMLParser):
+    """Find where one card's MATCH pane stands in a page, and where it posts.
 
-    **The sheet names a row in the page's own words**, because the owner finds
-    it by reading the pane: a row's checkbox and its ``<label for=...>``
-    are tied by the box's id, and the words are the label's ``rec-row-name``
-    span (``accounts/_statement_reconcile_match.html``, its ``pick`` macro).
+    **The pane is what htmx swaps, start tag to end tag**: the card's one
+    element of class ``rec-match``, which is first the placeholder the page
+    renders (``verb_pane`` in ``accounts/_statement_reconcile_macros.html``)
+    and then each pane that replaces it (``accounts/_statement_reconcile_match
+    .html``), every one swapped ``outerHTML``.  The first ``hx-post`` inside it
+    is where each sends: the placeholder's own, then the pane's
+    ``rec-match-picks``.
+
+    Attributes:
+        line_id: The bank line the card is about.
+        span: ``(start, end)`` of the pane in the page's text, ``end`` ``None``
+            until its end tag is read; ``None`` while no pane is found.
+        fetch: The URL the pane posts to, or ``None``.
     """
 
-    def __init__(self):
+    def __init__(self, line_id: int, html: str):
         super().__init__(convert_charrefs=True)
-        self.boxes: "dict[str, tuple[str, str]]" = {}
-        self.names: "dict[str, str]" = {}
-        self._label: "str | None" = None
-        self._name: "list[str] | None" = None
+        self.line_id = line_id
+        self.span: "tuple[int, int | None] | None" = None
+        self.fetch: "str | None" = None
+        self._html = html
+        # Lines counted as the parser counts them, at each "\n" only
+        # (``_markupbase.ParserBase.updatepos``): ``splitlines`` also breaks at
+        # "\r", "\f", " " and others, which a row's name can carry, and
+        # would put every offset after one a line early.
+        self._lines = [0]
+        for line in html.split("\n")[:-1]:
+            self._lines.append(self._lines[-1] + len(line) + 1)
+        self._in_card = False
+        self._divs = 0
+        self.feed(html)
+        self.close()
+
+    def _at(self) -> int:
+        """Return where the tag being read starts, in the page's text."""
+        line, column = self.getpos()
+        return self._lines[line - 1] + column
 
     def handle_starttag(self, tag, attrs):
-        """Record a checkbox's id, enter a label, or start a row's name."""
+        """Enter the card, start its pane, count a div inside it, or take where it posts."""
         attr = dict(attrs)
-        if tag == "input" and attr.get("type") == "checkbox" and attr.get("id"):
-            self.boxes[attr["id"]] = (attr.get("name", ""), attr.get("value", ""))
-        elif tag == "label":
-            self._label = attr.get("for")
-        elif tag == "span" and self._label and "rec-row-name" in attr.get("class", "").split():
-            self._name = []
-
-    def handle_data(self, data):
-        """Keep a row name's text."""
-        if self._name is not None:
-            self._name.append(data)
+        if tag == "details":
+            self._in_card = attr.get("id") == f"rec-card-{self.line_id}"
+        elif tag == "div" and self._divs:
+            self._divs += 1
+        elif tag == "div" and self._in_card and self.span is None \
+                and "rec-match" in (attr.get("class") or "").split():
+            self.span, self._divs = (self._at(), None), 1
+        if tag == "div" and self._divs and self.fetch is None and attr.get("hx-post"):
+            self.fetch = attr["hx-post"]
 
     def handle_endtag(self, tag):
-        """Close a row's name, or leave its label."""
-        if tag == "span" and self._name is not None:
-            self.names[self._label] = " ".join("".join(self._name).split())
-            self._name = None
-        elif tag == "label":
-            self._label = None
+        """Leave the card, or close a div of the pane and, with its last, the pane."""
+        if tag == "details":
+            self._in_card = False
+        elif tag == "div" and self._divs:
+            self._divs -= 1
+            if not self._divs:
+                self.span = (self.span[0], self._html.index(">", self._at()) + 1)
 
-    def label_of(self, name: str, value: str) -> str:
-        """Return the row name the page prints beside box *name* = *value*.
+
+class _PaneRows(HTMLParser):
+    """Read one MATCH pane as the owner reads it: the rows it lists, and whether it adds up.
+
+    **The sheet names a row in the pane's own words**, because the owner finds
+    it by reading the pane: its name, the days printed under it and its figure
+    (the ``pick`` macro's ``rec-row-name``, each ``rec-row-day`` and
+    ``rec-row-figure``).  A row another shares words with is one the owner
+    cannot tell apart, so :meth:`words_of` refuses it.
+
+    Attributes:
+        line_id: The bank line the card is about.
+        rows: Each row the pane lists, in its order:
+            ``{"token", "checked", "name", "days", "figure"}``.
+        adds_up: Whether the pane carries the figure it was priced at as a
+            hidden field: its arm for ticked rows that come to the bank's
+            figure, which leaves nothing to choose.  The placeholder carries a
+            proposal's figure hidden too, unpriced, so only a loaded pane's
+            counts.
+    """
+
+    #: The ``pick`` macro's spans, and the field each one's words go to.
+    _WORDS = {"rec-row-name": "name", "rec-row-day": "days", "rec-row-figure": "figure"}
+
+    def __init__(self, line_id: int, pane: str):
+        super().__init__(convert_charrefs=True)
+        self.line_id = line_id
+        self.rows: "list[dict]" = []
+        self.adds_up = False
+        self._waiting: "bool | None" = None
+        self._spans = 0
+        self._words: "tuple[str, int, list[str]] | None" = None
+        self.feed(pane)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        """Note what the pane is, record a row's box or a hidden figure, or start words."""
+        attr = dict(attrs)
+        classes = (attr.get("class") or "").split()
+        if tag == "div" and self._waiting is None:
+            self._waiting = "rec-match-waiting" in classes
+        elif tag == "input" and attr.get("name") == f"rows-{self.line_id}" \
+                and attr.get("type") == "checkbox":
+            self.rows.append({"token": attr["value"], "checked": "checked" in attr,
+                              "name": "", "days": [], "figure": ""})
+        elif tag == "input" and attr.get("name") == f"consent-{self.line_id}" \
+                and attr.get("type") == "hidden" and not self._waiting:
+            self.adds_up = True
+        elif tag == "span":
+            self._spans += 1
+            field = next((self._WORDS[name] for name in classes if name in self._WORDS), None)
+            if field and self.rows and self._words is None:
+                self._words = (field, self._spans, [])
+
+    def handle_data(self, data):
+        """Keep the words of a row's span."""
+        if self._words is not None:
+            self._words[2].append(data)
+
+    def handle_endtag(self, tag):
+        """Close a row's span, keeping its words."""
+        if tag != "span" or not self._spans:
+            return
+        if self._words is not None and self._words[1] == self._spans:
+            field, _, text = self._words
+            words = " ".join("".join(text).split())
+            if field == "days":
+                self.rows[-1]["days"].append(words)
+            else:
+                self.rows[-1][field] = words
+            self._words = None
+        self._spans -= 1
+
+    def words_of(self, row: dict) -> str:
+        """Return *row* as the sheet names it: its name, its days, its figure, as printed.
 
         Raises:
-            AssertionError: When the page renders no such box, or no name for it.
+            AssertionError: When another row the pane lists prints the same words.
         """
-        ids = [box for box, control in self.boxes.items() if control == (name, value)]
-        assert ids and ids[0] in self.names, f"the page names no row for {name}={value}"
-        return self.names[ids[0]]
+        def words(each: dict) -> str:
+            return f"\"{each['name']}\", {', '.join(each['days'])}, {each['figure']}"
+        alike = [each["token"] for each in self.rows if words(each) == words(row)]
+        assert alike == [row["token"]], \
+            f"the MATCH pane of line {self.line_id} prints {words(row)} for {alike}"
+        return words(row)
 
 
-def _card_form(run: Run, line_id: int) -> "tuple[dict, str, Tab, _RowLabels]":
-    """Return the Apply form holding line *line_id*'s card opened, its page and tab.
+class _OkPresses(HTMLParser):
+    """Read what presses one card's OK, off the card as rendered.
 
-    The card is on whichever tab the page puts it; each is asked in turn, with
-    the card's MATCH pane rendered in the document (``?open=``).  The page's
-    row names come with it, for the sheet (:class:`_RowLabels`).
+    **Never assumed**: the summary's own OK (``rec-ok-btn``) is rendered only
+    where the card offers one (``offers_ok``), and every Transfers card has
+    none, because its sentence opens on TRANSFER, a verb with no door; the
+    opened card's foot button named after the MATCH verb (``rec-cta``) is on
+    every card a match is open on.  Both are labels for the card's one hidden
+    OK checkbox (``accounts/_statement_reconcile_macros.html``), so a second
+    press of either takes the OK back.
+
+    Attributes:
+        line_id: The bank line the card is about.
+        summary: The summary's OK button's words, or ``None``.
+        panel: The opened card's MATCH button's words, or ``None``.
+    """
+
+    def __init__(self, line_id: int, html: str):
+        super().__init__(convert_charrefs=True)
+        self.line_id = line_id
+        self.summary: "str | None" = None
+        self.panel: "str | None" = None
+        self._label: "tuple[str, list[str]] | None" = None
+        self.feed(html)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        """Enter a label for the card's OK box: the summary's, or the MATCH button."""
+        attr = dict(attrs)
+        if tag != "label" or attr.get("for") != f"ok-{self.line_id}":
+            return
+        classes = (attr.get("class") or "").split()
+        if "rec-ok-btn" in classes:
+            self._label = ("summary", [])
+        elif "rec-cta" in classes and attr.get("data-verb") == Verb.MATCH.value:
+            self._label = ("panel", [])
+
+    def handle_data(self, data):
+        """Keep the words of the label being read."""
+        if self._label is not None:
+            self._label[1].append(data)
+
+    def handle_endtag(self, tag):
+        """Close the label being read, keeping its words."""
+        if tag == "label" and self._label is not None:
+            setattr(self, self._label[0], " ".join("".join(self._label[1]).split()))
+            self._label = None
+
+    def words(self) -> str:
+        """Return what the owner presses, once, to OK this card, as the sheet says it.
+
+        Raises:
+            AssertionError: When the opened card renders no MATCH button for its OK.
+        """
+        assert self.panel, f"the card of line {self.line_id} renders no MATCH button"
+        if self.summary:
+            return (f"{self.summary} on the card's summary line, once, NOT also "
+                    f"{self.panel} at the foot of the opened card: both press one box, "
+                    "so a second press takes the OK back")
+        return (f"{self.panel} at the foot of the opened card, once: this card's summary "
+                "line shows no OK, the button shows no pressed state, and a second press "
+                "takes it back; the Apply button then reads \"Apply 1 of the cards you OK'd\"")
+
+
+@dataclass
+class _OpenedCard:
+    """One card on the Reconcile page, its MATCH tab open, as the owner's browser holds it.
+
+    Attributes:
+        line_id: The bank line the card is about.
+        tab: The Reconcile tab the card is on.
+        page: That tab's URL.
+        html: The page as the browser holds it: as served, each pane the
+            browser loaded swapped in where the last one stood.
+        outside: What the owner ticked outside the pane: the card's MATCH tab,
+            where the card opened on another verb.
+    """
+
+    line_id: int
+    tab: Tab
+    page: str
+    html: str
+    outside: "tuple[tuple[str, str], ...]"
+
+    def pane(self) -> _PaneRows:
+        """Return the card's MATCH pane as the browser now holds it."""
+        start, end = _PaneSpan(self.line_id, self.html).span
+        return _PaneRows(self.line_id, self.html[start:end])
+
+    def ok_press(self) -> str:
+        """Return what the owner presses, once, to OK the card (:class:`_OkPresses`)."""
+        return _OkPresses(self.line_id, self.html).words()
+
+    def form(self) -> dict:
+        """Return the Apply form holding the card, as the browser would submit it now."""
+        forms = [form for form in forms_in(self.html)
+                 if ("ok", str(self.line_id)) in form["unticked"]]
+        assert len(forms) == 1, f"{len(forms)} forms hold the OK of line {self.line_id}"
+        return forms[0]
+
+    def ask(self, run: Run, typed: "dict | None" = None,
+            ticked: "tuple[tuple[str, str], ...]" = ()) -> None:
+        """Send what the pane sends, and swap its answer in where the pane stood.
+
+        The pane loads when the MATCH tab first shows it, and asks again on a
+        keystroke in its search and on a tick (``hx-trigger``).  **Each sends
+        the whole Apply form**: htmx adds the values of the form enclosing an
+        element to every request it sends that is not a GET, and the
+        ``hx-include`` of the card adds nothing the form does not hold.
+
+        Args:
+            run: The run.
+            typed: What the owner typed into the pane, by control.
+            ticked: The boxes the owner ticked in the pane.
+        """
+        found = _PaneSpan(self.line_id, self.html)
+        assert found.span and found.span[1] and found.fetch, \
+            f"the card of line {self.line_id} renders no MATCH pane"
+        response = run.operator.submit(dict(self.form(), method="post", url=found.fetch),
+                                       typed=typed, ticked=self.outside + ticked)
+        start, end = found.span
+        self.html = self.html[:start] + response.get_data(as_text=True) + self.html[end:]
+
+
+def _open_card(run: Run, line_id: int) -> _OpenedCard:
+    """Open line *line_id*'s card on the tab the page puts it, and its MATCH tab.
+
+    **It opens the pane the owner's browser loads**, the fragment listing the
+    line's own pay period, and never ``?open=``: that render lists every
+    unexplained row on the account and carries no search, so the rows and the
+    hidden fields a run submitted from it were not the owner's.
 
     Raises:
         AssertionError: When no tab renders an OK box for the line.
     """
     for tab in Tab:
-        page = (f"/accounts/{run.account_id}/statements/reconcile"
-                f"?tab={tab.value}&open={line_id}")
+        page = f"/accounts/{run.account_id}/statements/reconcile?tab={tab.value}"
         response = run.operator.client.get(page)
         assert response.status_code == 200, f"GET {page} -> {response.status_code}"
         html = response.get_data(as_text=True)
         for form in forms_in(html):
             if ("ok", str(line_id)) in form["unticked"]:
-                labels = _RowLabels()
-                labels.feed(html)
-                return form, page, tab, labels
+                verb = (f"verb-{line_id}", Verb.MATCH.value)
+                card = _OpenedCard(line_id, tab, page, html,
+                                   () if verb in form["controls"] else (verb,))
+                card.ask(run)
+                return card
     raise AssertionError(f"no Reconcile tab renders a card for line {line_id}")
+
+
+def _tick_row(run: Run, card: _OpenedCard, act: MatchAct) -> None:
+    """Reach the sheet's row in the open pane and leave it ticked, saying how on the sheet.
+
+    **The page's own proposal must BE the sheet's row**: a row the page
+    proposes beside it is a different act, and the run stops rather than
+    untick it.  The pane opens on the line's own pay period; where the row is
+    not in it the owner types the line's figure into the pane's search, which
+    lists every unexplained row whose name or figure holds it
+    (``MatchCandidates.matching``), and presses no Enter: the box is inside the
+    Apply form, and the page's keys stand aside in a box, so Enter presses
+    Apply.  An unproposed row is ticked, and the tick re-prices the pane.
+    """
+    stray = [row["token"] for row in card.pane().rows
+             if row["checked"] and not act.offered_as(row["token"])]
+    assert not stray, f"the page also proposes {stray} for line {card.line_id}"
+    if not any(act.offered_as(row["token"]) for row in card.pane().rows):
+        query = f"{abs(Decimal(act.line['amount'])):f}"
+        run.sheet.say("- The row is not in the line's own pay period, which the MATCH tab lists; "
+                      "type into its search box and do NOT press Enter, which presses Apply:")
+        run.sheet.typed("the MATCH tab's search box", query)
+        card.ask(run, typed={f"q-{card.line_id}": query})
+    pane = card.pane()
+    wanted = [row for row in pane.rows if act.offered_as(row["token"])]
+    assert wanted, f"the MATCH pane of line {card.line_id} does not list the sheet's row"
+    words = pane.words_of(wanted[0])
+    if wanted[0]["checked"]:
+        run.sheet.say(f"- The page proposes the row, ticked: {words} ({wanted[0]['token']}); "
+                      "tick no other")
+        return
+    run.sheet.say(f"- TICK the row {words} ({wanted[0]['token']}), and no other")
+    card.ask(run, ticked=((f"rows-{card.line_id}", wanted[0]["token"]),))
 
 
 def _match(run: Run, number: int, act: MatchAct) -> None:
     """Match one SECU line to the sheet's row on the Reconcile page, and assert it landed.
 
-    **The page's own proposal must BE the sheet's row**: a row the page offers
-    beside it ticked is a different act, and the run stops rather than
-    untick it.  Where the page proposes nothing the owner ticks the row in the
-    MATCH pane, which must offer it.  Then OK on the card, and Apply.
+    The card's MATCH pane, as the owner's browser loads it (:func:`_open_card`),
+    must reach the sheet's row (:func:`_tick_row`) and then add up: a match on
+    this sheet is an exact pair, so a pane asking what to do with a difference
+    stops the run before anything is pressed.  Then the card's OK, pressed as
+    the card offers it (:class:`_OkPresses`), and Apply.
     """
     line_id = run.read(line_id_of, run.account_id, act.line)
     assert line_id is not None, f"{named(act.line)} is not recorded"
-    form, page, tab, labels = _card_form(run, line_id)
-    run.sheet.act(number, act.title, f"{page} (Reconcile: the line's card, MATCH)")
-    run.sheet.say(f"- FIND it: the Reconcile page's \"{tab.label}\" tab, the card of "
-                  "SECU's line above; open its MATCH")
-    rows = f"rows-{line_id}"
-    proposed = [value for name, value in form["controls"] if name == rows]
-    wanted = [value for value in proposed if act.offered_as(value)] or \
-        [value for name, value in form["unticked"] if name == rows and act.offered_as(value)]
-    assert wanted, f"the MATCH pane for line {line_id} does not offer the sheet's row"
-    stray = [value for value in proposed if not act.offered_as(value)]
-    assert not stray, f"the page also proposes {stray} for line {line_id}"
-    ticked = [("ok", str(line_id))]
-    label = labels.label_of(rows, wanted[0])
-    if wanted[0] in proposed:
-        run.sheet.say(f"- The page proposes the row, ticked: \"{label}\" ({wanted[0]}); "
-                      "tick no other")
-    else:
-        ticked.append((rows, wanted[0]))
-        run.sheet.say(f"- TICK the row \"{label}\" ({wanted[0]}), and no other")
-    if ("match" not in [value for name, value in form["controls"] if name == f"verb-{line_id}"]):
-        ticked.append((f"verb-{line_id}", "match"))
-    run.sheet.say("- TICK OK on the card, then press Apply")
-    run.operator.submit(form, ticked=tuple(ticked))
+    card = _open_card(run, line_id)
+    run.sheet.act(number, act.title, f"{card.page} (Reconcile: the line's card, MATCH)")
+    run.sheet.say(f"- FIND it: the Reconcile page's \"{card.tab.label}\" tab, the card of "
+                  "SECU's line above; open it, and its MATCH tab")
+    _tick_row(run, card, act)
+    assert card.pane().adds_up, \
+        f"the rows ticked for line {line_id} do not come to the bank's figure"
+    run.sheet.say(f"- PRESS {card.ok_press()}; then press Apply")
+    run.operator.submit(card.form(), ticked=card.outside + (("ok", str(line_id)),))
     run.read(_matched, run, act)
 
 

@@ -2,11 +2,11 @@
 
 What a rehearsal of an operator act needs before it can perform one act: an app pointed at the
 copy it names and at nothing else (:func:`connect`, and :func:`connect_read_only` for a check
-that writes nothing), the owner's session (:class:`Operator`), the forms the owner's pages render
-and the payload a browser would submit from them (:func:`forms_in`, :func:`browser_payload`), a
-refusal told apart from an acceptance however the door answers (:meth:`Operator.send`,
-:class:`RefusedError`), and the PERFORMANCE SHEET the act is performed from (:class:`Sheet`),
-written where no checkout can commit it (:func:`new_file`).
+that writes nothing), the owner's session (:class:`Operator`), the forms and buttons the owner's
+pages render and what a browser would submit from them (:func:`forms_in`, :func:`buttons_in`,
+:func:`browser_payload`), a refusal told apart from an acceptance however the door answers
+(:meth:`Operator.send`, :class:`RefusedError`), and the PERFORMANCE SHEET the act is performed
+from (:class:`Sheet`), written where no checkout can commit it (:func:`new_file`).
 
 **It is the account-10 repair's rehearsal's door-driving half** (plan step
 ``balance:X-f3c-2b-2c``), moved here as it stood when that rehearsal was retired (ruling
@@ -18,11 +18,21 @@ taken through that rehearsal.
 
 A script beside this one imports it by name (``from door_rehearsal import Operator``), because
 Python puts a script's own folder first on ``sys.path``.
+
+**What the reconcile rehearsal (plan#2414) added**: a submission is the form's controls IN ORDER
+with every value, as a browser posts them (:func:`browser_payload`), because the Reconcile page
+repeats control names; an act ticks only a box the page rendered and types only an option a
+select offers (:meth:`Operator.submit`); and a press of a button outside any form is sent as
+htmx sends it (:func:`buttons_in`, :meth:`Operator.press`).
 """
 
+import json
 import os
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlencode, urlsplit
+
+from werkzeug.datastructures import MultiDict
 
 from app import create_app
 from app.extensions import db, login_manager
@@ -33,6 +43,10 @@ from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
 #: and a flash rather than with a designed fragment and a 4xx --
 #: ``accounts.restate_opening``, the door that repair existed for, is one.
 _REFUSAL_FLASHES = frozenset({"danger", "error", "warning"})
+
+#: The methods htmx sends a press's values with in the URL rather than the
+#: body: ``methodsThatUseUrlParams`` in the vendored htmx 2.0.10.
+_URL_PARAM_METHODS = frozenset({"get", "delete"})
 
 
 class _Forms(HTMLParser):
@@ -63,7 +77,8 @@ class _Forms(HTMLParser):
       shape ``grid/_transaction_full_edit.html`` uses for its flags -- came out
       ``false``, because the controls were folded into a dict and the LAST
       value won.  Werkzeug's ``MultiDict`` gives ``request.form[key]`` the
-      FIRST, so :func:`browser_payload` keeps the first and the flag survives;
+      FIRST, so the flag survives once both are posted in order, which
+      :func:`browser_payload` now does rather than folding them;
     * a ``<textarea>`` posted empty whatever it held, because its content was
       never read;
     * a ``<select multiple>`` posted only its last selected option;
@@ -81,23 +96,37 @@ class _Forms(HTMLParser):
     Disabled controls are dropped because a browser drops them, which is what
     makes a finalised transfer's locked amount absent from the submission
     rather than re-posted.
+
+    **What the owner COULD change is kept beside what is submitted** (plan
+    task plan#2414): every enabled checkbox and radio rendered unticked
+    (``unticked``, with the radios' names in ``radios``) and every single
+    select's enabled options (``options``), so an act ticks and types only
+    what the page offers (:meth:`Operator.submit`).  And every ``<button>``
+    carrying an htmx verb is kept apart (``buttons``), with its ``hx-vals``,
+    for a press that is not a form's (:meth:`Operator.press`).
     """
 
     _NOT_A_VALUE = {"submit", "button", "image", "reset"}
 
+    #: The htmx attributes a press is sent by, in the order they are read.
+    _VERBS = ("patch", "post", "put", "delete", "get")
+
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.forms: "list[dict]" = []
+        self.buttons: "list[dict]" = []
         self._form: "dict | None" = None
         self._select: "dict | None" = None
         self._textarea: "str | None" = None
         self._text: "list[str]" = []
 
     def handle_starttag(self, tag, attrs):
-        """Open a form, or record one control's submitted value."""
+        """Open a form, record one control's submitted value, or a button."""
         attr = dict(attrs)
         if tag == "form":
             self._open_form(attr)
+        elif tag == "button":
+            self._button(attr)
         elif self._form is None:
             return
         elif tag == "input":
@@ -107,7 +136,7 @@ class _Forms(HTMLParser):
                 None if "disabled" in attr or not attr.get("name")
                 else {
                     "name": attr["name"], "multiple": "multiple" in attr,
-                    "selected": [], "first": None,
+                    "selected": [], "first": None, "offered": [],
                 }
             )
         elif tag == "option" and self._select is not None:
@@ -124,14 +153,30 @@ class _Forms(HTMLParser):
         """
         self._form = {
             "method": "post", "url": attr.get("action", ""),
-            "controls": [], "multiple": set(),
+            "controls": [], "unticked": [], "radios": set(), "options": {},
         }
-        for verb in ("patch", "post", "put", "delete", "get"):
+        for verb in self._VERBS:
             if f"hx-{verb}" in attr:
                 self._form["method"] = verb
                 self._form["url"] = attr[f"hx-{verb}"]
                 break
         self.forms.append(self._form)
+
+    def _button(self, attr):
+        """Record a ``<button>`` that htmx sends a request from.
+
+        Args:
+            attr: The tag's attributes.
+        """
+        if "disabled" in attr:
+            return
+        for verb in self._VERBS:
+            if f"hx-{verb}" in attr:
+                self.buttons.append({
+                    "method": verb, "url": attr[f"hx-{verb}"],
+                    "vals": json.loads(attr.get("hx-vals") or "{}"),
+                })
+                return
 
     def _input(self, attr):
         """Record one ``<input>``'s submitted value, or drop it.
@@ -144,7 +189,12 @@ class _Forms(HTMLParser):
         if not attr.get("name"):
             return
         ticked = attr.get("type") in ("checkbox", "radio")
+        if attr.get("type") == "radio":
+            self._form["radios"].add(attr["name"])
         if ticked and "checked" not in attr:
+            self._form["unticked"].append(
+                (attr["name"], attr.get("value", "on")),
+            )
             return
         # A ticked control with no ``value`` submits the string ``on``; every
         # other control with no value submits the empty string.
@@ -165,8 +215,10 @@ class _Forms(HTMLParser):
         # ``analytics/_income_statement.html`` uses exactly that placeholder
         # idiom, and an earlier version dropped such an option and posted the
         # next one instead (adversarial review, 2026-09-01).
-        if "disabled" not in attr and self._select["first"] is None:
-            self._select["first"] = value
+        if "disabled" not in attr:
+            self._select["offered"].append(value)
+            if self._select["first"] is None:
+                self._select["first"] = value
         if "selected" in attr:
             self._select["selected"].append(value)
 
@@ -192,12 +244,13 @@ class _Forms(HTMLParser):
         """Append the open select's submitted value or values."""
         if self._form is not None:
             chosen = self._select["selected"]
-            if self._select["multiple"]:
-                # A MULTI-select with nothing selected submits NOTHING.  The
-                # first-option fallback belongs to a single select only, and
-                # applying it here posted a value no browser would.
-                self._form["multiple"].add(self._select["name"])
-            else:
+            # A MULTI-select with nothing selected submits NOTHING.  The
+            # first-option fallback belongs to a single select only, and
+            # applying it to a multi-select posted a value no browser would.
+            if not self._select["multiple"]:
+                self._form["options"][self._select["name"]] = (
+                    self._select["offered"]
+                )
                 if not chosen and self._select["first"] is not None:
                     chosen = [self._select["first"]]
                 chosen = chosen[:1]
@@ -206,28 +259,24 @@ class _Forms(HTMLParser):
         self._select = None
 
 
-def browser_payload(form: dict) -> dict:
+def browser_payload(form: dict) -> MultiDict:
     """Return *form*'s controls as the payload a browser would submit.
 
-    **The FIRST value of a repeated name wins**, which is what werkzeug's
-    ``MultiDict`` gives ``request.form[key]`` and therefore what every schema
-    in this app reads.  A genuinely multi-valued control -- a
-    ``<select multiple>`` -- keeps every value as a list, which the test client
-    posts as repeated fields.
+    **Every control, in document order, every value of a repeated name kept**
+    -- which is what a browser sends, so the server's own ``MultiDict`` then
+    gives ``request.form[key]`` the first and ``getlist`` all of them, as it
+    does for a browser.  *It was a dict keeping the FIRST value of a repeated
+    name until plan task plan#2414*: right for a reader of ``form[key]``,
+    wrong for the Reconcile page, whose ``ok`` and ``rows-<line>`` boxes are
+    read as lists.
 
     Args:
         form: One parsed form.
 
     Returns:
-        ``{name: value}``, with a list for each multi-select.
+        The submission.
     """
-    payload: dict = {}
-    for name, value in form["controls"]:
-        if name in form["multiple"]:
-            payload.setdefault(name, []).append(value)
-        elif name not in payload:
-            payload[name] = value
-    return payload
+    return MultiDict(form["controls"])
 
 
 def forms_in(html: str) -> "list[dict]":
@@ -242,6 +291,20 @@ def forms_in(html: str) -> "list[dict]":
     parser = _Forms()
     parser.feed(html)
     return parser.forms
+
+
+def buttons_in(html: str) -> "list[dict]":
+    """Return every button in *html* that htmx sends a request from.
+
+    Args:
+        html: A rendered page or HTMX fragment.
+
+    Returns:
+        ``{"method", "url", "vals"}`` per button, in document order.
+    """
+    parser = _Forms()
+    parser.feed(html)
+    return parser.buttons
 
 
 class RefusedError(AssertionError):
@@ -269,6 +332,10 @@ class Operator:
             session["_fresh"] = True
             session["_id"] = None
         self.acts = 0
+        #: What the last submission flashed, ``[(category, message), ...]``:
+        #: a door that answers by flashing, such as the statement import,
+        #: says what it did there, and the act records it.
+        self.flashes: "list[tuple[str, str]]" = []
 
     def _drain_flashes(self) -> "list[tuple[str, str]]":
         """Return and clear whatever the last request flashed.
@@ -321,22 +388,83 @@ class Operator:
                 return form
         raise AssertionError(f"{page} renders no form posting to {action}")
 
-    def submit(self, form: dict, typed: "dict | None" = None):
+    def submit(
+        self, form: dict, typed: "dict | None" = None,
+        ticked: "tuple[tuple[str, str], ...]" = (),
+    ):
         """Submit *form* with the owner's edits applied.
+
+        **An act ticks and picks only what the page offers**: a box ticked
+        must be one the form rendered unticked, and a value typed into a
+        select must be one of its enabled options, or the act is not one the
+        owner could perform and this raises before anything is sent.
 
         Args:
             form: A form from :meth:`form` or :meth:`form_posting_to`.
             typed: What the owner changed, or supplied where a control is
                 driven by script rather than rendered carrying its value.
+                Each replaces every value its name carried.
+            ticked: ``(name, value)`` per box the owner ticks.  A radio's
+                replaces the one its group carried; a checkbox's is added.
+
+        Returns:
+            The response.
+
+        Raises:
+            AssertionError: When a tick or a pick is not on the page.
+        """
+        payload = browser_payload(form)
+        for name, value in ticked:
+            assert (name, value) in form["unticked"], \
+                f"{form['url']} renders no unticked box {name}={value}"
+            if name in form["radios"]:
+                payload.setlist(name, [value])
+            else:
+                payload.add(name, value)
+        for name, value in (typed or {}).items():
+            offered = form["options"].get(name)
+            assert offered is None or value in offered, \
+                f"{form['url']}'s {name} offers no option {value}"
+            payload.setlist(name, [value])
+        return self.send(form["method"], form["url"], payload)
+
+    def button(self, page: str, method: str, action: str) -> dict:
+        """Return the button on *page* that sends *method* to *action*.
+
+        Args:
+            page: The page or fragment the owner opens.
+            method: The button's htmx verb, ``delete`` for one.
+            action: The door's path, matched whole, its query aside.
+
+        Returns:
+            The button dict.
+
+        Raises:
+            AssertionError: When the page does not answer or renders no such
+                button.
+        """
+        response = self.client.get(page, headers={"HX-Request": "true"})
+        assert response.status_code == 200, \
+            f"GET {page} -> {response.status_code}"
+        for found in buttons_in(response.get_data(as_text=True)):
+            if found["method"] == method and \
+                    urlsplit(found["url"]).path == action:
+                return found
+        raise AssertionError(f"{page} renders no {method} button to {action}")
+
+    def press(self, button: dict):
+        """Press *button* as htmx sends it: its ``hx-vals`` are the payload.
+
+        Args:
+            button: A button from :meth:`button`.
 
         Returns:
             The response.
         """
-        payload = browser_payload(form)
-        payload.update(typed or {})
-        return self.send(form["method"], form["url"], payload)
+        return self.send(button["method"], button["url"],
+                         MultiDict(button["vals"]))
 
-    def send(self, method: str, url: str, payload: dict):
+    def send(self, method: str, url: str, payload: MultiDict):
         """Submit *payload* and assert the door accepted it.
 
         **A 302 with a danger flash is a REFUSAL, and reading only the status
@@ -346,6 +474,11 @@ class Operator:
         never happened (adversarial review, 2026-09-01).  The flash is drained
         after every submission and any refusal category raises, which also
         surfaces the refusal SENTENCE -- which is what a rehearsal is for.
+
+        **A GET's and a DELETE's payload goes in the URL**, which is where
+        htmx 2 puts it (its ``methodsThatUseUrlParams``, ``["get", "delete"]``
+        in the vendored 2.0.10): a DELETE door reads ``request.args``, and a
+        body it never reads would be a submission no browser makes.
 
         Args:
             method: The form's own method.
@@ -359,11 +492,20 @@ class Operator:
             RefusedError: On a refusing status, or on a refusal flash.
         """
         self.acts += 1
-        response = getattr(self.client, method)(
-            url, data=payload, headers={"HX-Request": "true"},
-        )
+        if method in _URL_PARAM_METHODS:
+            query = urlencode(list(payload.items(multi=True)))
+            if query:
+                url = f"{url}{'&' if '?' in url else '?'}{query}"
+            response = getattr(self.client, method)(
+                url, headers={"HX-Request": "true"},
+            )
+        else:
+            response = getattr(self.client, method)(
+                url, data=payload, headers={"HX-Request": "true"},
+            )
+        self.flashes = self._drain_flashes()
         refused = [
-            message for category, message in self._drain_flashes()
+            message for category, message in self.flashes
             if category in _REFUSAL_FLASHES
         ]
         # **A designed error fragment can carry a 2xx, and the status list

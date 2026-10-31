@@ -4,8 +4,10 @@ each copy.
 
 THE ENVIRONMENT IS BUILT WHOLE (:func:`side_environment`): nothing of the shell that runs the
 kit reaches a side, so an operator's ``DATABASE_URL_APP``, ``RATELIMIT_STORAGE_URI`` or
-``SHEKEL_FAKE_TODAY`` cannot.  What production's image and compose file give the app is read
-from the side's own tree, so a cut that changes it is measured with it.
+``SHEKEL_FAKE_TODAY`` cannot.  What production's image and compose files give the app is read
+from the side's own tree, so a cut that changes it is measured with it: the rate-limit store's
+scheme among it (:func:`limiter_uri`), since a side whose lock holds no client for the scheme
+it is given cannot make its app.
 
 THE CLOCK IS PINNED at ONE instant for every side: noon of the dump's civil day in base's zone,
 computed once a run (:func:`pinned_instant`), so a run that crosses midnight deploys every side
@@ -25,15 +27,23 @@ _SIDE = Path(__file__).resolve().parent / "side"
 _DEPLOY_PROBE = _SIDE / "deploy.py"
 #: The side probe that boots a side's app under the pinned instant, run by path.
 _BOOT_PROBE = _SIDE / "boot.py"
-#: A rate-limit store ProdConfig accepts (it refuses ``memory:``) that names no server that
-#: could answer (``.invalid`` never resolves, RFC 6761): the deploy serves no request, and a
-#: deploy that reached for the store would fail by name rather than pass on a live one.
-_UNREACHABLE_LIMITER = "redis://rehearsal.invalid:6379/0"
+#: Where every side's rate-limit store is (:func:`limiter_uri`), since ProdConfig refuses
+#: ``memory:``: a server none could reach (``.invalid`` never resolves, RFC 6761), so a deploy,
+#: which serves no request, that reached for the store would fail by name rather than pass on
+#: a live one.
+_UNREACHABLE_STORE = "rehearsal.invalid:6379/0"
 #: The side's ``Dockerfile`` lines that set its image's environment.
 _IMAGE_ENV = re.compile(r"^ENV ([A-Z_][A-Z0-9_]*)=(\S+)$", re.MULTILINE)
 #: The production compose file's pin of the app's civil timezone.
 _COMPOSE_TZ = re.compile(r"^\s+TZ: (\S+)$", re.MULTILINE)
 _COMPOSE = Path("deploy") / "docker-compose.prod.yml"
+#: The base compose file production's override is laid over (``reconcile_prod_to_canonical.sh``
+#: copies :data:`_COMPOSE` to production's ``docker-compose.override.yml`` beside it).
+_BASE_COMPOSE = Path("docker-compose.yml")
+#: A compose file's setting of the app's rate-limit store, in the mapping form both use.
+_COMPOSE_LIMITER = re.compile(r"^\s+RATELIMIT_STORAGE_URI:(.*)$", re.MULTILINE)
+#: That setting's scheme: its value's, or its ``${RATELIMIT_STORAGE_URI:-...}`` default's.
+_LIMITER_SCHEME = re.compile(r"\s*(?:\$\{RATELIMIT_STORAGE_URI:-)?([a-z][a-z0-9+.-]*)://")
 #: ``PYTHONHASHSEED``, fixed on every side (design s.3 item 5).
 _HASH_SEED = "0"
 #: Switches python-dotenv off, so ``app/config.py``'s ``load_dotenv()`` reads no ``.env``, as
@@ -71,21 +81,52 @@ def image_environment(worktree: Path) -> dict[str, str]:
     return environment
 
 
+def limiter_uri(worktree: Path) -> str:
+    """The rate-limit store a side is given: :data:`_UNREACHABLE_STORE` under the scheme
+    production's compose files, read from the side's own tree, give the app's
+    ``RATELIMIT_STORAGE_URI`` by default.  limits picks its client by the scheme and
+    Flask-Limiter builds the store when the app is made, so a side given a scheme its lock
+    holds no client for fails at app creation: one scheme for every side would fail one side
+    of a release that changes the store.
+
+    Raises:
+        bench.BenchError: when either compose file cannot be read, or the two set the store
+            on other than one line, or that line names no scheme.
+    """
+    files = (worktree / _BASE_COMPOSE, worktree / _COMPOSE)
+    try:
+        settings = [value for path in files
+                    for value in _COMPOSE_LIMITER.findall(path.read_text(encoding="utf-8"))]
+    except OSError as exc:
+        raise bench.BenchError(f"{worktree} cannot give production's rate-limit store: {exc}") \
+            from exc
+    if len(settings) != 1:
+        raise bench.BenchError(f"{files[0]} and {files[1]} set RATELIMIT_STORAGE_URI on "
+                               f"{len(settings)} lines, not one")
+    scheme = _LIMITER_SCHEME.match(settings[0])
+    if scheme is None:
+        raise bench.BenchError(f"{files[0]} and {files[1]} set RATELIMIT_STORAGE_URI naming "
+                               "no scheme")
+    return f"{scheme.group(1)}://{_UNREACHABLE_STORE}"
+
+
 def side_environment(state: bench.State, url: str, secret_key: str) -> dict[str, str]:
     """The whole environment a side probe runs in, its deploy and its boot, inheriting
     nothing: production's (:func:`image_environment`), its configuration, the copy's URL, a
-    secret key of the run's, a rate-limit store no deploy could reach, the fixed hash seed,
-    python-dotenv switched off (:data:`_NO_DOTENV`), and the side's venv first on ``PATH``.
+    secret key of the run's, a rate-limit store no deploy could reach under the scheme the
+    side's tree names (:func:`limiter_uri`), the fixed hash seed, python-dotenv switched off
+    (:data:`_NO_DOTENV`), and the side's venv first on ``PATH``.
 
     Raises:
-        bench.BenchError: when the side's tree cannot give production's environment.
+        bench.BenchError: when the side's tree cannot give production's environment or its
+            rate-limit store.
     """
     return {
         **image_environment(state.worktree),
         "FLASK_ENV": "production",
         "SECRET_KEY": secret_key,
         "DATABASE_URL": url,
-        "RATELIMIT_STORAGE_URI": _UNREACHABLE_LIMITER,
+        "RATELIMIT_STORAGE_URI": limiter_uri(state.worktree),
         "PYTHONHASHSEED": _HASH_SEED,
         _NO_DOTENV[0]: _NO_DOTENV[1],
         "PATH": os.pathsep.join((str(state.python.parent), "/usr/bin", "/bin")),
@@ -112,7 +153,7 @@ def _probe(probe: Path, state: bench.State, url: str, secret_key: str, moment: d
 
     Raises:
         bench.BenchError: when the side's interpreter cannot be run, or its tree cannot give
-            production's environment.
+            production's environment or its rate-limit store.
     """
     done = bench.run([str(state.python), str(probe), moment.isoformat()],
                      side_environment(state, url, secret_key), cwd=state.worktree)

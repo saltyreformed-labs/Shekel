@@ -31,7 +31,7 @@ from app.config import ProdConfig
 from app.extensions import db
 from app.models.trusted_device import TrustedDevice
 from app.models.user import MfaConfig
-from app.services import mfa_service
+from app.services import mfa_service, trusted_device_service
 from scripts.reset_mfa import reset_mfa
 from tests._test_helpers import enable_mfa
 from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
@@ -40,6 +40,9 @@ _SECOND_EMAIL = "second@shekel.local"
 _SECOND_PASSWORD = "secondpass12"
 
 _BACKUP_CODE = "aaaaaaaabbbbbbbbccccccccdddd"
+
+_COMPANION_EMAIL = "companion@shekel.local"
+_COMPANION_PASSWORD = "companionpass"
 
 #: Thirty days in seconds: the cookie's Max-Age, spelled here as an oracle.
 _THIRTY_DAYS_IN_SECONDS = 30 * 24 * 60 * 60
@@ -129,6 +132,20 @@ def _enrol_a_new_authenticator(user_id):
     )
     config.confirmed_at = datetime.now(timezone.utc)
     db.session.commit()
+
+
+def _browser_trusted_through_the_service(app, user_id):
+    """Return a browser holding a device cookie the service trusted for *user_id*.
+
+    What the code form's trust writes, without spending a code on it, for a
+    test whose one code another act needs (replay prevention refuses a second
+    inside its thirty-second step).
+    """
+    token = trusted_device_service.trust_device(user_id, "")
+    db.session.commit()
+    browser = app.test_client()
+    browser.set_cookie(f"shekel_device_{user_id}", token)
+    return browser
 
 
 def _trusted_browser(app, seed_user):
@@ -361,6 +378,88 @@ class TestWhatForgetsTheDevice:
 
         assert _asked_the_code(
             _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD),
+        )
+
+    def test_turning_two_factor_off(self, app, seed_user):
+        """``/mfa/disable``, then a new authenticator: the code is asked."""
+        user_id = seed_user["user"].id
+        secret = enable_mfa(db.session, user_id)
+        browser = _browser_trusted_through_the_service(app, user_id)
+        # Control: before two-factor is turned off, this browser skips the code.
+        assert _signed_in(_password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD))
+
+        response = browser.post("/mfa/disable", data={
+            "current_password": SEED_USER_PASSWORD, "totp_code": _code(secret),
+        })
+        assert response.status_code == 302
+        assert db.session.query(MfaConfig).filter_by(
+            user_id=user_id,
+        ).one().is_enabled is False, "Setup failed: two-factor is still on"
+        browser.post("/logout")
+        _enrol_a_new_authenticator(user_id)
+
+        assert _asked_the_code(
+            _password(browser, SEED_USER_EMAIL, SEED_USER_PASSWORD),
+        )
+
+    def test_the_owners_password_reset_of_a_companion(
+        self, app, auth_client, seed_companion,
+    ):
+        """The owner sets the companion a new password: her device asks the code.
+
+        One of the two writers on the database's clock (``now()``).
+        """
+        companion_id = seed_companion["user"].id
+        enable_mfa(db.session, companion_id)
+        browser = _browser_trusted_through_the_service(app, companion_id)
+        # Control: before the reset, her browser skips the code.
+        assert _signed_in(
+            _password(browser, _COMPANION_EMAIL, _COMPANION_PASSWORD),
+        )
+        browser.post("/logout")
+        new_password = "a-new-companion-passphrase"
+
+        response = auth_client.post(
+            f"/settings/companions/{companion_id}/edit",
+            data={
+                "email": _COMPANION_EMAIL,
+                "display_name": "Companion User",
+                "password": new_password,
+                "password_confirm": new_password,
+            },
+        )
+        assert response.status_code == 302
+
+        assert _asked_the_code(
+            _password(browser, _COMPANION_EMAIL, new_password),
+        )
+
+    def test_the_owners_deactivation_of_a_companion(
+        self, app, auth_client, seed_companion,
+    ):
+        """Deactivated and reactivated: her device asks the code.
+
+        The other writer on the database's clock.  Reactivation writes nothing
+        to ``session_invalidated_at``, so the deactivation's bump is what the
+        next sign-in meets.
+        """
+        companion_id = seed_companion["user"].id
+        enable_mfa(db.session, companion_id)
+        browser = _browser_trusted_through_the_service(app, companion_id)
+        # Control: before the deactivation, her browser skips the code.
+        assert _signed_in(
+            _password(browser, _COMPANION_EMAIL, _COMPANION_PASSWORD),
+        )
+        browser.post("/logout")
+
+        for act in ("deactivate", "reactivate"):
+            response = auth_client.post(
+                f"/settings/companions/{companion_id}/{act}",
+            )
+            assert response.status_code == 302
+
+        assert _asked_the_code(
+            _password(browser, _COMPANION_EMAIL, _COMPANION_PASSWORD),
         )
 
     def test_the_emergency_reset_of_two_factor(self, app, seed_user):

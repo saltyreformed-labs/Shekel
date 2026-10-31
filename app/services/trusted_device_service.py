@@ -20,8 +20,11 @@ survives it, as a session created at that instant does.
 **The clock is the process's**, ``datetime.now(timezone.utc)``, read once per
 act: the same clock the sign-in stamps and most ``session_invalidated_at``
 writers use.  Two writers (the owner's companion password reset and
-deactivation, ``app/routes/settings.py``) use the database's ``now()``; on one
-host the two clocks are one.
+deactivation, ``app/routes/settings.py``) use the database's ``now()``, which
+is the moment their transaction BEGAN, not the moment it commits: a device
+trusted while such a request runs is not before the bump and survives it, as a
+session started then does.  On one host the database's clock and the
+process's are one clock.
 
 Architecture:
   - No Flask imports.  Takes plain ids and strings, returns rows or the token.

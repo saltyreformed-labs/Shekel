@@ -198,7 +198,7 @@ class TestPendingMfaTimeout:
         With the timeout it must:
 
           1. Redirect to /login (not validate the code).
-          2. Clear _mfa_pending_user_id, _remember, _next, _at so a
+          2. Clear _mfa_pending_user_id, _next, _at so a
              second attempt with the same cookie also fails.
           3. Flash a user-visible reason for the bounce.
         """

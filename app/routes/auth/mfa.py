@@ -250,11 +250,11 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
     # pending state, and validated again there (defense in depth -- it was
     # also validated at storage time in the login route).  The completion
     # stamps every lifecycle key from one instant.  The backup-code branch
-    # below ALSO calls ``invalidate_other_sessions``, which writes
-    # ``_session_created_at`` again with its own internal ``now`` -- the
-    # small microsecond drift is harmless because the load_user check is
-    # strict less-than, not equality, and the cookie's later value is still
-    # > the DB's earlier session_invalidated_at.
+    # below ALSO calls ``invalidate_other_sessions``, which writes its own
+    # internal ``now`` to BOTH ``_session_created_at`` and the user's
+    # ``session_invalidated_at``.  The two are equal, and the load_user check
+    # is strict less-than, so this session survives while every earlier one
+    # is refused.
     response = _complete_sign_in(user, flask_session.get("_mfa_pending_next"))
 
     if used_backup_code:

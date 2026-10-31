@@ -500,7 +500,13 @@ services:
 
   # ── Nginx Reverse Proxy ──────────────────────────────────────────
   nginx:
-    image: nginx:1.31-alpine
+    # Pinned to nginx:1.31-alpine 1.31.8 (multi-arch index digest
+    # sha256:785835..., read 2026-10-30 with ``docker buildx imagetools
+    # inspect``; finding BAL-653).  The tag documents the version line
+    # the wud label below watches, and the digest pins the bytes; update
+    # both halves together (deploy/README.md "Image digest pinning").
+    # The deploy tests run this image too (tests/test_deploy/_compose.py).
+    image: nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
     container_name: shekel-prod-nginx
     restart: unless-stopped
     labels:

@@ -7,6 +7,9 @@ Covers audit findings:
     F-062  Two HIGH OS CVEs with no fix available in container image
     F-120  pip CVE in container (build-time only)
     F-155  No Cosign / image-signature verification
+    BAL-653  Compose images pinned by tag alone (ledger finding, plan step X-em;
+             :class:`TestEveryComposeImageIsPinnedByDigest`, which lists the
+             compose files with ``git ls-files``)
 
 The artifacts under audit are the multi-stage Dockerfile, the
 production compose override at ``deploy/docker-compose.prod.yml``,
@@ -701,6 +704,62 @@ class TestComposeOverrideRequiresDigest:
             f"override in deploy/docker-compose.prod.yml.\n"
             f"  stdout: {result.stdout}"
         )
+
+
+# ──────────────────────────────────────────────────────────────────
+# BAL-653: every compose image pinned by tag and digest.
+# ──────────────────────────────────────────────────────────────────
+
+#: A pinned image: a tag, then the digest of its bytes (``.claude/rules/deploy.md``).
+TAG_AND_DIGEST_PATTERN = re.compile(r"^[^@\s]+:[\w.-]+@sha256:[0-9a-f]{64}$")
+#: The images whose own line carries no digest, each as ``(compose file, service)``: the
+#: app's.  The base file names it ``:latest`` for an end user's ``docker compose up``, and
+#: the prod override pins it through ``SHEKEL_IMAGE_DIGEST``
+#: (:class:`TestProdComposeOverridePinsByDigest`).
+PINNED_ELSEWHERE = frozenset({
+    ("docker-compose.yml", "app"),
+    ("deploy/docker-compose.prod.yml", "app"),
+})
+
+
+def _compose_images() -> tuple[list[str], dict[tuple[str, str], str]]:
+    """Every committed compose file (``git ls-files``, so a new one anywhere in the tree is
+    read too) and every ``image:`` its services name, by ``(compose file, service)``."""
+    listed = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "--", "*compose*.yml", "*compose*.yaml"],
+        capture_output=True, text=True, check=True, timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
+    )
+    files = listed.stdout.split()
+    images: dict[tuple[str, str], str] = {}
+    for name in files:
+        with (REPO_ROOT / name).open(encoding="utf-8") as fh:
+            services = yaml.safe_load(fh).get("services") or {}
+        for service, spec in services.items():
+            if "image" in spec:
+                images[(name, service)] = spec["image"]
+    return files, images
+
+
+class TestEveryComposeImageIsPinnedByDigest:
+    """Every image a compose file names is ``name:tag@sha256:<digest>``, so a push to a tag
+    cannot change what a ``docker compose up`` runs (finding BAL-653): the tag says which
+    version, the digest pins its bytes.  The app's is pinned elsewhere."""
+
+    def test_every_image_names_its_tag_and_digest(self) -> None:
+        """Each compose image but the app's carries a tag and a sha256 digest; the census
+        found the compose files production, dev and the build use, and the app's lines are
+        still where the exemption says, so neither can pass by reading nothing."""
+        files, images = _compose_images()
+        assert {"docker-compose.yml", "docker-compose.dev.yml", "docker-compose.build.yml",
+                "deploy/docker-compose.prod.yml"} <= set(files), files
+        assert PINNED_ELSEWHERE <= images.keys(), sorted(images)
+        unpinned = {f"{name} {service}": image for (name, service), image in images.items()
+                    if (name, service) not in PINNED_ELSEWHERE
+                    and not TAG_AND_DIGEST_PATTERN.match(image)}
+        assert not unpinned, (
+            f"compose images pinned by tag alone: {unpinned}.  Pin each as "
+            "``name:tag@sha256:<digest>``, the digest the multi-arch index's, read with "
+            "``docker buildx imagetools inspect name:tag`` (finding BAL-653).")
 
 
 # ──────────────────────────────────────────────────────────────────

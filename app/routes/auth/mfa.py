@@ -209,8 +209,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
         return render_template("auth/mfa_verify.html")
 
     # Login completion -- both password and TOTP/backup code are verified.
-    # Read the values we still need from pending state before clearing.
-    remember = flask_session.get("_mfa_pending_remember", False)
+    # Read the value we still need from pending state before clearing.
     # Validate again at redirect time (defense in depth -- the value was
     # also validated at storage time in the login route).
     next_page = flask_session.get("_mfa_pending_next")
@@ -219,7 +218,7 @@ def mfa_verify():  # pylint: disable=too-many-return-statements
 
     _clear_mfa_pending_state()
 
-    login_user(user, remember=remember)
+    login_user(user)
     # Stamp every lifecycle key in one call so the idle-timeout check
     # (commit C-10 / F-006) and the fresh-login check (commit C-10 /
     # F-045) start from the same instant the MFA-protected session

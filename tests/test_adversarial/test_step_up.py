@@ -74,13 +74,13 @@ _KNOWN_BACKUP_CODES = ["aaaaaaaa", "bbbbbbbb", "cccccccc"]
 
 
 # Env vars that BaseConfig consults at class-definition time for the
-# four C-10 defaults.  The TestPermanentSessionLifetime suite clears
+# three C-10 defaults (the fourth, the remember-me cookie's lifetime, went
+# with "Remember me" at plan#2173).  The TestPermanentSessionLifetime suite clears
 # every entry here and reloads ``app.config`` so the assertions
 # measure the BUILT-IN defaults rather than whatever the developer
 # happens to have in their local .env.
 _C10_ENV_VARS = (
     "SESSION_LIFETIME_HOURS",
-    "REMEMBER_COOKIE_DURATION_DAYS",
     "IDLE_TIMEOUT_MINUTES",
     "FRESH_LOGIN_MAX_AGE_MINUTES",
 )
@@ -160,15 +160,14 @@ def _do_login_no_mfa(client):
 
 
 class TestC10ConfigDefaults:
-    """The four C-10 config defaults are baked into ``BaseConfig``.
+    """The three C-10 config defaults are baked into ``BaseConfig``.
 
     Each test stubs ``load_dotenv`` and clears the matching env var
     before reloading ``app.config``, so the assertion measures the
     BUILT-IN default rather than whatever the developer happens to
     have in their local .env.  Without this isolation a developer
-    whose .env sets ``REMEMBER_COOKIE_DURATION_DAYS=30`` (the
-    pre-C-10 historical value) would see a green test that hides a
-    real regression.
+    whose .env sets ``IDLE_TIMEOUT_MINUTES=30`` (the original
+    value) would see a green test that hides a real regression.
 
     A teardown ``_restore_config_module`` call reloads the module
     after monkeypatch undoes its changes, so sibling tests that
@@ -187,23 +186,6 @@ class TestC10ConfigDefaults:
             reloaded = _reload_config_with_clean_env(monkeypatch)
             assert reloaded.BaseConfig.PERMANENT_SESSION_LIFETIME == (
                 timedelta(hours=12)
-            )
-        finally:
-            _restore_config_module()
-
-    def test_remember_cookie_default_is_7_days(self, monkeypatch):
-        """``REMEMBER_COOKIE_DURATION`` defaults to 7 days (F-006).
-
-        Pre-C-10 default was 30 days.  Shortened to 7 to match ASVS
-        L2 guidance for financial apps -- a stolen remember-me
-        cookie is a password-equivalent credential and 7 days is the
-        right tradeoff between legitimate "stay logged in" UX and
-        stolen-device blast radius.
-        """
-        try:
-            reloaded = _reload_config_with_clean_env(monkeypatch)
-            assert reloaded.BaseConfig.REMEMBER_COOKIE_DURATION == (
-                timedelta(days=7)
             )
         finally:
             _restore_config_module()
@@ -308,11 +290,11 @@ class TestIdleTimeoutAcceptance:
     def test_first_request_after_login_passes(self, app, client, seed_user):
         """A request immediately after /login is accepted.
 
-        Without the chicken-and-egg accept-on-missing branch, the
-        very first protected request after login would 302 to /login
-        because no ``_session_last_activity_at`` exists yet -- the
-        ``before_request`` hook writes the stamp DURING the request,
-        but ``load_user`` runs first.
+        ``load_user`` refuses a session with no
+        ``_session_last_activity_at`` (plan#2173), so this passes only
+        because the sign-in itself writes the stamp
+        (``stamp_login_session``) rather than leaving it to the
+        ``before_request`` hook, which runs after ``load_user``.
         """
         with app.app_context():
             resp = _do_login_no_mfa(client)

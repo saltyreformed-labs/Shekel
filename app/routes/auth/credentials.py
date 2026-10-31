@@ -109,7 +109,6 @@ def login():
             login_data = LoginSchema().load(request.form)
             email = login_data["email"]
             password = login_data["password"]
-            remember = login_data["remember"]
             # Find the account, take its owner's lock, THEN check it (ruling
             # R-CC121, "Lock, then check"): the check reads the lockout
             # columns and writes the failed-attempt count, and a signed-in
@@ -128,7 +127,6 @@ def login():
             if mfa_config:
                 # Store pending auth state in session (user is NOT logged in yet).
                 flask_session["_mfa_pending_user_id"] = user.id
-                flask_session["_mfa_pending_remember"] = remember
                 # Validate the next parameter at storage time (defense in depth).
                 pending_next = request.args.get("next")
                 flask_session["_mfa_pending_next"] = (
@@ -149,7 +147,7 @@ def login():
             # idle-timeout check (commit C-10 / F-006) and the
             # fresh-login check (commit C-10 / F-045) start from the
             # same instant the session was created.
-            login_user(user, remember=remember)
+            login_user(user)
             stamp_login_session(datetime.now(timezone.utc))
             log_event(logger, logging.INFO, EVT_LOGIN_SUCCESS, AUTH,
                       "User logged in", user_id=user.id, email=email)

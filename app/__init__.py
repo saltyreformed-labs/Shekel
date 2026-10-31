@@ -95,17 +95,23 @@ def create_app(config_name=None, *, init_ref_cache=True):
         """Load a user by ID for Flask-Login session hydration.
 
         Returns None (forcing re-login) for any of:
+          * No ``_session_created_at``: a session the app's own sign-in
+            did not start, such as Flask-Login's remember-me restore
+            (plan#2173; ``app.utils.session_helpers`` says why).
           * Unknown user ID.
           * Deactivated user (``is_active=False``).
           * Session created before the most recent
             ``session_invalidated_at`` bump (commit C-08 -- F-002,
             F-003, F-032).
           * Session whose last activity is older than
-            ``IDLE_TIMEOUT_MINUTES`` (commit C-10 -- F-006).
+            ``IDLE_TIMEOUT_MINUTES`` or absent (commit C-10 -- F-006).
 
         A None return triggers Flask-Login's "logged out" flow on the
         next request, redirecting to the configured ``login_view``.
         """
+        session_created = flask_session.get(SESSION_CREATED_AT_KEY)
+        if session_created is None:
+            return None
         user = db.session.get(User, int(user_id))
         if user is None:
             return None
@@ -123,16 +129,15 @@ def create_app(config_name=None, *, init_ref_cache=True):
             return None
         # Check whether this session was created before the most recent
         # "log out all sessions" or password change event.
-        if user.session_invalidated_at is not None:
-            session_created = flask_session.get(SESSION_CREATED_AT_KEY)
-            if session_created is not None:
-                created_dt = datetime.fromisoformat(session_created)
-                if created_dt < user.session_invalidated_at:
-                    return None
+        invalidated_at = user.session_invalidated_at
+        if invalidated_at is not None and (
+            datetime.fromisoformat(session_created) < invalidated_at
+        ):
+            return None
         # Idle-timeout check (commit C-10 / F-006).  Reject the
         # session if ``_session_last_activity_at`` is older than
         # ``IDLE_TIMEOUT_MINUTES``.  See ``_idle_session_is_fresh``
-        # docstring for the per-state policy (missing -> fresh,
+        # docstring for the per-state policy (missing -> stale,
         # malformed/naive -> stale, future-dated -> fresh,
         # within-window -> fresh, beyond-window -> stale).
         if not _idle_session_is_fresh(app):
@@ -663,8 +668,8 @@ def _idle_session_is_fresh(app):
         walked away from their desk" case the constant exists to
         enforce.
 
-    Missing key returns True (the chicken-and-egg branch documented
-    in ``load_user``).
+    Missing key returns False: every sign-in stamps it in the request
+    that signs in, so a session without one is not the app's (plan#2173).
 
     Future-dated timestamps (``elapsed < 0``) are treated as FRESH
     rather than rejected.  The two real-world causes are:
@@ -695,11 +700,7 @@ def _idle_session_is_fresh(app):
     """
     raw = flask_session.get(SESSION_LAST_ACTIVITY_KEY)
     if raw is None:
-        # Chicken-and-egg: first request after login has no stamp
-        # yet (the before_request hook runs after load_user).  Treat
-        # missing as fresh; the hook will write a value before this
-        # request's response goes out.
-        return True
+        return False
     try:
         last_activity = datetime.fromisoformat(raw)
     except (TypeError, ValueError):

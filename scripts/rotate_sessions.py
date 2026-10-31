@@ -5,7 +5,7 @@ One-shot operations utility that bumps ``users.session_invalidated_at``
 to ``now()`` for every row in ``auth.users``.  Run it after rotating
 ``SECRET_KEY``, after a git history rewrite that excised a leaked key,
 or after any other event that compromises previously-issued session
-cookies and remember-me tokens.
+cookies.
 
 The application's ``load_user`` callback (``app/__init__.py``) compares
 ``users.session_invalidated_at`` against the per-session
@@ -13,6 +13,13 @@ The application's ``load_user`` callback (``app/__init__.py``) compares
 runs, every existing session becomes older than the new
 ``session_invalidated_at`` and is rejected on the next request,
 forcing every active user to log in again.
+
+This docstring once said the script also revokes remember-me tokens.  It
+never did: Flask-Login's remember-me restore starts a session with no
+``_session_created_at``, which the comparison above skipped.  Since
+plan#2173 ``load_user`` refuses any session without that stamp, so every
+remember-me cookie ever issued is refused whatever this script does, and
+the app issues none (ruling plan#2406).
 
 Usage:
     python scripts/rotate_sessions.py --confirm

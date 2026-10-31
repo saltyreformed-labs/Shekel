@@ -65,7 +65,6 @@ _MFA_PENDING_MAX_AGE = timedelta(minutes=5)
 # would silently break the flow.
 _MFA_PENDING_KEYS = (
     "_mfa_pending_user_id",
-    "_mfa_pending_remember",
     "_mfa_pending_next",
     "_mfa_pending_at",
 )

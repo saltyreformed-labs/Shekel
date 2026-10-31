@@ -236,7 +236,6 @@ class TestPendingMfaTimeout:
             with client.session_transaction() as sess:
                 for key in (
                     "_mfa_pending_user_id",
-                    "_mfa_pending_remember",
                     "_mfa_pending_next",
                     "_mfa_pending_at",
                 ):

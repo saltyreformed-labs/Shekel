@@ -283,6 +283,13 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         Drives the loader directly via ``login_manager._user_callback``
         with the cookie value the helper just wrote, so the test grades
         the loader's own answer for that cookie.
+
+        The session is signed in first (``stamp_login_session``), as
+        every caller's is: ``/mfa/verify`` stamps it just before its
+        backup-code call, and ``/mfa/disable`` runs on a signed-in
+        session.  Since plan#2173 the loader refuses a session with no
+        activity stamp, and the developer confirmed that change on
+        2026-10-30, so a bare request context no longer stands in for one.
         """
         # pylint: disable=import-outside-toplevel,protected-access
         # Local import keeps the LoginManager dependency next to the
@@ -295,6 +302,7 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         user = seed_user["user"]
 
         with app.test_request_context("/"):
+            stamp_login_session(datetime.now(timezone.utc))
             invalidate_other_sessions(user, "current_passes_check")
             # The cookie the helper just wrote is still on the
             # request context's session.  Drive the loader.
@@ -315,6 +323,12 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         runs, then invokes the helper, then drives the loader.  The
         loader must return None for the stale cookie -- the entire
         point of the helper.
+
+        The session is signed in first (``stamp_login_session``) so the
+        stale ``_session_created_at`` is the ONLY thing the loader can
+        refuse it for: since plan#2173 a session with no activity stamp is
+        refused too, and without the sign-in this test would pass on that
+        instead, measuring nothing about the comparison it exists for.
         """
         # pylint: disable=import-outside-toplevel,protected-access
         # See test_current_cookie_value_passes_load_user_after_call
@@ -324,6 +338,7 @@ class TestInvalidateOtherSessionsLoadUserIntegration:
         user = seed_user["user"]
 
         with app.test_request_context("/") as ctx:
+            stamp_login_session(datetime.now(timezone.utc))
             stale_value = (
                 datetime.now(timezone.utc) - timedelta(hours=1)
             ).isoformat()

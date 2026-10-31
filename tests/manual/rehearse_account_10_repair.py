@@ -99,7 +99,7 @@ import os
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from html.parser import HTMLParser
 from pathlib import Path
@@ -126,6 +126,7 @@ from app.services.settle_day import SettleDay, is_evidence, recorded_settle_day
 from app.utils.archive_helpers import category_has_usage
 from app.utils.balance_predicates import is_cancelled
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
+from app.utils.session_helpers import login_session_stamps
 
 _ZERO_MONEY = Decimal("0.00")
 _CENT = Decimal("0.01")
@@ -676,6 +677,9 @@ class _Operator:
             session["_user_id"] = str(self.user_id)
             session["_fresh"] = True
             session["_id"] = None
+            # The stamps a sign-in writes: ``load_user`` refuses a session
+            # without them (plan#2173).
+            session.update(login_session_stamps(datetime.now(timezone.utc)))
         self.acts = 0
 
     def _drain_flashes(self) -> "list[tuple[str, str]]":

@@ -75,8 +75,16 @@ class TestLoginSchemaWiring:
             assert response.status_code == 200
             assert b"Invalid email or password" in response.data
 
-    def test_remember_on_persists_through_schema(self, app, client, seed_user):
-        """The 'remember=on' checkbox value reaches login_user()."""
+    def test_stale_remember_on_signs_in_and_sets_no_cookie(
+        self, app, client, seed_user,
+    ):
+        """A stale form's ``remember=on`` signs in and issues no remember cookie.
+
+        "Remember me" is gone (plan#2173, ruling plan#2406), but a browser
+        holding the old login page still posts the box.  The sign-in must
+        succeed and must not set Flask-Login's ``remember_token``: the cookie
+        could not be revoked, which is why it went.
+        """
         with app.app_context():
             response = client.post("/login", data={
                 "email": "test@shekel.local",
@@ -84,6 +92,11 @@ class TestLoginSchemaWiring:
                 "remember": "on",
             }, follow_redirects=False)
             assert response.status_code == 302
+            assert response.headers["Location"].endswith("/dashboard")
+            set_cookies = response.headers.getlist("Set-Cookie")
+            assert not [
+                c for c in set_cookies if c.startswith("remember_token=")
+            ], f"No remember_token may be issued; got {set_cookies!r}"
 
     def test_invalid_email_format_returns_generic_error(self, app, client):
         """Schema-level invalid email format produces generic flash."""
@@ -249,7 +262,6 @@ class TestMfaVerifySchemaWiring:
         """Drop the user into the post-password / pre-MFA state."""
         with client.session_transaction() as sess:
             sess["_mfa_pending_user_id"] = user_id
-            sess["_mfa_pending_remember"] = False
             sess["_mfa_pending_next"] = None
             sess["_mfa_pending_at"] = (
                 datetime.now(timezone.utc).isoformat()

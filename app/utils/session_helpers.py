@@ -39,6 +39,21 @@ session cookie:
     successful ``/reauth``, and on ``change_password`` -- every code
     path that requires the user to type a password.
 
+**A session missing either of the first two stamps is not signed in**
+(plan#2173, finding S-02 of the 2026-10-29 security review):
+``load_user`` refuses one without ``_session_created_at``, and reads one
+without ``_session_last_activity_at`` as stale.  Every sign-in writes both
+in the request that calls ``login_user`` (:func:`stamp_login_session`, at
+both of the app's ``login_user`` sites), so a session without them is one
+something else started.  What the rule exists to refuse is Flask-Login's
+remember-me restore, which calls the loader on an EMPTY session.  A
+"Remember me" cookie is the same ``<id>|HMAC(SECRET_KEY, id)`` value for
+every remembered sign-in, and Flask-Login honours it whether or not the
+app ever issues one again, so until this rule a copied one signed a
+browser in past every "log out all sessions".  The rule refuses every
+such cookie ever issued, with no ``SECRET_KEY`` rotation (ruling
+plan#2406, which also deleted the checkbox).
+
 The three keys are deliberately distinct.  An idle-but-not-stale
 session can still complete a benign GET (``_session_last_activity_at``
 keeps refreshing as the user clicks around), but a high-value POST
@@ -55,7 +70,8 @@ to a single semantic event so the caller cannot accidentally write
 the wrong subset:
 
   * :func:`stamp_login_session` -- new login (password POST,
-    successful MFA verify, password change).  Writes all three keys.
+    successful MFA verify, password change).  Writes all three keys,
+    the set :func:`login_session_stamps` names.
 
   * :func:`stamp_reauth_session` -- ``/reauth`` success on an
     existing session.  Writes activity + fresh; ``_session_created_at``
@@ -139,6 +155,30 @@ SESSION_LAST_ACTIVITY_KEY = "_session_last_activity_at"
 FRESH_LOGIN_AT_KEY = "_fresh_login_at"
 
 
+def login_session_stamps(now: datetime) -> dict[str, str]:
+    """Return the lifecycle stamps a sign-in writes, keyed by session key.
+
+    The one statement of WHICH keys a new sign-in carries:
+    :func:`stamp_login_session` writes exactly these, and a script that
+    builds a signed-in session by hand (``tests/manual``) writes them too,
+    so ``load_user`` cannot tell the two apart and a key added here
+    reaches both.
+
+    Args:
+        now: Single timezone-aware UTC datetime for all three keys.
+
+    Returns:
+        ``{key: iso_timestamp}`` for ``_session_created_at``,
+        ``_session_last_activity_at`` and ``_fresh_login_at``.
+    """
+    iso = now.isoformat()
+    return {
+        SESSION_CREATED_AT_KEY: iso,
+        SESSION_LAST_ACTIVITY_KEY: iso,
+        FRESH_LOGIN_AT_KEY: iso,
+    }
+
+
 def stamp_login_session(now: datetime) -> None:
     """Stamp every lifecycle timestamp on a freshly authenticated session.
 
@@ -164,10 +204,7 @@ def stamp_login_session(now: datetime) -> None:
             were called from a CLI command or a background job by
             mistake.
     """
-    iso = now.isoformat()
-    flask_session[SESSION_CREATED_AT_KEY] = iso
-    flask_session[SESSION_LAST_ACTIVITY_KEY] = iso
-    flask_session[FRESH_LOGIN_AT_KEY] = iso
+    flask_session.update(login_session_stamps(now))
 
 
 def stamp_reauth_session(now: datetime) -> None:

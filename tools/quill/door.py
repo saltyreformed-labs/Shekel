@@ -57,10 +57,18 @@ Each name, and who reads it:
   it prepares as a change of its own moves, from a lock made with ``pyproject.toml`` edited,
   which ``lock_change`` refuses (ruling plan#2450), and for the package each requirement of
   ``pyproject.toml`` names, by PEP 503's one reading of a project's name.
+- ``unversioned_between``: ``tools/update.queue``, the daily update queue, which puts a bot's
+  pull request in the merge queue only when the landing check's own walk finds its trial
+  merge moves pinned versions alone, none across a major, over every file it changes
+  (``_versions``; ruling plan#2449).  ``GitHub``, ``paged`` and ``reading``: the queue
+  again, for its reads and writes of the repository's pull requests under the update App's
+  token, through quill's one HTTP path to GitHub, its one walk of a GraphQL connection and
+  its naming of the read a failure cut short.
 - ``GitHubError``, ``TrackerError`` and ``CredentialsError``: ``tools/release.release``,
   which reports a failed read of the tracker, or App credentials it cannot use, as a
   release judged on nothing; ``described``, by which it prints that failure, as every
-  printer of one does: one line, naming the read it cut short (plan#1809).
+  printer of one does: one line, naming the read it cut short (plan#1809).  ``GitHubError``
+  and ``described``: ``tools/update.queue`` too, for a read or a write GitHub refused.
 - ``FakeTracker`` and ``OutsideLink``: ``tools/release``'s tests, which drive the card
   reader against quill's own in-memory tracker, a card's link to an issue outside the
   tracker built as quill's read builds one.  The fake's cost, accepted so quill keeps ONE
@@ -81,7 +89,7 @@ from tools.quill._git import (
     markers_in,
     merged_tree,
 )
-from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._github import CredentialsError, GitHub, GitHubError, paged, reading
 from tools.quill._production import IgnoreFileError, changed
 from tools.quill._state import (
     OWNED,
@@ -106,6 +114,7 @@ from tools.quill._versions import (
     lock_unversioned,
     pinned,
     pins_versions,
+    unversioned_between,
 )
 
 __all__ = [
@@ -115,6 +124,7 @@ __all__ = [
     "Card",
     "CredentialsError",
     "FakeTracker",
+    "GitHub",
     "GitHubError",
     "IgnoreFileError",
     "LockChange",
@@ -143,7 +153,10 @@ __all__ = [
     "markers_in",
     "merged_tree",
     "owner",
+    "paged",
     "pinned",
     "pins_versions",
+    "reading",
+    "unversioned_between",
     "with_closure",
 ]

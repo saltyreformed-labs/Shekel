@@ -3,13 +3,16 @@ exit status, and ``census``'s listing.  The dev database listing is injected, so
 calls docker."""
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from tools.ci.scratch import run
-from tools.quill.door import FakeTracker
+from tools.quill.door import FakeTracker, GitHubError
 from tools.release import release
 from tools.release._census import COMPOSE, MANIFEST
-from tools.release.conftest import MONEY, lock, migration, pull_request, ship
+from tools.release._updates import WORKFLOW
+from tools.release.conftest import MONEY, Runs, daily, lock, migration, monday, pull_request, ship
 
 COMPOSED = ("services:\n  db:\n    container_name: dev-db\n    environment:\n"
             "      POSTGRES_USER: someone\n      POSTGRES_DB: budget\n")
@@ -89,6 +92,63 @@ def test_plan_exits_2_on_a_cut_git_does_not_have(repo, capsys):
     assert release.main(["plan", "--base", base, "--cut", "0" * 40], root=repo.root,
                         connect=lambda: tracker) == 2
     assert "nothing was judged" in capsys.readouterr().err
+
+
+def _one_mover_on_the_workflow(repo):
+    """A base whose tree holds the update workflow, a cut on it carrying #40 (moves money),
+    and the tracker holding it: a cut no rule of its own refuses."""
+    base = repo.commit("base", {WORKFLOW: "name: Updates\n"})
+    cut = pull_request(repo, base, ship(40))
+    tracker = FakeTracker()
+    tracker.add(40, labels=MONEY)
+    return base, cut, tracker
+
+
+def test_plan_refuses_a_release_whose_monday_update_stopped_and_offers_no_cut(repo, capsys):
+    """Main holds the workflow and no update published in the eight days: refused, and no
+    earlier cut is offered, as every one would be refused alike."""
+    base, cut, tracker = _one_mover_on_the_workflow(repo)
+    runs = Runs(daily(2, datetime.now(UTC) - timedelta(days=1)),
+                monday(1, datetime.now(UTC) - timedelta(days=9)))
+    assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
+                        connect=lambda: tracker, actions=runs.actions) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert out[-2].startswith("REFUSED -- no Monday update published from main in the 8 days")
+    assert out[-1] == "verdict: refused (exit 1)"
+    assert not [line for line in out if line.startswith(("newest earlier cut", "monday update"))]
+
+
+def test_plan_names_when_the_monday_update_last_published(repo, capsys):
+    """A Monday run's publish succeeded two days ago: its start and its page are printed, and
+    the release is clean."""
+    base, cut, tracker = _one_mover_on_the_workflow(repo)
+    started = (datetime.now(UTC) - timedelta(days=2)).replace(second=0, microsecond=0)
+    runs = Runs(daily(2, datetime.now(UTC) - timedelta(days=1)), monday(1, started))
+    assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
+                        connect=lambda: tracker, actions=runs.actions) == 0
+    assert capsys.readouterr().out.splitlines()[-2:] == [
+        f"monday update: last published by the run started {started:%Y-%m-%d %H:%M} UTC "
+        "(https://github.com/o/n/actions/runs/1)",
+        "verdict: clean (exit 0)"]
+
+
+def test_plan_exits_2_and_judges_nothing_when_the_runs_cannot_be_read(repo, capsys):
+    """GitHub refusing the read of the runs judges nothing, never a release read as fresh."""
+    base, cut, tracker = _one_mover_on_the_workflow(repo)
+
+    class Refusing(Runs):
+        """GitHub refusing every read."""
+
+        def rest(self, method, path):
+            """Refuse it, as a private repository answers an anonymous read."""
+            raise GitHubError(404, f"{method} {path} -> 404 Not Found")
+
+    assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
+                        connect=lambda: tracker, actions=Refusing().actions) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("release plan: nothing was judged: ")
+    assert "the update workflow's runs on main, page 1" in captured.err
 
 
 # -- production ------------------------------------------------------------------------------

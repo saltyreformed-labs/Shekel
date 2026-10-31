@@ -151,6 +151,12 @@ Then, line by line:
 - A refusal naming a card the tracker does not hold, a card that is no work, or an entry under
   `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no judgment for this run to make:
   STOP and report it to Josh.
+- Once production's tree holds the weekly update's workflow (`.github/workflows/updates.yml`),
+  `plan` reads its runs on GitHub, with no credential, and prints `monday update: last published
+  by the run started <date>`; a week with nothing to move still counts. None in the 8 days
+  before the run refuses the release whatever the cut (ruling plan#2351), so no earlier cut
+  answers it. Before `main` holds the workflow there is no such line and no such refusal: GitHub
+  runs it only from `main`.
 
 Re-run with every flag at once until nothing more changes; the last run is `plan.txt`.
 
@@ -158,6 +164,11 @@ Re-run with every flag at once until nothing more changes; the last run is `plan
 
 The answer moves the cut, so this comes before any rehearsal.
 
+- **The Monday update stopped** (`REFUSED -- no Monday update published ...`): STOP before
+  anything else, whatever else `plan` printed. Tell Josh in plain words that the weekly package
+  update has not finished a run in 8 days, with the page the line names. The release resumes at
+  step 2 once a run has published: fixing what stopped it is a card's work, and then
+  `gh workflow run updates.yml --ref main` starts a run.
 - **Refused (exit 1):** name the rule and the cards in plain words, then offer the line
   `newest earlier cut that passes`: "Release up to <its subject> (<its cards>); <the rest> goes in
   the next release", or "Stop". When that line says `none`, say no earlier cut passes and the one

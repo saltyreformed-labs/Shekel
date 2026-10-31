@@ -63,7 +63,9 @@ Each name, and who reads it:
   (``_versions``; ruling plan#2449).  ``GitHub``, ``paged`` and ``reading``: the queue
   again, for its reads and writes of the repository's pull requests under the update App's
   token, through quill's one HTTP path to GitHub, its one walk of a GraphQL connection and
-  its naming of the read a failure cut short.
+  its naming of the read a failure cut short.  ``GitHub`` and ``reading``:
+  ``tools/release._updates`` too, for its read of the update workflow's runs with no
+  credential (ruling plan#2351).
 - ``GitHubError``, ``TrackerError`` and ``CredentialsError``: ``tools/release.release``,
   which reports a failed read of the tracker, or App credentials it cannot use, as a
   release judged on nothing; ``described``, by which it prints that failure, as every

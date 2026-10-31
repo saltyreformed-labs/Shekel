@@ -4,13 +4,15 @@ Not ``quill release``, which deletes a card's claim: this is a release of code t
 production (card ``plan#9``).  Everything with a person or a judgment in it -- the
 developer's two questions, the CI reads, the rehearsal, the deploy and its checks -- is
 the skill's prose (``.claude/skills/release/SKILL.md``, X-cx's piece L9a-2); this
-command reads git, the tracker's cards through quill's App and the dev database
-server's listing, and writes nothing.
+command reads git, the tracker's cards through quill's App, the update workflow's runs
+with no credential and the dev database server's listing, and writes nothing.
 
 ``plan`` judges the release ``<base>..<cut>`` (:mod:`tools.release._plan`): the steps it
 carries, each step's money flag and deploy-together group, the migrations it adds, edits
-or deletes; what refuses it; what the developer's approval question must name; and, on a
-refusal or two added migrations, the newest earlier cut to offer him.  ``production``
+or deletes; when the Monday update last published, once production's tree holds its
+workflow (:mod:`tools.release._updates`); what refuses it, a stopped update included;
+what the developer's approval question must name; and, on a refusal of the cut or two
+added migrations, the newest earlier cut to offer him.  ``production``
 lists what the release ``<base>..<cut>`` changes of what production runs, by each pull
 request's own change and apart what none of them changed, and each version it moves in the
 files that pin versions (:mod:`tools.release._changes`), for the approval question to name
@@ -33,9 +35,10 @@ Each card's money flag is its label, and nothing is declared (R-BAL287).  ``--ki
 names a rehearsal kit's directory, which holds the kit's ``release-manifest.txt``: one
 line per thing the kit made, written before it made it.
 
-Exit status, ``plan``: 0 clean; 1 refused, each reason printed with the cut to offer;
-3 the approval question must name what is printed; 2 nothing was judged (the command
-line, git, the tracker, or an unrehearsed name that names nothing).  ``production``: 0
+Exit status, ``plan``: 0 clean; 1 refused, each reason printed, with the cut to offer when
+the cut is refused; 3 the approval question must name what is printed; 2 nothing was judged
+(the command line, git, the tracker, the update workflow's runs, or an unrehearsed name that
+names nothing).  ``production``: 0
 listed; 2 nothing was judged (the command line, git, an ignore file holding a pattern
 Docker refuses, or a file pinning versions this listing cannot read).  ``census``: 0
 listed, every kit's manifest accepted; 4 listed, but a kit was refused (each reason
@@ -49,6 +52,7 @@ import argparse
 import subprocess
 import sys
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import requests
@@ -77,6 +81,7 @@ from tools.release._census import (
 from tools.release._changes import Changes, changes
 from tools.release._model import ReleaseError
 from tools.release._plan import CLEAN, NEEDS_APPROVAL, REFUSED, Inputs, Plan, Verdict, plan
+from tools.release._updates import Actions, Update, anonymous
 
 CANNOT = 2
 
@@ -152,19 +157,30 @@ def _offer(label: str, offered: Verdict | None) -> list[str]:
             *(f"  its APPROVAL MUST NAME -- {named}" for named in offered.approvals)]
 
 
+def _update_lines(update: Update) -> list[str]:
+    """When the Monday update last published, once production's tree holds its workflow;
+    nothing while it does not, or when none published in the window, which refuses the
+    release and says so."""
+    if update.published is None:
+        return []
+    return [f"monday update: last published by the run started "
+            f"{update.published.started:%Y-%m-%d %H:%M} UTC ({update.published.run})"]
+
+
 def plan_lines(judged: Plan) -> list[str]:
     """``plan``'s report, ending with its verdict."""
     verdict = judged.verdict
-    lines = [f"release plan: base {judged.base}", *_verdict_lines(verdict)]
-    lines += [f"REFUSED -- {reason}" for reason in verdict.refusals]
+    lines = [f"release plan: base {judged.base}", *_verdict_lines(verdict),
+             *_update_lines(judged.update)]
+    lines += [f"REFUSED -- {reason}" for reason in judged.refusals]
     lines += [f"APPROVAL MUST NAME -- {named}" for named in verdict.approvals]
     if verdict.refusals:
         lines += _offer("newest earlier cut that passes", judged.passing)
     if len(verdict.added) > 1:
         lines += _offer("newest cut adding at most one migration", judged.one_migration)
     word = {CLEAN: "clean", REFUSED: "refused",
-            NEEDS_APPROVAL: "approval must name the above"}[verdict.status]
-    lines.append(f"verdict: {word} (exit {verdict.status})")
+            NEEDS_APPROVAL: "approval must name the above"}[judged.status]
+    lines.append(f"verdict: {word} (exit {judged.status})")
     return lines
 
 
@@ -225,19 +241,22 @@ def census_lines(found: Census) -> list[str]:
 
 def main(argv: list[str] | None = None, root: Path = REPO,
          listing: Callable[[list[str]], list[str]] = docker_listing,
-         connect: Callable[[], Tracker] | None = None) -> int:
+         connect: Callable[[], Tracker] | None = None,
+         actions: Callable[[], Actions] | None = None) -> int:
     """Run one command on the repository at ``root``, listing the dev databases with
-    ``listing`` and reaching the tracker with ``connect`` (none given: ``plan`` judges
-    nothing; only the command line, run as ``python -m``, gives quill's
-    :data:`~tools.quill.quill.CONNECT`, so no other caller, a test above all, reaches the
-    live tracker unless it says so); its exit status."""
+    ``listing``, reaching the tracker with ``connect`` and the update workflow's runs with
+    ``actions`` (none given: ``plan`` judges nothing, and nothing once production's tree
+    holds the workflow; only the command line, run as ``python -m``, gives quill's
+    :data:`~tools.quill.quill.CONNECT` and the anonymous read of the runs, so no other
+    caller, a test above all, reaches the live tracker or GitHub unless it says so); its
+    exit status."""
     args = parser().parse_args(argv)
     try:
         if args.command == "plan":
             judged = plan(root, args.base, args.cut,
-                          Inputs(args.unrehearsed, connect))
+                          Inputs(args.unrehearsed, connect, actions))
             print("\n".join(plan_lines(judged)))
-            return judged.verdict.status
+            return judged.status
         if args.command == "production":
             print("\n".join(production_lines(args.base, args.cut,
                                               changes(root, args.base, args.cut))))
@@ -254,4 +273,4 @@ def main(argv: list[str] | None = None, root: Path = REPO,
 
 
 if __name__ == "__main__":
-    sys.exit(main(connect=CONNECT))
+    sys.exit(main(connect=CONNECT, actions=partial(anonymous, REPO)))

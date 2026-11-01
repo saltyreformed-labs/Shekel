@@ -1,14 +1,19 @@
 """The daily update queue (:mod:`tools.update.queue`, ruling plan#2449): each bot's pull request
-put in the merge queue only when its trial merge moves pinned versions alone, at the head judged.
+put in the merge queue only when its trial merge moves pinned versions alone, at the head judged;
+and the developer mentioned once on each that cannot be (rulings plan#2450, plan#2467,
+plan#2468).
 
 GitHub's API is faked (:class:`_GitHub`) over recorded pull requests, answering as GitHub did
-when read on 2026-10-31 (#626, #628): a bot named by its slug, a trial merge ``UNKNOWN`` until
-made.  Git is real: each pull request's head and trial merge are made in a second clone and
-pushed to a bare ``origin`` as ``refs/pull/N/merge``, as GitHub serves them, so the queue
-fetches each by its sha into a checkout that held neither.
+when read on 2026-10-31 (#626, #628) and 2026-11-01: a bot named by its slug, a comment's
+author too (``shekel-quill``, on the tracker), a trial merge ``UNKNOWN`` until made, and the
+last of a pull request's queue removals, commits and force pushes as its timeline holds them
+(#589, #592, #628).  Git is real: each pull request's head and trial merge are made in a
+second clone and pushed to a bare ``origin`` as ``refs/pull/N/merge``, as GitHub serves them,
+so the queue fetches each by its sha into a checkout that held neither.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
@@ -64,11 +69,19 @@ class _Response:
         return self._body
 
 
-class _GitHub:
+class _GitHub:  # pylint: disable=too-many-instance-attributes
     """GitHub's API as the queue uses it, over recorded pull requests (each a node as
     GraphQL answers :data:`queue._FIELDS`): the open ones ``page`` at a time, each one read
-    again from ``rereads`` (by number, its later states in turn), and each write recorded,
-    an enqueue of a number in ``refuse`` refused as GitHub refuses one."""
+    again from ``rereads`` (by number, its later states in turn), each one's ``comments``
+    (by number, each a node as GraphQL answers :data:`queue._COMMENTS`; none until a test
+    gives some, a comment written here added as the App's) ``page`` at a time too, each
+    read of them recorded in ``reads``, and each write in ``writes``, an enqueue or a
+    comment on a number in ``refuse`` refused as GitHub refuses one.
+
+    Pylint: too-many-instance-attributes (8/7) -- **eight because the fake answers four
+    reads and two writes**, each held as GitHub would hold it, plus the page size and the
+    records of reads and writes.
+    """
 
     def __init__(self, pulls, *, page=100, rereads=None, refuse=(), listing=200):
         """Hold the pull requests, their later states, and what GitHub refuses."""
@@ -77,7 +90,29 @@ class _GitHub:
         self.rereads = {number: list(states) for number, states in (rereads or {}).items()}
         self.refuse = set(refuse)
         self.listing = listing
+        self.comments = {}
         self.writes = []
+        self.reads = []
+
+    def _comment(self, url, body):
+        """Write a comment as the App on the pull request ``url`` names, or refuse it."""
+        number = int(url.rsplit("/", 2)[1])
+        self.writes.append(("comment", number, body["body"]))
+        if number in self.refuse:
+            return _Response(403, {"message": "Resource not accessible by integration"})
+        self.comments.setdefault(number, []).append({"author": {"login": _APP},
+                                                     "body": body["body"]})
+        return _Response(201, {"id": len(self.writes)})
+
+    def _comments_page(self, variables):
+        """A page of one pull request's comments, as :data:`queue._COMMENTS` reads it."""
+        self.reads.append(("comments", variables["number"], variables["after"]))
+        nodes = self.comments.get(variables["number"], [])
+        start = int(variables["after"] or 0)
+        end = start + self.page
+        return _Response(200, {"data": {"repository": {"pullRequest": {"comments": {
+            "nodes": nodes[start:end],
+            "pageInfo": {"hasNextPage": end < len(nodes), "endCursor": str(end)}}}}}})
 
     def request(self, method, url, **kwargs):
         """Answer one request as GitHub would."""
@@ -85,8 +120,16 @@ class _GitHub:
         if method == "PATCH":
             self.writes.append(("PATCH", url, body))
             return _Response(200, {"number": int(url.rsplit("/", 1)[1])})
+        if url.endswith("/comments"):
+            assert method == "POST"
+            return self._comment(url, body)
         assert (method, url) == ("POST", _GRAPHQL)
-        query, variables = body["query"], body["variables"]
+        return self._graphql(body["query"], body["variables"])
+
+    def _graphql(self, query, variables):
+        """Answer one GraphQL ``query`` as GitHub would."""
+        if "comments(" in query:
+            return self._comments_page(variables)
         if "enqueuePullRequest" in query:
             fields = _input(query, variables)
             self.writes.append(("enqueue", fields["pullRequestId"], fields.get("expectedHeadOid")))
@@ -118,10 +161,17 @@ def _checks(state, at):
                                   "statusCheckRollup": {"state": state} if state else None}}]}
 
 
+def _latest(kind, reason=None):
+    """The last of a pull request's queue removals, commits and force pushes, as its timeline
+    holds it: of ``kind``, GitHub's name for it, a removal's ``reason`` with it."""
+    return {"nodes": [{"__typename": kind} | ({"reason": reason} if reason else {})]}
+
+
 def _node(number, head, merge, **fields):
     """A pull request as GraphQL answers :data:`queue._FIELDS`: Dependabot's into ``dev``, its
-    head ``head``, its trial merge ``merge`` (None while not made) and every check at its
-    head passed, but for each of ``fields``, by GraphQL's name."""
+    head ``head``, its trial merge ``merge`` (None while not made), every check at its head
+    passed and its last timeline item of those the queue reads its first commit, but for each
+    of ``fields``, by GraphQL's name."""
     return {
         "number": number, "id": f"PR_{number}", "headRefName": f"update/{number}",
         "isDraft": False, "isCrossRepository": False, "isInMergeQueue": False,
@@ -129,7 +179,20 @@ def _node(number, head, merge, **fields):
         "mergeable": "MERGEABLE" if merge else "UNKNOWN", "author": _by(DEPENDABOT),
         "potentialMergeCommit": {"oid": merge} if merge else None,
         "commits": _checks("SUCCESS", head),
+        "timelineItems": _latest("PullRequestCommit"),
     } | fields
+
+
+def _mentions(fake, number):
+    """The bodies of the comments written on pull request ``number``, in order."""
+    return [body for kind, at, body in fake.writes if (kind, at) == ("comment", number)]
+
+
+def _marked(told):
+    """The marker naming ``told`` in a comment of the App's, spelled here as well as in the
+    queue: a marker the App wrote stays on GitHub across releases, so a change to its form
+    must fail a test, never silently forget what each comment told."""
+    return f"<!-- update: mention {hashlib.sha256(told.encode()).hexdigest()} -->"
 
 
 @pytest.fixture(name="world")
@@ -191,23 +254,29 @@ def test_a_version_only_pull_request_whose_checks_passed_is_queued_at_the_head_j
 def test_a_change_that_does_more_than_move_versions_is_left_saying_why(world, capsys, files,
                                                                       why):
     """A trial merge the landing check's walk finds a reason in is never enqueued, green or
-    not, and its line names the walk's reason."""
+    not: the developer is mentioned that it waits for a card, and its line names the walk's
+    reason."""
     head, merge = world.pull(7, files)
     fake = _GitHub([_node(7, head, merge)])
     assert _run(world, fake) == (0, [])
-    assert not fake.writes
-    assert f"#7 (update/7): left: it does more than move pinned versions: {why}\n" in (
-        capsys.readouterr().out)
+    assert [kind for kind, *_ in fake.writes] == ["comment"]
+    assert _mentions(fake, 7)[0].startswith(
+        f"@SaltyReformed This pull request waits for a card: {why}. ")
+    assert (f"#7 (update/7): left: it does more than move pinned versions: {why}; the "
+            "developer mentioned\n") in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(("checks", "checked", "said"), [
-    ("PENDING", None, "PENDING"), ("FAILURE", None, "FAILURE"),
+    ("PENDING", None, "PENDING"), ("EXPECTED", None, "EXPECTED"),
     (None, None, "not reported"), ("SUCCESS", "a" * 40, "not reported"),
-], ids=["running", "failed", "none reported", "passed at another commit"])
+    ("FAILURE", "a" * 40, "not reported"),
+], ids=["running", "a required check not yet reported", "none reported",
+        "passed at another commit", "failed at another commit"])
 def test_a_version_only_change_whose_checks_have_not_all_passed_at_its_head_is_left(
         world, capsys, checks, checked, said):
-    """Version-only but not green at the head judged: left for the next day's run, its
-    checks' state said; a green read at any commit but its head is no green at it."""
+    """Version-only but not green at the head judged, and not red there either: left for the
+    next day's run, its checks' state said, no one mentioned; a read at any commit but its
+    head is no read at it."""
     head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
     fake = _GitHub([_node(7, head, merge, commits=_checks(checks, checked or head))])
     assert _run(world, fake) == (0, [])
@@ -282,13 +351,14 @@ def test_a_pull_request_the_queue_cannot_take_is_left_unjudged(world, capsys, no
 
 
 def test_a_trial_merge_that_is_not_of_the_head_github_named_is_left(world, capsys):
-    """GitHub names one head, its trial merge merges another: no merge of the head judged."""
-    _, merge = world.pull(7, {LOCK: _lock("12.4.1")})
+    """GitHub names one head, its trial merge merges another: no merge of the head judged,
+    so nothing is judged of it and no one is told it waits for a card."""
+    _, merge = world.pull(7, {LOCK: _lock("13.0.0")})
     fake = _GitHub([_node(7, "a" * 40, merge)])
     assert _run(world, fake) == (0, [])
     assert not fake.writes
-    assert (f"left: it does more than move pinned versions: its trial merge {merge[:12]} is not "
-            f"a merge of its head aaaaaaaaaaaa") in capsys.readouterr().out
+    assert (f"#7 (update/7): left: its trial merge {merge[:12]} is not a merge of its head "
+            "aaaaaaaaaaaa\n") in capsys.readouterr().out
 
 
 def test_a_refused_write_fails_the_run_once_every_other_pull_request_is_tried(world, capsys):
@@ -321,3 +391,130 @@ def test_the_queue_starts_only_with_each_of_its_variables(monkeypatch, capsys, w
     assert queue.main([], root=world.work) == 1
     assert capsys.readouterr().err == (
         "update queue: UPDATE_APP_SLUG, GITHUB_REPOSITORY unset, so nothing was read\n")
+
+
+# -- what reaches the developer (rulings plan#2450, plan#2467, plan#2468) ------------------
+
+@pytest.mark.parametrize("checks", ["FAILURE", "ERROR"])
+def test_a_red_version_only_change_is_left_and_mentioned_once_for_its_head(world, capsys,
+                                                                           checks):
+    """Version-only, a check failed or errored at its head: left, the developer mentioned in
+    a comment marked for that head; the next day's run at that head mentions no one again,
+    and a new head, red too, is mentioned afresh."""
+    head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
+    fake = _GitHub([_node(7, head, merge, commits=_checks(checks, head))])
+    assert _run(world, fake) == (0, [])
+    (body,) = _mentions(fake, 7)
+    assert body == (
+        f"@SaltyReformed This pull request moves pinned versions alone, but its checks at "
+        f"{head[:12]} are {checks}. The daily update queue puts it in the merge queue once "
+        f"every check at that commit passes, and judges it afresh at a new one (ruling "
+        f"plan#2351).\n\n{_marked(f'red {head}')}\n")
+    assert _run(world, fake) == (0, [])
+    assert len(_mentions(fake, 7)) == 1
+    later, later_merge = world.pull(17, {LOCK: _lock("12.4.2")})
+    fake.pulls = [_node(7, later, later_merge, commits=_checks(checks, later))]
+    assert _run(world, fake) == (0, [])
+    assert [kind for kind, *_ in fake.writes] == ["comment", "comment"]
+    out = capsys.readouterr().out
+    left = f"left: it moves pinned versions alone, but its checks at {{}} are {checks}; "
+    assert out.count(left.format(head[:12]) + "the developer mentioned\n") == 1
+    assert out.count(left.format(head[:12]) + "the developer was mentioned already\n") == 1
+    assert out.count(left.format(later[:12]) + "the developer mentioned\n") == 1
+
+
+def test_a_red_change_that_turns_green_at_its_head_is_queued_with_no_more_mention(world):
+    """A re-run passes at the head mentioned: the next day's run queues it there, and reads
+    no comment, as nothing is to be told."""
+    head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
+    fake = _GitHub([_node(7, head, merge, commits=_checks("FAILURE", head))])
+    _run(world, fake)
+    fake.pulls, fake.reads = [_node(7, head, merge)], []
+    assert _run(world, fake) == (0, [])
+    assert [kind for kind, *_ in fake.writes] == ["comment", "enqueue"]
+    assert not fake.reads
+
+
+def test_a_pull_request_removed_from_the_merge_queue_at_its_head_waits_for_a_new_one(
+        world, capsys):
+    """GitHub removed it from the queue and no commit reached it since: left with no trial
+    merge read (each names a commit no repository holds) though its own checks passed, and
+    mentioned once for that head, GitHub's reason said; the next day's run writes nothing."""
+    fake = _GitHub([_node(7, _NOWHERE, _NOWHERE,
+                          timelineItems=_latest("RemovedFromMergeQueueEvent", "failed_checks"))])
+    assert _run(world, fake) == (0, [])
+    assert _run(world, fake) == (0, [])
+    (body,) = _mentions(fake, 7)
+    assert body == (
+        "@SaltyReformed GitHub removed this pull request from the merge queue at ffffffffffff "
+        "(failed_checks). The daily update queue leaves it until its commit changes (a "
+        "Dependabot rebase, or the next Monday's update); `gh pr merge 7 --merge` puts it back "
+        f"by hand (ruling plan#2468).\n\n{_marked(f'removed {_NOWHERE}')}\n")
+    assert [kind for kind, *_ in fake.writes] == ["comment"]
+    left = ("#7 (update/7): left: GitHub removed it from the merge queue at ffffffffffff "
+            "(failed_checks), so it waits for a new commit; the developer ")
+    assert capsys.readouterr().out.count(left) == 2
+
+
+@pytest.mark.parametrize("since", ["PullRequestCommit", "HeadRefForcePushedEvent"])
+def test_a_pull_request_reached_by_a_commit_since_its_removal_is_judged_again(world, since):
+    """A commit or a force push after the removal is a new head: judged, and queued when it
+    moves pinned versions alone and its checks passed, no one mentioned."""
+    head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
+    fake = _GitHub([_node(7, head, merge, timelineItems=_latest(since))])
+    assert _run(world, fake) == (0, [])
+    assert fake.writes == [("enqueue", "PR_7", head)]
+
+
+def test_a_change_waiting_for_a_card_is_mentioned_once_for_each_major_it_enters(world,
+                                                                                capsys):
+    """A new major is told once: not again when the branch is made again at a new head moving
+    the same major further, and afresh when a later major arrives on the same pull request,
+    each comment naming every reason, marked for each thing it waits on."""
+    fake = _GitHub([])
+    for number, version in ((7, "13.0.0"), (17, "13.1.0"), (27, "14.0.0")):
+        head, merge = world.pull(number, {LOCK: _lock(version)})
+        fake.pulls = [_node(7, head, merge)]
+        assert _run(world, fake) == (0, [])
+    first, later = _mentions(fake, 7)
+    assert first.endswith(f"\n\n{_marked('card pillow 13')}\n")
+    assert later == (
+        "@SaltyReformed This pull request waits for a card: uv.lock moves pillow from 12.3.0 "
+        "to 14.0.0, a new major version. A session reads the changelog, claims a card and "
+        "takes its change; until then the daily update queue leaves it (rulings plan#2351, "
+        f"plan#2450).\n\n{_marked('card pillow 14')}\n")
+    assert ("pillow from 12.3.0 to 13.1.0, a new major version; the developer was mentioned "
+            "already\n") in capsys.readouterr().out
+
+
+def test_only_the_app_s_own_comments_record_a_mention(world):
+    """The marker for the head, in a comment by a person and by Dependabot, counts for
+    nothing: the App mentions the developer; its own comment, on the second page of the
+    comments, is found."""
+    head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
+    marked = _marked(f"red {head}")
+    fake = _GitHub([_node(7, head, merge, commits=_checks("FAILURE", head))], page=2)
+    fake.comments[7] = [{"author": {"login": "SaltyReformed"}, "body": marked},
+                        {"author": None, "body": marked},
+                        {"author": {"login": DEPENDABOT}, "body": marked}]
+    assert _run(world, fake) == (0, [])
+    assert len(_mentions(fake, 7)) == 1
+    assert _run(world, fake) == (0, [])
+    assert len(_mentions(fake, 7)) == 1
+    assert [read for read in fake.reads if read[0] == "comments"][-2:] == [
+        ("comments", 7, None), ("comments", 7, "2")]
+
+
+def test_a_refused_mention_fails_the_run_once_every_other_pull_request_is_tried(world,
+                                                                                capsys):
+    """GitHub refuses #7's comment: its line says so, #8 is still queued, and the run fails,
+    which the workflow's alert reports."""
+    first, first_merge = world.pull(7, {LOCK: _lock("13.0.0")})
+    second, second_merge = world.pull(8, {LOCK: _lock("12.3.1")})
+    fake = _GitHub([_node(7, first, first_merge), _node(8, second, second_merge)], refuse={7})
+    assert _run(world, fake) == (1, [])
+    assert [kind for kind, *_ in fake.writes] == ["comment", "enqueue"]
+    out, err = capsys.readouterr()
+    assert "#7 (update/7): failed: " in err
+    assert "Resource not accessible by integration" in err
+    assert f"#8 (update/8): queued at {second[:12]}" in out

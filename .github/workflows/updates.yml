@@ -25,6 +25,11 @@
 #            Dependabot or the App is judged on its trial merge by the landing
 #            check's own walk, and put in dev's merge queue at the head it
 #            judged when it moves pinned versions alone and its checks passed.
+#            The developer is mentioned in a comment of the App's, once for
+#            what it tells, on each that waits for a card (once for each major
+#            it enters), that is red at its head, or that GitHub removed from
+#            the merge queue at its head, which waits for a new head (rulings
+#            plan#2450, plan#2467, plan#2468).
 #   alert    when the refresh, the publish or the queue failed: opens an issue in
 #            this repository mentioning the developer, linking the run and naming
 #            each job's result (tools/update/alert.py; ruling plan#2466).  It

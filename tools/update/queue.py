@@ -1,6 +1,7 @@
 """The daily update queue (ruling plan#2449): each open pull request of Dependabot or the update
 App put in ``dev``'s merge queue when it moves pinned versions alone, none across a major, at the
-head it was judged at.
+head it was judged at; and the developer mentioned once on each that cannot be (rulings
+plan#2450, plan#2467, plan#2468).
 
 **It runs main's own code** (``.github/workflows/updates.yml``'s ``queue`` job), holding the
 update App's token (ruling plan#2448) and only the ``landing`` group's packages, so the key is
@@ -23,6 +24,30 @@ Dependabot or by the App, as GraphQL names a bot: by its slug, ``dependabot``, w
   A draft, one already queued, one whose trial merge conflicts or is not yet made, and one
   whose checks have not all passed are left, each said with its reason, and read again on the
   next day's run.
+
+**What reaches the developer** is a comment from the App on the pull request, mentioning him,
+since only a mention reaches him (measured 2026-10-27, on the tracker, whose App's mentions
+did), written once for each thing it tells (:func:`_told`):
+
+- **removed from the merge queue at its head**: GitHub took it out of the queue (a check
+  failed on top of ``dev``, say) and no commit has reached it since, which its timeline says,
+  as GitHub's removal names no commit (measured 2026-10-31).  It is left until its head
+  changes, a Dependabot rebase or the next Monday's publish (ruling plan#2468), never put
+  back daily, and told once for that head.
+- **waiting for a card**: the walk gives a reason, so a session must take it onto a card.
+  It is told once for each thing it waits on (:class:`~tools.quill.door.Reason`), so a new
+  major is told once however often its branch is made again on a later ``dev``, and again
+  when a later major arrives on the same pull request (ruling plan#2450).  Such a pull
+  request's own checks fail by design (the landing check refuses it with no card), so they
+  tell nothing more.
+- **red**: it moves pinned versions alone, but a check at its head failed or errored.  It
+  is told once for that head and put in the queue on a later run once every check there
+  passes (a re-run), or judged afresh at its next head.
+
+Each comment holds a marker for each thing it tells, a digest of it, so nothing a pull
+request carries is spelled inside an HTML comment.  The App's own comments are the one record
+of what was told, read only when there is something to tell (:func:`_markers`); a marker in
+anyone else's comment counts for nothing.
 
 **Why the queue and not auto-merge** (measured 2026-10-31): GitHub's ``AutoMergeRequest`` holds
 no head commit, and its documentation turns auto-merge off on a push only when the pusher has
@@ -47,7 +72,9 @@ is unset, saying which.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
+import re
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -62,12 +89,13 @@ from tools.ci.gitcmd import MAIN, GitError, git
 from tools.quill.door import (
     GitHub,
     GitHubError,
+    Reason,
     described,
     paged,
     reading,
     unversioned_between,
 )
-from tools.update.app import INTO, REPOSITORY_VARIABLE, TOKEN_VARIABLE, unset
+from tools.update.app import DEVELOPER, INTO, REPOSITORY_VARIABLE, TOKEN_VARIABLE, unset
 
 #: The variable holding the App's slug, as GraphQL names the bot it acts as.
 APP_VARIABLE = "UPDATE_APP_SLUG"
@@ -82,13 +110,26 @@ REREAD_SECONDS = 10
 #: GitHub's ``mergeable`` for a trial merge it has made, for one it is still making, and for
 #: a head that conflicts with its base.
 _MADE, _MAKING, _CONFLICTS = "MERGEABLE", "UNKNOWN", "CONFLICTING"
-#: GitHub's ``statusCheckRollup`` state when every check at a commit passed.
+#: GitHub's ``statusCheckRollup`` state when every check at a commit passed, and the states
+#: when one failed or errored.
 _PASSED = "SUCCESS"
+_FAILED = frozenset({"FAILURE", "ERROR"})
+#: GitHub's name for a removal from the merge queue: the last of a pull request's timeline
+#: items that remove it from the queue or move its head (a commit, a force push; :data:`_FIELDS`)
+#: is one when no commit has reached it since.
+_REMOVED = "RemovedFromMergeQueueEvent"
+#: A marker in a comment of the App's, naming by its digest one thing it told the developer,
+#: and the expression finding each in a comment's text, made from it.
+_MARKER = "<!-- update: mention {} -->"
+_MARKED = re.compile(re.escape(_MARKER).replace(r"\{\}", "([0-9a-f]{64})"))
 
 #: What the run reads of each pull request.
 _FIELDS = """number id headRefName isDraft isCrossRepository isInMergeQueue baseRefName
 headRefOid mergeable author { __typename login } potentialMergeCommit { oid }
-commits(last: 1) { nodes { commit { oid statusCheckRollup { state } } } }"""
+commits(last: 1) { nodes { commit { oid statusCheckRollup { state } } } }
+timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT, PULL_REQUEST_COMMIT,
+HEAD_REF_FORCE_PUSHED_EVENT]) { nodes { __typename ... on RemovedFromMergeQueueEvent {
+reason } } }"""
 #: A page of the repository's open pull requests.
 _OPEN = """query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
@@ -102,6 +143,17 @@ _OPEN = """query($owner: String!, $name: String!, $after: String) {
 _ONE = """query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) { pullRequest(number: $number) { %s } }
 }""" % _FIELDS
+#: A page of one pull request's comments, each with its author.
+_COMMENTS = """query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      comments(first: 100, after: $after) {
+        nodes { author { login } body }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}"""
 #: A pull request put in its base branch's merge queue only at the head named.
 _ENQUEUE = """mutation($id: ID!, $head: GitObjectID!) {
   enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) {
@@ -115,10 +167,12 @@ class Pull:  # pylint: disable=too-many-instance-attributes
     """An open pull request as the run reads it: its ``number`` and GraphQL ``node`` id; its
     head ``branch``; ``bot``, the slug of the bot that opened it, None when no bot did;
     whether it is from a ``fork``, a ``draft``, or ``queued`` already; its ``base`` branch and
-    ``head`` commit; GitHub's ``mergeable`` and its trial ``merge`` (None until made); and
-    ``checks``, the state of every check at ``head``, None where none is reported there.
+    ``head`` commit; GitHub's ``mergeable`` and its trial ``merge`` (None until made);
+    ``checks``, the state of every check at ``head``, None where none is reported there; and
+    ``removed``, why GitHub removed it from the merge queue as GitHub says it, where it did
+    so at ``head`` (:data:`_REMOVED`), None where it did not.
 
-    Pylint: too-many-instance-attributes (12/7) -- **twelve because the run reads twelve
+    Pylint: too-many-instance-attributes (13/7) -- **thirteen because the run reads thirteen
     fields of GitHub's pull request**, one each, all read together and re-read together.
     """
 
@@ -134,6 +188,7 @@ class Pull:  # pylint: disable=too-many-instance-attributes
     mergeable: str
     merge: str | None
     checks: str | None
+    removed: str | None
 
 
 def _pull(node: dict) -> Pull:
@@ -142,6 +197,7 @@ def _pull(node: dict) -> Pull:
     last = node["commits"]["nodes"]
     rollup = (last[0]["commit"]["statusCheckRollup"]
               if last and last[0]["commit"]["oid"] == node["headRefOid"] else None)
+    latest = node["timelineItems"]["nodes"]
     return Pull(
         number=node["number"], node=node["id"], branch=node["headRefName"],
         bot=author["login"] if author and author["__typename"] == "Bot" else None,
@@ -149,6 +205,7 @@ def _pull(node: dict) -> Pull:
         base=node["baseRefName"], head=node["headRefOid"], mergeable=node["mergeable"],
         merge=(node["potentialMergeCommit"] or {}).get("oid"),
         checks=rollup["state"] if rollup else None,
+        removed=latest[0]["reason"] if latest and latest[0]["__typename"] == _REMOVED else None,
     )
 
 
@@ -169,33 +226,107 @@ def _read(github: GitHub, repository: str, number: int) -> Pull:
     return _pull(answer["repository"]["pullRequest"])
 
 
-def _made(github: GitHub, repository: str, pull: Pull,
-          sleep: Callable[[float], None]) -> Pull:
+@dataclass(frozen=True)
+class Queue:
+    """One run of the queue: ``github``, under the App's token; the ``repository`` it reads;
+    ``app``, the App's slug, as GraphQL names the bot that opens its pull requests and writes
+    its mentions; ``root``, the checkout it judges each trial merge in; and ``sleep``, its wait
+    between reads of a trial merge GitHub has not made."""
+
+    github: GitHub
+    repository: str
+    app: str
+    root: Path
+    sleep: Callable[[float], None]
+
+
+def _made(queue: Queue, pull: Pull) -> Pull:
     """``pull`` once GitHub has made its trial merge: read again up to :data:`REREADS` times,
     :data:`REREAD_SECONDS` apart, while it reads :data:`_MAKING`; as last read."""
     for _ in range(REREADS):
         if pull.mergeable != _MAKING:
             break
-        sleep(REREAD_SECONDS)
-        pull = _read(github, repository, pull.number)
+        queue.sleep(REREAD_SECONDS)
+        pull = _read(queue.github, queue.repository, pull.number)
     return pull
 
 
-def _judged(root: Path, pull: Pull) -> tuple[str, ...]:
-    """Why ``pull``'s trial merge, fetched into the repository at ``root`` by its sha, is no
-    change that moves pinned versions alone, none across a major, over every file it changes;
-    none when it is one.  A trial merge whose second parent is not ``pull``'s head is no
-    merge of the head judged, and says so.
+def _onto(root: Path, pull: Pull) -> str | None:
+    """The commit ``pull``'s trial merge, fetched into the repository at ``root`` by its sha,
+    merges its head onto: its first parent; None when it is no merge of the head judged (its
+    second parent not ``pull``'s head).
 
     Raises:
         tools.ci.gitcmd.GitError: when git cannot fetch or read it.
     """
     git(root, "fetch", "--quiet", "--no-tags", "--depth=2", "origin", pull.merge)
     parents = git(root, "rev-parse", f"{pull.merge}^@").split()
-    if len(parents) != 2 or parents[1] != pull.head:
-        return (f"its trial merge {pull.merge[:12]} is not a merge of its head "
-                f"{pull.head[:12]}",)
-    return unversioned_between(root, parents[0], pull.merge)
+    return parents[0] if len(parents) == 2 and parents[1] == pull.head else None
+
+
+def _marker(told: str) -> str:
+    """The marker naming ``told``, one thing the App tells the developer, by its digest."""
+    return _MARKER.format(hashlib.sha256(told.encode()).hexdigest())
+
+
+def _markers(queue: Queue, pull: Pull) -> frozenset[str]:
+    """Each marker (:func:`_marker`) in a comment the App wrote on ``pull``, read page by
+    page."""
+    owner, name = queue.repository.split("/", 1)
+    nodes, _ = paged(partial(queue.github.graphql, _COMMENTS, owner=owner, name=name,
+                             number=pull.number),
+                     lambda answer: answer["repository"]["pullRequest"]["comments"],
+                     f"the comments of pull request #{pull.number} of {queue.repository}")
+    return frozenset(_MARKER.format(digest) for node in nodes
+                     if (node["author"] or {}).get("login") == queue.app
+                     for digest in _MARKED.findall(node["body"]))
+
+
+def _told(queue: Queue, pull: Pull, told: Sequence[str], text: str) -> str:
+    """Mention the developer on ``pull`` in a comment saying ``text``, marked with each of
+    ``told`` (:func:`_marker`), unless the App's comments hold every one of those marks
+    already: what was done, for the pull request's line."""
+    marks = [_marker(thing) for thing in told]
+    if set(marks) <= _markers(queue, pull):
+        return "the developer was mentioned already"
+    queue.github.rest("POST", f"/repos/{queue.repository}/issues/{pull.number}/comments",
+                      {"body": "\n".join([f"@{DEVELOPER} {text}", "", *marks]) + "\n"})
+    return "the developer mentioned"
+
+
+def _removed(queue: Queue, pull: Pull) -> str:
+    """Tell the developer once for its head that GitHub removed ``pull`` from the merge queue
+    there, where it waits for a new head (ruling plan#2468): its line's text."""
+    said = _told(queue, pull, [f"removed {pull.head}"],
+                 f"GitHub removed this pull request from the merge queue at "
+                 f"{pull.head[:12]} ({pull.removed}). The daily update queue leaves it until "
+                 f"its commit changes (a Dependabot rebase, or the next Monday's update); "
+                 f"`gh pr merge {pull.number} --merge` puts it back by hand (ruling plan#2468).")
+    return (f"left: GitHub removed it from the merge queue at {pull.head[:12]} "
+            f"({pull.removed}), so it waits for a new commit; {said}")
+
+
+def _waiting(queue: Queue, pull: Pull, reasons: Sequence[Reason]) -> str:
+    """Tell the developer once for each thing it waits on that ``pull`` waits for a card for
+    ``reasons`` (ruling plan#2450): its line's text."""
+    clauses = "; ".join(reason.clause for reason in reasons)
+    said = _told(queue, pull, sorted({f"card {reason.waits_on}" for reason in reasons}),
+                 f"This pull request waits for a card: {clauses}. A session reads the "
+                 f"changelog, claims a card and takes its change; until then the daily update "
+                 f"queue leaves it (rulings plan#2351, plan#2450).")
+    return f"left: it does more than move pinned versions: {clauses}; {said}"
+
+
+def _red(queue: Queue, pull: Pull) -> str:
+    """Tell the developer once for its head that ``pull`` moves pinned versions alone but a
+    check failed there: its line's text."""
+    said = _told(queue, pull, [f"red {pull.head}"],
+                 f"This pull request moves pinned versions alone, but its checks at "
+                 f"{pull.head[:12]} are {pull.checks}. The daily update queue puts it in the "
+                 f"merge queue once every check at that commit passes, and judges it afresh at "
+                 f"a new one (ruling plan#2351).")
+    return (f"left: it moves pinned versions alone, but its checks at {pull.head[:12]} are "
+            f"{pull.checks}; {said}")
 
 
 def _retarget(github: GitHub, repository: str, pull: Pull) -> None:
@@ -231,39 +362,56 @@ def _unmade(pull: Pull) -> str | None:
     return None
 
 
-def queued(github: GitHub, repository: str, root: Path, pull: Pull,
-           sleep: Callable[[float], None] = time.sleep) -> str:
-    """What the run does with ``pull``, a bot's pull request of ``repository``, judged in the
-    checkout at ``root``: its line's text.
+def _checked(queue: Queue, pull: Pull) -> str:
+    """What the run does with ``pull``, whose trial merge moves pinned versions alone, by its
+    checks at its head: its line's text."""
+    if pull.checks in _FAILED:
+        return _red(queue, pull)
+    if pull.checks != _PASSED:
+        return (f"left: it moves pinned versions alone, but its checks at {pull.head[:12]} "
+                f"are {pull.checks or 'not reported'}")
+    _enqueue(queue.github, pull)
+    return f"queued at {pull.head[:12]}"
+
+
+def _judged(queue: Queue, pull: Pull) -> str:
+    """What the run does with ``pull``, read again while GitHub made its trial merge
+    (:func:`_made`), by that trial merge: its line's text."""
+    if why := _unmade(pull):
+        return f"left: {why}"
+    if (onto := _onto(queue.root, pull)) is None:
+        return (f"left: its trial merge {pull.merge[:12]} is not a merge of its head "
+                f"{pull.head[:12]}")
+    if reasons := unversioned_between(queue.root, onto, pull.merge):
+        return _waiting(queue, pull, reasons)
+    return _checked(queue, pull)
+
+
+def queued(queue: Queue, pull: Pull) -> str:
+    """What ``queue`` does with ``pull``, a bot's pull request of its repository: its line's
+    text.
 
     Raises:
         GitHubError, requests.RequestException: when GitHub refuses a read or a write, or
             cannot be reached.
-        tools.ci.gitcmd.GitError: as :func:`_judged` raises it.
+        tools.ci.gitcmd.GitError: as :func:`_onto` and the walk raise it.
     """
     if pull.base == OFF:
-        _retarget(github, repository, pull)
+        _retarget(queue.github, queue.repository, pull)
         return (f"retargeted from {OFF} to {INTO}, and judged on a later run, once GitHub has "
                 f"made its trial merge there")
     if why := _unready(pull):
         return f"left: {why}"
-    pull = _made(github, repository, pull, sleep)
-    if why := _unmade(pull):
-        return f"left: {why}"
-    if reasons := _judged(root, pull):
-        return f"left: it does more than move pinned versions: {'; '.join(reasons)}"
-    if pull.checks != _PASSED:
-        return (f"left: it moves pinned versions alone, but its checks at {pull.head[:12]} "
-                f"are {pull.checks or 'not reported'}")
-    _enqueue(github, pull)
-    return f"queued at {pull.head[:12]}"
+    if pull.removed is not None:
+        return _removed(queue, pull)
+    return _judged(queue, _made(queue, pull))
 
 
 def run(github: GitHub, repository: str, app: str, root: Path,
         sleep: Callable[[float], None] = time.sleep) -> int:
     """Put each pull request of ``repository`` by Dependabot or the App ``app`` that moves
-    pinned versions alone in the merge queue (:func:`queued`), printing a line for each;
-    exit as the module says."""
+    pinned versions alone in the merge queue, or mention the developer on it (:func:`queued`),
+    judged in the checkout at ``root``, printing a line for each; exit as the module says."""
     try:
         pulls = _open(github, repository)
     except (GitHubError, requests.RequestException) as error:
@@ -271,10 +419,11 @@ def run(github: GitHub, repository: str, app: str, root: Path,
         return 1
     bots = {DEPENDABOT, app}
     ours = [pull for pull in pulls if pull.bot in bots and not pull.fork]
+    queue = Queue(github, repository, app, root, sleep)
     failed = 0
     for pull in ours:
         try:
-            line = queued(github, repository, root, pull, sleep)
+            line = queued(queue, pull)
         except (GitHubError, requests.RequestException, GitError) as error:
             print(f"#{pull.number} ({pull.branch}): failed: {described(error)}",
                   file=sys.stderr)

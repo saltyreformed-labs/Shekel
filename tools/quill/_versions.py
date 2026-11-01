@@ -2,9 +2,11 @@
 ``balance:R-BAL362``): a change that moves nothing but pinned versions lands with no card, as
 CI's write rule reads it (``tools/quill/landing.py``, rule 9), and anything else, a major
 version included, still needs one.  Two readers judge by the one walk here
-(:func:`unversioned`): the landing check, over each file of production a change moves, and
-the daily update queue, over every file a pull request moves, which it puts in the merge
-queue only when the walk finds no reason (ruling plan#2449).
+(:func:`_reasons`): the landing check, over each file of production a change moves
+(:func:`unversioned`), and the daily update queue, over every file a pull request moves
+(:func:`unversioned_between`), which it puts in the merge queue only when the walk finds no
+reason (ruling plan#2449), and which mentions the developer once for each thing a pull
+request waits for a card on (:class:`Reason`; rulings plan#2450, plan#2467).
 
 **A version-only change moves only version data in each file it changes** (:func:`moves`),
 and only in the files that pin versions (:func:`pins_versions`):
@@ -127,6 +129,18 @@ class Move:
 
 
 @dataclass(frozen=True)
+class Reason:
+    """One reason the walk (:func:`_reasons`) gives that a change is no change that moves
+    pinned versions alone, none across a major: ``clause``, saying so and naming its file;
+    and ``waits_on``, what the change waits for a card on: for a move across a major, what
+    moves and the major it moves into (``pillow 13``, ``zeta 0.7``), the same however far
+    within that major and in whichever file it moves, and for a refusal its clause."""
+
+    clause: str
+    waits_on: str
+
+
+@dataclass(frozen=True)
 class Pin:
     """One version a file production runs pins (:func:`pinned`): ``what`` (a package, an
     image, an action) at ``version``, a package's as the lock holds it, an image's as its
@@ -199,7 +213,14 @@ def ceiling(version: str) -> str | None:
         return None
     epoch, *release = major
     release[-1] += 1
-    text = ".".join(map(str, release))
+    return _spelled((epoch, *release))
+
+
+def _spelled(major: tuple[int, ...]) -> str:
+    """``major``, a major as :func:`_major` gives it (its epoch, then its release), spelled
+    as a release is: ``14``, ``0.7``, ``1!3``, and a release of zeros alone ``0``."""
+    epoch, *release = major
+    text = ".".join(map(str, release)) or "0"
     return f"{epoch}!{text}" if epoch else text
 
 
@@ -562,12 +583,12 @@ def moves(root: Path, path: str, was: str | None, now: str | None,
     return _lines(root, path, rule, old, new)
 
 
-def unversioned(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
-                where: str = "production") -> tuple[str, ...]:
+def _reasons(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
+             where: str) -> tuple[Reason, ...]:
     """Why a change is no change that moves pinned versions alone, none across a major, each
-    as a clause naming its file; none when it is one.  ``changed`` holds each path where
-    ``where`` differs (:func:`moves`), with its mode and object before and after.  The one
-    walk the landing check (rule 9) and the daily update queue both judge by.
+    a :class:`Reason` whose clause names its file; none when it is one.  ``changed`` holds
+    each path where ``where`` differs (:func:`moves`), with its mode and object before and
+    after.  The one walk the landing check (rule 9) and the daily update queue both judge by.
 
     Raises:
         tools.ci.gitcmd.GitError: when git cannot read a file it changes.
@@ -576,38 +597,54 @@ def unversioned(root: Path, changed: Mapping[str, tuple[str | None, str | None]]
                  for reason in _why(path, partial(moves, root, path, was, now, where)))
 
 
+def unversioned(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
+                where: str = "production") -> tuple[str, ...]:
+    """The clause of each reason the walk (:func:`_reasons`) gives over ``changed``, where
+    ``where`` differs: the landing check's reading.
+
+    Raises:
+        tools.ci.gitcmd.GitError: when git cannot read a file it changes.
+    """
+    return tuple(reason.clause for reason in _reasons(root, changed, where))
+
+
 def lock_unversioned(old: str, new: str) -> tuple[str, ...]:
     """Why the change from the lock text ``old`` to ``new`` is no change that moves pinned
     versions alone, none across a major, each as a clause; none when it is one: the walk of
-    :func:`unversioned` over the lock alone, which the Monday refresh judges its lock by
-    before any pull request carries it."""
-    return _why(LOCK, partial(_lock, old, new))
+    :func:`_reasons` over the lock alone, which the Monday refresh judges its lock by before
+    any pull request carries it."""
+    return tuple(reason.clause for reason in _why(LOCK, partial(_lock, old, new)))
 
 
-def _why(path: str, moved: Callable[[], tuple[Move, ...]]) -> tuple[str, ...]:
+def _why(path: str, moved: Callable[[], tuple[Move, ...]]) -> tuple[Reason, ...]:
     """Why the change ``moved`` reads in ``path`` is no change that moves pinned versions
-    alone, none across a major: each move across a major, or the reason ``moved`` refuses
-    it (:class:`NotVersions`), as a clause; none when it is one.
+    alone, none across a major: each move across a major, waiting on the major it moves into
+    (every :class:`Move`'s versions are ones :func:`_major` reads, as both its builders
+    refuse any other), or the reason ``moved`` refuses it (:class:`NotVersions`), waiting on
+    that; none when it is one.
 
     Raises:
         tools.ci.gitcmd.GitError: when ``moved`` cannot read a file.
     """
     try:
-        return tuple(f"{path} moves {move.what} from {move.old} to {move.new}, a new major "
-                     "version" for move in moved() if move.major)
+        return tuple(Reason(f"{path} moves {move.what} from {move.old} to {move.new}, a new "
+                            "major version", f"{move.what} {_spelled(_major(move.new))}")
+                     for move in moved() if move.major)
     except NotVersions as error:
-        return (str(error),)
+        return (Reason(str(error), str(error)),)
 
 
-def unversioned_between(root: Path, old: str, new: str) -> tuple[str, ...]:
+def unversioned_between(root: Path, old: str, new: str) -> tuple[Reason, ...]:
     """Why the change from commit ``old`` to commit ``new`` is no change that moves pinned
-    versions alone, none across a major, over every file of the tree it changes
-    (:func:`unversioned`); none when it is one.
+    versions alone, none across a major, over every file of the tree it changes, each a
+    :class:`Reason` (:func:`_reasons`); none when it is one: the daily update queue's
+    reading, which leaves a pull request with a reason and mentions the developer once for
+    each thing it waits on.
 
     Raises:
         tools.ci.gitcmd.GitError: when git cannot read either commit, or a file it changes.
     """
-    return unversioned(root, differences(tree(root, old), tree(root, new)), "the tree")
+    return _reasons(root, differences(tree(root, old), tree(root, new)), "the tree")
 
 
 def pinned(root: Path, path: str, held: str | None) -> frozenset[Pin]:

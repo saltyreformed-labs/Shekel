@@ -57,10 +57,12 @@ Each name, and who reads it:
   it prepares as a change of its own moves, from a lock made with ``pyproject.toml`` edited,
   which ``lock_change`` refuses (ruling plan#2450), and for the package each requirement of
   ``pyproject.toml`` names, by PEP 503's one reading of a project's name.
-- ``unversioned_between``: ``tools/update.queue``, the daily update queue, which puts a bot's
-  pull request in the merge queue only when the landing check's own walk finds its trial
-  merge moves pinned versions alone, none across a major, over every file it changes
-  (``_versions``; ruling plan#2449).  ``GitHub``, ``paged`` and ``reading``: the queue
+- ``unversioned_between`` and ``Reason``: ``tools/update.queue``, the daily update queue,
+  which puts a bot's pull request in the merge queue only when the landing check's own walk
+  finds its trial merge moves pinned versions alone, none across a major, over every file it
+  changes, and mentions the developer once for each thing one waits for a card on, as each
+  reason names it (``_versions``; rulings plan#2449, plan#2450).  ``GitHub``, ``paged`` and
+  ``reading``: the queue
   again, for its reads and writes of the repository's pull requests under the update App's
   token, through quill's one HTTP path to GitHub, its one walk of a GraphQL connection and
   its naming of the read a failure cut short.  ``GitHub`` and ``reading``:
@@ -109,6 +111,7 @@ from tools.quill._versions import (
     Move,
     NotVersions,
     Pin,
+    Reason,
     canonical,
     ceiling,
     lock_change,
@@ -136,6 +139,7 @@ __all__ = [
     "OWNED",
     "OutsideLink",
     "Pin",
+    "Reason",
     "Tracker",
     "TrackerError",
     "above",

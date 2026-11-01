@@ -15,7 +15,8 @@ import pytest
 from tools.ci.gitcmd import git
 from tools.ci.scratch import commit, commit_files, repository
 from tools.quill._production import COMPOSE, DOCKERFILE, PUBLISH
-from tools.quill._versions import LOCK, Move, NotVersions, Pin, moves, pinned, pins_versions
+from tools.quill._versions import LOCK, Move, NotVersions, Pin, Reason, moves, pinned
+from tools.quill._versions import pins_versions
 from tools.quill._versions import ceiling, lock_change, lock_moves, lock_unversioned, unversioned
 from tools.quill._versions import unversioned_between
 
@@ -518,7 +519,8 @@ def _tree_of(root, base, files):
 def test_a_change_between_two_commits_is_judged_over_every_file_it_changes(repo):
     """:func:`unversioned_between` reads each file the tree changes, production's or not: a
     Dependabot-like change moving a workflow's action and the dev compose file's digest
-    moves versions alone; one also writing a plan record, or crossing a major, is not."""
+    moves versions alone; one also writing a plan record, or crossing a major, is not, each
+    reason waiting on its refusal or on what moves into which major."""
     base = _tree_of(repo, None, {LOCK: _lock(), ".github/workflows/ci.yml": _WORKFLOW,
                                  "docker-compose.dev.yml": _COMPOSE, "app/x.py": "a\n"})
     alone = _tree_of(repo, base, {
@@ -527,8 +529,36 @@ def test_a_change_between_two_commits_is_judged_over_every_file_it_changes(repo)
         LOCK: _lock(_at("pillow", "12.4.1"))})
     more = _tree_of(repo, alone, {"plan/ships/9": "x\n", LOCK: _lock(_at("pillow", "13.0.0"))})
     assert (unversioned_between(repo, base, alone), unversioned_between(repo, alone, more)) == (
-        (), ("plan/ships/9 pins no version",
-             "uv.lock moves pillow from 12.4.1 to 13.0.0, a new major version"))
+        (), (Reason("plan/ships/9 pins no version", "plan/ships/9 pins no version"),
+             Reason("uv.lock moves pillow from 12.4.1 to 13.0.0, a new major version",
+                    "pillow 13")))
+
+
+def test_a_move_across_a_major_waits_on_the_major_it_enters_however_far_and_wherever(repo):
+    """Each move across a major waits on what moves and the major it moves into, spelled as
+    :func:`ceiling` spells a release: the same for any release of that major and in any file
+    (a lock's package, an action's release, an image's tag), and another major for the next;
+    a 0.x package's minor is its major.  Only what each waits on is new here: each clause is
+    the one :func:`unversioned` names."""
+    base = _tree_of(repo, None, {LOCK: _lock(), ".github/workflows/ci.yml": _WORKFLOW,
+                                 "docker-compose.dev.yml": _COMPOSE})
+    waiting = {}
+    for case, lock, release, image in (
+            ("first", {"pillow": "13.0.0", "zeta": "0.7.0"}, "8.0.0", "19"),
+            ("later", {"pillow": "13.2.1", "zeta": "0.7.4"}, "8.3.1", "19.1"),
+            ("next", {"pillow": "14.0.0", "zeta": "0.8.0"}, "9.0.0", "20")):
+        moved = _tree_of(repo, base, {
+            LOCK: _lock(_PACKAGES | {name: (version, ()) for name, version in lock.items()}),
+            ".github/workflows/ci.yml": _WORKFLOW.replace(f"{_SHA} # v7.0.1",
+                                                          f"{_LATER} # v{release}"),
+            "docker-compose.dev.yml": _COMPOSE.replace("postgres:18-", f"postgres:{image}-")})
+        reasons = unversioned_between(repo, base, moved)
+        assert all(reason.clause.endswith(", a new major version") for reason in reasons)
+        waiting[case] = sorted(reason.waits_on for reason in reasons)
+    assert waiting == {
+        "first": ["actions/checkout 8", "pillow 13", "postgres 19", "zeta 0.7"],
+        "later": ["actions/checkout 8", "pillow 13", "postgres 19", "zeta 0.7"],
+        "next": ["actions/checkout 9", "pillow 14", "postgres 20", "zeta 0.8"]}
 
 
 # -- what the Monday refresh reads (tools/update/refresh.py) --------------------------------

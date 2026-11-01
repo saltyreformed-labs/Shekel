@@ -9,14 +9,15 @@ with no credential and the dev database server's listing, and writes nothing.
 
 ``plan`` judges the release ``<base>..<cut>`` (:mod:`tools.release._plan`): the steps it
 carries, each step's money flag and deploy-together group, the migrations it adds, edits
-or deletes; when the Monday update last published, once production's tree holds its
-workflow (:mod:`tools.release._updates`); what refuses it, a stopped update included;
-what the developer's approval question must name; and, on a refusal of the cut or two
-added migrations, the newest earlier cut to offer him.  ``production``
-lists what the release ``<base>..<cut>`` changes of what production runs, by each pull
-request's own change and apart what none of them changed, and each version it moves in the
-files that pin versions (:mod:`tools.release._changes`), for the approval question to name
-where no rehearsal kit or card covered it (R-BAL281's interim, ruling plan#2351).
+or deletes; when the Monday update's lock was refreshed and which run published it, once
+production's tree holds its workflow (:mod:`tools.release._updates`); what refuses it, a
+stopped update included; what the developer's approval question must name; and, on a
+refusal of the cut or two added migrations, the newest earlier cut to offer him.
+``production`` lists what the release ``<base>..<cut>`` changes of what production runs, by
+each pull request's own change and apart what none of them changed, and each version it
+moves in the files that pin versions (:mod:`tools.release._changes`), for the approval
+question to name where no rehearsal kit or card covered it (R-BAL281's interim, ruling
+plan#2351).
 ``census`` lists every worktree, every branch ``main`` already holds or a kit names, and
 every dev database, marking what this release made: its ``release/<date>`` branch and what
 each rehearsal kit's manifest names (:mod:`tools.release._census`).
@@ -158,13 +159,13 @@ def _offer(label: str, offered: Verdict | None) -> list[str]:
 
 
 def _update_lines(update: Update) -> list[str]:
-    """When the Monday update last published, once production's tree holds its workflow;
-    nothing while it does not, or when none published in the window, which refuses the
-    release and says so."""
+    """When the Monday update's lock was refreshed and which run published it, once
+    production's tree holds its workflow; nothing while it does not, or when none published
+    in the window, which refuses the release and says so."""
     if update.published is None:
         return []
-    return [f"monday update: last published by the run started "
-            f"{update.published.started:%Y-%m-%d %H:%M} UTC ({update.published.run})"]
+    return [f"monday update: lock refreshed {update.published.started:%Y-%m-%d %H:%M} UTC, "
+            f"published by {update.published.run}"]
 
 
 def plan_lines(judged: Plan) -> list[str]:

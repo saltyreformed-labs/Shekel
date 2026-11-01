@@ -1,6 +1,8 @@
 """The Monday lock refresh (ruling plan#2351, R-BAL294's lock refresh): every package the lock
 holds moved as far as ``uv lock --upgrade`` moves it, but each move that needs a card, so the
-week's pull request lands by auto-merge with none.
+week's pull request lands with none: the daily update queue puts it in ``dev``'s merge queue
+once every check at its head passed (:mod:`tools.update.queue`, which says why not by
+auto-merge; ruling plan#2449).
 
 **It runs at the root of a checkout of ``dev``** whose ``.venv`` holds the lock's ``landing``
 group (``.github/actions/install-lock``'s install set ``landing``), which this module imports
@@ -311,7 +313,8 @@ def _body(week: Refreshed) -> str:
     """The pull request's text for ``week``: what moved, then what was held back."""
     lines = ["The Monday lock refresh (ruling plan#2351): every package `uv lock --upgrade` "
              "moves within its major, each release at least 7 days old. It moves only "
-             "versions, so it lands by auto-merge with no card.", "",
+             "versions, so it lands with no card: the daily update queue puts it in `dev`'s "
+             "merge queue once every check at its head passed (ruling plan#2449).", "",
              "| Package | From | To |", "| --- | --- | --- |",
              *(f"| {move.what} | {move.old} | {move.new} |" for move in week.moves)]
     if week.held:

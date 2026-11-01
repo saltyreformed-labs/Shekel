@@ -118,17 +118,17 @@ def test_plan_refuses_a_release_whose_monday_update_stopped_and_offers_no_cut(re
     assert not [line for line in out if line.startswith(("newest earlier cut", "monday update"))]
 
 
-def test_plan_names_when_the_monday_update_last_published(repo, capsys):
-    """A Monday run's publish succeeded two days ago: its start and its page are printed, and
-    the release is clean."""
+def test_plan_names_when_the_monday_update_s_lock_was_refreshed(repo, capsys):
+    """A Monday run's publish succeeded, its refresh started two days ago: that start and the
+    run's page are printed, and the release is clean."""
     base, cut, tracker = _one_mover_on_the_workflow(repo)
     started = (datetime.now(UTC) - timedelta(days=2)).replace(second=0, microsecond=0)
     runs = Runs(daily(2, datetime.now(UTC) - timedelta(days=1)), monday(1, started))
     assert release.main(["plan", "--base", base, "--cut", cut], root=repo.root,
                         connect=lambda: tracker, actions=runs.actions) == 0
     assert capsys.readouterr().out.splitlines()[-2:] == [
-        f"monday update: last published by the run started {started:%Y-%m-%d %H:%M} UTC "
-        "(https://github.com/o/n/actions/runs/1)",
+        f"monday update: lock refreshed {started:%Y-%m-%d %H:%M} UTC, "
+        "published by https://github.com/o/n/actions/runs/1",
         "verdict: clean (exit 0)"]
 
 

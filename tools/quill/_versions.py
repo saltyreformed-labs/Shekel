@@ -1,12 +1,16 @@
 """The versions a change moves in the files that pin them (ruling plan#2351, which narrows
 ``balance:R-BAL362``): a change that moves nothing but pinned versions lands with no card, as
 CI's write rule reads it (``tools/quill/landing.py``, rule 9), and anything else, a major
-version included, still needs one.  Two readers judge by the one walk here
-(:func:`_reasons`): the landing check, over each file of production a change moves
+version included, still needs one.  Three readers judge by the one walk here
+(:func:`_why`): the landing check, over each file of production a change moves
 (:func:`unversioned`), and the daily update queue, over every file a pull request moves
-(:func:`unversioned_between`), which it puts in the merge queue only when the walk finds no
-reason (ruling plan#2449), and which mentions the developer once for each thing a pull
-request waits for a card on (:class:`Reason`; rulings plan#2450, plan#2467).
+(:func:`unversioned_between`), both through :func:`_reasons`, its run over each file a
+change moves; the queue puts a pull request in the merge queue only when the walk finds no
+reason (ruling plan#2449), and mentions the developer once for each thing one waits for a
+card on (:class:`Reason`; rulings plan#2450, plan#2467).  The third is the Monday lock
+refresh, over the lock alone (:func:`lock_unversioned`): it judges the week's lock by it
+before any pull request carries it, and each package it moves alone with
+``pyproject.toml`` as it is, to keep that change only where the walk finds it needs a card.
 
 **A version-only change moves only version data in each file it changes** (:func:`moves`),
 and only in the files that pin versions (:func:`pins_versions`):
@@ -50,8 +54,7 @@ Every other line of those files is as it was, byte for byte: each file is read a
 it, refused when its bytes decode to no text (:func:`_text`, which every file this module
 reads is read through) and when its text does not hash back to its object (a line ending
 changed, or bytes no decoding keeps), so a line compared equal is equal.  Which of them
-production runs is :mod:`tools.quill._production`'s to say, never this module's: today the
-``Dockerfile``, ``docker-compose.yml`` and the workflow that builds and signs the image.
+production runs is :mod:`tools.quill._production`'s to say, never this module's.
 
 **A major is the release up to its first number that is not zero** (:func:`_major`, its
 epoch first), so ``12.3.0`` to ``13.0.0`` crosses one and a 0.x package's minor is its
@@ -147,7 +150,7 @@ class Move:
 
 @dataclass(frozen=True)
 class Reason:
-    """One reason the walk (:func:`_reasons`) gives that a change is no change that moves
+    """One reason the walk (:func:`_why`) gives that a change is no change that moves
     pinned versions alone, none across a major: ``clause``, saying so and naming its file;
     and ``waits_on``, what the change waits for a card on: for a move across a major, what
     moves and the major it moves into (``pillow 13``, ``zeta 0.7``), the same however far
@@ -669,7 +672,8 @@ def _reasons(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
     """Why a change is no change that moves pinned versions alone, none across a major, each
     a :class:`Reason` whose clause names its file; none when it is one.  ``changed`` holds
     each path where ``where`` differs (:func:`moves`), with its mode and object before and
-    after.  The one walk the landing check (rule 9) and the daily update queue both judge by.
+    after.  The walk (:func:`_why`) over each such file, which the landing check (rule 9) and
+    the daily update queue both judge by.
 
     Raises:
         tools.ci.gitcmd.GitError: when git cannot read a file it changes.
@@ -680,7 +684,7 @@ def _reasons(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
 
 def unversioned(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
                 where: str = "production") -> tuple[str, ...]:
-    """The clause of each reason the walk (:func:`_reasons`) gives over ``changed``, where
+    """The clause of each reason :func:`_reasons` gives over ``changed``, where
     ``where`` differs: the landing check's reading.
 
     Raises:
@@ -691,9 +695,10 @@ def unversioned(root: Path, changed: Mapping[str, tuple[str | None, str | None]]
 
 def lock_unversioned(old: str, new: str) -> tuple[str, ...]:
     """Why the change from the lock text ``old`` to ``new`` is no change that moves pinned
-    versions alone, none across a major, each as a clause; none when it is one: the walk of
-    :func:`_reasons` over the lock alone, which the Monday refresh judges its lock by before
-    any pull request carries it."""
+    versions alone, none across a major, each as a clause; none when it is one: the walk
+    (:func:`_why`) over the lock alone, which the Monday refresh judges the week's lock by
+    before any pull request carries it, and each package it moves alone with
+    ``pyproject.toml`` as it is."""
     return tuple(reason.clause for reason in _why(LOCK, partial(_lock_read, old, new)))
 
 

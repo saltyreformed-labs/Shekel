@@ -13,9 +13,14 @@
 # ``build-constraint-dependencies``): uv locks no build tool, so each one's
 # version and hash live here, and uv copies them into the lock's manifest.
 #
-# The Python version is ``.python-version``'s, its one home: uv picks the
-# interpreter from it and CI's jobs read it.  ``requires-python`` below is
-# only the floor the code needs, so the minor version is never stated twice.
+# The Python version is ``.python-version``'s: uv picks the interpreter from
+# it and CI's jobs read it.  ``requires-python`` below names its minor too,
+# as only the floor the code needs: uv refuses to lock or sync with a
+# ``.python-version`` under it, and uv.lock's header copies it, which
+# ``--locked`` refuses to find stale (both measured 2026-11-01, uv 0.13.6).
+# The Dockerfile's two FROM tags name the minor too, held equal to it by
+# tests/test_deploy/test_image_supply_chain.py; the build holds the builder
+# image's own Python to it, as uv there fetches no other interpreter.
 #
 # Install:  uv sync --locked              (the local venv: runtime + dev)
 # Image:    the Dockerfile installs ``--no-dev --group server``.

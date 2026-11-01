@@ -2,8 +2,9 @@
 them from (rulings plan#2351, plan#2450): the one home of its layout, which both import.
 
 The refresh (:mod:`tools.update.refresh`) runs package code and holds no secret; the publish
-(:mod:`tools.update.publish`) holds the update App's token and runs none.  So the folder
-crosses from a job that ran package code to one holding a key, as the workflow's artifact
+(:mod:`tools.update.publish`) holds the update App's token and runs no package code but the
+``landing`` group's, installed from main's lock by hash.  So the folder crosses from a job
+that ran package code to one holding a key, as the workflow's artifact
 (``.github/workflows/updates.yml``), and is read as data: :func:`read` refuses it whole
 (:class:`FolderError`) where it holds anything outside this layout, before anything is
 published.

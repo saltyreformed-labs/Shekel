@@ -17,7 +17,7 @@ from tools.ci.scratch import run
 from tools.quill.door import MARKERS, FakeTracker
 from tools.quill.setup_tracker import DEPLOY_TOGETHER_LABEL, MOVES_MONEY_LABEL
 from tools.release._plan import Inputs, plan
-from tools.release._updates import JOB, PAGE, Actions
+from tools.release._updates import JOB, PAGE, REFRESH, Actions
 
 
 def lock(*packages: tuple[str, str]) -> str:
@@ -178,28 +178,37 @@ def replanned_and_dropped(tracker):
 
 
 def workflow_run(number: int, created: datetime, jobs: dict[str, str],
-                 started: datetime | None = None) -> tuple[dict, list]:
+                 started: datetime | None = None,
+                 refreshed: datetime | None = None) -> tuple[dict, list]:
     """A run of the update workflow as GitHub lists it, created at ``created`` and its latest
     attempt started at ``started`` (at ``created`` unless given, as a first attempt's), and
-    its latest attempt's jobs, each job's name with its conclusion."""
+    its latest attempt's jobs, each job's name with its conclusion and its start: the
+    refresh's at ``refreshed`` (the attempt's start unless given, a refresh that attempt
+    repeated or ran first), every other job's at the attempt's start."""
     stamp = "%Y-%m-%dT%H:%M:%SZ"
+    attempt = started or created
     return ({"id": number, "created_at": created.strftime(stamp),
-             "run_started_at": (started or created).strftime(stamp),
+             "run_started_at": attempt.strftime(stamp),
              "html_url": f"https://github.com/o/n/actions/runs/{number}"},
-            [{"name": name, "conclusion": conclusion} for name, conclusion in jobs.items()])
+            [{"name": name, "conclusion": conclusion,
+              "started_at": ((refreshed or attempt) if name == REFRESH else attempt)
+              .strftime(stamp)}
+             for name, conclusion in jobs.items()])
 
 
 def monday(number: int, created: datetime, publish: str = "success",
-           started: datetime | None = None) -> tuple[dict, list]:
+           started: datetime | None = None,
+           refreshed: datetime | None = None) -> tuple[dict, list]:
     """A Monday run: the refresh succeeded, the publish concluded ``publish``, the queue
-    skipped; its latest attempt started at ``started`` (:func:`workflow_run`)."""
-    return workflow_run(number, created, {"refresh": "success", JOB: publish,
-                                          "queue": "skipped"}, started)
+    skipped; its latest attempt started at ``started`` and its refresh at ``refreshed``
+    (:func:`workflow_run`)."""
+    return workflow_run(number, created, {REFRESH: "success", JOB: publish,
+                                          "queue": "skipped"}, started, refreshed)
 
 
 def daily(number: int, created: datetime) -> tuple[dict, list]:
     """A day's run of the queue alone: the refresh and the publish skipped."""
-    return workflow_run(number, created, {"refresh": "skipped", JOB: "skipped",
+    return workflow_run(number, created, {REFRESH: "skipped", JOB: "skipped",
                                           "queue": "success"})
 
 

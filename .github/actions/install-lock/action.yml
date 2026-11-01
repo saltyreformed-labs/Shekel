@@ -1,14 +1,17 @@
 # Shekel Budget App -- a job's Python and packages, from uv.lock
 #
-# Every workflow job that runs Python takes it from here (ruling
-# balance:R-BAL294, plan#1027) but the update alert, which installs nothing
-# so a failed install cannot stop it (plan#2481): uv installs the interpreter
-# ``.python-version`` names and the packages ``uv.lock`` pins, every file
-# checked against its sha256 (``--locked`` also refuses a lock that no longer
-# matches pyproject.toml), into ``.venv``, whose ``bin`` the job's later steps
-# then find first on PATH, beside the uv that installed it (the release
-# rehearsal's bench runs uv itself).  One recipe, so no job states a Python
-# version or a package version of its own.
+# Every workflow job that runs Python on the runner takes it from here
+# (ruling balance:R-BAL294, plan#1027) but the update alert, which installs
+# nothing so a failed install cannot stop it (plan#2481); the two jobs that
+# build the app image (ci.yml's ``image`` and the release's) run Python only
+# inside it.  tools/ci/test_ci_workflow.py's INSTALLS and RUNNER_PYTHON hold
+# which job is which.  uv installs the interpreter ``.python-version`` names
+# and the packages ``uv.lock`` pins, every file checked against its sha256
+# (``--locked`` also refuses a lock that no longer matches pyproject.toml),
+# into ``.venv``, whose ``bin`` the job's later steps then find first on
+# PATH, beside the uv that installed it (the release rehearsal's bench runs
+# uv itself).  One recipe, so no job states a Python version or a package
+# version of its own.
 #
 # UV IS THE DOCKERFILE'S.  The first step below takes the binary its ``uv``
 # stage holds from .github/actions/dockerfile-uv, the one recipe for it, which

@@ -12,8 +12,9 @@
 #            reads only.  What it prepares is uploaded as the run's artifact,
 #            beside the dev commit it read.
 #   publish  after refresh: holds the update App's key and runs main's own
-#            code, installing the landing group alone and running no package
-#            code (tools/update/publish.py).  It reads the artifact as data,
+#            code, installing the landing group alone from main's lock, each
+#            file checked against its hash, and running no other package code
+#            (tools/update/publish.py).  It reads the artifact as data,
 #            refused whole where it holds anything outside its layout
 #            (tools/update/folder.py), so the most a poisoned refresh can do is
 #            open a pull request, which the landing check and the queue judge

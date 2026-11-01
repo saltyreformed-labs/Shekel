@@ -1,6 +1,7 @@
 """The Monday update as a release reads it (:mod:`tools.release._updates`, ruling plan#2351):
-the newest run on ``main`` whose publish succeeded, read only once production's tree holds
-the workflow, and the refusal when none published in the eight days to the release."""
+the newest run on ``main`` whose publish succeeded, dated by its refresh's start, read only
+once production's tree holds the workflow, and the refusal when none published in the eight
+days to the release."""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -14,6 +15,7 @@ from tools.release._model import ReleaseError
 from tools.release._updates import (
     JOB,
     PAGE,
+    REFRESH,
     START,
     STALE_AFTER,
     WORKFLOW,
@@ -82,16 +84,25 @@ def test_a_failed_monday_run_is_no_update_and_one_before_it_in_the_window_still_
     assert (update.published.started, update.refusals) == (_ago(days=7), ())
 
 
-def test_a_re_run_is_dated_by_its_latest_attempt_s_start(repo):
-    """A run created six days ago whose latest attempt, the one whose publish GitHub lists,
-    started an hour ago: the update is dated by that start, not by the run's creation."""
+def test_a_re_run_repeating_the_refresh_is_dated_by_the_refresh_it_ran(repo):
+    """A run created six days ago whose latest attempt, refresh included, ran an hour ago:
+    the update is dated by that refresh, not by the run's creation."""
     runs = Runs(monday(1, _ago(days=6), started=_ago(hours=1)))
     update = read(repo.root, _held(repo), NOW, runs.actions)
     assert (update.published.started, update.refusals) == (_ago(hours=1), ())
 
 
+def test_a_re_run_keeping_the_refresh_is_dated_by_the_refresh_it_kept(repo):
+    """A run created six days ago whose latest attempt started an hour ago and repeated the
+    publish alone: GitHub lists the refresh it kept, started six days ago, and the update is
+    dated by that, not by the attempt's start (``run_started_at``)."""
+    runs = Runs(monday(1, _ago(days=6), started=_ago(hours=1), refreshed=_ago(days=6)))
+    update = read(repo.root, _held(repo), NOW, runs.actions)
+    assert (update.published.started, update.refusals) == (_ago(days=6), ())
+
+
 def test_a_run_created_before_the_window_is_not_read_though_re_run_since(repo):
-    """A run created nine days ago and re-run an hour ago ends the walk unread, as the
+    """A run created nine days ago and re-run whole an hour ago ends the walk unread, as the
     listing is by creation: the release is refused, and no jobs of it were asked for."""
     runs = Runs(monday(1, _ago(days=9), started=_ago(hours=1)))
     update = read(repo.root, _held(repo), NOW, runs.actions)
@@ -169,9 +180,11 @@ def test_the_anonymous_read_is_of_origin_s_repository(repo):
     assert anonymous(repo.root).repository == "o/n"
 
 
-def test_the_job_read_is_the_workflow_s_publish_job_named_by_its_id():
-    """GitHub names a job by its ``name:``, else by its id: the job this module reads is a
-    job of the committed workflow under that id, with no ``name:`` to rename it, or every
-    release would find no update and be refused."""
+def test_the_jobs_read_are_the_workflow_s_publish_and_the_refresh_it_needs_by_their_ids():
+    """GitHub names a job by its ``name:``, else by its id: the two jobs this module reads
+    are jobs of the committed workflow under those ids, with no ``name:`` to rename them, or
+    every release would find no update and be refused; and the publish needs the refresh,
+    so GitHub lists the refresh beside every publish that succeeded."""
     jobs = yaml.safe_load((REPO / WORKFLOW).read_text(encoding="utf-8"))["jobs"]
-    assert JOB in jobs and "name" not in jobs[JOB]
+    assert all(name in jobs and "name" not in jobs[name] for name in (JOB, REFRESH))
+    assert jobs[JOB]["needs"] == REFRESH

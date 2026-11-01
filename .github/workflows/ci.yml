@@ -38,9 +38,11 @@
 # runners; six shards at ``-n logical`` ran 6.4-9.7 min each.
 #
 # THE STEP NUMBERS are kept from the single-job era, on the same steps, because
-# .pre-commit-config.yaml and pytest.ini cite them.  Every job takes its Python
-# and packages from .github/actions/install-lock: ``.python-version``'s
-# interpreter and ``uv.lock``'s packages, installed by the Dockerfile's uv.
+# .pre-commit-config.yaml and pytest.ini cite them.  Every job that runs
+# Python on the runner takes it and its packages from
+# .github/actions/install-lock: ``.python-version``'s interpreter and
+# ``uv.lock``'s packages, installed by the Dockerfile's uv.  The image job runs
+# Python only inside the image it builds.
 #
 # THE TIME LIMITS (rulings plan#2328, plan#2330).  Every job carries a
 # ``timeout-minutes`` of twice its longest successful run, rounded up to a
@@ -719,9 +721,10 @@ jobs:
 
       # Version-pinned standalone binaries, extracted to ~/.local/bin via
       # `find` so a change in an archive's internal layout cannot break the
-      # step. shellcheck is pinned to 0.11.0 specifically: the optional
-      # masked-errexit groups in .shellcheckrc need >= 0.10 and the runner's
-      # preinstalled build may lag.
+      # step. shellcheck is pinned rather than the runner's own, whose version
+      # moves with the runner image; the optional masked-errexit groups
+      # .shellcheckrc enables need 0.8 or later (both are in v0.8.0's source
+      # and in neither of v0.7.2's, read 2026-11-01).
       - name: Install pinned binary linters
         run: |
           set -euo pipefail

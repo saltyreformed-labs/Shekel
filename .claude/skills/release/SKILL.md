@@ -152,8 +152,8 @@ Then, line by line:
   `plan/ships/` that is no card's marker (R-BAL287, R-BAL289) is no judgment for this run to make:
   STOP and report it to Josh.
 - Once production's tree holds the weekly update's workflow (`.github/workflows/updates.yml`),
-  `plan` reads its runs on GitHub, with no credential, and prints `monday update: last published
-  by the run started <date>`; a week with nothing to move still counts. None in the 8 days
+  `plan` reads its runs on GitHub, with no credential, and prints `monday update: lock refreshed
+  <date> UTC, published by <run>`; a week with nothing to move still counts. None in the 8 days
   before the run refuses the release whatever the cut (ruling plan#2351), so no earlier cut
   answers it. Before `main` holds the workflow there is no such line and no such refusal: GitHub
   runs it only from `main`.

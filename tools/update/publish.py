@@ -2,12 +2,13 @@
 refresh prepared made one commit on the ``dev`` commit the refresh read, on its branch, its pull
 request into ``dev`` opened or refreshed, and each branch whose change is gone deleted.
 
-**It runs main's own code holding the update App's token, and no package code**
-(``.github/workflows/updates.yml``'s ``publish`` job, with the ``landing`` group alone).  What
-it publishes is the folder the ``refresh`` job wrote, which ran package code and held no
-secret (:mod:`tools.update.folder`), read as data and refused whole where it holds anything
-else.  The most a change can then do is open a pull request, which the landing check and the
-daily queue (:mod:`tools.update.queue`) judge like any other.
+**It runs main's own code holding the update App's token, and no package code but the
+``landing`` group's** (``.github/workflows/updates.yml``'s ``publish`` job): ``requests`` and
+``cryptography`` and the packages they need, installed from main's lock, each file checked
+against its hash.  What it publishes is the folder the ``refresh`` job wrote, which ran
+package code and held no secret (:mod:`tools.update.folder`), read as data and refused whole
+where it holds anything else.  The most a change can then do is open a pull request, which
+the landing check and the daily queue (:mod:`tools.update.queue`) judge like any other.
 
 **Each change's one commit has the ``dev`` commit the refresh read as its one parent**, never
 ``dev``'s tip when the publish runs: a lock made from one ``dev`` and committed on a later one

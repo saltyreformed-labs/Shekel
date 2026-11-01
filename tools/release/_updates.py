@@ -1,17 +1,19 @@
 """Whether the Monday update still runs (ruling plan#2351): a release is refused once the
-update workflow last published more than :data:`STALE_AFTER` ago, so a script that silently
-stopped surfaces at the next release.
+update workflow has published no lock refreshed in the last :data:`STALE_AFTER`, so a script
+that silently stopped surfaces at the next release.
 
 **The last update is read, never stored**: the newest run of the update workflow
 (:data:`WORKFLOW`) on ``main`` whose ``publish`` job (:data:`JOB`) succeeded, dated by when
-GitHub started the run's latest attempt (``run_started_at``, which a re-run moves and
-``created_at`` does not): the jobs GitHub lists for a run are its latest attempt's
-(measured 2026-11-01 on a CI run of two attempts: 11 jobs, all of attempt 2, where
-``filter=all`` lists 22), so the publish judged and its date are one attempt's.  A week with
-nothing to move still runs that job, which publishes
-nothing and succeeds, so a quiet week is no stopped update; a run whose refresh or publish
-failed, and a day's run of the queue alone, whose publish is skipped, are none.  A commit the
-update made would date it too, but a quiet week makes none.
+its ``refresh`` job (:data:`REFRESH`), which the publish needs, started: uv resolved the lock
+then, so a re-run cannot make an old lock look new.  GitHub lists a run's jobs as its latest
+attempt's, each job that attempt did not repeat listed again at its own earlier times
+(measured 2026-11-01 on CI run 35939186713, two attempts: 11 jobs, all of attempt 2, nine
+of them started in attempt 1), so neither the run's ``created_at`` nor its
+``run_started_at`` dates the refresh: a re-run that does not repeat the refresh moves the
+second and not the refresh's start.  A week with nothing to move still runs the publish,
+which publishes nothing and succeeds, so a quiet week is no stopped update; a run whose
+refresh or publish failed, and a day's run of the queue alone, whose publish is skipped, are
+none.  A commit the update made would date it too, but a quiet week makes none.
 
 **Read with no credential**: the repository is public, and GitHub serves its Actions runs to
 anyone (measured 2026-10-31: answered 200, 60 reads an hour per address), so the read goes
@@ -27,10 +29,13 @@ have run, so the release that brings it is judged without it.  From the next one
 release finding no update in the window is refused, saying how to start one.
 
 **The window**: the runs are read newest first by when GitHub created each, the listing's
-order, and the walk ends at the first created more than :data:`STALE_AFTER` ago, since any
-update older than that refuses the release alike; so a refusal names the window, not the date
-of an older update, and a run created before the window is not read, though a re-run started
-it since.
+order, and the walk ends at the first created more than :data:`STALE_AFTER` ago, so a
+refusal names the window, not the date of an older update.  A run's refresh starts no
+earlier than the run was created, so a run created before the window holds an update inside
+it only where a re-run repeated its refresh since: that run is not read, and the release is
+refused, failing closed, until a fresh run (:data:`START`) publishes.  The update named is
+the newest run by creation whose publish succeeded, which a release needs only one of: an
+older run re-run since can hold a later refresh, which is not looked for.
 """
 from __future__ import annotations
 
@@ -51,6 +56,8 @@ NAME = WORKFLOW.rpartition("/")[2]
 #: The job whose success is a Monday update: it opens the week's pull requests, or finds
 #: none to open.
 JOB = "publish"
+#: The job :data:`JOB` needs, which resolves the week's lock: its start dates the update.
+REFRESH = "refresh"
 #: The branch GitHub runs the workflow from.
 BRANCH = MAIN.partition("/")[2]
 #: How old the last update may be before a release is refused (ruling plan#2351).
@@ -76,7 +83,8 @@ class Actions:
 
 @dataclass(frozen=True)
 class Published:
-    """A Monday update: when GitHub started its run's latest attempt, and the run's page."""
+    """A Monday update: when its refresh job started, resolving the lock it published, and
+    the page of its run."""
 
     started: datetime
     run: str
@@ -152,14 +160,15 @@ def read(root: Path, base: str, now: datetime,
 
 def _newest(reader: Actions, since: datetime) -> Published | None:
     """The newest run on :data:`BRANCH` created at or after ``since`` whose :data:`JOB`
-    succeeded in its latest attempt, dated by that attempt's start; None when there is
-    none."""
+    succeeded, as GitHub lists its jobs, dated by when the :data:`REFRESH` listed beside it
+    started; None when there is none."""
     for run in _runs(reader, since):
         with reading(f"the jobs of the update workflow's run {run['id']}"):
             jobs = reader.github.rest(
                 "GET", f"/repos/{reader.repository}/actions/runs/{run['id']}/jobs")["jobs"]
         if any(job["name"] == JOB and job["conclusion"] == "success" for job in jobs):
-            return Published(datetime.fromisoformat(run["run_started_at"]), run["html_url"])
+            refreshed = next(job["started_at"] for job in jobs if job["name"] == REFRESH)
+            return Published(datetime.fromisoformat(refreshed), run["html_url"])
     return None
 
 

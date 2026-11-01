@@ -41,7 +41,8 @@ from tools.quill._board_fields import STATUS_OPTIONS
 from tools.quill._command import on_board as goes_on_board
 from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, filed_labels, in_order
+from tools.quill._filed import filed_labels
+from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, in_order
 from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
 
 #: The card's fact (:class:`_tracker.BareCard`) holding each issue field
@@ -277,10 +278,12 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     # -- writes
     def create(self, card, milestone=None):
         """File ``card`` (a ``check.Draft``) at the next number holding its Arc (a task none),
-        marked :data:`setup_tracker.FILING` beside its labels and its arc label, by the labels
-        :meth:`_tracker.Tracker.create` sends (:func:`_tracker.filed_labels`), in
-        ``milestone`` when one is given.  One the tracker lacks is a write the tool must never
-        send, so it fails loudly rather than guess GitHub's answer."""
+        its Priority and its Effort, marked :data:`setup_tracker.FILING` beside its labels and
+        its arc label, by the labels :meth:`_tracker.Tracker.create` sends
+        (:func:`_filed.filed_labels`), in ``milestone`` when one is given.  One the tracker
+        lacks is a write the tool must never send, so it fails loudly rather than guess
+        GitHub's answer.  The log holds the create's type, title, labels, Arc and milestone; a
+        test reads the Priority and Effort it filed from the card."""
         number = max(self.cards_by_number, default=0) + 1
         labels = tuple(filed_labels(card.labels, card.arc))
         assert milestone is None or milestone in self.milestones, (
@@ -288,7 +291,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.writes.append(("create", number, card.kind, card.title, labels, card.arc)
                            + (() if milestone is None else (milestone,)))
         self.add(number, card.kind, card.body, on_board=False, title=card.title, labels=labels,
-                 arc=card.arc)
+                 arc=card.arc, priority=card.priority, effort=card.effort)
         if milestone is not None:
             self.milestone_of[number] = milestone
         return number
@@ -591,18 +594,19 @@ def two_tasks():
 
 
 def leaf_filing(tmp_path, title, parent="plan#1"):
-    """``quill file step`` filing a leaf named ``title`` under ``parent``, its spec written to
-    a file."""
+    """``quill file step`` filing a leaf named ``title`` under ``parent``, sized at two
+    sessions (ruling plan#2492), its spec written to a file."""
     spec = tmp_path / f"{title}.md"
     spec.write_text(f"Build {title}.")
     return ("file", "step", "--parent", parent, "--arc", "balance", "--title", title,
-            "--body-file", str(spec))
+            "--body-file", str(spec), "--effort", "2")
 
 
 def finding_filing(owner, title="Twice", text="The report counts a refund twice."):
-    """``quill file finding`` filing the finding ``title``, saying ``text``, for ``owner``."""
+    """``quill file finding`` filing the finding ``title``, saying ``text``, for ``owner``,
+    sized at one session (ruling plan#2492)."""
     return ("file", "finding", "--arc", "balance", "--title", title, "--owner", owner,
-            "--text", text)
+            "--text", text, "--effort", "1")
 
 
 def ruling_filing(tmp_path, owner):

@@ -64,16 +64,10 @@ from typing import overload
 from urllib.parse import quote
 
 from tools.quill import _arcs, _queries
-from tools.quill._arcs import (
-    ARC_FIELD,
-    ArcCard,
-    arc_answered,
-    arc_labels,
-    arc_of,
-    labels_and_values,
-)
+from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_of, labels_and_values
 from tools.quill._draft import Draft
 from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD, answered_value, value_of
+from tools.quill._filed import filed_labels, filed_values
 from tools.quill._github import (
     GitHub,
     TrackerError,
@@ -292,15 +286,6 @@ def milestone_nodes(github: GitHub, place: Place) -> list[dict]:
     (:func:`_queries.milestones`)."""
     return paged(partial(github.graphql, _queries.milestones(place)),
                  lambda answer: answer["repository"]["milestones"], "the milestones")[0]
-
-
-def filed_labels(labels: Iterable[str], arc: str | None) -> list[str]:
-    """The labels a create sends for a card filed in ``arc`` (None: a task, which holds no
-    arc) beside ``labels``: those, its arc's label as display of its Arc
-    (:func:`_arcs.arc_labels`, ruling ``balance:R-BAL354``) and the :data:`setup_tracker.FILING`
-    mark (R-BAL202), sorted, as GitHub's answer is read back.  The one composition, which
-    :meth:`Tracker.create` sends and the tests' tracker files by."""
-    return sorted({*labels, *arc_labels(arc), FILING})
 
 
 def _comment(node: dict) -> Comment:
@@ -777,10 +762,12 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
         Its arc is written in the same call to its issue field Arc, the arc's one home, and
         as its arc label beside, display of it (rulings ``balance:R-BAL349``, ``R-BAL354``;
-        :func:`filed_labels`); the Arc's id is read first (:meth:`_field_ids`).  A task,
-        which holds neither (R-BAL386), sends no field and reads no id, so its request is
-        what it was.  GitHub drops a field value silently where the feature is off (its REST
-        description), so the Arc is read back as the type is.
+        :func:`_filed.filed_labels`), and so is every other field value it holds, a step's or
+        a finding's Effort (ruling plan#2492; :func:`_filed.filed_values`); their ids are read
+        first, in one read (:meth:`_field_ids`).  A task, which holds none (R-BAL386), sends no
+        field and reads no id, so its request is what it was.  GitHub drops a field value
+        silently where the feature is off (its REST description), so each is read back as the
+        type is.
 
         ``milestone``: the number of the milestone the card is filed in: a leaf's that
         ``quill file step --parent`` files in its split step's while that step holds one
@@ -800,17 +787,22 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         """
         labels = filed_labels(card.labels, card.arc)
         sent = {"title": card.title, "body": card.body, "type": card.kind, "labels": labels}
-        if card.arc is not None:
-            sent["issue_field_values"] = [{"field_id": self._field_ids(ARC_FIELD)[ARC_FIELD],
-                                           "value": card.arc}]
+        if values := filed_values(card):
+            ids = self._field_ids(*values)
+            sent["issue_field_values"] = [{"field_id": ids[field], "value": value}
+                                          for field, value in values.items()]
         if milestone is not None:
             sent["milestone"] = milestone
         issue = self.github.rest("POST", f"{self.place.path}/issues", sent)
+        answered = issue.get("issue_field_values") or []
         got = ((issue.get("type") or {}).get("name"), sorted(l["name"] for l in issue["labels"]),
-               arc_answered(issue.get("issue_field_values") or []))
+               arc_answered(answered))
         if got != (wanted := (card.kind, labels, card.arc)):
             raise TrackerError(f"plan#{issue['number']} was filed as {got}, not {wanted}: fix it "
                                "by hand")
+        if (holding := {field: answered_value(answered, field) for field in values}) != values:
+            raise TrackerError(f"plan#{issue['number']} was filed holding {holding}, not "
+                               f"{values}: fix it by hand")
         held = (issue.get("milestone") or {}).get("number")
         if held != milestone:
             raise TrackerError(f"plan#{issue['number']} was filed in milestone {held}, not "
@@ -819,8 +811,8 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
     def _field_ids(self, *names: str) -> dict[str, int]:
         """The REST id of each of the tracker's issue fields ``names``, by name, in one read
-        (:func:`_queries.issue_fields`): for the create that writes a card's Arc and the write
-        of one value (:meth:`set_field`).
+        (:func:`_queries.issue_fields`): for the create that writes a card's field values and
+        the write of one value (:meth:`set_field`).
 
         Raises:
             TrackerError: When the repository holds no such field, or the read GitHub cut

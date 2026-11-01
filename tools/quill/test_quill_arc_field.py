@@ -94,7 +94,7 @@ def test_a_filing_run_again_over_a_card_whose_arc_was_changed_by_hand_is_refused
     person changed since is theirs to fix, and nothing is written."""
     tracker = FakeTracker()
     tracker.add(4, body="New work.", title="New", labels=("salary", FILING), arc="balance")
-    assert run(tracker, code, "file", "step", "--arc", "salary", "--title", "New",
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
                "--body-file", _spec(tmp_path)) == 1
     assert capsys.readouterr().err == (
         "refused: plan#4 [step, balance] New has this kind, title and text but holds the Arc "
@@ -123,8 +123,8 @@ def test_a_filing_run_again_over_a_card_whose_arc_label_was_changed_is_finished(
     stops no filing, which the same command finishes, its Arc as it was filed."""
     tracker = FakeTracker()
     tracker.add(4, body="New work.", title="New", labels=("balance", FILING), arc="salary",
-                on_board=False)
-    assert run(tracker, code, "file", "step", "--arc", "salary", "--title", "New",
+                effort="2", on_board=False)
+    assert run(tracker, code, "file", "step", "--effort", "2", "--arc", "salary", "--title", "New",
                "--body-file", _spec(tmp_path)) == 0
     assert tracker.writes == [("board_add", 4), ("unmark", 4)]
 

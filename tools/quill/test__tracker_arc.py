@@ -37,6 +37,9 @@ FIELDS = {"repository": {"issueFields": {"totalCount": 5, "nodes": [
     {"fullDatabaseId": "48771436", "name": "Arc"}]}}}
 #: The Arc's REST id in that read.
 ARC_ID = 48771436
+#: Each field's name by its REST id in that read.
+NAMES = {int(node["fullDatabaseId"]): node["name"]
+         for node in FIELDS["repository"]["issueFields"]["nodes"] if node}
 
 
 def _value(name, field="Arc", field_id=ARC_ID):
@@ -49,7 +52,8 @@ def _value(name, field="Arc", field_id=ARC_ID):
 class _GitHub:
     """A GitHub that answers the issue fields' read with ``fields`` and a create with the
     recorded create answer, carrying the type and labels sent and, for each value sent, its
-    value in GitHub's shape (``answered`` in its place when given), keeping every call."""
+    value in GitHub's shape, in the field its id names (``answered`` in their place when
+    given), keeping every call."""
 
     def __init__(self, fields=None, answered=None):
         """Hold the answers; keep each call."""
@@ -69,7 +73,8 @@ class _GitHub:
     def rest(self, method, path, body=None):
         """The recorded create, as sent."""
         self.calls.append((method, path, body))
-        values = [_value(value["value"]) for value in body.get("issue_field_values", [])]
+        values = [_value(value["value"], NAMES[value["field_id"]], value["field_id"])
+                  for value in body.get("issue_field_values", [])]
         return {**self.filed, "type": {**self.filed["type"], "name": body["type"]},
                 "labels": [{"name": name} for name in body["labels"]],
                 "issue_field_values": values if self.answered is None else self.answered}
@@ -105,6 +110,43 @@ def test_an_arc_github_did_not_set_as_sent_is_refused_not_trusted(answered, held
     with pytest.raises(TrackerError, match=rf"was filed as \('finding', \['filing', 'salary'\], "
                                            rf"{held}\), not .*'salary'\): fix it by hand"):
         tracker.create(Draft("finding", "t", "b", (), "salary"))
+
+
+def test_a_step_s_effort_is_sent_beside_its_arc_in_the_one_create():
+    """Ruling plan#2492: a step or a finding is filed holding its Effort, both fields' ids read
+    in one read and both values sent in the create itself, read back."""
+    github = _GitHub()
+    _tracker(github).create(Draft("step", "t", "b", (), "balance", effort="3"))
+    assert github.calls == [
+        ("graphql", _queries.issue_fields(PLAN), {}),
+        ("POST", f"{PLAN.path}/issues", {
+            "title": "t", "body": "b", "type": "step", "labels": ["balance", FILING],
+            "issue_field_values": [{"field_id": ARC_ID, "value": "balance"},
+                                   {"field_id": 47847924, "value": "3"}]})]
+
+
+def test_every_field_value_a_draft_holds_is_sent():
+    """A Priority a draft holds is sent too, so none it holds is filed dropped
+    (``_filed.filed_values``); no filing names one today (ruling plan#2507)."""
+    github = _GitHub()
+    _tracker(github).create(Draft("finding", "t", "b", (), "salary", priority="High",
+                                  effort="1"))
+    assert github.calls[1][2]["issue_field_values"] == [
+        {"field_id": ARC_ID, "value": "salary"}, {"field_id": 47847921, "value": "High"},
+        {"field_id": 47847924, "value": "1"}]
+
+
+@pytest.mark.parametrize(("answered", "held"), [
+    ([_value("balance")], "None"), ([_value("balance"), _value("2", "Effort", 47847924)], "'2'")])
+def test_an_effort_github_did_not_set_as_sent_is_refused_not_trusted(answered, held):
+    """GitHub drops a field value silently where the feature is off, and what it does with an
+    option the field lacks is unmeasured: a card answered holding no Effort, or another, is
+    refused, as a dropped Arc is."""
+    tracker = _tracker(_GitHub(answered=answered))
+    with pytest.raises(TrackerError, match=rf"was filed holding \{{'Arc': 'balance', 'Effort': "
+                                           rf"{held}\}}, not \{{'Arc': 'balance', 'Effort': "
+                                           rf"'3'\}}: fix it by hand"):
+        tracker.create(Draft("step", "t", "b", (), "balance", effort="3"))
 
 
 def test_a_task_is_filed_holding_no_arc_and_no_field_is_read():

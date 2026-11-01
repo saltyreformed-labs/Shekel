@@ -57,7 +57,8 @@ and ``file question --owner`` links a question to the step it is asked for, a li
 keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).  ``arc`` sets a card's Arc and puts
 its arc label back to display it, ``label`` adds or removes a label a person chooses (ruling
 plan#2221), and ``priority`` and ``effort`` set or clear a card's Priority and Effort
-(plan#2491, :mod:`_arc_label`).
+(plan#2491, :mod:`_arc_label`); ``file step`` and ``file finding`` file a card holding its
+Effort, the filing session's estimate (ruling plan#2492, :mod:`_filing`).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -65,8 +66,10 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill claim plan#N [--here]
     python -m tools.quill.quill release plan#N
     python -m tools.quill.quill show plan#N | OLD-ID
-    python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC [--parent plan#P]
+    python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC
+                                         --effort SESSIONS [--parent plan#P]
     python -m tools.quill.quill file finding --arc ARC --title NAME --owner plan#S --text SENTENCE
+                                            --effort SESSIONS
     python -m tools.quill.quill file ruling --arc ARC --title NAME
                                 (--owner plan#S --question-file Q | [--owner plan#S]
                                  --from-question plan#Q) --answer-file A

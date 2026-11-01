@@ -74,7 +74,7 @@ def arc_labels(arc: str | None) -> tuple[str, ...]:
     """The arc labels a card holding ``arc`` carries, as display of its Arc (ruling
     ``R-BAL354``): its arc's own, and none when it holds none, as a task does.  The one
     producer of a card's arc labels, which the create that files a card writes
-    (:func:`_tracker.filed_labels`)."""
+    (:func:`_filed.filed_labels`)."""
     return () if arc is None else (arc,)
 
 

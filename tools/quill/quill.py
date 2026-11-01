@@ -55,8 +55,9 @@ claimed card's next session starts and prints its prompt (rulings plan#1921, pla
 ``pr`` opens a card's pull request into ``dev``, its text naming the card so the card links it,
 and ``file question --owner`` links a question to the step it is asked for, a link its ruling
 keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).  ``arc`` sets a card's Arc and puts
-its arc label back to display it, and ``label`` adds or removes a label a person chooses
-(ruling plan#2221, :mod:`_arc_label`).
+its arc label back to display it, ``label`` adds or removes a label a person chooses (ruling
+plan#2221), and ``priority`` and ``effort`` set or clear a card's Priority and Effort
+(plan#2491, :mod:`_arc_label`).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -81,6 +82,8 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill comment plan#N --body-file TEXT
     python -m tools.quill.quill arc plan#N --to ARC
     python -m tools.quill.quill label plan#N (--add LABEL | --remove LABEL)
+    python -m tools.quill.quill priority plan#N (--to PRIORITY | --clear)
+    python -m tools.quill.quill effort plan#N (--to SESSIONS | --clear)
     python -m tools.quill.quill answer plan#N --body-file TEXT
     python -m tools.quill.quill note plan#N --body-file NOTE
     python -m tools.quill.quill block plan#N --by plan#M [--remove]
@@ -188,7 +191,6 @@ from tools.quill.check import (
     violations,
 )
 from tools.quill.setup_tracker import (
-    CHOSEN_LABELS,
     FILING,
     IN_ORDER,
     PLAN,
@@ -848,18 +850,6 @@ def cmd_spec_revert(args, tracker: Tracker, _root: Path) -> int:
 
 # -- the command line -----------------------------------------------------------------
 
-def _arc_label_parser(commands) -> None:
-    """``arc`` and ``label`` and their arguments (ruling plan#2221)."""
-    arc = commands.add_parser("arc", help="set a card's Arc, its arc label following it")
-    arc.add_argument("card", type=card_number)
-    arc.add_argument("--to", required=True, choices=ARCS, help="the arc it moves to")
-    label = commands.add_parser("label", help="add or remove a label a person chooses")
-    label.add_argument("card", type=card_number)
-    which = label.add_mutually_exclusive_group(required=True)
-    which.add_argument("--add", choices=CHOSEN_LABELS)
-    which.add_argument("--remove", choices=CHOSEN_LABELS)
-
-
 def _text_parser(commands) -> None:
     """``edit``, ``comment``, ``answer``, ``note`` and ``pr``, and their arguments: each names a
     card and a file holding the text it writes."""
@@ -901,7 +891,7 @@ def parser() -> argparse.ArgumentParser:
         "card")
     _filing.file_parser(commands)
     _text_parser(commands)
-    _arc_label_parser(commands)
+    _arc_label.add_parsers(commands)
     block = commands.add_parser("block", help="record a blocked-by edge")
     block.add_argument("card", type=card_number)
     block.add_argument("--by", type=card_number, required=True)
@@ -945,7 +935,8 @@ def parser() -> argparse.ArgumentParser:
 COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
     "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment, "arc": _arc_label.cmd_arc,
-    "label": _arc_label.cmd_label,
+    "label": _arc_label.cmd_label, "priority": _arc_label.cmd_field,
+    "effort": _arc_label.cmd_field,
     "answer": _comments.cmd_answer, "note": _notes.cmd_note, "block": cmd_block,
     "move": cmd_move, "drop": cmd_drop, "start": _tasks.cmd_start,
     "task-file": _tasks.cmd_task_file,

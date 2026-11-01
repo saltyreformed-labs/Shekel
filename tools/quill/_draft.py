@@ -26,11 +26,21 @@ class Owner:
 
 
 @dataclass(frozen=True)
-class Draft:
+class Draft:  # pylint: disable=too-many-instance-attributes
     """A card as it would stand after the change; ``owner`` None when it has none
-    (:class:`Owner`).  ``arc``: the value of its issue field Arc, None when it holds none;
+    (:class:`Owner`).
+
+    Pylint: too-many-instance-attributes (8/7) -- **eight because a card as a change leaves
+    it states eight facts**, each its own GitHub field or link -- its type, title, text,
+    labels, Arc, owner, Priority and Effort -- which the check and the create read between
+    them, and no subset of them travels apart from the others.
+
+    ``arc``: the value of its issue field Arc, None when it holds none;
     ``labels``: its labels but its arc's, which a filing writes beside them as display of its
-    Arc (``_tracker.filed_labels``), and which the check never reads (R-BAL354)."""
+    Arc (``_tracker.filed_labels``), and which the check never reads (R-BAL354).
+    ``priority`` and ``effort``: the values of its issue fields Priority and Effort
+    (:mod:`_fields`, plan#2491), None for one it holds none of or the change does not write,
+    as the check reads them only where the change writes them."""
 
     kind: str | None
     title: str
@@ -38,3 +48,5 @@ class Draft:
     labels: tuple[str, ...]
     arc: str | None
     owner: Owner | None = None
+    priority: str | None = None
+    effort: str | None = None

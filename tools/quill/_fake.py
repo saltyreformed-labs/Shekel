@@ -7,7 +7,8 @@ It keeps what the commands depend on the way the recordings show GitHub keeping
 it -- a body edit saves a full version, and the first edit also saves the body
 as filed; a parent's read lists each sub-issue's kind and state as they stand
 now, not as they were when it was linked; a mark removed from a card that
-does not carry it is answered as GitHub answers it, 404; a card added to the board
+does not carry it is answered as GitHub answers it, 404, and so is a field value cleared
+that the card does not hold; a card added to the board
 again keeps the item it has (and, unmeasured, its place), and an unlink of a card
 that is no sub-issue of the parent named is refused 403, as GitHub answers both
 (``recorded/twice.json``, ``recorded/unlink.json``) -- and FAILS LOUDLY on a write
@@ -35,12 +36,17 @@ from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
-from tools.quill._arcs import ArcCard
+from tools.quill._arcs import ARC_FIELD, ArcCard
 from tools.quill._board_fields import STATUS_OPTIONS
 from tools.quill._command import on_board as goes_on_board
+from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD
 from tools.quill._github import GitHubError
 from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, filed_labels, in_order
 from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
+
+#: The card's fact (:class:`_tracker.BareCard`) holding each issue field
+#: :meth:`FakeTracker.set_field` writes.
+FIELD_PARTS = {ARC_FIELD: "arc", PRIORITY_FIELD: "priority", EFFORT_FIELD: "effort"}
 
 
 class FakeBoard:
@@ -350,6 +356,18 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         """Set a card's Arc, its other facts kept."""
         self.writes.append(("set_arc", number, arc))
         self._set(number, arc=arc)
+
+    def set_field(self, number, field, value):
+        """Set a card's Arc, Priority or Effort to ``value``, or with None clear it, its other
+        facts kept.  A clear of a field the card holds none of is answered as GitHub answers it,
+        404 "Issue field value not found" (``_tracker.Tracker.set_field``), and nothing is
+        written."""
+        part = FIELD_PARTS[field]
+        if value is None and getattr(self.cards_by_number[number], part) is None:
+            raise GitHubError(404, f"DELETE .../issues/{number}/issue-field-values/{field} -> "
+                                   '404: {"message":"Issue field value not found"}')
+        self.writes.append(("set_field", number, field, value))
+        self._set(number, **{part: value})
 
     def relabel(self, number, add, remove):
         """Add the labels ``add`` to a card and remove ``remove``, its other labels kept.  A

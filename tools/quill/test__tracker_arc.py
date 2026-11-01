@@ -1,6 +1,8 @@
 """The create that files a card holding its Arc (rulings ``balance:R-BAL349``, ``R-BAL354``):
 :meth:`_tracker.Tracker.create`'s write of the field beside the arc label, its read of the
-field's id, and its read-back; nothing calls GitHub.
+field's id, and its read-back; and the one write of a card's field value
+(:meth:`_tracker.Tracker.set_field`, plan#2491), the Arc's (``set_arc``), its Priority's and
+its Effort's.  Nothing calls GitHub.
 
 No recording holds a create that sends a field value: none did when they were recorded
 (``test__tracker.py`` replays them, each create sending no Arc).  So each test answers from
@@ -189,3 +191,123 @@ def test_only_the_arc_field_s_value_is_the_arc_github_answered():
     assert arc_answered([_value("High", "Effort", 47847924), _value("recurrence")]) == "recurrence"
     assert arc_answered([_value("High", "Effort", 47847924)]) is None
     assert arc_answered([]) is None
+
+
+# -- the one write of a field value (plan#2491) ---------------------------------------------
+#
+# Each answer below is one GitHub gave on 2026-11-01 to ``quill priority`` and ``quill effort``
+# setting and clearing plan#2491's Priority and Effort
+# (``effort-priority-2026-11-01/measure_set_field.out``): the add answered the card's values
+# after it, the delete 204 and no body, and the read after it the card's values left.  The
+# issue fields quill's App read that day are :data:`FIELDS`, their ids unchanged.
+
+PRIORITY_ID, EFFORT_ID = 47847921, 47847924
+#: plan#2491's values as GitHub answered them, each by its field's name.
+ARC = {"issue_field_id": ARC_ID, "node_id": "IFSSV_kgDOAO_E3A", "data_type": "single_select",
+       "issue_field_name": "Arc", "value": 86134945,
+       "single_select_option": {"id": 86134945, "name": "tooling", "color": "red"}}
+PRIORITY = {"issue_field_id": PRIORITY_ID, "node_id": "IFSSV_kgDOAO_4kA",
+            "data_type": "single_select", "issue_field_name": "Priority", "value": 83761749,
+            "single_select_option": {"id": 83761749, "name": "High", "color": "red"}}
+EFFORT = {"issue_field_id": EFFORT_ID, "node_id": "IFSSV_kgDOAO_4kQ",
+          "data_type": "single_select", "issue_field_name": "Effort", "value": 86353218,
+          "single_select_option": {"id": 86353218, "name": "3", "color": "gray"}}
+#: Where a card's values are written and read.
+VALUES = f"{PLAN.path}/issues/7/issue-field-values"
+
+
+class _Values:
+    """A GitHub that answers the issue fields' read with ``fields``, an add with ``added``,
+    a delete with no body (204), and the read of the card's values with ``listed``, keeping
+    every call."""
+
+    def __init__(self, added=None, listed=None, fields=None):
+        """Hold the answers; keep each call."""
+        self.added, self.listed = added, listed
+        self.fields = FIELDS if fields is None else fields
+        self.calls = []
+
+    def graphql(self, query, **variables):
+        """The issue fields' read."""
+        self.calls.append(("graphql", query, variables))
+        return copy.deepcopy(self.fields)
+
+    def rest(self, method, path, body=None):
+        """The add, the delete or the read of the card's values."""
+        self.calls.append((method, path, body))
+        return copy.deepcopy({"POST": self.added, "DELETE": None, "GET": self.listed}[method])
+
+
+@pytest.mark.parametrize(("field", "value", "field_id", "added"), [
+    ("Priority", "High", PRIORITY_ID, [ARC, PRIORITY]),
+    ("Effort", "3", EFFORT_ID, [ARC, PRIORITY, EFFORT])])
+def test_a_value_is_the_add_of_the_one_value_read_back_from_its_answer(field, value, field_id,
+                                                                        added):
+    """The field's id read, then REST's add of the one value (never its set, PUT, which would
+    replace every value), its answer the card's values after it, the Arc kept."""
+    github = _Values(added=added)
+    _tracker(github).set_field(7, field, value)
+    assert github.calls == [
+        ("graphql", _queries.issue_fields(PLAN), {}),
+        ("POST", VALUES, {"issue_field_values": [{"field_id": field_id, "value": value}]})]
+
+
+@pytest.mark.parametrize(("field", "field_id", "listed"), [
+    ("Priority", PRIORITY_ID, [ARC, EFFORT]), ("Effort", EFFORT_ID, [ARC])])
+def test_a_clear_is_the_delete_of_the_value_then_a_read_of_the_card_s_values(field, field_id,
+                                                                             listed):
+    """The delete answers no body (204), so the card's values are read after it, and the
+    field holding none there is the clear done."""
+    github = _Values(listed=listed)
+    _tracker(github).set_field(7, field, None)
+    assert github.calls == [
+        ("graphql", _queries.issue_fields(PLAN), {}),
+        ("DELETE", f"{VALUES}/{field_id}", None),
+        ("GET", f"{VALUES}?per_page=100", None)]
+
+
+@pytest.mark.parametrize(("value", "added", "said"), [
+    ("3", [ARC, PRIORITY], r"plan#7 holds the Effort None, not '3', after it was set"),
+    ("4", [ARC, PRIORITY, EFFORT], r"plan#7 holds the Effort '3', not '4', after it was set"),
+    ("3", {"message": "Not Found"}, r"plan#7's Effort was answered \{'message': 'Not Found'\}, "
+                                    r"not a list of its field values"),
+    ("3", [{"issue_field_name": "Effort", "single_select_option": None}],
+     r"plan#7's Effort was answered .*, not a list of its field values"),
+])
+def test_a_set_github_did_not_make_is_refused(value, added, said):
+    """An answer that does not show the value set, another or none, or that is not the list
+    of the card's values, is refused, never trusted."""
+    with pytest.raises(TrackerError, match=said):
+        _tracker(_Values(added=added)).set_field(7, "Effort", value)
+
+
+@pytest.mark.parametrize(("listed", "said"), [
+    ([ARC, PRIORITY], r"plan#7 holds the Priority 'High', not None, after it was cleared"),
+    ({"message": "Not Found"}, r"plan#7's Priority was answered \{'message': 'Not Found'\}, "
+                               r"not a list of its field values"),
+])
+def test_a_clear_github_did_not_make_is_refused(listed, said):
+    """A read after the delete still showing the value, or not the list of the card's values,
+    is refused, never trusted."""
+    with pytest.raises(TrackerError, match=said):
+        _tracker(_Values(listed=listed)).set_field(7, "Priority", None)
+
+
+def test_a_full_page_read_after_a_clear_is_refused():
+    """A page of a hundred values, REST's most, may have another after it holding the value
+    cleared, so it says nothing of the clear; ninety-nine is the whole list."""
+    with pytest.raises(TrackerError, match=r"plan#7's issue field values were answered a full "
+                                           r"page of 100, which another may follow: read its "
+                                           r"Priority back by hand"):
+        _tracker(_Values(listed=[ARC] * 100)).set_field(7, "Priority", None)
+    _tracker(_Values(listed=[ARC] * 99)).set_field(7, "Priority", None)
+
+
+def test_a_field_the_repository_lacks_writes_nothing():
+    """No such field in the read is refused before any write is sent."""
+    github = _Values(fields={"repository": {"issueFields": {"totalCount": 1, "nodes": [
+        {"fullDatabaseId": "48771436", "name": "Arc"}]}}})
+    with pytest.raises(TrackerError, match="holds 0 issue fields named 'Effort' in a read of 1 "
+                                           "of its 1"):
+        _tracker(github).set_field(7, "Effort", "2")
+    assert [call[0] for call in github.calls] == ["graphql"]

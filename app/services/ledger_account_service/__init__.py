@@ -14,9 +14,8 @@ surface.
   width, the natural-key race handler (:func:`._common.add_or_reuse`), and the
   tenancy-filtered account load the two account-linked resolvers guard with.
 * :mod:`._linked` -- the ``linked`` Asset/Liability row, one per real
-  ``budget.accounts`` row (Build-Order Step 2), plus the class rule
-  (:func:`ledger_class_id_for_category`) the account-type boundary guards apply
-  to a PROPOSED category, and the re-class an unposted type change needs.
+  ``budget.accounts`` row (Build-Order Step 2), and the re-class an unposted
+  type change needs.
 * :mod:`._categories` -- the per-category Income/Expense rows an ordinary
   settled transaction's counter-leg books into (Step 3), and the door that
   answers the per-(owner, class) ``Uncategorized`` fallback for a transaction
@@ -33,13 +32,22 @@ surface.
   ``interest_income`` and ``unrealized_change`` from ruling **R-FO**), and the
   total dispatch that decides WHICH of them a given correction books into.
 
+**Every row's class and display name come from the worked-out chart**
+(:mod:`app.services.ledger_lines`, ruling plan#2518, plan task plan#2523): each
+resolver builds the row's ``ChartKey``, stamps the class the key carries and
+snapshots the label :func:`~app.services.ledger_lines.chart_label` gives, so the
+row stored here and the key worked out there cannot part.  The tables of kinds,
+classes and labels this package held moved there; what is left here is the
+get-or-create of the stored rows, which X-ew's third leaf (plan#2516) deletes.
+
 It was ONE 962-line module until plan step X-f3d, which needed room in it: four
 unrelated resolvers had accumulated behind one name, and the split is by the
 kind of chart row each one writes; ``balance:X-bi-6-3`` added the fifth when
-the fallback became one of two bucket kinds.  The public names are unchanged and are
-re-exported here, so every consumer keeps reading them off ``ledger_account_service``
--- the chart's one public surface, the same posture ``posting_service`` keeps
-over ``posting_reads``.
+the fallback became one of two bucket kinds.  The public names are re-exported
+here, so every consumer of a resolver reads it off ``ledger_account_service``,
+the same posture ``posting_service`` keeps over ``posting_reads``; the one that
+left, ``ledger_class_id_for_category``, is the worked-out chart's
+``linked_ledger_class`` since plan#2523.
 
 ## What the resolvers guarantee, and what the database does not
 
@@ -87,7 +95,6 @@ from ._counters import (
 from ._linked import (
     create_ledger_account_for_account,
     find_linked_ledger_account,
-    ledger_class_id_for_category,
     sync_linked_ledger_class,
 )
 from ._loans import get_or_create_loan_ledger_account
@@ -100,6 +107,5 @@ __all__ = [
     "get_or_create_category_ledger_account",
     "get_or_create_loan_ledger_account",
     "get_or_create_transit_ledger_account",
-    "ledger_class_id_for_category",
     "sync_linked_ledger_class",
 ]

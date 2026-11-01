@@ -57,12 +57,9 @@ from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services import ledger_account_service
-from app.services._posting_write import (
-    emit_typed_source_deltas,
-    is_transfer_leg,
-    ledger_class_of,
-)
+from app.services._posting_write import emit_typed_source_deltas, is_transfer_leg
 from app.services.cash_ledger import movement_cash_leg
+from app.services.ledger_lines import ledger_class_of
 from app.services.posting_reads import _ledger_account_for
 from app.services.transfer_legs import PlanItem
 from app.utils.balance_predicates import is_balance_contributing
@@ -195,7 +192,7 @@ def _purchase_target(entry, parent: PlanItem) -> dict[int, Decimal]:
 
     **The counter leg is the PARENT's own category, in the parent's class**
     (ruling **R-FM**, developer 2026-08-15; the class since X-bi-3b by
-    :func:`~app.services._posting_write.ledger_class_of`).  A movement carries
+    :func:`~app.services.ledger_lines.ledger_class_of`).  A movement carries
     no category of its own, and the money it records is its parent's: booking
     it there recognises the expense or income in the right category on the
     day it happens.  Through ``X-bi-3e`` the parent's close then booked the

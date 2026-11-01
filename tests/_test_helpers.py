@@ -1852,6 +1852,63 @@ def transit_ledger_account(db_session, user_id):
     )
 
 
+def stored_chart_key(ledger_account):
+    """Return the ``ChartKey`` a STORED chart row stands for, read off its columns.
+
+    The bridge the worked-out ledger's proof maps by (plan#2513: plan#2523
+    builds it, the parity test plan#2527 and the production run plan#2528 map
+    each worked-out line onto its stored row with it).  It reads the row AS
+    STORED -- its ``kind_id``, its ``class_id``, and the one link column its
+    shape sets -- and deliberately re-derives nothing: a stored class the
+    worked-out rule would not give (a stale snapshot) must surface as a key
+    that differs, never be repaired by the mapping.  The record is whichever of
+    ``account_id`` / ``category_id`` / ``loan_account_id`` is set; the shape
+    CHECKs allow at most one, and an owner bucket sets none.
+
+    A row no worked-out key can name maps to a key no constructor builds: an
+    ``orphan``, or a ``category`` row whose category was deleted (its
+    ``category_id`` SET NULL, its kind unchanged), whose ``record_id`` is
+    ``None``.  The records book those lines on the owner's Uncategorized bucket
+    instead, so a nonzero stored net on one is a difference the proof names.
+
+    Args:
+        ledger_account: The stored
+            :class:`~app.models.ledger_account.LedgerAccount`.
+
+    Returns:
+        The :class:`~app.services.ledger_lines.ChartKey` its columns spell.
+    """
+    # pylint: disable=import-outside-toplevel  -- same collection-time-safety
+    # convention as the helpers above (no app symbols at module load).
+    from app import ref_cache
+    from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
+    from app.services.ledger_lines import ChartKey
+
+    kinds = {
+        ref_cache.ledger_account_kind_id(member): member
+        for member in LedgerAccountKindEnum
+    }
+    classes = {
+        ref_cache.ledger_account_class_id(member): member
+        for member in LedgerAccountClassEnum
+    }
+    # At most one is set: ``ck_ledger_accounts_account_or_category_null`` and
+    # ``ck_ledger_accounts_loan_shape`` hold the row to it.
+    links = [
+        link for link in (
+            ledger_account.account_id,
+            ledger_account.category_id,
+            ledger_account.loan_account_id,
+        )
+        if link is not None
+    ]
+    return ChartKey(
+        kinds[ledger_account.kind_id],
+        classes[ledger_account.class_id],
+        links[0] if links else None,
+    )
+
+
 def linked_ledger_account(db_session, account_id):
     """Return the account's LINKED ledger row, never its anchor-equity twin.
 

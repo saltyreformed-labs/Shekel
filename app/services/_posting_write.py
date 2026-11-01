@@ -3,10 +3,13 @@
 The pieces every ledger WRITER composes -- the leg record
 (:class:`_PostingLeg`), the single balanced-write path
 (:func:`_emit_balanced_entry`), the description width, and since plan step
-``balance:X-bi-3b`` the two derivations a source's TYPE decides
-(:func:`ledger_class_of`, :func:`posting_kind_of`) -- in a LEAF module
-below every writer, so the correction packages can import them without
-importing :mod:`app.services.posting_service` itself.  It also held the entry's
+``balance:X-bi-3b`` the leg kind a source's TYPE decides
+(:func:`posting_kind_of`) -- in a LEAF module below every writer, so the
+correction packages can import them without importing
+:mod:`app.services.posting_service` itself.  The CLASS a source's type
+decides (``ledger_class_of``) lived here too, until plan task plan#2523 moved it
+into the worked-out chart (:mod:`app.services.ledger_lines`), which outlives
+this writer.  It also held the entry's
 civil-date rule as ``_utc_civil_date`` until ruling R-DH (2026-07-31) moved that
 day to the USER's timezone.  The day is a stored column since plan step X-f1
 (ruling R-EC), and a ROW's is read through
@@ -41,7 +44,7 @@ from datetime import date
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import LedgerAccountClassEnum, PostingKindEnum, PostingSourceEnum
+from app.enums import PostingKindEnum, PostingSourceEnum
 from app.extensions import db
 from app.models.journal_entry import JournalEntry, Posting
 from app.services.posting_reads import PostingError
@@ -97,30 +100,6 @@ def is_transfer_leg(parent) -> bool:
     return isinstance(parent, TransferLeg)
 
 
-def ledger_class_of(txn) -> LedgerAccountClassEnum:
-    """Return the chart class *txn*'s counter leg books to, by its TYPE.
-
-    An income row's counter account is an INCOME-class category account and
-    an expense row's an EXPENSE-class one -- the one mapping the movement
-    writer (``_posting_purchases._purchase_target``) reads, shared with the
-    row's own writer from plan step ``balance:X-bi-3b`` (when a movement's
-    class became its PARENT's, ruling **R-BAL35**) until ``balance:X-bi-4a``
-    deleted that writer, so the second would otherwise have spelled the
-    mapping again.  ``transaction_type_id`` is immutable, so the class is
-    stable across the row's life.
-
-    Args:
-        txn: The transaction, income or expense.
-
-    Returns:
-        :attr:`LedgerAccountClassEnum.INCOME` or ``.EXPENSE``.
-    """
-    return (
-        LedgerAccountClassEnum.INCOME if txn.is_income
-        else LedgerAccountClassEnum.EXPENSE
-    )
-
-
 def posting_kind_of(parent) -> int:
     """Return the ``ref.posting_kinds`` id every leg of *parent*'s money carries.
 
@@ -129,7 +108,8 @@ def posting_kind_of(parent) -> int:
     MOVEMENT's legs carry its PARENT's kind (plan step ``balance:X-bi-3b``): a
     purchase against an envelope is an ``expense`` posting and a paycheck's
     covering movement an ``income`` one, for the one reason
-    :func:`ledger_class_of` gives -- and a transfer leg's covering movement
+    :func:`app.services.ledger_lines.ledger_class_of` gives -- and a transfer
+    leg's covering movement
     a ``transfer`` one (plan step ``balance:X-bi-6-3``, ruling **R-BAL101**),
     because a transfer between the owner's own accounts is neither income nor
     expense, which is why its counter leg is the transit account and not a

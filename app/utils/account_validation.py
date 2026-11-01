@@ -66,7 +66,7 @@ from app.schemas.validation import (
     InterestParamsUpdateSchema,
 )
 from app.services.account_category import is_liability_category
-from app.services.ledger_account_service import ledger_class_id_for_category
+from app.services.ledger_lines import linked_ledger_class
 from app.utils import archive_helpers
 
 
@@ -218,7 +218,7 @@ def _crosses_posting_boundary(old_type, new_amortization, new_category_id):
       under the other.
     * **The Asset/Liability class boundary** (the category-derived linked
       ledger class flips, per
-      :func:`app.services.ledger_account_service.ledger_class_id_for_category`):
+      :func:`app.services.ledger_lines.linked_ledger_class`):
       posted legs carry the class's economic meaning on the balance
       sheet, and the class is a pairing-time snapshot.
 
@@ -233,8 +233,8 @@ def _crosses_posting_boundary(old_type, new_amortization, new_category_id):
     if bool(old_type.has_amortization) != bool(new_amortization):
         return True
     return (
-        ledger_class_id_for_category(old_type.category_id)
-        != ledger_class_id_for_category(new_category_id)
+        linked_ledger_class(old_type.category_id)
+        is not linked_ledger_class(new_category_id)
     )
 
 

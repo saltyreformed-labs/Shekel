@@ -9,8 +9,10 @@ per-(owner, class) ``Uncategorized`` bucket that catches a transaction whose
 module's door keeps its signature and delegates the fallback there.
 
 Unlike a linked row a category row carries a ``category_id`` and a NULL
-``account_id``, and snapshots a display ``name`` frozen at creation so
-renaming a budgeting category never rewrites posted history.
+``account_id``, and snapshots a display ``name`` at creation.  The class guard
+and the label are the worked-out chart's
+(:func:`app.services.ledger_lines.category_key`,
+:func:`~app.services.ledger_lines.chart_label`; plan task plan#2523).
 
 Flask-isolated and commit-free: plain data in, ORM objects out; the caller owns
 the transaction boundary.
@@ -19,27 +21,16 @@ the transaction boundary.
 import logging
 
 from app import ref_cache
-from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
+from app.enums import LedgerAccountClassEnum
 from app.extensions import db
 from app.models.category import Category
 from app.models.ledger_account import LedgerAccount
+from app.services.ledger_lines import ChartKey, category_key, chart_label
 
-from ._buckets import fallback_ledger_classes, get_or_create_owner_bucket
+from ._buckets import get_or_create_owner_bucket
 from ._common import LEDGER_ACCOUNT_NAME_MAX_LEN, resolve_chart_row
 
 logger = logging.getLogger(__name__)
-
-# The accounting classes a category ledger account may carry: Income or
-# Expense, exactly the classes the ``fallback`` bucket is defined for
-# (:func:`._buckets.fallback_ledger_classes`, derived from that module's label
-# map so the two can never drift).  An ordinary transaction's counter-leg is
-# always income or expense, while Asset/Liability belong to the linked
-# real-account rows and the ``transit`` bucket, and Equity to the per-loan
-# ``equity_opening`` and per-account ``anchor_equity`` opening rows, none of
-# which THIS resolver creates.  No database CHECK constrains a category row's
-# ``class_id``, so this set is the resolver's -- and the app's -- only guard
-# against minting a malformed chart entry.
-_CATEGORY_LEDGER_CLASSES = fallback_ledger_classes()
 
 
 def _find_existing_category_ledger_account(
@@ -74,13 +65,14 @@ def _find_existing_category_ledger_account(
     )
 
 
-def _category_display_name(user_id: int, category_id: int) -> str:
-    """Return a budget category's ``display_name`` to snapshot into ``name``.
+def _category_display_name(user_id: int, key: ChartKey) -> str:
+    """Return a category line's label to snapshot into ``name``.
 
-    Loaded fresh (not navigated through a relationship) because the snapshot
-    is taken once, at ledger-account creation, and must not track later
-    renames of the budgeting category -- posted history stays stable.
-    Truncated to :data:`._common.LEDGER_ACCOUNT_NAME_MAX_LEN` so a long
+    The label is the worked-out chart's
+    (:func:`app.services.ledger_lines.chart_label`: the category's
+    ``"Group: Item"``), loaded fresh rather than navigated through a
+    relationship because the snapshot is taken once, at ledger-account
+    creation.  Truncated to :data:`._common.LEDGER_ACCOUNT_NAME_MAX_LEN` so a long
     "Group: Item" (up to ~202 chars) always fits the ``name`` column; the label
     is display-only, so the clip is lossless for logic, and the equivalent
     ``LEFT(group || ': ' || item, <len>)`` in the Step-7 backfill yields the
@@ -96,7 +88,8 @@ def _category_display_name(user_id: int, category_id: int) -> str:
 
     Args:
         user_id: The owning user's id (the category must belong to them).
-        category_id: The budget category's id (non-NULL).
+        key: The category line's key (its ``record_id`` the budget category's
+            id, non-NULL).
 
     Returns:
         str -- the category's ``"Group: Item"`` display label, clipped to the
@@ -112,15 +105,15 @@ def _category_display_name(user_id: int, category_id: int) -> str:
     """
     category = (
         db.session.query(Category)
-        .filter_by(id=category_id, user_id=user_id)
+        .filter_by(id=key.record_id, user_id=user_id)
         .first()
     )
     if category is None:
         raise ValueError(
             f"cannot create a category ledger account: no budget category "
-            f"with id={category_id} owned by user_id={user_id}"
+            f"with id={key.record_id} owned by user_id={user_id}"
         )
-    return category.display_name[:LEDGER_ACCOUNT_NAME_MAX_LEN]
+    return chart_label(key, category)[:LEDGER_ACCOUNT_NAME_MAX_LEN]
 
 
 def get_or_create_category_ledger_account(
@@ -185,21 +178,16 @@ def get_or_create_category_ledger_account(
         flushed).
 
     Raises:
-        ValueError: If ``ledger_class`` is not Income or Expense (no database
-            CHECK enforces this, so the guard is the sole defense against a
+        ValueError: If ``ledger_class`` is not Income or Expense (from
+            :func:`app.services.ledger_lines.category_key`; no database CHECK
+            enforces this, so the guard is the sole defense against a
             malformed chart entry), or if a non-NULL ``category_id`` names
             no category owned by ``user_id``.
     """
-    if ledger_class not in _CATEGORY_LEDGER_CLASSES:
-        raise ValueError(
-            f"category ledger account must be Income or Expense class, "
-            f"got {ledger_class!r}"
-        )
+    key = category_key(category_id, ledger_class)
     if category_id is None:
-        return get_or_create_owner_bucket(
-            user_id, LedgerAccountKindEnum.FALLBACK, ledger_class,
-        )
-    class_id = ref_cache.ledger_account_class_id(ledger_class)
+        return get_or_create_owner_bucket(user_id, key.kind, key.ledger_class)
+    class_id = ref_cache.ledger_account_class_id(key.ledger_class)
     ledger_account = resolve_chart_row(
         lambda: _find_existing_category_ledger_account(
             user_id, class_id, category_id,
@@ -207,13 +195,11 @@ def get_or_create_category_ledger_account(
         lambda: LedgerAccount(
             user_id=user_id,
             class_id=class_id,
-            kind_id=ref_cache.ledger_account_kind_id(
-                LedgerAccountKindEnum.CATEGORY,
-            ),
+            kind_id=ref_cache.ledger_account_kind_id(key.kind),
             account_id=None,
             category_id=category_id,
             is_owner_bucket=False,
-            name=_category_display_name(user_id, category_id),
+            name=_category_display_name(user_id, key),
         ),
     )
     # "Resolved", not "Created": :func:`._common.resolve_chart_row` returns

@@ -36,41 +36,16 @@ the transaction boundary.
 """
 
 from app import ref_cache
-from app.enums import LedgerAccountClassEnum, LedgerAccountKindEnum
+from app.enums import LedgerAccountKindEnum
 from app.models.account import Account
 from app.models.ledger_account import LedgerAccount
 from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
 )
+from app.services.ledger_lines import account_counter_key, chart_label
 
 from ._common import ChartRowLink, get_or_create_chart_row, load_owned_account
-
-# The per-account counter kinds this resolver materialises, each mapped to
-# (its accounting class, the display-name suffix snapshotted into ``name``).
-# Spelled out here, like ``_LOAN_LEDGER_KINDS``, rather than derived from the
-# enum value, so renaming a ``LedgerAccountKindEnum`` member can never silently
-# rewrite the class or the label on already-posted rows.
-#
-# This map is the resolver's -- and therefore the app's -- sole guarantee that
-# an account-linked counter row carries the accounting class its kind implies:
-# no CHECK pins ``class_id`` to ``kind_id`` (a CHECK cannot subquery
-# ``ref.ledger_account_kinds``, and the project forbids hardcoding its IDs), so
-# a kind absent from this map is rejected before any write.
-#
-# ``ANCHOR_EQUITY``'s suffix stays ``"Opening"``: it is the label already
-# snapshotted on every live twin, and a snapshot is frozen at creation.
-_ACCOUNT_COUNTER_LEDGER_KINDS = {
-    LedgerAccountKindEnum.ANCHOR_EQUITY: (
-        LedgerAccountClassEnum.EQUITY, "Opening",
-    ),
-    LedgerAccountKindEnum.INTEREST_INCOME: (
-        LedgerAccountClassEnum.INCOME, "Interest Income",
-    ),
-    LedgerAccountKindEnum.UNREALIZED_CHANGE: (
-        LedgerAccountClassEnum.UNREALIZED, "Change in Value",
-    ),
-}
 
 # WHAT a TRUE-UP's difference MEANS, by the account's projection kind (ruling
 # **R-FO**).  Total over the four NON-loan kinds
@@ -208,8 +183,9 @@ def get_or_create_account_counter_account(
 
     The accounting class is derived from ``kind`` (``anchor_equity`` ->
     Equity; ``interest_income`` -> Income; ``unrealized_change`` ->
-    ``UNREALIZED``) via ``_ACCOUNT_COUNTER_LEDGER_KINDS``, so the caller passes
-    only the kind and the class can never be set inconsistently with it.
+    ``UNREALIZED``) by the worked-out chart
+    (:func:`app.services.ledger_lines.account_counter_key`), so the caller
+    passes only the kind and the class can never be set inconsistently with it.
 
     Idempotent: an existing row for the ``(account, kind)`` natural key is
     returned unchanged (the ``uq_ledger_accounts_account_kind`` partial unique
@@ -217,12 +193,13 @@ def get_or_create_account_counter_account(
     (sharing the column with the account's ``linked`` row and with its other
     counter kinds -- all coexist under that key), leaves ``category_id`` /
     ``loan_account_id`` NULL and ``is_owner_bucket`` False, and ALWAYS snapshots a
-    display ``name`` (``"<account name> -- Opening|Interest Income|Unrealized
-    Gain / Loss"``, clipped to the column width): the COALESCE display rule is
-    the LINKED-row rule, so readers branch on ``kind_id`` and render this
-    snapshot (see :class:`app.models.ledger_account.LedgerAccount`).  Like
-    every snapshot it is frozen at creation, so renaming the account never
-    rewrites posted history.
+    display ``name`` (``"<account name> -- Opening|Interest Income|Change in
+    Value"``, the worked-out chart's label, clipped to the column width): the
+    COALESCE display rule is the LINKED-row rule, so readers branch on
+    ``kind_id`` and render this snapshot (see
+    :class:`app.models.ledger_account.LedgerAccount`).  Like every snapshot it
+    is frozen at creation, so renaming the account does not relabel the stored
+    row; the worked-out label follows the rename (ruling plan#2518).
 
     Flushes so the new row's ``id`` is assigned, but does NOT commit -- the
     caller (``account_posting_service``) owns the transaction boundary.
@@ -249,22 +226,14 @@ def get_or_create_account_counter_account(
             the three, so these guards are the sole defense against a malformed
             chart entry.
     """
-    if kind not in _ACCOUNT_COUNTER_LEDGER_KINDS:
-        raise ValueError(
-            f"account counter ledger account kind must be one of "
-            f"{sorted(member.value for member in _ACCOUNT_COUNTER_LEDGER_KINDS)}, "
-            f"got {kind!r}"
-        )
-    ledger_class, component = _ACCOUNT_COUNTER_LEDGER_KINDS[kind]
+    key = account_counter_key(kind, account_id)
     return get_or_create_chart_row(
         user_id,
-        ref_cache.ledger_account_kind_id(kind),
-        ref_cache.ledger_account_class_id(ledger_class),
+        ref_cache.ledger_account_kind_id(key.kind),
+        ref_cache.ledger_account_class_id(key.ledger_class),
         ChartRowLink(LedgerAccount.account_id, account_id),
         # Called ONLY when a row is being created, which is what keeps the
         # non-loan guard off the hit path: an existing row resolves without
         # loading (or re-validating) the account.
-        lambda: (
-            f"{_load_non_loan_account(user_id, account_id).name} -- {component}"
-        ),
+        lambda: chart_label(key, _load_non_loan_account(user_id, account_id)),
     )

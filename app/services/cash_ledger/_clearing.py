@@ -351,7 +351,8 @@ def statement_coverage(
     """Return the clearing rule for an account, from its assertion facts.
 
     Takes the facts rather than an account id, so a caller already holding them
-    -- both walks load them to replay -- pays no second query, and a caller that
+    -- a :class:`~._walk.CashLedgerWalk`, whose ``coverage`` this is -- pays no
+    second query, and a caller that
     does not (:func:`~._events.coverage_for`) has exactly one place that turns
     an id into them.
 

@@ -21,10 +21,12 @@ a change in value, or the equity opening (ruling **R-FO**, plan step X-f3d).
 
 Mirrors :mod:`app.services.loan_posting_service` (split by concern):
 
-* :mod:`._walk` -- the pure DAY-granular walk: replay the account's
-  :class:`~app.models.account.AccountAnchorHistory` rows against the source
-  facts read back from its linked ledger, producing one
-  :class:`AccountAnchorCorrection` per assertion.
+* :mod:`._walk` -- the pure DAY-granular walk: the account's opening equity,
+  then one :class:`AccountAnchorCorrection` per
+  :class:`~app.models.account.AccountAnchorHistory` row, off the read fold's
+  own assertion replay over the account's settled records
+  (:func:`app.services.balance_at.assertion_corrections`, plan task
+  plan#2525).
 * :mod:`._anchors` -- the opening + true-up reconcile: per-(source kind,
   pay period, civil date) targets, posted-leg read-back, one balanced delta
   per key that differs.

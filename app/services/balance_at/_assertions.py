@@ -20,20 +20,23 @@ of a leaf instead of a deletion in a fold.  So the replay lives HERE, beside the
 running total it is a policy about, and each fold applies what its own kind
 needs: :mod:`._cash_fold` for PLAIN, :mod:`._asset_fold` for the modelled kinds.
 
-**What plan step X-d must decide, named here rather than discovered there.**
-That step wires the POSTING writer onto the cash walk, and each of these
-corrections is what it books as a balanced journal entry.  It can no longer
-reach them: ``account_posting_service`` importing ``balance_at._assertions`` is
-a private-module import in every spelling (W9910,
+**The POSTING writer reads this replay through the seam's public door** (plan
+task plan#2525).  Each of these corrections is what the writer books as a
+balanced journal entry, and it could not reach them here:
+``account_posting_service`` importing ``balance_at._assertions`` is a
+private-module import in every spelling (W9910,
 :mod:`tools.pylint.shekel_checkers.package_privacy` -- no allowlist, and
-``TYPE_CHECKING`` is not exempt).  So X-d chooses between giving the seam a
-PUBLIC entry the writer takes, and having the writer re-implement the replay --
-which would recreate the two-independent-statements drift the walk's own
-"one walk closes it by construction" exists to remove.  The choice is smaller
-than it looks after plan step X-f3c-5: a PLAIN account books no
-``account_trueup`` at all there, so what survives is the modelled kinds' half.
-The RESIDUE decision two paragraphs down in :mod:`app.services.cash_ledger._walk`
-is named for the same reason (``CLAUDE.md`` rule 8).
+``TYPE_CHECKING`` is not exempt).  So the writer kept a replay of its own,
+``walk_account_ledger``, over its own STORED postings: two statements of one
+running total, which rule 14 forbids however well they agreed.  The choice this
+paragraph left plan step X-d is made the one way that keeps a single replay --
+:mod:`app.services.balance_at` re-exports :func:`assertion_corrections` and
+:class:`CashAnchorCorrection`, and the writer's walk is the opening plus one
+correction per element of this list.  Moving the replay DOWN into
+``cash_ledger`` was the other spelling of "reachable" and the fence refuses it:
+``balance_before`` is a balance-at-T, and that leaf's producer set is empty and
+stays empty (W9909).  The RESIDUE the writer's walk used to read is the subject
+of a paragraph in :mod:`app.services.cash_ledger._walk`.
 
 **It is a prefix sum, which is the other reason it is here.**
 :attr:`CashAnchorCorrection.balance_before` is the account's balance an instant
@@ -67,11 +70,12 @@ class CashAnchorCorrection:
     which is the healthy steady state -- an account whose every movement is
     recorded needs no correction at all.
 
-    On the write side (plan step X-d) each of these becomes a balanced journal
-    entry, the opening tagged ``account_opening`` and every later one
-    ``account_trueup``, exactly as
-    :class:`app.services.account_posting_service.AccountAnchorCorrection` is
-    today -- subject to the reachability decision the module docstring names.
+    On the write side each of these becomes a balanced ``account_trueup``
+    journal entry: :func:`app.services.account_posting_service.walk_account_ledger`
+    wraps each one in an
+    :class:`~app.services.account_posting_service.AccountAnchorCorrection`
+    behind the account's ``account_opening`` (plan task plan#2525; the module
+    docstring says why it is reached through the seam's door).
 
     Attributes:
         anchor: The :class:`~app.services.cash_ledger.CashAnchorFact` this

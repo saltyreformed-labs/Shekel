@@ -654,7 +654,12 @@ def resync_all_cash_postings() -> tuple[int, int]:
     the one re-check per scenario (one owner's; the self-heal takes no lock,
     and this function took every owner's at its start) reads the finished
     ledger.  The union's earliest day can only make the re-check run where
-    one source alone would skip it.
+    one source alone would skip it.  **Since plan task plan#2525 the waiting
+    money cannot mislead a walk at all**: the account walk reads the RECORDS
+    rather than what is posted, so a re-check inside the loop would book the
+    same corrections this one does.  The hold stays because one walk per
+    scenario is cheaper than one per source, and a re-check still writes
+    wherever a re-booked source's RECORD moved across an assertion.
 
     **From plan step ``balance:X-bi-6-3`` it REFUSED to finish while any
     transfer still held a nonzero legacy net** (ruling **R-BAL104**, amended
@@ -750,9 +755,10 @@ def resync_all_cash_postings() -> tuple[int, int]:
     Raises:
         PostingError: If a ROW's family cannot post (the transaction arm
             does not skip), or if the one anchor re-check
-            refuses an account (anchor history with no linked ledger, or a
-            posted net whose source it cannot resolve).  In every case the
-            caller's transaction must not commit.
+            refuses an account (a correction to book and no linked ledger to
+            book it on, refused at the reconcile's emit step; the walk read
+            posted nets it could also refuse until plan task plan#2525).  In
+            every case the caller's transaction must not commit.
     """
     lock_every_user_writes()
     settled_ids = settled_status_ids()
@@ -877,9 +883,9 @@ def resync_all_cash_postings() -> tuple[int, int]:
             _hold_for_the_re_check(held, xfer.scenario_id, accounts, entries)
     # The ONE anchor re-check, after every source is re-booked (ruling
     # **R-BAL103**; the docstring says why).  Outside the per-transfer
-    # SAVEPOINT on purpose: the walk refuses only for the ACCOUNT
-    # (anchor history with no linked ledger, or a posted net whose source it
-    # cannot resolve), never for one transfer's re-book, and the deploy's third
+    # SAVEPOINT on purpose: the re-check refuses only for the ACCOUNT (a
+    # correction to book and no linked ledger to book it on), never for one
+    # transfer's re-book, and the deploy's third
     # hook walks every non-loan account with no skip
     # (``account_posting_service.backfill_all_account_anchor_postings``), so
     # such an account aborts the deploy there regardless.

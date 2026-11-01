@@ -39,26 +39,23 @@ R-G), so they are the seam fold's tier, exactly as the loan plan's PLANNED tier
 lives in ``balance_at._plan`` and not in ``loan_ledger``.
 
 **Two consumers, one walk** (ruling R-H).  The seam's read pass folds it into a
-balance at a date; at plan step X-d the posting writer projects the same facts
-into the balanced corrections it reconciles onto the general ledger, replacing
-the postings-sourced
-:func:`app.services.account_posting_service.walk_account_ledger`.
-Today those are two independent statements of what happened to an account -- one
-period-granular over transaction rows, one instant-granular over the postings it
-is correcting -- and their disagreement IS the defect Phase X exists to close
-(findings cash D1-D4).  One walk closes it by construction rather than by a test
-holding two implementations in step.
+balance at a date, and since plan task plan#2525 the posting writer books the
+same facts' assertion corrections onto the general ledger:
+:func:`app.services.account_posting_service.walk_account_ledger` frames the
+read fold's own replay over this walk
+(:func:`app.services.balance_at.assertion_corrections`, published at the seam's
+door because W9910 forbids the writer importing ``balance_at._assertions`` and
+its ``balance_before`` is a balance-at-T this package may not hold).  Until
+then they were two independent statements of what happened to an account --
+the writer's replayed its own STORED postings -- and their disagreement IS the
+defect Phase X exists to close (findings cash D1-D4).  One walk closes it by
+construction rather than by a test holding two implementations in step.
 
-**How that writer reaches the CORRECTIONS is a decision plan step X-f3c-1 left
-it**, and it is named in :mod:`app.services.balance_at._assertions` rather than
-left to be discovered: W9910 forbids ``account_posting_service`` importing that
-private module in every spelling.  It is the same treatment the RESIDUE
-question two paragraphs down gets, for the same reason.
-
-**Three differences from the account POSTING walk, all deliberate, all settled at
-X-d.**  (1) This walk reads SOURCE rows where that one reads back the postings;
-that is the direction the whole arc turns on -- the posted ledger is a projection
-of the facts, not a second opinion about them (plan Section 1, root cause 2).
+**Three differences from the account POSTING walk were named here, and plan
+task plan#2525 closed two.**  (1) That walk read back its own postings where
+this one reads SOURCE rows; the writer reads this walk now, the direction the
+whole arc turns on -- the posted ledger is a projection of the facts, not a
+second opinion about them (plan Section 1, root cause 2).
 (2) It does not refuse an amortizing account.  That refusal is a WRITE concern
 (which correction family a loan's anchors book into), not a property of a fact
 stream, and the cash-flow seam view deliberately consults no kind -- its balance
@@ -71,15 +68,18 @@ which closed the calendar door finding N-38 measured open (the Van Loan
 rendered at ``$531.94`` against ``$15,663.59`` owed).  So this walk stays total
 and kind-blind, the writer keeps
 the guard it needs, and no screen reaches a cash-basis loan balance through
-either.  (3) It sees no RESIDUE.  The posting walk reads a second source bucket
+either.  (3) It sees no RESIDUE.  The posting walk read a second source bucket
 beside the movement-linked one -- entries whose movement link
 (``transaction_entry_id``) was SET-NULLed by a hard
 delete -- precisely so its running total "stays equal to the live linked total
 even if the reverse-before-delete discipline is ever violated".  A source-row
-walk cannot see a posting whose source row is gone, by construction, so X-d must
-decide whether that defence moves to the checked-projection assert (where a
-residue row becomes a LOUD mismatch instead of a silently absorbed one) or is
-ceded; it is named here so that decision is made rather than discovered.
+walk cannot see a posting whose source row is gone, by construction, so moving
+the writer onto this walk at plan task plan#2525 decided it: a residue that does
+not net to zero is now a LOUD difference between the stored ledger and the
+records, which the parity proof of plan step plan#2513 names, rather than one
+the corrections silently absorb.  Measured on production 2026-11-01: four
+``purchase`` residue entries (two reversal pairs), netting ``$0.00`` per ledger
+account and per (paycheck, day).
 
 Reads the account's rows; no writes, no commit.
 

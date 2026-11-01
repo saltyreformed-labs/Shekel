@@ -193,15 +193,19 @@ class CashAnchorFact:
     same-day tie -- the same key :func:`app.services.cash_ledger.resolve_anchor`
     takes descending, and the FIRST is the account's OPENING.
 
-    **That order is a CONTRACT two walks depend on, not a convenience.**  Both
-    replays advance a monotonic pointer through day-sorted sources
-    (:func:`app.services.cash_ledger.walk_cash_ledger` and
-    :func:`app.services.account_posting_service.walk_account_ledger`), so a
-    fact list not non-decreasing in :attr:`observed_on` makes the pointer skip
-    sources it should absorb and mis-state a ``ledger_before`` the posting
-    walk WRITES to the general ledger.  The read side used to re-sort and so
-    self-healed it; since the one-partition step neither side does, because one
-    ordering stated where the rows are read is what finding N-133 / R1 ruled.
+    **That order is a CONTRACT the one replay depends on, not a convenience.**
+    :class:`~._clearing.StatementCoverage` bisects it for a source no statement
+    was recorded as showing, and
+    :func:`app.services.balance_at.assertion_corrections` measures each
+    assertion against the one before -- the read fold's replay, and since plan
+    task plan#2525 the posting writer's too
+    (:func:`app.services.account_posting_service.walk_account_ledger` frames
+    it), where there were two replays.  So a fact list not non-decreasing in
+    :attr:`observed_on` mis-states a ``ledger_before`` the writer WRITES to the
+    general ledger as well as a balance the fold shows.  The read side used to
+    re-sort and so self-healed it; since the one-partition step nothing does,
+    because one ordering stated where the rows are read is what finding N-133 /
+    R1 ruled.
     The key was ``(created_at, id)`` until plan step 2 made ``observed_on``
     user-supplied and the two orders could differ -- which is how a
     ``$1,307.66`` true-up once posted to the ledger tagged as the OPENING.
@@ -294,12 +298,12 @@ class CashAnchorFact:
 
         An assertion is the closing balance for its civil day, so it reconciles
         every movement dated on or before :attr:`observed_on` (ruling R-DH (a)).
-        Both walks ask their sources through this -- the read replay in
-        :func:`app.services.cash_ledger.walk_cash_ledger` and the posted
-        ledger's in
-        :func:`app.services.account_posting_service.walk_account_ledger` -- so
-        the rule they apply is one implementation rather than two statements
-        held in step by convention.
+        Read off the LAST assertion by the walk's own boundary
+        (:attr:`~._walk.CashLedgerWalk.reconciled_through`, the modelled
+        side's, ruling R-FL).  Both cash replays asked their sources through
+        this until plan step X-f3a-1 moved them onto
+        :class:`~._clearing.StatementCoverage`, and the posting walk's replay
+        is gone since plan task plan#2525: it reads the read fold's.
 
         Returns:
             The :class:`~app.services.cash_ledger.ReconciledThrough` for this

@@ -30,8 +30,16 @@ finding) and both agree exactly:
   opening or true-up, and since plan step ``balance:X-bi-6-3`` (ruling
   **R-BAL102**) a loan payment's SPLIT: a derivation of the walk is keyed
   ``(kind, period, date)`` and links no row.
-* :func:`emit_correction_deltas` -- the reconcile LOOP itself: union the
-  target and posted keys, emit one balanced delta per key that differs.
+* :func:`emit_correction_deltas` -- the reconcile LOOP itself: resolve the
+  target's chart keys to stored rows, union the target and posted keys, emit
+  one balanced delta per key that differs.
+
+A correction TARGET is keyed by chart key (:data:`ChartLegMap`, plan task
+plan#2524): the target rules name what each leg is booked on and touch no
+stored chart row, and the loop resolves the keys at its emit step
+(:func:`app.services._posting_write.resolve_chart_targets`).  What is POSTED
+is read back by stored row (:data:`LegMap`), and the delta is taken between
+two maps keyed the same way.
 
 Flask-isolated and commit-free like its consumers: plain data in, ORM
 objects or plain values out; flushes only through the shared balanced-write
@@ -48,12 +56,14 @@ from app.extensions import db
 from app.models.account import Account
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
+from app.services.ledger_lines import ChartKey
 from app.services.pay_calendar import PayCalendar, calendar_for
 from app.services.posting_reads import PostingError
 from app.services._posting_write import (
     _MAX_DESCRIPTION_LENGTH,
     _PostingLeg,
     _emit_balanced_entry,
+    resolve_chart_targets,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,8 +98,12 @@ _ZERO_MONEY = Decimal("0.00")
 # decoration on this tuple: it is the half of the key that makes a reversal
 # land where the postings it undoes live.
 CorrectionKey = tuple[int, int, date]
-# The target/posted leg map: {ledger_account_id: (signed amount, posting_kind_id)}.
+# The posted leg map, and a target once resolved: {ledger_account_id: (signed
+# amount, posting_kind_id)}.
 LegMap = dict[int, tuple[Decimal, int]]
+# A correction target as its rule builds it: {chart key: (signed amount,
+# posting_kind_id)} (plan task plan#2524).
+ChartLegMap = dict[ChartKey, tuple[Decimal, int]]
 
 
 def account_owner_id(account_id: int) -> int | None:
@@ -372,14 +386,17 @@ def delta_legs(target: LegMap, posted: LegMap) -> list[_PostingLeg]:
     return legs
 
 
-def merge_target_legs(bucket: LegMap, legs: LegMap) -> None:
+def merge_target_legs(bucket: ChartLegMap, legs: ChartLegMap) -> None:
     """Sum a correction's legs into a per-key target *bucket*, in place.
 
     The same-key merge both anchor reconciles apply when two anchors share
     one reconcile key -- same source kind, same pay period AND same civil day.
-    Each ledger's amounts add, so the merged target expresses the anchors'
-    combined jump (landing on the later anchor's value, since each
-    correction's delta already accounts for the prior one).  The posting kind
+    Each chart key's amounts add -- one key is one stored row, so it is the
+    sum each row took while this merged by row -- and the merged target
+    expresses the anchors' combined jump (landing on the later anchor's value,
+    since each correction's delta already accounts for the prior one).  A leg
+    that nets to zero stays in the bucket, so its row is still resolved
+    (:func:`~app.services._posting_write.resolve_chart_targets`).  The posting kind
     is shared within a key by construction (one key holds one source kind,
     whose legs all carry that kind), so the incoming kind simply wins.
 
@@ -517,14 +534,17 @@ def emit_correction_deltas(
     owner_id: int,
     scenario_id: int,
     *,
-    target: dict[CorrectionKey, LegMap],
+    target: dict[CorrectionKey, ChartLegMap],
     posted: dict[CorrectionKey, LegMap],
 ) -> None:
     """Emit one balanced delta entry per correction key that differs.
 
     The reconcile LOOP both anchor packages share -- and, since plan step
     ``balance:X-bi-6-3`` (ruling **R-BAL102**), the loan payment split, which
-    the loan package reconciles beside its anchors in ONE call: over the
+    the loan package reconciles beside its anchors in ONE call: resolve the
+    target's chart keys to the owner's stored rows
+    (:func:`app.services._posting_write.resolve_chart_targets`, plan task
+    plan#2524), then over the
     UNION of the target and posted keys in sorted order, take each key's
     ``target - posted`` deltas (:func:`delta_legs`) and, when any are
     non-zero, emit them as one balanced entry (
@@ -559,21 +579,28 @@ def emit_correction_deltas(
     unlikely.
 
     Args:
-        owner_id: The account owner's user id.
+        owner_id: The account owner's user id, whom every target row belongs
+            to.
         scenario_id: The budget scenario to reconcile within.
-        target: ``{key: {ledger_account_id: (amount, kind_id)}}`` the ledger
-            should net to per key (a key with an empty leg map reverses that
-            key to zero).
+        target: ``{key: {chart key: (amount, kind_id)}}`` the ledger should
+            net to per key (a key with an empty leg map reverses that key to
+            zero).
         posted: ``{key: {ledger_account_id: (net, kind_id)}}`` currently
             posted, from :func:`posted_correction_legs`.
 
     Raises:
         PostingError: If a key names a non-correction source kind, or its
             legs do not balance (both via
-            :func:`emit_correction_entry`).
+            :func:`emit_correction_entry`), or a target names the linked row
+            of an account that has none (via
+            :func:`~app.services._posting_write.resolve_chart_targets`).
+        ValueError: From the chart's family resolvers, if a target names a
+            record they refuse (a loan component on a non-loan, a counter on
+            a loan, an account not the owner's).
     """
-    for key in sorted(set(target) | set(posted)):
-        legs = delta_legs(target.get(key, {}), posted.get(key, {}))
+    resolved = resolve_chart_targets(owner_id, target)
+    for key in sorted(set(resolved) | set(posted)):
+        legs = delta_legs(resolved.get(key, {}), posted.get(key, {}))
         if not legs:
             continue
         emit_correction_entry(owner_id, scenario_id, key, legs)

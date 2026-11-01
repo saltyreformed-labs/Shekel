@@ -20,7 +20,9 @@ the walk implies -- what the next deploy's ``backfill_all_loan_postings``
 reconciles the ledger to -- then the plan's payments, the trajectory's
 projected splits, the payoff, a balance grid, the what-if lever and the
 projected interest.  It reads only producers present on both sides of
-R16-c-2, so the one file runs on both trees.
+R16-c-2, so the one file runs on both trees.  *Since plan task plan#2524 the
+two target builders take the loan and key each leg by its chart key rather
+than a stored ledger row, so the file runs only on trees holding that task.*
 
 **The BASELINE and the TODAY read are expected byte-identical after
 recurrence:R23** (a loan with no unpaid installment after its latest
@@ -103,7 +105,8 @@ Nothing it prints carries an id a door's own write assigned, for the reason
 ``verify_generation_pass.py`` states: PostgreSQL does not roll a sequence
 back, so an id-bearing dump reads as a difference between two runs of
 identical code.  The posting targets name rows the clone already holds (a
-pay period, a ledger account, a reference kind), which no run re-assigns.
+pay period, the loan a chart key names, a reference kind), which no run
+re-assigns.
 
 **Each door runs alone, and a refused door ends nothing** (finding
 plan#1859).  Each opens a savepoint and ``Session.rollback()`` afterwards
@@ -209,12 +212,19 @@ def _outcome_line(label, kind, account, outcome):
 
 
 def _target_lines(label, kind, account, targets):
-    """Print a posting target map with its keys and legs in a stable order."""
+    """Print a posting target map with its keys and legs in a stable order.
+
+    Each leg is keyed by its chart key (plan task plan#2524), printed as its
+    kind and the record it names.
+    """
     for key in sorted(targets, key=lambda k: (k[2], k[0], k[1])):
         legs = targets[key]
         rendered = ",".join(
-            f"{ledger}:{amount}/{kind_id}"
-            for ledger, (amount, kind_id) in sorted(legs.items())
+            f"{chart.kind.value}:{chart.record_id}:{amount}/{kind_id}"
+            for chart, (amount, kind_id) in sorted(
+                legs.items(),
+                key=lambda leg: (leg[0].kind.value, leg[0].record_id),
+            )
         )
         print(
             f"{label}\t{kind}\taccount={account.id}\tsource={key[0]}"
@@ -242,12 +252,13 @@ def _ledger_lines(label, account):
             f"\tstated={correction.anchor.anchor_balance}"
         )
     _target_lines(
-        label, "POST-PAY", account, payment_split_targets(walk.settled_splits),
+        label, "POST-PAY", account,
+        payment_split_targets(walk.settled_splits, account),
     )
     _target_lines(
         label, "POST-ANCHOR", account,
         anchor_correction_targets(
-            walk.anchor_corrections, USER_ID, calendar_for(USER_ID),
+            walk.anchor_corrections, account, calendar_for(USER_ID),
         ),
     )
 

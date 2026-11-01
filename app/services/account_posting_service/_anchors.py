@@ -24,7 +24,9 @@ hard-deletable).
 **WHICH counter ledger is a total dispatch over the account's projection kind**
 (ruling **R-FO**, plan step X-f3d), resolved by
 :func:`app.services.ledger_account_service.anchor_correction_counter_kind` and
-materialised once per reconcile by :func:`_counter_ledger_accounts`.  An
+keyed once per correction by :func:`_counter_keys`.  The targets name chart
+KEYS and touch no stored chart row; the shared reconcile loop resolves them to
+rows at its emit step (plan task plan#2524).  An
 OPENING books to the account's equity row whatever its kind -- capital brought
 onto the books is not something earned -- and a TRUE-UP books to what the
 difference WAS: interest income for an ``INTEREST`` account, a change in
@@ -140,25 +142,20 @@ yet (plan step X-ai-s).
 from decimal import Decimal
 
 from app import ref_cache
-from app.enums import (
-    LedgerAccountKindEnum,
-    PostingKindEnum,
-    PostingSourceEnum,
-)
+from app.enums import PostingKindEnum, PostingSourceEnum
 from app.models.account import Account
-from app.models.ledger_account import LedgerAccount
 from app.services import ledger_account_service
 from app.services._posting_reconcile import (
+    ChartLegMap,
     CorrectionKey,
-    LegMap,
     emit_correction_deltas,
     filing_calendar_for,
     merge_target_legs,
     posted_correction_legs,
 )
 from app.services.account_projection import classify_account
+from app.services.ledger_lines import ChartKey, account_counter_key, linked_key
 from app.services.pay_calendar import PayCalendar
-from app.services.posting_reads import _ledger_account_for
 
 from ._walk import AccountAnchorCorrection
 
@@ -205,9 +202,9 @@ def _correction_delta(correction: AccountAnchorCorrection) -> Decimal:
     ``anchor_balance - ledger_before``: the jump from what the walked ledger
     said just before this assertion to what the assertion declares.  Zero means
     the correction books NOTHING, which is the one predicate two callers share
-    -- :func:`_counter_ledger_accounts` (which mints no chart row for a
-    correction that books nothing) and :func:`_account_anchor_correction_target`
-    (which returns an empty target for it) -- so it is stated once rather than
+    -- :func:`_counter_keys` (which names no counter key for a correction that
+    books nothing) and :func:`_account_anchor_correction_target` (which
+    returns an empty target for it) -- so it is stated once rather than
     spelled twice and left to drift.
 
     Args:
@@ -219,20 +216,22 @@ def _correction_delta(correction: AccountAnchorCorrection) -> Decimal:
     return correction.target_balance - correction.ledger_before
 
 
-def _counter_ledger_accounts(
-    owner_id: int,
+def _counter_keys(
     account: Account,
     corrections: list[AccountAnchorCorrection],
-) -> list[LedgerAccount | None]:
-    """Resolve each correction's COUNTER chart row, ``None`` where it books nothing.
+) -> list[ChartKey | None]:
+    """Return each correction's COUNTER chart key, ``None`` where it books nothing.
 
     Ruling **R-FO** made the counter leg a dispatch over the account's
     projection kind (:func:`~app.services.ledger_account_service.anchor_correction_counter_kind`),
-    so an account can need up to two counter rows: ``anchor_equity`` for the
+    so an account can need up to two counter lines: ``anchor_equity`` for the
     correction that OPENS its books and, for a modelled account,
     ``interest_income`` or ``unrealized_change`` for the ones after it.  This
     walks the corrections once, in order, and returns one entry per correction
-    -- so the caller never has to re-derive which row a correction belongs to.
+    -- so the caller never has to re-derive which line a correction belongs to.
+    It resolved and minted each counter's stored row as it went until plan
+    task plan#2524, as ``_counter_ledger_accounts``; it names the line's
+    :class:`~app.services.ledger_lines.ChartKey` and touches no stored row.
 
     **"The opening" is the account's EARLIEST ASSERTION, and keying it on the
     DELTA series instead was tried and REFUSED.**  The tempting refinement is
@@ -251,15 +250,18 @@ def _counter_ledger_accounts(
     create form now ASKS, which is ruling R-EX's own argument about the
     registration payday applied to the other figure nobody can default.
 
-    **A row is minted only when a correction really books into it.**  A
-    correction whose ``ledger_before`` already equals its anchor balance mints
-    nothing, so a fresh $0 account keeps zero ledger rows and stays
-    hard-deletable -- which the account-delete CASCADE argument rests on -- and
-    a resolved row is reused across corrections rather than re-queried, since
-    the resolver issues a query and Checking carries 102 corrections.
+    **A key is named only where a correction really books into it, and a row
+    is minted only for a key a target names.**  A correction whose
+    ``ledger_before`` already equals its anchor balance names no key, so the
+    writer mints nothing for it
+    (:func:`app.services._posting_write.resolve_chart_targets`) and a fresh $0
+    account keeps zero ledger rows and stays hard-deletable -- which the
+    account-delete CASCADE argument rests on.  The writer resolves each key
+    once per reconcile, which is what this function's reuse of a resolved row
+    was for (the resolver issues a query and Checking carries 102
+    corrections).
 
     Args:
-        owner_id: The account owner's user id.
         account: The non-loan :class:`~app.models.account.Account` being
             reconciled, with ``account_type`` loaded (the dispatch classifies
             it).
@@ -268,40 +270,36 @@ def _counter_ledger_accounts(
 
     Returns:
         One entry per correction, in the same order: its counter
-        :class:`~app.models.ledger_account.LedgerAccount`, or ``None`` when the
+        :class:`~app.services.ledger_lines.ChartKey`, or ``None`` when the
         correction books nothing.
 
     Raises:
         ValueError: If the dispatch has no rule for the account's projection
-            kind, or the resolver rejects the account (not owned by *owner_id*,
-            or an amortizing loan -- both broken invariants at this point, the
-            walk having already classified).
+            kind.  The counter resolver's refusals (an account not the
+            owner's, or an amortizing loan -- both broken invariants at this
+            point, the walk having already classified) are the writer's, at
+            its emit step.
     """
     projection_kind = classify_account(account)
-    resolved: dict[LedgerAccountKindEnum, LedgerAccount] = {}
-    counters: list[LedgerAccount | None] = []
+    counters: list[ChartKey | None] = []
     for correction in corrections:
         if _correction_delta(correction) == 0:
             counters.append(None)
             continue
-        kind = ledger_account_service.anchor_correction_counter_kind(
-            projection_kind, is_opening=correction.opens_the_books,
-        )
-        if kind not in resolved:
-            resolved[kind] = (
-                ledger_account_service.get_or_create_account_counter_account(
-                    owner_id, account.id, kind,
-                )
-            )
-        counters.append(resolved[kind])
+        counters.append(account_counter_key(
+            ledger_account_service.anchor_correction_counter_kind(
+                projection_kind, is_opening=correction.opens_the_books,
+            ),
+            account.id,
+        ))
     return counters
 
 
 def _account_anchor_correction_target(
     correction: AccountAnchorCorrection,
-    linked: LedgerAccount,
-    counter: LedgerAccount | None,
-) -> LegMap:
+    linked: ChartKey,
+    counter: ChartKey | None,
+) -> ChartLegMap:
     """Build the two-leg target for one anchor correction, or empty when it books nothing.
 
     The linked leg is ``anchor_balance - ledger_before`` (tagged ``opening``
@@ -312,24 +310,24 @@ def _account_anchor_correction_target(
 
     **The counter leg NAMES what the difference was** (ruling **R-FO**): the
     equity opening, interest income, or change in value, decided by
-    :func:`_counter_ledger_accounts` and handed in here.  Only the counter side
+    :func:`_counter_keys` and handed in here.  Only the counter side
     moves; the linked leg, its amount and its posting kind are exactly what they
     were before that ruling, which is why the whole change is balance-neutral on
     every account balance the app reports.
 
     Args:
         correction: The anchor correction from :func:`._walk.walk_account_ledger`.
-        linked: The account's LINKED ledger account, resolved once by the
+        linked: The account's own line's chart key, built once by the
             reconcile.
-        counter: This correction's counter chart row from
-            :func:`_counter_ledger_accounts`, or ``None`` when that function
-            found the correction books nothing -- the same predicate this
-            function applies, through the same :func:`_correction_delta`, so
-            the two cannot disagree about which corrections have a row.
+        counter: This correction's counter chart key from
+            :func:`_counter_keys`, or ``None`` when that function found the
+            correction books nothing -- the same predicate this function
+            applies, through the same :func:`_correction_delta`, so the two
+            cannot disagree about which corrections have a counter.
 
     Returns:
-        ``{ledger_account_id: (amount, posting_kind_id)}`` (the two balanced
-        legs, or empty when the correction books nothing).
+        ``{chart key: (amount, posting_kind_id)}`` (the two balanced legs, or
+        empty when the correction books nothing).
     """
     delta = _correction_delta(correction)
     if delta == 0:
@@ -337,17 +335,17 @@ def _account_anchor_correction_target(
     _source_enum, posting_kind_enum = _account_correction_kinds(correction)
     posting_kind_id = ref_cache.posting_kind_id(posting_kind_enum)
     return {
-        linked.id: (delta, posting_kind_id),
-        counter.id: (-delta, posting_kind_id),
+        linked: (delta, posting_kind_id),
+        counter: (-delta, posting_kind_id),
     }
 
 
 def _account_anchor_correction_targets(
     corrections: list[AccountAnchorCorrection],
     calendar: PayCalendar,
-    linked: LedgerAccount,
-    counters: list[LedgerAccount | None],
-) -> dict[CorrectionKey, LegMap]:
+    linked: ChartKey,
+    counters: list[ChartKey | None],
+) -> dict[CorrectionKey, ChartLegMap]:
     """Merge an account's corrections into per-(source, period, date) targets.
 
     Groups every correction by its ``(source_kind_id, pay_period_id, civil
@@ -379,19 +377,19 @@ def _account_anchor_correction_targets(
             refused, so this carries no precondition of its own -- an earlier
             draft claimed the loader had already checked, which was a second
             statement of one predicate and the two had drifted.
-        linked: The account's LINKED ledger account, resolved once by the
-            reconcile (which needs it anyway to read the posted side).
-        counters: One counter chart row per correction, in the SAME order, from
-            :func:`_counter_ledger_accounts` -- ``None`` where the correction
-            books nothing.  Positional rather than keyed because which row a
+        linked: The account's own line's chart key, built once by the
+            reconcile.
+        counters: One counter chart key per correction, in the SAME order, from
+            :func:`_counter_keys` -- ``None`` where the correction books
+            nothing.  Positional rather than keyed because which line a
             correction belongs to is a property of its POSITION in the series
             (the first booking opens the books), not of anything on the row.
 
     Returns:
-        ``{(source_kind_id, pay_period_id, entry_date): {ledger_account_id:
-        (amount, kind_id)}}``.
+        ``{(source_kind_id, pay_period_id, entry_date): {chart key: (amount,
+        kind_id)}}``.
     """
-    targets: dict[CorrectionKey, LegMap] = {}
+    targets: dict[CorrectionKey, ChartLegMap] = {}
     for correction, counter in zip(corrections, counters, strict=True):
         source_enum, _posting_kind = _account_correction_kinds(correction)
         # The correction's journal entry is dated the day the assertion is the
@@ -467,8 +465,12 @@ def reconcile_account_anchor_corrections(
             :func:`._walk.walk_account_ledger`.
 
     Raises:
-        PostingError: If the account has no linked ledger account (a broken
-            chart-of-accounts pairing).
+        PostingError: If a correction books and the account has no linked
+            ledger account (a broken chart-of-accounts pairing), at the emit
+            step that resolves the target's keys.  A reconcile in which no
+            correction books names no key and so never reaches the pairing;
+            until plan task plan#2524 it looked the linked row up first and
+            raised either way.
         PayCalendarError: The owner has no MATERIALISED pay period, so a
             correction's ``NOT NULL`` ``pay_period_id`` has nothing to point at
             -- refused by
@@ -476,8 +478,8 @@ def reconcile_account_anchor_corrections(
             is the ONE place that question is asked (developer ruling
             2026-08-10).  Finding **N-192** is why it fails loud.
         ValueError: If the counter dispatch has no rule for the account's
-            projection kind, or its resolver rejects the account (see
-            :func:`_counter_ledger_accounts`).
+            projection kind (:func:`_counter_keys`), or, at the emit step, the
+            counter resolver rejects the account.
     """
     if not corrections:
         return
@@ -493,15 +495,14 @@ def reconcile_account_anchor_corrections(
     if resolved is None:
         return
     owner_id, calendar = resolved
-    linked = _ledger_account_for(account.id)
     emit_correction_deltas(
         owner_id,
         scenario_id,
         target=_account_anchor_correction_targets(
             corrections,
             calendar,
-            linked,
-            _counter_ledger_accounts(owner_id, account, corrections),
+            linked_key(account),
+            _counter_keys(account, corrections),
         ),
         posted=posted_correction_legs(
             account.id,

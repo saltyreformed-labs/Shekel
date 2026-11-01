@@ -40,9 +40,12 @@ What lives here is what those doors are made of.  (A per-purchase door,
 step deleted it -- ledger row **BAL-507**.)
 
 **The dependency runs one way**: this module imports the balanced-write leaf
-(:mod:`app.services._posting_write`) and the chart resolvers, and never
-``posting_service`` itself -- the same direction, and for the same cycle
-reason, that :mod:`app.services._posting_reconcile` keeps.
+(:mod:`app.services._posting_write`) and the worked-out chart
+(:mod:`app.services.ledger_lines`), and never ``posting_service`` itself --
+the same direction, and for the same cycle reason, that
+:mod:`app.services._posting_reconcile` keeps.  Its target rule names chart
+KEYS and touches no stored chart row; the balanced-write leaf resolves the
+keys to rows at the emit step (plan task plan#2524).
 
 Flask-isolated and commit-free like its consumers: flushes so the caller sees
 assigned ids; the caller owns the transaction boundary.
@@ -53,14 +56,19 @@ from decimal import Decimal
 
 from app.enums import PostingSourceEnum
 from app.extensions import db
+from app.models.account import Account
 from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.services import ledger_account_service
 from app.services._posting_write import emit_typed_source_deltas, is_transfer_leg
 from app.services.cash_ledger import movement_cash_leg
-from app.services.ledger_lines import ledger_class_of
-from app.services.posting_reads import _ledger_account_for
+from app.services.ledger_lines import (
+    ChartKey,
+    category_key,
+    ledger_class_of,
+    linked_key,
+    transit_key,
+)
 from app.services.transfer_legs import PlanItem
 from app.utils.balance_predicates import is_balance_contributing
 
@@ -149,16 +157,25 @@ def purchase_posts(parent: PlanItem, entry) -> bool:
     )
 
 
-def _purchase_target(entry, parent: PlanItem) -> dict[int, Decimal]:
+def _purchase_target(entry, parent: PlanItem) -> dict[ChartKey, Decimal]:
     """Return the debit-positive ledger target for a POSTED movement.
 
     The ONE ledger target a row's family has (plan step
     ``balance:X-bi-4a``, ruling **R-BAL80**: a plan row books nothing of its
     own, so the row-level ``_settled_target`` this was the analog of is
-    gone): ``{cash_ledger_id: leg, counter_ledger_id: -leg}``, summing to
-    zero by construction, where
+    gone): ``{cash: leg, counter: -leg}``, summing to zero by construction,
+    where
     ``leg`` is :func:`app.services.cash_ledger.movement_cash_leg` -- the
     movement's whole figure in its PARENT's direction (ruling **R-BAL35**).
+
+    **Keyed by chart key, and it touches no stored chart row** (ruling
+    plan#2518, plan task plan#2524): the cash leg names the movement's
+    account's own line (:func:`~app.services.ledger_lines.linked_key`), the
+    counter leg the parent's category line or the owner's transit bucket.  It
+    found the cash row and got or created the counter row as it went until
+    that task; the writer resolves the keys at its emit step now
+    (:func:`app.services._posting_write.resolve_chart_targets`), so the
+    worked-out ledger reads this very rule and creates nothing.
     A purchase against an envelope books ``{cash: -amount, category:
     +amount}`` exactly as it did; a paycheck's covering movement books
     ``{cash: +amount, category: -amount}`` into an INCOME-class counter
@@ -214,7 +231,13 @@ def _purchase_target(entry, parent: PlanItem) -> dict[int, Decimal]:
             moved THROUGH -- its own, and free to differ from its parent's
             since plan step ``credit_card:CC-5-1`` (ruling **R-BAL75**: the
             ledger, the fold and the self-heal all read the movement's) --
-            so the cash account is read straight off it.
+            so the cash account is read straight off it: by the COLUMN,
+            never the ``account`` relationship, because the seam re-points a
+            covering movement by its column alone
+            (``status_seam._covering``), and a relationship loaded before
+            that would still name the old account.  The account is almost
+            always in the session already (a plan row and a transfer each
+            hold theirs, joined), so the read is an identity-map hit.
         parent: Its parent -- a plan row, or a transfer leg -- taken as an
             ARGUMENT rather than resolved here, so the caller that already
             holds it -- every caller does, through
@@ -222,30 +245,21 @@ def _purchase_target(entry, parent: PlanItem) -> dict[int, Decimal]:
             load, and so every movement of one family is provably booked to
             one category.  Its ``user_id`` is the counter account's owner,
             the ONE home ``pay_calendar:C13-b`` gave a row's owner (a leg's is
-            its transfer's): a parameter every caller binds from that home
-            would be a second home one hop away.
+            its transfer's), which the writer reads when it resolves the keys
+            (:func:`app.services._posting_write.emit_typed_source_deltas`).
 
     Returns:
-        ``{cash_ledger_id: leg, category_ledger_id: -leg}``.
-
-    Raises:
-        PostingError: If the movement's account has no linked ledger account.
-        ValueError: Propagated from the resolver if the parent's non-NULL
-            ``category_id`` names no category owned by ``parent.user_id``.
+        ``{cash key: leg, counter key: -leg}``.
     """
-    cash_ledger = _ledger_account_for(entry.account_id)
     if is_transfer_leg(parent):
-        counter_ledger = (
-            ledger_account_service.get_or_create_transit_ledger_account(
-                parent.user_id,
-            )
-        )
+        counter = transit_key()
     else:
-        counter_ledger = ledger_account_service.get_or_create_category_ledger_account(
-            parent.user_id, parent.category_id, ledger_class_of(parent),
-        )
+        counter = category_key(parent.category_id, ledger_class_of(parent))
     leg = movement_cash_leg(parent, entry)
-    return {cash_ledger.id: leg, counter_ledger.id: -leg}
+    return {
+        linked_key(db.session.get(Account, entry.account_id)): leg,
+        counter: -leg,
+    }
 
 
 def emit_purchase_deltas(
@@ -285,7 +299,7 @@ def emit_purchase_deltas(
     Returns:
         The emitted delta entries; ``[]`` when the ledger is already at target.
     """
-    targets: "dict[tuple[int, date], dict[int, Decimal]]" = {}
+    targets: "dict[tuple[int, date], dict[ChartKey, Decimal]]" = {}
     if posted:
         targets[(parent.pay_period_id, entry.settled_on)] = _purchase_target(
             entry, parent,

@@ -42,9 +42,11 @@ Flask-isolated: plain data in, no ``request`` / ``session``.
 
 from app import ref_cache
 from app.enums import PostingSourceEnum
+from app.extensions import db
+from app.models.account import Account
 from app.services._posting_reconcile import (
+    ChartLegMap,
     CorrectionKey,
-    LegMap,
     emit_correction_deltas,
     filing_calendar_for,
     posted_correction_legs,
@@ -99,7 +101,9 @@ def reconcile_loan_corrections(
             payment split carries its payment's own stored period and asks no
             calendar.
         PostingError: A loan account with no linked ledger account (a broken
-            chart-of-accounts pairing), from either target builder.
+            chart-of-accounts pairing), when a correction books on it, from
+            the emit step that resolves the targets' chart keys (plan task
+            plan#2524; from either target builder until then).
     """
     if not walk.anchor_corrections and not walk.payment_splits:
         return
@@ -112,14 +116,21 @@ def reconcile_loan_corrections(
     if resolved is None:
         return
     owner_id, calendar = resolved
+    # The loan itself, once, for the key of its own line, whose class is its
+    # type's (plan task plan#2524).  Present: the owner just read is its row's.
+    # Usually an identity-map hit, since a payment door's transfer holds its
+    # accounts joined.  Every leg of both halves is this loan's, and every key
+    # resolves to a row of the owner's -- the transfer's owner too, which
+    # ``fk_transfers_owner_to_account`` makes the loan's.
+    loan = db.session.get(Account, loan_account_id)
 
-    target: dict[CorrectionKey, LegMap] = anchor_correction_targets(
-        walk.anchor_corrections, owner_id, calendar,
+    target: dict[CorrectionKey, ChartLegMap] = anchor_correction_targets(
+        walk.anchor_corrections, loan, calendar,
     )
     # Disjoint by construction: the split's keys carry the ``loan_payment``
     # kind and the anchors' the opening / true-up kinds, so the two maps
     # share no key and a plain update merges them.
-    target.update(payment_split_targets(walk.settled_splits))
+    target.update(payment_split_targets(walk.settled_splits, loan))
     emit_correction_deltas(
         owner_id,
         scenario_id,

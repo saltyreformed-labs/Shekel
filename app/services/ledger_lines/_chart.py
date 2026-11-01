@@ -115,6 +115,15 @@ _CATEGORY_CLASSES = frozenset(
     if kind is LedgerAccountKindEnum.FALLBACK
 )
 
+# The two families of kinds whose record is an ACCOUNT and that are not its own
+# line: an account's correction counters and a loan's components.  Public
+# because the stored chart's writer files the two under different columns
+# (``account_id`` against ``loan_account_id``) and resolves each family's row
+# through its own resolver; derived from the tables above so the sets and the
+# classes cannot part.
+ACCOUNT_COUNTER_KINDS = frozenset(_ACCOUNT_COUNTER_KINDS)
+LOAN_KINDS = frozenset(_LOAN_KINDS)
+
 # The label component of every kind whose label is "<account> -- <component>".
 _COMPONENTS = {
     kind: component

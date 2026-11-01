@@ -19,6 +19,8 @@ section): plain data in, plain data out; nothing here writes.
 """
 
 from ._chart import (
+    ACCOUNT_COUNTER_KINDS,
+    LOAN_KINDS,
     ChartKey,
     account_counter_key,
     category_key,
@@ -32,6 +34,8 @@ from ._chart import (
 )
 
 __all__ = [
+    "ACCOUNT_COUNTER_KINDS",
+    "LOAN_KINDS",
     "ChartKey",
     "account_counter_key",
     "category_key",

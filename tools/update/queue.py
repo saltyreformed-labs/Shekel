@@ -256,10 +256,19 @@ def _onto(root: Path, pull: Pull) -> str | None:
     merges its head onto: its first parent; None when it is no merge of the head judged (its
     second parent not ``pull``'s head).
 
+    It is fetched with its two parents alone where that repository is shallow already (the
+    workflow's checkout, at depth 1), since a fetch with no depth there pulls each commit of
+    ``dev`` the checkout cannot see; and with no depth in a full clone, where a fetch with one
+    records each parent as a shallow boundary however much of its history the clone holds,
+    cutting every walk across it (measured 2026-11-01: run in a worktree, it turned the
+    object store every worktree shares shallow, ``dev`` read as one commit).
+
     Raises:
         tools.ci.gitcmd.GitError: when git cannot fetch or read it.
     """
-    git(root, "fetch", "--quiet", "--no-tags", "--depth=2", "origin", pull.merge)
+    shallow = git(root, "rev-parse", "--is-shallow-repository").strip() == "true"
+    git(root, "fetch", "--quiet", "--no-tags", *(["--depth=2"] if shallow else []), "origin",
+        pull.merge)
     parents = git(root, "rev-parse", f"{pull.merge}^@").split()
     return parents[0] if len(parents) == 2 and parents[1] == pull.head else None
 

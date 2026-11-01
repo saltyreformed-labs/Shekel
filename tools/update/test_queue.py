@@ -20,7 +20,8 @@ import re
 import pytest
 
 from tools.ci import gitcmd
-from tools.ci.scratch import commit, commit_files, elsewhere, repository, run, with_origin
+from tools.ci.scratch import ISOLATED, commit, commit_files, elsewhere, repository, run
+from tools.ci.scratch import with_origin
 from tools.quill.door import LOCK, GitHub
 from tools.update import queue
 from tools.update.queue import DEPENDABOT, REREAD_SECONDS, REREADS
@@ -283,6 +284,43 @@ def test_a_version_only_change_whose_checks_have_not_all_passed_at_its_head_is_l
     assert not fake.writes
     assert (f"left: it moves pinned versions alone, but its checks at {head[:12]} are {said}"
             in capsys.readouterr().out)
+
+
+def test_a_full_clone_the_queue_judges_in_stays_whole(world):
+    """Fetched into a full clone with no depth: the clone is never made shallow, so a walk
+    from the trial merge still reaches the first commit (merge, head, ``dev``, start)."""
+    head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
+    fake = _GitHub([_node(7, head, merge)])
+    assert _run(world, fake) == (0, [])
+    assert fake.writes == [("enqueue", "PR_7", head)]
+    assert run(world.work, "rev-parse", "--is-shallow-repository") == "false"
+    assert run(world.work, "rev-list", "--count", merge) == "4"
+
+
+def test_a_shallow_checkout_takes_the_trial_merge_and_its_two_parents_alone(world, tmp_path):
+    """As the workflow's checkout, at depth 1 on ``main`` while ``dev`` has moved on twice:
+    the trial merge comes with its two parents alone, never the commits of ``dev`` between,
+    and the checkout stays shallow."""
+    other = elsewhere(world.work)
+    tree = run(other, "rev-parse", f"{world.base}^{{tree}}")
+    moved = world.base
+    for step in ("dev moves", "dev moves again"):
+        moved = run(other, "commit-tree", tree, "-p", moved, "-m", step)
+    head = commit_files(other, world.base, "pull 7", {LOCK: _lock("12.4.1")})
+    merge = run(other, "commit-tree", run(other, "rev-parse", f"{head}^{{tree}}"), "-p", moved,
+                "-p", head, "-m", "Merge")
+    run(other, "push", "--quiet", "origin", f"{merge}:refs/pull/7/merge")
+    checkout = tmp_path / "checkout"
+    run(tmp_path, "clone", "--quiet", "--no-checkout", "--depth=1", "--branch=main",
+        f"file://{run(world.work, 'remote', 'get-url', 'origin')}", str(checkout))
+    for setting in ISOLATED[1::2]:
+        run(checkout, "config", *setting.split("=", 1))
+    fake = _GitHub([_node(7, head, merge)])
+    assert queue.run(GitHub("token", session=fake), _REPOSITORY, _APP, checkout,
+                     lambda seconds: None) == 0
+    assert fake.writes == [("enqueue", "PR_7", head)]
+    assert run(checkout, "rev-parse", "--is-shallow-repository") == "true"
+    assert run(checkout, "rev-list", "--count", merge) == "3"
 
 
 def test_a_security_update_into_main_is_retargeted_to_dev_and_judged_on_a_later_run(

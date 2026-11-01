@@ -18,6 +18,10 @@ rate-limited request would fail.  These tests run the store as production does:
   acquire (``acquire_moving_window.lua``) and the window read behind its X-RateLimit-*
   headers (``moving_window.lua``), each run by EVALSHA on a server that holds no script yet,
   so valkey-py loads each by SCRIPT LOAD first.
+* Each grant of the ``shekel`` user's is graded as one the limiter needs: the limiter
+  passes under the committed rules, and fails under them with any one grant taken out,
+  each read from the committed file.  A grant widened in place (``+@list`` for the list
+  commands) still passes; task plan#2563 censuses the user's grants whole.
 
 ``docker``-marked: ``scripts/test.sh`` deselects them unless asked
 (``PYTEST_MARKER_EXPR=docker``), CI runs them, and this package's conftest refuses the
@@ -38,6 +42,7 @@ from pathlib import Path
 import pytest
 import valkey
 from valkey.exceptions import AuthenticationError, NoPermissionError
+from werkzeug.test import TestResponse
 
 from app import create_app
 from app.extensions import db, limiter
@@ -58,6 +63,8 @@ _HOST = "127.0.0.1"
 _SERVER_PORT = "6379/tcp"
 #: Where ``start.sh`` reads a mounted password file from.
 _SECRET = "/run/secrets/valkey_password"
+#: How ``users.acl`` starts the ``shekel`` user's one line.
+_SHEKEL = "user shekel "
 #: How long one docker command may take, a pull of the pinned image included.
 _DOCKER_TIMEOUT_S = 40
 #: How long a started server has to answer its healthcheck user's PING.
@@ -92,9 +99,10 @@ def _service_args(name: str, rules: Path) -> list[str]:
 
 @dataclass(frozen=True)
 class _Store:
-    """A running server: the loopback port the test reaches it on, and the password of its
-    ``shekel`` user."""
+    """A running server: its container's ``name``, the loopback port the test reaches it on,
+    and the password of its ``shekel`` user."""
 
+    name: str
     port: int
     password: str
 
@@ -125,10 +133,10 @@ def _logs(name: str) -> str:
 
 
 @contextlib.contextmanager
-def _served(password: str, given: list[str]) -> Iterator[_Store]:
-    """Run the valkey service, handed its ``shekel`` password ``password`` by the options
-    ``given``, on a free loopback port, until it answers; yield it, then remove its container
-    whatever happened.
+def _served(password: str, given: list[str], rules: Path = _RULES) -> Iterator[_Store]:
+    """Run the valkey service with ``rules`` mounted, handed its ``shekel`` password
+    ``password`` by the options ``given``, on a free loopback port, until it answers; yield
+    it, then remove its container whatever happened.
 
     Raises:
         AssertionError: when the container does not start or publish its port, or the server
@@ -137,11 +145,11 @@ def _served(password: str, given: list[str]) -> Iterator[_Store]:
     name = f"shekel-test-valkey-{secrets.token_hex(4)}"
     try:
         started = _docker("run", "--detach", "--publish", f"{_HOST}::{_SERVER_PORT}", *given,
-                          *_service_args(name, _RULES))
+                          *_service_args(name, rules))
         assert started.returncode == 0, f"the valkey service did not start: {started.stderr}"
         published = _docker("port", name, _SERVER_PORT)
         assert published.returncode == 0, f"no port was published: {published.stderr}"
-        store = _Store(int(published.stdout.split()[0].rsplit(":", 1)[1]), password)
+        store = _Store(name, int(published.stdout.split()[0].rsplit(":", 1)[1]), password)
         deadline = time.monotonic() + _READY_S
         while not _answers(store):
             assert time.monotonic() <= deadline, (
@@ -161,27 +169,34 @@ def _store() -> Iterator[_Store]:
         yield store
 
 
+def _login_answers(uri: str) -> list[TestResponse]:
+    """``/login``'s limit and one more POSTs, through the app's own limiter on the store
+    ``uri``, each answer in turn.  The limiter is fail-closed, so a command the store refuses
+    raises out of the request (a :class:`valkey.exceptions.ValkeyError`)."""
+    rate_app = create_app("testing")
+    rate_app.config.update(RATELIMIT_ENABLED=True, RATELIMIT_STORAGE_URI=uri)
+    limiter.enabled = True
+    limiter.init_app(rate_app)
+    try:
+        client = rate_app.test_client()
+        with rate_app.app_context():
+            return [client.post("/login", data={"email": SEED_USER_EMAIL,
+                                                "password": "not-the-password"})
+                    for _ in range(_LOGIN_LIMIT + 1)]
+    finally:
+        # Never limiter.reset(): it clears the store with KEYS and DEL, which the ACL refuses.
+        with rate_app.app_context():
+            db.engine.dispose()
+        limiter.enabled = False
+
+
 @pytest.mark.usefixtures("seed_user")
 def test_a_limited_route_runs_on_the_store_as_the_app_s_user(store):
     """``/login``'s five POSTs pass on the store, each answered with the window it read
     (X-RateLimit-Remaining 4 down to 0), and the sixth is refused, with when to retry: the
     acquire and the window read each ran, by EVALSHA after SCRIPT LOAD on the fresh server,
     as the ``shekel`` user.  A grant missing from the ACL fails a request instead."""
-    rate_app = create_app("testing")
-    rate_app.config.update(RATELIMIT_ENABLED=True, RATELIMIT_STORAGE_URI=store.uri)
-    limiter.enabled = True
-    limiter.init_app(rate_app)
-    try:
-        client = rate_app.test_client()
-        with rate_app.app_context():
-            answers = [client.post("/login", data={"email": SEED_USER_EMAIL,
-                                                   "password": "not-the-password"})
-                       for _ in range(_LOGIN_LIMIT + 1)]
-    finally:
-        # Never limiter.reset(): it clears the store with KEYS and DEL, which the ACL refuses.
-        with rate_app.app_context():
-            db.engine.dispose()
-        limiter.enabled = False
+    answers = _login_answers(store.uri)
     assert [answer.status_code for answer in answers] == [200] * _LOGIN_LIMIT + [429]
     assert [answer.headers.get("X-RateLimit-Remaining") for answer in answers] == [
         "4", "3", "2", "1", "0", "0"]
@@ -229,18 +244,90 @@ def test_start_sh_reads_production_s_password_file_over_a_blank_variable(tmp_pat
         assert shekel.execute_command("LINDEX", "LIMITS:a", "0") is None
 
 
-def _rules_without_shekel(tmp_path: Path) -> Path:
-    """A copy of the committed rules and start script whose ``users.acl`` names no ``shekel``
-    user, the one line that names it dropped."""
+def _shekel_tokens() -> list[str]:
+    """What the committed ``users.acl`` gives the ``shekel`` user, each token of its one line
+    after the user's name.
+
+    Raises:
+        AssertionError: when the file names the user on other than one line.
+    """
+    lines = [line for line in (_RULES / "users.acl").read_text(encoding="utf-8").splitlines()
+             if line.startswith(_SHEKEL)]
+    assert len(lines) == 1, "users.acl names the shekel user on one line"
+    return lines[0].removeprefix(_SHEKEL).split()
+
+
+def _rules_where_shekel(tmp_path: Path, tokens: list[str] | None) -> Path:
+    """A copy of the committed rules and start script whose ``users.acl`` gives the ``shekel``
+    user ``tokens`` after its name, or names no ``shekel`` user where ``tokens`` is None, its
+    one line dropped."""
     rules = tmp_path / "rules"
     shutil.copytree(_RULES, rules)
     acl = rules / "users.acl"
-    lines = acl.read_text(encoding="utf-8").splitlines(keepends=True)
-    kept = [line for line in lines if not line.startswith("user shekel ")]
-    assert len(lines) - len(kept) == 1, "users.acl names the shekel user on one line"
-    acl.write_text("".join(kept), encoding="utf-8")
+    acl.write_text("".join(
+        line if not line.startswith(_SHEKEL)
+        else "" if tokens is None else f"{_SHEKEL}{' '.join(tokens)}\n"
+        for line in acl.read_text(encoding="utf-8").splitlines(keepends=True)),
+        encoding="utf-8")
     rules.chmod(0o755)
     return rules
+
+
+#: How a token of an ACL line that restricts rather than grants starts: a command or category
+#: taken away, a reset, a password removed by itself or by its hash.
+_RESTRICTING = ("-", "reset", "<", "!")
+#: The tokens Valkey reads as restrictions by name: the user disabled, no commands, no
+#: selectors.
+_RESTRICTIONS = frozenset({"off", "nocommands", "clearselectors"})
+#: Each token of the ``shekel`` user's line that grants something: a command, a key pattern,
+#: ``on`` itself; every token but a restriction (:data:`_RESTRICTING`,
+#: :data:`_RESTRICTIONS`), read from the committed file.
+_GRANTS = [token for token in _shekel_tokens()
+           if not token.startswith(_RESTRICTING) and token not in _RESTRICTIONS]
+#: What the store says refusing the ``shekel`` user each grant, in any case (valkey-py drops
+#: the NOPERM prefix: "User shekel has no permissions to run the 'evalsha' command"): no
+#: permission for a command or a key, an ACL failure for a command a script calls, and a
+#: disabled user for ``on``.
+_REFUSED = r"(?i)no permissions|ACL failure in script|user is disabled"
+
+
+@pytest.mark.usefixtures("seed_user")
+def test_the_rules_copied_whole_serve_the_limiter(tmp_path):
+    """The control for the grants test below: the committed rules copied by the same helper,
+    nothing taken out, and the limiter passes its five and refuses the sixth, so a refusal
+    there is the grant's, never the copy's."""
+    password = secrets.token_hex(16)
+    rules = _rules_where_shekel(tmp_path, _shekel_tokens())
+    with _served(password, ["--env", f"VALKEY_PASSWORD={password}"], rules) as store:
+        answers = _login_answers(store.uri)
+    assert [answer.status_code for answer in answers] == [200] * _LOGIN_LIMIT + [429]
+
+
+@pytest.mark.usefixtures("seed_user")
+@pytest.mark.parametrize("grant", _GRANTS)
+def test_each_grant_of_the_app_s_user_is_one_the_limiter_needs(tmp_path, grant):
+    """The ``shekel`` user's line with one grant taken out, and the store refuses the
+    limiter's requests for that grant (:data:`_REFUSED`): so each token the user holds is one
+    the limiter needs, where :func:`test_a_limited_route_runs_on_the_store_as_the_app_s_user`
+    shows it holds all it does.  The grants are read from the committed file, so one added
+    there (``+get``, ``allkeys``, ``&*``) is graded with no edit here; a grant widened in
+    place is not (task plan#2563)."""
+    password = secrets.token_hex(16)
+    rules = _rules_where_shekel(tmp_path, [token for token in _shekel_tokens()
+                                           if token != grant])
+    with _served(password, ["--env", f"VALKEY_PASSWORD={password}"], rules) as store:
+        with pytest.raises(valkey.exceptions.ValkeyError, match=_REFUSED):
+            _login_answers(store.uri)
+
+
+def test_start_sh_writes_the_rules_only_its_user_reads_under_any_umask():
+    """``start.sh`` run straight, the image's entrypoint (which sets 0077 only where the umask
+    is docker's default 0022) cleared, so under that 0022: the generated ACL file, which holds the password's
+    hash, is still 0600, as the umask the script sets itself makes it."""
+    password = secrets.token_hex(16)
+    with _served(password, ["--entrypoint", "", "--env", f"VALKEY_PASSWORD={password}"]) as store:
+        mode = _docker("exec", store.name, "stat", "-c", "%a", "/tmp/users.acl")
+    assert (mode.returncode, mode.stdout.strip()) == (0, "600"), mode.stderr
 
 
 #: Each start ``start.sh`` refuses, and what it says.
@@ -258,10 +345,13 @@ def test_start_sh_refuses_a_server_the_app_could_not_log_in_to(tmp_path, case):
     in, and the fail-closed limiter would fail every limited request while the healthcheck,
     as its own user, passed.  ``start.sh`` exits 1 naming why, and no server starts."""
     name = f"shekel-test-valkey-{secrets.token_hex(4)}"
-    rules = _rules_without_shekel(tmp_path) if case == "no shekel user" else _RULES
+    rules = _rules_where_shekel(tmp_path, None) if case == "no shekel user" else _RULES
     password = "" if case == "an empty password" else secrets.token_hex(16)
     try:
-        ran = _docker("run", "--rm", "--env", f"VALKEY_PASSWORD={password}",
+        # ``--quiet``: on a daemon that has not pulled the image, the CLI writes its own
+        # "Unable to find image" and the pull's progress to stderr first (measured
+        # 2026-11-01), and the assertion is of start.sh's line alone.
+        ran = _docker("run", "--rm", "--quiet", "--env", f"VALKEY_PASSWORD={password}",
                       *_service_args(name, rules))
     finally:
         _docker("rm", "--force", name)

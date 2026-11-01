@@ -50,7 +50,8 @@ services:
     # shekel-audits/dev-prod-parity/findings.md).  Tag-only pins let dev
     # and prod drift to different PG patch levels on pull timing; bump
     # this digest and the one in docker-compose.yml's db service in the
-    # same commit.
+    # same commit, which tests/test_deploy/test_image_supply_chain.py
+    # holds (ruling plan#2560, until plan#2561 gives the pin one home).
     image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     container_name: shekel-dev-db
     restart: unless-stopped
@@ -109,7 +110,9 @@ services:
   # whose writes are the code under test).
   valkey:
     # The same image and digest as docker-compose.yml's valkey service;
-    # bump both in the same commit.
+    # bump both in the same commit, which
+    # tests/test_deploy/test_image_supply_chain.py holds (ruling
+    # plan#2560, until plan#2561 gives the pin one home).
     image: valkey/valkey:9.1.2-alpine@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11
     container_name: shekel-dev-valkey
     restart: unless-stopped

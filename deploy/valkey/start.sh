@@ -25,8 +25,10 @@
 # the password meet in ONE generated file: the rules with their comment lines
 # dropped (the ACL file format refuses them) and the shekel user's password
 # added as its SHA-256 hash, the form an ACL file holds instead of the
-# password.  It is written to /tmp, the container's tmpfs, under the image
-# entrypoint's umask of 0077, so only the valkey user can read it.
+# password.  It is written to /tmp, the container's tmpfs, under the umask
+# 077 this script sets itself, so only the valkey user can read it, whatever
+# umask it was started under (the image's entrypoint sets 0077 only where
+# the umask is docker's default 0022).
 #
 # It refuses to start Valkey when the password is empty or when users.acl
 # names no shekel user: either way the app could not log in, and with the
@@ -46,6 +48,7 @@
 #                                   the fail-closed limiter would turn into
 #                                   a 500.
 set -eu
+umask 077
 
 rules=/etc/valkey/users.acl
 secret=/run/secrets/valkey_password

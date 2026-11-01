@@ -47,6 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # ── Files under assertion ──────────────────────────────────────────
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 DOCKER_COMPOSE = REPO_ROOT / "docker-compose.yml"
+DEV_COMPOSE = REPO_ROOT / "docker-compose.dev.yml"
 PROD_COMPOSE_OVERRIDE = REPO_ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 GITIGNORE = REPO_ROOT / ".gitignore"
@@ -1065,6 +1066,28 @@ class TestEveryComposeImageIsPinnedByDigest:
             f"compose images pinned by tag alone: {unpinned}.  Pin each as "
             "``name:tag@sha256:<digest>``, the digest the multi-arch index's, read with "
             "``docker buildx imagetools inspect name:tag`` (finding BAL-653).")
+
+
+class TestDevComposeRunsProductionsImages:
+    """Each service ``docker-compose.dev.yml`` and ``docker-compose.yml`` both run from an
+    image runs ONE image in both, tag and digest, so dev exercises what production runs (parity
+    audit findings D04, the store, and D15, the database).  An interim fence (ruling
+    plan#2560): each file still writes the pin, until step plan#2561 gives each image one
+    home, a service file both extend, and deletes this class."""
+
+    def test_each_service_both_files_run_from_an_image_runs_one_image(self) -> None:
+        """The services both files run from an image (``db`` and ``valkey``; the app is built
+        in dev) name the same image in each, so a bump of one file alone fails here."""
+        _files, images = _compose_images()
+        base, dev = ({service: image for (name, service), image in images.items()
+                      if name == path.name} for path in (DOCKER_COMPOSE, DEV_COMPOSE))
+        shared = {service: (base[service], dev[service]) for service in base.keys() & dev.keys()}
+        assert {"db", "valkey"} <= shared.keys(), sorted(shared)
+        differing = {name: pair for name, pair in shared.items() if pair[0] != pair[1]}
+        assert not differing, (
+            f"docker-compose.dev.yml runs other images than docker-compose.yml: {differing}.  "
+            "Move both files' pins in one change (ruling plan#2560; plan#2561 gives each one "
+            "home).")
 
 
 # ──────────────────────────────────────────────────────────────────

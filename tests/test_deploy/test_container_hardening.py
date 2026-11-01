@@ -45,6 +45,9 @@ BUNDLED_NGINX_CONF = DEPLOY_DIR / "nginx-bundled" / "nginx.conf"
 # commit; including it here pins the regression surface so the
 # existing fields cannot be removed.
 HARDENED_SERVICES = ("db", "app", "nginx", "valkey")
+# The services the shared-mode merge still runs: nginx is parked in
+# its disabled profile there, so the merged result holds no nginx.
+MERGED_SERVICES = tuple(name for name in HARDENED_SERVICES if name != "nginx")
 
 # Bytes-per-MiB conversion used to normalise compose's mixed
 # representation of mem_limit (raw bytes from ``compose config``,
@@ -653,7 +656,8 @@ class TestProdComposeOverrideInheritsHardening:
 class TestMergedComposeHardeningSurvivesOverride:
     """Run ``docker compose config`` against the merged base +
     shared-mode override and verify the hardening fields appear on
-    the merged result for the app and db services.
+    the merged result for the app, db and valkey services, and that
+    valkey takes its password from production's file.
 
     This is the highest-fidelity check: it exercises the same
     merge logic compose uses at deploy time and catches a regression
@@ -672,7 +676,7 @@ class TestMergedComposeHardeningSurvivesOverride:
         regressions this class is meant to detect.
 
         Class-scoped so the subprocess only runs once per test
-        session despite the eight parametrize cases below.
+        session despite the parametrize cases below.
         """
         if not _docker_available():
             pytest.skip(
@@ -730,14 +734,14 @@ class TestMergedComposeHardeningSurvivesOverride:
         )
         return yaml.safe_load(result.stdout)
 
-    @pytest.mark.parametrize("service_name", ("db", "app"))
+    @pytest.mark.parametrize("service_name", MERGED_SERVICES)
     def test_merged_service_carries_security_opt(
         self,
         merged: dict,
         service_name: str,
     ) -> None:
         """The shared-mode merge must preserve ``security_opt`` on
-        the app and db services (nginx is parked in the disabled
+        the app, db and valkey services (nginx is parked in the disabled
         profile in shared mode and is therefore filtered from the
         default merge result).
         """
@@ -748,14 +752,14 @@ class TestMergedComposeHardeningSurvivesOverride:
             f"no-new-privileges:true: {opts}"
         )
 
-    @pytest.mark.parametrize("service_name", ("db", "app"))
+    @pytest.mark.parametrize("service_name", MERGED_SERVICES)
     def test_merged_service_carries_cap_drop(
         self,
         merged: dict,
         service_name: str,
     ) -> None:
         """The shared-mode merge must preserve ``cap_drop: [ALL]``
-        on the app and db services.
+        on the app, db and valkey services.
         """
         service = merged["services"][service_name]
         cap_drop = service.get("cap_drop") or []
@@ -764,7 +768,7 @@ class TestMergedComposeHardeningSurvivesOverride:
             f"{cap_drop}"
         )
 
-    @pytest.mark.parametrize("service_name", ("db", "app"))
+    @pytest.mark.parametrize("service_name", MERGED_SERVICES)
     def test_merged_service_carries_read_only(
         self,
         merged: dict,
@@ -777,7 +781,7 @@ class TestMergedComposeHardeningSurvivesOverride:
             f"after override merge"
         )
 
-    @pytest.mark.parametrize("service_name", ("db", "app"))
+    @pytest.mark.parametrize("service_name", MERGED_SERVICES)
     def test_merged_service_carries_resource_limits(
         self,
         merged: dict,
@@ -809,3 +813,24 @@ class TestMergedComposeHardeningSurvivesOverride:
             f"(deploy.resources.limits.pids or pids_limit): "
             f"{pids_limit!r}"
         )
+
+    def test_merged_valkey_reads_production_s_password_file(
+        self,
+        merged: dict,
+    ) -> None:
+        """Production hands Valkey its password as a file, never in the
+        container's stored environment: the merge mounts the
+        ``valkey_password`` secret, from ``secrets/valkey_password``
+        under production's directory, at the path ``start.sh`` reads,
+        and blanks ``VALKEY_PASSWORD``, which ``start.sh`` would
+        otherwise fall back to.
+        """
+        valkey = merged["services"]["valkey"]
+        start_sh = (DEPLOY_DIR / "valkey" / "start.sh").read_text(encoding="utf-8")
+        (read_at,) = [line.removeprefix("secret=") for line in start_sh.splitlines()
+                      if line.startswith("secret=")]
+        assert [f"/run/secrets/{mount['target']}" for mount in valkey["secrets"]
+                if mount["source"] == "valkey_password"] == [read_at]
+        assert merged["secrets"]["valkey_password"]["file"] == (
+            "/opt/docker/shekel/secrets/valkey_password")
+        assert valkey["environment"]["VALKEY_PASSWORD"] == ""

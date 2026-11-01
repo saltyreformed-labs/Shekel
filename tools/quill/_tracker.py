@@ -758,7 +758,7 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         own), marked :data:`setup_tracker.FILING` beside its labels in this, its first write
         (R-BAL202): every card quill files is born marked, and its filing's last write,
         :meth:`unmark`, removes the mark.  Its number, once GitHub's answer shows the type,
-        labels, Arc and milestone sent.
+        labels, field values and milestone sent.
 
         Its arc is written in the same call to its issue field Arc, the arc's one home, and
         as its arc label beside, display of it (rulings ``balance:R-BAL349``, ``R-BAL354``;
@@ -767,7 +767,8 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
         first, in one read (:meth:`_field_ids`).  A task, which holds none (R-BAL386), sends no
         field and reads no id, so its request is what it was.  GitHub drops a field value
         silently where the feature is off (its REST description), so each is read back as the
-        type is.
+        type is; a Priority or Effort it dropped, the same command run again writes
+        (``_filing._refield``).
 
         ``milestone``: the number of the milestone the card is filed in: a leaf's that
         ``quill file step --parent`` files in its split step's while that step holds one
@@ -802,7 +803,10 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
                                "by hand")
         if (holding := {field: answered_value(answered, field) for field in values}) != values:
             raise TrackerError(f"plan#{issue['number']} was filed holding {holding}, not "
-                               f"{values}: fix it by hand")
+                               f"{values}: once `quill show plan#{issue['number']}` reads it, run "
+                               "the same command again, which writes them (R-BAL186); run while "
+                               "GitHub's lists of open and marked cards do not hold it yet, it "
+                               "files a second card")
         held = (issue.get("milestone") or {}).get("number")
         if held != milestone:
             raise TrackerError(f"plan#{issue['number']} was filed in milestone {held}, not "
@@ -841,7 +845,9 @@ class Tracker(CardReader):  # pylint: disable=too-many-public-methods
 
         A value is REST's add of the one value, never its "set" (PUT), which replaces every
         value, nor an add of none, which clears them all (GitHub's REST description); it
-        replaces a value the field holds (measured 2026-10-30 on plan#2225) and answers the
+        replaces a value the field holds, the one value of it left (measured 2026-10-30 on
+        plan#2225, an Arc, and 2026-11-01 on plan#2491, an Effort of 3 then 4 and a Priority of
+        High then Urgent, ``effort-priority-2026-11-01/measure_replace.out``), and answers the
         card's values after it.  A clear is REST's delete of the value, answered 204 and no body
         (404 "Issue field value not found" when the card holds none), so the card's values are
         read after it, a page of :data:`_VALUES_PAGE`.  Measured 2026-11-01 on plan#2491, a

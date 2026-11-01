@@ -148,7 +148,8 @@ def test_a_create_whose_effort_github_dropped_is_finished_holding_it(code, tmp_p
         number = create(card, milestone)
         tracker.cards_by_number[number] = dataclasses.replace(tracker.cards_by_number[number],
                                                               effort=None)
-        raise TrackerError(f"plan#{number} was filed holding no Effort: fix it by hand")
+        raise TrackerError(f"plan#{number} was filed holding no Effort: run the same command "
+                           "again, which writes it")
 
     monkeypatch.setattr(tracker, "create", dropped)
     assert run(tracker, code, *_step(tmp_path, "--effort", "4")) == 2

@@ -604,8 +604,8 @@ def file_parser(commands) -> None:
     task.add_argument("--before", type=card_number,
                       help="the open task under the same card it is built before; else it goes "
                            "above the card's finishing tasks")
-    field, kinds, ruling = HOLDERS[EFFORT]
-    for kind in kinds:
+    field, sized, ruling = HOLDERS[EFFORT]
+    for kind in sized:
         sub.choices[kind].add_argument(
             f"--{EFFORT}", required=True, choices=ISSUE_FIELDS[field].options,
             help=f"the sessions its work takes, the filing session's estimate (rulings "
@@ -671,7 +671,10 @@ def _refield(tracker: Tracker, card: Card, draft: Draft) -> None:
     """Write each Priority or Effort ``draft`` holds (``check.HOLDERS``) that ``card``, the card
     an earlier run of its filing made, does not hold (:meth:`_tracker.Tracker.set_field`): a
     create whose value GitHub dropped, or a card filed by older quill, which sent none (ruling
-    plan#2492).  A value ``draft`` does not hold is left as the card holds it."""
+    plan#2492).  A value ``draft`` does not hold is left as the card holds it.  One the card
+    holds that differs is overwritten, deliberately: a card still being filed holds the filing
+    session's estimate, which this run states again, where a different Arc or labels are a
+    person's call, refused (:func:`_refuse_relabel`)."""
     for part, (field, _, _) in HOLDERS.items():
         value, held = getattr(draft, part), getattr(card, part)
         if value is not None and held != value:

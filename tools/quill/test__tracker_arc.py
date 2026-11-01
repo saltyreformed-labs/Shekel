@@ -141,11 +141,14 @@ def test_every_field_value_a_draft_holds_is_sent():
 def test_an_effort_github_did_not_set_as_sent_is_refused_not_trusted(answered, held):
     """GitHub drops a field value silently where the feature is off, and what it does with an
     option the field lacks is unmeasured: a card answered holding no Effort, or another, is
-    refused, as a dropped Arc is."""
+    refused, as a dropped Arc is, and the refusal says the same command run again writes it
+    (``_filing._refield``), once a read of the card finds it."""
     tracker = _tracker(_GitHub(answered=answered))
     with pytest.raises(TrackerError, match=rf"was filed holding \{{'Arc': 'balance', 'Effort': "
                                            rf"{held}\}}, not \{{'Arc': 'balance', 'Effort': "
-                                           rf"'3'\}}: fix it by hand"):
+                                           rf"'3'\}}: once `quill show plan#\d+` reads it, run "
+                                           rf"the same command again, which writes them "
+                                           rf"\(R-BAL186\)"):
         tracker.create(Draft("step", "t", "b", (), "balance", effort="3"))
 
 

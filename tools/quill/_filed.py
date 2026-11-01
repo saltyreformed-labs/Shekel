@@ -30,7 +30,7 @@ def filed_values(card: Draft) -> dict[str, str]:
     """The issue field values a create sends for ``card``, by field: its Arc, its Priority
     and its Effort, each that it holds (``quill file`` names an Effort for a step or a
     finding, ruling plan#2492, and a Priority for none, ruling plan#2507); empty for a task,
-    which holds none of them (R-BAL386).  Every value a draft holds is sent, so none it holds
-    is filed dropped."""
+    which holds none of them (R-BAL386).  Every value a draft holds is sent, and the create
+    refuses an answer not holding each (:meth:`_tracker.Tracker.create`)."""
     held = {ARC_FIELD: card.arc, PRIORITY_FIELD: card.priority, EFFORT_FIELD: card.effort}
     return {field: value for field, value in held.items() if value is not None}

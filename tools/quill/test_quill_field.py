@@ -1,7 +1,7 @@
 """``quill priority`` and ``quill effort`` (plan#2491): a card's Priority or Effort set or
 cleared through the tracker's one write of a field value, over :class:`_fake.FakeTracker` and a
 throwaway git repository (the ``code`` fixture, ``conftest.py``).  ``Tracker.set_field`` is
-graded against GitHub's answers in ``test__tracker_fields.py``.  Nothing here calls GitHub.
+graded against GitHub's answers in ``test__tracker_arc.py``.  Nothing here calls GitHub.
 """
 from __future__ import annotations
 

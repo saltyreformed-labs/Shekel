@@ -30,14 +30,10 @@ inputs:
   install:
     description: >-
       What the job installs from the lock: ``all`` (what ``uv sync``
-      installs: the runtime set and the dev and build groups), ``runtime``
-      (the runtime set and the build group, which psycopg-c compiles
-      against; no dev tools), ``landing`` (the landing check's packages
-      alone, pyproject.toml's ``landing`` group), ``refresh`` (the Monday
-      lock refresh's: the build group, the tools ``uv lock`` builds a
-      source-only package's metadata with, and the landing group, which the
-      refresh imports through quill) or ``python`` (the interpreter and no
-      package).
+      installs: the runtime set and the dev group), ``runtime`` (the
+      runtime set alone; no dev tools), ``landing`` (the landing check's
+      packages alone, pyproject.toml's ``landing`` group) or ``python``
+      (the interpreter and no package).
     required: true
   cache:
     description: >-
@@ -92,9 +88,10 @@ runs:
         restore-keys: |
           uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.uv.outputs.digest }}-
 
-    # ``--require-build-hashes`` refuses a source build whose build tools the
-    # lock does not hash (pyproject.toml's ``no-build-isolation-package``),
-    # as the Dockerfile's sync does.  An install set not named here fails.
+    # ``--require-build-hashes`` refuses a source build whose build tools no
+    # hash covers (pyproject.toml's ``build-constraint-dependencies``, which
+    # uv records in the lock; ruling plan#2494), as the Dockerfile's sync
+    # does.  An install set not named here fails.
     #
     # The PATH line is the one zizmor's github-env check flags: from this
     # file it cannot see what triggers the workflows that call the action,
@@ -118,10 +115,9 @@ runs:
             all) "${sync[@]}" ;;
             runtime) "${sync[@]}" --no-dev ;;
             landing) "${sync[@]}" --only-group landing ;;
-            refresh) "${sync[@]}" --only-group build --only-group landing ;;
             python) "${UV}" venv ;;
             *)
-                echo "No install set '${INSTALL}': all, runtime, landing, refresh or python." >&2
+                echo "No install set '${INSTALL}': all, runtime, landing or python." >&2
                 exit 1
                 ;;
         esac

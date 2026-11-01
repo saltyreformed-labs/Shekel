@@ -335,7 +335,8 @@ class TestDockerfileInstallsTheLock:
 
         ``--locked`` refuses a lock that no longer matches pyproject.toml,
         and ``--require-build-hashes`` refuses a source build whose tools no
-        hash covers (pyproject.toml's ``no-build-isolation-package``).
+        hash covers (pyproject.toml's ``build-constraint-dependencies``,
+        ruling plan#2494).
         """
         builder = text.split("\nFROM ")[2]
         assert "uv sync --locked --require-build-hashes" in builder, (

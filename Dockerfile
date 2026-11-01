@@ -67,16 +67,14 @@ WORKDIR /build
 COPY pyproject.toml uv.lock .python-version ./
 # Install exactly the lock's runtime set plus the ``server`` group
 # (gunicorn), every file checked against its sha256 (``--locked`` also
-# refuses a lock that no longer matches pyproject.toml).  The first sync
-# adds the ``build`` group so psycopg-c compiles against the locked,
-# hashed setuptools (pyproject.toml's ``no-build-isolation-package``);
-# ``--require-build-hashes`` refuses any other source build.  The second
-# sync removes the build tools again, so the venv holds what runs and
-# nothing that only built it, and compiles its bytecode as pip did, since
-# the read-only runtime cannot write it.
-RUN uv sync --locked --require-build-hashes --no-install-project \
-        --no-default-groups --group build --group server \
-    && uv sync --locked --compile-bytecode --no-install-project \
+# refuses a lock that no longer matches pyproject.toml), and compile its
+# bytecode as pip did, since the read-only runtime cannot write it.  uv
+# builds psycopg-c in an environment of its own, from the build requirement
+# its own source declares, with only the build tools pyproject.toml's
+# ``build-constraint-dependencies`` trust by hash (ruling plan#2494);
+# ``--require-build-hashes`` refuses a tool no hash there covers.  The venv
+# so holds what runs and nothing that only built it.
+RUN uv sync --locked --require-build-hashes --compile-bytecode --no-install-project \
         --no-default-groups --group server
 
 # -- Stage 2: Runtime -------------------------------------------------

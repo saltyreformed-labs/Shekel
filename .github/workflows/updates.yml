@@ -100,12 +100,13 @@ jobs:
           ref: dev
           persist-credentials: false
 
-      # The build group, whose tools uv builds a source-only package's metadata
-      # with, and the landing group, which the refresh imports through quill.
+      # The landing group, which the refresh imports through quill.  uv lock
+      # builds a source-only package's metadata in an environment of its own,
+      # with the build tools pyproject.toml trusts by hash (ruling plan#2494).
       - name: Install the lock
         uses: $/.github/actions/install-lock
         with:
-          install: refresh
+          install: landing
           cache: "false"
 
       # Its report, summary.md, is written once it has finished, whether or not

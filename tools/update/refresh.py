@@ -2,12 +2,12 @@
 holds moved as far as ``uv lock --upgrade`` moves it, but each move that needs a card, so the
 week's pull request lands by auto-merge with none.
 
-**It runs at the root of a checkout of ``dev``** whose ``.venv`` holds the lock's ``build``
-and ``landing`` groups (``.github/actions/install-lock``'s install set ``refresh``; the second
-is what this module imports through quill's door): ``uv lock`` builds the metadata of a
-package the lock holds only as source with the first's tools, unisolated
-(``pyproject.toml``'s ``no-build-isolation-package``), so the run executes package code and
-the workflow gives its job no secret.  The 7-day cooldown is ``pyproject.toml``'s
+**It runs at the root of a checkout of ``dev``** whose ``.venv`` holds the lock's ``landing``
+group (``.github/actions/install-lock``'s install set ``landing``), which this module imports
+through quill's door: ``uv lock`` builds the metadata of a package the lock holds only as
+source in an environment of its own, with the build tools ``pyproject.toml``'s
+``build-constraint-dependencies`` trust by hash (ruling plan#2494), so the run executes
+package code and the workflow gives its job no secret.  The 7-day cooldown is ``pyproject.toml``'s
 ``exclude-newer``, which the lock keeps, so no flag here states it.  uv is the Dockerfile's
 (the install set puts it on ``PATH``), so the lock's header, which another uv would write
 otherwise, is as the landing check requires.

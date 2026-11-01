@@ -33,25 +33,24 @@ A DUMP FROM ANOTHER POSTGRESQL MAJOR IS REFUSED before it is restored.  Every cu
 archive records the server that made it (``Dumped from database version``), so production's
 major is read from the dump on every run, never by reaching into production.
 
-EACH SIDE RUNS UNDER A VENV OF ITS OWN PINS, never the developer's: what THAT side's
-``uv.lock`` pins for its runtime set and its ``rehearsal`` group (``time-machine``, which the
-side probe pins its clock with), so a pin that moves between base and cut -- a version update
--- is measured rather than masked by one shared venv.  uv installs it under this process's
-interpreter, every file checked against the lock's sha256, as the ``Dockerfile`` does: first
-with the ``build`` group, which ``psycopg-c`` compiles against, then without it, so the venv
-holds what runs and nothing that only built it.  A side whose tree holds no ``uv.lock`` is a
-revision before the lock (ruling ``balance:R-BAL294``), and it is refused by name.  The venv
-is a stopgap (ruling plan#2404): step plan#2405 runs each side in its own production image,
-whose Python, libpq, files and settings a host venv only approximates.  It is CACHED outside
-git, under ``${XDG_CACHE_HOME:-~/.cache}/shekel-rehearsal/venvs/``, by the SHA-256 of those
-pins, as ``uv export`` writes them, and the interpreter's version, so two sides with the same
-pins share one and a later run builds nothing; the cache is the one thing a teardown
-deliberately leaves.  A venv counts as built
-only once its marker is written, the last step of a build that succeeded, so one that failed
-or was killed is never taken for built: the next run removes it and builds again.  It is
-built where it stays, never moved, because a venv's scripts hold its path in their shebangs.
-Two runs building the same venv at the same moment would collide in its directory; one kit
-runs at a time.
+EACH SIDE RUNS UNDER A VENV OF ITS OWN PINS, never the developer's: what THAT side's ``uv.lock``
+pins for its runtime set and its ``rehearsal`` group (``time-machine``, which the side probe
+pins its clock with), so a pin that moves between base and cut -- a version update -- is
+measured rather than masked by one shared venv.  uv installs it under this process's
+interpreter, every file checked against the lock's sha256, as the ``Dockerfile`` does, and
+``psycopg-c`` built in an environment of its own with the build tools the side trusts by hash
+(ruling plan#2494), so the venv holds what runs and nothing that only built it.  A side whose
+tree holds no ``uv.lock`` is a revision before the lock (ruling ``balance:R-BAL294``), and it is
+refused by name.  The venv is a stopgap (ruling plan#2404): step plan#2405 runs each side in its
+own production image, whose Python, libpq, files and settings a host venv only approximates.  It
+is CACHED outside git, under ``${XDG_CACHE_HOME:-~/.cache}/shekel-rehearsal/venvs/``, by the
+SHA-256 of those pins, as ``uv export`` writes them, and the interpreter's version, so two sides
+with the same pins share one and a later run builds nothing; the cache is the one thing a
+teardown deliberately leaves.  A venv counts as built only once its marker is written, the last
+step of a build that succeeded, so one that failed or was killed is never taken for built: the
+next run removes it and builds again.  It is built where it stays, never moved, because a venv's
+scripts hold its path in their shebangs.  Two runs building the same venv at the same moment
+would collide in its directory; one kit runs at a time.
 
 Usage, which brings a bench up and tears it down, printing what each part took::
 
@@ -107,11 +106,11 @@ _PINNED_HOUR = 12
 _VERSION_NUM_PER_MAJOR = 10_000
 #: The lock a side's pins are read from; a side's tree without one predates it.
 _LOCK = "uv.lock"
-#: The groups (``pyproject.toml``) a side's venv is first built with beside the runtime set:
-#: ``build``, the tools ``psycopg-c`` compiles against, and ``rehearsal``, ``time-machine``.
-_BUILT_WITH = ("--no-default-groups", "--group", "build", "--group", "rehearsal")
-#: The groups it keeps: the second sync removes the ``build`` tools again.
-_KEPT = ("--no-default-groups", "--group", "rehearsal")
+#: The group (``pyproject.toml``) a side's venv is built with beside the runtime set:
+#: ``rehearsal``, ``time-machine``.  uv builds ``psycopg-c`` in an environment of its own, with
+#: the build tools the side's ``pyproject.toml`` trusts by hash (ruling plan#2494), so the
+#: venv holds none of them.
+_GROUPS = ("--no-default-groups", "--group", "rehearsal")
 #: Written into a venv as the last step of a build that succeeded: what makes it built.
 _BUILT_MARKER = ".rehearsal-built"
 #: How much of a failed uv's stderr a refusal quotes.
@@ -303,8 +302,8 @@ def refuse_another_major(dump: int, server_version_num: int) -> None:
 
 def side_pins(worktree: Path) -> str:
     """The pins a side's venv is built from, as ``uv export`` writes them from its lock: the
-    runtime set and the ``build`` and ``rehearsal`` groups, each pin with its sha256.  No
-    header, so the text names no path and two sides with the same pins give the same text.
+    runtime set and the ``rehearsal`` group, each pin with its sha256.  No header, so the
+    text names no path and two sides with the same pins give the same text.
 
     Raises:
         BenchError: when the side's tree holds no ``uv.lock``, or uv cannot export it.
@@ -313,7 +312,7 @@ def side_pins(worktree: Path) -> str:
         raise BenchError(f"{worktree} holds no {_LOCK}, so it is a revision before the lock "
                          "(ruling balance:R-BAL294) and its pins are not known")
     exported = run(["uv", "export", "--frozen", "--no-header", "--no-annotate",
-                    "--no-emit-project", *_BUILT_WITH, "--project", str(worktree)])
+                    "--no-emit-project", *_GROUPS, "--project", str(worktree)])
     if exported.returncode:
         raise BenchError(f"uv could not export {worktree}'s pins (exit {exported.returncode}): "
                          f"{exported.stderr.strip()}")
@@ -338,13 +337,12 @@ def venv_for(worktree: Path) -> Path:
     shutil.rmtree(venv, ignore_errors=True)
     venv.parent.mkdir(parents=True, exist_ok=True)
     into = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
-    for groups in (_BUILT_WITH, _KEPT):
-        synced = run(["uv", "sync", "--locked", "--require-build-hashes", "--no-install-project",
-                      *groups, "--python", sys.executable, "--project", str(worktree)], into)
-        if synced.returncode:
-            quoted = "\n".join(synced.stderr.strip().splitlines()[-_QUOTED_LINES:])
-            raise BenchError(f"uv could not install {worktree}'s pins into {venv} (exit "
-                             f"{synced.returncode}):\n{quoted}")
+    synced = run(["uv", "sync", "--locked", "--require-build-hashes", "--no-install-project",
+                  *_GROUPS, "--python", sys.executable, "--project", str(worktree)], into)
+    if synced.returncode:
+        quoted = "\n".join(synced.stderr.strip().splitlines()[-_QUOTED_LINES:])
+        raise BenchError(f"uv could not install {worktree}'s pins into {venv} (exit "
+                         f"{synced.returncode}):\n{quoted}")
     (venv / _BUILT_MARKER).write_text(pins, encoding="utf-8")
     return python
 

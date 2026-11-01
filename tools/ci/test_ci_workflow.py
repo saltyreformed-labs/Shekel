@@ -89,7 +89,7 @@ INSTALLS = {
     ("calendar-sweep.yml", "sweep"): {"install": "all", "cache": "false"},
     ("tax-law.yml", "watch"): {"install": "runtime", "cache": "false"},
     ("docker-publish.yml", "tax-law"): {"install": "runtime", "cache": "false"},
-    ("updates.yml", "refresh"): {"install": "refresh", "cache": "false"},
+    ("updates.yml", "refresh"): {"install": "landing", "cache": "false"},
     ("updates.yml", "publish"): {"install": "landing", "cache": "false"},
     ("updates.yml", "queue"): {"install": "landing", "cache": "false"},
 }
@@ -860,8 +860,7 @@ class TestTheInstallActionInstallsTheLock:
             "all": (0, [sync]),
             "runtime": (0, [f"{sync} --no-dev"]),
             "landing": (0, [f"{sync} --only-group landing"]),
-            "refresh": (0, [f"{sync} --only-group build --only-group landing"]),
-            "build": (1, []),
+            "refresh": (1, []), "build": (1, []),
             "python": (0, ["venv"]),
             "dev": (1, []), "": (1, []), "all ": (1, []), "ALL": (1, []),
         }

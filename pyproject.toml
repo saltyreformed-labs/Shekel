@@ -8,7 +8,10 @@
 # --bounds major``'s form, so a 0.x package is held to its minor), the exact
 # version has ONE home, the lock (CLAUDE.md rule 14), and a major version
 # moves only by an edit to this file -- which needs a card (ruling plan#2351).
-# Minor and patch moves are the lock's alone, refreshed each Monday.
+# Minor and patch moves are the lock's alone, refreshed each Monday.  The one
+# exception is the build tools a source build may run (``[tool.uv]``'s
+# ``build-constraint-dependencies``): uv locks no build tool, so each one's
+# version and hash live here, and uv copies them into the lock's manifest.
 #
 # The Python version is ``.python-version``'s, its one home: uv picks the
 # interpreter from it and CI's jobs read it.  ``requires-python`` below is
@@ -160,17 +163,6 @@ dev = [
 server = [
     "gunicorn>=26.2.0,<27.0.0",
 ]
-# The tools that build the two packages the lock holds only as source:
-# psycopg-c (the image's C driver) and pylint-flask (a dev linter).  They are
-# built WITHOUT build isolation (below), against these locked, hashed
-# versions, so no build anywhere fetches an unhashed tool.  setuptools is
-# exact because psycopg-c's own ``build-system.requires`` is exactly
-# ``setuptools == 83.0.0``: when its next release moves that pin, this one
-# moves with it in the same change.
-build = [
-    "setuptools==83.0.0",
-    "wheel>=0.37,<1.0",
-]
 # The two packages CI's landing check imports (``requests``, and
 # ``cryptography`` through quill's GitHub client), installed alone in the
 # job that holds the tracker's token, so it runs no other third-party code.
@@ -193,10 +185,28 @@ rehearsal = [
 # Shekel is an application, not a library: uv installs its dependencies and
 # never builds or installs the project itself.
 package = false
-# Build the source-only packages with the ``build`` group's locked tools,
-# not with tools fetched for an isolated build that no hash covers.
-# ``--require-build-hashes`` (the Dockerfile, CI) then refuses any future
-# source-only package until it is added here.
-no-build-isolation-package = ["psycopg-c", "pylint-flask"]
-default-groups = ["dev", "build"]
+default-groups = ["dev"]
 exclude-newer = "7 days"
+
+# THE BYTES A SOURCE BUILD MAY RUN (ruling plan#2494).  The lock holds two
+# packages only as source, psycopg-c (the image's C driver) and pylint-flask
+# (a dev linter), and uv builds each in an environment of its own from the
+# build requirement its own source declares, so no copy of that requirement
+# is kept here.  These are the only build tools uv may install there, each by
+# its sha256, checked at every build: a source asking for a version not held
+# here is refused as unsatisfiable, and a file of another hash is refused, so
+# a new requirement waits for a session to trust its bytes here (measured
+# 2026-11-01, uv 0.13.6).  uv takes a hash only beside an ``==`` pin, and
+# ``--require-build-hashes`` (the Dockerfile, CI) wants one for every tool a
+# build installs, wheel's own ``packaging`` included.
+[[tool.uv.build-constraint-dependencies]]
+requirement = "setuptools==83.0.0"
+hashes = ["sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3"]
+
+[[tool.uv.build-constraint-dependencies]]
+requirement = "wheel==0.48.0"
+hashes = ["sha256:3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab"]
+
+[[tool.uv.build-constraint-dependencies]]
+requirement = "packaging==26.3"
+hashes = ["sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"]

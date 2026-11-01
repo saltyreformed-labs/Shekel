@@ -98,14 +98,16 @@ def _side(root: Path) -> Path:
     return root
 
 
-def test_a_side_s_pins_are_its_locked_runtime_set_and_its_build_and_rehearsal_groups(tmp_path):
-    """The side's lock's pins for its runtime set, its ``build`` tools and its ``rehearsal``
-    group, every pin with its sha256, and none of the dev tools or the server.  The text names
-    no path, so two sides with one lock give one text, and one cache key."""
+def test_a_side_s_pins_are_its_locked_runtime_set_and_its_rehearsal_group(tmp_path):
+    """The side's lock's pins for its runtime set and its ``rehearsal`` group, every pin with
+    its sha256, and none of the dev tools, the server or the build tools, which uv installs
+    only where it builds (ruling plan#2494).  The text names no path, so two sides with one
+    lock give one text, and one cache key."""
     pins = bench.side_pins(_side(tmp_path / "a"))
     names = set(re.findall(r"^([a-z0-9][a-z0-9._-]*)==", pins, re.MULTILINE))
-    assert {"flask", "psycopg", "psycopg-c", "time-machine", "setuptools", "wheel"} <= names
-    assert names.isdisjoint({"pytest", "pylint", "playwright", "pre-commit", "gunicorn"})
+    assert {"flask", "psycopg", "psycopg-c", "time-machine"} <= names
+    assert names.isdisjoint({"pytest", "pylint", "playwright", "pre-commit", "gunicorn",
+                             "setuptools", "wheel"})
     entries = re.split(r"\n(?=\S)", pins.strip())
     assert len(entries) == len(names)
     assert all("--hash=sha256:" in entry for entry in entries)
@@ -159,21 +161,19 @@ def _builds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Builds:
 
 def test_a_venv_is_built_once_for_its_pins_and_then_reused_untouched(tmp_path, builds):
     """The first call builds: uv syncs the side's lock into the cached venv under this
-    interpreter, with the ``build`` and ``rehearsal`` groups and then with ``rehearsal``
-    alone, and marks it built with its pins.  The second, for a side with the same pins,
-    syncs nothing."""
+    interpreter, once, with the ``rehearsal`` group, and marks it built with its pins.  The
+    second, for a side with the same pins, syncs nothing."""
     base = _side(tmp_path / "base")
     python = bench.venv_for(base)
     venv = python.parent.parent
     sync = ["uv", "sync", "--locked", "--require-build-hashes", "--no-install-project",
             "--no-default-groups"]
     side = ["--python", sys.executable, "--project", str(base)]
-    assert builds.syncs == [[*sync, "--group", "build", "--group", "rehearsal", *side],
-                            [*sync, "--group", "rehearsal", *side]]
-    assert builds.into == [str(venv), str(venv)]
+    assert builds.syncs == [[*sync, "--group", "rehearsal", *side]]
+    assert builds.into == [str(venv)]
     assert (venv / ".rehearsal-built").read_text(encoding="utf-8") == bench.side_pins(base)
     assert bench.venv_for(_side(tmp_path / "cut")) == python
-    assert len(builds.syncs) == 2
+    assert len(builds.syncs) == 1
 
 
 def test_a_venv_whose_build_did_not_finish_is_built_again(tmp_path, builds):
@@ -183,13 +183,12 @@ def test_a_venv_whose_build_did_not_finish_is_built_again(tmp_path, builds):
     (venv / ".rehearsal-built").unlink()
     (venv / "half-installed").write_text("", encoding="utf-8")
     assert bench.venv_for(_side(tmp_path / "base")) == python
-    assert len(builds.syncs) == 4 and not (venv / "half-installed").exists()
+    assert len(builds.syncs) == 2 and not (venv / "half-installed").exists()
     assert (venv / ".rehearsal-built").is_file()
 
 
 def test_a_venv_uv_could_not_install_is_named_and_never_marked_built(tmp_path, builds):
-    """uv's refusal is quoted, no second sync runs, and the venv is left unmarked, so the
-    next run rebuilds it."""
+    """uv's refusal is quoted and the venv is left unmarked, so the next run rebuilds it."""
     builds.status = 1
     with pytest.raises(BenchError, match="uv could not install .* \\(exit 1\\):\nuv said no"):
         bench.venv_for(_side(tmp_path / "base"))

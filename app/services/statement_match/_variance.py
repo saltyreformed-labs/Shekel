@@ -522,10 +522,11 @@ def _reject_unrepresentable_landing(
     and with one row ``sides.app`` IS that row's cash, so the bank's figure
     could never oppose it.
 
-    **A group breaks the guarantee, and this module's own docstring says
-    why**: *mixed signs WITHIN a group stay legal, because a net deposit
-    really is a gross income row less a deduction*.  So the select offers the
-    negative member too, and the bank can leave it a figure of the other sign.
+    **A group breaks the guarantee, and
+    :func:`_reject_opposed_movements`' own docstring says why**: *mixed signs
+    WITHIN a group stay legal, because a net deposit really is a gross income
+    row less a deduction*.  So the select offers the negative member too, and
+    the bank can leave it a figure of the other sign.
 
     Worked example, which is the shape it exists for.  A `+$2,060.00` deposit
     against a `+$2,050.00` salary row and a `-$50.00` deduction row comes to

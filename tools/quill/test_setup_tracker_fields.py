@@ -33,15 +33,17 @@ def _fields(*nodes, total=None):
     return {"totalCount": len(nodes) if total is None else total, "nodes": list(nodes)}
 
 
-#: GitHub's four default fields as the organization held them on 2026-10-25, in the order
-#: GitHub answered them (read by GraphQL that evening): the developer keeps them beside Arc.
+#: GitHub's four default fields as the organization held them on 2026-11-01, in the order
+#: GitHub answered them (read by GraphQL at 10:42 EST): the developer keeps them beside Arc,
+#: each as held on 2026-10-25 but Effort, whose options he set to the sessions a card's work
+#: takes that day (ruling plan#2508; on 2026-10-25 it held High, Medium and Low).
 _KEPT = (_issue_field("Priority", options=("Urgent", "High", "Medium", "Low")),
          _issue_field("Start date", "DATE"), _issue_field("Target date", "DATE"),
-         _issue_field("Effort", options=("High", "Medium", "Low")))
+         _issue_field("Effort", options=("1", "2", "3", "4", "5+")))
 
 
 def _declared_but(name):
-    """The five declared fields as the organization held them on 2026-10-25, ``name`` out."""
+    """The five declared fields as the organization held them on 2026-11-01, ``name`` out."""
     return [node for node in (*_KEPT, _issue_field("Arc", options=ARCS))
             if node["name"] != name]
 
@@ -57,11 +59,12 @@ def test_the_five_declared_fields_holding_their_options_in_any_order_match():
         _fields(_issue_field("Arc", options=reversed(ARCS)), *reordered))
 
 
-def test_the_organization_as_read_on_2026_10_25_matches():
+def test_the_organization_as_read_on_2026_11_01_matches():
     """The developer, 2026-10-25, of GitHub's four default fields, which R-BAL348 ruled
     deleted (that click on the web was never made): "I don't want to delete them unless the
     tracker won't work with them empty. I want to use those fields even if they are empty
-    for now."  So the organization as read that evening, the four beside Arc, differs
+    for now."  On 2026-11-01 he set Effort's options to 1, 2, 3, 4 and 5+ (ruling
+    plan#2508).  So the organization as read that morning, the four beside Arc, differs
     nowhere."""
     read = _fields(*_KEPT, _issue_field("Arc", options=ARCS))
     assert not setup_tracker.issue_field_differences(read)
@@ -92,9 +95,12 @@ def test_arc_missing_mistyped_or_holding_other_options_or_a_short_read_differs(r
     ("Priority", _issue_field("Priority", options=("High", "Low")),
      "issue field 'Priority' holds the options ['High', 'Low'], not the options declared here "
      "['Urgent', 'High', 'Medium', 'Low']: correct it"),
-    ("Effort", _issue_field("Effort", options=("High", "Medium", "Low", "None")),
-     "issue field 'Effort' holds the options ['High', 'Medium', 'Low', 'None'], not the options "
-     "declared here ['High', 'Medium', 'Low']: correct it"),
+    ("Effort", _issue_field("Effort", options=("1", "2", "3-4", "5+")),
+     "issue field 'Effort' holds the options ['1', '2', '3-4', '5+'], not the options "
+     "declared here ['1', '2', '3', '4', '5+']: correct it"),
+    ("Effort", _issue_field("Effort", options=("High", "Medium", "Low")),
+     "issue field 'Effort' holds the options ['High', 'Medium', 'Low'], not the options "
+     "declared here ['1', '2', '3', '4', '5+']: correct it"),
 ])
 def test_a_kept_field_missing_mistyped_or_holding_other_options_differs(name, node, difference):
     """Each of the four the developer kept is declared as the organization held it, so one

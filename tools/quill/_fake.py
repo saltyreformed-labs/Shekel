@@ -7,7 +7,8 @@ It keeps what the commands depend on the way the recordings show GitHub keeping
 it -- a body edit saves a full version, and the first edit also saves the body
 as filed; a parent's read lists each sub-issue's kind and state as they stand
 now, not as they were when it was linked; a mark removed from a card that
-does not carry it is answered as GitHub answers it, 404; a card added to the board
+does not carry it is answered as GitHub answers it, 404, and so is a field value cleared
+that the card does not hold; a card added to the board
 again keeps the item it has (and, unmeasured, its place), and an unlink of a card
 that is no sub-issue of the parent named is refused 403, as GitHub answers both
 (``recorded/twice.json``, ``recorded/unlink.json``) -- and FAILS LOUDLY on a write
@@ -35,12 +36,18 @@ from tools.ci.gitcmd import DEV, tracking
 from tools.ci.scratch import commit_files, elsewhere
 from tools.ci.scratch import run as _run
 from tools.quill import _git, quill
-from tools.quill._arcs import ArcCard
+from tools.quill._arcs import ARC_FIELD, ArcCard
 from tools.quill._board_fields import STATUS_OPTIONS
 from tools.quill._command import on_board as goes_on_board
+from tools.quill._fields import FIELDS
 from tools.quill._github import GitHubError
-from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, filed_labels, in_order
+from tools.quill._filed import filed_labels
+from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, in_order
 from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
+
+#: The card's fact (:class:`_tracker.BareCard`) holding each issue field
+#: :meth:`FakeTracker.set_field` writes.
+FIELD_PARTS = {ARC_FIELD: "arc", **{field: part for part, field in FIELDS.items()}}
 
 
 class FakeBoard:
@@ -154,10 +161,12 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     def add(self, number, kind="step", body="", on_board=True, **fields):
         """Put a card in the tracker (open, unclaimed, and by default on the board's bottom when
         quill would put it there, :func:`_command.on_board`), by default in the balance arc, its
-        Arc and its label, but a task, which holds neither (R-BAL386)."""
+        Arc and its label, but a task, which holds neither (R-BAL386), and holding no Priority
+        and no Effort."""
         values = {"number": number, "id": 1000 + number, "node_id": f"I_{number}",
                   "title": f"card {number}", "kind": kind, "labels": ("balance",),
-                  "arc": None if kind == TASK else "balance", "is_open": True,
+                  "arc": None if kind == TASK else "balance", **dict.fromkeys(FIELDS),
+                  "is_open": True,
                   "state_reason": None, "parent": None, "children": (),
                   "blocked_by": (), "board_item": None, "closed_by_tool": False,
                   "touched_by_hand": False, "outside": (), **fields}
@@ -269,10 +278,12 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     # -- writes
     def create(self, card, milestone=None):
         """File ``card`` (a ``check.Draft``) at the next number holding its Arc (a task none),
-        marked :data:`setup_tracker.FILING` beside its labels and its arc label, by the labels
-        :meth:`_tracker.Tracker.create` sends (:func:`_tracker.filed_labels`), in
-        ``milestone`` when one is given.  One the tracker lacks is a write the tool must never
-        send, so it fails loudly rather than guess GitHub's answer."""
+        its Priority and its Effort, marked :data:`setup_tracker.FILING` beside its labels and
+        its arc label, by the labels :meth:`_tracker.Tracker.create` sends
+        (:func:`_filed.filed_labels`), in ``milestone`` when one is given.  One the tracker
+        lacks is a write the tool must never send, so it fails loudly rather than guess
+        GitHub's answer.  The log holds the create's type, title, labels, Arc and milestone; a
+        test reads the Priority and Effort it filed from the card."""
         number = max(self.cards_by_number, default=0) + 1
         labels = tuple(filed_labels(card.labels, card.arc))
         assert milestone is None or milestone in self.milestones, (
@@ -280,7 +291,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.writes.append(("create", number, card.kind, card.title, labels, card.arc)
                            + (() if milestone is None else (milestone,)))
         self.add(number, card.kind, card.body, on_board=False, title=card.title, labels=labels,
-                 arc=card.arc)
+                 arc=card.arc, **{part: getattr(card, part) for part in FIELDS})
         if milestone is not None:
             self.milestone_of[number] = milestone
         return number
@@ -348,6 +359,18 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         """Set a card's Arc, its other facts kept."""
         self.writes.append(("set_arc", number, arc))
         self._set(number, arc=arc)
+
+    def set_field(self, number, field, value):
+        """Set a card's Arc, Priority or Effort to ``value``, or with None clear it, its other
+        facts kept.  A clear of a field the card holds none of is answered as GitHub answers it,
+        404 "Issue field value not found" (``_tracker.Tracker.set_field``), and nothing is
+        written."""
+        part = FIELD_PARTS[field]
+        if value is None and getattr(self.cards_by_number[number], part) is None:
+            raise GitHubError(404, f"DELETE .../issues/{number}/issue-field-values/{field} -> "
+                                   '404: {"message":"Issue field value not found"}')
+        self.writes.append(("set_field", number, field, value))
+        self._set(number, **{part: value})
 
     def relabel(self, number, add, remove):
         """Add the labels ``add`` to a card and remove ``remove``, its other labels kept.  A
@@ -571,18 +594,19 @@ def two_tasks():
 
 
 def leaf_filing(tmp_path, title, parent="plan#1"):
-    """``quill file step`` filing a leaf named ``title`` under ``parent``, its spec written to
-    a file."""
+    """``quill file step`` filing a leaf named ``title`` under ``parent``, sized at two
+    sessions (ruling plan#2492), its spec written to a file."""
     spec = tmp_path / f"{title}.md"
     spec.write_text(f"Build {title}.")
     return ("file", "step", "--parent", parent, "--arc", "balance", "--title", title,
-            "--body-file", str(spec))
+            "--body-file", str(spec), "--effort", "2")
 
 
 def finding_filing(owner, title="Twice", text="The report counts a refund twice."):
-    """``quill file finding`` filing the finding ``title``, saying ``text``, for ``owner``."""
+    """``quill file finding`` filing the finding ``title``, saying ``text``, for ``owner``,
+    sized at one session (ruling plan#2492)."""
     return ("file", "finding", "--arc", "balance", "--title", title, "--owner", owner,
-            "--text", text)
+            "--text", text, "--effort", "1")
 
 
 def ruling_filing(tmp_path, owner):

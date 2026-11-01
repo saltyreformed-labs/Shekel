@@ -888,7 +888,7 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
     text; its comments.  The finding, with no task under it: by number; its owner, its one
     blocker, in one read; the board; its text; its comments.  Whether either shipped, its
     claim and its marker's history are git's (``code``: no marker, no ``card/N``), not the
-    tracker's."""
+    tracker's.  Neither holds a Priority or an Effort, each printed as none (plan#2491)."""
     replay = Replay("show")
     scratch = Scratch.from_json(recording("show")["scratch"])
     github = GitHub("token", replay)
@@ -898,6 +898,8 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
         f"plan#{SS} [step, no arc] {_show_line('S', 'step')}\n"
         "  state: open\n"
         "  shipped (git): no\n"
+        "  priority: none\n"
+        "  effort (sessions): none\n"
         "  board: not on it\n"
         "  claim: none\n"
         "  parent: none\n"
@@ -918,6 +920,8 @@ def test_show_over_the_recording_lists_a_steps_links_and_owned_cards_then_its_co
         f"plan#{SF} [finding, no arc] {_show_line('F', 'finding')}\n"
         "  state: open\n"
         "  shipped (git): no\n"
+        "  priority: none\n"
+        "  effort (sessions): none\n"
         "  board: not on it\n"
         "  claim: none\n"
         "  parent: none\n"

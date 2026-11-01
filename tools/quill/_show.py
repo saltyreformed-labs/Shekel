@@ -54,7 +54,8 @@ def _resolve_reference(tracker: Tracker, text: str) -> int:
 
 def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _git.Reads,
                 listed: dict[int, Card]) -> list[str]:
-    """What the tracker and git (``reads``) say about a card, one fact a line.  ``cards``
+    """What the tracker and git (``reads``) say about a card, one fact a line, its Priority and
+    its Effort in sessions among them (plan#2491), ``none`` for one it holds none of.  ``cards``
     holds every step linked below it (:func:`_steps_below`), and ``listed`` each card it
     lists as a child, a blocker or a card it owns (:func:`_listed`), whose lines are
     :func:`_link_lines`'.  A task says whether git says it is done
@@ -81,6 +82,8 @@ def _card_lines(card: Card, tracker: Tracker, cards: dict[int, Card], reads: _gi
         _label(card),
         f"  state: {state}",
         f"  {ship}",
+        f"  priority: {card.priority or 'none'}",
+        f"  effort (sessions): {card.effort or 'none'}",
         f"  board: {place}",
         f"  claim: {holder(claim)}" if claim else "  claim: none",
         (f"  parent: plan#{card.parent}" if card.parent else

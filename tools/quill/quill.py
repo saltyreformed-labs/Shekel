@@ -14,14 +14,18 @@ display, which ``sync`` writes from git.  A card is CLAIMED while the code
 repository's ``origin`` holds a branch ``card/N`` whose work neither ``dev``
 nor ``main`` holds: ``claim`` makes it, a commit adding the card's marker
 pushed create-only, and ``release`` keeps its work on ``released/N/<instant>``
-and deletes it.  So every command that asks git -- ``next``, ``show``,
-``claim``, ``release``, ``move``, ``drop``, ``sync``, and ``file`` given an
-owner or a parent or finding a card of its own closed while still marked --
-first reads it once (:func:`_git.read`): it lists the ``card/N`` branches
+and deletes it.  So every command that asks git what shipped and who claims what --
+``next``, ``show``, ``claim``, ``release``, ``move``, ``drop``, ``sync``, ``note``,
+``finding-file``, ``hand``, ``block`` of a finding, ``watch`` once a branch moved
+from the tips its last finished pass saved, ``effort --to`` of a step with a step
+linked under it, and ``file`` given an owner (its ``--owner``, or the owner of the
+question it converts) or a parent, or finding a card of its own closed while still
+marked -- first reads it once (:func:`_git.read`): it lists the ``card/N`` branches
 ``origin`` holds, then fetches ``dev``, ``main`` and each of them, which moves
 this checkout's ``origin/dev``, ``origin/main`` and ``origin/card/N``.
-(``move`` and ``drop`` ask it whether a step is split: a leaf dropped before
-its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
+``start`` fetches only ``dev``, ``main`` and its card's branch (:func:`_git.fetch`).
+(``move``, ``drop`` and ``effort`` ask it whether a step is split: a leaf dropped
+before its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
 A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-issue
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,
@@ -40,7 +44,8 @@ marked nor handed on, and a leaf's while a step above it owns one (``landing``, 
 A LEAF (``file step --parent``) is filed in its split step's milestone while the split
 step holds one, which the filing then clears; else in none, the milestones its leaves
 hold named for a person to set one on the web (``_filing._leaf_milestone``).  A leaf
-dropped before its filing finished gives it back (``_unsplit``).
+dropped before its filing finished gives it back (``_unsplit``).  The filing clears its split
+step's Effort too, which ``effort`` refuses to set on a split step (ruling plan#2555).
 ``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
 ``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``
@@ -55,8 +60,10 @@ claimed card's next session starts and prints its prompt (rulings plan#1921, pla
 ``pr`` opens a card's pull request into ``dev``, its text naming the card so the card links it,
 and ``file question --owner`` links a question to the step it is asked for, a link its ruling
 keeps (plan#1861's item 10, :mod:`_pr`, :mod:`_filing`).  ``arc`` sets a card's Arc and puts
-its arc label back to display it, and ``label`` adds or removes a label a person chooses
-(ruling plan#2221, :mod:`_arc_label`).
+its arc label back to display it, ``label`` adds or removes a label a person chooses (ruling
+plan#2221), and ``priority`` and ``effort`` set or clear a card's Priority and Effort
+(plan#2491, :mod:`_arc_label`); ``file step`` and ``file finding`` file a card holding its
+Effort, the filing session's estimate (ruling plan#2492, :mod:`_filing`).
 
 Usage, from the repository root (``plan#N`` or ``N`` names a card)::
 
@@ -64,8 +71,10 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill claim plan#N [--here]
     python -m tools.quill.quill release plan#N
     python -m tools.quill.quill show plan#N | OLD-ID
-    python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC [--parent plan#P]
+    python -m tools.quill.quill file step --arc ARC --title NAME --body-file SPEC
+                                         --effort SESSIONS [--parent plan#P]
     python -m tools.quill.quill file finding --arc ARC --title NAME --owner plan#S --text SENTENCE
+                                            --effort SESSIONS
     python -m tools.quill.quill file ruling --arc ARC --title NAME
                                 (--owner plan#S --question-file Q | [--owner plan#S]
                                  --from-question plan#Q) --answer-file A
@@ -81,6 +90,8 @@ Usage, from the repository root (``plan#N`` or ``N`` names a card)::
     python -m tools.quill.quill comment plan#N --body-file TEXT
     python -m tools.quill.quill arc plan#N --to ARC
     python -m tools.quill.quill label plan#N (--add LABEL | --remove LABEL)
+    python -m tools.quill.quill priority plan#N (--to PRIORITY | --clear)
+    python -m tools.quill.quill effort plan#N (--to SESSIONS | --clear)
     python -m tools.quill.quill answer plan#N --body-file TEXT
     python -m tools.quill.quill note plan#N --body-file NOTE
     python -m tools.quill.quill block plan#N --by plan#M [--remove]
@@ -181,6 +192,7 @@ from tools.quill._state import (
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import (
     BODY,
+    HOLDERS,
     TITLE,
     Draft,
     in_ruling_shape,
@@ -188,7 +200,6 @@ from tools.quill.check import (
     violations,
 )
 from tools.quill.setup_tracker import (
-    CHOSEN_LABELS,
     FILING,
     IN_ORDER,
     PLAN,
@@ -848,18 +859,6 @@ def cmd_spec_revert(args, tracker: Tracker, _root: Path) -> int:
 
 # -- the command line -----------------------------------------------------------------
 
-def _arc_label_parser(commands) -> None:
-    """``arc`` and ``label`` and their arguments (ruling plan#2221)."""
-    arc = commands.add_parser("arc", help="set a card's Arc, its arc label following it")
-    arc.add_argument("card", type=card_number)
-    arc.add_argument("--to", required=True, choices=ARCS, help="the arc it moves to")
-    label = commands.add_parser("label", help="add or remove a label a person chooses")
-    label.add_argument("card", type=card_number)
-    which = label.add_mutually_exclusive_group(required=True)
-    which.add_argument("--add", choices=CHOSEN_LABELS)
-    which.add_argument("--remove", choices=CHOSEN_LABELS)
-
-
 def _text_parser(commands) -> None:
     """``edit``, ``comment``, ``answer``, ``note`` and ``pr``, and their arguments: each names a
     card and a file holding the text it writes."""
@@ -901,7 +900,7 @@ def parser() -> argparse.ArgumentParser:
         "card")
     _filing.file_parser(commands)
     _text_parser(commands)
-    _arc_label_parser(commands)
+    _arc_label.add_parsers(commands)
     block = commands.add_parser("block", help="record a blocked-by edge")
     block.add_argument("card", type=card_number)
     block.add_argument("--by", type=card_number, required=True)
@@ -945,7 +944,7 @@ def parser() -> argparse.ArgumentParser:
 COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
     "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment, "arc": _arc_label.cmd_arc,
-    "label": _arc_label.cmd_label,
+    "label": _arc_label.cmd_label, **dict.fromkeys(HOLDERS, _arc_label.cmd_field),
     "answer": _comments.cmd_answer, "note": _notes.cmd_note, "block": cmd_block,
     "move": cmd_move, "drop": cmd_drop, "start": _tasks.cmd_start,
     "task-file": _tasks.cmd_task_file,

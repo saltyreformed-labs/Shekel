@@ -14,14 +14,18 @@ display, which ``sync`` writes from git.  A card is CLAIMED while the code
 repository's ``origin`` holds a branch ``card/N`` whose work neither ``dev``
 nor ``main`` holds: ``claim`` makes it, a commit adding the card's marker
 pushed create-only, and ``release`` keeps its work on ``released/N/<instant>``
-and deletes it.  So every command that asks git -- ``next``, ``show``,
-``claim``, ``release``, ``move``, ``drop``, ``sync``, and ``file`` given an
-owner or a parent or finding a card of its own closed while still marked --
-first reads it once (:func:`_git.read`): it lists the ``card/N`` branches
+and deletes it.  So every command that asks git what shipped and who claims what --
+``next``, ``show``, ``claim``, ``release``, ``move``, ``drop``, ``sync``, ``note``,
+``finding-file``, ``hand``, ``block`` of a finding, ``watch`` once a branch moved
+from the tips its last finished pass saved, ``effort --to`` of a step with a step
+linked under it, and ``file`` given an owner (its ``--owner``, or the owner of the
+question it converts) or a parent, or finding a card of its own closed while still
+marked -- first reads it once (:func:`_git.read`): it lists the ``card/N`` branches
 ``origin`` holds, then fetches ``dev``, ``main`` and each of them, which moves
 this checkout's ``origin/dev``, ``origin/main`` and ``origin/card/N``.
-(``move`` and ``drop`` ask it whether a step is split: a leaf dropped before
-its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
+``start`` fetches only ``dev``, ``main`` and its card's branch (:func:`_git.fetch`).
+(``move``, ``drop`` and ``effort`` ask it whether a step is split: a leaf dropped
+before its filing finished is no leaf unless git says it shipped, ``_state.leaves``.)
 A TASK (ruling ``balance:R-BAL386``) is a piece of one step or finding, a sub-issue
 of it done when its file ``plan/tasks/N`` is in git (``_state.done_tasks``):
 ``file task`` files one, on the board under a step the board holds (ruling plan#1814,

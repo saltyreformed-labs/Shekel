@@ -574,7 +574,7 @@ def test_the_files_that_pin_versions_are_the_lock_and_each_line_rules_file(path,
     (".github/workflows/ci.yml", _WORKFLOW,
      _WORKFLOW.replace(f"{_SHA} # v7.0.1", f"{_LATER} # v8.0.0"),
      (Move("actions/checkout", "7.0.1", "8.0.0", True),)),
-    (".github/actions/install-lock/action.yml", _ACTION,
+    (".github/actions/test-only/action.yml", _ACTION,
      _ACTION.replace(f"{_SHA} # v6.1.0", f"{_LATER} # v6.2.0"),
      (Move("actions/cache", "6.1.0", "6.2.0", False),)),
 ], ids=["the dev compose file", "a test workflow's major", "a local action"])

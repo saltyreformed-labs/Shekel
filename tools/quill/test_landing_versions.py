@@ -49,10 +49,11 @@ _MOVED = {
 #: Where a card's claim must record a change, as rule 9 has always said it.
 _CARD = ("but adds, changes or deletes no ship marker, so no release would count it: a change to "
          "a file the production image holds, Dockerfile, docker-compose.yml, "
-         ".github/workflows/docker-publish.yml, scripts/_container_lib.sh or deploy/ (a "
-         "README.md there excepted) lands from a card's claim (quill claim <card>), whose "
-         "marker records it, and only a change that moves pinned versions alone, writing no "
-         "plan record, lands with none (ruling plan#2351): here")
+         ".github/workflows/docker-publish.yml, scripts/_container_lib.sh, an action the "
+         "publish workflow loads or deploy/ (a README.md there excepted) lands from a card's "
+         "claim (quill claim <card>), whose marker records it, and only a change that moves "
+         "pinned versions alone, writing no plan record, lands with none (ruling plan#2351): "
+         "here")
 
 
 def _refused(head, paths, why):

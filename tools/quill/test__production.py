@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools.ci import scratch
+from tools.ci import arcs, scratch
 from tools.ci.scratch import commit as _commit
 from tools.ci.scratch import commit_files as _files
 from tools.ci.scratch import run as _run
@@ -226,6 +226,55 @@ def test_production_changes_where_its_files_differ_and_nowhere_else(repo):
         "a publish comment": (publish,), "a tools edit": (), "another workflow": (),
         "deploy's README": (), "a comment": ()}
     assert tuple(changed(repo, base, _executable(repo, base, "app/a.py"))) == ("app/a.py",)
+
+
+#: Actions the publish workflow loads, one through another, and actions it does not.
+_ACTIONS = {
+    ".dockerignore": ".dockerignore\n.github/\n",
+    _production.PUBLISH: ("jobs:\n  b:\n    steps:\n      - uses: $/.github/actions/lock\n"
+                          "      - uses: './.github/actions/empty'  # holds no action\n"
+                          "      - run: echo .github/actions/named\n"),
+    ".github/actions/lock/action.yml": "runs:\n  steps:\n    - uses: \"./.github/actions/in/\"\n",
+    ".github/actions/in/action.yaml": "runs:\n  steps:\n    - uses: $/.github/actions/lock\n",
+    ".github/actions/empty/README.md": "x\n",
+    ".github/actions/named/action.yml": "runs: {}\n",
+    ".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - uses: $/.github/actions/ci\n",
+    ".github/actions/ci/action.yml": "runs: {}\n",
+}
+
+
+def test_each_action_the_publish_workflow_loads_runs_production(repo):
+    """Each action of the repository's that the publish workflow loads by a step's ``uses:``,
+    in either form, quoted or not, and each that one loads in turn, in whichever file GitHub
+    reads it from, though the ignore file excludes them (plan#2482); one loading the other
+    back is read once.  Not a ``uses:`` of a directory holding no action, an action only
+    named in the workflow's text, nor one only another workflow loads."""
+    sha = _files(repo, _commit(repo, "root"), "base", _ACTIONS)
+    assert sorted(files(repo, sha)) == [
+        ".github/actions/in/action.yaml", ".github/actions/lock/action.yml",
+        _production.PUBLISH]
+
+
+def test_an_action_changes_production_while_the_publish_workflow_loads_it(repo):
+    """An edit to an action the publish workflow loads changes production, and one to an
+    action only another workflow loads nothing; the workflow dropping its ``uses:`` changes
+    the workflow and takes each action it loaded out of production."""
+    base = _files(repo, _commit(repo, "root"), "base", _ACTIONS)
+    lock, inner = ".github/actions/lock/action.yml", ".github/actions/in/action.yaml"
+    edits = {"a loaded action": {lock: _ACTIONS[lock] + "# moved\n"},
+             "another workflow's": {".github/actions/ci/action.yml": "runs: {x: 1}\n"},
+             "dropped": {_production.PUBLISH: "jobs: {}\n"}}
+    found = {name: tuple(changed(repo, base, _files(repo, base, name, edit)))
+             for name, edit in edits.items()}
+    assert found == {"a loaded action": (lock,), "another workflow's": (),
+                     "dropped": (inner, lock, _production.PUBLISH)}
+
+
+def test_the_release_s_tax_law_gate_runs_install_lock():
+    """This repository's own commit: the publish workflow's tax-law gate, which decides
+    whether the image is built, installs the lock by ``.github/actions/install-lock``, so an
+    edit to it changes production (plan#2482)."""
+    assert ".github/actions/install-lock/action.yml" in files(arcs.REPO, "HEAD")
 
 
 def test_an_ignore_file_docker_refuses_refuses_the_comparison(repo):

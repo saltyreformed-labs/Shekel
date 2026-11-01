@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 #: versions, the sentence names before it counts the rest.
 _NAMED = 5
 #: The files outside the image that the sentence names, as :mod:`_production` reads them.
-_OUTSIDE = (f"{', '.join(_production.RECIPE)} or {_production.DEPLOY}/ (a "
-            f"{_production.README} there excepted)")
+_OUTSIDE = (f"{', '.join(_production.RECIPE)}, an action the publish workflow loads or "
+            f"{_production.DEPLOY}/ (a {_production.README} there excepted)")
 
 
 def _named(items: tuple[str, ...], joined: str) -> str:

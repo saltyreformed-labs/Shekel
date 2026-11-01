@@ -130,10 +130,11 @@ it leaves as it was (rule 8):**
    production built from M differs from production built from M's first parent
    (:func:`_production.changed`: the files the image holds, read from its ignore file by
    Docker's own rules, and the files outside it that build or run production,
-   :data:`_production.RECIPE` and ``deploy/`` but its ``README.md`` files), a change writing
-   no marker is refused (:func:`_unrecorded.refused`).  Which marker it writes, and from which
-   branch, rules 1-8 judge.  A release and a resync change production only with the markers
-   they bring, which rules 3 and 4 judge as carried; one that brings none and still changes
+   :data:`_production.RECIPE`, each action the publish workflow loads, and ``deploy/`` but
+   its ``README.md`` files), a change writing no marker is refused
+   (:func:`_unrecorded.refused`).  Which marker it writes, and from which branch, rules 1-8
+   judge.  A release and a resync change production only with the markers they bring, which
+   rules 3 and 4 judge as carried; one that brings none and still changes
    production carries code ``dev`` kept after deleting its card's marker, which no release
    could count, so it is refused as well, and a fresh claim recording that code (a marker,
    no code) lets it pass.  **The rule is per change, as ruled**, so a change writing any

@@ -43,10 +43,14 @@ check the deploy script sources from that same checkout (``R-BAL254``: "the prod
 deploy script becomes two files from the same checkout instead of one"), the only file the
 image excludes that production's deploy loads (S3b's review, its finding 1); and
 (``R-BAL401``) the workflow that builds the image on ``main`` and signs it, read whole, its
-comments included, as the others are.
+comments included, as the others are, with each action of this repository's it loads by a
+step's ``uses:`` and each that one loads in turn (:func:`loaded`; plan#2482): its tax-law
+gate, which decides whether the image is built, runs ``.github/actions/install-lock``.  Which
+actions those are is read from each commit's own workflow, the one home of what it runs, so
+no list of them is kept here.
 ``docker-compose.dev.yml``, ``docker-compose.build.yml``, ``cloudflared/config.yml`` (a
 template the host's copy differs from) and the other workflows, which only test, are none
-of production's.
+of production's, nor an action that only they load.
 """
 from __future__ import annotations
 
@@ -74,6 +78,13 @@ DEPLOY = "deploy"
 README = "README.md"
 #: The ignore file Docker reads, each in the order it looks: the Dockerfile's own first.
 IGNORE_FILES = (f"{DOCKERFILE}.dockerignore", ".dockerignore")
+#: A step's ``uses:`` naming an action this repository holds, by its directory from the root:
+#: the ``$/`` form GitHub loads from the workflow's own commit (ruling plan#2375) or the
+#: ``./`` form it reads from the checkout, quoted or not, a comment after it.
+_LOCAL_USES = re.compile(r"""\s*(?:-\s+)?uses:\s*(["']?)[$.]/(?P<directory>[^\s"'#]+)\1"""
+                         r"\s*(?:#.*)?")
+#: The files GitHub reads a local action from, in its directory.
+ACTION_FILES = ("action.yml", "action.yaml")
 #: What Go's ``strings.TrimSpace`` trims (``unicode.IsSpace``): Python's ``str.strip()``
 #: trims U+001C-U+001F too.
 _SPACE = "\t\n\v\f\r \x85\xa0 " + "".join(map(chr, range(0x2000, 0x200B))) + (
@@ -245,27 +256,53 @@ def ignore_file(root: Path, commit: str) -> str:
 
 
 def runs_it(path: str) -> bool:
-    """Whether ``path`` is a file outside the image that builds or runs production
-    (``R-BAL400``, ``R-BAL401``): the image's recipe, the compose file production copies, the
-    workflow that builds and signs the image, the helper the deploy script sources
-    (``R-BAL254``), or a file under :data:`DEPLOY` but a :data:`README`."""
+    """Whether ``path`` is, by its path alone, a file outside the image that builds or runs
+    production (``R-BAL400``, ``R-BAL401``): the image's recipe, the compose file production
+    copies, the workflow that builds and signs the image, the helper the deploy script sources
+    (``R-BAL254``), or a file under :data:`DEPLOY` but a :data:`README`.  The actions that
+    workflow loads are its commit's to say (:func:`loaded`)."""
     return path in RECIPE or (path.startswith(f"{DEPLOY}/")
                               and posixpath.basename(path) != README)
+
+
+def loaded(root: Path, held: Mapping[str, str], path: str) -> set[str]:
+    """Each action of this repository's that the file ``path`` of ``held`` (a tree's files,
+    :func:`tree`) loads by a step's ``uses:``, and each that one loads in turn, by the file
+    of :data:`ACTION_FILES` ``held`` holds it in; none when ``held`` holds no ``path``.
+
+    Raises:
+        tools.ci.gitcmd.GitError: when git cannot read a file it reads.
+    """
+    found: set[str] = set()
+    reading = [path] if path in held else []
+    while reading:
+        for line in git(root, "cat-file", "blob", held[reading.pop()].split(" ")[1]).split("\n"):
+            if (match := _LOCAL_USES.fullmatch(line)) is None:
+                continue
+            for name in ACTION_FILES:
+                action = posixpath.join(posixpath.normpath(match["directory"]), name)
+                if action in held and action not in found:
+                    found.add(action)
+                    reading.append(action)
+    return found
 
 
 def files(root: Path, commit: str) -> dict[str, str]:
     """Every file of production at ``commit``, by its path, each its mode and object: those
     the image built from it holds (:func:`kept` by :func:`ignore_file`'s rules), and those
-    outside the image that build or run it (:func:`runs_it`).
+    outside the image that build or run it (:func:`runs_it`, and each action the publish
+    workflow loads, :func:`loaded`).
 
     Raises:
         IgnoreFileError: as :func:`rules` raises it.
-        tools.ci.gitcmd.GitError: when git cannot read ``commit``.
+        tools.ci.gitcmd.GitError: when git cannot read ``commit``, or a file it reads.
     """
     found = rules(ignore_file(root, commit))
     held = tree(root, commit)
     image = kept(found, held)
-    return {path: what for path, what in held.items() if path in image or runs_it(path)}
+    actions = loaded(root, held, PUBLISH)
+    return {path: what for path, what in held.items()
+            if path in image or path in actions or runs_it(path)}
 
 
 def tree(root: Path, commit: str) -> dict[str, str]:

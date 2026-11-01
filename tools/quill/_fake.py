@@ -154,10 +154,12 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
     def add(self, number, kind="step", body="", on_board=True, **fields):
         """Put a card in the tracker (open, unclaimed, and by default on the board's bottom when
         quill would put it there, :func:`_command.on_board`), by default in the balance arc, its
-        Arc and its label, but a task, which holds neither (R-BAL386)."""
+        Arc and its label, but a task, which holds neither (R-BAL386), and holding no Priority
+        and no Effort."""
         values = {"number": number, "id": 1000 + number, "node_id": f"I_{number}",
                   "title": f"card {number}", "kind": kind, "labels": ("balance",),
-                  "arc": None if kind == TASK else "balance", "is_open": True,
+                  "arc": None if kind == TASK else "balance", "priority": None,
+                  "effort": None, "is_open": True,
                   "state_reason": None, "parent": None, "children": (),
                   "blocked_by": (), "board_item": None, "closed_by_tool": False,
                   "touched_by_hand": False, "outside": (), **fields}

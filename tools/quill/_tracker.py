@@ -64,8 +64,16 @@ from typing import overload
 from urllib.parse import quote
 
 from tools.quill import _arcs, _queries
-from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_labels, labels_and_arc
+from tools.quill._arcs import (
+    ARC_FIELD,
+    ArcCard,
+    arc_answered,
+    arc_labels,
+    arc_of,
+    labels_and_values,
+)
 from tools.quill._draft import Draft
+from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD, value_of
 from tools.quill._github import (
     GitHub,
     TrackerError,
@@ -154,13 +162,14 @@ class BareCard:  # pylint: disable=too-many-instance-attributes
     about the board that is handed one raises AttributeError, never reads it as off the
     board.
 
-    Pylint: too-many-instance-attributes (15/7) -- **fifteen because a card
-    states fifteen facts the plan reads without the board**, each its own GitHub
+    Pylint: too-many-instance-attributes (17/7) -- **seventeen because a card
+    states seventeen facts the plan reads without the board**, each its own GitHub
     field, and no subset of them travels apart from the others.
 
     ``arc``: the value of its issue field Arc, the arc's one home (rulings
     ``balance:R-BAL349``, ``R-BAL354``; :mod:`_arcs`), None when it holds none; its arc label
-    is display.
+    is display.  ``priority`` and ``effort``: the values of its issue fields Priority and
+    Effort (:mod:`_fields`, plan#2491), each None when it holds none.
 
     ``parent``, ``children`` and ``blocked_by`` name cards of the tracker only;
     ``outside`` holds every link to an issue anywhere else (R-BAL188).
@@ -181,6 +190,8 @@ class BareCard:  # pylint: disable=too-many-instance-attributes
     kind: str | None
     labels: tuple[str, ...]
     arc: str | None
+    priority: str | None
+    effort: str | None
     is_open: bool
     state_reason: str | None
     parent: int | None
@@ -318,7 +329,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
     links += [(blocker, "blocker")
               for blocker in counted(node["blockedBy"], "blockers", number)]
     inside = [(link, what) for link, what in links if is_tracker_issue(link, place)]
-    labels, arc = labels_and_arc(node)
+    labels, values = labels_and_values(node)
     facts = {
         "number": number,
         "id": int(node["fullDatabaseId"]),
@@ -326,7 +337,9 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
         "title": node["title"],
         "kind": (node["issueType"] or {}).get("name"),
         "labels": labels,
-        "arc": arc,
+        "arc": arc_of(values),
+        "priority": value_of(values, PRIORITY_FIELD),
+        "effort": value_of(values, EFFORT_FIELD),
         "is_open": is_open,
         "state_reason": node["stateReason"],
         "parent": next((link["number"] for link, what in inside if what == "parent"), None),

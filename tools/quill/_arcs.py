@@ -1,11 +1,12 @@
 """A card's arc: the organization's issue field Arc, its one home (rulings ``balance:R-BAL349``,
 ``R-BAL354``), whose matching arc label quill keeps as display.  This module holds the field's
 name, how a card's value is read, from a GraphQL read (:func:`arc_of`) and from GitHub's
-answer to a REST write (:func:`arc_answered`), and the arc labels that display it
+answer to a REST write (:func:`arc_answered`), each the one read of a single select's value
+(:mod:`_fields`) named for the Arc, and the arc labels that display it
 (:func:`arc_labels`), for the tracker's configuration (:mod:`setup_tracker`, which declares
 the field), its reads (:mod:`_queries`), its cards and the create that files one
 (:mod:`_tracker`): every read of a card reads its labels and Arc by one text
-(:data:`LABELS_AND_ARC`) and one parse (:func:`labels_and_arc`).  And the one read of EVERY
+(:data:`LABELS_AND_ARC`) and one parse (:func:`labels_and_values`).  And the one read of EVERY
 card's labels and Arc (:func:`card_arcs`), with the one rule of what a card's arc labels and
 Arc call for (:func:`arc_verdict`): the Arc its one arc label sets while old code may still
 file a card without one (ruling plan#1856), else what a person must fix in its Arc, which no
@@ -13,8 +14,8 @@ label can, else what puts its arc labels back to display it (:func:`label_correc
 one producer).  ``quill sync``'s label pass writes and reports by it (:mod:`_relabel`), and
 :mod:`setup_tracker` reports each card it finds anything for (views_spec s.3, s.6).
 
-A leaf but for :mod:`_github`, itself a leaf: it imports no other module of quill's, so
-:mod:`setup_tracker`, which every other module imports, can import it.
+A leaf but for :mod:`_github` and :mod:`_fields`, themselves leaves: it imports no other module
+of quill's, so :mod:`setup_tracker`, which every other module imports, can import it.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from tools.ci.arcs import ARCS
+from tools.quill._fields import answered_value, value_of
 from tools.quill._github import GitHub, counted, issue_listing
 
 #: The organization's issue field holding a card's arc, a single select whose options are the
@@ -29,45 +31,43 @@ from tools.quill._github import GitHub, counted, issue_listing
 ARC_FIELD = "Arc"
 
 #: What quill reads of a card's issue fields: how many it holds, and each single select's
-#: value with its field's name.  The organization declares five fields
-#: (``setup_tracker.ISSUE_FIELDS``), so ten leave room, and a read GitHub cut short is refused
-#: by its count (``_tracker.card_from``).  A value of another type answers ``{}``: GitHub
-#: answers an inline fragment that does not match so.
+#: value with its field's name, the Arc, Priority and Effort among them (:mod:`_fields`).  The
+#: organization declares five fields (``setup_tracker.ISSUE_FIELDS``), so ten leave room, and a
+#: read GitHub cut short is refused by its count (``_tracker.card_from``).  A value of another
+#: type answers ``{}``: GitHub answers an inline fragment that does not match so.
 FIELD_VALUES = """\
   issueFieldValues(first: 10) { totalCount nodes { ... on IssueFieldSingleSelectValue {
     name field { ... on IssueFieldSingleSelect { name } } } } }
 """
 #: What every read of a card reads of its labels and Arc (``_queries.CARD_FIELDS`` and the
-#: every-card :func:`listing`), parsed by :func:`labels_and_arc`: up to a hundred labels, a
-#: read GitHub cut short refused by its count.
+#: every-card :func:`listing`), parsed by :func:`labels_and_values`: up to a hundred labels, a
+#: read GitHub cut short refused by its count, and its every field value.
 LABELS_AND_ARC = "  labels(first: 100) { totalCount nodes { name } }\n" + FIELD_VALUES
 
 
 def arc_of(values: Iterable[dict]) -> str | None:
     """A card's arc: the value of its :data:`ARC_FIELD` among ``values``, its field values as
-    read by :data:`FIELD_VALUES`; None when it holds none (measured 2026-10-27 on plan#1811: a
-    value is ``{"name": "balance", "field": {"name": "Arc"}}``)."""
-    return next((value["name"] for value in values
-                 if (value.get("field") or {}).get("name") == ARC_FIELD), None)
+    read by :data:`FIELD_VALUES`; None when it holds none.  The one read of a single select's
+    value (:func:`_fields.value_of`), named for the Arc."""
+    return value_of(values, ARC_FIELD)
 
 
 def arc_answered(values: Iterable[dict]) -> str | None:
-    """A card's arc from GitHub's answer to a REST write of it, its ``issue_field_values``:
-    the option named in the value of its :data:`ARC_FIELD`; None when it holds none
-    (measured 2026-10-27 on plan#1811: a value is ``{"issue_field_name": "Arc",
-    "single_select_option": {"name": "balance"}, ...}``, and GitHub's REST description
-    answers an issue's create in the shape of its read)."""
-    return next((value["single_select_option"]["name"] for value in values
-                 if value.get("issue_field_name") == ARC_FIELD), None)
+    """A card's arc from GitHub's answer to a REST write of a value, its
+    ``issue_field_values``: the option named in the value of its :data:`ARC_FIELD`; None when
+    it holds none.  The one read of a single select's answered value
+    (:func:`_fields.answered_value`), named for the Arc."""
+    return answered_value(values, ARC_FIELD)
 
 
-def labels_and_arc(node: dict) -> tuple[tuple[str, ...], str | None]:
-    """A card's labels and Arc from an issue node read by :data:`LABELS_AND_ARC`, each
-    connection read whole or refused (:func:`_github.counted`): the one parse of them, which
-    every read of a card makes (``_tracker.card_from``, :func:`arc_card`)."""
+def labels_and_values(node: dict) -> tuple[tuple[str, ...], tuple[dict, ...]]:
+    """A card's labels and its issue field values from an issue node read by
+    :data:`LABELS_AND_ARC`, each connection read whole or refused (:func:`_github.counted`):
+    the one parse of them, which every read of a card makes (``_tracker.card_from``, which
+    reads its Arc, Priority and Effort from the values, and :func:`arc_card`, its Arc)."""
     number = node["number"]
     return (tuple(label["name"] for label in counted(node["labels"], "labels", number)),
-            arc_of(counted(node["issueFieldValues"], "issue field values", number)))
+            tuple(counted(node["issueFieldValues"], "issue field values", number)))
 
 
 def arc_labels(arc: str | None) -> tuple[str, ...]:
@@ -212,9 +212,10 @@ def listing(owner: str, name: str) -> str:
 
 def arc_card(node: dict) -> ArcCard:
     """A card from one node of :func:`listing`, its labels and Arc read whole or refused
-    (:func:`labels_and_arc`)."""
+    (:func:`labels_and_values`)."""
+    labels, values = labels_and_values(node)
     return ArcCard(node["number"], (node["issueType"] or {}).get("name"), node["title"],
-                   *labels_and_arc(node))
+                   labels, arc_of(values))
 
 
 def card_arcs(github: GitHub, owner: str, name: str) -> list[ArcCard]:

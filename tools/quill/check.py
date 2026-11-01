@@ -81,7 +81,9 @@ NEW_CARD = frozenset({TITLE, BODY, OWNER, PRIORITY, EFFORT})
 #: The kinds of card that may hold each issue field quill writes beside the Arc
 #: (:data:`_fields.FIELDS`), by the part writing it, and the ruling saying so: an Effort the
 #: work a branch builds (ruling plan#2506), a Priority what waits on work or on the
-#: developer's answer (ruling plan#2507).
+#: developer's answer (ruling plan#2507).  A step split into smaller steps holds no Effort
+#: (ruling plan#2555), which the callers apply, as whether a step is split reads the steps
+#: linked under it and git (``_filing._finish`` clears it, ``_arc_label.cmd_field`` refuses it).
 HOLDERS = {
     PRIORITY: (("step", "finding", "question"), "plan#2507"),
     EFFORT: (("step", "finding"), "plan#2506"),

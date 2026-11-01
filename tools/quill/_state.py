@@ -152,10 +152,18 @@ def never_split(card: Card, cards: Mapping[int, Card], shipped: Iterable[int]) -
     return tuple(number for number in card.step_children if number not in split)
 
 
+def has_steps_under(card: BareCard) -> bool:
+    """Whether ``card`` is a step with a step linked under it: the one card whose leaves
+    :func:`is_container` reads, so a caller that reads git only to decide that
+    (``_arc_label._split_refusal``) reads it for no other."""
+    return card.kind == "step" and bool(card.step_children)
+
+
 def is_container(card: BareCard, cards: Mapping[int, BareCard], shipped: Iterable[int]) -> bool:
-    """A step split into steps: one with a leaf (:func:`leaves`).  A card that is not a
-    step is no container, whatever hangs under it."""
-    return card.kind == "step" and bool(leaves(card, cards, shipped))
+    """A step split into steps: one with a leaf (:func:`leaves`), among the steps linked under
+    it (:func:`has_steps_under`).  A card that is not a step is no container, whatever hangs
+    under it."""
+    return has_steps_under(card) and bool(leaves(card, cards, shipped))
 
 
 def is_work(card: BareCard, cards: Mapping[int, BareCard], shipped: Iterable[int]) -> bool:

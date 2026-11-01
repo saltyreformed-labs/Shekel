@@ -1,7 +1,8 @@
 """A step or a finding is sized when it is filed (ruling plan#2492): ``quill file step`` and
 ``quill file finding`` require ``--effort``, its choices the field's options, and file the card
 holding it; no other kind takes one (ruling plan#2506); a filing run again writes the Effort the
-card it finishes does not hold, and one that finished is never rewritten; and a question
+card it finishes does not hold, and one that finished is never rewritten; a leaf's filing clears
+its split step's Effort, as a split step holds none (ruling plan#2555); and a question
 converted into its ruling has its Priority cleared, and any Effort a person set on it, as a
 ruling holds neither (rulings plan#2506, plan#2507).  The fake tracker holds what a create
 filed on the card, which each test reads; the create's one call carrying it is
@@ -14,7 +15,14 @@ import dataclasses
 import pytest
 
 from tools.quill import quill
-from tools.quill._fake import FailOnce, FakeTracker, finding_filing, ruling_filing, run
+from tools.quill._fake import (
+    FailOnce,
+    FakeTracker,
+    finding_filing,
+    leaf_filing,
+    ruling_filing,
+    run,
+)
 from tools.quill._fields import EFFORT, EFFORT_FIELD, PRIORITY_FIELD
 from tools.quill._tracker import TrackerError
 from tools.quill.check import HOLDERS
@@ -170,6 +178,84 @@ def test_a_filing_that_finished_is_never_resized(code, tmp_path, capsys):
     assert run(tracker, code, *_step(tmp_path, "--effort", "3")) == 0
     assert not tracker.writes and tracker.cards_by_number[1].effort == "1"
     assert "is filed already" in capsys.readouterr().out
+
+
+def test_the_first_leaf_clears_its_split_step_s_effort_before_its_mark_comes_off(
+        code, tmp_path, capsys):
+    """Ruling plan#2555: step #1, sized at 4, is split.  The leaf is born holding its own 2, and
+    #1's 4 is cleared once the leaf is linked and placed, before the leaf's mark is removed,
+    last (R-BAL202)."""
+    tracker = FakeTracker()
+    tracker.add(1, effort="4")
+    assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
+    assert (tracker.cards_by_number[1].effort, tracker.cards_by_number[2].effort) == (None, "2")
+    assert tracker.writes == [("create", 2, "step", "half", ("balance", FILING), "balance"),
+                              ("add_child", 1, 2), ("board_add", 2), ("board_place", 2, "PVTI_1"),
+                              ("board_remove", 1), ("set_field", 1, EFFORT_FIELD, None),
+                              ("unmark", 2)]
+    assert ("  cleared plan#1's Effort, '4': a split step holds none (ruling plan#2555)\n"
+            in capsys.readouterr().out)
+
+
+def test_a_split_step_in_a_milestone_gives_up_its_milestone_and_its_effort(code, tmp_path):
+    """The common shape: #1 in milestone #1 and sized at 4.  The leaf is born in #1's milestone,
+    and #1 gives up both, the milestone first, before the leaf's mark is removed."""
+    tracker = FakeTracker()
+    tracker.milestones.add(1)
+    tracker.milestone_of[1] = 1
+    tracker.add(1, effort="4")
+    assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
+    assert tracker.milestone_of == {2: 1}
+    assert tracker.cards_by_number[1].effort is None
+    assert tracker.writes[-3:] == [("set_milestone", 1, None),
+                                   ("set_field", 1, EFFORT_FIELD, None), ("unmark", 2)]
+
+
+def test_a_leaf_of_a_split_step_holding_no_effort_writes_none(code, tmp_path):
+    """The first leaf cleared #1's Effort, so the second finds it holding none: no write, as a
+    clear of a value the card does not hold is GitHub's 404 (``_tracker.Tracker.set_field``)."""
+    tracker = FakeTracker()
+    tracker.add(1, effort="4")
+    assert run(tracker, code, *leaf_filing(tmp_path, "first half")) == 0
+    assert run(tracker, code, *leaf_filing(tmp_path, "second half")) == 0
+    assert _set_fields(tracker) == [("set_field", 1, EFFORT_FIELD, None)]
+    assert tracker.cards_by_number[3].effort == "2"
+
+
+def test_a_leaf_filing_cut_short_at_the_clear_is_finished_by_the_same_command(code, tmp_path):
+    """R-BAL186: the clear fails, the run exits 2 with #1 still holding its Effort and the leaf
+    still marked; run again, it clears it once and removes the mark, no second card filed."""
+    tracker = FakeTracker()
+    tracker.add(1, effort="4")
+    FailOnce(tracker, "set_field")
+    assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 2
+    assert tracker.cards_by_number[1].effort == "4"
+    assert FILING in tracker.cards_by_number[2].labels
+    assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 0
+    assert tracker.cards_by_number[1].effort is None
+    assert FILING not in tracker.cards_by_number[2].labels
+    assert len(tracker.cards_by_number) == 2, "no second card filed"
+    assert _set_fields(tracker) == [("set_field", 1, EFFORT_FIELD, None)]
+
+
+@pytest.mark.parametrize(("cut", "kept"), [("unmark", None), ("add_child", "4")])
+def test_a_leaf_dropped_before_its_filing_finished_leaves_its_step_as_its_filing_did(
+        code, tmp_path, cut, kept):
+    """Ruling plan#2555: a leaf's filing cut short, then dropped, leaves #1 a plain step, on the
+    board.  Cut at its last write, the unmark, the leaf was linked and is taken out of the split
+    (R-BAL205), and the filing had cleared #1's Effort: nothing records the value cleared, so #1
+    holds none, and ``quill effort`` sets one.  Cut at its link, before the clear, #1 keeps the
+    Effort it held."""
+    tracker = FakeTracker()
+    tracker.add(1, effort="4")
+    FailOnce(tracker, cut)
+    assert run(tracker, code, *leaf_filing(tmp_path, "half")) == 2
+    assert tracker.cards_by_number[1].effort == kept
+    assert run(tracker, code, "drop", "plan#2", "--why", "Not split after all.") == 0
+    step = tracker.cards_by_number[1]
+    assert (step.step_children, step.effort, 1 in tracker.board.items) == ((), kept, True)
+    assert run(tracker, code, "effort", "plan#1", "--to", "3") == 0
+    assert tracker.cards_by_number[1].effort == "3"
 
 
 def _converted(tmp_path):

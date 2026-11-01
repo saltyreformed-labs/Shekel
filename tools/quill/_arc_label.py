@@ -13,8 +13,9 @@ options (``setup_tracker.ISSUE_FIELDS``), or clear it, one function writing eith
 same command run again finishes one a failure cut short.  Each works on a ruling, whose title
 and text alone are the developer's words (R-BAL220), and on a closed card, and refuses a card
 still being filed (:func:`_filing_refusal`); ``arc`` and ``label`` refuse a task
-(:func:`_refusal`), and ``priority`` and ``effort`` a value on a kind the check refuses it on
-(``check.HOLDERS``).
+(:func:`_refusal`), ``priority`` and ``effort`` a value on a kind the check refuses it on
+(``check.HOLDERS``), and ``effort`` one on a step split into smaller steps, reading git only
+for a step with a step linked under it (ruling plan#2555, :func:`_split_refusal`).
 
 Split out of the command module, which they would take past the 1,000 lines
 ``too-many-lines`` allows; their arguments are here too (:func:`add_parsers`).
@@ -24,11 +25,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools.ci.arcs import ARCS
+from tools.quill import _git
 from tools.quill._arcs import label_corrections, other_labels
-from tools.quill._command import _label, _one, card_number
+from tools.quill._command import _label, _one, card_number, with_closure
 from tools.quill._exits import Refused
-from tools.quill._fields import FIELDS
-from tools.quill._state import filing_unfinished
+from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS
+from tools.quill._state import filing_unfinished, has_steps_under, is_container
 from tools.quill._tracker import Card, Tracker
 from tools.quill.check import HOLDERS, Draft, violations
 from tools.quill.setup_tracker import CHOSEN_LABELS, ISSUE_FIELDS, TASK
@@ -105,14 +107,34 @@ def cmd_label(args, tracker: Tracker, _root: Path) -> int:
     return 0
 
 
-def cmd_field(args, tracker: Tracker, _root: Path) -> int:
+def _split_refusal(tracker: Tracker, root: Path, card: Card) -> str | None:
+    """Why ``card`` takes no Effort: a step split into smaller steps, which holds none (ruling
+    plan#2555); None when it is no such step.  Whether it is split reads the steps linked under
+    it and git (:func:`_state.is_container`: a leaf dropped before its filing finished is no
+    leaf unless git says it shipped), which the check never reads, as it reads no task's
+    parent's leaves (``check._task_problems``), so git is read only for a step with a step
+    linked under it (:func:`_state.has_steps_under`).  The refusal names the clear while the
+    step holds one."""
+    if not has_steps_under(card):
+        return None
+    cards = with_closure(tracker, {card.number: card})
+    if not is_container(card, cards, _git.read(root).shipped.cards):
+        return None
+    clear = (f"; it holds {card.effort!r}, which `quill effort plan#{card.number} --clear` "
+             "clears" if card.effort is not None else "")
+    return (f"{_label(card)} is split into smaller steps, and a split step holds no "
+            f"{EFFORT_FIELD} (ruling plan#2555){clear}")
+
+
+def cmd_field(args, tracker: Tracker, root: Path) -> int:
     """``quill priority`` and ``quill effort``: set a card's Priority or Effort, the command's
     issue field (``_fields.FIELDS``, keyed by the command's name), to ``--to``, or with
     ``--clear`` clear it (:meth:`_tracker.Tracker.set_field`), after the check every written
     card passes on its type and Arc and on the kind that may hold the field
     (:func:`check.violations`, grading that part alone).  Refused, with nothing written, for
-    a card still being filed (:func:`_filing_refusal`) and what the check refuses.  Written
-    only when it differs from what the card holds."""
+    a card still being filed (:func:`_filing_refusal`), what the check refuses, and an Effort
+    on a step split into smaller steps (:func:`_split_refusal`), whose clear is still taken.
+    Written only when it differs from what the card holds."""
     part = args.command
     field = FIELDS[part]
     card = _one(tracker, args.card)
@@ -123,6 +145,8 @@ def cmd_field(args, tracker: Tracker, _root: Path) -> int:
                   **{part: value})
     if problems := violations(draft, frozenset({part})):
         raise Refused("not written:\n  " + "\n  ".join(problems))
+    if part == EFFORT and value is not None and (why := _split_refusal(tracker, root, card)):
+        raise Refused(why)
     held = getattr(card, part)
     if held == value:
         holds = f"no {field}" if value is None else f"the {field} {value!r}"

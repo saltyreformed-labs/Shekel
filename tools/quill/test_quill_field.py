@@ -1,13 +1,18 @@
 """``quill priority`` and ``quill effort`` (plan#2491): a card's Priority or Effort set or
-cleared through the tracker's one write of a field value, over :class:`_fake.FakeTracker` and a
-throwaway git repository (the ``code`` fixture, ``conftest.py``).  ``Tracker.set_field`` is
+cleared through the tracker's one write of a field value, and no Effort set on a step split into
+smaller steps (ruling plan#2555), over :class:`_fake.FakeTracker` and a throwaway git repository
+(the ``code`` fixture, ``conftest.py``).  ``Tracker.set_field`` is
 graded against GitHub's answers in ``test__tracker_arc.py``.  Nothing here calls GitHub.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
-from tools.quill._fake import FakeTracker, run
+from tools.quill import _git
+from tools.quill._fake import FakeTracker, run, ship
+from tools.quill._tracker import Child
 from tools.quill.check import ruling_body
 from tools.quill.setup_tracker import FILING
 
@@ -188,3 +193,79 @@ def test_every_declared_option_is_taken(code, command, options):
     for option in options:
         assert run(tracker, code, command, "plan#1", "--to", option) == 0
     assert [write[3] for write in tracker.writes] == list(options)
+
+
+def _split(tracker, effort=None, **leaf):
+    """Step #1, holding ``effort``, with the step #2 linked under it, off the board, ``leaf``
+    its facts."""
+    tracker.add(1, effort=effort)
+    tracker.add(2, parent=1, on_board=False, **leaf)
+    tracker.cards_by_number[1] = replace(tracker.cards_by_number[1],
+                                         children=(Child(2, "step", True),))
+
+
+#: A step closed while still being filed: dropped by a person on the web before its filing's
+#: last write removed its mark (R-BAL202).
+DROPPED_WHILE_FILED = {"labels": ("balance", FILING), "is_open": False,
+                       "state_reason": "NOT_PLANNED", "touched_by_hand": True}
+
+
+def test_an_effort_on_a_split_step_is_refused_and_its_clear_taken(code, capsys):
+    """Ruling plan#2555: #1, split into #2, holds an Effort a person set on the web.  A value is
+    refused, naming the clear while it holds one; the clear is written; and its Priority, no
+    part of the ruling, is still set."""
+    tracker = FakeTracker()
+    _split(tracker, effort="4")
+    said = ("refused: plan#1 [step, balance] card 1 is split into smaller steps, and a split "
+            "step holds no Effort (ruling plan#2555)")
+    assert run(tracker, code, "effort", "plan#1", "--to", "3") == 1
+    assert capsys.readouterr().err == (
+        f"{said}; it holds '4', which `quill effort plan#1 --clear` clears\n")
+    assert not tracker.writes
+    assert run(tracker, code, "effort", "plan#1", "--clear") == 0
+    assert run(tracker, code, "effort", "plan#1", "--to", "3") == 1
+    assert capsys.readouterr().err == f"{said}\n"
+    assert run(tracker, code, "priority", "plan#1", "--to", "High") == 0
+    assert tracker.writes == [("set_field", 1, "Effort", None),
+                              ("set_field", 1, "Priority", "High")]
+
+
+def test_a_step_whose_one_linked_step_was_dropped_while_filed_takes_an_effort(code):
+    """A leaf dropped before its filing finished is no leaf (``_state.leaves``), so before
+    ``sync`` unlinks it #1 is a plain step, which holds an Effort."""
+    tracker = FakeTracker()
+    _split(tracker, **DROPPED_WHILE_FILED)
+    assert run(tracker, code, "effort", "plan#1", "--to", "3") == 0
+    assert tracker.writes == [("set_field", 1, "Effort", "3")]
+
+
+def test_a_linked_step_closed_while_filed_that_git_says_shipped_is_a_leaf(code, capsys):
+    """Git's answer decides it: the same step #2, shipped (its marker on ``dev``), is a leaf,
+    so #1 is split, and the value is refused, nothing written."""
+    tracker = FakeTracker()
+    _split(tracker, **DROPPED_WHILE_FILED)
+    ship(code, 2)
+    assert run(tracker, code, "effort", "plan#1", "--to", "3") == 1
+    assert "is split into smaller steps" in capsys.readouterr().err
+    assert not tracker.writes
+
+
+def test_git_is_read_only_for_a_step_with_a_step_linked_under_it(code, monkeypatch):
+    """A step with no step under it (a task alone) and a finding are no split step, decided
+    without git, and so is any clear, a split step's among them."""
+    def unread(_root):
+        raise AssertionError("git was read")
+
+    plain, split = FakeTracker(), FakeTracker()
+    plain.add(1)
+    plain.add_task(2, 1)
+    plain.add(3, "finding", parent=1)
+    _split(split, effort="4")
+    monkeypatch.setattr(_git, "read", unread)
+    assert run(plain, code, "effort", "plan#1", "--to", "2") == 0
+    assert run(plain, code, "effort", "plan#3", "--to", "1") == 0
+    assert run(plain, code, "effort", "plan#1", "--clear") == 0
+    assert run(split, code, "effort", "plan#1", "--clear") == 0
+    assert plain.writes == [("set_field", 1, "Effort", "2"), ("set_field", 3, "Effort", "1"),
+                            ("set_field", 1, "Effort", None)]
+    assert split.writes == [("set_field", 1, "Effort", None)]

@@ -40,7 +40,8 @@ marked nor handed on, and a leaf's while a step above it owns one (``landing``, 
 A LEAF (``file step --parent``) is filed in its split step's milestone while the split
 step holds one, which the filing then clears; else in none, the milestones its leaves
 hold named for a person to set one on the web (``_filing._leaf_milestone``).  A leaf
-dropped before its filing finished gives it back (``_unsplit``).
+dropped before its filing finished gives it back (``_unsplit``).  The filing clears its split
+step's Effort too, which ``effort`` refuses to set on a split step (ruling plan#2555).
 ``sync`` runs every three hours on this host (``shekel-plan-sync.timer``, its units' sources in
 ``/opt/docker/scripts``) from its own clone ``~/projects/shekel-plan-sync`` at dev's tip; a run
 that fails, or exits 1 on a REPORT, pushes its last fifteen log lines (plan#1809), and ``next``

@@ -12,7 +12,9 @@ so is a question given ``--owner``, the step it is asked for, which its ruling k
 (:func:`_carried_owner`, plan#1861's item 10); a question converted into its ruling has its
 Priority cleared, and any Effort, as a ruling holds neither (rulings plan#2506, plan#2507); a
 leaf is filed in its split step's milestone while that step holds one, which it then gives up
-(:func:`_leaf_milestone`).  ``quill.py``'s module docstring is the command's usage.
+(:func:`_leaf_milestone`), and its filing clears its split step's Effort, as a split step holds
+none (ruling plan#2555, :func:`_finish`).  ``quill.py``'s module docstring is the command's
+usage.
 
 Split out of the command module at X-cx L2's leaf C, whose change would otherwise take
 that module past the 1,000 lines ``too-many-lines`` allows (it has been ``quill.py``
@@ -37,7 +39,7 @@ from tools.quill._command import (
     with_closure,
 )
 from tools.quill._exits import Refused
-from tools.quill._fields import EFFORT, FIELDS
+from tools.quill._fields import EFFORT, EFFORT_FIELD, FIELDS
 from tools.quill._state import (
     OWNED,
     done_tasks,
@@ -767,11 +769,16 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
     printed as it lands, then its mark removed, last (R-BAL202): the link, a ruling's
     close, a leaf's place and its split step's milestone cleared (after the leaf's create
     carried it, so a run cut short between them leaves it held, and the same command run
-    again clears it), then each open finding the split step owns handed to the leaf, which a
-    split step never owns (ruling plan#1784, :func:`_findings.hand_on`: a run cut short
-    between a finding's two writes leaves it two owners, and the same command run again
-    finishes it), a top-level step's or question's board place, or a task's under a step the
-    board holds (:func:`_command.on_board`, rulings plan#1814, plan#1842), at the bottom,
+    again clears it), and its split step's Effort cleared when it holds one, as a split step
+    holds none (ruling plan#2555: the same command run again clears one a run cut short left
+    held; a leaf dropped after that clear and before its filing finished leaves its step
+    holding none, a plain step again when it was the only leaf, as nothing records the value
+    cleared, and ``quill effort`` sets one if it is wanted), then each open finding the split
+    step owns handed to the leaf, which a split step never owns (ruling plan#1784,
+    :func:`_findings.hand_on`: a run cut short between a finding's two writes leaves it two
+    owners, and the same command run again finishes it), a top-level step's or question's
+    board place, or a task's under a step the board holds (:func:`_command.on_board`, rulings
+    plan#1814, plan#1842), at the bottom,
     where the board's order does not read it; a task is first placed in its card's order of
     its tasks, above ``before`` when the filing names one (:func:`_tasks.place`, ruling
     plan#1868)."""
@@ -789,6 +796,10 @@ def _finish(tracker: Tracker, card: Card, filing: _Filing, before: Card | None) 
         if (split := filing.milestone.leaf) is not None:
             tracker.set_milestone(parent.number, None)
             print(f"  plan#{parent.number} left milestone #{split}: a split step keeps none")
+        if (held := parent.effort) is not None:
+            tracker.set_field(parent.number, EFFORT_FIELD, None)
+            print(f"  cleared plan#{parent.number}'s {EFFORT_FIELD}, {held!r}: a split step "
+                  "holds none (ruling plan#2555)")
         for finding in _findings.owned(tracker, parent.number, filing.shipped):
             _findings.hand_on(tracker, finding, card, parent, prefix="  ")
     elif on_board(kind, parent) and card.board_item is None:

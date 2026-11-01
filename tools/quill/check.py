@@ -58,7 +58,7 @@ from collections.abc import Collection
 
 from tools.ci.arcs import ARCS
 from tools.quill._draft import Draft, Owner
-from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD
+from tools.quill._fields import EFFORT, FIELDS, PRIORITY
 from tools.quill._state import SHIPPABLE, may_own
 from tools.quill.setup_tracker import CARD_TYPES, TASK
 
@@ -73,18 +73,18 @@ RULING_CAP = 2000
 #: above it.
 TITLE_CAP = 100
 
-#: The parts of a card a change can write.  :data:`PRIORITY` and :data:`EFFORT` are also the
-#: names of the :class:`Draft`'s fields and the card's (``_tracker.BareCard``) holding them,
-#: and of the commands that write them (``_arc_label.cmd_field``).
-TITLE, BODY, OWNER, PRIORITY, EFFORT = "title", "body", "owner", "priority", "effort"
+#: The parts of a card a change can write, beside :data:`_fields.PRIORITY` and
+#: :data:`_fields.EFFORT`, the parts holding its Priority and Effort.
+TITLE, BODY, OWNER = "title", "body", "owner"
 #: A new card writes every part.
 NEW_CARD = frozenset({TITLE, BODY, OWNER, PRIORITY, EFFORT})
-#: The kinds of card that may hold each issue field quill writes beside the Arc, by the part
-#: writing it, its field and the ruling saying so: an Effort the work a branch builds (ruling
-#: plan#2506), a Priority what waits on work or on the developer's answer (ruling plan#2507).
+#: The kinds of card that may hold each issue field quill writes beside the Arc
+#: (:data:`_fields.FIELDS`), by the part writing it, and the ruling saying so: an Effort the
+#: work a branch builds (ruling plan#2506), a Priority what waits on work or on the
+#: developer's answer (ruling plan#2507).
 HOLDERS = {
-    PRIORITY: (PRIORITY_FIELD, ("step", "finding", "question"), "plan#2507"),
-    EFFORT: (EFFORT_FIELD, ("step", "finding"), "plan#2506"),
+    PRIORITY: (("step", "finding", "question"), "plan#2507"),
+    EFFORT: (("step", "finding"), "plan#2506"),
 }
 
 _QUESTION, _ANSWER = "Question: ", "\n\nAnswer: "
@@ -249,10 +249,10 @@ def _field_problems(draft: Draft, changed: Collection[str]) -> list[str]:
     (:data:`HOLDERS`); none for a field the change does not write, or writes as none (a
     clear), which any card may take, one holding a value set on the web among them."""
     problems = []
-    for part, (field, kinds, ruling) in HOLDERS.items():
+    for part, (kinds, ruling) in HOLDERS.items():
         value = getattr(draft, part)
         if part in changed and value is not None and draft.kind not in kinds:
-            problems.append(f"{field} is held by a {', '.join(kinds[:-1])} or {kinds[-1]} "
+            problems.append(f"{FIELDS[part]} is held by a {', '.join(kinds[:-1])} or {kinds[-1]} "
                             f"alone (ruling {ruling}); this {draft.kind or 'card with no type'} "
                             f"would hold {value!r}")
     return problems

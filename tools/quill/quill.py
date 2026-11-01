@@ -187,6 +187,7 @@ from tools.quill._state import (
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import (
     BODY,
+    HOLDERS,
     TITLE,
     Draft,
     in_ruling_shape,
@@ -938,8 +939,7 @@ def parser() -> argparse.ArgumentParser:
 COMMANDS: dict[str, Callable[..., int]] = {
     "next": cmd_next, "claim": cmd_claim, "release": cmd_release, "show": cmd_show,
     "file": cmd_file, "edit": cmd_edit, "comment": cmd_comment, "arc": _arc_label.cmd_arc,
-    "label": _arc_label.cmd_label, "priority": _arc_label.cmd_field,
-    "effort": _arc_label.cmd_field,
+    "label": _arc_label.cmd_label, **dict.fromkeys(HOLDERS, _arc_label.cmd_field),
     "answer": _comments.cmd_answer, "note": _notes.cmd_note, "block": cmd_block,
     "move": cmd_move, "drop": cmd_drop, "start": _tasks.cmd_start,
     "task-file": _tasks.cmd_task_file,

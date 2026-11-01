@@ -1,7 +1,8 @@
 """A card's Priority and Effort, two of the organization's issue fields
-(``setup_tracker.ISSUE_FIELDS``), which quill writes and ``quill show`` prints (plan#2491); and
-the one read of the option a card holds in any single select of them, from a GraphQL read of
-its values (:func:`value_of`) and from GitHub's answer to a REST write of one
+(``setup_tracker.ISSUE_FIELDS``), which quill writes and ``quill show`` prints (plan#2491): the
+part of a card holding each and the one pairing of each part with its field (:data:`FIELDS`);
+and the one read of the option a card holds in any single select of them, from a GraphQL read
+of its values (:func:`value_of`) and from GitHub's answer to a REST write of one
 (:func:`answered_value`), which :mod:`_arcs` names for the Arc.  Which kinds of card hold
 each is a rule of the plan's, so :mod:`check` holds it.
 
@@ -18,6 +19,14 @@ PRIORITY_FIELD = "Priority"
 #: The issue field counting the sessions a card's work takes, a single select of
 #: ``setup_tracker.ISSUE_FIELDS``' options (ruling plan#2508).
 EFFORT_FIELD = "Effort"
+#: The parts of a card holding those two fields: each the name of the fact a ``_draft.Draft``
+#: and a ``_tracker.BareCard`` hold its value in, and of the command writing it
+#: (``_arc_label.cmd_field``).
+PRIORITY, EFFORT = "priority", "effort"
+#: Each part's issue field, by the part: the one pairing of the two (rule 14), which the
+#: check's rules (``check.HOLDERS``), the create (``_filed.filed_values``), the read of a card
+#: (``_tracker.card_from``), the filing and the commands each walk.
+FIELDS = {PRIORITY: PRIORITY_FIELD, EFFORT: EFFORT_FIELD}
 
 
 def value_of(values: Iterable[dict], field: str) -> str | None:

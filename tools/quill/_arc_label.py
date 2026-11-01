@@ -27,6 +27,7 @@ from tools.ci.arcs import ARCS
 from tools.quill._arcs import label_corrections, other_labels
 from tools.quill._command import _label, _one, card_number
 from tools.quill._exits import Refused
+from tools.quill._fields import FIELDS
 from tools.quill._state import filing_unfinished
 from tools.quill._tracker import Card, Tracker
 from tools.quill.check import HOLDERS, Draft, violations
@@ -106,14 +107,14 @@ def cmd_label(args, tracker: Tracker, _root: Path) -> int:
 
 def cmd_field(args, tracker: Tracker, _root: Path) -> int:
     """``quill priority`` and ``quill effort``: set a card's Priority or Effort, the command's
-    issue field (``check.HOLDERS``, keyed by the command's name), to ``--to``, or with
+    issue field (``_fields.FIELDS``, keyed by the command's name), to ``--to``, or with
     ``--clear`` clear it (:meth:`_tracker.Tracker.set_field`), after the check every written
     card passes on its type and Arc and on the kind that may hold the field
     (:func:`check.violations`, grading that part alone).  Refused, with nothing written, for
     a card still being filed (:func:`_filing_refusal`) and what the check refuses.  Written
     only when it differs from what the card holds."""
     part = args.command
-    field = HOLDERS[part][0]
+    field = FIELDS[part]
     card = _one(tracker, args.card)
     if why := _filing_refusal(card, " (R-BAL186)"):
         raise Refused(why)
@@ -149,7 +150,8 @@ def add_parsers(commands) -> None:
     which = label.add_mutually_exclusive_group(required=True)
     which.add_argument("--add", choices=CHOSEN_LABELS)
     which.add_argument("--remove", choices=CHOSEN_LABELS)
-    for part, (field, _, ruling) in HOLDERS.items():
+    for part, (_, ruling) in HOLDERS.items():
+        field = FIELDS[part]
         written = commands.add_parser(part, help=f"set or clear a card's {field} (ruling "
                                                  f"{ruling})")
         written.add_argument("card", type=card_number)

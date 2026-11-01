@@ -39,7 +39,7 @@ from tools.quill import _git, quill
 from tools.quill._arcs import ARC_FIELD, ArcCard
 from tools.quill._board_fields import STATUS_OPTIONS
 from tools.quill._command import on_board as goes_on_board
-from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD
+from tools.quill._fields import FIELDS
 from tools.quill._github import GitHubError
 from tools.quill._filed import filed_labels
 from tools.quill._tracker import Card, Child, Comment, Edit, Statuses, in_order
@@ -47,7 +47,7 @@ from tools.quill.setup_tracker import APP_LOGIN, FILING, PLAN, TASK, unmarked
 
 #: The card's fact (:class:`_tracker.BareCard`) holding each issue field
 #: :meth:`FakeTracker.set_field` writes.
-FIELD_PARTS = {ARC_FIELD: "arc", PRIORITY_FIELD: "priority", EFFORT_FIELD: "effort"}
+FIELD_PARTS = {ARC_FIELD: "arc", **{field: part for part, field in FIELDS.items()}}
 
 
 class FakeBoard:
@@ -165,8 +165,8 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         and no Effort."""
         values = {"number": number, "id": 1000 + number, "node_id": f"I_{number}",
                   "title": f"card {number}", "kind": kind, "labels": ("balance",),
-                  "arc": None if kind == TASK else "balance", "priority": None,
-                  "effort": None, "is_open": True,
+                  "arc": None if kind == TASK else "balance", **dict.fromkeys(FIELDS),
+                  "is_open": True,
                   "state_reason": None, "parent": None, "children": (),
                   "blocked_by": (), "board_item": None, "closed_by_tool": False,
                   "touched_by_hand": False, "outside": (), **fields}
@@ -291,7 +291,7 @@ class FakeTracker:  # pylint: disable=too-many-public-methods,too-many-instance-
         self.writes.append(("create", number, card.kind, card.title, labels, card.arc)
                            + (() if milestone is None else (milestone,)))
         self.add(number, card.kind, card.body, on_board=False, title=card.title, labels=labels,
-                 arc=card.arc, priority=card.priority, effort=card.effort)
+                 arc=card.arc, **{part: getattr(card, part) for part in FIELDS})
         if milestone is not None:
             self.milestone_of[number] = milestone
         return number

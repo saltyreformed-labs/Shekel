@@ -66,7 +66,7 @@ from urllib.parse import quote
 from tools.quill import _arcs, _queries
 from tools.quill._arcs import ARC_FIELD, ArcCard, arc_answered, arc_of, labels_and_values
 from tools.quill._draft import Draft
-from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD, answered_value, value_of
+from tools.quill._fields import FIELDS, answered_value, value_of
 from tools.quill._filed import filed_labels, filed_values
 from tools.quill._github import (
     GitHub,
@@ -326,8 +326,7 @@ def card_from(node: dict, place: Place, board_id: str | None, app_login: str) ->
         "kind": (node["issueType"] or {}).get("name"),
         "labels": labels,
         "arc": arc_of(values),
-        "priority": value_of(values, PRIORITY_FIELD),
-        "effort": value_of(values, EFFORT_FIELD),
+        **{part: value_of(values, field) for part, field in FIELDS.items()},
         "is_open": is_open,
         "state_reason": node["stateReason"],
         "parent": next((link["number"] for link, what in inside if what == "parent"), None),

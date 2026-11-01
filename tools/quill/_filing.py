@@ -37,6 +37,7 @@ from tools.quill._command import (
     with_closure,
 )
 from tools.quill._exits import Refused
+from tools.quill._fields import EFFORT, FIELDS
 from tools.quill._state import (
     OWNED,
     done_tasks,
@@ -54,7 +55,6 @@ from tools.quill._state import (
 )
 from tools.quill._tracker import Card, Tracker, TrackerError
 from tools.quill.check import (
-    EFFORT,
     HOLDERS,
     Draft,
     Owner,
@@ -604,10 +604,10 @@ def file_parser(commands) -> None:
     task.add_argument("--before", type=card_number,
                       help="the open task under the same card it is built before; else it goes "
                            "above the card's finishing tasks")
-    field, sized, ruling = HOLDERS[EFFORT]
+    sized, ruling = HOLDERS[EFFORT]
     for kind in sized:
         sub.choices[kind].add_argument(
-            f"--{EFFORT}", required=True, choices=ISSUE_FIELDS[field].options,
+            f"--{EFFORT}", required=True, choices=ISSUE_FIELDS[FIELDS[EFFORT]].options,
             help=f"the sessions its work takes, the filing session's estimate (rulings "
                  f"plan#2492, {ruling})")
 
@@ -675,7 +675,7 @@ def _refield(tracker: Tracker, card: Card, draft: Draft) -> None:
     holds that differs is overwritten, deliberately: a card still being filed holds the filing
     session's estimate, which this run states again, where a different Arc or labels are a
     person's call, refused (:func:`_refuse_relabel`)."""
-    for part, (field, _, _) in HOLDERS.items():
+    for part, field in FIELDS.items():
         value, held = getattr(draft, part), getattr(card, part)
         if value is not None and held != value:
             tracker.set_field(card.number, field, value)
@@ -832,10 +832,11 @@ def _convert_question(args, tracker: Tracker, draft: Draft, to: Card, asked: _As
     if question.kind != "ruling":
         tracker.retype(question.number, "ruling")
         print(f"  plan#{question.number} is now a ruling")
-    for part, (field, kinds, ruling) in HOLDERS.items():
+    for part, (kinds, ruling) in HOLDERS.items():
         if "ruling" not in kinds and (held := getattr(question, part)) is not None:
-            tracker.set_field(question.number, field, None)
-            print(f"  cleared its {field}, {held!r}: a ruling holds none (ruling {ruling})")
+            tracker.set_field(question.number, FIELDS[part], None)
+            print(f"  cleared its {FIELDS[part]}, {held!r}: a ruling holds none (ruling "
+                  f"{ruling})")
     if draft.title.strip() != question.title.strip():
         tracker.retitle(question.number, draft.title)
         print(f"  retitled {draft.title!r}")

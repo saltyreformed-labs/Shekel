@@ -13,7 +13,7 @@ from collections.abc import Iterable
 
 from tools.quill._arcs import ARC_FIELD, arc_labels
 from tools.quill._draft import Draft
-from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD
+from tools.quill._fields import FIELDS
 from tools.quill.setup_tracker import FILING
 
 
@@ -32,5 +32,5 @@ def filed_values(card: Draft) -> dict[str, str]:
     finding, ruling plan#2492, and a Priority for none, ruling plan#2507); empty for a task,
     which holds none of them (R-BAL386).  Every value a draft holds is sent, and the create
     refuses an answer not holding each (:meth:`_tracker.Tracker.create`)."""
-    held = {ARC_FIELD: card.arc, PRIORITY_FIELD: card.priority, EFFORT_FIELD: card.effort}
+    held = {ARC_FIELD: card.arc, **{field: getattr(card, part) for part, field in FIELDS.items()}}
     return {field: value for field, value in held.items() if value is not None}

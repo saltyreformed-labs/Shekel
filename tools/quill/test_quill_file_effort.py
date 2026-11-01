@@ -15,9 +15,9 @@ import pytest
 
 from tools.quill import quill
 from tools.quill._fake import FailOnce, FakeTracker, finding_filing, ruling_filing, run
-from tools.quill._fields import EFFORT_FIELD, PRIORITY_FIELD
+from tools.quill._fields import EFFORT, EFFORT_FIELD, PRIORITY_FIELD
 from tools.quill._tracker import TrackerError
-from tools.quill.check import EFFORT, HOLDERS
+from tools.quill.check import HOLDERS
 from tools.quill.setup_tracker import CARD_TYPES, FILING, ISSUE_FIELDS, TASK
 
 
@@ -72,7 +72,7 @@ def test_a_finding_is_filed_holding_its_effort(code):
     assert not _set_fields(tracker)
 
 
-@pytest.mark.parametrize("kind", HOLDERS[EFFORT][1])
+@pytest.mark.parametrize("kind", HOLDERS[EFFORT][0])
 def test_a_kind_that_holds_an_effort_is_never_filed_without_one(code, tmp_path, capsys, kind):
     """argparse refuses the filing before anything is read: usage, exit 2."""
     tracker = FakeTracker()
@@ -97,7 +97,7 @@ def test_an_effort_that_is_no_option_of_the_field_is_refused(code, tmp_path, cap
 
 
 @pytest.mark.parametrize("kind", [kind for kind in (*CARD_TYPES, TASK)
-                                  if kind not in HOLDERS[EFFORT][1]])
+                                  if kind not in HOLDERS[EFFORT][0]])
 def test_a_kind_that_holds_no_effort_takes_none(code, tmp_path, capsys, kind):
     """A ruling, a question or a task is no work a branch builds (ruling plan#2506): its
     command line has no ``--effort``."""

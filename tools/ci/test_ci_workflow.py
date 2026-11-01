@@ -73,11 +73,11 @@ INSTALL_LOCK_FILE = arcs.REPO / ".github/actions/install-lock/action.yml"
 #: The step that calls it, named alike in every job.
 INSTALL_STEP = "Install the lock"
 
-#: What each job that runs Python installs from the lock, and whether it keeps uv's cache:
-#: every job of every workflow but the two that build the app image (ci.yml's ``image`` and
-#: the release's), which run no Python on the runner.  The landing job holds a token and the
-#: release workflow publishes, so neither restores a cache; the scheduled runs keep none, as
-#: they kept no pip cache, and the update workflow's keyed jobs and its alert hold a token too.
+#: What each job installs from the lock, and whether it keeps uv's cache: every job but the
+#: two that build the app image (ci.yml's ``image`` and the release's), which run no Python on
+#: the runner, and the update alert, which installs nothing so a failed install cannot stop it
+#: (plan#2481).  The landing job and the update's keyed jobs hold a token and the release
+#: publishes, so none restores a cache; the scheduled runs keep none, as they kept no pip cache.
 INSTALLS = {
     ("ci.yml", "landing"): {"install": "landing", "cache": "false"},
     ("ci.yml", "tools"): {"install": "all", "cache": "true"},
@@ -92,7 +92,6 @@ INSTALLS = {
     ("updates.yml", "refresh"): {"install": "refresh", "cache": "false"},
     ("updates.yml", "publish"): {"install": "landing", "cache": "false"},
     ("updates.yml", "queue"): {"install": "landing", "cache": "false"},
-    ("updates.yml", "alert"): {"install": "landing", "cache": "false"},
 }
 
 #: The triggers under which a step's PATH write lets a pull request's code run with the
@@ -921,21 +920,22 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
     def test_a_failed_job_opens_an_issue_with_the_workflow_s_own_token(self):
         """The alert runs when the refresh, the publish or the queue failed, holding no secret,
         variable or mint: main's own code, given the workflow's token and each job's result
-        (ruling plan#2466)."""
+        (ruling plan#2466), in two steps, the checkout and the alert, so it installs nothing
+        and runs on the standard library alone (``-S``; plan#2481)."""
         alert = self._workflow()["jobs"]["alert"]
         assert alert["needs"] == ["refresh", "publish", "queue"]
         assert alert["if"] == "failure()"
         text = yaml.safe_dump(alert)
         assert "secrets." not in text and "vars." not in text and MINT not in text
-        assert alert["steps"][0]["uses"].startswith("actions/checkout@")
-        assert alert["steps"][0]["with"] == {"persist-credentials": False}
-        step = alert["steps"][-1]
+        checkout, step = alert["steps"]
+        assert checkout["uses"].startswith("actions/checkout@")
+        assert checkout["with"] == {"persist-credentials": False}
         assert step["env"] == {
-            "GITHUB_TOKEN": "${{ github.token }}",
+            "GH_TOKEN": "${{ github.token }}",
             "RUN": "${{ github.server_url }}/${{ github.repository }}/actions/runs/"
                    "${{ github.run_id }}",
             **{job.upper(): f"${{{{ needs.{job}.result }}}}" for job in alert["needs"]}}
-        assert step["run"] == ('python -m tools.update.alert "${RUN}" ' + " ".join(
+        assert step["run"] == ('python3 -S -m tools.update.alert "${RUN}" ' + " ".join(
             f'"{job}=${{{job.upper()}}}"' for job in alert["needs"]))
 
     def test_each_keyed_job_runs_mains_code_and_hands_its_token_to_one_step(self):

@@ -34,9 +34,12 @@
 #            this repository mentioning the developer, linking the run and naming
 #            each job's result (tools/update/alert.py; ruling plan#2466).  It
 #            holds only the workflow's own token, widened to issues for this job
-#            alone, and runs main's own code with the landing group.  A run
-#            cancelled opens none; the release tool's refusal of an update older
-#            than 8 days is the backstop for a run that never failed loudly.
+#            alone, and installs nothing: main's own code on the runner's Python
+#            with the standard library alone, the issue sent by the runner's gh,
+#            so the install the other jobs share cannot stop the job that reports
+#            its failure (plan#2481).  A run cancelled opens none; the release
+#            tool's refusal of an update older than 8 days is the backstop for a
+#            run that never failed loudly.
 #
 # THE KEY.  The App "Shekel updates" (Contents and Pull requests read and
 # write, installed on Shekel alone; ruling plan#2448), its private key the
@@ -201,19 +204,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install the lock
-        uses: $/.github/actions/install-lock
-        with:
-          install: landing
-          cache: "false"
-
       - name: Open an issue naming the failed run
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REFRESH: ${{ needs.refresh.result }}
           PUBLISH: ${{ needs.publish.result }}
           QUEUE: ${{ needs.queue.result }}
         run: >-
-          python -m tools.update.alert "${RUN}"
+          python3 -S -m tools.update.alert "${RUN}"
           "refresh=${REFRESH}" "publish=${PUBLISH}" "queue=${QUEUE}"

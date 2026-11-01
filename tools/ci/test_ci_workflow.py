@@ -98,6 +98,34 @@ INSTALLS = {
 #: run on one (ruling plan#2376).
 DANGEROUS_TRIGGERS = frozenset({"pull_request_target", "workflow_run"})
 
+#: The one job that runs Python with no install, so the runner's own: the update alert, which
+#: installs nothing so a failed install cannot stop it, and runs on the standard library alone
+#: (plan#2481); :class:`TestTheUpdateWorkflowKeepsItsKeyFromPackageCode` holds its ``run`` line.
+RUNNER_PYTHON = frozenset({("updates.yml", "alert")})
+
+#: Where a step's shell starts a command, as the checks below read it: a line's start, after
+#: ``;``, ``&``, ``|``, ``(`` or a backtick (so ``&&``, ``||`` and ``$(`` too), a ``-c``
+#: string's start, or after a word that runs the next (``if``, ``elif``, ``then``, ``do``,
+#: ``else``, ``while``, ``until``, ``{``, ``!``, ``exec``, ``env``, ``sudo``, ``xargs``,
+#: ``time``, ``command``, ``nohup``) and the options that follow it, the command's variable
+#: assignments skipped.  A command started any other way (``timeout 5 uv``, a ``case`` arm,
+#: a function, an option's argument such as ``sudo -u root``, a script that runs one) is
+#: not read.
+COMMAND = (r"(?:^|[;&|(`]|-c\s+[\"']|(?<![\w-])(?:if|elif|then|do|else|while|until|\{|!|exec"
+           r"|env|sudo|xargs|time|command|nohup)\s+(?:-\S+\s+)*)\s*(?:\w+=\S*\s+)*")
+#: Python run as a command (:data:`COMMAND`): ``python``, ``python3`` or ``python3.N`` (a
+#: free-threaded ``t`` build too), by name or by path, or a ``.py`` file.
+PYTHON_COMMAND = re.compile(
+    rf"{COMMAND}(?:(?:\S*/)?python(?:3(?:\.\d+t?)?)?|\S*\.py)(?![\w.-])", re.MULTILINE)
+#: Python's ``-m``, alone or the last of a group of one-letter options (``-Im``).
+RUN_MODULE = r"(?<![\w-])-[A-Za-z]*m\s*"
+#: An installer run as a command (:data:`COMMAND`): ``uv``, ``uvx``, ``pip``, ``pip3[.N]``,
+#: ``pip-`` anything (pip-compile) or ``pipx``, by name or by path; or Python's ``-m``
+#: (:data:`RUN_MODULE`) with pip, ensurepip, venv or uv, anywhere.
+INSTALLER_COMMAND = re.compile(
+    rf"{COMMAND}(?:\S*/)?(?:uvx?|pip(?:x|3(?:\.\d+)?)?)(?![\w.])"
+    rf"|{RUN_MODULE}(?:pip|ensurepip|venv|uv)\b", re.MULTILINE)
+
 
 def _jobs() -> dict[str, dict]:
     """Read the jobs out of the live workflow file."""
@@ -137,6 +165,36 @@ def _workflows() -> dict[str, dict]:
 def _calls_the_install(job: dict) -> bool:
     """Whether a job has a step naming the install action, in any form."""
     return any("install-lock" in step.get("uses", "") for step in job.get("steps", []))
+
+
+def _shell(step: dict) -> str:
+    """A step's ``run`` text, each line a trailing backslash continues joined to the next."""
+    return step.get("run", "").replace("\\\n", " ")
+
+
+def _runs_python(step: dict, default_shell: str) -> bool:
+    """Whether a ``run`` step runs Python: its shell, its own or ``default_shell``, naming
+    Python as a word (``python``, ``/usr/bin/env python3 {0}``), or :data:`PYTHON_COMMAND`."""
+    return "run" in step and bool(
+        re.search(r"(?:^|[\s/])python", step.get("shell", default_shell))
+        or PYTHON_COMMAND.search(_shell(step)))
+
+
+def _runner_python(workflows: dict[str, dict]) -> set[tuple[str, str]]:
+    """The jobs, by ``(workflow, job)``, with a step that runs Python (:func:`_runs_python`)
+    before any install action has run: in a job with none, any step; in one with it, a step
+    before it.  A step's shell defaults to its job's ``defaults``, then its workflow's."""
+    found = set()
+    for name, workflow in workflows.items():
+        for job_name, job in workflow["jobs"].items():
+            shell = next((place["defaults"]["run"]["shell"] for place in (job, workflow)
+                          if "shell" in place.get("defaults", {}).get("run", {})), "")
+            for step in job.get("steps", []):
+                if "install-lock" in step.get("uses", ""):
+                    break
+                if _runs_python(step, shell):
+                    found.add((name, job_name))
+    return found
 
 
 def _dangerous_callers(workflows: dict[str, dict]) -> list[str]:
@@ -652,7 +710,8 @@ class TestTheRequiredCheckJudgesEveryGrader:
 
 
 class TestEveryJobInstallsTheLock:
-    """Every job that runs Python installs it through ``.github/actions/install-lock``.
+    """Every job that runs Python installs it through ``.github/actions/install-lock``, but
+    the update alert (:data:`RUNNER_PYTHON`).
 
     Ruling balance:R-BAL294 (plan#1027) as X-em's plan#2327 builds it: the job's Python is
     ``.python-version``'s and its packages ``uv.lock``'s, installed by one recipe, so no
@@ -688,9 +747,45 @@ class TestEveryJobInstallsTheLock:
         assert len(uses) == len(INSTALLS)
         assert set(uses) == {INSTALL_LOCK}
 
+    def test_no_job_runs_python_with_no_install_but_the_update_alert(self):
+        """A job that runs Python before any install runs the runner's own, at whatever
+        version the runner holds and with none of the lock's packages: the update alert
+        alone does.  The check sees each spelling it reads in a job with no install and
+        before one, and none after one, nor Python run inside a container, nor the word as
+        an argument."""
+        assert _runner_python(_workflows()) == RUNNER_PYTHON
+        install, ran = {"uses": INSTALL_LOCK}, {("x.yml", "j")}
+
+        def one_job(*steps: dict, **job) -> dict[str, dict]:
+            return {"x.yml": {"jobs": {"j": {"steps": list(steps), **job}}}}
+
+        for step in ({"run": "python -m tools.x"}, {"run": 'python3 -S -m tools.x "${RUN}"'},
+                     {"run": "cd tools && python3.14 x.py"}, {"run": 'v="$(python -c 1)"'},
+                     {"run": "/usr/bin/python3 x"}, {"run": "./scripts/check_tax_law.py notice"},
+                     {"run": "echo start\nenv PYTHONPATH=. python x"},
+                     {"run": "docker pull img \\\n  && python x"}, {"run": 'bash -c "python x"'},
+                     {"run": "if python3 -c 1; then :; fi"},
+                     {"run": "while python3 x; do :; done"},
+                     {"run": "until python3 x; do :; done"}, {"run": "{ python3 x; }"},
+                     {"run": "sudo -E python3 x"}, {"run": "env -i python3 x"},
+                     {"run": "python3.14t x"}, {"shell": "python", "run": "print(1)"},
+                     {"shell": "/usr/bin/env python3 {0}", "run": "print(1)"}):
+            assert _runner_python(one_job(step)) == ran, step
+            assert _runner_python(one_job(step, install)) == ran, step
+            assert not _runner_python(one_job(install, step)), step
+        python = {"run": {"shell": "python"}}
+        assert _runner_python(one_job({"run": "print(1)"}, defaults=python)) == ran
+        assert _runner_python({"x.yml": {"defaults": python, "jobs": {
+            "j": {"steps": [{"run": "print(1)"}]}}}}) == ran
+        assert not _runner_python(one_job({"uses": "actions/checkout@v9"}, defaults=python))
+        for run in ("docker run --rm --entrypoint python img -c 'print(1)'", "echo python",
+                    "docker run --rm --entrypoint \\\n    python img", "pythonista x"):
+            assert not _runner_python(one_job({"run": run})), run
+
     def test_no_workflow_installs_python_or_packages_any_other_way(self):
-        """No ``setup-python``, no ``python-version``, no pip and no cache action of a job's
-        own: a second recipe would be a second home of what it installs."""
+        """No ``setup-python``, no ``python-version``, no cache action of a job's own and no
+        installer run (:data:`INSTALLER_COMMAND`): a second recipe would be a second home of
+        what it installs."""
         for name, workflow in _workflows().items():
             for job_name, job in workflow["jobs"].items():
                 for step in job["steps"]:
@@ -698,7 +793,33 @@ class TestEveryJobInstallsTheLock:
                     uses = step.get("uses", "")
                     assert not uses.startswith(("actions/setup-python@", "actions/cache@")), where
                     assert "python-version" not in step.get("with", {}), where
-                    assert not re.search(r"\bpip3? install\b|-m pip\b", step.get("run", "")), where
+                    assert not INSTALLER_COMMAND.search(_shell(step)), where
+
+    def test_the_installer_check_refuses_each_spelling_it_reads_and_passes_an_argument(self):
+        """Each installer :data:`INSTALLER_COMMAND` names is refused wherever :data:`COMMAND`
+        reads a command start; uv named as an argument, as the image job runs it inside the
+        image, passes, and so do a word that only starts like one and Python's other modules."""
+        for run in ("pip install requests", "pip3 install requests", "pip3.14 install x",
+                    "python -m pip install x", "python3 -mpip install x", "uv pip install x",
+                    "uv tool install ruff", "uvx ruff check", "uv run --with ruff ruff check",
+                    "pipx install ruff", "pipx run ruff", "pip-compile requirements.in",
+                    "python -m ensurepip", "python -m venv .venv", "python -m uv sync",
+                    "cd app && uv sync", 'v="$(uvx ruff --version)"', "sudo pip install x",
+                    "env UV_SYSTEM_PYTHON=1 uv pip install x", 'bash -c "uvx ruff check"',
+                    '"${HOME}/.local/bin/uv" sync', "echo start\nuv tool install ruff",
+                    "docker pull img \\\n  && uvx ruff", "if uv sync; then :; fi",
+                    "while uvx ruff; do :; done", "{ uv tool install ruff; }",
+                    "sudo -H pip install x", "xargs -n1 pip install < reqs.txt",
+                    "python3 -Im pip install x", "python3 -sm ensurepip"):
+            assert INSTALLER_COMMAND.search(_shell({"run": run})), run
+        for run in ('docker run --rm --entrypoint uv "${IMAGE}" sync --check',
+                    'docker buildx build --target uv --output "type=local,dest=${T}/uv" .',
+                    'docker run --volume "${T}/uv/uv:/usr/local/bin/uv:ro" img',
+                    "docker run --rm --entrypoint \\\n    uv img sync --check",
+                    'cp "${RUNNER_TEMP}/uv" out', "set -o pipefail", 'echo "pip install"',
+                    "find / -name pip",
+                    "uvicorn app:app", 'python -m tools.update.refresh "${RUNNER_TEMP}/update"'):
+            assert not INSTALLER_COMMAND.search(_shell({"run": run})), run
 
     def test_no_caller_runs_on_a_trigger_that_makes_the_path_write_dangerous(self):
         """The reason zizmor's github-env flag is ignored on the action's PATH line (ruling

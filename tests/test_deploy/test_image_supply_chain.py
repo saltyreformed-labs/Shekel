@@ -102,6 +102,80 @@ def _docker_available() -> bool:
 #   upgrade in both stages, and runs no pip (it installs uv.lock).
 # ──────────────────────────────────────────────────────────────────
 
+#: The Dockerfile's instructions (Docker's reference): the first word of every line that is
+#: not a comment, a blank or a continuation.
+DOCKERFILE_INSTRUCTIONS = frozenset({
+    "ADD", "ARG", "CMD", "COPY", "ENTRYPOINT", "ENV", "EXPOSE", "FROM", "HEALTHCHECK",
+    "LABEL", "MAINTAINER", "ONBUILD", "RUN", "SHELL", "STOPSIGNAL", "USER", "VOLUME",
+    "WORKDIR",
+})
+
+
+def _instructions(text: str) -> list[str]:
+    """Each instruction of the Dockerfile ``text``, its continuation lines included, by
+    Docker's rules for its default ``\\`` escape: a comment line is dropped wherever it
+    stands, inside an instruction too, and so is a blank line inside one.
+
+    A line it cannot place fails the read rather than going unread: one that starts no
+    instruction, and a heredoc (``<<``), whose body it does not read.
+    """
+    instructions, lines = [], []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#") or (lines and not line.strip()):
+            continue
+        lines.append(line)
+        if not re.search(r"\\[ \t]*$", line):
+            instructions.append("\n".join(lines))
+            lines = []
+    instructions = [one for one in [*instructions, "\n".join(lines)] if one.strip()]
+    for instruction in instructions:
+        assert instruction.split()[0].upper() in DOCKERFILE_INSTRUCTIONS, instruction
+        assert "<<" not in instruction, f"a heredoc this read cannot see into: {instruction}"
+    return instructions
+
+
+def _stages(text: str) -> list[list[str]]:
+    """The Dockerfile ``text``'s stages, each its instructions from its ``FROM`` on."""
+    stages: list[list[str]] = []
+    for instruction in _instructions(text):
+        if re.match(r"FROM\s", instruction, re.IGNORECASE):
+            stages.append([])
+        if stages:
+            stages[-1].append(instruction)
+    return stages
+
+
+def _python_stages(text: str) -> list[list[str]]:
+    """The stages built ``FROM`` the Python base image (:data:`PYTHON_BASE_PATTERN`)."""
+    return [stage for stage in _stages(text) if PYTHON_BASE_PATTERN.match(stage[0])]
+
+
+def _runs(instructions: list[str]) -> list[str]:
+    """The RUN instructions among ``instructions``."""
+    return [one for one in instructions if re.match(r"RUN\s", one, re.IGNORECASE)]
+
+
+def _commands(instruction: str) -> list[list[str]]:
+    """The words of each command a RUN ``instruction`` runs, each without the variable
+    assignments that lead it and the RUN line's own ``--`` flags.
+
+    In the shell form a command is what ``;``, ``&``, ``|``, ``(``, ``)`` and a backtick
+    separate (``&&``, ``||``, a subshell and ``$(...)`` among them); the exec form is one
+    command, its JSON punctuation dropped.
+    """
+    shell = re.sub(r"\\[ \t]*\n", " ", instruction)
+    shell = re.sub(r"^RUN(?:\s+--\S+)*\s*", "", shell, flags=re.IGNORECASE)
+    if shell.startswith("["):
+        shell = re.sub(r'[\[\]",]', " ", shell)
+    commands = []
+    for part in re.split(r"[;&|()`]", shell):
+        words = part.split()
+        while words and re.fullmatch(r"\w+=\S*", words[0]):
+            del words[0]
+        if words:
+            commands.append(words)
+    return commands
+
 
 class TestDockerfileDigestPin:
     """Dockerfile FROM lines pin the base image by sha256 digest.
@@ -197,8 +271,24 @@ class TestDockerfileDigestPin:
             )
 
 
+#: The OpenSSL packages each Python stage upgrades: the set audit finding F-025 names.
+OPENSSL_PACKAGES = frozenset({"openssl", "libssl3t64", "openssl-provider-legacy"})
+
+
+def _upgrades_openssl(stage: list[str]) -> bool:
+    """Whether a RUN instruction of ``stage`` holds the command ``apt-get upgrade -y`` naming
+    every one of :data:`OPENSSL_PACKAGES`.
+
+    It reads the command's words, not the shell's control flow or apt's other options: an
+    upgrade after ``true ||``, or one given ``-s`` (simulate), passes it.
+    """
+    return any(words[:2] == ["apt-get", "upgrade"] and "-y" in words
+               and OPENSSL_PACKAGES <= set(words)
+               for instruction in _runs(stage) for words in _commands(instruction))
+
+
 class TestDockerfileOpenSSLUpgrade:
-    """Both stages run apt-get upgrade for the OpenSSL packages.
+    """Both Python stages run apt-get upgrade for the OpenSSL packages.
 
     Defense-in-depth on top of the digest pin: the digest gives
     reproducibility, the apt-get upgrade gives currency.  A new CVE
@@ -206,63 +296,102 @@ class TestDockerfileOpenSSLUpgrade:
     picked up on the next image build.  Audit finding F-025.
     """
 
+    #: The two lines of each stage's RUN instruction that run the upgrade.
+    UPGRADE = ("    && apt-get upgrade -y --no-install-recommends \\\n"
+               "        openssl libssl3t64 openssl-provider-legacy \\\n")
+
     @pytest.fixture(scope="class")
     @classmethod
     def text(cls) -> str:
         """Return the full Dockerfile source as a string."""
         return DOCKERFILE.read_text(encoding="utf-8")
 
-    @pytest.mark.parametrize(
-        "package", ["openssl", "libssl3t64", "openssl-provider-legacy"]
-    )
-    def test_dockerfile_mentions_openssl_package(
-        self, text: str, package: str,
+    def test_each_python_stage_runs_the_openssl_upgrade(self, text: str) -> None:
+        """The builder and the runtime stage each hold ``apt-get upgrade -y`` naming every
+        package F-025 names, as a command of a RUN instruction of their own
+        (:func:`_upgrades_openssl`, which reads its words, not whether the shell reaches it).
+
+        Since ruling plan#2443 the upgrade is the image's only OpenSSL control.  The
+        runtime stage carries its own libssl3t64 (postgresql-client needs it), which an
+        upgrade in the builder alone would leave at the base image's.  A comment naming the
+        command is no RUN instruction, and a command that only names it runs nothing.
+        """
+        stages = _python_stages(text)
+        assert len(stages) == 2, [stage[0] for stage in stages]
+        missing = [stage[0] for stage in stages if not _upgrades_openssl(stage)]
+        assert not missing, (
+            f"these Dockerfile stages run no ``apt-get upgrade -y`` of "
+            f"{sorted(OPENSSL_PACKAGES)}: {missing}.  Each stage on the Python base must "
+            f"run it, so libssl3t64 in the runtime stage is also patched (audit finding "
+            f"F-025)."
+        )
+
+    def test_the_upgrade_check_refuses_a_runtime_stage_that_does_not_run_it(
+        self, text: str,
     ) -> None:
-        """Each OpenSSL package the audit names must appear in the
-        Dockerfile's apt-get upgrade list.  The audit explicitly
-        names all three (the vulnerable package set in F-025).
-        """
-        assert package in text, (
-            f"Dockerfile does not mention {package!r} -- the audit "
-            f"specifically requires upgrading this package "
-            f"(F-025)."
-        )
-
-    def test_apt_get_upgrade_appears_at_least_twice(self, text: str) -> None:
-        """``apt-get upgrade`` runs in both the builder and runtime stages.
-
-        We count occurrences rather than parse the Dockerfile because
-        each stage is a separate sequence of RUN directives and the
-        upgrade must run in EACH stage (the runtime stage gets its own
-        libssl3t64 from the postgresql-client install).
-        """
-        # Find all distinct apt-get upgrade invocations.  We allow
-        # the upgrade to be on one line or split across continuation
-        # lines, so the search is for the literal substring within
-        # any run command.
-        upgrade_count = len(re.findall(r"apt-get upgrade -y", text))
-        assert upgrade_count >= 2, (
-            f"``apt-get upgrade -y`` appears {upgrade_count} time(s) in "
-            f"Dockerfile; both the builder and runtime stages must run "
-            f"the upgrade so libssl3t64 in the runtime stage is also "
-            f"patched (audit finding F-025)."
-        )
+        """Measured on the real Dockerfile, whose header comment names the command too: the
+        runtime stage's upgrade deleted, one of its packages dropped, its lines turned into
+        comments inside the RUN instruction, or the command only echoed, and the runtime
+        stage alone fails, the builder's upgrade still read."""
+        assert text.count(self.UPGRADE) == 2, "the upgrade lines moved; re-cut these mutations"
+        head, _, tail = text.rpartition(self.UPGRADE)
+        for upgrade in ("", self.UPGRADE.replace(" libssl3t64", ""),
+                        "".join(f"#{line}\n" for line in self.UPGRADE.splitlines()),
+                        self.UPGRADE.replace("&& apt-get", "&& echo apt-get")):
+            builder, runtime = _python_stages(head + upgrade + tail)
+            assert _upgrades_openssl(builder), upgrade
+            assert not _upgrades_openssl(runtime), upgrade
 
 
-#: Where a shell command starts in a RUN line: the instruction itself, after an operator, or
-#: inside a subshell or a command substitution, line continuations included.
-_COMMAND_START = r"(?:^RUN|&&|\|\||[;|(`]|\$\()[\s\\]*"
-#: A RUN line that runs pip (ruling plan#2446): the word ``pip`` anywhere but as a path's
-#: segment after a ``/`` (``pip install``, ``pip3``, ``python -m pip``, ``uv pip``,
-#: ``pip-compile``), ``-mpip``, and a path to pip where a command starts
-#: (``/usr/local/bin/pip install``).  A path naming pip's files as an argument runs
-#: nothing: the runtime stage's ``rm`` of the base image's pip (ruling plan#2443).
-PIP_RUN = re.compile(rf"(?<![/\w])pip|-m\s*pip|{_COMMAND_START}\S*/pip", re.MULTILINE)
+#: Python's ``-m``, alone or the last of a group of one-letter options (``-Im``).
+RUN_MODULE = r"(?<![\w-])-[A-Za-z]*m\s*"
+#: pip by name in a command, anywhere but as a path's segment after a ``/``, in
+#: ``--without-pip`` or as ``pip.conf``: ``pip``, ``pip3``, ``pip3.N``, ``pip-`` anything
+#: (pip-compile), ``pipx``, Debian's ``python3-pip`` and pip's modules (``pip._internal``),
+#: ``uv pip`` and ``python -m pip`` among them; ``-m`` (:data:`RUN_MODULE`) with pip or
+#: ensurepip; and an ensurepip function called (``ensurepip.bootstrap()``), where reading
+#: ``ensurepip.__file__`` runs nothing.
+PIP_BY_NAME = re.compile(rf"(?<![/\w])(?<!--without-)pip(?:x|3[\d.]*)?(?!\w|\.conf\b)"
+                         rf"|{RUN_MODULE}(?:ensure)?pip\b|ensurepip\.(?!__file__\b)")
+#: A path to pip's files: ``pip`` (its package directory or its command), ``pip3`` and
+#: ``pip3.N`` with or without a glob, ``pip-*`` (its dist-info, its wheel, pip-compile), and
+#: ``pipx``.
+PIP_PATH = re.compile(r"/pip(?:x|[\d.]*\*?|-\S*)?(?=[\s\"'/]|$)")
 
 
-def _run_lines(text: str) -> list[str]:
-    """Each RUN instruction of the Dockerfile ``text``, its continuation lines included."""
-    return re.findall(r"^RUN\b(?:.*\\\n)*.*$", text, re.MULTILINE)
+def _runs_pip(instruction: str) -> bool:
+    """Whether a RUN ``instruction`` runs pip, by a spelling read here (rulings plan#2443,
+    plan#2446).
+
+    A command (:func:`_commands`) is refused that names pip (:data:`PIP_BY_NAME`), runs
+    ``-m venv`` without ``--without-pip`` (venv seeds pip by running ensurepip), or names a
+    path to pip's files (:data:`PIP_PATH`) as anything but ``rm`` does: ``rm`` deletes them
+    and runs nothing, so the runtime stage's delete of the base image's pip passes, while
+    ``python3 /usr/local/bin/pip install`` does not.  A spelling this does not read (a path
+    built at run time, ``from ensurepip import bootstrap``, ``import ensurepip as e``,
+    ``virtualenv``, ``uv venv --seed``, a script that runs pip) passes it: what reached the
+    image is ci.yml's ``image`` job's to grade, by finding no pip in it and its venv exactly
+    the lock's.
+    """
+    for words in _commands(instruction):
+        command = " ".join(words)
+        if (PIP_BY_NAME.search(command)
+                or (re.search(rf"{RUN_MODULE}venv\b", command) and "--without-pip" not in words)
+                or (words[0] != "rm" and PIP_PATH.search(command))):
+            return True
+    return False
+
+
+def _taken_from_elsewhere(stage: list[str]) -> list[str]:
+    """What ``stage`` takes from another stage or image: its ``FROM`` unless the Python base
+    (:data:`PYTHON_BASE_PATTERN`), each instruction naming one by ``from=`` (``COPY --from=``,
+    a RUN mount's ``from=``), each RUN with any mount (a cache mount shares its files across
+    stages by its id), and each ADD, which can also fetch a URL.  A file a RUN line fetches
+    itself (``curl``) is not read."""
+    return [one for at, one in enumerate(stage)
+            if (at == 0 and not PYTHON_BASE_PATTERN.match(one))
+            or re.search(r"\bfrom=|--mount\b", one, re.IGNORECASE)
+            or re.match(r"ADD\s", one, re.IGNORECASE)]
 
 
 class TestDockerfileInstallsTheLock:
@@ -278,6 +407,9 @@ class TestDockerfileInstallsTheLock:
     ci.yml's ``image`` job checks the built image holds none.
     """
 
+    #: The one thing the runtime stage takes from another stage or image.
+    VENV_COPY = "COPY --from=builder /opt/venv /opt/venv"
+
     @pytest.fixture(scope="class")
     @classmethod
     def text(cls) -> str:
@@ -285,12 +417,12 @@ class TestDockerfileInstallsTheLock:
         return DOCKERFILE.read_text(encoding="utf-8")
 
     def test_no_pip_runs_in_the_build(self, text: str) -> None:
-        """No RUN line runs pip (:data:`PIP_RUN`).
+        """No RUN instruction runs pip (:func:`_runs_pip`).
 
         A ``pip install`` would install outside the lock's hashes; uv
         installs everything.
         """
-        pip_runs = [command for command in _run_lines(text) if PIP_RUN.search(command)]
+        pip_runs = [one for one in _runs(_instructions(text)) if _runs_pip(one)]
         assert not pip_runs, (
             f"Dockerfile runs pip: {pip_runs}.  The image installs only "
             f"``uv.lock``, through ``uv sync --locked`` (ruling "
@@ -304,63 +436,140 @@ class TestDockerfileInstallsTheLock:
         "RUN python3 -I -mpip install requests",
         "RUN uv pip install requests",
         "RUN pip-compile requirements.in",
+        "RUN pipx install ruff",
+        "RUN apt-get install -y --no-install-recommends python3-pip",
         "RUN apt-get update && pip install requests",
         "RUN apt-get update \\\n    && pip install requests",
         "RUN /usr/local/bin/pip install requests",
         "RUN apt-get update \\\n    && /usr/local/bin/pip3 install requests",
         'RUN "${scripts}"/pip install requests',
         "RUN version=\"$(/usr/local/bin/pip --version)\"",
-    ], ids=["pip", "pip3", "python -m pip", "-mpip", "uv pip", "pip-compile",
-            "after an operator", "on a continuation line", "by its path",
+        "RUN python3 /usr/local/bin/pip install requests",
+        'RUN env "${scripts}"/pip3 install requests',
+        "RUN rm -r /tmp/x && python3 /usr/local/bin/pip install requests",
+        "RUN cp /usr/local/bin/pip /tmp/installer",
+        "RUN python -m ensurepip",
+        "RUN python -Im ensurepip",
+        "RUN python -c 'import ensurepip; ensurepip.bootstrap()'",
+        "RUN python -c 'from pip._internal.cli.main import main; main([\"install\", \"x\"])'",
+        "RUN python -m venv /opt/venv",
+        "RUN python -Im venv /opt/venv",
+        'RUN ["python", "-m", "ensurepip"]',
+    ], ids=["pip", "pip3", "python -m pip", "-mpip", "uv pip", "pip-compile", "pipx",
+            "pip's Debian package", "after an operator", "on a continuation line", "by its path",
             "by its path on a continuation line", "by a variable's path",
-            "in a command substitution"])
-    def test_the_pip_check_refuses_each_way_a_build_runs_pip(self, command: str) -> None:
-        """Each way a RUN line runs pip is refused, by name or by a path to it."""
-        assert PIP_RUN.search(command), command
+            "in a command substitution", "its path an argument to python",
+            "its path an argument to env", "its path in the command after an rm",
+            "its path an argument to cp", "-m ensurepip", "-Im ensurepip",
+            "ensurepip.bootstrap", "pip's own module", "-m venv, which seeds pip",
+            "-Im venv", "the exec form"])
+    def test_the_pip_check_refuses_each_spelling_it_reads(self, command: str) -> None:
+        """Each spelling :func:`_runs_pip` reads is refused, wherever its command stands."""
+        assert _runs_pip(command), command
+
+    @pytest.mark.parametrize("command", [
+        'RUN rm -r "${scripts}"/pip "${scripts}"/pip3* "${bundled}"/pip-*.whl',
+        "RUN --network=none rm -r /usr/local/bin/pip",
+        "RUN python -m venv --without-pip /opt/venv",
+        "RUN python -c 'import ensurepip; print(ensurepip.__file__)'",
+        "RUN set -o pipefail && apt-get update",
+        "RUN cp pip.conf /etc/pip.conf",
+    ], ids=["rm of pip's files", "rm after the RUN line's flags", "venv without pip",
+            "ensurepip's path read", "pipefail", "a file named like pip's config"])
+    def test_the_pip_check_passes_each_command_that_runs_no_pip(self, command: str) -> None:
+        """A command that names pip's files, its module or a word starting like it, and runs
+        no pip, passes :func:`_runs_pip`."""
+        assert not _runs_pip(command), command
 
     def test_the_pip_check_passes_a_line_naming_pip_s_files_it_runs_nothing_of(
             self, text: str) -> None:
         """The runtime stage's ``rm`` of the base image's pip names pip's files and runs no
-        pip, so it passes; it is a RUN line of the Dockerfile, so the check over the real
-        file reads it."""
-        deleting = [command for command in _run_lines(text) if "rm -r " in command
-                    and '"${purelib}"/pip ' in command]
+        pip, so it passes; it is a RUN instruction of the Dockerfile, so the check over the
+        real file reads it."""
+        deleting = [one for one in _runs(_instructions(text)) if "rm -r " in one
+                    and '"${purelib}"/pip ' in one]
         assert len(deleting) == 1, deleting
-        assert not PIP_RUN.search(deleting[0]), deleting[0]
+        assert not _runs_pip(deleting[0]), deleting[0]
 
     def test_the_builder_syncs_the_lock_with_its_build_hashes(
         self, text: str,
     ) -> None:
-        """The builder runs ``uv sync --locked`` with ``--require-build-hashes``.
+        """The builder runs ``uv sync --locked`` with ``--require-build-hashes``, in a RUN
+        instruction: with that line turned into a comment, which still names it, the check
+        fails.
 
         ``--locked`` refuses a lock that no longer matches pyproject.toml,
         and ``--require-build-hashes`` refuses a source build whose tools no
         hash covers (pyproject.toml's ``build-constraint-dependencies``,
         ruling plan#2494).
         """
-        builder = text.split("\nFROM ")[2]
-        assert "uv sync --locked --require-build-hashes" in builder, (
+        def syncs(dockerfile: str) -> bool:
+            builder, = (stage for stage in _stages(dockerfile)
+                        if re.search(r"\sAS\s+builder$", stage[0], re.IGNORECASE))
+            return any(words[:4] == ["uv", "sync", "--locked", "--require-build-hashes"]
+                       for one in _runs(builder) for words in _commands(one))
+
+        assert syncs(text), (
             "the Dockerfile's builder stage no longer installs with "
             "``uv sync --locked --require-build-hashes``; the image would "
             "not be held to uv.lock's versions and hashes (ruling "
             "balance:R-BAL294)."
         )
+        sync = "RUN uv sync --locked --require-build-hashes"
+        assert text.count(sync) == 1
+        assert not syncs(text.replace(sync, "# " + sync).replace(
+            "\n        --no-default-groups --group server\n", "\n"))
 
-    def test_uv_never_reaches_the_runtime_stage(self, text: str) -> None:
-        """The runtime stage copies the venv from the builder and no uv.
+    def test_the_runtime_stage_takes_only_the_builder_s_venv(self, text: str) -> None:
+        """The runtime stage is built ``FROM`` the Python base and takes from another stage
+        or image only the builder's venv (:func:`_taken_from_elsewhere`), so no copy of the
+        uv stage's or the builder's uv.
 
         The installer is a build tool; an image that carried it would
         hand anything with code execution in the container a way to
-        install packages.
+        install packages.  What the venv itself holds is not read here:
+        ci.yml's ``image`` job finds its packages exactly the lock's
+        runtime and server set, but not a uv the builder put in it as a
+        file, which nothing grades yet (task plan#2543).
         """
-        runtime_stage = text.rsplit("\nFROM ", 1)[1]
-        assert "--from=uv" not in runtime_stage, (
-            "the runtime stage copies from the uv stage; uv must stay in "
-            "the builder."
+        runtime = _stages(text)[-1]
+        assert _taken_from_elsewhere(runtime) == [self.VENV_COPY], (
+            "the runtime stage takes something from another stage or image "
+            "besides the builder's /opt/venv, or no longer takes the venv: "
+            f"{_taken_from_elsewhere(runtime)}.  uv must stay in the builder."
         )
-        assert "COPY --from=builder /opt/venv /opt/venv" in runtime_stage, (
-            "the runtime stage no longer copies /opt/venv from the builder."
-        )
+
+    @pytest.mark.parametrize("line", [
+        "COPY --from=uv /uv /usr/local/bin/uv",
+        "COPY --from=ghcr.io/astral-sh/uv:0.13.6@sha256:" + "a" * 64 + " /uv /usr/local/bin/uv",
+        "COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv",
+        "COPY --from=0 /uv /usr/local/bin/uv",
+        "copy --from=uv /uv /usr/local/bin/uv",
+        "RUN --mount=type=bind,from=uv,source=/uv,target=/mnt/uv cp /mnt/uv /usr/local/bin/",
+        "RUN --mount=type=cache,id=uvx,target=/c cp /c/uv /usr/local/bin/uv",
+        "ADD https://example.com/uv /usr/local/bin/uv",
+    ], ids=["the uv stage", "the uv image", "the builder's uv", "a stage by its index",
+            "lowercase", "a RUN mount", "a cache mount shared by its id", "an ADD"])
+    def test_the_runtime_check_refuses_each_way_it_reads_of_taking_uv(
+            self, text: str, line: str) -> None:
+        """Each line added to the real runtime stage after its venv copy is refused."""
+        assert text.count(self.VENV_COPY + "\n") == 1
+        mutated = text.replace(self.VENV_COPY + "\n", f"{self.VENV_COPY}\n{line}\n")
+        assert _taken_from_elsewhere(_stages(mutated)[-1]) == [self.VENV_COPY, line]
+
+    def test_the_runtime_check_refuses_a_stage_built_on_another_and_a_venv_copy_gone(
+            self, text: str) -> None:
+        """The runtime stage built ``FROM builder`` (which holds uv), its venv copy widened to
+        all of ``/opt`` or gone, each fails; a comment naming a copy of uv passes."""
+        runtime_from = _stages(text)[-1][0]
+        assert text.count(runtime_from + "\n") == 1
+        for mutated in (text.replace(runtime_from + "\n", "FROM builder\n"),
+                        text.replace(self.VENV_COPY, "COPY --from=builder /opt /opt"),
+                        text.replace(self.VENV_COPY + "\n", "")):
+            assert _taken_from_elsewhere(_stages(mutated)[-1]) != [self.VENV_COPY]
+        commented = text.replace(self.VENV_COPY + "\n",
+                                 f"{self.VENV_COPY}\n# COPY --from=uv /uv /usr/local/bin/uv\n")
+        assert _taken_from_elsewhere(_stages(commented)[-1]) == [self.VENV_COPY]
 
 
 class TestDockerfilePreservesC34Invariants:

@@ -50,9 +50,10 @@ Each name, and who reads it:
   TOML, a link) as a listing made of nothing, and its tests.
 - ``lock_change``, ``LockChange``, ``lock_unversioned``, ``ceiling``, ``Move`` and ``LOCK``:
   ``tools/update.refresh``, the Monday lock refresh, which holds back each package whose
-  move needs a card (a move across a major, below its next major; a move adding or
-  removing a package, at its version) and judges its lock by the landing check's own walk
-  before any pull request carries it (``_versions``; rulings plan#2351, plan#2450).
+  move needs a card (a move across a major, below its next major; a move changing what the
+  package needs, at its version) and judges its lock by the landing check's own walk
+  before any pull request carries it (``_versions``; rulings plan#2351, plan#2450,
+  plan#2490).
   ``lock_moves`` and ``canonical``: ``tools/update.refresh`` again, for what each new major
   it prepares as a change of its own moves, from a lock made with ``pyproject.toml`` edited,
   which ``lock_change`` refuses (ruling plan#2450), and for the package each requirement of

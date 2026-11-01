@@ -13,14 +13,16 @@ the workflow gives its job no secret.  The 7-day cooldown is ``pyproject.toml``'
 otherwise, is as the landing check requires.
 
 **What needs a card is the landing check's to say** (:mod:`tools.quill._versions`, through
-the door), never this module's: a move across a major, and a move that adds or removes a
-package.  Each is held back and the lock made again from ``dev``'s, until no move needs one
-(:func:`refreshed`): a package crossing a major is held below the next major
-(``--upgrade-package 'P<ceiling>'``, measured 2026-10-31: pyee held at 13.0.1 while six
-packages moved), so it still takes the minors and patches of its own major; a package whose
-move brings or drops a package is held at its version.  A hold uv does not keep, or a change
-no hold can undo (the lock's header), fails the run, which the workflow reports.  The lock
-the run settles on is judged whole by the landing check's own walk before it is written.
+the door), never this module's: a move across a major, a move that adds or removes a
+package, and a move that changes what a package needs (ruling plan#2490).  Each is held back
+and the lock made again from ``dev``'s, until no move needs one (:func:`refreshed`): a
+package crossing a major is held below the next major (``--upgrade-package 'P<ceiling>'``,
+measured 2026-10-31: pyee held at 13.0.1 while six packages moved), so it still takes the
+minors and patches of its own major; a package whose move changes what it needs, as any
+move that brings or drops a package does, is held at its version.  A hold uv does not keep,
+or a change no hold can undo (the lock's header), fails the run, which the workflow
+reports.  The lock the run settles on is judged whole by the landing check's own walk
+before it is written.
 
 **Each package that needs a card is prepared as a change of its own** (ruling plan#2450,
 :func:`prepared`), to wait for one: each the week holds back, and each direct package a lock
@@ -116,8 +118,8 @@ class Refreshed:
 def _holds(old: str, new: str) -> dict[str, Hold]:
     """Each package the change from the lock text ``old`` to ``new`` must hold back to land
     with no card, by name: one crossing a major below its next major (at its version where
-    none follows, :func:`ceiling`), and one whose move adds or removes a package at its
-    version, which overrides the first.
+    none follows, :func:`ceiling`), and one whose move changes what it needs at its version,
+    which overrides the first.
 
     Raises:
         NotVersions: as :func:`lock_change` raises it, for a change no hold can undo.
@@ -127,7 +129,7 @@ def _holds(old: str, new: str) -> dict[str, Hold]:
                          if (below := ceiling(move.old)) is not None else
                          Hold(f"=={move.old}", f"{move.new} is a new major"))
              for move in change.moves if move.major}
-    holds.update({name: Hold(f"=={version}", "its next release adds or removes a package")
+    holds.update({name: Hold(f"=={version}", "its next release changes what it needs")
                   for name, version in change.bringing.items()})
     return holds
 

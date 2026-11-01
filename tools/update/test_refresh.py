@@ -146,8 +146,21 @@ def test_a_move_adding_a_package_is_held_at_its_version():
     week = refreshed(_lock(_BASE), lock)
     assert (_moved(week), dict(week.held), calls[1]) == (
         [("pillow", "12.3.0", "12.4.1"), ("zeta", "0.6.3", "0.6.4")],
-        {"qrcode": Hold("==8.2", "its next release adds or removes a package")},
+        {"qrcode": Hold("==8.2", "its next release changes what it needs")},
         ("--upgrade-package", "qrcode==8.2"))
+
+
+def test_a_move_needing_a_package_the_lock_holds_is_held_at_its_version():
+    """qrcode 8.3 needs zeta too, which the lock already holds: no package is added, but
+    what qrcode needs changes (ruling plan#2490), so qrcode is held at 8.2 and the week
+    moves the rest."""
+    releases = _MINORS | {"qrcode": [("8.2", ("pillow",)), ("8.3", ("pillow", "zeta"))]}
+    lock, calls = _uv(releases)
+    week = refreshed(_lock(_BASE), lock)
+    assert (_moved(week), dict(week.held), calls) == (
+        [("pillow", "12.3.0", "12.4.1"), ("zeta", "0.6.3", "0.6.4")],
+        {"qrcode": Hold("==8.2", "its next release changes what it needs")},
+        [(), ("--upgrade-package", "qrcode==8.2")])
 
 
 def test_a_hold_at_a_version_wins_over_one_below_a_major():
@@ -158,7 +171,7 @@ def test_a_hold_at_a_version_wins_over_one_below_a_major():
     lock, calls = _uv(releases)
     week = refreshed(_lock(_BASE), lock)
     assert (dict(week.held), calls, _moved(week)) == (
-        {"pillow": Hold("==12.3.0", "its next release adds or removes a package")},
+        {"pillow": Hold("==12.3.0", "its next release changes what it needs")},
         [(), ("--upgrade-package", "pillow<13"), ("--upgrade-package", "pillow==12.3.0")],
         [("qrcode", "8.2", "8.2.1"), ("zeta", "0.6.3", "0.6.4")])
 
@@ -509,7 +522,7 @@ def test_a_held_move_adding_a_package_is_prepared_with_it():
     week, alone, _ = _monday(_PILLOW, _BASE, releases)
     qrcode = alone["qrcode"]
     assert (dict(week.held), qrcode.change.moves, qrcode.change.added, qrcode.why) == (
-        {"qrcode": Hold("==8.2", "its next release adds or removes a package")},
+        {"qrcode": Hold("==8.2", "its next release changes what it needs")},
         (Move("qrcode", "8.2", "8.3", False),), ("olefile",),
         "uv.lock adds olefile, a package of no version before")
 
@@ -569,8 +582,8 @@ def test_a_held_package_whose_move_alone_needs_no_card_has_no_change_of_its_own(
     """The week held qrcode at 8.2 for a release that brings a package; alone, uv moves it
     to 8.2.1, which brings none: that needs no card, so it is no change waiting for one."""
     old = _locked(_BASE, _PILLOW)
-    week = Refreshed(old, (), {"qrcode": Hold("==8.2", "its next release adds or removes "
-                                              "a package")})
+    week = Refreshed(old, (), {"qrcode": Hold("==8.2", "its next release changes what "
+                                              "it needs")})
     minor = _locked(_BASE | {"qrcode": ("8.2.1", ("pillow",))}, _PILLOW)
 
     def uv(_project, start, arguments):

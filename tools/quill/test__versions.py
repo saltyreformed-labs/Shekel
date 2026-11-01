@@ -130,11 +130,38 @@ def test_new_files_for_an_unmoved_version_move_nothing(repo):
     assert not _moved(repo, LOCK, _lock(), _lock(files={"pillow": 2}))
 
 
-def test_a_moved_version_may_change_what_it_needs(repo):
-    """qrcode's new version needs zeta too, a package the lock already holds: what a version
-    declares moves with it."""
-    assert _moved(repo, LOCK, _lock(), _lock(_at("qrcode", "8.3", ("pillow", "zeta")))) == (
-        Move("qrcode", "8.2", "8.3", False),)
+#: The lock with qrcode moved to 8.3, needing what 8.2 needed.
+_QRCODE = _lock(_at("qrcode", "8.3"))
+#: qrcode's one need, as the lock writes it.
+_PILLOW = '{ name = "pillow" }'
+
+
+@pytest.mark.parametrize("new", [
+    _lock(_at("qrcode", "8.3", ("pillow", "zeta"))),
+    _lock(_at("qrcode", "8.3", ())),
+    _QRCODE.replace(_PILLOW, '{ name = "pillow", marker = "sys_platform == \'linux\'" }'),
+    _QRCODE.replace(_PILLOW, '{ name = "pillow", extra = ["fpx"] }'),
+    _QRCODE.replace('version = "8.3"\n',
+                    'version = "8.3"\noptional-dependencies = { pil = [{ name = "zeta" }] }\n'),
+], ids=["a need the lock holds", "a need dropped", "a need's marker", "a need's extras",
+        "an extra's need"])
+def test_a_moved_version_changing_what_it_needs_is_refused(repo, new):
+    """qrcode 8.3 needs zeta too, which the lock holds for another install set; or no longer
+    needs pillow; or needs it under a marker, with an extra, or through an extra of its own:
+    each could move a package into or out of what production installs with no package added
+    or removed (ruling plan#2490), so each is more than a version moved."""
+    assert _refusal(repo, LOCK, _lock(), new) == (
+        "uv.lock moves qrcode from 8.2 to 8.3, a new version that changes what it needs")
+
+
+def test_every_package_whose_needs_change_is_named(repo):
+    """Two moves that change what each needs are named together, in the lock's order; a
+    move beside them that needs what it did is not."""
+    new = _lock(_PACKAGES | {"pillow": ("12.4.1", ("zeta",)), "qrcode": ("8.3", ()),
+                             "zeta": ("0.6.4", ())})
+    assert _refusal(repo, LOCK, _lock(), new) == (
+        "uv.lock moves pillow from 12.3.0 to 12.4.1 and qrcode from 8.2 to 8.3, a new version "
+        "that changes what it needs")
 
 
 @pytest.mark.parametrize(("new", "why"), [
@@ -581,6 +608,15 @@ def test_a_move_needing_a_package_the_lock_lacked_brings_it():
     change = lock_change(_lock(), new)
     assert (change.added, change.removed, dict(change.bringing), change.moves) == (
         ("olefile",), (), {"qrcode": "8.2"}, (Move("qrcode", "8.2", "8.3", False),))
+
+
+def test_a_move_changing_what_it_needs_brings_with_no_package_added():
+    """qrcode's new version needs zeta too, which the lock already holds: nothing is added,
+    and qrcode, at its version before, is one whose move changes what it brings, which the
+    refresh holds back as it holds a move adding a package."""
+    change = lock_change(_lock(), _lock(_at("qrcode", "8.3", ("pillow", "zeta"))))
+    assert (change.added, change.removed, dict(change.bringing), change.moves) == (
+        (), (), {"qrcode": "8.2"}, (Move("qrcode", "8.2", "8.3", False),))
 
 
 def test_a_move_no_longer_needing_a_package_only_it_needed_drops_it():

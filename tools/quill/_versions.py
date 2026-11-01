@@ -14,10 +14,16 @@ and only in the files that pin versions (:func:`pins_versions`):
 - ``uv.lock``, read as TOML, as uv reads it (:func:`_lock`): its header (all but its
   packages) as it was, the same packages by name, each named once, and of each package from
   a registry only its files (``sdist`` and ``wheels``, each with its hash) and, where its
-  version moves, that version and the dependencies it declares; a package from no registry
-  (the project's own) as it was.  A package added or removed is no version moved, and
-  neither is an edit to ``pyproject.toml``, which the image holds and which pins nothing,
-  so a new package, direct or indirect, or a new range needs a card.
+  version moves, that version; a package from no registry (the project's own) as it was.
+  A package added or removed is no version moved, and neither is an edit to
+  ``pyproject.toml``, which the image holds and which pins nothing, so a new package,
+  direct or indirect, or a new range needs a card.  **What a package needs stays as it
+  was** (ruling plan#2490): each package it declares it needs, and each its extras need,
+  with that entry's extras and marker.  A move that changed it could bring a package the
+  lock holds for one install set (the dev tools) into another (production, the image's
+  build, the landing job) with no card, or take one out, and no install set is named here
+  to tell them apart: so every package is held to it, the lock's every install set kept as
+  it was.
 - **and each file of a package whose files change is that release's on its registry**
   (:func:`_released`): on the one host the lock's files from that registry were on before
   the change, and named for that package at the version the lock gives it (PyPI refuses an
@@ -95,9 +101,12 @@ _IMAGE = (r"(?P<what>[^\s@]+):(?P<version>[0-9]+(?:\.[0-9]+)*)(?P<variant>[A-Za-
 #: What a package from a registry may change where its version does not move: its files, a
 #: source distribution and wheels, each with its hash.
 _DISTRIBUTIONS = frozenset({"sdist", "wheels"})
-#: What a package from a registry may change where its version moves: that version, its
-#: files and the dependencies it declares.
-_MOVED = _DISTRIBUTIONS | {"version", "dependencies", "optional-dependencies"}
+#: What a package's entry declares it needs: the packages it depends on, and its extras'.
+_NEEDS = ("dependencies", "optional-dependencies")
+#: What a package from a registry may change where its version moves, as
+#: :func:`lock_change` reads it: that version, its files and what it needs, which it
+#: reports (:attr:`LockChange.bringing`) for the walk to refuse and the refresh to hold.
+_MOVED = _DISTRIBUTIONS | {"version", *_NEEDS}
 #: The endings of a source distribution's file name a registry serves: PEP 625's
 #: ``.tar.gz``, and the ``.zip`` older releases on PyPI still carry.
 _SOURCE_ENDINGS = (".tar.gz", ".zip")
@@ -346,9 +355,10 @@ def _packages(lock: dict[str, object]) -> dict[str, dict[str, object]]:
 class LockChange:
     """What a change to the lock does (:func:`lock_change`): ``moves``, each package it moves,
     by name; ``added`` and ``removed``, each package it adds or removes, by name; and
-    ``bringing``, each package whose move adds or removes one, by name, at its version
-    before (a package's new version needing a package the lock did not hold, or no longer
-    needing one only it needed)."""
+    ``bringing``, each package whose move changes what it brings with it (what it needs,
+    :func:`_needs`), by name, at its version before: a package's new version needing a
+    package or no longer needing one, the lock holding it or not, or needing one under
+    another marker or with other extras."""
 
     moves: tuple[Move, ...]
     added: tuple[str, ...]
@@ -356,14 +366,11 @@ class LockChange:
     bringing: Mapping[str, str]
 
 
-def _needs(package: dict[str, object]) -> frozenset[str]:
-    """The packages a lock's ``package`` needs, each by name, its extras' included."""
-    extras = package.get("optional-dependencies", {})
-    entries = [*package.get("dependencies", []),
-               *(entry for needed in (extras.values() if isinstance(extras, dict) else ())
-                 for entry in needed)]
-    return frozenset(entry["name"] for entry in entries
-                     if isinstance(entry, dict) and isinstance(entry.get("name"), str))
+def _needs(package: dict[str, object]) -> tuple[object, ...]:
+    """What a lock's ``package`` needs, as the lock declares it (:data:`_NEEDS`): each entry
+    as it is, with its extras and marker, so two readings are equal only where every install
+    set takes the same packages through the package."""
+    return tuple(package.get(key) for key in _NEEDS)
 
 
 def lock_change(old: str, new: str) -> LockChange:
@@ -409,13 +416,11 @@ def _change(was: dict[str, dict[str, object]],
         NotVersions: when a package both hold moves a version :func:`_major` cannot read.
     """
     added, removed = now.keys() - was.keys(), was.keys() - now.keys()
-    both = sorted(was.keys() & now.keys())
-    return LockChange(
-        tuple(move for name in both if (move := _move(name, was[name], now[name])) is not None),
-        tuple(sorted(added)), tuple(sorted(removed)),
-        {name: str(was[name].get("version")) for name in both
-         if (_needs(now[name]) - _needs(was[name])) & added
-         or (_needs(was[name]) - _needs(now[name])) & removed})
+    moved = tuple(move for name in sorted(was.keys() & now.keys())
+                  if (move := _move(name, was[name], now[name])) is not None)
+    return LockChange(moved, tuple(sorted(added)), tuple(sorted(removed)),
+                      {move.what: move.old for move in moved
+                       if _needs(was[move.what]) != _needs(now[move.what])})
 
 
 def _lock(old: str, new: str) -> tuple[Move, ...]:
@@ -423,7 +428,8 @@ def _lock(old: str, new: str) -> tuple[Move, ...]:
 
     Raises:
         NotVersions: as :func:`lock_change` raises it, or when the change adds or removes a
-            package.
+            package, or moves one to a version that changes what it needs
+            (:attr:`LockChange.bringing`).
     """
     change = lock_change(old, new)
     if change.added:
@@ -431,6 +437,10 @@ def _lock(old: str, new: str) -> tuple[Move, ...]:
                           "before")
     if change.removed:
         raise NotVersions(f"{LOCK} removes {', '.join(change.removed)}")
+    if change.bringing:
+        moved = " and ".join(f"{move.what} from {move.old} to {move.new}"
+                             for move in change.moves if move.what in change.bringing)
+        raise NotVersions(f"{LOCK} moves {moved}, a new version that changes what it needs")
     return change.moves
 
 
@@ -527,7 +537,8 @@ def _judge(name: str, old: dict[str, object], new: dict[str, object],
     it moves only versions: a package from a registry may change only its files, each that
     release's on the registry (:func:`_released`, its hosts from ``homes``, by registry, as
     :func:`_homes` reads them before the change), and where its version moves, that version
-    and the dependencies it declares too; one from no registry nothing.
+    and what it needs too (:data:`_MOVED`; what it needs is :func:`_lock`'s to refuse); one
+    from no registry nothing.
 
     Raises:
         NotVersions: when the change moves more than that, or names a file that is not the

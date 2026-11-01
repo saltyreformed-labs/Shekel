@@ -9,6 +9,7 @@ judged as CI's landing check judges a path where production differs
 from __future__ import annotations
 
 import hashlib
+import re
 
 import pytest
 
@@ -220,8 +221,17 @@ _WHEEL = "pillow-12.3.0-py3-none-platform0.whl"
     (_lock().replace(f'sdist = {{ url = "{_HOST}/pillow-12.3.0.tar.gz"',
                      'sdist = { path = "pillow-12.3.0.tar.gz"'),
      "uv.lock names a file of pillow by no URL"),
+    (_lock().replace('name = "pillow"\nversion = "12.3.0"', 'name = "pillow"\nversion = "12.4.1"'),
+     "uv.lock gives pillow 12.4.1 the file pillow-12.3.0.tar.gz, which is no file of that "
+     "release"),
+    (_lock().replace(f'{{ url = "{_HOST}/pillow-12.3.0.tar.gz", ',
+                     f'{{ url = "{_HOST}/pillow-12.3.0.tar.gz", path = "pillow.tar.gz", '),
+     "uv.lock names pillow's file pillow-12.3.0.tar.gz with path, which uv writes of no file"),
+    (re.sub(r'(pillow-12\.3\.0\.tar\.gz"), hash = "sha256:[0-9a-f]{64}"', r"\1", _lock()),
+     "uv.lock names pillow's file pillow-12.3.0.tar.gz with no hash"),
 ], ids=["another host", "another project's file", "another release's file",
-        "no distribution's name", "a wheel of too few fields", "no URL"])
+        "no distribution's name", "a wheel of too few fields", "no URL",
+        "a version moved, its files not", "a key uv never writes", "no hash"])
 def test_a_file_that_is_not_the_releases_on_its_registry_is_refused(repo, new, why):
     """``uv sync --locked`` downloads each file from the URL the lock names (measured
     2026-10-31), so a change moving no version may still repoint one: each file of a package
@@ -237,6 +247,72 @@ def test_a_registry_whose_files_lay_on_two_hosts_has_no_home(repo):
     assert _refusal(repo, LOCK, _lock().replace(*elsewhere),
                     _lock(_at("pillow", "12.4.1")).replace(*elsewhere)) == (
         "uv.lock's files from pillow's registry lay on 2 hosts before, not one")
+
+
+def _as_uv_writes(lock):
+    """``lock`` with each file entry as uv writes one of a registry's: its size and upload
+    time beside its URL and hash."""
+    return re.sub(r'(hash = "sha256:[0-9a-f]{64}") }',
+                  r'\1, size = 1024, upload-time = "2026-10-30T12:00:00.000Z" }', lock)
+
+
+def test_a_file_entry_as_uv_writes_it_moves_its_version(repo):
+    """Every key uv writes of a file (measured on the lock 2026-11-01: a URL, a hash, a size
+    and an upload time) may move with a release's files."""
+    assert _moved(repo, LOCK, _as_uv_writes(_lock()),
+                  _as_uv_writes(_lock(_at("pillow", "12.4.1")))) == (
+        Move("pillow", "12.3.0", "12.4.1", False),)
+
+
+@pytest.mark.parametrize(("old", "new", "why"), [
+    (_lock(), _lock(_at("pillow", "12.4.1"), files={"pillow": 0}),
+     "uv.lock gives pillow 12.4.1 no wheel where it had one, so it would be built from its "
+     "source"),
+    (_lock(), _lock(files={"pillow": 0}),
+     "uv.lock gives pillow 12.3.0 no wheel where it had one, so it would be built from its "
+     "source"),
+    (_lock(files={"zeta": 0}), _lock(_at("zeta", "0.6.4")),
+     "uv.lock gives zeta 0.6.4 a wheel where it had none, so it would no longer be built "
+     "from its source"),
+], ids=["a release of no wheel", "every wheel dropped", "a wheel where none was"])
+def test_a_package_built_from_source_or_installed_built_stays_so(repo, old, new, why):
+    """A release with no wheel, or a change dropping every wheel of one, would have every
+    install build from source a package it installed built; a wheel where there was none
+    would install built one the image compiles (psycopg-c against its own libpq)."""
+    assert _refusal(repo, LOCK, old, new) == why
+
+
+def test_a_release_with_fewer_wheels_still_moves_its_version(repo):
+    """A release that drops one platform's wheel and keeps another is the release's files:
+    one move."""
+    assert _moved(repo, LOCK, _lock(files={"pillow": 2}), _lock(_at("pillow", "12.4.1"))) == (
+        Move("pillow", "12.3.0", "12.4.1", False),)
+
+
+def _raw(repo, data):
+    """The bytes ``data`` written to ``repo`` as a blob, as production's mode and object name
+    it."""
+    held = repo / "raw.bin"
+    held.write_bytes(data)
+    return f"100644 {git(repo, 'hash-object', '-w', str(held)).strip()}"
+
+
+@pytest.mark.parametrize(("path", "text"), [(DOCKERFILE, _DOCKERFILE), (LOCK, _lock())],
+                         ids=["a Dockerfile", "the lock"])
+def test_bytes_that_decode_to_no_text_are_refused_not_raised(repo, path, text):
+    """A Latin-1 byte (``é``) in a comment of a file that pins versions decodes to no text:
+    :func:`moves`, :func:`pinned` and the walk each refuse it as one, so a landing check
+    names it and the daily queue leaves its pull request, where both raised before."""
+    broken = _raw(repo, text.encode() + "# café\n".encode("latin-1"))
+    why = f"{path} holds bytes this check cannot decode as text"
+    refusals = []
+    for read in (lambda: moves(repo, path, _blob(repo, text), broken),
+                 lambda: pinned(repo, path, broken)):
+        with pytest.raises(NotVersions) as refused:
+            read()
+        refusals.append(str(refused.value))
+    assert (refusals, unversioned(repo, {path: (_blob(repo, text), broken)})) == (
+        [why, why], (why,))
 
 
 def test_a_file_name_is_read_as_pep_503_compares_a_project(repo):

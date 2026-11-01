@@ -24,14 +24,18 @@ and only in the files that pin versions (:func:`pins_versions`):
   build, the landing job) with no card, or take one out, and no install set is named here
   to tell them apart: so every package is held to it, the lock's every install set kept as
   it was.
-- **and each file of a package whose files change is that release's on its registry**
-  (:func:`_released`): on the one host the lock's files from that registry were on before
-  the change, and named for that package at the version the lock gives it (PyPI refuses an
-  upload whose file name names another project or release, so the name ties the file to
-  the release).  ``uv sync --locked`` downloads each file from the URL the lock names and
-  checks only the hash the lock names beside it (measured 2026-10-31), so a change that
-  repointed a file, moving no version, would install whatever that URL serves, land with
-  no card and appear in no release's listing of the versions it moves.
+- **and each file of a package whose version or files move is that release's on its
+  registry** (:func:`_released`): on the one host the lock's files from that registry were
+  on before the change, named for that package at the version the lock gives it (PyPI
+  refuses an upload whose file name names another project or release, so the name ties the
+  file to the release), with a hash, and with nothing uv does not write of a file
+  (:data:`_FILE_KEYS`).  ``uv sync --locked`` downloads each file from the URL the lock
+  names and checks only the hash the lock names beside it (measured 2026-10-31), so a
+  change that repointed a file, moving no version, would install whatever that URL serves,
+  land with no card and appear in no release's listing of the versions it moves; and a
+  version moved with its files as they were would be listed as a release it never
+  installs.  A package with a wheel keeps one, and one with none (psycopg-c, which the
+  image compiles against its own libpq) gains none (:func:`_judge`).
 - a ``FROM`` line of the ``Dockerfile`` and an ``image:`` line of a compose file
   (``docker-compose*.yml``), each pinning an image by tag and digest
   (``name:<version><variant>@sha256:<digest>``): only the tag's version and the digest
@@ -43,10 +47,11 @@ and only in the files that pin versions (:func:`pins_versions`):
   move.
 
 Every other line of those files is as it was, byte for byte: each file is read as git holds
-it, and refused when its text does not hash back to its object (a line ending changed, or
-bytes no decoding keeps), so a line compared equal is equal.  Which of them production runs
-is :mod:`tools.quill._production`'s to say, never this module's: today the ``Dockerfile``,
-``docker-compose.yml`` and the workflow that builds and signs the image.
+it, refused when its bytes decode to no text (:func:`_text`, which every file this module
+reads is read through) and when its text does not hash back to its object (a line ending
+changed, or bytes no decoding keeps), so a line compared equal is equal.  Which of them
+production runs is :mod:`tools.quill._production`'s to say, never this module's: today the
+``Dockerfile``, ``docker-compose.yml`` and the workflow that builds and signs the image.
 
 **A major is the release up to its first number that is not zero** (:func:`_major`, its
 epoch first), so ``12.3.0`` to ``13.0.0`` crosses one and a 0.x package's minor is its
@@ -101,6 +106,9 @@ _IMAGE = (r"(?P<what>[^\s@]+):(?P<version>[0-9]+(?:\.[0-9]+)*)(?P<variant>[A-Za-
 #: What a package from a registry may change where its version does not move: its files, a
 #: source distribution and wheels, each with its hash.
 _DISTRIBUTIONS = frozenset({"sdist", "wheels"})
+#: What uv writes of each file a registry serves (measured 2026-11-01: these four on every
+#: one of the lock's 897), of which a file must name its URL and its hash.
+_FILE_KEYS = frozenset({"url", "hash", "size", "upload-time"})
 #: What a package's entry declares it needs: the packages it depends on, and its extras'.
 _NEEDS = ("dependencies", "optional-dependencies")
 #: What a package from a registry may change where its version moves, as
@@ -233,15 +241,30 @@ def _spelled(major: tuple[int, ...]) -> str:
     return f"{epoch}!{text}" if epoch else text
 
 
+def _text(root: Path, path: str, oid: str) -> str:
+    """The text of ``path``'s object ``oid``, as git reads it out: how every file this module
+    reads is read.
+
+    Raises:
+        NotVersions: when its bytes decode to no text, so no line of it can be read.
+        tools.ci.gitcmd.GitError: when git cannot read it.
+    """
+    try:
+        return git(root, "cat-file", "blob", oid)
+    except UnicodeDecodeError as error:
+        raise NotVersions(f"{path} holds bytes this check cannot decode as text") from error
+
+
 def _exact(root: Path, path: str, oid: str) -> list[str]:
     """The lines of ``path``'s object ``oid``, as git holds it.
 
     Raises:
-        NotVersions: when its text does not hash back to ``oid`` (a line ending, or bytes no
-            decoding keeps), so its lines are not the file's.
+        NotVersions: when its bytes decode to no text (:func:`_text`), or its text does not
+            hash back to ``oid`` (a line ending, or bytes no decoding keeps), so its lines
+            are not the file's.
         tools.ci.gitcmd.GitError: when git cannot read or hash it.
     """
-    text = git(root, "cat-file", "blob", oid)
+    text = _text(root, path, oid)
     if git(root, "hash-object", "--stdin", stdin=text).strip() != oid:
         raise NotVersions(f"{path} holds text this check cannot read byte for byte (a line "
                           "ending, or bytes no decoding keeps)")
@@ -513,7 +536,8 @@ def _released(name: str, version: str, package: dict[str, object],
 
     Raises:
         NotVersions: when the registry's files lay on no one host before, or a file names no
-            URL, lies on another host, or is named for no file of that release.
+            URL, or no hash, or more than uv writes of a file (:data:`_FILE_KEYS`), lies on
+            another host, or is named for no file of that release.
     """
     if len(hosts) != 1:
         raise NotVersions(f"{LOCK}'s files from {name}'s registry lay on {len(hosts)} hosts "
@@ -523,6 +547,11 @@ def _released(name: str, version: str, package: dict[str, object],
         if (url := _url(file)) is None:
             raise NotVersions(f"{LOCK} names a file of {name} by no URL")
         file_name = urlsplit(url).path.rpartition("/")[2]
+        if more := sorted(set(file) - _FILE_KEYS):
+            raise NotVersions(f"{LOCK} names {name}'s file {file_name} with {', '.join(more)}, "
+                              "which uv writes of no file")
+        if "hash" not in file:
+            raise NotVersions(f"{LOCK} names {name}'s file {file_name} with no hash")
         if (host := _host(url)) != home:
             raise NotVersions(f"{LOCK} moves {name}'s file {file_name} to {host}, not {home}, "
                               "where its registry's files lay")
@@ -540,9 +569,14 @@ def _judge(name: str, old: dict[str, object], new: dict[str, object],
     and what it needs too (:data:`_MOVED`; what it needs is :func:`_lock`'s to refuse); one
     from no registry nothing.
 
+    Where its version or its files move, each file is the release's, so a version moved
+    with its files as they were is refused; and a package with a wheel keeps one, and one
+    with none gains none, since every install would otherwise build from source a package it
+    installed built, or install built one it compiled (psycopg-c against the image's libpq).
+
     Raises:
-        NotVersions: when the change moves more than that, or names a file that is not the
-            release's.
+        NotVersions: when the change moves more than that, names a file that is not the
+            release's, or gives a package a wheel where it had none or none where it had one.
     """
     was, now = old.get("version"), new.get("version")
     registry = _registry(old)
@@ -550,8 +584,16 @@ def _judge(name: str, old: dict[str, object], new: dict[str, object],
     if changed := sorted(key for key in old.keys() | new.keys()
                          if key not in free and old.get(key) != new.get(key)):
         raise NotVersions(f"{LOCK} changes {name}'s {', '.join(changed)}")
-    if registry is not None and any(old.get(key) != new.get(key) for key in _DISTRIBUTIONS):
-        _released(name, str(now), new, homes.get(registry, frozenset()))
+    if registry is None or (was == now and all(old.get(key) == new.get(key)
+                                                for key in _DISTRIBUTIONS)):
+        return
+    if bool(old.get("wheels")) != bool(new.get("wheels")):
+        raise NotVersions(f"{LOCK} gives {name} {now} "
+                          + ("no wheel where it had one, so it would be built from its source"
+                             if old.get("wheels") else
+                             "a wheel where it had none, so it would no longer be built from "
+                             "its source"))
+    _released(name, str(now), new, homes.get(registry, frozenset()))
 
 
 def _move(name: str, old: dict[str, object], new: dict[str, object]) -> Move | None:
@@ -590,7 +632,7 @@ def moves(root: Path, path: str, was: str | None, now: str | None,
         raise NotVersions(f"{path} changes its mode")
     old, new = _object(path, was), _object(path, now)
     if (rule := _rule(path)) is None:
-        return _lock(git(root, "cat-file", "blob", old), git(root, "cat-file", "blob", new))
+        return _lock(_text(root, path, old), _text(root, path, new))
     return _lines(root, path, rule, old, new)
 
 
@@ -668,15 +710,16 @@ def pinned(root: Path, path: str, held: str | None) -> frozenset[Pin]:
     a change moves, so a lock forked by environment pins each version a name holds.
 
     Raises:
-        NotVersions: when it pins no version, is no file (:func:`_object`), or is a lock
-            that is no TOML (:func:`_read`) or holds a package with no name (:func:`_named`).
+        NotVersions: when it pins no version, is no file (:func:`_object`), holds bytes
+            that decode to no text (:func:`_text`), or is a lock that is no TOML
+            (:func:`_read`) or holds a package with no name (:func:`_named`).
         tools.ci.gitcmd.GitError: when git cannot read its object.
     """
     if not pins_versions(path):
         raise NotVersions(f"{path} pins no version")
     if held is None:
         return frozenset()
-    text = git(root, "cat-file", "blob", _object(path, held))
+    text = _text(root, path, _object(path, held))
     if (rule := _rule(path)) is None:
         return frozenset(Pin(package["name"], str(package["version"]))
                          for package in _named(_read(text)) if "version" in package)

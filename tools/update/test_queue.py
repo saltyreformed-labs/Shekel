@@ -6,10 +6,11 @@ plan#2468).
 GitHub's API is faked (:class:`_GitHub`) over recorded pull requests, answering as GitHub did
 when read on 2026-10-31 (#626, #628) and 2026-11-01: a bot named by its slug, a comment's
 author too (``shekel-quill``, on the tracker), a trial merge ``UNKNOWN`` until made, and the
-last of a pull request's queue removals, commits and force pushes as its timeline holds them
-(#589, #592, #628).  Git is real: each pull request's head and trial merge are made in a
-second clone and pushed to a bare ``origin`` as ``refs/pull/N/merge``, as GitHub serves them,
-so the queue fetches each by its sha into a checkout that held neither.
+last of a pull request's queue removals as its timeline holds it, naming the merge queue's
+trial merge, whose second parent is the head tested (#589, #592, read 2026-11-01).  Git is
+real: each pull request's head and trial merge are made in a second clone and pushed to a
+bare ``origin`` as ``refs/pull/N/merge``, as GitHub serves them, so the queue fetches each
+by its sha into a checkout that held neither.
 """
 from __future__ import annotations
 
@@ -162,17 +163,24 @@ def _checks(state, at):
                                   "statusCheckRollup": {"state": state} if state else None}}]}
 
 
-def _latest(kind, reason=None):
-    """The last of a pull request's queue removals, commits and force pushes, as its timeline
-    holds it: of ``kind``, GitHub's name for it, a removal's ``reason`` with it."""
-    return {"nodes": [{"__typename": kind} | ({"reason": reason} if reason else {})]}
+#: A pull request's timeline holding no removal from the merge queue.
+_NEVER_REMOVED = {"nodes": []}
+
+
+def _removal(reason, tested, merge=True):
+    """A pull request's last removal from the merge queue, as its timeline holds it: GitHub's
+    ``reason``, and the merge queue's trial merge of the head ``tested`` onto ``dev``, as
+    GitHub names it (none where not ``merge``)."""
+    made = {"parents": {"nodes": [{"oid": "d" * 40}, {"oid": tested}]}} if merge else None
+    return {"nodes": [{"__typename": "RemovedFromMergeQueueEvent", "reason": reason,
+                       "beforeCommit": made}]}
 
 
 def _node(number, head, merge, **fields):
     """A pull request as GraphQL answers :data:`queue._FIELDS`: Dependabot's into ``dev``, its
     head ``head``, its trial merge ``merge`` (None while not made), every check at its head
-    passed and its last timeline item of those the queue reads its first commit, but for each
-    of ``fields``, by GraphQL's name."""
+    passed and no removal from the merge queue in its timeline, but for each of ``fields``, by
+    GraphQL's name."""
     return {
         "number": number, "id": f"PR_{number}", "headRefName": f"update/{number}",
         "isDraft": False, "isCrossRepository": False, "isInMergeQueue": False,
@@ -180,7 +188,7 @@ def _node(number, head, merge, **fields):
         "mergeable": "MERGEABLE" if merge else "UNKNOWN", "author": _by(DEPENDABOT),
         "potentialMergeCommit": {"oid": merge} if merge else None,
         "commits": _checks("SUCCESS", head),
-        "timelineItems": _latest("PullRequestCommit"),
+        "timelineItems": _NEVER_REMOVED,
     } | fields
 
 
@@ -475,11 +483,11 @@ def test_a_red_change_that_turns_green_at_its_head_is_queued_with_no_more_mentio
 
 def test_a_pull_request_removed_from_the_merge_queue_at_its_head_waits_for_a_new_one(
         world, capsys):
-    """GitHub removed it from the queue and no commit reached it since: left with no trial
+    """GitHub removed it from the queue after testing the head it has now: left with no trial
     merge read (each names a commit no repository holds) though its own checks passed, and
     mentioned once for that head, GitHub's reason said; the next day's run writes nothing."""
     fake = _GitHub([_node(7, _NOWHERE, _NOWHERE,
-                          timelineItems=_latest("RemovedFromMergeQueueEvent", "failed_checks"))])
+                          timelineItems=_removal("failed_checks", _NOWHERE))])
     assert _run(world, fake) == (0, [])
     assert _run(world, fake) == (0, [])
     (body,) = _mentions(fake, 7)
@@ -494,12 +502,16 @@ def test_a_pull_request_removed_from_the_merge_queue_at_its_head_waits_for_a_new
     assert capsys.readouterr().out.count(left) == 2
 
 
-@pytest.mark.parametrize("since", ["PullRequestCommit", "HeadRefForcePushedEvent"])
-def test_a_pull_request_reached_by_a_commit_since_its_removal_is_judged_again(world, since):
-    """A commit or a force push after the removal is a new head: judged, and queued when it
-    moves pinned versions alone and its checks passed, no one mentioned."""
+@pytest.mark.parametrize("removal", [_removal("failed_checks", "e" * 40),
+                                     _removal("failed_checks", "e" * 40, merge=False)],
+                         ids=["it tested another head", "it names no merge"])
+def test_a_pull_request_whose_removal_tested_another_head_is_judged_again(world, removal):
+    """A removal that tested an older head, as one a push causes does (the publish moving a
+    queued ``update/lock``, whichever of the two GitHub records first), or names no merge, is
+    no removal at the head it has now: judged, and queued when it moves pinned versions alone
+    and its checks passed, no one mentioned."""
     head, merge = world.pull(7, {LOCK: _lock("12.4.1")})
-    fake = _GitHub([_node(7, head, merge, timelineItems=_latest(since))])
+    fake = _GitHub([_node(7, head, merge, timelineItems=removal)])
     assert _run(world, fake) == (0, [])
     assert fake.writes == [("enqueue", "PR_7", head)]
 
@@ -523,6 +535,33 @@ def test_a_change_waiting_for_a_card_is_mentioned_once_for_each_major_it_enters(
         f"plan#2450).\n\n{_marked('card pillow 14')}\n")
     assert ("pillow from 12.3.0 to 13.1.0, a new major version; the developer was mentioned "
             "already\n") in capsys.readouterr().out
+
+
+#: A package the lock did not hold, which a lock change adds.
+_OLEFILE = ('\n[[package]]\nname = "olefile"\nversion = "0.47"\n'
+            'source = { registry = "https://pypi.org/simple" }\n'
+            'sdist = { url = "https://files.pythonhosted.org/packages/olefile-0.47.tar.gz", '
+            f'hash = "sha256:{"0" * 64}" }}\n')
+
+
+def test_a_major_beside_a_package_added_is_mentioned_once_for_each_major(world):
+    """The lock adds olefile and moves pillow to 13; made again, it moves pillow to 14 and
+    still adds olefile: the second major is told, though the refusal beside it is the same,
+    since each major is a thing it waits on beside the refusal (rulings plan#2450,
+    plan#2467)."""
+    fake = _GitHub([])
+    for number, version in ((7, "13.0.0"), (17, "14.0.0")):
+        head, merge = world.pull(number, {LOCK: _lock(version) + _OLEFILE})
+        fake.pulls = [_node(7, head, merge)]
+        assert _run(world, fake) == (0, [])
+    added = "uv.lock adds olefile, a package of no version before"
+    first, later = _mentions(fake, 7)
+    assert (first.partition("\n\n")[2], later) == (
+        f"{_marked('card pillow 13')}\n{_marked(f'card {added}')}\n",
+        f"@SaltyReformed This pull request waits for a card: {added}; uv.lock moves pillow "
+        "from 12.3.0 to 14.0.0, a new major version. A session reads the changelog, claims a "
+        "card and takes its change; until then the daily update queue leaves it (rulings "
+        f"plan#2351, plan#2450).\n\n{_marked('card pillow 14')}\n{_marked(f'card {added}')}\n")
 
 
 def test_only_the_app_s_own_comments_record_a_mention(world):

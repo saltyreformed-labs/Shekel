@@ -72,6 +72,15 @@ on:
 permissions:
   contents: read
 
+# One run at a time: a dispatch overlapping Monday's run would race two
+# publishes onto one branch, and the daily queue could judge a pull request a
+# publish is moving.  A run waits for the one before it to end rather than
+# cancelling it; GitHub keeps one run waiting, so a third cancels the one
+# waiting, which opens no alert (a run cancelled opens none).
+concurrency:
+  group: updates
+  cancel-in-progress: false
+
 jobs:
   refresh:
     if: >-

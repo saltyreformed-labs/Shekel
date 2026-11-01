@@ -11,7 +11,7 @@ request waits for a card on (:class:`Reason`; rulings plan#2450, plan#2467).
 **A version-only change moves only version data in each file it changes** (:func:`moves`),
 and only in the files that pin versions (:func:`pins_versions`):
 
-- ``uv.lock``, read as TOML, as uv reads it (:func:`_lock`): its header (all but its
+- ``uv.lock``, read as TOML, as uv reads it (:func:`_lock_read`): its header (all but its
   packages) as it was, the same packages by name, each named once, and of each package from
   a registry only its files (``sdist`` and ``wheels``, each with its hash) and, where its
   version moves, that version; a package from no registry (the project's own) as it was.
@@ -446,25 +446,37 @@ def _change(was: dict[str, dict[str, object]],
                        if _needs(was[move.what]) != _needs(now[move.what])})
 
 
-def _lock(old: str, new: str) -> tuple[Move, ...]:
-    """Each version the change from the lock text ``old`` to ``new`` moves, by package name.
+@dataclass(frozen=True)
+class _Read:
+    """What the walk reads of a change to one file that pins versions: ``moves``, each
+    version it moves, and ``refusal``, the clause saying what more it does, None where it
+    moves versions alone.  A lock change can say both: a package added beside another moved
+    across a major (:func:`_lock_read`)."""
+
+    moves: tuple[Move, ...]
+    refusal: str | None = None
+
+
+def _lock_read(old: str, new: str) -> _Read:
+    """What the walk reads of the change from the lock text ``old`` to ``new``: each version
+    it moves, by package name, and the first of what more it does: a package added, a
+    package removed, or a move to a version that changes what it needs
+    (:attr:`LockChange.bringing`).
 
     Raises:
-        NotVersions: as :func:`lock_change` raises it, or when the change adds or removes a
-            package, or moves one to a version that changes what it needs
-            (:attr:`LockChange.bringing`).
+        NotVersions: as :func:`lock_change` raises it, when no version it moves can be read.
     """
     change = lock_change(old, new)
+    refusal = None
     if change.added:
-        raise NotVersions(f"{LOCK} adds {', '.join(change.added)}, a package of no version "
-                          "before")
-    if change.removed:
-        raise NotVersions(f"{LOCK} removes {', '.join(change.removed)}")
-    if change.bringing:
+        refusal = f"{LOCK} adds {', '.join(change.added)}, a package of no version before"
+    elif change.removed:
+        refusal = f"{LOCK} removes {', '.join(change.removed)}"
+    elif change.bringing:
         moved = " and ".join(f"{move.what} from {move.old} to {move.new}"
                              for move in change.moves if move.what in change.bringing)
-        raise NotVersions(f"{LOCK} moves {moved}, a new version that changes what it needs")
-    return change.moves
+        refusal = f"{LOCK} moves {moved}, a new version that changes what it needs"
+    return _Read(change.moves, refusal)
 
 
 def _registry(package: dict[str, object]) -> str | None:
@@ -566,8 +578,8 @@ def _judge(name: str, old: dict[str, object], new: dict[str, object],
     it moves only versions: a package from a registry may change only its files, each that
     release's on the registry (:func:`_released`, its hosts from ``homes``, by registry, as
     :func:`_homes` reads them before the change), and where its version moves, that version
-    and what it needs too (:data:`_MOVED`; what it needs is :func:`_lock`'s to refuse); one
-    from no registry nothing.
+    and what it needs too (:data:`_MOVED`; what it needs is :func:`_lock_read`'s to
+    refuse); one from no registry nothing.
 
     Where its version or its files move, each file is the release's, so a version moved
     with its files as they were is refused; and a package with a wheel keeps one, and one
@@ -613,6 +625,28 @@ def _move(name: str, old: dict[str, object], new: dict[str, object]) -> Move | N
     return Move(name, str(was), str(now), majors[0] != majors[1])
 
 
+def _moved(root: Path, path: str, was: str | None, now: str | None,
+           where: str) -> _Read:
+    """What the walk reads of a change to ``path``, a file whose mode and object ``where``
+    held as ``was`` before the change and as ``now`` after it (:func:`moves`).
+
+    Raises:
+        NotVersions: when the change moves more than versions there and no version it moves
+            can be read (the module's rules).
+        tools.ci.gitcmd.GitError: when git cannot read or hash either object.
+    """
+    if not pins_versions(path):
+        raise NotVersions(f"{path} pins no version")
+    if was is None or now is None:
+        raise NotVersions(f"{path} {'enters' if was is None else 'leaves'} {where}")
+    if was.split(" ")[0] != now.split(" ")[0]:
+        raise NotVersions(f"{path} changes its mode")
+    old, new = _object(path, was), _object(path, now)
+    if (rule := _rule(path)) is None:
+        return _lock_read(_text(root, path, old), _text(root, path, new))
+    return _Read(_lines(root, path, rule, old, new))
+
+
 def moves(root: Path, path: str, was: str | None, now: str | None,
           where: str = "production") -> tuple[Move, ...]:
     """Each version a change moves in ``path``, a file whose mode and object ``where`` (the
@@ -624,16 +658,10 @@ def moves(root: Path, path: str, was: str | None, now: str | None,
         NotVersions: when the change moves more than versions there (the module's rules).
         tools.ci.gitcmd.GitError: when git cannot read or hash either object.
     """
-    if not pins_versions(path):
-        raise NotVersions(f"{path} pins no version")
-    if was is None or now is None:
-        raise NotVersions(f"{path} {'enters' if was is None else 'leaves'} {where}")
-    if was.split(" ")[0] != now.split(" ")[0]:
-        raise NotVersions(f"{path} changes its mode")
-    old, new = _object(path, was), _object(path, now)
-    if (rule := _rule(path)) is None:
-        return _lock(_text(root, path, old), _text(root, path, new))
-    return _lines(root, path, rule, old, new)
+    read = _moved(root, path, was, now, where)
+    if read.refusal is not None:
+        raise NotVersions(read.refusal)
+    return read.moves
 
 
 def _reasons(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
@@ -647,7 +675,7 @@ def _reasons(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
         tools.ci.gitcmd.GitError: when git cannot read a file it changes.
     """
     return tuple(reason for path, (was, now) in changed.items()
-                 for reason in _why(path, partial(moves, root, path, was, now, where)))
+                 for reason in _why(path, partial(_moved, root, path, was, now, where)))
 
 
 def unversioned(root: Path, changed: Mapping[str, tuple[str | None, str | None]],
@@ -666,25 +694,28 @@ def lock_unversioned(old: str, new: str) -> tuple[str, ...]:
     versions alone, none across a major, each as a clause; none when it is one: the walk of
     :func:`_reasons` over the lock alone, which the Monday refresh judges its lock by before
     any pull request carries it."""
-    return tuple(reason.clause for reason in _why(LOCK, partial(_lock, old, new)))
+    return tuple(reason.clause for reason in _why(LOCK, partial(_lock_read, old, new)))
 
 
-def _why(path: str, moved: Callable[[], tuple[Move, ...]]) -> tuple[Reason, ...]:
+def _why(path: str, moved: Callable[[], _Read]) -> tuple[Reason, ...]:
     """Why the change ``moved`` reads in ``path`` is no change that moves pinned versions
-    alone, none across a major: each move across a major, waiting on the major it moves into
-    (every :class:`Move`'s versions are ones :func:`_major` reads, as both its builders
-    refuse any other), or the reason ``moved`` refuses it (:class:`NotVersions`), waiting on
-    that; none when it is one.
+    alone, none across a major: what more it does, waiting on that, then each move across a
+    major, waiting on the major it moves into (every :class:`Move`'s versions are ones
+    :func:`_major` reads, as both its builders refuse any other), so a major is told beside a
+    package added; or, where no version it moves can be read, the reason ``moved`` refuses it
+    (:class:`NotVersions`), waiting on that; none when it is one.
 
     Raises:
         tools.ci.gitcmd.GitError: when ``moved`` cannot read a file.
     """
     try:
-        return tuple(Reason(f"{path} moves {move.what} from {move.old} to {move.new}, a new "
-                            "major version", f"{move.what} {_spelled(_major(move.new))}")
-                     for move in moved() if move.major)
+        read = moved()
     except NotVersions as error:
         return (Reason(str(error), str(error)),)
+    return (*((Reason(read.refusal, read.refusal),) if read.refusal is not None else ()),
+            *(Reason(f"{path} moves {move.what} from {move.old} to {move.new}, a new major "
+                     "version", f"{move.what} {_spelled(_major(move.new))}")
+              for move in read.moves if move.major))
 
 
 def unversioned_between(root: Path, old: str, new: str) -> tuple[Reason, ...]:

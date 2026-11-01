@@ -961,7 +961,8 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
     def test_each_job_runs_only_from_main_on_the_schedule_its_condition_names(self):
         """The refresh on Monday's schedule or a dispatch, the queue on the daily one, each
         only from main, whose code alone may hold the key; the publish only after the
-        refresh."""
+        refresh; and one run at a time, each waiting for the one before, never cancelling it,
+        so a dispatch never races Monday's publish, nor the queue a publish."""
         workflow = self._workflow()
         on = workflow.get(True, workflow.get("on"))
         monday, daily = (entry["cron"] for entry in on["schedule"])
@@ -973,6 +974,7 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
             f"github.event.schedule == '{monday}')")
         assert jobs["queue"]["if"] == f"{main} && github.event.schedule == '{daily}'"
         assert jobs["publish"]["needs"] == "refresh" and "if" not in jobs["publish"]
+        assert workflow["concurrency"] == {"group": "updates", "cancel-in-progress": False}
 
     def test_the_publish_reads_what_the_refresh_wrote_from_the_commit_it_read(self):
         """The artifact the refresh uploads, which must hold a file, is the one the publish

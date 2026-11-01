@@ -637,6 +637,19 @@ def test_a_change_between_two_commits_is_judged_over_every_file_it_changes(repo)
                     "pillow 13")))
 
 
+def test_a_major_beside_a_package_added_is_named_beside_it(repo):
+    """The lock adds olefile and moves pillow across a major: the walk names the refusal,
+    then the major, each waiting on its own thing, where it named the refusal alone; what
+    :func:`moves` raises is the refusal, as before."""
+    new = _lock(_PACKAGES | {"pillow": ("13.0.0", ()), "olefile": ("0.47", ())})
+    added = "uv.lock adds olefile, a package of no version before"
+    major = "uv.lock moves pillow from 12.3.0 to 13.0.0, a new major version"
+    base = _tree_of(repo, None, {LOCK: _lock()})
+    assert (unversioned_between(repo, base, _tree_of(repo, base, {LOCK: new})),
+            lock_unversioned(_lock(), new), _refusal(repo, LOCK, _lock(), new)) == (
+        (Reason(added, added), Reason(major, "pillow 13")), (added, major), added)
+
+
 def test_a_move_across_a_major_waits_on_the_major_it_enters_however_far_and_wherever(repo):
     """Each move across a major waits on what moves and the major it moves into, spelled as
     :func:`ceiling` spells a release: the same for any release of that major and in any file

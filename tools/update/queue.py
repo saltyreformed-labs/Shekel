@@ -30,14 +30,21 @@ since only a mention reaches him (measured 2026-10-27, on the tracker, whose App
 did), written once for each thing it tells (:func:`_told`):
 
 - **removed from the merge queue at its head**: GitHub took it out of the queue (a check
-  failed on top of ``dev``, say) and no commit has reached it since, which its timeline says,
-  as GitHub's removal names no commit (measured 2026-10-31).  It is left until its head
-  changes, a Dependabot rebase or the next Monday's publish (ruling plan#2468), never put
-  back daily, and told once for that head.
+  failed on top of ``dev``, say) after testing the head it has now, which the removal says:
+  it names the merge queue's own trial merge, whose second parent is the head tested
+  (measured 2026-11-01 on #589 and #592).  A removal that tested another head, as one a push
+  causes does (the publish moving a queued ``update/lock``), or that names no merge, is none
+  at the new head, which is judged afresh.  It is left until its head changes, a Dependabot
+  rebase or the next Monday's publish (ruling plan#2468), never put back daily, and told once
+  for that head.
 - **waiting for a card**: the walk gives a reason, so a session must take it onto a card.
   It is told once for each thing it waits on (:class:`~tools.quill.door.Reason`), so a new
   major is told once however often its branch is made again on a later ``dev``, and again
-  when a later major arrives on the same pull request (ruling plan#2450).  Such a pull
+  when a later major arrives on the same pull request (ruling plan#2450), a major beside a
+  package the lock adds included.  **One case is told once per pull request**: a change the
+  Monday refresh prepares alone whose moved requirement uv cannot lock carries
+  ``pyproject.toml`` alone, which pins no version, so the walk reads no major in it and it
+  waits on that one refusal, whichever major its requirement later moves to.  Such a pull
   request's own checks fail by design (the landing check refuses it with no card), so they
   tell nothing more.
 - **red**: it moves pinned versions alone, but a check at its head failed or errored.  It
@@ -114,9 +121,9 @@ _MADE, _MAKING, _CONFLICTS = "MERGEABLE", "UNKNOWN", "CONFLICTING"
 #: when one failed or errored.
 _PASSED = "SUCCESS"
 _FAILED = frozenset({"FAILURE", "ERROR"})
-#: GitHub's name for a removal from the merge queue: the last of a pull request's timeline
-#: items that remove it from the queue or move its head (a commit, a force push; :data:`_FIELDS`)
-#: is one when no commit has reached it since.
+#: GitHub's name for a removal from the merge queue, whose ``beforeCommit`` is the merge queue's
+#: own trial merge, its second parent the head it tested (measured 2026-11-01 on #589 and #592,
+#: each removed for ``failed_checks``).
 _REMOVED = "RemovedFromMergeQueueEvent"
 #: A marker in a comment of the App's, naming by its digest one thing it told the developer,
 #: and the expression finding each in a comment's text, made from it.
@@ -127,9 +134,9 @@ _MARKED = re.compile(re.escape(_MARKER).replace(r"\{\}", "([0-9a-f]{64})"))
 _FIELDS = """number id headRefName isDraft isCrossRepository isInMergeQueue baseRefName
 headRefOid mergeable author { __typename login } potentialMergeCommit { oid }
 commits(last: 1) { nodes { commit { oid statusCheckRollup { state } } } }
-timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT, PULL_REQUEST_COMMIT,
-HEAD_REF_FORCE_PUSHED_EVENT]) { nodes { __typename ... on RemovedFromMergeQueueEvent {
-reason } } }"""
+timelineItems(last: 1, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) { nodes { __typename
+... on RemovedFromMergeQueueEvent { reason beforeCommit { parents(first: 2) { nodes { oid } }
+} } } }"""
 #: A page of the repository's open pull requests.
 _OPEN = """query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
@@ -169,8 +176,8 @@ class Pull:  # pylint: disable=too-many-instance-attributes
     whether it is from a ``fork``, a ``draft``, or ``queued`` already; its ``base`` branch and
     ``head`` commit; GitHub's ``mergeable`` and its trial ``merge`` (None until made);
     ``checks``, the state of every check at ``head``, None where none is reported there; and
-    ``removed``, why GitHub removed it from the merge queue as GitHub says it, where it did
-    so at ``head`` (:data:`_REMOVED`), None where it did not.
+    ``removed``, why GitHub removed it from the merge queue as GitHub says it, where its last
+    removal tested ``head`` (:data:`_REMOVED`), None where none did.
 
     Pylint: too-many-instance-attributes (13/7) -- **thirteen because the run reads thirteen
     fields of GitHub's pull request**, one each, all read together and re-read together.
@@ -191,6 +198,15 @@ class Pull:  # pylint: disable=too-many-instance-attributes
     removed: str | None
 
 
+def _tested(removal: dict) -> str | None:
+    """The head the merge queue tested before ``removal``, a removal from it as GraphQL
+    answers :data:`_FIELDS`: its trial merge's second parent; None where it names no merge of
+    two parents."""
+    merge = removal.get("beforeCommit")
+    parents = [parent["oid"] for parent in merge["parents"]["nodes"]] if merge else []
+    return parents[1] if len(parents) == 2 else None
+
+
 def _pull(node: dict) -> Pull:
     """A pull request as GraphQL's answer to :data:`_FIELDS` describes it."""
     author = node["author"]
@@ -198,6 +214,7 @@ def _pull(node: dict) -> Pull:
     rollup = (last[0]["commit"]["statusCheckRollup"]
               if last and last[0]["commit"]["oid"] == node["headRefOid"] else None)
     latest = node["timelineItems"]["nodes"]
+    removal = latest[0] if latest and latest[0]["__typename"] == _REMOVED else None
     return Pull(
         number=node["number"], node=node["id"], branch=node["headRefName"],
         bot=author["login"] if author and author["__typename"] == "Bot" else None,
@@ -205,7 +222,8 @@ def _pull(node: dict) -> Pull:
         base=node["baseRefName"], head=node["headRefOid"], mergeable=node["mergeable"],
         merge=(node["potentialMergeCommit"] or {}).get("oid"),
         checks=rollup["state"] if rollup else None,
-        removed=latest[0]["reason"] if latest and latest[0]["__typename"] == _REMOVED else None,
+        removed=(removal["reason"] if removal and _tested(removal) == node["headRefOid"]
+                 else None),
     )
 
 

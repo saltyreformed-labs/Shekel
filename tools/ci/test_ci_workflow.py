@@ -77,7 +77,7 @@ INSTALL_STEP = "Install the lock"
 #: every job of every workflow but the two that build the app image (ci.yml's ``image`` and
 #: the release's), which run no Python on the runner.  The landing job holds a token and the
 #: release workflow publishes, so neither restores a cache; the scheduled runs keep none, as
-#: they kept no pip cache, and the update workflow's keyed jobs hold a token too.
+#: they kept no pip cache, and the update workflow's keyed jobs and its alert hold a token too.
 INSTALLS = {
     ("ci.yml", "landing"): {"install": "landing", "cache": "false"},
     ("ci.yml", "tools"): {"install": "all", "cache": "true"},
@@ -92,6 +92,7 @@ INSTALLS = {
     ("updates.yml", "refresh"): {"install": "refresh", "cache": "false"},
     ("updates.yml", "publish"): {"install": "landing", "cache": "false"},
     ("updates.yml", "queue"): {"install": "landing", "cache": "false"},
+    ("updates.yml", "alert"): {"install": "landing", "cache": "false"},
 }
 
 #: The triggers under which a step's PATH write lets a pull request's code run with the
@@ -905,15 +906,37 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
         return _workflows()[UPDATES]
 
     def test_the_refresh_reads_dev_and_sees_no_secret(self):
-        """The refresh checks out ``dev`` and names no secret, variable or mint; no job widens
-        the workflow's read-only token."""
+        """The refresh checks out ``dev`` and names no secret, variable or mint; no job but the
+        alert widens the workflow's read-only token, and the alert only to issues (ruling
+        plan#2466)."""
         workflow = self._workflow()
         refresh = workflow["jobs"]["refresh"]
         text = yaml.safe_dump(refresh)
         assert "secrets." not in text and "vars." not in text and MINT not in text
         assert refresh["steps"][0]["with"] == {"ref": "dev", "persist-credentials": False}
         assert workflow["permissions"] == {"contents": "read"}
-        assert not any("permissions" in job for job in workflow["jobs"].values())
+        assert {name: job["permissions"] for name, job in workflow["jobs"].items()
+                if "permissions" in job} == {"alert": {"contents": "read", "issues": "write"}}
+
+    def test_a_failed_job_opens_an_issue_with_the_workflow_s_own_token(self):
+        """The alert runs when the refresh, the publish or the queue failed, holding no secret,
+        variable or mint: main's own code, given the workflow's token and each job's result
+        (ruling plan#2466)."""
+        alert = self._workflow()["jobs"]["alert"]
+        assert alert["needs"] == ["refresh", "publish", "queue"]
+        assert alert["if"] == "failure()"
+        text = yaml.safe_dump(alert)
+        assert "secrets." not in text and "vars." not in text and MINT not in text
+        assert alert["steps"][0]["uses"].startswith("actions/checkout@")
+        assert alert["steps"][0]["with"] == {"persist-credentials": False}
+        step = alert["steps"][-1]
+        assert step["env"] == {
+            "GITHUB_TOKEN": "${{ github.token }}",
+            "RUN": "${{ github.server_url }}/${{ github.repository }}/actions/runs/"
+                   "${{ github.run_id }}",
+            **{job.upper(): f"${{{{ needs.{job}.result }}}}" for job in alert["needs"]}}
+        assert step["run"] == ('python -m tools.update.alert "${RUN}" ' + " ".join(
+            f'"{job}=${{{job.upper()}}}"' for job in alert["needs"]))
 
     def test_each_keyed_job_runs_mains_code_and_hands_its_token_to_one_step(self):
         """Each keyed job checks out the workflow's own commit; the key goes to the mint alone,

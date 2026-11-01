@@ -123,12 +123,12 @@ def _self_heal_account_anchor_corrections(
 
     The Build-Order Step 5 effect-time self-heal, shared by the tails of
     :func:`sync_transfer_postings` and :func:`sync_transaction_postings`
-    (which every settle / revert / delete path routes through, including
-    :func:`reverse_postings_before_delete` and
-    :func:`reverse_transfer_postings_before_delete`), and called ONCE per
-    scenario by :func:`resync_all_cash_postings` after its whole loop with
-    every entry that loop emitted (ruling **R-BAL103**): when the emitted
-    deltas touch a
+    (which every settle and revert path routes through), and called ONCE per
+    scenario after a batch by :func:`re_check_held_anchor_corrections` --
+    after :func:`resync_all_cash_postings`' whole loop with every entry that
+    loop emitted (ruling **R-BAL103**), and after the one removal act's
+    deletes with every reversal it emitted (ruling **plan#2564**): when the
+    emitted deltas touch a
     non-loan account whose latest anchor assertion sits at-or-after the
     earliest emitted ``entry_date``, that account's opening / true-up
     corrections are reconciled again in the same transaction -- see
@@ -196,9 +196,12 @@ def sync_transfer_postings(xfer: Transfer) -> list[JournalEntry]:
     ==========================================  ==============================
 
     A DELETE is not here: it must reverse BEFORE the records come off, on
-    every record either side holds, and that is
-    :func:`reverse_transfer_postings_before_delete` -- the teardown twin the
-    transaction side has had since plan step X-f3b, for the same reason.
+    every record either side holds, and re-check the anchors only AFTER they
+    have, and both are the one removal act's
+    (:func:`app.services.movement_removal.remove_movements`, which the
+    transfer delete hands every record the pair holds; ruling **plan#2564**).
+    This door would find two live, dated movements at that moment and leave
+    them posted.
 
     **The legacy arm is gone.**  From plan step ``balance:X-bi-6-3`` until
     plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845) this door
@@ -230,84 +233,33 @@ def sync_transfer_postings(xfer: Transfer) -> list[JournalEntry]:
     Raises:
         PostingError: If a movement's account has no linked ledger account.
     """
-    return _reconcile_transfer_family(xfer, purchase_posts)
-
-
-def reverse_transfer_postings_before_delete(xfer: Transfer) -> None:
-    """Reverse a transfer's ledger postings before its rows are deleted.
-
-    The transfer twin of :func:`reverse_postings_before_delete`, and it exists
-    for the identical reason: a delete -- soft or hard -- must bring the pair's
-    WHOLE posted family to zero FIRST, while every row still exists.  It cannot
-    be :func:`sync_transfer_postings`, which reads each movement's own state
-    and would find, at the moment the delete door calls it, two live,
-    contributing, dated movements and leave them posted.  Since plan step
-    ``balance:X-bi-6-4d-2`` the family is every record either side holds by
-    its side link (:func:`app.services.transfer_legs.transfer_family_movements`),
-    which the delete then takes off through the one removal act, the journal
-    links SET-NULL with each (``journal_entries.transaction_entry_id``);
-    reversing first leaves each posted entry and its reversal a net-zero pair.
-    A hidden transfer holds none, so the idempotent hard delete of an already
-    soft-deleted one (``delete_transfer(allow_deleted=True)``) finds nothing
-    to reverse.  It reverses each record (``posted=False``).
-
-    Idempotent no-op for a transfer that never posted.  Flushes but does not
-    commit (the caller owns the transaction).
-
-    Args:
-        xfer: The transfer about to be deleted.  Must still be flushed
-            (``xfer.id`` set) so the reversals can read the posted legs back.
-    """
-    _reconcile_transfer_family(xfer, _never_posts)
-
-
-def _never_posts(_leg, _movement) -> bool:
-    """Return ``False``: the teardown's answer to "does this movement post"."""
-    return False
-
-
-def _reconcile_transfer_family(xfer: Transfer, posts) -> "list[JournalEntry]":
-    """Reconcile every movement of *xfer*'s family.
-
-    The one body :func:`sync_transfer_postings` and
-    :func:`reverse_transfer_postings_before_delete` share; they differ in
-    nothing but *posts* -- the movement's own rule for the sync, ``False`` for
-    the teardown -- so the two doors cannot drift on which movements a
-    transfer's family holds or on the self-heal that follows.  The transfer
-    twin of the loop in :func:`sync_transaction_postings` /
-    :func:`reverse_postings_before_delete`, which walk ``txn.entries`` the
-    same way.
-
-    Args:
-        xfer: The transfer whose family to reconcile.
-        posts: ``(leg, movement) -> bool``, whether the ledger should hold
-            the movement's leg.
-
-    Returns:
-        The emitted delta entries, in emission order; ``[]`` at target.
-    """
-    entries, accounts = _rebook_transfer_family(xfer, posts)
+    entries, accounts = _rebook_transfer_family(xfer)
     _self_heal_account_anchor_corrections(accounts, xfer.scenario_id, entries)
     return entries
 
 
-def _rebook_transfer_family(xfer: Transfer, posts) -> "tuple[list[JournalEntry], tuple]":
+def _rebook_transfer_family(xfer: Transfer) -> "tuple[list[JournalEntry], tuple]":
     """Bring *xfer*'s family to target; re-check no anchor correction.
 
-    :func:`_reconcile_transfer_family`'s first half.  The deploy resync runs it
+    :func:`sync_transfer_postings`' first half.  The deploy resync runs it
     for every transfer and re-checks the anchors ONCE after its loop (ruling
-    **R-BAL103**; :func:`resync_all_cash_postings` says why).  *posts* is
-    ``(leg, movement) -> bool``; returns ``(entries, accounts)``, the
-    emitted deltas (``[]`` at target) and every real account their linked
-    legs can touch.  The family and each movement's LEG are
+    **R-BAL103**; :func:`resync_all_cash_postings` says why).  Returns
+    ``(entries, accounts)``, the emitted deltas (``[]`` at target) and every
+    real account their linked legs can touch.  The family and each
+    movement's LEG are
     :func:`~app.services.transfer_legs.transfer_family_movements`' (leaf
-    ``X-bi-6-4a``), so no line here reads a shadow row.
+    ``X-bi-6-4a``), so no line here reads a shadow row.  It took a *posts*
+    rule beside the transfer until plan task plan#2557 deleted the teardown
+    twin that passed ``False`` (ruling **plan#2564**): the one removal act
+    reverses a leaving record now (:func:`reverse_leaving_movements`).
     """
     family = transfer_family_movements(xfer)
     entries: list[JournalEntry] = []
     for movement, leg in family:
         entries.extend(
-            emit_purchase_deltas(movement, leg, posted=posts(leg, movement))
+            emit_purchase_deltas(
+                movement, leg, posted=purchase_posts(leg, movement),
+            )
         )
     return entries, _transfer_family_accounts(
         xfer, [movement for movement, _leg in family],
@@ -393,9 +345,11 @@ def sync_transaction_postings(txn: Transaction) -> list[JournalEntry]:
     and none of them says whether the row has settled: a movement posts iff
     it is dated under a contributing parent
     (:func:`~app.services._posting_purchases.purchase_posts`), whatever the
-    parent's status, and a revert, a cancel or a delete reverses what the
-    ledger holds for movements the act un-dated or the parent's exclusion
-    made worthless.  The ``settled`` flag this took through ``X-bi-3e`` chose
+    parent's status, and a revert or a cancel reverses what the ledger holds
+    for movements the act un-dated or the parent's exclusion made worthless
+    (a delete is the one removal act's, :func:`reverse_leaving_movements`,
+    since a movement it deletes is still dated and contributing when it is
+    reversed).  The ``settled`` flag this took through ``X-bi-3e`` chose
     the row's OWN target, and a row has none.
 
     **No transfer shadow reaches here since plan step ``balance:X-bi-6-4d-2``
@@ -478,105 +432,98 @@ def _family_accounts(txn: Transaction) -> tuple:
     return tuple(seen)
 
 
-def reverse_purchase_postings_before_delete(entry) -> None:
-    """Reverse one purchase's ledger postings before the row is deleted.
+def reverse_leaving_movements(
+    movements,
+) -> "dict[int, tuple[set[int], list[JournalEntry]]]":
+    """Reverse every leaving movement's ledger postings; re-check no anchor yet.
 
-    The purchase twin of :func:`reverse_postings_before_delete`, and it exists
-    for the identical reason: ``journal_entries.transaction_entry_id`` is ``ON
-    DELETE SET NULL``, so once the purchase row is gone the link is severed and
-    its legs would be stranded on their ledger accounts with no offsetting
-    reversal -- breaking per-account reconciliation and leaving RESIDUE the
-    posted walk can only absorb, never explain.  Reversing FIRST leaves the
-    original entry and its reversal as an immutable net-zero pair.
+    The one removal act's first step
+    (:func:`app.services.movement_removal.remove_movements`, ruling
+    **plan#2564**), and its one caller: every movement that leaves the books
+    leaves through that act (ruling **R-CC64**: the keys onto a movement are
+    NO ACTION, so no other delete can take one), and each is reversed here
+    while ``journal_entries.transaction_entry_id`` still links its legs.  That
+    key is ``ON DELETE SET NULL``, so once the movement is gone its legs would
+    be stranded on their ledger accounts with no offsetting reversal;
+    reversing FIRST leaves each original entry and its reversal an immutable
+    net-zero pair.  Every movement is reversed, dated or not: it is about to
+    be deleted, which no sync's "does it post" rule
+    (:func:`~app.services._posting_purchases.purchase_posts`) can say of a
+    movement still standing.  A transfer side's record reverses here like any
+    movement, typed by its LEG (:func:`~app.services.transfer_legs.movement_parent`).
+
+    **The anchor re-check is HELD, not run, and that is the ruling.**  The
+    re-check walks the RECORDS since plan task plan#2525, and at this moment
+    they still hold every leaving movement, so a walk here re-derives the
+    corrections of the state the act is about to end.  Each row and transfer
+    door reversed its own family and re-checked here until plan task
+    plan#2557 deleted those doors (``reverse_postings_before_delete``,
+    ``reverse_transfer_postings_before_delete``, and this function's
+    per-movement predecessor ``reverse_purchase_postings_before_delete``):
+    measured, a $200.00 Paid transfer into a Savings account opened at
+    $0.00, settled on its first assertion's day (true-up -$200.00), then
+    deleted -- Savings' posted ledger read -$200.00 against the records'
+    $0.00.  The act re-checks once its deletes have flushed
+    (:func:`re_check_held_anchor_corrections`).
+
+    **The accounts held are each movement's own** (``account_id``, the
+    column, never the relationship a re-point may not have flushed): that is
+    where its leg lands (ruling **R-BAL75**) and the only account whose
+    records its leaving changes.
 
     Idempotent no-op for a movement that never posted (no recorded posting
-    day, a card purchase, a non-contributing parent).
+    day, a card purchase, a non-contributing parent).  Flushes when it emits
+    (the balanced write does) but does not commit.
 
     Args:
-        entry: The movement about to be deleted -- a purchase, or a covering
-            movement the seam withdraws.  Must still be flushed
-            (``entry.id`` set) so the reversal can read its posted legs back.
+        movements: The ``TransactionEntry`` rows leaving, each still flushed
+            (``id`` set) so its reversal can read its posted legs back.
+
+    Returns:
+        The held re-check: a scenario id -> (the accounts the reversals
+        touched, the reversal entries emitted), empty when nothing posted.
     """
-    # A transfer's covering movement posts against the transit account since
-    # plan step ``balance:X-bi-6-3`` (ruling **R-BAL101**), so its withdrawal
-    # -- a ``$0.00`` record landing on a settled leg, the seam's delete arm,
-    # or the pair's hard delete -- reverses here like any movement's, typed
-    # by its LEG (leaf ``X-bi-6-4a``); the guard that returned for a shadow
-    # (ruling **R-BAL45**'s interval) is gone with the interval.
-    parent = movement_parent(entry)
-    entries = emit_purchase_deltas(entry, parent, posted=False)
-    _self_heal_account_anchor_corrections(
-        (entry.account_id,), parent.scenario_id, entries,
-    )
-
-
-def reverse_postings_before_delete(txn: Transaction) -> None:
-    """Reverse a transaction's ledger postings before the row is deleted.
-
-    The delete-side reconcile every transaction-delete path runs FIRST, while
-    ``txn.id`` still exists: it brings the row's WHOLE posted family -- every
-    one of its movements' legs -- to zero, emitting a balanced reversal entry
-    for whatever the ledger currently holds.  Running it before the delete is
-    load-bearing for a HARD delete: ``journal_entries.transaction_entry_id`` is
-    ``ON DELETE SET NULL`` (and a row's ``transaction_entries`` are deleted
-    just before it, by the one removal act -- their keys are NO ACTION since
-    migration ``c4a4e7d1b9f2``), so once the movements are gone the links are
-    severed and the original legs would be stranded on their ledger accounts
-    with no offsetting reversal -- breaking per-account reconciliation.
-    Reversing first leaves each original entry and its reversal as an
-    immutable net-zero pair (their links SET-NULL together on the delete), so
-    every ledger account still nets correctly.  The row's OWN cash leg was a
-    second link here until plan step ``balance:X-bi-6-5``'s second leaf (card
-    plan#1845) deleted that source with its ``transaction_id``.  The transaction analog of
-    :func:`reverse_transfer_postings_before_delete`, which
-    ``transfer_service.delete_transfer`` runs first for the same reason.  No
-    transfer shadow reaches here since plan step ``balance:X-bi-6-4d-2``
-    deleted them (ruling **R-BAL166**): a transfer side's payment record
-    hangs off the transfer since plan step ``balance:X-bi-6-4d-2``, and
-    :func:`reverse_transfer_postings_before_delete` reverses the pair's.
-    Until 4d-2 a shadow's movement was reversed here, typed by its transfer
-    LEG since leaf ``X-bi-6-4a`` (``transfer_legs.movement_parent``); the
-    guard that returned for one (ruling **R-BAL45**'s interval) is gone with
-    the interval.
-
-    **It is NOT :func:`sync_transaction_postings`, and since plan step X-f3b
-    it cannot be.**  That reconcile leaves a DATED movement posted whatever
-    the parent's status -- a revert must leave an envelope's posted purchases
-    exactly where they are, because the money really did leave the bank.  A
-    teardown means something else entirely: every movement of the row is
-    about to be deleted with it, so every one is reversed, dated or not.
-
-    Idempotent no-op for a transaction whose family has never posted (a
-    Projected row with no posted purchases).  Shared by the delete route
-    (``delete_transaction``), the regeneration sweep
-    (``recurrence_engine.regenerate_for_template``) and the three payback-delete
-    paths (``credit_workflow.delete_payback_on_credit_revert`` /
-    ``delete_payback_on_source_delete`` / ``entry_credit_workflow
-    .sync_entry_payback``'s DELETE branch) so no delete path can strand a
-    posting.  Flushes but does not commit (the caller owns the transaction).
-
-    Args:
-        txn: The transaction about to be deleted (soft or hard).  Must still be
-            flushed (``txn.id`` set) so its movements' reversal entries can
-            link by ``transaction_entry_id`` and read the already-posted legs
-            back.
-    """
-    entries: list[JournalEntry] = []
-    for purchase in txn.entries:
-        entries.extend(
-            emit_purchase_deltas(
-                purchase, movement_parent(purchase), posted=False,
+    held: dict[int, tuple[set[int], list[JournalEntry]]] = {}
+    for movement in movements:
+        parent = movement_parent(movement)
+        entries = emit_purchase_deltas(movement, parent, posted=False)
+        if entries:
+            _hold_for_the_re_check(
+                held, parent.scenario_id, (movement.account_id,), entries,
             )
+    return held
+
+
+def re_check_held_anchor_corrections(
+    held: "dict[int, tuple[set[int], list[JournalEntry]]]",
+) -> None:
+    """Run a batch's held anchor re-check: once per scenario, accounts ascending.
+
+    The ONE re-check after a batch, shared by the deploy resync (ruling
+    **R-BAL103**: after every source is re-booked) and the one removal act
+    (ruling **plan#2564**: after its deletes have flushed,
+    :func:`reverse_leaving_movements` held it), so the walk reads the records
+    as the batch leaves them.  A no-op when *held* is empty.
+
+    Args:
+        held: A scenario id -> (accounts touched, entries emitted), as
+            :func:`_hold_for_the_re_check` builds it.
+
+    Raises:
+        PostingError: If a re-checked account owes a correction and has no
+            linked ledger to book it on (the reconcile's emit step refuses).
+    """
+    for scenario_id, (accounts, entries) in sorted(held.items()):
+        _self_heal_account_anchor_corrections(
+            tuple(sorted(accounts)), scenario_id, entries,
         )
-    _self_heal_account_anchor_corrections(
-        _family_accounts(txn), txn.scenario_id, entries,
-    )
 
 
 def _hold_for_the_re_check(held: dict, scenario_id: int, accounts, entries) -> None:
-    """Add one source's re-book to :func:`resync_all_cash_postings`' one re-check.
+    """Add one source's re-book or reversal to a batch's one re-check.
 
-    *held* maps a scenario id to (accounts touched, entries emitted).
+    *held* maps a scenario id to (accounts touched, entries emitted), and
+    :func:`re_check_held_anchor_corrections` runs it.
     """
     held_accounts, held_entries = held.setdefault(scenario_id, (set(), []))
     held_accounts.update(accounts)
@@ -874,7 +821,7 @@ def resync_all_cash_postings() -> tuple[int, int]:
     for xfer in transfers:
         try:
             with db.session.begin_nested():
-                entries, accounts = _rebook_transfer_family(xfer, purchase_posts)
+                entries, accounts = _rebook_transfer_family(xfer)
         except PostingError as exc:
             skipped[xfer.id] = str(exc)
             continue
@@ -889,10 +836,7 @@ def resync_all_cash_postings() -> tuple[int, int]:
     # hook walks every non-loan account with no skip
     # (``account_posting_service.backfill_all_account_anchor_postings``), so
     # such an account aborts the deploy there regardless.
-    for scenario_id, (accounts, entries) in sorted(held.items()):
-        _self_heal_account_anchor_corrections(
-            tuple(sorted(accounts)), scenario_id, entries,
-        )
+    re_check_held_anchor_corrections(held)
     if skipped:
         logger.warning(
             "Cash posting resync skipped %d transfer(s) whose family could not "

@@ -603,9 +603,10 @@ class TestHardDeletedTransactionReconcilesAtZero:
         Groceries-Expense counter therefore nets to zero across a no-parent-row group --
         the exact branch of the counter sweep that asserts a hard-deleted
         transaction's legs were reversed, not stranded.  This is the route-driven
-        production path (``delete_transaction`` ->
-        ``reverse_postings_before_delete`` -> FK SET NULL) the oracle claims to
-        cover.
+        production path (``delete_transaction`` -> the one removal act's
+        ``reverse_leaving_movements`` -> FK SET NULL; the row's own
+        ``reverse_postings_before_delete`` until plan task plan#2557) the
+        oracle claims to cover.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id

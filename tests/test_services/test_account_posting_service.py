@@ -66,7 +66,11 @@ from app.services.pay_calendar import PayCalendarError
 from app.services.auth_service import hash_password
 from app.utils.dates import display_today, to_display_date
 from tests._test_helpers import (
+    add_entry,
     figure_source_columns,
+    generate_row_of,
+    make_expense_template,
+    typed,
     record_paydays_across_a_hole,
     rhythm_of,
     an_entered_day,
@@ -2045,6 +2049,180 @@ class TestSyncEntryPoints:
             assert posting_service.account_posting_total(
                 account2.id, baseline2.id,
             ) == Decimal("100.00")
+
+
+class TestATeardownReChecksTheAnchorsAfterTheRecordsLeave:
+    """A movement leaving the books re-derives the corrections it staled.
+
+    Ruling **plan#2564** (plan task plan#2557): the one removal act reverses
+    each leaving movement, deletes it, then re-checks the anchor corrections
+    ONCE per scenario.  The re-check walks the RECORDS since plan task
+    plan#2525, and every door that took a movement off reversed it first and
+    re-checked while it still stood, so a deleted covered settle left its
+    true-up in place.  Each case below settles money on a day the account's
+    origination assertion covers (the opening absorbs it as a true-up), takes
+    it off through a different door, and reads the account back on its
+    $500.00 anchor.  The route twin, a Paid transfer into a Savings account
+    opened at $0.00, is
+    ``tests/test_routes/test_transfers/test_hard_delete.py``'s
+    ``test_a_deleted_paid_transfer_is_no_history_so_the_template_is_deleted``.
+    """
+
+    def test_a_deleted_row_leaves_the_account_on_its_anchor(
+        self, app, db, seed_user,
+    ):
+        """The row delete's hard arm: a covered $200.00 settle deleted.
+
+        Arithmetic: the $500.00 opening; a -$200.00 settle on the bootstrap
+        period's first day, before the origination assertion of $500.00, so
+        the true-up books 500 - (500 - 200) = +200.00 and the total reads
+        500.00.  The delete reverses the settle (+200.00) and, the records
+        now holding nothing, the true-up's target is 500 - 500 = 0: its delta
+        is -200.00 and the total reads 500.00 again.  Before the ruling the
+        true-up stayed at +200.00 and the total read 700.00.
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            account = _make_account(seed_user, "500.00")
+            txn = _settle_expense(
+                seed_user, account, "200.00",
+                seed_user["bootstrap_period"].start_date,
+            )
+            _db.session.commit()
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+
+            deletion = transaction_service.delete_transaction(
+                txn, seed_user["user"].id,
+            )
+            _db.session.commit()
+
+            assert deletion.soft is False
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
+            trueups = _correction_entries(
+                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+            )
+            # +200.00 at the settle, -200.00 after the delete.
+            assert sorted(
+                _entry_legs(entry.id)[linked.id][0] for entry in trueups
+            ) == [Decimal("-200.00"), Decimal("200.00")]
+
+    def test_two_purchases_leaving_in_one_act_are_re_checked_once(
+        self, app, db, seed_user,
+    ):
+        """The row delete's soft arm: an envelope's two covered purchases go.
+
+        Arithmetic: the $500.00 opening; a recurring envelope on the account
+        holding two purchases the bank took on the bootstrap period's first
+        day, -$60.00 and -$40.00, before the origination assertion, so the
+        true-up books 500 - (500 - 100) = +100.00 and the total reads 500.00.
+        Deleting the envelope (a tombstone: its definition recurs) takes both
+        off in ONE act: +60.00 and +40.00 reversed, then ONE re-check, whose
+        true-up target is 0 -- one entry of -100.00, not one per purchase --
+        and the total reads 500.00.
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            account = _make_account(seed_user, "500.00")
+            day = seed_user["bootstrap_period"].start_date
+            envelope = generate_row_of(
+                make_expense_template(
+                    _db.session, seed_user, amount="300.00",
+                    name="Groceries", category_key="Groceries",
+                    is_envelope=True, account=account,
+                ),
+                seed_user["bootstrap_period"],
+            )
+            add_entry(
+                _db.session, seed_user, envelope, Decimal("60.00"), day,
+                settled_on=day,
+            )
+            add_entry(
+                _db.session, seed_user, envelope, Decimal("40.00"), day,
+                settled_on=day,
+            )
+            posting_service.sync_transaction_postings(envelope)
+            _db.session.commit()
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
+            before = {
+                entry.id for entry in _correction_entries(
+                    account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+                )
+            }
+
+            deletion = transaction_service.delete_transaction(
+                envelope, seed_user["user"].id,
+                purchases_named=frozenset(
+                    entry.id for entry in envelope.purchases
+                ),
+            )
+            _db.session.commit()
+
+            assert deletion.soft is True
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+            added = [
+                entry for entry in _correction_entries(
+                    account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+                )
+                if entry.id not in before
+            ]
+            assert [
+                _entry_legs(entry.id)[linked.id][0] for entry in added
+            ] == [Decimal("-100.00")]
+
+    def test_a_zero_record_on_a_row_that_stays_re_checks_too(
+        self, app, db, seed_user,
+    ):
+        """The status seam's withdrawal: a covered Paid row re-recorded at $0.00.
+
+        The row STAYS (Paid, at $0.00) and only its payment leaves, through
+        the same act.  Arithmetic: the $500.00 opening; a -$200.00 settle
+        before the origination assertion, true-up +200.00, total 500.00.
+        Re-recorded at $0.00, the seam withdraws the payment: +200.00
+        reversed, and the re-check's true-up target is 0, so -200.00 and the
+        total reads 500.00.
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            account = _make_account(seed_user, "500.00")
+            txn = _settle_expense(
+                seed_user, account, "200.00",
+                seed_user["bootstrap_period"].start_date,
+            )
+            _db.session.commit()
+
+            transaction_service.apply_requested_status(
+                txn, txn.status_id,
+                stated=transaction_service.StatedRecord(
+                    figure=typed(Decimal("0.00")),
+                ),
+            )
+            _db.session.commit()
+
+            assert not txn.covering_movements
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
+            assert sum(
+                (
+                    _entry_legs(entry.id)[linked.id][0]
+                    for entry in _correction_entries(
+                        account.id, scenario_id,
+                        PostingSourceEnum.ACCOUNT_TRUEUP,
+                    )
+                ),
+                Decimal("0"),
+            ) == Decimal("0.00")
 
 
 class TestLedgerAgreesWithTheGridOnAssertionPeriods:

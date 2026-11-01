@@ -628,8 +628,9 @@ class TestZeroCorrectionWithdrawsTheLegs:
 
         The status seam WITHDRAWS a covering movement a ``$0.00`` record lands
         on (no movement can carry a zero figure), and reverses its leg first
-        through ``posting_service.reverse_purchase_postings_before_delete`` --
-        the door that RETURNED for a shadow's movement through ruling
+        through the one removal act's ``posting_service.reverse_leaving_movements``
+        (``reverse_purchase_postings_before_delete`` until plan task plan#2557)
+        -- the reversal that RETURNED for a shadow's movement through ruling
         R-BAL45's interval and reaches it since plan step
         ``balance:X-bi-6-3`` (ruling **R-BAL101**).  Arithmetic: settle +100
         on Savings / -100 on Checking (two entries via transit); the

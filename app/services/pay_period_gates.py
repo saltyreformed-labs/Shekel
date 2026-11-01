@@ -240,7 +240,8 @@ def gate_deletable_tail(
         # DELETE); that is safe only for a period whose postings net to zero
         # per account (a self-cancelling original + reversal pair).  Whoever
         # relaxes these locks MUST first reverse the postings
-        # (posting_service.reverse_postings_before_delete / the loan sync).
+        # (movement_removal.remove_movements, the one act that reverses and
+        # deletes a movement / the loan sync).
         # A third layer since plan step credit_card:CC-5-4a-4: a period
         # holding a row or transfer that holds a payment or purchase
         # classifies HOLDS_MOVEMENT, whatever ``_regenerable`` says, and

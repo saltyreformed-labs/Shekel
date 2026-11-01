@@ -32,9 +32,10 @@ convention ``posting_reads`` was created by.
 **It holds no public door, deliberately.**  The two doors a caller reaches --
 ``posting_service.sync_transaction_postings`` (the family reconcile, and since
 plan step ``balance:X-bi-4a`` the whole of what an ordinary transaction posts)
-and ``posting_service.reverse_purchase_postings_before_delete`` -- stay in the
-writer module, because both must run the account anchor self-heal that module
-owns, and because ``posting_service`` remains the ledger's ONE public surface.
+and ``posting_service.reverse_leaving_movements`` (the one removal act's
+reversal, ruling **plan#2564**) -- stay in the writer module, because both
+feed the account anchor self-heal that module owns, and because
+``posting_service`` remains the ledger's ONE public surface.
 What lives here is what those doors are made of.  (A per-purchase door,
 ``sync_purchase_postings``, stood beside them with zero callers until that
 step deleted it -- ledger row **BAL-507**.)

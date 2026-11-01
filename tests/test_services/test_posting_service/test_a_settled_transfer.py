@@ -11,7 +11,7 @@ from app import ref_cache
 from app.enums import PostingKindEnum, PostingSourceEnum, StatusEnum
 from app.extensions import db as _db
 from app.models.journal_entry import Posting
-from app.services import posting_service, transfer_service
+from app.services import posting_service, transfer_legs, transfer_service
 from tests._test_helpers import create_account_of_type, create_settled_transfer
 from app.services.amount_ownership import state_own_amount
 from app.models.amount_ownership import AmountOwnership
@@ -353,12 +353,15 @@ class TestSyncReversal:
         +100 on Checking against -100 transit.  The Savings ledger nets back
         to its $100.00 opening; the reversal legs are 100, NOT 999.
 
-        The door is the TEARDOWN twin (plan step ``balance:X-bi-6-3``, ruling
+        The door is the TEARDOWN's (plan step ``balance:X-bi-6-3``, ruling
         **R-BAL101**): ``sync_transfer_postings`` reads each movement's own
         state and would find two live, dated movements and leave them posted;
-        reversing a still-settled pair is what the delete door does, through
-        ``reverse_transfer_postings_before_delete``.  It called the sync with
-        ``settled=False`` until that step deleted the flag.
+        reversing a still-settled pair is what the delete does.  It called the
+        sync with ``settled=False`` until that step deleted the flag, and
+        ``reverse_transfer_postings_before_delete`` until plan task plan#2557
+        deleted that door (ruling **plan#2564**): the one removal act reverses
+        every record the pair holds through ``reverse_leaving_movements``,
+        which this calls over the same family, before the act deletes them.
         """
         with app.app_context():
             checking = seed_user["account"]
@@ -379,7 +382,10 @@ class TestSyncReversal:
             state_own_amount(transfer, Decimal("999.00"))
             _db.session.flush()
 
-            posting_service.reverse_transfer_postings_before_delete(transfer)
+            posting_service.reverse_leaving_movements([
+                movement for movement, _leg
+                in transfer_legs.transfer_family_movements(transfer)
+            ])
             _db.session.commit()
 
             by_side = _side_entries(transfer.id)

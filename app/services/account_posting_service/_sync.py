@@ -240,10 +240,11 @@ def self_heal_anchor_corrections(
 
     The effect-time self-heal (Build-Order Step 5, C6): the tails of
     ``posting_service.sync_transfer_postings`` /
-    ``sync_transaction_postings`` (which
-    ``reverse_postings_before_delete`` routes through) call this after
-    emitting source delta entries, and ``resync_all_cash_postings`` calls it
-    ONCE per scenario after re-booking every source (ruling **R-BAL103**).
+    ``sync_transaction_postings`` call this after emitting source delta
+    entries, and ``posting_service.re_check_held_anchor_corrections`` calls it
+    ONCE per scenario after a batch: ``resync_all_cash_postings`` after
+    re-booking every source (ruling **R-BAL103**), and the one removal act
+    after deleting the movements it reversed (ruling **plan#2564**).
 
     **What it decides is whether the reconcile can be SKIPPED, and that is
     the honest way round.**  :func:`sync_account_anchor_postings` is

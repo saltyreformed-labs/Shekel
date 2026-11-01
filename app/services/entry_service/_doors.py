@@ -922,7 +922,8 @@ def delete_entry(
     # purchase is no longer explained by it once it goes, so an act left
     # naming no app row is withdrawn and the line is unexplained again
     # (developer ruling 2026-08-25, plan step ``bank_import:X-gb``) -- then
-    # deleted out of its envelope's ``entries``.  Its PARENT is untouched:
+    # deleted out of its envelope's ``entries``, and the anchor corrections
+    # re-checked once it is gone (ruling **plan#2564**).  Its PARENT is untouched:
     # removing one purchase leaves the envelope and every other purchase in it
     # asserting exactly what they did.  The X names the line first since plan
     # step ``credit_card:CC-5-4a-5`` (ruling **R-CC80**, closing finding
@@ -932,12 +933,13 @@ def delete_entry(
     # ``credit_card:CC-5-4a-5``): the act grades "the WHOLE set one press
     # removes" against what the X named, and on the envelope's account a
     # second act would meet the first's line and refuse the press as out of
-    # date.  The row delete takes its payback chain so, its row reversed
-    # first; the sync below deletes the payback ROW, by the same arithmetic.
+    # date.  The row delete takes its payback chain so; the act reverses the
+    # payback's movements with the purchase and re-checks the anchors once
+    # after both are gone (ruling **plan#2564**), and the sync below deletes
+    # the payback ROW, by the same arithmetic.
     doomed = payback_a_removal_deletes(txn, {entry.id})
     movements, leaving = [entry], ()
     if doomed is not None:
-        posting_service.reverse_postings_before_delete(doomed)
         movements, leaving = [entry, *doomed.entries], (doomed,)
         press = x_press_for_payback(press, txn, entry)
     movement_removal.remove_movements(

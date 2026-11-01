@@ -4,7 +4,11 @@ stopped surfaces at the next release.
 
 **The last update is read, never stored**: the newest run of the update workflow
 (:data:`WORKFLOW`) on ``main`` whose ``publish`` job (:data:`JOB`) succeeded, dated by when
-GitHub started the run.  A week with nothing to move still runs that job, which publishes
+GitHub started the run's latest attempt (``run_started_at``, which a re-run moves and
+``created_at`` does not): the jobs GitHub lists for a run are its latest attempt's
+(measured 2026-11-01 on a CI run of two attempts: 11 jobs, all of attempt 2, where
+``filter=all`` lists 22), so the publish judged and its date are one attempt's.  A week with
+nothing to move still runs that job, which publishes
 nothing and succeeds, so a quiet week is no stopped update; a run whose refresh or publish
 failed, and a day's run of the queue alone, whose publish is skipped, are none.  A commit the
 update made would date it too, but a quiet week makes none.
@@ -22,9 +26,11 @@ workflow run if the workflow file exists on the default branch", GitHub's events
 have run, so the release that brings it is judged without it.  From the next one on, a
 release finding no update in the window is refused, saying how to start one.
 
-**The window**: the runs are read newest first, and the walk ends at the first created more
-than :data:`STALE_AFTER` ago, since any update older than that refuses the release alike; so a
-refusal names the window, not the date of an older update.
+**The window**: the runs are read newest first by when GitHub created each, the listing's
+order, and the walk ends at the first created more than :data:`STALE_AFTER` ago, since any
+update older than that refuses the release alike; so a refusal names the window, not the date
+of an older update, and a run created before the window is not read, though a re-run started
+it since.
 """
 from __future__ import annotations
 
@@ -70,7 +76,7 @@ class Actions:
 
 @dataclass(frozen=True)
 class Published:
-    """A Monday update: when GitHub started its run, and the run's page."""
+    """A Monday update: when GitHub started its run's latest attempt, and the run's page."""
 
     started: datetime
     run: str
@@ -146,13 +152,14 @@ def read(root: Path, base: str, now: datetime,
 
 def _newest(reader: Actions, since: datetime) -> Published | None:
     """The newest run on :data:`BRANCH` created at or after ``since`` whose :data:`JOB`
-    succeeded; None when there is none."""
+    succeeded in its latest attempt, dated by that attempt's start; None when there is
+    none."""
     for run in _runs(reader, since):
         with reading(f"the jobs of the update workflow's run {run['id']}"):
             jobs = reader.github.rest(
                 "GET", f"/repos/{reader.repository}/actions/runs/{run['id']}/jobs")["jobs"]
         if any(job["name"] == JOB and job["conclusion"] == "success" for job in jobs):
-            return Published(datetime.fromisoformat(run["created_at"]), run["html_url"])
+            return Published(datetime.fromisoformat(run["run_started_at"]), run["html_url"])
     return None
 
 

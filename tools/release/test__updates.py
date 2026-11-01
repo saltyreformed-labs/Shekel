@@ -82,6 +82,23 @@ def test_a_failed_monday_run_is_no_update_and_one_before_it_in_the_window_still_
     assert (update.published.started, update.refusals) == (_ago(days=7), ())
 
 
+def test_a_re_run_is_dated_by_its_latest_attempt_s_start(repo):
+    """A run created six days ago whose latest attempt, the one whose publish GitHub lists,
+    started an hour ago: the update is dated by that start, not by the run's creation."""
+    runs = Runs(monday(1, _ago(days=6), started=_ago(hours=1)))
+    update = read(repo.root, _held(repo), NOW, runs.actions)
+    assert (update.published.started, update.refusals) == (_ago(hours=1), ())
+
+
+def test_a_run_created_before_the_window_is_not_read_though_re_run_since(repo):
+    """A run created nine days ago and re-run an hour ago ends the walk unread, as the
+    listing is by creation: the release is refused, and no jobs of it were asked for."""
+    runs = Runs(monday(1, _ago(days=9), started=_ago(hours=1)))
+    update = read(repo.root, _held(repo), NOW, runs.actions)
+    assert update.published is None and len(update.refusals) == 1
+    assert runs.read == [LISTING + "1"]
+
+
 def test_no_update_in_the_eight_days_refuses_and_says_how_to_start_one(repo):
     """The last successful publish was eight days and a second ago: the walk ends at it,
     never reading its jobs, and the release is refused with where to read why and how to

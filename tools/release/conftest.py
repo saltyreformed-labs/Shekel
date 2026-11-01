@@ -177,19 +177,24 @@ def replanned_and_dropped(tracker):
 # -- the update workflow's runs --------------------------------------------------------------
 
 
-def workflow_run(number: int, created: datetime, jobs: dict[str, str]) -> tuple[dict, list]:
-    """A run of the update workflow as GitHub lists it, created at ``created``, and its jobs,
-    each job's name with its conclusion."""
-    return ({"id": number, "created_at": created.strftime("%Y-%m-%dT%H:%M:%SZ"),
+def workflow_run(number: int, created: datetime, jobs: dict[str, str],
+                 started: datetime | None = None) -> tuple[dict, list]:
+    """A run of the update workflow as GitHub lists it, created at ``created`` and its latest
+    attempt started at ``started`` (at ``created`` unless given, as a first attempt's), and
+    its latest attempt's jobs, each job's name with its conclusion."""
+    stamp = "%Y-%m-%dT%H:%M:%SZ"
+    return ({"id": number, "created_at": created.strftime(stamp),
+             "run_started_at": (started or created).strftime(stamp),
              "html_url": f"https://github.com/o/n/actions/runs/{number}"},
             [{"name": name, "conclusion": conclusion} for name, conclusion in jobs.items()])
 
 
-def monday(number: int, created: datetime, publish: str = "success") -> tuple[dict, list]:
+def monday(number: int, created: datetime, publish: str = "success",
+           started: datetime | None = None) -> tuple[dict, list]:
     """A Monday run: the refresh succeeded, the publish concluded ``publish``, the queue
-    skipped."""
+    skipped; its latest attempt started at ``started`` (:func:`workflow_run`)."""
     return workflow_run(number, created, {"refresh": "success", JOB: publish,
-                                          "queue": "skipped"})
+                                          "queue": "skipped"}, started)
 
 
 def daily(number: int, created: datetime) -> tuple[dict, list]:

@@ -18,6 +18,8 @@ import yaml
 
 from tools.ci import arcs
 from tools.ci.test_ci_workflow import _jobs, _run_step, _steps, _workflows
+from tools.ci.test_dockerfile_uv_action import ACTION_FILE as DOCKERFILE_UV_FILE
+from tools.ci.test_dockerfile_uv_action import USES as DOCKERFILE_UV
 
 
 class TestTheImageIsBuiltAndCheckedBeforeAMerge:
@@ -25,16 +27,16 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
     queue group and push to ``main``, never pushed, and what it holds checked (task
     plan#2366).
 
-    Its four ``run`` steps are RUN here with a stand-in ``docker``; that each check refuses
-    a wrong image is measured against real images (built 2026-10-30: an extra package, a
-    missing one and no psycopg-c each refused; 2026-10-31: the pinned base image's seven pip
-    files each found, and none in the built image) and is graded on every run by the job
-    itself.
+    Its three ``run`` steps are RUN here with a stand-in ``docker``, and its uv is the one
+    recipe's (:mod:`tools.ci.test_dockerfile_uv_action`); that each check refuses a wrong
+    image is measured against real images (built 2026-10-30: an extra package, a missing one
+    and no psycopg-c each refused; 2026-10-31: the pinned base image's seven pip files each
+    found, and none in the built image) and is graded on every run by the job itself.
     """
 
     BUILDX = "Set up Docker Buildx"
     BUILD = "Build the image"
-    EXPORT = "Export the Dockerfile's uv"
+    UV = "The Dockerfile's uv"
     IMPL = "The image runs psycopg's C implementation"
     PACKAGES = "The image holds exactly the lock's runtime and server set"
     PIP = "The image holds no pip"
@@ -89,7 +91,7 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         assert set(job) == {"runs-on", "timeout-minutes", "env", "steps"}
         assert job["env"] == {"IMAGE": self.IMAGE}
         assert [step["name"] for step in job["steps"]] == [
-            "Checkout code", self.BUILDX, self.BUILD, self.EXPORT, self.IMPL, self.PACKAGES,
+            "Checkout code", self.BUILDX, self.BUILD, self.UV, self.IMPL, self.PACKAGES,
             self.PIP,
         ]
         steps = _steps("image")
@@ -108,25 +110,22 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         assert not re.search(r"\bsecrets\b", yaml.safe_dump(job))
 
     def test_the_layer_cache_is_read_and_never_written(self):
-        """No step of the job writes a cache: a pull request's or a queue group's is
-        restorable by its own ref alone, and one a push to ``main`` wrote would sit in the
-        scope the release workflow restores."""
+        """No step of the job writes a cache, the uv step's action read whole: a pull
+        request's or a queue group's is restorable by its own ref alone, and one a push to
+        ``main`` wrote would sit in the scope the release workflow restores."""
         for step in _jobs()["image"]["steps"]:
             text = yaml.safe_dump(step)
+            if step.get("uses") == DOCKERFILE_UV:
+                text += DOCKERFILE_UV_FILE.read_text(encoding="utf-8")
             assert "cache-to" not in text and "actions/cache@" not in text, step["name"]
 
-    def test_uv_is_exported_from_the_dockerfiles_own_uv_stage(self, tmp_path):
-        """The export step, RUN: buildx writes the Dockerfile's ``uv`` stage, which holds the
-        binary alone, to the runner's temp directory, where the package check mounts it."""
-        assert re.search(r"^FROM \S+ AS uv$",
-                         (arcs.REPO / "Dockerfile").read_text(encoding="utf-8"), re.MULTILINE)
-        env = self._docker(tmp_path)
-        temp = tmp_path / "temp"
-        result = _run_step(_steps("image")[self.EXPORT]["run"], {**env, "RUNNER_TEMP": str(temp)})
-        assert result.returncode == 0, result.stderr
-        assert self._called(tmp_path) == [
-            "buildx", "build", "--target", "uv", "--output", f"type=local,dest={temp}/uv", ".",
-        ]
+    def test_uv_is_the_dockerfiles_by_the_one_recipe(self):
+        """The job takes uv from the action every job's install takes it from, by the ``$/``
+        form (where, the job's step order says: after the build); the package check mounts
+        the binary it hands on."""
+        steps = _steps("image")
+        assert steps[self.UV] == {"name": self.UV, "id": "uv", "uses": DOCKERFILE_UV}
+        assert steps[self.PACKAGES]["env"] == {"UV": "${{ steps.uv.outputs.bin }}"}
 
     def test_the_psycopg_check_passes_the_c_implementation_alone(self, tmp_path):
         """The psycopg step, RUN: in the image, offline, it reads which implementation psycopg
@@ -155,9 +154,9 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         offline against the image's own ``/opt/venv``, checking (never changing) it against
         the lock's runtime set and its ``server`` group; and uv's refusal fails the step."""
         env = self._docker(tmp_path)
-        temp, workspace = tmp_path / "temp", tmp_path / "ws"
+        uv, workspace = tmp_path / "temp" / "uv" / "uv", tmp_path / "ws"
         run = _steps("image")[self.PACKAGES]["run"]
-        step_env = {**env, "RUNNER_TEMP": str(temp), "GITHUB_WORKSPACE": str(workspace)}
+        step_env = {**env, "UV": str(uv), "GITHUB_WORKSPACE": str(workspace)}
         assert _run_step(run, step_env).returncode == 0
         args = self._called(tmp_path)
         assert args[:4] == ["run", "--rm", "--network", "none"]
@@ -166,7 +165,7 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         assert options[-2:] == ["--entrypoint", "uv"]
         pairs = list(zip(options[:-2:2], options[1:-2:2]))
         assert sorted(value for flag, value in pairs if flag == "--volume") == sorted([
-            f"{temp}/uv/uv:/usr/local/bin/uv:ro", f"{workspace}:/src:ro",
+            f"{uv}:/usr/local/bin/uv:ro", f"{workspace}:/src:ro",
         ])
         assert {value for flag, value in pairs if flag == "--env"} == {
             "UV_PROJECT_ENVIRONMENT=/opt/venv", "UV_PYTHON_DOWNLOADS=never", "UV_NO_CACHE=1",

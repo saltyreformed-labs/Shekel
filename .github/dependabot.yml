@@ -39,9 +39,9 @@ updates:
   # what they pin, so nothing is left to re-measure (ruling plan#2443): the
   # build's own upgrade keeps OpenSSL at Debian's newest, and the runtime
   # image deletes the base image's pip.  The uv stage's FROM line
-  # moves here too: it is the one home of uv's version and digest, which
-  # every CI job's .github/actions/install-lock reads.  Each image opens a
-  # PR of its own, a major included.
+  # moves here too: it is the one home of uv's version and digest, and the
+  # stage is what .github/actions/dockerfile-uv exports for every CI job
+  # that runs uv.  Each image opens a PR of its own, a major included.
   - package-ecosystem: docker
     directory: /
     schedule:

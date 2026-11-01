@@ -1,7 +1,8 @@
 # Shekel Budget App -- a job's Python and packages, from uv.lock
 #
 # Every workflow job that runs Python takes it from here (ruling
-# balance:R-BAL294, plan#1027): uv installs the interpreter
+# balance:R-BAL294, plan#1027) but the update alert, which installs nothing
+# so a failed install cannot stop it (plan#2481): uv installs the interpreter
 # ``.python-version`` names and the packages ``uv.lock`` pins, every file
 # checked against its sha256 (``--locked`` also refuses a lock that no longer
 # matches pyproject.toml), into ``.venv``, whose ``bin`` the job's later steps
@@ -9,11 +10,10 @@
 # rehearsal's bench runs uv itself).  One recipe, so no job states a Python
 # version or a package version of its own.
 #
-# UV IS THE DOCKERFILE'S.  Its ``FROM ghcr.io/astral-sh/uv:<version>@sha256:...
-# AS uv`` line is the one home of uv's version and digest (Dependabot's docker
-# entry moves it), and the first step below copies ``/uv`` out of that same
-# image, pulled by that digest, as the image build does: CI and the image run
-# one uv binary, and no third-party action installs it.
+# UV IS THE DOCKERFILE'S.  The first step below takes the binary its ``uv``
+# stage holds from .github/actions/dockerfile-uv, the one recipe for it, which
+# ci.yml's ``image`` job calls too: CI and the image's build run one uv
+# binary, and no third-party action installs it.
 #
 # THE INTERPRETER IS uv's OWN BUILD OF CPYTHON (``UV_PYTHON_PREFERENCE``
 # below): the newest release of ``.python-version``'s minor that this uv
@@ -46,47 +46,41 @@ inputs:
 runs:
   using: composite
   steps:
-    # The image reference is read whole from the Dockerfile's uv line, digest
-    # included, so the pull is by digest; a Dockerfile holding no such line,
-    # or two, fails the job rather than guessing.
-    - name: Copy uv out of the Dockerfile's uv image
+    - name: The Dockerfile's uv
       id: uv
+      uses: $/.github/actions/dockerfile-uv
+
+    # uv's cache: its directory, which the restore and the install both
+    # read, and the sha256 of the uv binary that writes it, which names uv
+    # in the cache's key.
+    - name: Name uv's cache
+      id: cache
       shell: bash
+      env:
+        UV: ${{ steps.uv.outputs.bin }}
       run: |
         set -euo pipefail
-        mapfile -t found < <(sed -n -E 's#^FROM (ghcr\.io/astral-sh/uv:[^@ ]+@sha256:([0-9a-f]{64})) AS uv$#\1 \2#p' Dockerfile)
-        if [ "${#found[@]}" -ne 1 ]; then
-            echo "The Dockerfile must hold exactly one 'FROM ghcr.io/astral-sh/uv:<version>@sha256:<digest> AS uv' line; it holds ${#found[@]}." >&2
-            exit 1
-        fi
-        read -r image digest <<< "${found[0]}"
-        dir="${RUNNER_TEMP}/uv"
-        mkdir -p "${dir}"
-        docker pull --quiet "${image}"
-        container="$(docker create "${image}" /uv)"
-        docker cp "${container}:/uv" "${dir}/uv"
-        docker rm "${container}" > /dev/null
-        "${dir}/uv" --version
+        sum="$(sha256sum "${UV}")"
         {
-            echo "bin=${dir}/uv"
-            echo "digest=${digest}"
-            echo "cache=${RUNNER_TEMP}/uv-cache"
+            echo "dir=${RUNNER_TEMP}/uv-cache"
+            echo "uv=${sum%% *}"
         } >> "${GITHUB_OUTPUT}"
 
     # GitHub's own cache action, never a third party's.  The key holds
     # everything the cache's contents depend on: which packages (the install
     # set and the lock), which interpreter (``.python-version`` and the uv
-    # that picks its release) and uv's own cache format (its digest again).
-    # A saved key is never overwritten, so a key two install sets shared
-    # would hand one of them a cache that lacks its wheels for good.
+    # that picks its release) and uv's own cache format (the uv binary's
+    # sha256 again).  A saved key is never overwritten, so a key two install
+    # sets shared would hand one of them a cache that lacks its wheels for
+    # good.
     - name: Restore uv's cache
       if: inputs.cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ${{ steps.uv.outputs.cache }}
-        key: uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.uv.outputs.digest }}-${{ hashFiles('uv.lock', '.python-version') }}
+        path: ${{ steps.cache.outputs.dir }}
+        key: uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.cache.outputs.uv }}-${{ hashFiles('uv.lock', '.python-version') }}
         restore-keys: |
-          uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.uv.outputs.digest }}-
+          uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.cache.outputs.uv }}-
 
     # ``--require-build-hashes`` refuses a source build whose build tools no
     # hash covers (pyproject.toml's ``build-constraint-dependencies``, which
@@ -100,13 +94,13 @@ runs:
     # and tools/ci/test_ci_workflow.py refuses any workflow that calls this
     # action under either trigger, so the reason is checked, not only stated.
     # The directories written are the workspace's own venv and the one the
-    # first step copied uv into, no input's value.
+    # first step exported uv into, no input's value.
     - name: Install from the lock
       shell: bash
       env:
         UV: ${{ steps.uv.outputs.bin }}
         INSTALL: ${{ inputs.install }}
-        UV_CACHE_DIR: ${{ steps.uv.outputs.cache }}
+        UV_CACHE_DIR: ${{ steps.cache.outputs.dir }}
         UV_PYTHON_PREFERENCE: only-managed
       run: | # zizmor: ignore[github-env]
         set -euo pipefail

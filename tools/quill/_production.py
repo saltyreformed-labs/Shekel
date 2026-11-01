@@ -45,9 +45,9 @@ image excludes that production's deploy loads (S3b's review, its finding 1); and
 (``R-BAL401``) the workflow that builds the image on ``main`` and signs it, read whole, its
 comments included, as the others are, with each action of this repository's it loads by a
 step's ``uses:`` and each that one loads in turn (:func:`loaded`; plan#2482): its tax-law
-gate, which decides whether the image is built, runs ``.github/actions/install-lock``.  Which
-actions those are is read from each commit's own workflow, the one home of what it runs, so
-no list of them is kept here.
+gate, which decides whether the image is built, runs ``.github/actions/install-lock``, which
+loads ``.github/actions/dockerfile-uv``.  Which actions those are is read from each commit's
+own workflow, the one home of what it runs, so no list of them is kept here.
 ``docker-compose.dev.yml``, ``docker-compose.build.yml``, ``cloudflared/config.yml`` (a
 template the host's copy differs from) and the other workflows, which only test, are none
 of production's, nor an action that only they load.

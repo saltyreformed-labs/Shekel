@@ -65,6 +65,10 @@ PYTHON_BASE_PATTERN = re.compile(
 )
 #: The one home of the Python version (ruling balance:R-BAL294).
 PYTHON_VERSION_FILE = REPO_ROOT / ".python-version"
+#: The uv stage's FROM line: astral's uv image by its version tag and its digest.
+UV_STAGE_PATTERN = re.compile(
+    r"FROM\s+ghcr\.io/astral-sh/uv:[\w.-]+@sha256:[0-9a-f]{64}\s+AS\s+uv", re.IGNORECASE,
+)
 
 # Pattern matching the ``SHEKEL_IMAGE_DIGEST`` interpolation in the
 # prod override.  Required-form (``:?``) is what makes the missing-
@@ -148,6 +152,22 @@ def _stages(text: str) -> list[list[str]]:
 def _python_stages(text: str) -> list[list[str]]:
     """The stages built ``FROM`` the Python base image (:data:`PYTHON_BASE_PATTERN`)."""
     return [stage for stage in _stages(text) if PYTHON_BASE_PATTERN.match(stage[0])]
+
+
+def _uv_stages(text: str) -> list[str]:
+    """The ``FROM`` instruction of each stage of the Dockerfile ``text`` named ``uv``."""
+    return [stage[0] for stage in _stages(text)
+            if re.search(r"\sAS\s+uv\s*$", stage[0], re.IGNORECASE)]
+
+
+#: Each uv stage the uv-stage check refuses, made from the real FROM line.
+UV_STAGE_REFUSED = {
+    "another registry": lambda line: line.replace("ghcr.io/", "evil.example/"),
+    "another of astral's repositories": lambda line: line.replace("/uv:", "/uv-tools:"),
+    "a digest alone": lambda line: re.sub(r":[\w.-]+@", "@", line),
+    "a tag alone": lambda line: re.sub(r"@sha256:[0-9a-f]{64}", "", line),
+    "two uv stages": lambda line: f"{line}\n{line}",
+}
 
 
 def _runs(instructions: list[str]) -> list[str]:
@@ -269,6 +289,33 @@ class TestDockerfileDigestPin:
                 f"Replace with ``FROM <image>@sha256:<digest>`` "
                 f"(audit findings F-025, F-060)."
             )
+
+    def test_the_uv_stage_is_astral_s_uv_image_by_tag_and_digest(self, text: str) -> None:
+        """The one stage named ``uv``, which the builder copies the installer from and CI
+        exports (``.github/actions/dockerfile-uv``), is built FROM astral's uv image by its
+        version tag and its digest (:data:`UV_STAGE_PATTERN`).
+
+        A digest pin alone (:meth:`test_no_floating_tag_only_from`) passes a uv image from
+        any registry.  Until task plan#2484 the install action's own reading of this line
+        refused one; BuildKit, which reads it there now, refuses none.
+        """
+        found = _uv_stages(text)
+        assert [UV_STAGE_PATTERN.fullmatch(one) is not None for one in found] == [True], (
+            f"the Dockerfile's stages named ``uv``: {found}.  It must hold exactly one, "
+            f"``FROM ghcr.io/astral-sh/uv:<version>@sha256:<digest> AS uv``."
+        )
+
+    @pytest.mark.parametrize("name", list(UV_STAGE_REFUSED))
+    def test_the_uv_stage_check_refuses_each_other_image(self, text: str, name: str) -> None:
+        """The real uv stage's FROM line replaced by each of :data:`UV_STAGE_REFUSED`: an
+        image of another registry or another of astral's repositories, astral's uv by digest
+        alone or tag alone, and the line twice; each fails the check."""
+        real, = _uv_stages(text)
+        assert text.count(real + "\n") == 1
+        mutated = text.replace(real + "\n", UV_STAGE_REFUSED[name](real) + "\n")
+        assert mutated != text
+        assert [UV_STAGE_PATTERN.fullmatch(one) is not None
+                for one in _uv_stages(mutated)] != [True], name
 
 
 #: The OpenSSL packages each Python stage upgrades: the set audit finding F-025 names.

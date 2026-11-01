@@ -277,6 +277,21 @@ def test_the_release_s_tax_law_gate_runs_install_lock():
     assert ".github/actions/install-lock/action.yml" in files(arcs.REPO, "HEAD")
 
 
+def test_the_install_action_s_uv_runs_production(repo):
+    """The publish workflow and the two actions as this checkout holds them, committed to a
+    scratch repository whose ignore file excludes ``.github/`` and itself: the install
+    action the release's tax-law gate runs takes its uv from
+    ``.github/actions/dockerfile-uv``, so an edit to that action changes production too
+    (plan#2484).  The checkout's files, not HEAD's, so the commit that changes the wiring
+    is graded before it is made."""
+    names = (_production.PUBLISH, ".github/actions/install-lock/action.yml",
+             ".github/actions/dockerfile-uv/action.yml")
+    held = {name: (arcs.REPO / name).read_text(encoding="utf-8") for name in names}
+    sha = _files(repo, _commit(repo, "root"), "base",
+                 {".dockerignore": ".dockerignore\n.github/\n", **held})
+    assert sorted(files(repo, sha)) == sorted(names)
+
+
 def test_an_ignore_file_docker_refuses_refuses_the_comparison(repo):
     """A commit whose ignore file Docker refuses builds no image, so the comparison refuses
     rather than judge one."""

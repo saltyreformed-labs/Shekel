@@ -5,13 +5,14 @@ Which jobs call the action, and with what, is ``test_ci_workflow``'s
 """
 from __future__ import annotations
 
+import hashlib
 import re
-from pathlib import Path
 
 import yaml
 
 from tools.ci import arcs
 from tools.ci.test_ci_workflow import _run_step
+from tools.ci.test_dockerfile_uv_action import USES as DOCKERFILE_UV
 
 
 #: The file that defines the install action.
@@ -25,54 +26,48 @@ def _action_steps() -> dict[str, dict]:
 
 
 class TestTheInstallActionInstallsTheLock:
-    """The action's own steps, read and RUN with stand-ins for ``docker`` and ``uv``."""
+    """The action's own steps, read and RUN with a stand-in for ``uv``."""
 
-    COPY = "Copy uv out of the Dockerfile's uv image"
+    UV = "The Dockerfile's uv"
+    NAME = "Name uv's cache"
     CACHE = "Restore uv's cache"
     INSTALL = "Install from the lock"
 
-    #: A stand-in ``docker``: it records each call, hands ``create`` a container id, and
-    #: writes a runnable ``uv`` where ``cp`` is told to; ``FAIL_PULL`` fails the pull.
-    DOCKER = (
-        "#!/bin/sh\n"
-        'echo "$*" >> "${LOG}"\n'
-        'case "$1" in\n'
-        '    pull) [ -z "${FAIL_PULL:-}" ] || exit 1 ;;\n'
-        "    create) echo c0ffee ;;\n"
-        '    cp) printf \'#!/bin/sh\\necho "uv 9.9.9"\\n\' > "$3" && chmod +x "$3" ;;\n'
-        'esac\n'
-    )
-
     def test_its_inputs_steps_and_pins(self):
-        """Two required inputs; its three steps in order; every third-party action pinned by
-        sha; GitHub's own cache action, run only when the caller asks for exactly
-        ``true``, keyed on the install set, uv's digest, the lock and ``.python-version``;
-        and the install step's interpreter uv's own build, never the runner's."""
+        """Two required inputs; its four steps in order, the first taking uv from the one
+        recipe for it by the ``$/`` form (:mod:`tools.ci.test_dockerfile_uv_action`); every
+        third-party action pinned by sha; GitHub's own cache action, run only when the caller
+        asks for exactly ``true``, keyed on the install set, the uv binary's sha256, the lock
+        and ``.python-version``; and the install step's interpreter uv's own build, never the
+        runner's."""
         action = yaml.safe_load(INSTALL_LOCK_FILE.read_text(encoding="utf-8"))
         assert action["inputs"].keys() == {"install", "cache"}
         assert all(spec["required"] is True for spec in action["inputs"].values())
         assert action["runs"]["using"] == "composite"
         steps = _action_steps()
-        assert list(steps) == [self.COPY, self.CACHE, self.INSTALL]
+        assert list(steps) == [self.UV, self.NAME, self.CACHE, self.INSTALL]
+        assert steps[self.UV] == {"name": self.UV, "id": "uv", "uses": DOCKERFILE_UV}
         for step in steps.values():
-            if "uses" in step:
+            if "uses" in step and step["uses"] != DOCKERFILE_UV:
                 assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", step["uses"]), step["name"]
-            else:
+            elif "uses" not in step:
                 assert step["shell"] == "bash", step["name"]
         cache = steps[self.CACHE]
         assert cache["uses"].startswith("actions/cache@")
         assert cache["if"] == "inputs.cache == 'true'"
-        key = "uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.uv.outputs.digest }}-"
+        key = "uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.cache.outputs.uv }}-"
         assert cache["with"] == {
-            "path": "${{ steps.uv.outputs.cache }}",
+            "path": "${{ steps.cache.outputs.dir }}",
             "key": key + "${{ hashFiles('uv.lock', '.python-version') }}",
             "restore-keys": key + "\n",
         }
-        assert "if" not in steps[self.COPY] and "if" not in steps[self.INSTALL]
+        assert all("if" not in steps[name] for name in (self.UV, self.NAME, self.INSTALL))
+        assert steps[self.NAME]["id"] == "cache"
+        assert steps[self.NAME]["env"] == {"UV": "${{ steps.uv.outputs.bin }}"}
         assert steps[self.INSTALL]["env"] == {
             "UV": "${{ steps.uv.outputs.bin }}",
             "INSTALL": "${{ inputs.install }}",
-            "UV_CACHE_DIR": "${{ steps.uv.outputs.cache }}",
+            "UV_CACHE_DIR": "${{ steps.cache.outputs.dir }}",
             "UV_PYTHON_PREFERENCE": "only-managed",
         }
 
@@ -92,63 +87,24 @@ class TestTheInstallActionInstallsTheLock:
         names = [line for line in lines[:ignores[0]] if line.startswith("    - name: ")]
         assert names[-1] == f"    - name: {self.INSTALL}"
 
-    def _copy(self, tmp_path: Path, dockerfile: str, **env: str):
-        """RUN the copy step in a directory holding ``dockerfile``: the result, what
-        ``docker`` was asked, and what the step wrote to its outputs."""
-        work, bindir, temp = tmp_path / "work", tmp_path / "bin", tmp_path / "temp"
-        for folder in (work, bindir, temp):
-            folder.mkdir(exist_ok=True)
-        (work / "Dockerfile").write_text(dockerfile, encoding="utf-8")
-        (bindir / "docker").write_text(self.DOCKER, encoding="utf-8")
-        (bindir / "docker").chmod(0o755)
-        log, output = tmp_path / "docker.log", tmp_path / "github_output"
-        for file in (log, output):
-            file.write_text("", encoding="utf-8")
-        result = _run_step(_action_steps()[self.COPY]["run"], {
-            "PATH": f"{bindir}:/usr/bin:/bin", "LOG": str(log), "RUNNER_TEMP": str(temp),
-            "GITHUB_OUTPUT": str(output), **env}, cwd=work)
-        return result, log.read_text(encoding="utf-8").splitlines(), output.read_text(
-            encoding="utf-8")
-
-    def test_uv_is_copied_from_the_dockerfiles_own_uv_image_by_its_digest(self, tmp_path):
-        """With the real Dockerfile the step pulls its uv image by tag and digest, copies
-        ``/uv`` out of it, and hands the binary, the digest and the cache directory on."""
-        dockerfile = (arcs.REPO / "Dockerfile").read_text(encoding="utf-8")
-        # Read here by splitting the line, not by the step's expression.
-        line, = (row for row in dockerfile.splitlines()
-                 if row.startswith("FROM ghcr.io/astral-sh/uv:"))
-        image = line.split()[1]
-        digest = image.split("@sha256:")[1]
-        result, calls, output = self._copy(tmp_path, dockerfile)
+    def test_the_cache_is_named_for_the_uv_binary_that_writes_it(self, tmp_path):
+        """The naming step, RUN: the cache's directory under the runner's temp directory, and
+        the sha256 of the uv binary the first step handed on, which the key names uv by; a
+        binary it cannot read fails the step, handing nothing on."""
+        run = _action_steps()[self.NAME]["run"]
+        uv, temp, output = tmp_path / "uv", tmp_path / "temp", tmp_path / "github_output"
+        binary = b"a uv binary\n"
+        uv.write_bytes(binary)
+        env = {"RUNNER_TEMP": str(temp), "GITHUB_OUTPUT": str(output)}
+        output.write_text("", encoding="utf-8")
+        result = _run_step(run, {**env, "UV": str(uv)})
         assert result.returncode == 0, result.stderr
-        uv = tmp_path / "temp" / "uv" / "uv"
-        assert calls == [f"pull --quiet {image}", f"create {image} /uv",
-                         f"cp c0ffee:/uv {uv}", "rm c0ffee"]
-        assert result.stdout.splitlines()[-1] == "uv 9.9.9"
-        assert output == (f"bin={uv}\ndigest={digest}\n"
-                          f"cache={tmp_path / 'temp' / 'uv-cache'}\n")
-
-    def test_a_dockerfile_without_exactly_one_pinned_uv_line_is_refused(self, tmp_path):
-        """No uv line, two, a tag with no digest, a short digest or a line that names no
-        ``uv`` stage: the step refuses before calling ``docker`` and hands nothing on; and
-        a pull that fails fails the step, handing nothing on."""
-        pinned = "FROM ghcr.io/astral-sh/uv:0.1.0@sha256:" + "a" * 64 + " AS uv\n"
-        refused = {
-            "FROM python:3.14-slim\n": "it holds 0",
-            pinned + pinned: "it holds 2",
-            "FROM ghcr.io/astral-sh/uv:0.1.0 AS uv\n": "it holds 0",
-            pinned.replace("a" * 64, "a" * 63): "it holds 0",
-            pinned.replace(" AS uv", ""): "it holds 0",
-            pinned.replace(" AS uv", " AS tools"): "it holds 0",
-        }
-        for dockerfile, reason in refused.items():
-            result, calls, output = self._copy(tmp_path, dockerfile)
-            assert result.returncode == 1, dockerfile
-            assert reason in result.stderr, (dockerfile, result.stderr)
-            assert calls == [] and output == "", dockerfile
-        result, calls, output = self._copy(tmp_path, pinned, FAIL_PULL="1")
+        assert output.read_text(encoding="utf-8") == (
+            f"dir={temp}/uv-cache\nuv={hashlib.sha256(binary).hexdigest()}\n")
+        output.write_text("", encoding="utf-8")
+        result = _run_step(run, {**env, "UV": str(tmp_path / "missing")})
         assert result.returncode != 0
-        assert calls == ["pull --quiet " + pinned.split()[1]] and output == ""
+        assert output.read_text(encoding="utf-8") == ""
 
     def test_each_install_set_runs_its_one_uv_command_then_puts_the_venv_first(self, tmp_path):
         """Each set runs its one uv command, every sync ``--locked --require-build-hashes``,

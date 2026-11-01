@@ -605,11 +605,12 @@ jobs:
           tags: ${{ env.IMAGE }}
           cache-from: type=gha
 
-      # uv for the package check, from the Dockerfile's own uv stage: the
-      # binary the build ran, which the image never carries.
-      - name: Export the Dockerfile's uv
-        shell: bash
-        run: docker buildx build --target uv --output "type=local,dest=${RUNNER_TEMP}/uv" .
+      # uv for the package check, from the Dockerfile's own uv stage by the
+      # one recipe every job's install takes it by: the binary the build ran,
+      # which the image never carries.
+      - name: The Dockerfile's uv
+        id: uv
+        uses: $/.github/actions/dockerfile-uv
 
       # The Dockerfile's PSYCOPG_IMPL=c (ruling balance:R-BAL209) already makes
       # the import fail without psycopg-c; the implementation is also read and
@@ -633,9 +634,11 @@ jobs:
       # set is caught rather than agreed with.
       - name: The image holds exactly the lock's runtime and server set
         shell: bash
+        env:
+          UV: ${{ steps.uv.outputs.bin }}
         run: |
           docker run --rm --network none \
-              --volume "${RUNNER_TEMP}/uv/uv:/usr/local/bin/uv:ro" \
+              --volume "${UV}:/usr/local/bin/uv:ro" \
               --volume "${GITHUB_WORKSPACE}:/src:ro" \
               --env UV_PROJECT_ENVIRONMENT=/opt/venv \
               --env UV_PYTHON_DOWNLOADS=never \

@@ -28,7 +28,7 @@ its card's one version, dated the day it was first saved: ``created_at`` read
 in the owner's display timezone (``America/New_York``,
 ``app.utils.dates.DISPLAY_TIMEZONE``, spelled here because a migration imports
 nothing from ``app``).  The reader holds a card's EARLIEST version flat before
-its date (``app.services.card_terms.terms_in_effect``), so a card with one
+its date (``app.services.card_statement.terms_in_effect``), so a card with one
 version derives the same terms on every day whatever its date is: the date is
 the label the Card terms card shows, not an input any figure reads.  Nothing
 derives a figure from the terms yet in any case (no ``app/`` module calls

@@ -62,12 +62,16 @@ Inauguration Day is deliberately absent.  It is a federal holiday for
 federal employees in the District of Columbia area only, banks do not
 close, and payroll does not move for it.
 """
-import calendar
 from datetime import date, timedelta
 from functools import cache
 
 from app.enums import BusinessDayShiftEnum
-from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN
+from app.utils.dates import (
+    CALENDAR_DATE_MAX,
+    CALENDAR_DATE_MIN,
+    last_weekday,
+    nth_weekday,
+)
 
 # ``datetime.date.weekday()`` indices, named because the arithmetic below
 # reads as nonsense against bare integers: a holiday that is "the fourth
@@ -84,53 +88,6 @@ SUNDAY = 6
 # user may put on record predate the holiday, and emitting it for them
 # would move a payday that payroll never moved.
 JUNETEENTH_FIRST_YEAR = 2021
-
-
-def _nth_weekday(year: int, month: int, weekday: int, occurrence: int) -> date:
-    """Return the *occurrence*-th *weekday* of a month (e.g. the 3rd Monday).
-
-    Args:
-        year: Calendar year.
-        month: Calendar month, 1-12.
-        weekday: A ``datetime.date.weekday()`` index -- :data:`MONDAY` or
-            :data:`THURSDAY` here.
-        occurrence: 1-based, so ``1`` is the first such weekday of the month.
-
-    Returns:
-        The day itself.
-    """
-    opens = date(year, month, 1)
-    lead = (weekday - opens.weekday()) % 7
-    return opens + timedelta(days=lead + 7 * (occurrence - 1))
-
-
-def _last_weekday(year: int, month: int, weekday: int) -> date:
-    """Return the LAST *weekday* of a month (Memorial Day's only rule).
-
-    Counted backward from the month's final day rather than forward at a
-    fixed occurrence, because "the last Monday of May" is the fourth in
-    some years and the fifth in others -- the distinction the fixed-count
-    spelling gets wrong roughly one May in three.
-
-    **It must start from the month's REAL last day**, which is what
-    ``calendar.monthrange`` supplies.  A first draft of this function
-    started at the 28th -- the last day every month is guaranteed to have
-    -- and stepped forward a week at a time while the month held: in a
-    31-day May that stops ON the 28th, because the 28th plus seven is
-    already June, and the last Monday of May 2027 (the 31st) was answered
-    as the 24th.  The test that caught it is
-    ``test_matches_the_transcribed_calendar_exactly[2027]``.
-
-    Args:
-        year: Calendar year.
-        month: Calendar month, 1-12.
-        weekday: A ``datetime.date.weekday()`` index.
-
-    Returns:
-        The day itself.
-    """
-    closes = date(year, month, calendar.monthrange(year, month)[1])
-    return closes - timedelta(days=(closes.weekday() - weekday) % 7)
 
 
 def _observed(day: date) -> date:
@@ -204,12 +161,12 @@ def federal_holidays(year: int) -> "frozenset[date]":
     if spillover.year == year:
         observed.add(spillover)
     observed.update({
-        _nth_weekday(year, 1, MONDAY, 3),          # Martin Luther King, Jr.
-        _nth_weekday(year, 2, MONDAY, 3),          # Washington's Birthday
-        _last_weekday(year, 5, MONDAY),            # Memorial Day
-        _nth_weekday(year, 9, MONDAY, 1),          # Labor Day
-        _nth_weekday(year, 10, MONDAY, 2),         # Columbus Day
-        _nth_weekday(year, 11, THURSDAY, 4),       # Thanksgiving Day
+        nth_weekday(year, 1, MONDAY, 3),          # Martin Luther King, Jr.
+        nth_weekday(year, 2, MONDAY, 3),          # Washington's Birthday
+        last_weekday(year, 5, MONDAY),            # Memorial Day
+        nth_weekday(year, 9, MONDAY, 1),          # Labor Day
+        nth_weekday(year, 10, MONDAY, 2),         # Columbus Day
+        nth_weekday(year, 11, THURSDAY, 4),       # Thanksgiving Day
     })
     return frozenset(observed)
 

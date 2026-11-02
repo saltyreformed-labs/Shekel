@@ -455,10 +455,94 @@ def clamped_day(ordinal: int, nominal_day: int) -> date:
             domain (year 1..9999), from the ``date`` constructor itself.  The
             bound is the caller's, as it is for every grid producer.
     """
-    year, month_index = divmod(ordinal, MONTHS_PER_YEAR)
-    month = month_index + 1
+    year, month = month_of_ordinal(ordinal)
     last_day = calendar.monthrange(year, month)[1]
     return date(year, month, min(nominal_day, last_day))
+
+
+def month_of_ordinal(ordinal: int) -> tuple[int, int]:
+    """Return the ``(year, month)`` an absolute month ordinal numbers.
+
+    :func:`month_ordinal`'s inverse, and its ONE spelling: :func:`clamped_day`
+    opened with it inline, and the weekday grids below land their day from
+    the same ordinal (plan step ``recurrence:R8-c``), so a second ``divmod``
+    would be a second statement of which month an ordinal names.
+
+    Args:
+        ordinal: An absolute month ordinal, from :func:`month_ordinal`.
+
+    Returns:
+        The calendar year and the month number, 1-12.
+    """
+    year, month_index = divmod(ordinal, MONTHS_PER_YEAR)
+    return year, month_index + 1
+
+
+#: Days in a week, for every stride and weekday count measured in them.
+DAYS_PER_WEEK = 7
+
+
+def nth_weekday(year: int, month: int, weekday: int, nth: int) -> date:
+    """Return the *nth* *weekday* of a month (the third Monday, the fourth Thursday).
+
+    **The ONE producer of a weekday counted from a month's start**, moved here
+    from :mod:`app.utils.business_days` at plan step ``recurrence:R8-c``.  The
+    federal holiday set counted Martin Luther King, Jr. Day and Thanksgiving
+    with it there, and a recurrence firing on "the third Tuesday" lands every
+    month on the same answer; this leaf is below both, so neither spells it
+    again (``CLAUDE.md`` rule 14: move the leaf).
+
+    Args:
+        year: Calendar year.
+        month: Calendar month, 1-12.
+        weekday: A :meth:`datetime.date.weekday` index, 0 = Monday.
+        nth: 1-based, so ``1`` is the month's first such weekday.  Every month
+            holds a 1st through 4th of every weekday; a 5th exists in some
+            months only, and asking for one a month lacks answers a day in
+            the FOLLOWING month, so a caller asks it only where it knows the
+            month holds one.
+
+    Returns:
+        The day itself.
+    """
+    opens = date(year, month, 1)
+    lead = (weekday - opens.weekday()) % DAYS_PER_WEEK
+    return opens + timedelta(days=lead + DAYS_PER_WEEK * (nth - 1))
+
+
+def last_weekday(year: int, month: int, weekday: int) -> date:
+    """Return the LAST *weekday* of a month (Memorial Day, "the last Friday").
+
+    Moved here from :mod:`app.utils.business_days` beside :func:`nth_weekday`,
+    for the same reason (plan step ``recurrence:R8-c``).
+
+    Counted backward from the month's final day rather than forward at a
+    fixed occurrence, because "the last Monday of May" is the fourth in
+    some years and the fifth in others -- the distinction the fixed-count
+    spelling gets wrong roughly one May in three.
+
+    **It must start from the month's REAL last day**, which is what
+    ``calendar.monthrange`` supplies.  A first draft of this function (in
+    ``business_days``) started at the 28th -- the last day every month is
+    guaranteed to have -- and stepped forward a week at a time while the
+    month held: in a 31-day May that stops ON the 28th, because the 28th
+    plus seven is already June, and the last Monday of May 2027 (the 31st)
+    was answered as the 24th.  The test that caught it is
+    ``test_business_days``' ``test_matches_the_transcribed_calendar_exactly
+    [2027]``.
+
+    Args:
+        year: Calendar year.
+        month: Calendar month, 1-12.
+        weekday: A :meth:`datetime.date.weekday` index, 0 = Monday.
+
+    Returns:
+        The day itself.
+    """
+    closes = date(year, month, calendar.monthrange(year, month)[1])
+    return closes - timedelta(
+        days=(closes.weekday() - weekday) % DAYS_PER_WEEK,
+    )
 
 
 # A nominal day's MONTHLY GRID is that day clamped into every month -- one date

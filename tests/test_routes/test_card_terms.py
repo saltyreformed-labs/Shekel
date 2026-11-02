@@ -2,14 +2,18 @@
 Shekel Budget App -- the card's terms door and its card (plan step credit_card:CC-2)
 
 ``POST /accounts/<id>/card/terms`` (developer ruling **R-CC24**: one door,
-one schema, creating the row when the card has none and rewriting it whole
-when it has one) and the "Card terms" card the cash detail page shows a
-revolving account (**R-CC25**).  What is pinned:
+one schema) and the "Card terms" card the cash detail page shows a revolving
+account (**R-CC25**).  Since plan#2331 (developer ruling **plan#2333**) the
+terms are a dated series: each submit states a whole version from the date
+it names.  What is pinned:
 
-* the door CREATES the row from a whole form, storing fractions and the
-  ACCOUNT's owner, and a second submit REWRITES the same row (same id, one
-  row) -- the second time, because a producer right on the first write can
-  be wrong on the repeat;
+* the door CREATES a version from a whole form, storing fractions and the
+  ACCOUNT's owner; a second submit on the SAME date corrects that version
+  (same id, one row) -- the second time, because a producer right on the
+  first write can be wrong on the repeat -- and one on a LATER date adds a
+  version and leaves the first as it was (the done-when of plan#2331 at the
+  door: a change of terms leaves the terms before it standing);
+* a submit naming no effective date is refused and writes nothing;
 * a nullable term stated once and blanked next is CLEARED (the "clearable
   from the UI" contract every nullable form field in this app holds);
 * a refused payload writes nothing: a card with no row stays dormant, and
@@ -19,21 +23,26 @@ revolving account (**R-CC25**).  What is pinned:
   URL routes for a real card, so a 404 from the map cannot pass for a 404
   from the gate;
 * the page renders the card blank for a dormant card, filled (in percents)
-  after a save, and not at all for a non-card; and saving the row changes
-  NOTHING on the page outside the card -- dormancy and its end are one
-  render apart, and the band, the reconcile panel, the difference card and
-  the history are byte-identical across them.
+  after a save from the version in force on the page's day -- not the newest,
+  when the newest is a change still to come -- and not at all for a non-card;
+  the terms history lists every version newest first and marks the one in
+  force; and saving terms changes NOTHING on the page outside the card --
+  dormancy and its end are one render apart, and the band, the reconcile
+  panel, the difference card and the history are byte-identical across them.
 """
 
 import re
+from datetime import date, timedelta
 from decimal import Decimal
 
 from app.extensions import db
 from app.models.credit_card_params import CreditCardParams
+from app.utils.dates import display_today
 from tests._test_helpers import create_account_of_type
 
 #: A whole valid form, as the browser posts it.
 _FORM = {
+    "effective_date": "2026-01-01",
     "statement_close_day": "20",
     "payment_due_day": "15",
     "min_payment_percent": "2.5",
@@ -45,6 +54,7 @@ _FORM = {
 
 #: What :data:`_FORM` stores.
 _STORED = {
+    "effective_date": date(2026, 1, 1),
     "statement_close_day": 20,
     "payment_due_day": 15,
     "min_payment_percent": Decimal("0.0250"),
@@ -63,11 +73,11 @@ def _card(owner, name="Visa"):
 
 
 def _terms_of(account):
-    """The account's terms rows (a list, so a duplicate would show)."""
+    """The account's terms versions, earliest first (a list, so a duplicate shows)."""
     db.session.expire_all()
     return db.session.query(CreditCardParams).filter_by(
         account_id=account.id,
-    ).all()
+    ).order_by(CreditCardParams.effective_date).all()
 
 
 def _rendered_values(page):
@@ -106,7 +116,7 @@ def _post(client, account_id, **overrides):
 
 
 class TestTheDoorWritesTheRow:
-    """Create on the first submit, rewrite on the next."""
+    """Create on the first submit; correct on the same date, add on a later one."""
 
     def test_a_whole_form_creates_the_row(self, auth_client, seed_user):
         """The first submit stores every column, as fractions, owned by the account's owner."""
@@ -125,8 +135,8 @@ class TestTheDoorWritesTheRow:
             assert getattr(rows[0], column) == value, column
         assert rows[0].user_id == seed_user["user"].id
 
-    def test_a_second_submit_rewrites_the_same_row(self, auth_client, seed_user):
-        """The repeat changes every column in place: one row, the same id."""
+    def test_a_same_date_submit_corrects_that_version(self, auth_client, seed_user):
+        """The repeat on the same date changes every column in place: one row, the same id."""
         account = _card(seed_user)
         _post(auth_client, account.id)
         first_id = _terms_of(account)[0].id
@@ -151,6 +161,35 @@ class TestTheDoorWritesTheRow:
         assert row.cashback_rate == Decimal("0.0200")
         assert row.auto_redeem_threshold == Decimal("50.00")
         assert row.credit_limit == Decimal("12000.00")
+
+    def test_a_later_date_adds_a_version_and_the_first_stands(
+        self, auth_client, seed_user,
+    ):
+        """Mar 1's change is a second version; January's terms are untouched.
+
+        plan#2333's example at the door: the close moves to the 5th, the due
+        day to the 30th and cash back to 1.0% from Mar 1, and the version
+        every statement before Mar 1 reads keeps its 20th, 15th and 1.5%.
+        """
+        account = _card(seed_user)
+        _post(auth_client, account.id)
+        first_id = _terms_of(account)[0].id
+
+        response = _post(
+            auth_client, account.id, effective_date="2026-03-01",
+            statement_close_day="5", payment_due_day="30", cashback_rate="1",
+        )
+
+        assert response.status_code == 302
+        rows = _terms_of(account)
+        assert [r.effective_date for r in rows] == [
+            date(2026, 1, 1), date(2026, 3, 1),
+        ]
+        assert rows[0].id == first_id
+        for column, value in _STORED.items():
+            assert getattr(rows[0], column) == value, column
+        assert (rows[1].statement_close_day, rows[1].payment_due_day) == (5, 30)
+        assert rows[1].cashback_rate == Decimal("0.0100")
 
     def test_a_blanked_nullable_term_is_cleared(self, auth_client, seed_user):
         """Stated once, blank next: the threshold and the limit go back to NULL."""
@@ -194,6 +233,15 @@ class TestTheDoorWritesTheRow:
 
 class TestARefusalWritesNothing:
     """A bad payload leaves the card exactly as it was."""
+
+    def test_a_submit_naming_no_date_is_refused(self, auth_client, seed_user):
+        """No effective date, no version: a change of terms must name its day."""
+        account = _card(seed_user)
+
+        response = _post(auth_client, account.id, effective_date=None)
+
+        assert response.status_code == 302
+        assert _terms_of(account) == []
 
     def test_a_refused_first_submit_keeps_the_card_dormant(
         self, auth_client, seed_user,
@@ -341,6 +389,45 @@ class TestThePageShowsTheCard:
             "auto_redeem_threshold": "25.00",
             "credit_limit": "5000.00",
         }
+
+    def test_the_form_fills_from_the_terms_in_force_today(
+        self, auth_client, seed_user, seed_periods_today,
+    ):
+        """A change still to come is listed, but today's terms fill the form.
+
+        Two versions around the page's day: one 30 days back (close 20th), one
+        30 days ahead (close 5th).  The newest is the future one, so a form
+        filled from the newest would read 5; the history lists both, newest
+        first, and marks only the one in force today.
+        """
+        account = _card(seed_user)
+        today = display_today()
+        past, future = today - timedelta(days=30), today + timedelta(days=30)
+        _post(auth_client, account.id, effective_date=past.isoformat())
+        _post(
+            auth_client, account.id, effective_date=future.isoformat(),
+            statement_close_day="5", payment_due_day="30",
+        )
+
+        response = auth_client.get(f"/accounts/{account.id}/details")
+
+        assert response.status_code == 200
+        page = response.data.decode()
+        assert _rendered_values(page)["statement_close_day"] == "20"
+        assert _rendered_values(page)["payment_due_day"] == "15"
+        history = page.split('id="card-terms-history"', 1)[1].split("</ul>", 1)[0]
+        items = history.split("<li")[1:]
+        assert len(items) == 2
+        assert future.strftime("%b %-d, %Y") in items[0]
+        assert "Closes on the 5th, due on the 30th" in items[0]
+        assert "In effect today" not in items[0]
+        assert past.strftime("%b %-d, %Y") in items[1]
+        assert "Closes on the 20th, due on the 15th" in items[1]
+        assert "minimum 2.50%, at least $25.00" in items[1]
+        assert "cash back 1.50%" in items[1]
+        assert "auto-redeem at $25.00" in items[1]
+        assert "limit $5,000.00" in items[1]
+        assert "In effect today" in items[1]
 
     def test_a_checking_account_shows_no_card_terms(
         self, auth_client, seed_user, seed_periods_today,

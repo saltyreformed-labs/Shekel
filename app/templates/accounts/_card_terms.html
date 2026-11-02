@@ -1,18 +1,28 @@
+{% from "_money_macros.html" import money %}
 {# The card's terms (plan step credit_card:CC-2; developer ruling R-CC25,
    2026-09-18): the parameters card a revolving account shows below its
    balance band on the cash detail page, exactly where an interest-bearing
    account shows its APY card.  Blank until the owner saves the card's terms,
-   filled from the row after; until then the card is a DORMANT plain
-   liability (design 3.4: no auto-create) and no card feature is offered.
-   The cockpit plan step CC-11 builds replaces this page for a card and
-   carries this form on.
+   filled after from the version in force on the page's day; until then the
+   card is a DORMANT plain liability (design 3.4: no auto-create) and no card
+   feature is offered.  The cockpit plan step CC-11 builds replaces this page
+   for a card and carries this form on.
 
-   Every control renders every time, so a submit is the WHOLE row and the one
-   door it posts to (card.save_terms, ruling R-CC24) creates or rewrites it;
-   the five NOT NULL terms are required controls (cash back pre-filled 0.00
-   for a card with no terms), the two nullable ones may be left blank.
-   Rates are entered as percents and stored as fractions (E-28): the schema
-   divides, the template multiplies back through |to_percent.
+   The terms are a DATED SERIES (plan#2331, developer ruling plan#2333,
+   2026-11-02): every control renders every time, so a submit is a WHOLE
+   version, stated from the "Effective from" date; the one door it posts to
+   (card.save_terms, ruling R-CC24) creates that version or corrects the one
+   already on that date.  The date control is never pre-filled, as the APR's
+   is not: a change of terms must name its day, and a pre-filled date would
+   turn a forgotten edit into a correction that re-cuts the past.  The five
+   NOT NULL terms are required controls (cash back pre-filled 0.00 for a card
+   with no terms), the two nullable ones may be left blank.  Rates are
+   entered as percents and stored as fractions (E-28): the schema divides,
+   the template multiplies back through |to_percent.
+
+   Below the form, once terms exist: the versions newest first, the one in
+   force today marked.  The earliest also governs every day before it
+   (app.services.card_terms.terms_in_effect), and the card says so.
 
    Below the terms, once they exist: the card's APR (plan step
    credit_card:CC-3; developer rulings R-CC27 and R-CC28, 2026-09-18) -- the
@@ -22,8 +32,10 @@
    Nothing renders here while the card is dormant: every card feature gates
    on the terms row (design 3.4).
 
-   Context: account, card_terms (a CreditCardParams row, or None),
-   card_aprs (CardApr rows, newest first; empty for a dormant card),
+   Context: account, card_terms (the CreditCardParams version in force on
+   the page's day, or None), card_term_versions (CreditCardParams rows,
+   newest first; empty for a dormant card), card_aprs (CardApr rows, newest
+   first; empty for a dormant card),
    card_apr_today (the fraction in effect on the page's day, or None). #}
 <div class="card acctd-params">
   <div class="card-header">
@@ -39,6 +51,11 @@
     <form method="POST" action="{{ url_for('card.save_terms', account_id=account.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="row g-3">
+        <div class="col-sm-6 col-lg-3">
+          <label for="effective_date" class="form-label">Effective from</label>
+          <input type="date" class="form-control" id="effective_date" name="effective_date" required>
+          <div class="form-text">The day these terms took effect. A date already listed is corrected.</div>
+        </div>
         <div class="col-sm-6 col-lg-3">
           <label for="statement_close_day" class="form-label">Statement closes on day</label>
           <input type="number" class="form-control" id="statement_close_day" name="statement_close_day"
@@ -109,6 +126,31 @@
       </button>
     </form>
     {% if card_terms is not none %}
+    <hr>
+    <h6 class="mb-2"><i class="bi bi-clock-history"></i> Terms history</h6>
+    <p class="text-muted small mb-2">
+      Each set of terms applies from its date until the next one. The earliest
+      also applies to every day before it.
+    </p>
+    <ul class="list-group list-group-flush mb-3" id="card-terms-history">
+      {% for version in card_term_versions %}
+      <li class="list-group-item px-0 py-1">
+        <div class="d-flex justify-content-between align-items-center">
+          <span>{{ version.effective_date.strftime('%b %-d, %Y') }}</span>
+          {% if version.id == card_terms.id %}
+          <span class="badge text-bg-secondary">In effect today</span>
+          {% endif %}
+        </div>
+        <div class="small text-muted">
+          Closes on the {{ version.statement_close_day|ordinal }}, due on the {{ version.payment_due_day|ordinal }};
+          minimum {{ "%.2f"|format(version.min_payment_percent|to_percent) }}%, at least {{ money(version.min_payment_floor) }};
+          cash back {{ "%.2f"|format(version.cashback_rate|to_percent) }}%;
+          {% if version.auto_redeem_threshold is not none %}auto-redeem at {{ money(version.auto_redeem_threshold) }}{% else %}redeem by hand{% endif %};
+          {% if version.credit_limit is not none %}limit {{ money(version.credit_limit) }}{% else %}no limit tracked{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
     <hr>
     <h6 class="mb-2"><i class="bi bi-percent"></i> APR</h6>
     <p class="small mb-2" id="card-apr-today">

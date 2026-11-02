@@ -11,14 +11,17 @@ leaf:
 * the CHECKs' text on the model equals the migration's, name for name,
   because Alembic autogenerate does not diff a CHECK and the migration's
   docstring names this module as what keeps them equal;
-* the row is one-to-one with its account, and its owner is the ACCOUNT's
-  owner by key (``fk_credit_card_params_owner``) -- a row naming another
-  owner is unstorable rather than checked by a reader;
-* the row dies with its account (CASCADE on both keys);
+* a card holds one version of its terms per effective date (plan#2331,
+  ruling plan#2333: the terms are a dated series), and each row's owner is
+  the ACCOUNT's owner by key (``fk_credit_card_params_owner``) -- a row
+  naming another owner is unstorable rather than checked by a reader;
+* the rows die with their account (CASCADE on both keys);
 * the migration round-trips on this test's own clone: down drops the table
-  and its audit trigger, up restores both.
+  and its audit trigger, up restores both.  The dating revision
+  ``0703995c8536`` is graded in ``test_card_terms_dated_migration.py``.
 """
 
+from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -37,9 +40,13 @@ from app.models.credit_card_params import CreditCardParams
 from tests._test_helpers import create_account_of_type, load_migration_module
 
 _MIGRATION = load_migration_module("97f92340fffc_the_cards_terms.py")
+#: The revision after it on this table, which a round trip of the one above
+#: must re-apply before the model can write a row again.
+_DATED = load_migration_module("0703995c8536_a_cards_terms_are_dated.py")
 
 #: An in-domain row, the base every refusal case perturbs one column of.
 _VALID_TERMS = {
+    "effective_date": date(2026, 1, 1),
     "statement_close_day": 20,
     "payment_due_day": 15,
     "min_payment_percent": Decimal("0.0200"),
@@ -189,9 +196,9 @@ class TestTheDomainIsTheDatabases:
             account = _card(seed_user)
             db.session.execute(sqlalchemy.text(
                 "INSERT INTO budget.credit_card_params "
-                "(statement_close_day, payment_due_day, min_payment_percent, "
-                " min_payment_floor, account_id, user_id) "
-                "VALUES (20, 15, 0.02, 25.00, :account_id, :user_id)"
+                "(effective_date, statement_close_day, payment_due_day, "
+                " min_payment_percent, min_payment_floor, account_id, user_id) "
+                "VALUES ('2026-01-01', 20, 15, 0.02, 25.00, :account_id, :user_id)"
             ), {"account_id": account.id, "user_id": account.user_id})
             stored = db.session.execute(sqlalchemy.text(
                 "SELECT cashback_rate FROM budget.credit_card_params "
@@ -263,11 +270,17 @@ class TestTheDomainIsTheDatabases:
             assert model_checks == _MIGRATION._CHECKS  # pylint: disable=protected-access
 
 
-class TestTheRowIsOneToOneAndOwned:
-    """One row per account, and its owner is the account's by key."""
+class TestOneVersionPerDayAndOwned:
+    """One version per card per date, and its owner is the account's by key."""
 
-    def test_a_second_row_for_the_same_account_is_refused(self, app, seed_user):
-        """``account_id`` is UNIQUE: the satellite is 1:1 with its account."""
+    def test_a_second_version_on_the_same_date_is_refused(self, app, seed_user):
+        """``(account_id, effective_date)`` is UNIQUE: one version per day.
+
+        The key the terms door's ``ON CONFLICT`` names
+        (``card_terms.set_terms``), so a same-day save corrects the version
+        rather than adding a second one the as-of read could not choose
+        between.
+        """
         with app.app_context():
             account = _card(seed_user)
             db.session.add(_terms_for(account))
@@ -276,7 +289,29 @@ class TestTheRowIsOneToOneAndOwned:
             with pytest.raises(IntegrityError) as excinfo:
                 db.session.flush()
             db.session.rollback()
-            assert "credit_card_params_account_id_key" in str(excinfo.value)
+            assert "uq_credit_card_params_account_effective_date" in str(
+                excinfo.value,
+            )
+
+    def test_a_second_date_is_a_second_version(self, app, seed_user):
+        """The pair for the refusal above: another day stores beside the first.
+
+        Without it, a key still on ``account_id`` alone would pass the case
+        above too.
+        """
+        with app.app_context():
+            account = _card(seed_user)
+            db.session.add(_terms_for(account))
+            db.session.add(_terms_for(
+                account, effective_date=date(2026, 3, 1), statement_close_day=5,
+            ))
+            db.session.commit()
+            stored = db.session.query(CreditCardParams).filter_by(
+                account_id=account.id,
+            ).order_by(CreditCardParams.effective_date).all()
+            assert [(r.effective_date, r.statement_close_day) for r in stored] == [
+                (date(2026, 1, 1), 20), (date(2026, 3, 1), 5),
+            ]
 
     def test_a_row_naming_another_owner_is_unstorable(
         self, app, seed_user, second_user,
@@ -298,15 +333,16 @@ class TestTheRowIsOneToOneAndOwned:
             db.session.rollback()
             assert "fk_credit_card_params_owner" in str(excinfo.value)
 
-    def test_the_row_dies_with_its_account(self, app, seed_user):
-        """Deleting the account cascades to its terms (both keys CASCADE).
+    def test_the_rows_die_with_their_account(self, app, seed_user):
+        """Deleting the account cascades to every version (both keys CASCADE).
 
         A card with no transactions is deletable; the cascade is what keeps a
-        terms row from outliving the account it describes.
+        terms version from outliving the account it describes.
         """
         with app.app_context():
             account = _card(seed_user)
             db.session.add(_terms_for(account))
+            db.session.add(_terms_for(account, effective_date=date(2026, 3, 1)))
             db.session.commit()
             account_id = account.id
             db.session.delete(db.session.get(Account, account_id))
@@ -344,7 +380,12 @@ class TestTheMigrationRoundTrips:
     def test_the_downgrade_drops_the_table_and_the_upgrade_restores_it(
         self, app, seed_user,
     ):
-        """Down: table and trigger gone.  Up: both back, and a row is storable."""
+        """Down: table and trigger gone.  Up: both back, and a row is storable.
+
+        The table this revision's upgrade creates is the PRE-dating shape, so
+        the dating revision (``0703995c8536``) is applied after it before the
+        model writes a row: the head shape is the one the model maps.
+        """
         with app.app_context():
             assert _table_exists() is True
             assert _trigger_exists() is True
@@ -358,6 +399,9 @@ class TestTheMigrationRoundTrips:
             db.session.commit()
             assert _table_exists() is True
             assert _trigger_exists() is True
+
+            _run(_DATED.upgrade)
+            db.session.commit()
 
             account = _card(seed_user)
             db.session.add(_terms_for(account))

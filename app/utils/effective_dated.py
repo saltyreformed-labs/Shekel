@@ -18,6 +18,12 @@ and two in :mod:`app.services.template_amount_service`
 this leaf is ledger row **BAL-524**'s, owned by plan step ``balance:X-ct``
 (filed 2026-09-18; the row lists each with its fallback).
 
+**A series that HOLDS FLAT before its first row** has its walk here too,
+:func:`in_effect_or_earliest`, built on :func:`in_effect_on` rather than beside
+it: a card's dated terms read through it (plan#2331, ruling plan#2333), and
+``template_amount_service._version_in_effect`` is the same shape still spelled
+in its own module, one of BAL-524's.
+
 A leaf: the standard library only.
 """
 
@@ -44,3 +50,27 @@ def in_effect_on(rows: Iterable[Row], on_date: date) -> Row | None:
     if not candidates:
         return None
     return max(candidates, key=lambda row: row.effective_date)
+
+
+def in_effect_or_earliest(rows: Iterable[Row], on_date: date) -> Row | None:
+    """Return the row in effect on *on_date*; before the first, the first.
+
+    :func:`in_effect_on`'s answer wherever it has one, and the EARLIEST row
+    for a day before every row: the series holds flat backwards, ruling
+    **R-I**'s shape for a stated figure, so a resolver over a series with
+    any row is total.  ``None`` is reserved for an EMPTY series.
+
+    Args:
+        rows: Rows each exposing an ``effective_date``, in any order.
+        on_date: The day to resolve.
+
+    Returns:
+        The row with the greatest ``effective_date <= on_date``; the row with
+        the least ``effective_date`` when none is on or before *on_date*;
+        ``None`` when *rows* is empty.
+    """
+    rows = list(rows)
+    found = in_effect_on(rows, on_date)
+    if found is not None:
+        return found
+    return min(rows, key=lambda row: row.effective_date, default=None)

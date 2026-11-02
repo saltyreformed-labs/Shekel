@@ -48,7 +48,6 @@ from app.extensions import db
 from app.models.pay_stub import PayStub
 from app.models.paycheck_line import PaycheckLine
 from app.models.salary_profile import SalaryProfile
-from app.models.transaction_template import TransactionTemplate
 from app.services import pay_stub_service
 from app.services.balance_at import BalanceContext
 from tests._test_helpers import (
@@ -575,10 +574,10 @@ class TestTheSwitch:
 def _paid_world(world, seed_user):
     """The worked example's profile paid into a salary template, so a write regenerates.
 
-    The salary template is what the paycheck rows and the stored amount
-    belong to; the plain ``world`` profile has none, and the regeneration
-    skips a profile without one.  The template's stated price, ``$2,000.00``,
-    is made up and is no paycheck's net.
+    The salary template is what the paycheck rows belong to; the plain
+    ``world`` profile has none, and the regeneration skips a profile without
+    one.  The template's stated price, ``$2,000.00``, is made up and is no
+    paycheck's net.
     """
     profile = db.session.get(SalaryProfile, world["profile_id"])
     template = make_income_template(db.session, seed_user, name="Day Job pay")
@@ -588,7 +587,7 @@ def _paid_world(world, seed_user):
 
 
 def _todays_net(world):
-    """Today's paycheck net, priced by a pass built now -- the oracle a write must store."""
+    """Today's paycheck net, priced by a pass built now -- what a write must move."""
     db.session.expire_all()
     profile = db.session.get(SalaryProfile, world["profile_id"])
     ctx = BalanceContext.build(profile.user_id)
@@ -596,44 +595,40 @@ def _todays_net(world):
     return ctx.paychecks().for_profile(profile).at(period).earnings.net_pay
 
 
-def _stored_amount(world):
-    """The salary template's stored amount, freshly read."""
-    db.session.expire_all()
-    return db.session.get(TransactionTemplate, world["template_id"]).default_amount
-
-
-class TestAStubWriteRegeneratesThePaychecks:
-    """Each stub door regenerates the salary rows in its transaction (review M3).
+class TestAStubWriteMovesTodaysPaycheck:
+    """Each stub door moves today's paycheck, as a pass built after it prices it.
 
     Plan step salary:S11-c-2c: a stub prices the taxes of every paycheck on
     or after its payday (ruling R-SAL100), so recording, editing or switching
-    one moves the amount the salary template stores for today's paycheck, as
-    the calibration doors it replaced did.  The stub here is dated 03-13, the
-    payday of today's paycheck (today is 03-20), so it prices that paycheck;
-    every door is driven with the form the page emits (the worked example's
-    payload, pinned to the rendered controls above).  The expected figure is
-    the pricer's own, read by a pass built after the write: the door must
-    store what the app now prices, and each case also proves the write moved
-    that figure, so a door that skipped the regeneration fails it.
+    one moves today's paycheck, the figure the Recurring and savings pages
+    show (``obligations_aggregator.todays_price``), as the calibration doors
+    it replaced did.  The stub here is dated 03-13, the payday of today's
+    paycheck (today is 03-20), so it prices that paycheck; every door is
+    driven with the form the page emits (the worked example's payload,
+    pinned to the rendered controls above).  The figure is the pricer's own,
+    read by a pass built after the write, and each case proves the write
+    moved it.  **These cases graded the doors' regeneration (review M3)
+    through the amount it stored on the salary template, until plan step
+    X-bp deleted that re-statement**: the paycheck is priced live, so what a
+    stub write must do is reach the pricer, and a stub changes no row the
+    regeneration redraws.
     """
 
     _TODAY_PAYDAY = "2026-03-13"
 
-    def test_recording_a_stub_stores_the_paycheck_it_prices(self, auth_client, paid_world):
-        """The formulas' net before; the stub-priced net stored after."""
+    def test_recording_a_stub_moves_the_paycheck_it_prices(self, auth_client, paid_world):
+        """The formulas' net before; the stub-priced net after."""
         formulas_net = _todays_net(paid_world)
 
         response = _record(auth_client, paid_world, payday=self._TODAY_PAYDAY)
 
         assert response.status_code == 302
-        stub_net = _todays_net(paid_world)
-        assert stub_net != formulas_net
-        assert _stored_amount(paid_world) == stub_net
+        assert _todays_net(paid_world) != formulas_net
 
-    def test_editing_a_stub_stores_the_paycheck_it_now_prices(self, auth_client, paid_world):
-        """Federal $150.00 -> $250.00 on the stub moves today's paycheck, and it is stored."""
+    def test_editing_a_stub_moves_the_paycheck_it_now_prices(self, auth_client, paid_world):
+        """Federal $150.00 -> $250.00 on the stub moves today's paycheck."""
         _record(auth_client, paid_world, payday=self._TODAY_PAYDAY)
-        before = _stored_amount(paid_world)
+        before = _todays_net(paid_world)
         stub = _stub()
         payload = _payload(paid_world, payday=self._TODAY_PAYDAY, printed_net="2002.62")
         payload[_tax_field(WithholdingKindEnum.FEDERAL_INCOME)] = "250.00"
@@ -642,15 +637,14 @@ class TestAStubWriteRegeneratesThePaychecks:
         response = auth_client.post(f"/salary/stubs/{stub.id}/edit", data=payload)
 
         assert response.status_code == 302
-        after = _todays_net(paid_world)
-        assert after != before
-        assert _stored_amount(paid_world) == after
+        assert _todays_net(paid_world) != before
 
-    def test_switching_a_stub_off_and_on_stores_each_paycheck(self, auth_client, paid_world):
-        """Off: the formulas' net is stored; on again: the stub's."""
+    def test_switching_a_stub_off_and_on_moves_each_paycheck(self, auth_client, paid_world):
+        """Off: the formulas' net; on again: the stub's."""
         formulas_net = _todays_net(paid_world)
         _record(auth_client, paid_world, payday=self._TODAY_PAYDAY)
-        stub_net = _stored_amount(paid_world)
+        stub_net = _todays_net(paid_world)
+        assert stub_net != formulas_net
         stub_id = _stub().id
 
         off = auth_client.post(
@@ -658,14 +652,14 @@ class TestAStubWriteRegeneratesThePaychecks:
             data={"use_for_pricing": "off", "version_id": "1"},
         )
         assert off.status_code == 302
-        assert _stored_amount(paid_world) == formulas_net == _todays_net(paid_world)
+        assert _todays_net(paid_world) == formulas_net
 
         on = auth_client.post(
             f"/salary/stubs/{stub_id}/pricing",
             data={"use_for_pricing": "on", "version_id": "2"},
         )
         assert on.status_code == 302
-        assert _stored_amount(paid_world) == stub_net == _todays_net(paid_world)
+        assert _todays_net(paid_world) == stub_net
 
 
 def _selected(html, name):

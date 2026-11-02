@@ -36,6 +36,7 @@ from app.services import (
 )
 from app.services import pay_schedule_service, pay_stub_service
 from app.services.balance_at import BalanceContext
+from app.services.obligations_aggregator import todays_price
 from app.services.pay_calendar import PayCadence
 from app.services.payroll_basis import PayrollBasis
 from app.services.recurrence import RecurrenceSpec, author_rule
@@ -510,8 +511,9 @@ def update_profile(profile_id):
     # The linked template takes the profile's name.  ``profile.template`` is
     # eager (lazy="joined"), so this touches no DB and stages safely before
     # the guard below picks up the commit.  The GROSS amount written here
-    # beside it went with the yearly salary (plan step salary:X-av-3a): the
-    # regeneration below re-states the template at the net, its one quantity.
+    # beside it went with the yearly salary (plan step salary:X-av-3a), and
+    # the net the regeneration re-stated went at plan step X-bp: a salary
+    # profile's template states no amount, its figure is today's paycheck.
     if profile.template and "name" in data:
         profile.template.name = data["name"]
 
@@ -653,16 +655,37 @@ def delete_profile(profile_id):
     if profile is None:
         abort(404)
 
+    # Today's paycheck, priced FIRST and while this profile still prices it
+    # (plan step X-bp, an edge case decided under R-BAL207): the template's
+    # price history opens at it below, because the Recurring and savings
+    # pages already show it as the definition's figure
+    # (``obligations_aggregator.todays_price``), so the archive moves no
+    # figure there.  It opened at the stored ``default_amount`` until X-bp,
+    # the paycheck as of the last salary save, which a raise whose date has
+    # passed since then is missing from.  Before the freeze and the flag,
+    # with nothing staged, so the pricer's profile query reads the profile
+    # as active and flushes nothing.  The pass is pinned to the owner's
+    # civil day, the day the version is dated, so the price and its date
+    # are one day (ledger row SAL-572's rule).
+    today = display_today()
+    todays_paycheck = None
+    if profile.template:
+        todays_paycheck = todays_price(
+            profile.template, BalanceContext.build(current_user.id, as_of=today),
+        ).amount
+
     # **BEFORE the flag, and the ordering IS the fix** (finding **N-261**,
     # ruled 2026-09-02).  Archiving removes the producer behind amount rule 2,
     # and since plan step X-au-d the rows it priced hold no figure of their
     # own -- so they must record what they were last worth here, while this
     # profile is still what prices them.  ``is_salary_linked_template`` reads
     # the identity-mapped collection, so a pending ``is_active = False`` is
-    # already visible to it: freezing after the flag would freeze the
-    # ``default_amount`` this exists to avoid.  Measured on the 2026-09-02
-    # production clone: without it the archive re-prices 50 of 59 rows and
-    # moves the projected balance by ``-$9,677.24``.
+    # already visible to it: freezing after the flag would freeze every row
+    # at the one price the series opens at below, where each row's paycheck
+    # is its own.  Measured on the 2026-09-02 production clone, when that
+    # price was the stored ``default_amount``: without it the archive
+    # re-prices 50 of 59 rows and moves the projected balance by
+    # ``-$9,677.24``.
     salary_profile_service.archive_profile(profile)
 
     profile.is_active = False
@@ -670,9 +693,9 @@ def delete_profile(profile_id):
         profile.template.is_active = False
         # The template's amount stops being DERIVED the moment the profile is
         # archived (plan step X-au-a): with no ACTIVE profile its rows are
-        # priced by its own series rather than by the paycheck engine, so that
-        # column becomes the definition's stated price and the write door opens
-        # its series at it.  Without this the template would satisfy
+        # priced by its own series rather than by the paycheck engine, so
+        # today's paycheck becomes the definition's stated price and the write
+        # door opens its series at it.  Without this the template would satisfy
         # ``owns_its_amount`` while holding NO version -- an eligible
         # definition with an empty series, which is the one gap
         # ``amount_as_of`` reports as ``None`` and which the amount resolver is
@@ -684,8 +707,7 @@ def delete_profile(profile_id):
         # of them state its own figure, so this version is what a row generated
         # from the template AFTER the archive would read.
         template_amount_service.set_amount(
-            profile.template, profile.template.default_amount,
-            effective_on=display_today(),
+            profile.template, todays_paycheck, effective_on=today,
         )
 
     conflict = commit_or_handle_stale(StaleConflictContext(

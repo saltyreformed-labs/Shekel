@@ -212,15 +212,18 @@ def create_payment_transfer(account_id):
         derive_from_loan=derive_from_loan, extra_principal=extra_principal,
     )
 
-    # Open the amount's dated series, AFTER the settings row is attached and for
-    # exactly that reason (plan step X-au-a): a DERIVE-mode payment's
-    # ``default_amount`` is a P&I + escrow snapshot, so it owns no stated amount
-    # and must get no version -- and the write door reads the mode off the
-    # settings row this line has just set.  A MANUAL payment (the operator typed
-    # the base) does open a series here.
-    template_amount_service.set_amount(
-        template, transfer_amount, effective_on=display_today(),
-    )
+    # Open the amount's dated series for a MANUAL payment, the one whose base
+    # the operator typed (plan step X-au-a), AFTER the settings row is
+    # attached, because the write door reads the mode off it.  A DERIVE-mode
+    # payment states no price: its base is the loan's P&I + escrow, which
+    # amount rule 4 prices live and the Recurring and savings pages read the
+    # same way (``obligations_aggregator.todays_price``), so the door refuses
+    # one (plan step X-bp, where this wrote that snapshot into
+    # ``default_amount`` a second time, beside the builder's).
+    if not derive_from_loan:
+        template_amount_service.set_amount(
+            template, transfer_amount, effective_on=display_today(),
+        )
 
     namedup_redirect = flush_template_or_namedup_redirect(
         redirect=RedirectTarget("loan.dashboard", {"account_id": account_id}),
@@ -404,10 +407,12 @@ def track_payment(account_id, template_id):
     MANUAL recurring payment has fallen short of the contractual monthly
     payment (P&I + today's escrow) after an escrow or rate change, this flips
     it to ``derive_from_loan`` so its projected cash always equals the
-    contract, and resets the stored base (``default_amount``) to today's
-    contract so every surface that reads it shows the current figure.  The
-    card offers it on every fixed-amount definition, short or not, and the
-    definition it flips is the one the URL names -- never a picked one.
+    contract.  It also reset the stored base (``default_amount``) to today's
+    contract until plan step X-bp, a copy the Recurring and savings pages
+    read; they price a tracking payment by amount rule 4 now
+    (``obligations_aggregator.todays_price``), so the flip writes no figure.
+    The card offers it on every fixed-amount definition, short or not, and
+    the definition it flips is the one the URL names -- never a picked one.
 
     **No payment row is rewritten, and that is STRUCTURAL rather than a
     property of a read-time override.**  It used to rest on
@@ -439,8 +444,7 @@ def track_payment(account_id, template_id):
     flip is refused with :data:`ANOTHER_PAYMENT_TRACKS_THE_LOAN` and nothing
     is written -- the card offers no Track control in that state, so only a
     crafted POST reaches this arm.  A definition that already tracks is not
-    refused by it: asking it to track again writes the same mode and today's
-    contract, as before.
+    refused by it: asking it to track again writes the same mode, as before.
     """
     account, _params, _ = _require_configured_loan(account_id)
     template, definitions = _require_loan_payment_definition(
@@ -458,26 +462,22 @@ def track_payment(account_id, template_id):
         )
         return dashboard.to_response()
 
+    # Today's contract, for the flash: what the payment pays from now on.
     contract = _contractual_monthly_payment(account)
-    # Flip to derive FIRST, creating the settings row for a legacy manual payment
+    # Flip to derive, creating the settings row for a legacy manual payment
     # that never had one (a missing settings row IS manual mode); the standing
     # extra is preserved, added live on top of the tracked base exactly as
-    # before.  **The order is load-bearing since plan step X-au-a**: the stored
-    # base written below is a DERIVED figure (P&I + today's escrow), so it must
-    # not be recorded as a stated price in the amount series -- and the write
-    # door reads the mode off the settings row, so flipping after the write
-    # would stamp exactly the fake history ruling R-FI refuses.  Versions the
-    # template recorded while it was manual stay as the record of what was
-    # stated then.
+    # before.  The flip is the whole write: a tracking payment states no price
+    # (ruling R-FI refuses the fake history a derived figure in the series
+    # would be), so nothing is written to the amount series or its copy.
+    # Versions the template recorded while it was manual stay as the record
+    # of what was stated then.
     if template.settings is None:
         template.settings = LoanPaymentSettings(
             derive_from_loan=True, extra_principal=Decimal("0.00"),
         )
     else:
         template.settings.derive_from_loan = True
-    template_amount_service.set_amount(
-        template, contract, effective_on=display_today(),
-    )
 
     # Flipping manual->derive MOVES the projected payoff whenever the two
     # figures differ (the PLANNED tier folds each projected payment's RESOLVED

@@ -12,7 +12,8 @@ merely unlikely:
      before the earliest version so the resolver is total.
   3. **How an amount is stated** -- one write door, no version when the series
      already answers that amount on that date, correction in place on a
-     same-day restatement.
+     same-day restatement, and a refusal for a definition rule 1 gives no
+     series.
   4. **How a mis-dated version is withdrawn** -- and why the earliest is not.
 
 The figures here are the production history the backfill was designed against
@@ -361,14 +362,14 @@ class TestSetAmount:
             assert tas.amount_as_of(template, date(2026, 7, 1)) == Decimal("150.00")
             assert tas.amount_as_of(template, date(2027, 1, 1)) == Decimal("200.00")
 
-    def test_derived_template_gets_the_scalar_and_no_version(
-        self, app, db, seed_user,
-    ):
-        """The salary path reaches this door and must record nothing.
+    def test_a_salary_linked_template_is_refused(self, app, db, seed_user):
+        """A paycheck the engine works out is no price anybody stated (plan step X-bp).
 
-        ``salary_regeneration.regenerate_salary_transactions`` writes the
-        recomputed net pay to the column on every profile edit; a version per edit would be a fake
-        price history of a computed figure.
+        The door set the column and recorded no version for such a template
+        until X-bp, when its one caller -- the salary regeneration's
+        re-statement of today's net on every salary save -- went, so a call
+        now names a caller's defect: it raises, and writes neither the series
+        nor the column.
         """
         with app.app_context():
             template = _txn_template(seed_user, name="Data Manager")
@@ -377,12 +378,39 @@ class TestSetAmount:
             profile.is_active = True
             db.session.flush()
 
-            tas.set_amount(
-                template, Decimal("2473.38"), effective_on=date(2026, 4, 1),
+            with pytest.raises(ValueError, match="does not own its amount"):
+                tas.set_amount(
+                    template, Decimal("2473.38"), effective_on=date(2026, 4, 1),
+                )
+            db.session.flush()
+
+            assert template.default_amount == Decimal("165.30")
+            assert tas.amount_versions(template) == []
+
+    def test_a_derive_mode_loan_payment_is_refused(self, app, db, seed_user):
+        """A payment that tracks its loan states no price either (plan step X-bp).
+
+        Its creation and its Track wrote the loan's P&I plus escrow into the
+        column through this door until X-bp; amount rule 4 prices it live, so
+        both callers went and the door refuses one, writing nothing.
+        """
+        with app.app_context():
+            savings = create_savings_account(
+                seed_user, db.session, "Money Market", Decimal("0.00"),
+            )
+            template = _xfer_template(seed_user, savings)
+            template.settings = LoanPaymentSettings(
+                derive_from_loan=True, extra_principal=Decimal("0.00"),
             )
             db.session.flush()
 
-            assert template.default_amount == Decimal("2473.38")
+            with pytest.raises(ValueError, match="does not own its amount"):
+                tas.set_amount(
+                    template, Decimal("1910.95"), effective_on=date(2026, 4, 1),
+                )
+            db.session.flush()
+
+            assert template.default_amount == Decimal("250.00")
             assert tas.amount_versions(template) == []
 
 

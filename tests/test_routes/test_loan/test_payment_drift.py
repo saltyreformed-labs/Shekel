@@ -11,11 +11,23 @@ import pytest
 
 from app.services.balance_at import BalanceContext
 from app.services import balance_at, escrow_calculator, loan_loaders
+from app.services.obligations_aggregator import todays_price
 
 from tests._test_helpers import add_escrow_line, make_cadence_rule, state_template_price
 from tests.oracles.recurrence_baseline import MONTHLY
 
 from ._helpers import _payment_template, _create_mortgage
+
+
+def _todays_figure(template, seed_user):
+    """What the Recurring and savings pages show for *template* today.
+
+    The figure Track's reset of the stored base existed to keep current, read
+    from the producer those pages read since plan step X-bp
+    (``obligations_aggregator.todays_price``): amount rule 4, the standing
+    extra included.
+    """
+    return todays_price(template, BalanceContext.build(seed_user["user"].id)).amount
 
 
 # ── Payment Drift Warning + Auto-Track Switch Tests (C7 / ruling D3) ──
@@ -242,8 +254,11 @@ class TestPaymentDrift:
         """The one-click switch flips a short manual payment to auto-track.
 
         A manual payment $50 below contract warns; POSTing track-payment sets
-        derive_from_loan True and resets the stored base to the contract, so a
-        re-render shows no warning and the loan now tracks the contract.
+        derive_from_loan True, so a re-render shows no warning and the payment's
+        figure on the Recurring and savings pages is the contract.  The door
+        reset the stored base to the contract until plan step X-bp; those pages
+        price the payment by amount rule 4 now
+        (``obligations_aggregator.todays_price``), so the figure is read there.
         """
         acct = _create_mortgage(seed_user, db.session)
         checking = seed_user["account"]
@@ -268,7 +283,7 @@ class TestPaymentDrift:
 
         db.session.expire(tpl)
         assert tpl.settings.derive_from_loan is True
-        assert tpl.default_amount == contract
+        assert _todays_figure(tpl, seed_user) == contract
 
         post = auth_client.get(f"/accounts/{acct.id}/loan")
         assert "short of the" not in post.data.decode()
@@ -279,8 +294,8 @@ class TestPaymentDrift:
         """Switching a legacy no-settings payment creates the settings row (derive).
 
         The real-loan shape has no loan_payment_settings row; the switch must
-        create one with derive_from_loan True (a missing row is manual mode), keep
-        the extra at zero, and reset the stored base to the contract.
+        create one with derive_from_loan True (a missing row is manual mode) and
+        keep the extra at zero, so the payment's figure is the contract.
         """
         acct = _create_mortgage(seed_user, db.session)
         contract = self._contract(acct, seed_user["user"].id)
@@ -298,7 +313,7 @@ class TestPaymentDrift:
         assert tpl.settings is not None
         assert tpl.settings.derive_from_loan is True
         assert tpl.settings.extra_principal == Decimal("0.00")
-        assert tpl.default_amount == contract
+        assert _todays_figure(tpl, seed_user) == contract
 
     def test_track_payment_preserves_standing_extra(
         self, auth_client, seed_user, db, seed_periods,
@@ -307,7 +322,8 @@ class TestPaymentDrift:
 
         A manual payment with a $75 standing extra, $50 below contract on its base:
         the switch flips derive True and keeps extra at $75 (the extra rides on top
-        of the tracked base, unchanged), resetting the base to the contract.
+        of the tracked base, unchanged), so the payment's figure is the contract
+        plus $75.00.
         """
         acct = _create_mortgage(seed_user, db.session)
         checking = seed_user["account"]
@@ -330,7 +346,7 @@ class TestPaymentDrift:
         db.session.expire(tpl)
         assert tpl.settings.derive_from_loan is True
         assert tpl.settings.extra_principal == Decimal("75.00")
-        assert tpl.default_amount == contract
+        assert _todays_figure(tpl, seed_user) == contract + Decimal("75.00")
 
     def test_track_payment_unknown_template_404s(
         self, auth_client, seed_user, db, seed_periods,
@@ -386,7 +402,7 @@ class TestPaymentDrift:
 
         db.session.expire_all()
         assert payment.settings.derive_from_loan is True
-        assert payment.default_amount == contract
+        assert _todays_figure(payment, seed_user) == contract
         assert sweep.settings is None
         assert sweep.default_amount == Decimal("50.00")
 

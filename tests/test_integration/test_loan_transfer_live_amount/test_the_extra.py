@@ -255,8 +255,10 @@ def test_a_derive_payment_on_the_same_fixture_does_follow_the_escrow(
             _build_derived_loan_transfer(seed_user, Decimal("3600.00"))
         )
         template.default_amount = Decimal("1499.10")
-        # The manual base is the definition's SERIES (see the sibling case).
-        _state_price(template, Decimal("1499.10"))
+        # No price is stated: a derive payment's base is the loan's, and the
+        # write door refuses one (plan step X-bp).  The sibling cases state
+        # their manual base here; on this derive template the same call only
+        # ever wrote the column above.
         transfer_recurrence.generate_for_template(
             template, GenerationSchedule.for_period_ids(
                 BalanceContext.build(template.user_id), {p.id for p in seed_periods},

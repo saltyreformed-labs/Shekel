@@ -339,7 +339,8 @@ def _todays_paycheck(
 
     Ruling **R-SAL71** (plan step salary:X-av-2): a salary definition's
     ``default_amount`` is a STORED copy of a paycheck the engine priced when
-    the salary was last saved, which records neither which payday it was nor
+    the salary was last saved (when the profile was created, since plan step
+    X-bp deleted the re-statement), which records neither which payday it was nor
     the rhythm that payday was paid at -- so a reader converting it to a
     month has to guess the count, and guessed the LATEST era's.  That was
     right only while the engine divided every payday by that count too.  The
@@ -355,9 +356,11 @@ def _todays_paycheck(
     SAVED payday** (the calendar's ``opening_bound``) **it prices that first
     saved paycheck** (ruling **R-SAL79**): there is no paycheck today to
     price, and the copy is exactly the figure the ruling retires -- one a
-    salary EDIT made in that window leaves at GROSS pay, because the edit
-    door writes the gross and ``salary_regeneration`` restates the net only
-    once a saved period contains the day.  For an owner who has stated
+    salary EDIT made in that window left at GROSS pay when the ruling was
+    made, because the edit door wrote the gross and ``salary_regeneration``
+    re-stated the net only once a saved period contained the day (the gross
+    write went at plan step salary:X-av-3a, the re-statement at X-bp).  For
+    an owner who has stated
     ``history_opens_on`` the backward rhythm may hold earlier paydays, but
     those are counts and never periods, so the first saved paycheck is the
     next one priceable.  The savings page shows no current pay in that

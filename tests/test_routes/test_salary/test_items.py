@@ -594,17 +594,18 @@ class TestEarningLinesThroughTheDoor:
             ]
             assert "Payroll lines" in html and "Deductions</h6>" not in html
 
-    def test_a_taxable_earning_added_by_the_form_raises_the_regenerated_paycheck(
+    def test_a_taxable_earning_added_by_the_form_raises_todays_paycheck(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """A $45 taxable line: the section labels it, the priced gross carries it, the template's amount rises.
+        """A $45 taxable line: the section labels it, and the priced gross carries it.
 
         The developer's own line (R-SAL38's facts): ``$45.00`` gross, taxable,
         on the first paycheck of every month.  Today is frozen at 2026-03-20
         in this module and the paycheck of Mar 13 is March's first payday,
         so the current paycheck carries it: gross rises by exactly ``$45.00``
-        and the net by less (it is taxed), and the regeneration's stored net
-        is the priced one.
+        and the net by less (it is taxed).  It also asserted the regeneration
+        stored that net on the template, until plan step X-bp deleted the
+        re-statement: today's paycheck is priced live, as here.
         """
         with app.app_context():
             profile = _create_profile(seed_user)
@@ -644,9 +645,6 @@ class TestEarningLinesThroughTheDoor:
             # the taxed figures are the engine suite's to grade).
             assert priced.earnings.net_pay - before.earnings.net_pay == (
                 Decimal("45.00") - (priced.taxes.total - before.taxes.total)
-            )
-            assert profile.template.default_amount == priced.earnings.net_pay, (
-                "the regeneration stated a net that did not carry the earning line"
             )
 
     def test_a_target_account_on_an_earning_is_refused_and_nothing_is_written(

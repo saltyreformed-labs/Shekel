@@ -28,13 +28,14 @@ import pytest
 from flask_login import login_user
 
 from app import ref_cache
-from app.enums import RaiseTypeEnum, WithholdingKindEnum
+from app.enums import StatusEnum, WithholdingKindEnum
 from app.exceptions import UnsupportedStateError
 from app.extensions import db
 from app.models.ref import FilingStatus
 from app.models.salary_profile import SalaryProfile
 from app.models.transaction_template import TransactionTemplate
 from app.services.balance_at import BalanceContext
+from app.services.obligations_aggregator import todays_price
 from app.services.salary_paydays import paycheck_on
 from app.services.tax_report_service import compute_tax_report
 from app.tax_law import TaxLaw
@@ -96,6 +97,11 @@ def _priced(profile, day):
     return ctx.paychecks().for_profile(profile).at(period)
 
 
+def _todays_figure(profile):
+    """Today's paycheck for *profile*, the figure the Recurring and savings pages show."""
+    return todays_price(profile.template, BalanceContext.build(profile.user_id)).amount
+
+
 def _stored_profiles(user_id):
     """The owner's profiles as the DATABASE holds them, after the session is expired."""
     db.session.expire_all()
@@ -125,10 +131,10 @@ def _install_law(tax_law):
 def _today_is_a_seeded_paycheck(monkeypatch):
     """Today is 2026-03-20, inside the paycheck of 03-13: ``seed_periods`` holds it.
 
-    The salary pages and the update door's regeneration price the paycheck
-    holding TODAY (``salary_regeneration``: ``period_containing(as_of)``), so
-    a today past the ten seeded paydays prices nothing and every refusal below
-    would pass by never being reached.
+    The salary pages and today's paycheck
+    (``obligations_aggregator.todays_price``) price the paycheck holding
+    TODAY, so a today past the ten seeded paydays prices nothing and every
+    refusal below would pass by never being reached.
     """
     freeze_today(monkeypatch, date(2026, 3, 20))
 
@@ -170,10 +176,12 @@ class TestTheCreateDoor:
 class TestTheUpdateDoor:
     """POST /salary/<id> saves a listed state and refuses any other.
 
-    Every profile here is created through the create door, so it has the
-    template the update door's regeneration re-states at the net it prices:
-    ``template.default_amount`` is the paycheck the door priced, under the
-    state it saved.
+    Every profile here is created through the create door, so it has a
+    template, born at the net the create door priced.  What an update moves
+    is today's paycheck, priced live under the state it saved
+    (:func:`_todays_figure`); the update door's regeneration re-stated the
+    template's ``default_amount`` at it until plan step X-bp, and these cases
+    read that copy until then.
     """
 
     @staticmethod
@@ -199,7 +207,7 @@ class TestTheUpdateDoor:
             (stored,) = _stored_profiles(seed_user["user"].id)
             assert stored.state_code == "ZZ"
             # 3,000.00 gross, ZZ withholds $0.00, federal and FICA $0.00.
-            assert stored.template.default_amount == Decimal("3000.00")
+            assert _todays_figure(stored) == Decimal("3000.00")
 
     @pytest.mark.parametrize("state_code", ["QQ", "nc"])
     def test_a_state_the_law_does_not_list_is_refused(
@@ -226,8 +234,8 @@ class TestTheUpdateDoor:
     ):  # pylint: disable=unused-argument
         """The repair the refusal names: a QQ row, written around the doors, saved as ZZ.
 
-        Its edit page opens (it prices nothing), and the update door prices
-        the paycheck under the state it saves: ZZ's $3,000.00 net.
+        Its edit page opens (it prices nothing), and today's paycheck is
+        priced under the state the update door saves: ZZ's $3,000.00 net.
         """
         with app.app_context():
             profile = self._created(auth_client, seed_user)
@@ -242,16 +250,22 @@ class TestTheUpdateDoor:
             assert response.status_code == 302
             (stored,) = _stored_profiles(seed_user["user"].id)
             assert stored.state_code == "ZZ"
-            assert stored.template.default_amount == Decimal("3000.00")
+            assert _todays_figure(stored) == Decimal("3000.00")
 
-    def test_an_edit_that_keeps_an_unlisted_state_saves_nothing(
+    def test_an_edit_that_keeps_an_unlisted_state_saves_and_pricing_still_refuses(
         self, app, auth_client, seed_user, seed_periods, law,
     ):  # pylint: disable=unused-argument
-        """A QQ row's rename, posted without a state, is refused at its pricing and rolled back.
+        """A QQ row's rename, posted without a state, is saved; every page that prices refuses.
 
         The form cannot submit without a state; a POST that leaves it out keeps
-        QQ, so the regeneration refuses the profile.  The fix-it page answers,
-        and the database still holds the old name (committed, then re-read).
+        QQ.  **The rename was refused and rolled back until plan step X-bp**,
+        by the update door's regeneration, which priced today's paycheck to
+        re-state the template's copy of it and met the engine's refusal.  X-bp
+        deleted the re-statement (an edge case decided under R-BAL207): a
+        write that prices nothing refuses nothing, so the rename is saved (the
+        edit page it lands on prices nothing), and the refusal stays where the
+        money is -- the next page that prices the profile answers the fix-it
+        page.
         """
         with app.app_context():
             profile = self._created(auth_client, seed_user)
@@ -263,11 +277,12 @@ class TestTheUpdateDoor:
 
             response = auth_client.post(f"/salary/{profile.id}", data=form)
 
-            assert response.status_code == 200
-            assert "State Not Supported" in response.data.decode()
+            assert response.status_code == 302
             (stored,) = _stored_profiles(seed_user["user"].id)
-            assert (stored.name, stored.state_code) == ("Day Job", "QQ")
-            assert stored.template.default_amount == Decimal("2850.00")
+            assert (stored.name, stored.state_code) == ("Night Job", "QQ")
+            priced_page = auth_client.get("/salary")
+            assert priced_page.status_code == 200
+            assert "State Not Supported" in priced_page.data.decode()
 
 
 class TestTheForm:
@@ -511,35 +526,38 @@ class TestTheFixItPage:
     ):  # pylint: disable=unused-argument
         """An htmx POST that prices the QQ profile gets the page, never a silent 204.
 
-        A raise added on the profile's edit page re-prices the profile; for a
-        QQ row that refuses, and the button the owner pressed answers with the
-        page (the shared rule's MUTATING branch), the raise not saved.  The
-        page is base.html's whole document, which htmx swaps in place of the
-        raises section (``hx-swap="outerHTML"``): ledger row salary:SAL-600.
+        Marking today's paycheck received on the grid settles it at what it
+        resolves to, which prices the profile; for a QQ row that refuses, and
+        the button the owner pressed answers with the page (the shared rule's
+        MUTATING branch), the row not settled.  The page is base.html's whole
+        document, which htmx swaps in place of its target: ledger row
+        salary:SAL-600.  **This case pressed a raise's Add until plan step
+        X-bp**, whose regeneration priced the profile to re-state the
+        template's copy of today's paycheck; X-bp deleted the re-statement,
+        so a raise is saved without pricing anything, and a settle is the
+        mutating htmx request that prices.
         """
         with app.app_context():
             assert auth_client.post("/salary", data=_create_form("NC")).status_code == 302
             (profile,) = _stored_profiles(seed_user["user"].id)
             profile.state_code = "QQ"
             db.session.commit()
+            (paycheck,) = [
+                row for row in profile.template.transactions
+                if row.occurs_on == date(2026, 3, 13)
+            ]
 
             response = auth_client.post(
-                f"/salary/{profile.id}/raises",
-                # A one-time 3% merit raise as the add form posts it: the
-                # recurring box unticked and neither end-mode radio checked.
-                data={
-                    "version_id": "",
-                    "raise_type_id": str(ref_cache.raise_type_id(RaiseTypeEnum.MERIT)),
-                    "effective_month": "7", "effective_year": "2026",
-                    "percentage": "3", "flat_amount": "", "terminal_year": "",
-                },
+                f"/transactions/{paycheck.id}/mark-done",
                 headers={"HX-Request": "true"},
             )
 
             assert response.status_code == 200
             assert "State Not Supported" in response.data.decode()
-            (stored,) = _stored_profiles(seed_user["user"].id)
-            assert not stored.raises
+            db.session.expire_all()
+            assert db.session.get(type(paycheck), paycheck.id).status_id == (
+                ref_cache.status_id(StatusEnum.PROJECTED)
+            )
 
     def test_deleting_the_profile_answers_the_page_and_archives_nothing(
         self, app, auth_client, seed_user, seed_periods, law,

@@ -28,7 +28,8 @@ docstring holds the supersession argument and this one holds the rules.
    definition with no version at all.
 
 3. **How an amount is stated** (:func:`set_amount`, the write door).  Setting an
-   amount as of a date keeps the scalar and the series in step in one call.  It
+   amount as of a date keeps the scalar and the series in step in one call, and
+   it refuses a definition rule 1 gives no series (plan step X-bp).  It
    is a no-op on the series when the series ALREADY answers that amount on that
    date, so a rename or a cadence edit appends nothing, and a version already
    standing on that exact date is CORRECTED in place rather than joined by a
@@ -99,8 +100,10 @@ def is_salary_linked_template(template) -> bool:
     states that amount through the write door in the same unit of work -- and
     that door suppresses autoflush to protect the optimistic-lock counter.  A
     predicate issuing its own query would therefore read the profile as still
-    ACTIVE and record nothing, leaving an eligible template with an EMPTY series
-    (measured: 58 rows on production's one salary template).  The collection is
+    ACTIVE: until plan step X-bp the door then recorded nothing, leaving an
+    eligible template with an EMPTY series (measured: 58 rows on production's
+    one salary template), and since X-bp it refuses, so every archive would
+    fail.  The collection is
     identity-mapped, so a pending ``is_active = False`` is already visible here.
 
     Args:
@@ -126,8 +129,9 @@ def owns_its_amount(template) -> bool:
     * a **salary-linked** transaction template, whose rows the paycheck
       calculator prices per period (:func:`is_salary_linked_template`);
     * a **derive-mode loan-payment** transfer template, whose ``default_amount``
-      is the P&I plus escrow captured at its last write
-      (``routes/loan/payment_transfer.py``) and whose projected cash is
+      is the P&I plus escrow captured when it was created, or the typed base it
+      held before it was switched to track (``routes/loan/payment_transfer.py``;
+      nothing rewrites it since plan step X-bp), and whose projected cash is
       recomputed live by amount rule 4 (``cash_ledger._loan_pricing``).
 
     A MANUAL loan payment is NOT refused: there the operator owns the base cash
@@ -316,8 +320,9 @@ def _resync_scalar(template) -> None:
     :func:`amount_as_of` on today; it read a ``current_amount`` here that fell
     back to the column, until plan step X-bp).
 
-    A no-op for a template with no series, which is only ever one whose amount is
-    derived -- there the column IS the statement and has already been set.
+    A no-op for a template with no series, which neither caller hands it:
+    :func:`set_amount` has just stated a version, and :func:`restate_in_effect`
+    refuses an empty series before it gets here.
 
     Args:
         template: The transaction or transfer template to re-sync.
@@ -360,14 +365,15 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     with either step: plan step X-bp deletes it from both template tables
     (rulings **R-IY**, **R-BAL16**), and until then it is still READ.  The
     census of its readers is ``git grep -n default_amount app/``; among them,
-    a salary profile's archive (``routes/salary/profiles.delete_profile``)
-    opens the template's series AT it, and the X-au-e and X-au-f cutover
-    migrations' downgrades restore from it.
+    the carry-forward resolver reads it as a GENERATE target's base, and the
+    X-au-e and X-au-f cutover migrations' downgrades restore from it.
 
     Every route that states a template's amount goes through this door: the
-    two create forms, the two edit forms, the investment contribution and loan
-    payment creators, and the salary paths (which it correctly records nothing
-    for).
+    two create forms, the two edit forms, the investment contribution
+    creator, the loan payment creator for a payment whose base the operator
+    typed, the one-off producer, and a salary profile's archive (which opens
+    the template's series at today's paycheck, the moment the template starts
+    owning its amount).
 
     Three outcomes on the series, and the order is the rule:
 
@@ -381,9 +387,20 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     3. Otherwise a version is appended through the relationship, so a template
        that has not been flushed yet still records its opening amount.
 
-    A template that does NOT own its amount (:func:`owns_its_amount`) has the
-    scalar set and the series left alone -- the salary and derive-mode loan
-    paths reach here and must record nothing.
+    **A template that does NOT own its amount (:func:`owns_its_amount`) is
+    REFUSED** (plan step X-bp): there is no price to state, because its rows
+    are priced by a computation -- the paycheck engine, or the loan's
+    contract -- and the Recurring and savings pages read that computation
+    live (``obligations_aggregator.todays_price``).  This door wrote the
+    computation's latest answer into the scalar for such a template until
+    X-bp, a copy nothing read once those pages stopped reading the column;
+    its three writers went with X-bp (``salary_regeneration``'s restatement
+    on every salary save, and a derive-mode loan payment's at its creation
+    and at Track), and both update doors refuse a typed amount for such a
+    template before they reach here
+    (``routes/_amount_version_actions.refuse_a_typed_worked_out_amount``).
+    So a call here for one is a caller's defect, and it raises rather than
+    recording a figure nobody stated.
 
     **The scalar is then re-read off the series, never assigned the argument,
     and an adversarial review is why.**  ``default_amount`` means "the NEWEST
@@ -420,13 +437,21 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
         effective_on: The date the amount takes effect.  Back-dating is legal
             and deliberate: a settled row owns the figure it was booked at, so
             restating a past price moves no money that has already moved.
+
+    Raises:
+        ValueError: *template* does not own its amount -- a salary-linked
+            transaction template or a derive-mode loan payment.  No door
+            reaches here with one (above), so this names a caller's defect
+            rather than handling a state the app writes.
     """
     with db.session.no_autoflush:
         if not owns_its_amount(template):
-            # No series to be the newest price OF; the column is the whole
-            # statement, exactly as it was before this door existed.
-            template.default_amount = amount
-            return
+            raise ValueError(
+                f"{type(template).__name__} {template.id} does not own its "
+                f"amount (a salary profile's or a loan-tracking payment's), so "
+                f"{amount} cannot be stated for it from {effective_on}: its "
+                f"rows are priced by the computation, not by a price series."
+            )
 
         existing = _version_on(template, effective_on)
         if existing is not None:

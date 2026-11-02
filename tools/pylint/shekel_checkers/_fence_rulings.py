@@ -231,6 +231,17 @@ _ROW_VALUATION_MODULES = frozenset({
 _RECURRING_DEFINITION_MODULES = frozenset({
     "app.services.recurring_transfer_query",
 })
+# The worked-out ledger (balance:X-ew, plan#2513).  Plan task plan#2526 moved
+# every ledger target rule into it -- among them two loan rules this registry
+# had ruled under ``loan_posting_service`` -- and puts beside them the read
+# that sums the whole ledger, which X-ew's second leaf moves every statement
+# onto.  It is the general ledger's home from here on, so the scope follows
+# the rules rather than letting them leave the fence by changing address (the
+# R7d-a precedent above).  A package key, prefix-matched, so a submodule
+# written later is scoped the day it is written.
+_LEDGER_LINES_MODULES = frozenset({
+    "app.services.ledger_lines",
+})
 
 # Per-module rulings: {module: (producer set, non-producer set)}.  Every PUBLIC
 # top-level function defined in one of these modules must appear in one of its
@@ -316,6 +327,49 @@ _FENCED_MODULE_RULINGS = {
     # EMPTY producer set is the D3 invariant stated as data; that module
     # carries the why.
     "app.services.cash_ledger": (frozenset(), CASH_LEDGER_NON_PRODUCERS),
+    # The worked-out ledger -- why it is scoped is recorded once, at
+    # :data:`_LEDGER_LINES_MODULES`.  EMPTY producer set: every name below
+    # names a chart line or answers one record's legs, and none sums a
+    # balance at a time T.
+    "app.services.ledger_lines": (frozenset(), frozenset({
+        # The chart (ruling plan#2518): constructors of the key a line is
+        # booked on, the class and label rules, and ruling R-FO's counter
+        # dispatch.  Names and classes, never money.
+        "account_counter_key",
+        "anchor_correction_counter_kind",
+        "category_key",
+        "chart_label",
+        "ledger_class_of",
+        "linked_key",
+        "linked_ledger_class",
+        "loan_key",
+        "owner_bucket_key",
+        "transit_key",
+        # The movement rule: a shape test, the leg and source kinds, the
+        # gate, and ONE movement's two legs (its own figure on its account
+        # and its counter line) -- a figure of one record, not a balance.
+        "is_transfer_leg",
+        "posting_kind_of",
+        "purchase_posts",
+        "purchase_source",
+        "purchase_target",
+        # The correction rules: what each opening, true-up or payment split
+        # BOOKS, leg by leg, keyed (kind, period, date) -- the jump a
+        # correction makes, never the balance it lands on -- and the
+        # same-key merge, which returns nothing.
+        "account_correction_targets",
+        "anchor_correction_targets",
+        "loan_correction_targets",
+        "merge_target_legs",
+        "payment_split_targets",
+        # The account walk FRAMES the seam's own published assertion replay
+        # (``balance_at.assertion_corrections``, ruled at the seam's door):
+        # each correction's ``ledger_before`` is that replay's figure carried
+        # through unchanged, at an assertion's moment only.  It adds no reach
+        # the seam's door does not already give, and answers no balance at
+        # an arbitrary T.
+        "walk_account_ledger",
+    })),
     # The account-KIND classifier -- why it is scoped is recorded once, at
     # :data:`_KIND_CLASSIFIER_MODULES`.  Its ``find_period_containing_date``
     # went to ``loan_ledger._visible`` at D1b (chronology belongs with the rules
@@ -567,12 +621,9 @@ _FENCED_MODULE_RULINGS = {
             # **R-BAL102**): ONE reconcile over the walk, driven by the one
             # sync, and a split keyed by no row to reverse ahead of a delete.
             "reconcile_loan_corrections",
-            # The two TARGET builders that reconcile consumes: each maps the
-            # walk's corrections or splits onto ``{(kind, period, date):
-            # {ledger: (amount, kind)}}`` -- what the ledger SHOULD hold, leg
-            # by leg, never what it does hold or what a loan owes.
-            "anchor_correction_targets",
-            "payment_split_targets",
+            # (The two TARGET builders that reconcile consumes moved into the
+            # worked-out ledger at plan task plan#2526 and are ruled under
+            # ``app.services.ledger_lines`` below.)
             "sync_loan_postings",
             "sync_loan_postings_all_scenarios",
             "sync_all_scenarios_or_duplicate",

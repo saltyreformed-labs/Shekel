@@ -752,12 +752,15 @@ class TestTheDispatchIsNotVacuous:
         """
         # Pylint: ``import-outside-toplevel`` -- lazy app import, as above.
         # pylint: disable=import-outside-toplevel
-        from app.services.ledger_account_service import _counters
+        # The dispatch table lives in the worked-out chart since plan task
+        # plan#2526 (it was ``ledger_account_service._counters``'), so the
+        # planted regression is planted there.
+        from app.services.ledger_lines import _chart
 
         monkeypatch.setattr(
-            _counters, "_TRUEUP_COUNTER_KINDS",
+            _chart, "_TRUEUP_COUNTER_KINDS",
             dict.fromkeys(
-                _counters._TRUEUP_COUNTER_KINDS,
+                _chart._TRUEUP_COUNTER_KINDS,
                 LedgerAccountKindEnum.ANCHOR_EQUITY,
             ),
         )

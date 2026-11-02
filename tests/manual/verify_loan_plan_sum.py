@@ -161,21 +161,13 @@ from app.services.balance_at._loan_stream import loan_timeline  # pylint: disabl
 # Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
 # plan's payments, an intermediate the balance seam does not publish.
 from app.services.balance_at._plan import loan_plan  # pylint: disable=shekel-private-module-import
+from app.services.ledger_lines import (
+    anchor_correction_targets,
+    payment_split_targets,
+)
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.loan_loaders import load_escrow_lines, load_loan_params
 from app.services.loan_posting_service import confirmed_loan_payment_history
-# Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
-# posting targets an anchor correction implies (what the next deploy's backfill
-# reconciles to), which the posting package does not publish.
-from app.services.loan_posting_service._anchors import (  # pylint: disable=shekel-private-module-import
-    anchor_correction_targets,
-)
-# Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
-# posting targets a payment split implies (what the next deploy's backfill
-# reconciles to), which the posting package does not publish.
-from app.services.loan_posting_service._payments import (  # pylint: disable=shekel-private-module-import
-    payment_split_targets,
-)
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import RecurrenceSpec, author_rule
 from app.services.scenario_resolver import get_baseline_scenario

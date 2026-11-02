@@ -79,6 +79,7 @@ from app.models.journal_entry import JournalEntry
 from app.models.transaction import Transaction
 from app.models.transfer import Transfer
 from app.services import posting_reads
+from app.services.ledger_lines import purchase_posts
 from app.services.posting_reads import PostingError
 from app.services.transfer_legs import (
     movement_parent,
@@ -88,7 +89,6 @@ from app.services.user_write_lock import lock_every_user_writes
 from app.services._posting_purchases import (
     emit_purchase_deltas,
     posted_purchase_exists_clause,
-    purchase_posts,
 )
 from app.utils.balance_predicates import settled_status_ids
 
@@ -193,7 +193,7 @@ def sync_transfer_postings(xfer: Transfer) -> list[JournalEntry]:
     ``X-bi-6-1b`` this was told whether to post or reverse, because the ONE
     entry it booked had no fact of its own to read.  A movement has: it posts
     iff it is dated under a contributing parent
-    (:func:`~app.services._posting_purchases.purchase_posts`), a settle dates
+    (:func:`~app.services.ledger_lines.purchase_posts`), a settle dates
     it and a revert UN-DATES it (ruling **R-BAL61**), a cancel or a soft delete
     makes its parent non-contributing.  So every transfer lifecycle path is
     one call with no argument to get wrong:
@@ -358,7 +358,7 @@ def sync_transaction_postings(txn: Transaction) -> list[JournalEntry]:
     Every ordinary-transaction lifecycle action is one call to this function,
     and none of them says whether the row has settled: a movement posts iff
     it is dated under a contributing parent
-    (:func:`~app.services._posting_purchases.purchase_posts`), whatever the
+    (:func:`~app.services.ledger_lines.purchase_posts`), whatever the
     parent's status, and a revert or a cancel reverses what the ledger holds
     for movements the act un-dated or the parent's exclusion made worthless
     (a delete is the one removal act's, :func:`reverse_leaving_movements`,
@@ -435,7 +435,7 @@ def _family_accounts(txn: Transaction) -> tuple:
     ``fk_transaction_entries_parent_account``, went at plan step
     ``credit_card:CC-5-1``, ruling **R-BAL76**): a movement's leg lands on
     the movement's account
-    (``_posting_purchases._purchase_target``), so the anchor self-heal must
+    (``ledger_lines.purchase_target``), so the anchor self-heal must
     look wherever a leg can land rather than at the parent alone (plan step
     ``balance:X-bi-4a``, ruling **R-BAL75**).  Deduplicated, in first-seen
     order, so the self-heal visits an account once.
@@ -462,7 +462,7 @@ def reverse_leaving_movements(
     reversing FIRST leaves each original entry and its reversal an immutable
     net-zero pair.  Every movement is reversed, dated or not: it is about to
     be deleted, which no sync's "does it post" rule
-    (:func:`~app.services._posting_purchases.purchase_posts`) can say of a
+    (:func:`~app.services.ledger_lines.purchase_posts`) can say of a
     movement still standing.  A transfer side's record reverses here like any
     movement, typed by its LEG (:func:`~app.services.transfer_legs.movement_parent`).
 
@@ -840,7 +840,7 @@ def resync_all_cash_postings() -> tuple[int, int]:
             # **R-BAL101**) -- the transaction arm's totality argument: this
             # reaches every transfer that could hold a leg today, since a
             # side's record posts only while dated
-            # (``_posting_purchases.purchase_posts``) and is dated only while
+            # (``ledger_lines.purchase_posts``) and is dated only while
             # its transfer is settled (the status-band rule,
             # ``app.side_band_infrastructure``).  It reached a live transfer
             # holding a dated record on either side too, whatever its

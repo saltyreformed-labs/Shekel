@@ -28,7 +28,7 @@ clear.
 period, its visible day)`` and NO row link** (ruling **R-BAL102**, which
 re-ruled **R-BAL100**).  The split is re-computed from scratch by every walk,
 exactly as the loan's opening and true-ups are, so it is reconciled in the
-SAME loop as they are (:mod:`._corrections`) and its entry links no row: not
+SAME loop as they are (``loan_posting_service._corrections``) and its entry links no row: not
 the loan-side shadow (its key through ``balance:X-bi-6-1b``, a row plan step
 ``X-bi-6-4d-2`` deleted), not the shadow's covering movement (R-BAL100's key,
 which a ``$0.00`` payment does not have -- the seam writes no movement for a
@@ -38,10 +38,12 @@ reversal first, no detector hunts payments that "left the confirmed set" (a
 key with no target reverses in the same pass), and no reader maps rows back
 onto payments.  Two payments on one day in one period merge into one entry,
 which is the sum the ledger holds; WHICH payment paid what is the walk's
-answer (:mod:`._display`), never the ledger's.
+answer (``loan_posting_service._display``), never the ledger's.
 
-**This module builds the TARGET and nothing else.**  The reconcile -- what is
-posted, the delta, the emission -- is :mod:`._corrections`' one loop over the
+**This module builds the TARGET and nothing else**, for the stored ledger's
+writer and the worked-out read alike; it was ``loan_posting_service._payments``
+until plan task plan#2526 moved it beside the read.  The reconcile -- what is
+posted, the delta, the emission -- is ``loan_posting_service._corrections``' one loop over the
 anchor and split targets together, on the shared primitives in
 :mod:`app.services._posting_reconcile`.
 
@@ -60,14 +62,10 @@ from app.enums import (
     PostingSourceEnum,
 )
 from app.models.account import Account
-from app.services._posting_reconcile import (
-    ChartLegMap,
-    CorrectionKey,
-    merge_target_legs,
-)
-from app.services.ledger_lines import linked_key, loan_key
-
 from app.services.loan_ledger import PaymentOutcome
+
+from ._chart import linked_key, loan_key
+from ._targets import ChartLegMap, CorrectionKey, merge_target_legs
 
 
 # The three per-loan correction components, each a tuple of (the per-loan ledger
@@ -154,7 +152,7 @@ def payment_split_targets(
     settled outcome's legs (:func:`_loan_payment_target`) summed into the key
     ``(loan_payment source id, the payment's pay_period_id, the payment's
     visible day)`` through
-    :func:`app.services._posting_reconcile.merge_target_legs` -- the same
+    :func:`._targets.merge_target_legs` -- the same
     merge the anchor half applies to two same-day anchors.  The PERIOD is the
     payment's own stored one -- its TRANSFER's, read through the leg since
     plan step balance:X-bi-6-4b (the owner's budgeting choice, ruling

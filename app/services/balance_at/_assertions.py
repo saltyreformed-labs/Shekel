@@ -71,9 +71,9 @@ class CashAnchorCorrection:
     recorded needs no correction at all.
 
     On the write side each of these becomes a balanced ``account_trueup``
-    journal entry: :func:`app.services.account_posting_service.walk_account_ledger`
+    journal entry: :func:`app.services.ledger_lines.walk_account_ledger`
     wraps each one in an
-    :class:`~app.services.account_posting_service.AccountAnchorCorrection`
+    :class:`~app.services.ledger_lines.AccountAnchorCorrection`
     behind the account's ``account_opening`` (plan task plan#2525; the module
     docstring says why it is reached through the seam's door).
 

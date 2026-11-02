@@ -31,7 +31,7 @@ every one of them, whatever their date.  Its output is therefore a function of
 the loan's data ALONE -- which is what makes it re-derivable -- and deciding
 which facts have HAPPENED as of a date belongs to a reader (the seam's fold).  The
 cash ledger's walk
-(:func:`app.services.account_posting_service.walk_account_ledger`) has taken no
+(:func:`app.services.ledger_lines.walk_account_ledger`) has taken no
 as-of since Step 3; the loan half caught up at step A3 (``4e46a0a8``).
 
 **The same walk carries the loan's PROJECTIONS when the seam appends them**

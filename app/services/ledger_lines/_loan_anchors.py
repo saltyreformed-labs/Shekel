@@ -5,8 +5,10 @@ balance TRUE-UP -- a loan books into the append-only double-entry ledger, so its
 confirmed balance is fully reconstructable as ``-(sum of its linked postings)``
 with no external anchor read (the foundation the read switch and Step-5 reporting
 move onto).  **This module builds the TARGET and nothing else** (plan step
-``balance:X-bi-6-3``, ruling **R-BAL102**): the reconcile -- what is posted, the
-delta, the emission -- is :mod:`._corrections`' one loop over the anchor and the
+``balance:X-bi-6-3``, ruling **R-BAL102**), for the stored ledger's writer and
+the worked-out read alike; it was ``loan_posting_service._anchors`` until plan
+task plan#2526 moved it beside the read: the reconcile -- what is posted, the
+delta, the emission -- is ``loan_posting_service._corrections``' one loop over the anchor and the
 payment-split targets together, which is what keeps a loan's three correction
 kinds on one read and one write per sync.
 
@@ -104,15 +106,12 @@ from app.enums import (
     PostingSourceEnum,
 )
 from app.models.account import Account
-from app.services._posting_reconcile import (
-    ChartLegMap,
-    CorrectionKey,
-    merge_target_legs,
-)
-from app.services.ledger_lines import linked_key, loan_key
-from app.services.pay_calendar import PayCalendar
 from app.services.loan_ledger import LoanAnchorCorrection
 from app.services.loan_loaders import LoanAnchorFact
+from app.services.pay_calendar import PayCalendar
+
+from ._chart import linked_key, loan_key
+from ._targets import ChartLegMap, CorrectionKey, merge_target_legs
 
 
 def _anchor_correction_kinds(
@@ -196,7 +195,7 @@ def anchor_correction_targets(
 
     Groups every anchor correction by its ``(source_kind_id, pay_period_id,
     anchor_date)`` key and sums the legs within each group
-    (:func:`app.services._posting_reconcile.merge_target_legs`), so two same-day
+    (:func:`._targets.merge_target_legs`), so two same-day
     same-kind anchors (the unique index permits two true-ups on one day with
     different balances) net to a single balanced target that lands owed on the
     LATER value -- exactly the combined jump they express.  A correction that
@@ -217,7 +216,7 @@ def anchor_correction_targets(
         loan: The loan the walk is of, with ``account_type`` loaded
             (:func:`_loan_anchor_correction_target`).
         calendar: The owner's whole pay calendar, from
-            :func:`app.services._posting_reconcile.filing_calendar_for`.
+            :func:`app.services.pay_calendar.calendar_for`.
             :meth:`~app.services.pay_calendar.PayCalendar.filing_period` is the
             one place the "is there a period to point at" question is asked and
             refused, so this carries no precondition of its own -- an earlier

@@ -5,9 +5,11 @@ chronological walk (:func:`walk_account_ledger`) replays a NON-loan account's
 anchor assertions -- its :class:`~app.models.account.AccountAnchorHistory`
 rows -- against the account's settled RECORDS, and produces the balanced
 OPENING / TRUE-UP corrections that drive the ledger's running total to each
-asserted balance at its assertion moment.  The reconcile / posting of those
-corrections lives in the sibling module (:mod:`._anchors`); this module only
-reads and computes (no writes, no commit).
+asserted balance at its assertion moment.  What each correction books is the
+sibling rule's (:mod:`._account_anchors`), which the stored ledger's writer
+reconciles to and the worked-out read sums; this module only reads and
+computes (no writes, no commit).  It was ``account_posting_service._walk``
+until plan task plan#2526 moved it beside that rule.
 
 **A RECORDED clearing fact where there is one, and the civil DAY where there is
 not** (ruling **R-FL**, plan step X-f3a-1).  A source names the

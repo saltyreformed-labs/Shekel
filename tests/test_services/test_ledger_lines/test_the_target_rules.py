@@ -47,30 +47,31 @@ from app.services import account_posting_service, ledger_account_service
 from app.services.ledger_lines import (
     ChartKey,
     account_counter_key,
+    anchor_correction_targets,
     category_key,
     linked_key,
     loan_key,
     owner_bucket_key,
+    payment_split_targets,
+    purchase_target,
     transit_key,
+    walk_account_ledger,
 )
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.pay_calendar import calendar_for
 from app.services.posting_reads import PostingError
 from app.services.transfer_legs import movement_parent, transfer_family_movements
 from app.utils.dates import display_today
-# The rules under test are package-private to the writers that post them; the
-# worked-out read (plan#2526) is their second reader, and until it lands these
-# cases reach them by name rather than asking for a re-export that would exist
-# only for a test (the posture ``test_chart.py`` keeps for the report's label).
-from app.services._posting_purchases import _purchase_target
+# The rules under test live in the worked-out ledger since plan task plan#2526,
+# which moved them out of the writers that post them; the account half's two
+# pieces are package-private there, and these cases reach them by name rather
+# than asking for a re-export that would exist only for a test (the posture
+# ``test_chart.py`` keeps for the report's label).
 from app.services._posting_write import ledger_row_for, resolve_chart_targets
-from app.services.account_posting_service._anchors import (
+from app.services.ledger_lines._account_anchors import (
     _account_anchor_correction_targets,
     _counter_keys,
 )
-from app.services.account_posting_service._walk import walk_account_ledger
-from app.services.loan_posting_service._anchors import anchor_correction_targets
-from app.services.loan_posting_service._payments import payment_split_targets
 from tests._test_helpers import (
     create_account_of_type,
     create_loan_with_trueup,
@@ -143,7 +144,7 @@ def _assert_on(account, balance, *, days_after_opening, seconds):
 
 
 class TestTheMovementRuleNamesKeys:
-    """``_posting_purchases._purchase_target``: a movement's two legs, by key."""
+    """``ledger_lines.purchase_target``: a movement's two legs, by key."""
 
     def test_a_paid_expense_books_its_account_against_its_category(
         self, app, db, seed_user, seed_periods,
@@ -163,7 +164,7 @@ class TestTheMovementRuleNamesKeys:
             (movement,) = txn.entries
 
             target, statements = _statements_of(
-                lambda: _purchase_target(movement, movement_parent(movement)),
+                lambda: purchase_target(movement, movement_parent(movement)),
             )
 
             assert target == {
@@ -192,7 +193,7 @@ class TestTheMovementRuleNamesKeys:
             )
 
             targets, statements = _statements_of(lambda: {
-                movement.account_id: _purchase_target(movement, leg)
+                movement.account_id: purchase_target(movement, leg)
                 for movement, leg in transfer_family_movements(xfer)
             })
 
@@ -210,7 +211,7 @@ class TestTheMovementRuleNamesKeys:
 
 
 class TestTheAccountCorrectionRuleNamesKeys:
-    """The account corrections' targets, by key (``account_posting_service._anchors``)."""
+    """The account corrections' targets, by key (``ledger_lines._account_anchors``)."""
 
     def test_an_opening_and_a_true_up_name_their_two_counters(
         self, app, db, seed_user,

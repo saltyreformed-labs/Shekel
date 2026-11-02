@@ -1,7 +1,7 @@
 """Account anchor-posting orchestration: per-scenario sync, all-scenarios, per-user.
 
 The entry points that drive a non-loan account's anchor reconcile -- one walk
-(:func:`._walk.walk_account_ledger`) feeding one reconcile
+(:func:`app.services.ledger_lines.walk_account_ledger`) feeding one reconcile
 (:func:`._anchors.reconcile_account_anchor_corrections`) per (account,
 scenario):
 
@@ -57,10 +57,10 @@ from app.services.account_projection import (
 from app.services._posting_reconcile import account_chart_row_ids
 from app.services.cash_ledger import reconciled_through
 from app.services.scenario_resolver import get_baseline_scenario
+from app.services.ledger_lines import walk_account_ledger
 from app.services.user_write_lock import lock_every_user_writes
 
 from ._anchors import reconcile_account_anchor_corrections
-from ._walk import walk_account_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ def sync_account_anchor_postings(account_id: int, scenario_id: int) -> None:
 
     The per-scenario chokepoint: walks the account's anchor assertions
     against the scenario's posted sources
-    (:func:`._walk.walk_account_ledger`) and reconciles the resulting
+    (:func:`app.services.ledger_lines.walk_account_ledger`) and reconciles the resulting
     opening / true-up corrections to the ledger
     (:func:`._anchors.reconcile_account_anchor_corrections`).
 

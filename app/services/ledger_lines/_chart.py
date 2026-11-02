@@ -9,8 +9,8 @@ moment.  Ruling plan#2518 (developer, 2026-11-01) works it out instead, so a
 line names what it is booked on with a :class:`ChartKey` -- its kind, its class
 and the record behind it -- and no row of any table is created to name it.
 
-**This module is the ONE home of the chart's two rules**, and the stored chart's
-writer reads both from here for as long as the store lives:
+**This module is the ONE home of the chart's rules**, and the stored chart's
+writer reads them from here for as long as the store lives:
 
 * **the class**, applied once, when a key is built: a real account's own line by
   its type's category (:func:`linked_ledger_class`); a category line by its
@@ -23,6 +23,11 @@ writer reads both from here for as long as the store lives:
   snapshot.  The ruling's answer is "Statements show current names": a rename
   relabels past lines, where a stored snapshot kept the name it was minted
   with.
+* **which counter an account's correction books on** (ruling **R-FO**,
+  :func:`anchor_correction_counter_kind`): the opening on equity, a true-up on
+  what its difference WAS by the account's projection kind.  It was
+  ``ledger_account_service``'s until plan task plan#2526 moved it beside the
+  correction rules that read it (:mod:`._account_anchors`).
 
 ``ledger_account_service`` stamps each stored row's class and snapshots its
 name from these rules, so the row the writer stores and the key worked out here
@@ -56,6 +61,7 @@ from app.enums import (
 )
 from app.models.account import Account
 from app.models.category import Category
+from app.services.account_projection import AccountProjectionKind
 
 # Each per-ACCOUNT counter kind (the counter leg of a non-loan account's
 # opening and true-ups, ruling R-FO) mapped to (its class, its label's
@@ -123,6 +129,28 @@ _CATEGORY_CLASSES = frozenset(
 # classes cannot part.
 ACCOUNT_COUNTER_KINDS = frozenset(_ACCOUNT_COUNTER_KINDS)
 LOAN_KINDS = frozenset(_LOAN_KINDS)
+
+# WHAT a TRUE-UP's difference MEANS, by the account's projection kind (ruling
+# **R-FO**).  Total over the four NON-loan kinds
+# ``app.services.account_projection.classify_account`` can return;
+# ``AMORTIZING`` is deliberately absent, because a loan's corrections are the
+# loan rules' (:mod:`._loan_anchors`), and the account walk refuses a loan
+# (:func:`._account_walk.walk_account_ledger`).  A missing key is a
+# loud refusal rather than a default, so ADDING a projection kind fails here
+# instead of quietly booking the new kind's return to equity --
+# ``TestTrueUpCounterKindIsTotal`` is what turns that into a test failure
+# rather than a production surprise.
+#
+# ``PLAIN`` stays on equity on purpose and it is the only arm that is not
+# final: classifying an ordinary cash account's unexplained difference
+# automatically is exactly what ruling **R-FN** refuses, so it flips at plan
+# step X-f3c, when that difference becomes a transaction the user accepts.
+_TRUEUP_COUNTER_KINDS = {
+    AccountProjectionKind.PLAIN: LedgerAccountKindEnum.ANCHOR_EQUITY,
+    AccountProjectionKind.INTEREST: LedgerAccountKindEnum.INTEREST_INCOME,
+    AccountProjectionKind.INVESTMENT: LedgerAccountKindEnum.UNREALIZED_CHANGE,
+    AccountProjectionKind.APPRECIATING: LedgerAccountKindEnum.UNREALIZED_CHANGE,
+}
 
 # The label component of every kind whose label is "<account> -- <component>".
 _COMPONENTS = {
@@ -305,8 +333,8 @@ def account_counter_key(
     """Return the key of a non-loan account's correction counter line.
 
     WHICH counter kind a correction books on is ruling R-FO's dispatch
-    (``ledger_account_service.anchor_correction_counter_kind``); this builds
-    the key once the kind is known.
+    (:func:`anchor_correction_counter_kind`); this builds the key once the
+    kind is known.
 
     Args:
         kind: ``ANCHOR_EQUITY``, ``INTEREST_INCOME`` or ``UNREALIZED_CHANGE``.
@@ -350,6 +378,60 @@ def loan_key(kind: LedgerAccountKindEnum, loan_account_id: int) -> ChartKey:
         )
     ledger_class, _ = _LOAN_KINDS[kind]
     return ChartKey(kind, ledger_class, loan_account_id)
+
+
+def anchor_correction_counter_kind(
+    projection_kind: AccountProjectionKind, *, is_opening: bool,
+) -> LedgerAccountKindEnum:
+    """Return the chart kind an anchor correction's COUNTER leg books into.
+
+    Ruling **R-FO**'s rule, in one place and as a pure function: what a balance
+    assertion's difference MEANS is a property of the ACCOUNT, so the counter
+    leg is a total dispatch over
+    :func:`app.services.account_projection.classify_account` -- interest income
+    for an ``INTEREST`` account, an unrealized change in value for an ``INVESTMENT`` or
+    ``APPRECIATING`` one, the equity opening for a ``PLAIN`` one.
+
+    **An OPENING books to equity whatever the account is**, and that is not a
+    carve-out in the dispatch -- it is a different question.  An opening is the
+    balance brought ONTO the books, capital rather than something earned:
+    booking a Property's ``$350,000.00`` opening as a change in value would say
+    the house appreciated by its whole value on the day it was recorded, and a
+    Roth IRA's ``$22,909.02`` opening would read as a day-one return.  R-FO's
+    own measurement is the true-ups alone (``$10,653.91`` on a production clone
+    2026-08-13, with every opening excluded), and the developer ruled it
+    2026-08-14.
+
+    Args:
+        projection_kind: The account's
+            :class:`~app.services.account_projection.AccountProjectionKind`.
+        is_opening: Whether this correction books the account's EARLIEST
+            assertion (``CashAnchorFact.is_opening``) rather than a later
+            true-up.
+
+    Returns:
+        The :class:`~app.enums.LedgerAccountKindEnum` member the counter leg
+        books into.
+
+    Raises:
+        ValueError: If *projection_kind* has no true-up rule -- today only
+            ``AMORTIZING``, whose corrections are the loan rules' entirely,
+            and any kind added to the enum without a rule here.  Fail loud
+            rather than defaulting: a silent fallback to equity is the very
+            defect this dispatch removes.
+    """
+    if is_opening:
+        return LedgerAccountKindEnum.ANCHOR_EQUITY
+    counter_kind = _TRUEUP_COUNTER_KINDS.get(projection_kind)
+    if counter_kind is None:
+        raise ValueError(
+            f"no true-up counter rule for projection kind "
+            f"{projection_kind.value!r}; an account's balance-assertion "
+            f"difference must name what it WAS, and only the non-loan kinds "
+            f"{sorted(kind.value for kind in _TRUEUP_COUNTER_KINDS)} book "
+            f"an account's corrections"
+        )
+    return counter_kind
 
 
 def chart_label(key: ChartKey, record: Account | Category | None) -> str:

@@ -202,7 +202,7 @@ def _independent_movement_effect(account_id: int, scenario_id: int) -> Decimal:
     under UNSETTLED parents -- an oracle that would have stayed green had the
     writer regressed to posting the row's own leg beside its movement.
 
-    Restated in SQL rather than shared with ``_posting_purchases.purchase_posts``
+    Restated in SQL rather than shared with ``ledger_lines.purchase_posts``
     or ``cash_ledger.movement_cash_leg``, for the reason every helper in this
     file is: an oracle that imported the rule it grades could not grade it.
     """

@@ -199,7 +199,7 @@ class CashAnchorFact:
     :func:`app.services.balance_at.assertion_corrections` measures each
     assertion against the one before -- the read fold's replay, and since plan
     task plan#2525 the posting writer's too
-    (:func:`app.services.account_posting_service.walk_account_ledger` frames
+    (:func:`app.services.ledger_lines.walk_account_ledger` frames
     it), where there were two replays.  So a fact list not non-decreasing in
     :attr:`observed_on` mis-states a ``ledger_before`` the writer WRITES to the
     general ledger as well as a balance the fold shows.  The read side used to
@@ -332,7 +332,7 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     figure in its PARENT's direction (plan step X-bi-3b, ruling **R-BAL35**;
     a transfer side's figure is its transfer's, which its record does not
     hold), the same figure the posting writer books for it
-    (``_posting_purchases._purchase_target``) -- so the walk and the posted
+    (``ledger_lines.purchase_target``) -- so the walk and the posted
     ledger value one movement identically by construction, not by two rules
     that happen to agree.
 
@@ -718,14 +718,14 @@ def _movements_of(account_id: int, scenario_id: int, *narrowing):
       ``credit_card:CC-5-1`` dropped it (ruling **R-BAL76**) ahead of the
       card's doors, which write the first movements whose account is not
       their parent's; the posted ledger already attributes by the movement
-      (``_posting_purchases._purchase_target``), so the fold, the ledger and
+      (``ledger_lines.purchase_target``), so the fold, the ledger and
       the anchor self-heal read one predicate rather than agreeing by a key.
     * the parent's ``scenario_id`` -- a movement's scenario is its plan row's,
       read through ``transaction_id`` and never copied (ruling **R-BAL35**).
     * the parent is BALANCE-CONTRIBUTING -- the shared
       :func:`~app.utils.balance_predicates.balance_contributing_clause`, so a
       soft-deleted or Credit / Cancelled parent's movements are worth nothing
-      here, as they post nothing (``_posting_purchases.purchase_posts``).
+      here, as they post nothing (``ledger_lines.purchase_posts``).
     * the parent is a PLAN ROW, by the join on ``transaction_id``: a
       transfer side's movement names no row (plan step
       ``balance:X-bi-6-4d-2``, ruling **R-BAL88**) and is read with its

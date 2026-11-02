@@ -56,6 +56,7 @@ from app.services import (
     account_service,
     anchor_service,
     balance_at,
+    ledger_lines,
     loan_posting_service,
     posting_service,
     status_seam,
@@ -236,7 +237,7 @@ def _ledger_of_kind(account_id, kind):
 def _period_containing(user_id, day):
     """Return the id of the period a correction observed on ``day`` books in.
 
-    The derivation ``account_posting_service._anchors`` makes
+    The derivation ``ledger_lines._account_anchors`` makes
     (:meth:`app.services.pay_calendar.PayCalendar.filing_period`), asked here
     rather than read off the assertion row.  These tests compared a journal
     entry's ``pay_period_id`` against ``AccountAnchorHistory.pay_period_id``
@@ -361,7 +362,7 @@ class TestWalkAccountLedger:
         """
         with app.app_context():
             account = _make_account(seed_user, "500.00")
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 2
@@ -404,7 +405,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 2
@@ -475,7 +476,7 @@ class TestWalkAccountLedger:
             assert to_display_date(pinned) == _PINNED_OPENING_DAY
             assert settle.settled_on == _PINNED_OPENING_DAY
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 2
@@ -506,7 +507,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert corrections[1].ledger_before == Decimal("300.00")
@@ -546,7 +547,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
             movement, = txn.covering_movements
-            dated = account_posting_service.walk_account_ledger(
+            dated = ledger_lines.walk_account_ledger(
                 account.id, scenario_id,
             )
             assert dated[1].ledger_before == Decimal("300.00"), (
@@ -575,7 +576,7 @@ class TestWalkAccountLedger:
                 "PRECONDITION: the movement's leg is still posted"
             )
 
-            dayless = account_posting_service.walk_account_ledger(
+            dayless = ledger_lines.walk_account_ledger(
                 account.id, scenario_id,
             )
             assert dayless[1].ledger_before == Decimal("500.00")
@@ -650,7 +651,7 @@ class TestWalkAccountLedger:
             _db.session.commit()
 
             checking_corrections = (
-                account_posting_service.walk_account_ledger(
+                ledger_lines.walk_account_ledger(
                     checking.id, seed_user["scenario"].id,
                 )
             )
@@ -711,7 +712,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            control = account_posting_service.walk_account_ledger(
+            control = ledger_lines.walk_account_ledger(
                 checking.id, scenario_id,
             )
             assert [c.ledger_before for c in control[-2:]] == [
@@ -724,7 +725,7 @@ class TestWalkAccountLedger:
             entry.reconciled_by_id = governing.id
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 checking.id, scenario_id,
             )
             assert [c.ledger_before for c in corrections[-2:]] == [
@@ -763,7 +764,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 2
@@ -809,7 +810,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 3
@@ -889,7 +890,7 @@ class TestWalkAccountLedger:
             assert settle.settled_on == day
             assert to_display_date(trueup_at) == day
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             # THREE, not "at least three": a fourth would be an event no line
@@ -933,7 +934,7 @@ class TestWalkAccountLedger:
             _add_assertion(account, "480.00", settle_instant_on(origin + timedelta(days=2)))
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert corrections[1].ledger_before == Decimal("500.00")
@@ -950,14 +951,14 @@ class TestWalkAccountLedger:
             loan = create_loan_account(seed_user, _db.session)
             _db.session.commit()
             with pytest.raises(ValueError, match="amortizing loan"):
-                account_posting_service.walk_account_ledger(
+                ledger_lines.walk_account_ledger(
                     loan.id, seed_user["scenario"].id,
                 )
 
     def test_missing_account_returns_empty(self, app, db, seed_user):
         """A nonexistent account id walks to no corrections."""
         with app.app_context():
-            assert account_posting_service.walk_account_ledger(
+            assert ledger_lines.walk_account_ledger(
                 10**9, seed_user["scenario"].id,
             ) == []
 
@@ -1462,7 +1463,7 @@ class TestASettleDayMoveAcrossAnAssertion:
 
             def read_both():
                 """Return each assertion's ledger_before from the walk, and the posted state."""
-                walked = account_posting_service.walk_account_ledger(
+                walked = ledger_lines.walk_account_ledger(
                     account.id, scenario_id,
                 )
                 return (

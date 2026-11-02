@@ -41,7 +41,7 @@ lives in ``balance_at._plan`` and not in ``loan_ledger``.
 **Two consumers, one walk** (ruling R-H).  The seam's read pass folds it into a
 balance at a date, and since plan task plan#2525 the posting writer books the
 same facts' assertion corrections onto the general ledger:
-:func:`app.services.account_posting_service.walk_account_ledger` frames the
+:func:`app.services.ledger_lines.walk_account_ledger` frames the
 read fold's own replay over this walk
 (:func:`app.services.balance_at.assertion_corrections`, published at the seam's
 door because W9910 forbids the writer importing ``balance_at._assertions`` and
@@ -245,7 +245,7 @@ def walk_cash_ledger(account_id: int, scenario_id: int) -> CashLedgerWalk:
             Assertions are per-ACCOUNT (``AccountAnchorHistory`` carries no
             scenario), so the same assertions accompany every scenario's own
             rows -- the same split
-            :func:`app.services.account_posting_service.walk_account_ledger`
+            :func:`app.services.ledger_lines.walk_account_ledger`
             documents.
 
     Returns:
@@ -298,7 +298,7 @@ def dated_deltas(walk: CashLedgerWalk) -> list[tuple[date, Decimal]]:
     :func:`app.services.cash_ledger.movement_cash_leg` is debit-positive, so
     these steps ARE the linked ledger's movements in one convention, for assets
     and liabilities alike.  Verified against the writer:
-    ``_posting_purchases._purchase_target`` books ``movement_cash_leg(txn,
+    ``ledger_lines.purchase_target`` books ``movement_cash_leg(txn,
     entry)`` -- this module's :attr:`~._events.CashSourceFact.delta` -- onto
     the linked ledger.
     The NEGATIVES are the counter legs (the category ledger, the anchor-equity

@@ -152,7 +152,7 @@ since plan step X-f3c-1: that is a policy an account's KIND decides (ruling
 read fold TAKES these facts, and since plan step X-c2b2 every cash figure on
 every screen is that fold sampled at a date.  The posting WRITER is the second
 consumer since plan task plan#2525:
-:func:`app.services.account_posting_service.walk_account_ledger` books the
+:func:`app.services.ledger_lines.walk_account_ledger` books the
 fold's own assertion replay over this walk, where it had replayed the
 assertions over its own STORED postings -- so a stale posting is a detectable
 difference from the records rather than a second opinion about them.

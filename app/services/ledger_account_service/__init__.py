@@ -88,10 +88,7 @@ from the live ``account.name`` (see
 
 from ._buckets import get_or_create_transit_ledger_account
 from ._categories import get_or_create_category_ledger_account
-from ._counters import (
-    anchor_correction_counter_kind,
-    get_or_create_account_counter_account,
-)
+from ._counters import get_or_create_account_counter_account
 from ._linked import (
     create_ledger_account_for_account,
     find_linked_ledger_account,
@@ -100,7 +97,6 @@ from ._linked import (
 from ._loans import get_or_create_loan_ledger_account
 
 __all__ = [
-    "anchor_correction_counter_kind",
     "create_ledger_account_for_account",
     "find_linked_ledger_account",
     "get_or_create_account_counter_account",

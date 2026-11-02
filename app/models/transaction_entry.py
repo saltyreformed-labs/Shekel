@@ -218,7 +218,7 @@ class TransactionEntry(
         # against the envelope its merchant rule names, rather than as income
         # under a spending category.  The arithmetic was already sign-general
         # and was measured so before the constraint moved --
-        # ``_posting_purchases._purchase_target`` at ``-28.29`` emits
+        # ``ledger_lines.purchase_target`` at ``-28.29`` emits
         # ``{cash: +28.29, category: -28.29}`` with no branch, and
         # the row's own leg's three terms (through ``X-bi-3e``) were sums
         # that net -- which is what made the old bound a FENCE rather than an
@@ -514,7 +514,7 @@ class TransactionEntry(
     # The account this movement's money moved THROUGH -- its OWN fact since
     # plan step ``credit_card:CC-5-1`` (rulings **R-BAL75**, **R-BAL76**), read
     # on this account by the fold (``cash_ledger._events._movements_of``), the
-    # posted ledger (``_posting_purchases._purchase_target``) and the anchor
+    # posted ledger (``ledger_lines.purchase_target``) and the anchor
     # self-heal (``posting_service._family_accounts``), whatever account its
     # parent row names.  ``ON DELETE RESTRICT``, as ``transactions.account_id``
     # is: a record of money that moved through an account does not vanish with

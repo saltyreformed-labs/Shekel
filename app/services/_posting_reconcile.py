@@ -22,8 +22,6 @@ finding) and both agree exactly:
   entries touching any of ONE account's chart rows.
 * :func:`delta_legs` -- turn a ``target`` ledger-leg map and the ``posted``
   ledger-leg map into the balanced DELTA legs that move posted to target.
-* :func:`merge_target_legs` -- sum a correction's legs into a target bucket
-  (the same-key merge both anchor reconciles apply).
 * :func:`emit_correction_entry` -- the one definition of what a sourceless
   correction journal entry looks like (every concrete FK NULL, dated at the
   correction's civil date, described from its source kind).  An anchor's
@@ -34,9 +32,12 @@ finding) and both agree exactly:
   target's chart keys to stored rows, union the target and posted keys, emit
   one balanced delta per key that differs.
 
-A correction TARGET is keyed by chart key (:data:`ChartLegMap`, plan task
-plan#2524): the target rules name what each leg is booked on and touch no
-stored chart row, and the loop resolves the keys at its emit step
+A correction TARGET is keyed by chart key
+(:data:`app.services.ledger_lines.ChartLegMap`, plan task plan#2524) under a
+:data:`app.services.ledger_lines.CorrectionKey`: the target rules, which live
+in the worked-out ledger since plan task plan#2526, name what each leg is
+booked on and touch no stored chart row, and the loop resolves the keys at its
+emit step
 (:func:`app.services._posting_write.resolve_chart_targets`).  What is POSTED
 is read back by stored row (:data:`LegMap`), and the delta is taken between
 two maps keyed the same way.
@@ -56,7 +57,7 @@ from app.extensions import db
 from app.models.account import Account
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
-from app.services.ledger_lines import ChartKey
+from app.services.ledger_lines import ChartLegMap, CorrectionKey
 from app.services.pay_calendar import PayCalendar, calendar_for
 from app.services.posting_reads import PostingError
 from app.services._posting_write import (
@@ -70,40 +71,9 @@ logger = logging.getLogger(__name__)
 
 _ZERO_MONEY = Decimal("0.00")
 
-# The correction reconcile key: (journal ``source_kind_id``,
-# ``pay_period_id``, civil ``entry_date``).  Shared by the loan and account
-# anchor reconciles and, since plan step ``balance:X-bi-6-3`` (ruling
-# **R-BAL102**), the loan payment SPLIT -- a correction is a DERIVATION of a
-# walk and has no concrete source FK to key on, so each is keyed by its source
-# kind (opening / true-up / payment split) plus the period / date pair every
-# reconcile in this ledger keys on.  The split carried the loan-side shadow's
-# ``transaction_id`` until that step, and every teardown of that row owed it
-# a reversal first; a key with no row has nothing to lose.
-#
-# **The period is in the key because R2 is an attribution rule, not a
-# convention** (plan step X-ai-r, finding N-161).  A correction "carries the
-# PAY PERIOD of the postings it reverses -- read back from the ledger per
-# period, never the source row's current period"
-# (:mod:`app.services.posting_service`).  The other two reconciles in this
-# ledger obey it structurally by carrying the period in their key --
-# ``_posting_write.posted_by_period`` for a movement (a transaction's and a
-# transfer's own sources too, until plan#1845 deleted them) and
-# the loan payment split's own reader (folded into :func:`posted_correction_legs`
-# at ``balance:X-bi-6-3``), both ``(pay_period_id, entry_date)``.  This one did not: it read
-# the posted side keyed ``(source_kind_id, entry_date)`` with no period, so
-# it could not know WHICH period it was correcting, and the account reconcile
-# re-supplied one from the source row's current period -- verbatim what the
-# rule forbids.  Measured on production data, that filed a ``$2,854.36``
-# reversal of period-5 postings into period 6.  The period is therefore not
-# decoration on this tuple: it is the half of the key that makes a reversal
-# land where the postings it undoes live.
-CorrectionKey = tuple[int, int, date]
 # The posted leg map, and a target once resolved: {ledger_account_id: (signed
 # amount, posting_kind_id)}.
 LegMap = dict[int, tuple[Decimal, int]]
-# A correction target as its rule builds it: {chart key: (signed amount,
-# posting_kind_id)} (plan task plan#2524).
-ChartLegMap = dict[ChartKey, tuple[Decimal, int]]
 
 
 def account_owner_id(account_id: int) -> int | None:
@@ -304,7 +274,8 @@ def posted_correction_legs(
     correction whatever it touches, and the reconcile is idempotent again.
 
     **Grouping by ``pay_period_id`` is the R2 attribution rule made
-    structural** (plan step X-ai-r; see the :data:`CorrectionKey` comment for
+    structural** (plan step X-ai-r; see the
+    :data:`app.services.ledger_lines.CorrectionKey` comment for
     the measurement).  Without it a key spanning two periods reads back as
     one blob, and the reversal of postings in one period is filed against the
     other.  A journal entry carries exactly one source kind, one period and
@@ -384,45 +355,6 @@ def delta_legs(target: LegMap, posted: LegMap) -> list[_PostingLeg]:
         kind_id = target_kind if target_kind is not None else posted_kind
         legs.append(_PostingLeg(ledger_id, delta, kind_id))
     return legs
-
-
-def merge_target_legs(bucket: ChartLegMap, legs: ChartLegMap) -> None:
-    """Sum a correction's legs into a per-key target *bucket*, in place.
-
-    The same-key merge both anchor reconciles apply when two anchors share
-    one reconcile key -- same source kind, same pay period AND same civil day.
-    Each chart key's amounts add -- one key is one stored row, so it is the
-    sum each row took while this merged by row -- and the merged target
-    expresses the anchors' combined jump (landing on the later anchor's value,
-    since each correction's delta already accounts for the prior one).  A leg
-    that nets to zero stays in the bucket, so its row is still resolved
-    (:func:`~app.services._posting_write.resolve_chart_targets`).  The posting kind
-    is shared within a key by construction (one key holds one source kind,
-    whose legs all carry that kind), so the incoming kind simply wins.
-
-    **Adding the period to the key narrowed NOTHING here, and a draft of this
-    docstring claimed it did** ("two same-day assertions filed against
-    different periods now key apart").  That described R-DZ's target key, which
-    ruling R-EA replaced: the period is DERIVED from the assertion's day, so
-    two assertions sharing a day share a period BY CONSTRUCTION and can never
-    key apart.  The correction is kept visible because the claim survived the
-    ruling that falsified it, in the shared primitive both halves read.
-
-    It survives only because an assertion has no source FK for the ledger to
-    key on, so two assertions genuinely indistinguishable in the key merge
-    into one entry.  Giving a correction that identity is what deletes this
-    (plan step X-ai-s) -- and it is the ONLY thing that can, since no part of
-    the current key can tell two same-day assertions apart.
-
-    Args:
-        bucket: The key's accumulated ``{ledger_account_id: (amount,
-            posting_kind_id)}`` target, mutated in place.
-        legs: One correction's balanced legs to add (may be empty for a
-            correction that books nothing).
-    """
-    for ledger_id, (amount, kind_id) in legs.items():
-        prev_amount, _prev_kind = bucket.get(ledger_id, (_ZERO_MONEY, kind_id))
-        bucket[ledger_id] = (prev_amount + amount, kind_id)
 
 
 def _correction_description(source_kind_id: int, entry_date: date) -> str:

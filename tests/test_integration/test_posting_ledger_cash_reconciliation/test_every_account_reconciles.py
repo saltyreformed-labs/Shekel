@@ -9,7 +9,11 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import LedgerAccountClassEnum, TxnTypeEnum
+from app.enums import (
+    LedgerAccountClassEnum,
+    LedgerAccountKindEnum,
+    TxnTypeEnum,
+)
 from app.extensions import db as _db
 from app.models.category import Category
 from app.models.journal_entry import JournalEntry, Posting
@@ -19,7 +23,9 @@ from app.models.scenario import Scenario
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.services import posting_service, transaction_service
+from app.services.ledger_lines import ChartKey, owner_bucket_key
 from app.utils.balance_predicates import settled_status_ids
+from tests._ledger_parity import LedgerParityDifference
 from tests._test_helpers import (
     family_journal_filter,
     figure_source_columns,
@@ -41,6 +47,53 @@ from ._helpers import (
     _assert_full_reconciliation,
     _counter_ledger_id,
 )
+
+
+def _orphaned_expense_cells(
+    orphan_id: int, txn: Transaction, amount: Decimal,
+) -> tuple[LedgerParityDifference, ...]:
+    """Return the two cells a deleted category leaves the stored ledger behind on.
+
+    Worked out from the records, *txn*'s expense -- its category deleted, so
+    its ``category_id`` reads NULL -- books on the owner's Uncategorized
+    Expense bucket, which holds no stored row yet; the store keeps it on the
+    orphan until a resync re-books it.  The raw-SQL delete that makes the
+    orphan is one the category-delete route refuses for a category in use (it
+    archives one instead, ``routes/categories.delete_category``), so these two
+    cells are the fixture's, and every other cell of the world agrees (plan
+    task plan#2527).
+
+    Args:
+        orphan_id: The orphaned stored chart row's id.
+        txn: The expense row, its one movement dated.
+        amount: The expense's figure, as the case states it.
+
+    Returns:
+        The orphan's cell (stored, not worked out) and the bucket's (worked
+        out, not stored), each in *txn*'s paycheck on its movement's day.
+    """
+    (movement,) = txn.entries
+    return (
+        LedgerParityDifference(
+            # Spelled from the orphan's columns: no constructor builds a key
+            # with no category behind it.
+            key=ChartKey(
+                LedgerAccountKindEnum.CATEGORY,
+                LedgerAccountClassEnum.EXPENSE, None,
+            ),
+            stored_row_ids=(orphan_id,), pay_period_id=txn.pay_period_id,
+            entry_date=movement.settled_on,
+            stored=amount, worked_out=Decimal("0.00"),
+        ),
+        LedgerParityDifference(
+            key=owner_bucket_key(
+                LedgerAccountKindEnum.FALLBACK, LedgerAccountClassEnum.EXPENSE,
+            ),
+            stored_row_ids=(), pay_period_id=txn.pay_period_id,
+            entry_date=movement.settled_on,
+            stored=Decimal("0.00"), worked_out=amount,
+        ),
+    )
 
 
 def _assert_every_settled_transaction_posts(user_id: int) -> None:
@@ -352,7 +405,9 @@ class TestPerCounterAccountReconciliation:
                 )
                 .count()
             ) == 0
-            _assert_full_reconciliation(scenario_id)
+            _assert_full_reconciliation(scenario_id, _orphaned_expense_cells(
+                orphan_id, db.session.get(Transaction, txn_id), Decimal("50.00"),
+            ))
 
 
 # ---------------------------------------------------------------------------

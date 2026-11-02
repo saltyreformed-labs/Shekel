@@ -23,6 +23,7 @@ from app.models.transfer import Transfer
 from app.services import ledger_account_service
 from app.utils.balance_predicates import balance_excluded_status_ids, settled_status_ids
 from app.services import cash_ledger
+from tests._ledger_parity import assert_ledger_parity
 
 
 # ---------------------------------------------------------------------------
@@ -594,18 +595,27 @@ def _checked_side_counter_net(counter, record_id: int, net: Decimal) -> Decimal:
     return net
 
 
-def _assert_full_reconciliation(scenario_id: int) -> None:
+def _assert_full_reconciliation(
+    scenario_id: int, known_parity_differences: tuple = (),
+) -> None:
     """Assert the whole ledger reconciles: linked, counter, per-entry, trial.
 
     The production-wide sweep run after each test's mutations.  Linked and
     counter reconciliation are scenario-scoped; the per-entry balance and trial
     balance are global self-checks (always true for a balanced ledger, asserted
-    cheaply on every sweep).
+    cheaply on every sweep).  Last, the ledger worked out from the records
+    equals this stored one to the cent per (chart row, paycheck, day) (plan
+    task plan#2527): the stored side these oracles have just graded is the
+    second opinion the worked-out read is graded against.  A case whose
+    fixture wrote a record past every writer names the cells that leaves the
+    store behind on in *known_parity_differences*
+    (``tests._ledger_parity.assert_ledger_parity``).
     """
     _assert_linked_accounts_reconcile(scenario_id)
     _assert_counter_accounts_reconcile(scenario_id)
     assert _entries_violating_balance() == []
     assert _trial_balance() == Decimal("0")
+    assert_ledger_parity(_db.session, scenario_id, known_parity_differences)
 
 
 def _counter_ledger_id(

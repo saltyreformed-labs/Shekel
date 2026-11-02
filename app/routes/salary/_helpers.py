@@ -261,9 +261,11 @@ def _line_cadence_context(
 
     * ``cadence_phrases`` -- the Frequency cell's words, R15-b's;
     * ``recurrence_picker`` -- the offer set the shared cadence controls
-      render from, :func:`~app.services.recurrence.picker_model`, the same
-      value every recurrence form takes (ruling **R-SAL37**: the whole set,
-      unfiltered);
+      render from, :func:`~app.services.recurrence.picker_model` over
+      :func:`~app.services.payroll_line_cadence.line_cadences`: the set every
+      recurrence form takes, narrowed to the units a payroll line may repeat
+      by (ruling plan#2591, amending **R-SAL37**'s "the whole set": a line's
+      rule picks which paychecks take it, and the week unit picks none);
     * ``selected_cadences`` -- ``{deduction id: SelectedCadence | None}``,
       what an EDIT of each line starts its controls on, through the one
       render-side reader the template forms use
@@ -290,7 +292,7 @@ def _line_cadence_context(
         The nine context keys.
     """
     options = paycheck_line_kinds.kind_options()
-    picker = picker_model()
+    picker = picker_model(payroll_line_cadence.line_cadences())
     return {
         "kind_options": options,
         "kind_labels": dict(options),

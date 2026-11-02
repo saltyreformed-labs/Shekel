@@ -77,6 +77,7 @@ from app.services.recurrence import (
     EndsAfterOccurrences,
     EndsOnDate,
     NeverEnds,
+    authorable_cadences,
     cadence_options,
     end_bound_options,
     is_authorable,
@@ -344,7 +345,7 @@ class TestNothingOfferedIsUnauthorable:
         producers that merely agreed until plan step R7b-2.
         """
         with app.app_context():
-            options = cadence_options()
+            options = cadence_options(authorable_cadences())
 
             assert options, "the offer set is empty"
             for option in options:
@@ -399,7 +400,7 @@ class TestNothingOfferedIsUnauthorable:
         with app.app_context():
             month_id = ref_cache.recurrence_unit_id(RecurrenceUnitEnum.MONTH)
             month_placements = {
-                option.placement_id for option in cadence_options()
+                option.placement_id for option in cadence_options(authorable_cadences())
                 if option.unit_id == month_id
             }
 
@@ -495,7 +496,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
         )
 
         with app.app_context():
-            emitted = json.loads(picker_model().options_json)
+            emitted = json.loads(picker_model(authorable_cadences()).options_json)
 
             assert emitted, "the serialized offer set is empty"
             for entry in emitted:
@@ -516,7 +517,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
         select is one the script has no entry for.
         """
         with app.app_context():
-            model = picker_model()
+            model = picker_model(authorable_cadences())
             emitted = json.loads(model.options_json)
             serialized_keys = {
                 (entry["unit_id"], entry["placement_id"])
@@ -532,7 +533,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
     def test_the_projections_are_subsets_of_the_offer_set(self, app):
         """Each control's list is drawn FROM the offer set, not beside it."""
         with app.app_context():
-            model = picker_model()
+            model = picker_model(authorable_cadences())
 
             for projection in (model.units, model.placements):
                 assert set(projection) <= set(model.options)
@@ -548,7 +549,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
         outlived the control that exposed it.
         """
         with app.app_context():
-            model = picker_model()
+            model = picker_model(authorable_cadences())
 
             units = [option.unit_id for option in model.units]
             placements = [option.placement_id for option in model.placements]
@@ -579,7 +580,7 @@ class TestBothFormsRenderTheSameControls:
         assert seed_periods_today
         with app.app_context():
             expected = []
-            for option in cadence_options():
+            for option in cadence_options(authorable_cadences()):
                 if str(option.unit_id) not in expected:
                     expected.append(str(option.unit_id))
 
@@ -1488,4 +1489,4 @@ class TestTheEndBoundOfferSet:
 
     def test_the_picker_model_carries_them(self):
         """One producer call per render, for every control on the form."""
-        assert picker_model().end_bounds == end_bound_options()
+        assert picker_model(authorable_cadences()).end_bounds == end_bound_options()

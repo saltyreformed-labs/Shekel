@@ -34,6 +34,7 @@ from app.extensions import db
 from app.models.ref import RecurrenceUnit
 from app.services.recurrence import (
     UNREADABLE_CADENCE_MESSAGE,
+    authorable_cadences,
     cadence_options,
     modelled_placement,
     modelled_unit,
@@ -110,14 +111,14 @@ class TestAnUnmodelledRowIsInvisible:
         that changes only a LABEL.
         """
         with app.app_context():
-            before = cadence_options()
+            before = cadence_options(authorable_cadences())
 
             surplus = RecurrenceUnit(name="Fortnight")
             db.session.add(surplus)
             db.session.flush()
 
             assert db.session.get(RecurrenceUnit, surplus.id) is not None
-            assert cadence_options() == before
+            assert cadence_options(authorable_cadences()) == before
 
     def test_the_offer_set_omits_a_unit_the_resolver_cannot_anchor(self, app):
         """``WEEK`` is a modelled unit with no anchor, so it is not offered.
@@ -134,7 +135,7 @@ class TestAnUnmodelledRowIsInvisible:
 
             assert modelled_unit(week_id) is RecurrenceUnitEnum.WEEK
             assert week_id not in {
-                option.unit_id for option in cadence_options()
+                option.unit_id for option in cadence_options(authorable_cadences())
             }
 
     def test_a_ref_row_the_enum_does_not_name_is_not_modelled(self, app):
@@ -168,7 +169,7 @@ class TestAnUnmodelledRowIsInvisible:
         offer set is not driven by any ``ref`` table.
         """
         with app.app_context():
-            options = cadence_options()
+            options = cadence_options(authorable_cadences())
 
             assert options, "the offer set is empty"
             for option in options:

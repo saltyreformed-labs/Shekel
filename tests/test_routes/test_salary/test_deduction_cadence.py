@@ -5,13 +5,19 @@ Split from ``tests/test_routes/test_salary.py`` by ``tools/split`` (ruling R-BAL
 """
 
 from datetime import date
+from html import unescape
+import json
 import re
 from decimal import Decimal
+
+import pytest
+from marshmallow import ValidationError
 
 from app.extensions import db
 from app.models.paycheck_line import PaycheckLine
 from app.models.recurrence_rule import RecurrenceRule
 from app.models.ref import CalcMethod, PaycheckLineKind
+from app.schemas.validation import PaycheckLineCreateSchema
 from app import ref_cache
 from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
 from app.services.pay_calendar import calendar_for
@@ -490,3 +496,124 @@ class TestDeductionCadenceForm(_TestDeductionCadenceFormMembers):
                 "unit-id": "", "interval": "", "placement-id": "", "max-per-month": "",
                 "starts-on": "", **never_ending,
             }
+
+
+class TestWeeksStayOffTheSalaryPage:
+    """Ruling plan#2591: a payroll line repeats by paychecks, months or years.
+
+    A line's rule picks WHICH paychecks take it -- the paycheck engine asks one
+    yes/no per paycheck -- so a weekly line would be taken once per paycheck
+    however many weeks it held: $25 a week on a biweekly schedule is $50 a
+    paycheck, and the engine would take $25.  A weekly item is entered as its
+    per-paycheck amount instead.  These cases hold the salary page's offer and
+    its door to that set while the template forms offer the week unit (plan
+    step R8-b).
+    """
+
+    #: What the line schema says when a weekly cadence is posted.
+    WEEKS_REFUSED = (
+        "A payroll line repeats by paychecks, months or years, not weeks."
+    )
+
+    def test_the_repeats_control_offers_paychecks_months_and_years_only(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """The unit select and the script's offer set both omit the week unit."""
+        with app.app_context():
+            profile = _create_profile(seed_user)
+            html = auth_client.get(f"/salary/{profile.id}/edit").data.decode()
+            form = re.search(
+                r'<form method="POST" id="line-form".*?</form>', html, re.S,
+            ).group(0)
+            unit_select = re.search(
+                r'<select id="recurrence_unit".*?</select>', form, re.S,
+            ).group(0)
+            offered = set(re.findall(r'<option value="(\d+)"', unit_select))
+            assert offered == {
+                str(ref_cache.recurrence_unit_id(unit))
+                for unit in (
+                    RecurrenceUnitEnum.PERIOD,
+                    RecurrenceUnitEnum.MONTH,
+                    RecurrenceUnitEnum.YEAR,
+                )
+            }
+            wire = json.loads(unescape(
+                re.search(r'data-cadence-options="([^"]*)"', form).group(1),
+            ))
+            assert {option["unit_id"] for option in wire} == {
+                int(unit_id) for unit_id in offered
+            }
+
+    def test_add_a_weekly_line_is_refused_and_writes_nothing(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """A crafted weekly POST is the schema's field error, with no line or rule written."""
+        with app.app_context():
+            profile = _create_profile(seed_user)
+            rules_before = db.session.query(RecurrenceRule).count()
+            response = auth_client.post(
+                f"/salary/{profile.id}/lines",
+                data=_line_form(
+                    "Union dues", amount="25.00",
+                    **_cadence_payload(
+                        RecurrenceUnitEnum.WEEK,
+                        PeriodPlacementEnum.CONTAINING_DATE,
+                    ),
+                ),
+                follow_redirects=True,
+            )
+            assert response.status_code == 200
+            assert db.session.query(PaycheckLine).filter_by(
+                salary_profile_id=profile.id, name="Union dues",
+            ).count() == 0
+            assert db.session.query(RecurrenceRule).count() == rules_before
+
+    def test_edit_a_line_to_weekly_is_refused_and_keeps_its_rule(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """Moving a stored 24-a-year line onto weeks is refused; every authored column stays."""
+        with app.app_context():
+            profile = _create_profile(seed_user)
+            line = _a_line(profile, "Health", 24)
+            rule_id = line.recurrence_rule.id
+            before = _authored_columns(line.recurrence_rule)
+            response = auth_client.post(
+                f"/salary/lines/{line.id}/edit",
+                data=_line_form(
+                    "Health",
+                    **_cadence_payload(
+                        RecurrenceUnitEnum.WEEK,
+                        PeriodPlacementEnum.CONTAINING_DATE,
+                    ),
+                ),
+                follow_redirects=True,
+            )
+            assert response.status_code == 200
+            db.session.expire_all()
+            line = db.session.get(PaycheckLine, line.id)
+            assert line.recurrence_rule.id == rule_id
+            assert _authored_columns(line.recurrence_rule) == before
+
+    def test_the_line_schema_refuses_the_week_unit_in_its_own_words(
+        self, app, seed_user, seed_periods,
+    ):
+        """The refusal names the units a line repeats by and what to do instead.
+
+        Graded on the schema rather than the flash: while the template forms
+        still withhold the week unit their own refusal fires beside this one,
+        and the flash shows the first; the stored-state cases above hold the
+        route to writing nothing either way.
+        """
+        with app.app_context():
+            payload = _line_form(
+                "Union dues", amount="25.00",
+                **_cadence_payload(
+                    RecurrenceUnitEnum.WEEK, PeriodPlacementEnum.CONTAINING_DATE,
+                ),
+            )
+            with pytest.raises(ValidationError) as refused:
+                PaycheckLineCreateSchema().load(payload)
+            unit_messages = refused.value.normalized_messages()["recurrence_unit"]
+            assert any(
+                message.startswith(self.WEEKS_REFUSED) for message in unit_messages
+            ), unit_messages

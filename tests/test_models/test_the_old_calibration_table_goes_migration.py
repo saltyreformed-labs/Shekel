@@ -17,6 +17,11 @@ attached to the recreated table for the case; nothing writes
 
 Every refusal and printout case's job holds one stub, on 2026-03-27, with
 taxes $150.00 / $100.00 / $180.00 / $42.00 (the ``world`` fixture).
+
+The rehearsal's measure (``tests/manual/measure_s11d_old_calibrations.py``,
+R-SAL127's other half) is graded here too, on the same world: it reads the
+calibrations through this revision's own collector, so it runs while the
+downgrade has the table back.
 """
 from __future__ import annotations
 
@@ -26,14 +31,20 @@ from decimal import Decimal
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
+from sqlalchemy.engine import Engine
 
 from app import ref_cache
 from app.audit_infrastructure import AUDITED_TABLES
-from app.enums import WithholdingKindEnum
-from app.models.pay_stub import PayStub, PayStubWithholding
+from app.enums import PaycheckLineKindEnum, WithholdingKindEnum
+from app.models.pay_stub import PayStub, PayStubLineAmount, PayStubOneOff, PayStubWithholding
 from app.models.salary_profile import SalaryProfile
-from tests._test_helpers import load_migration_module, make_salary_profile
+from tests._test_helpers import (
+    load_migration_module,
+    make_flat_paycheck_line,
+    make_salary_profile,
+)
+from tests.manual import measure_s11d_old_calibrations as measure
 
 _MIGRATION = load_migration_module("858f569b2c17_the_old_calibration_table_goes.py")
 
@@ -464,3 +475,192 @@ class TestThePrintout:
         printed = capsys.readouterr().out
         assert printed.count("matches its pay stub's four taxes.") == 1
         assert "S11-d: 1 old calibration(s) found" in printed
+
+
+@pytest.fixture(name="earnings")
+def _earnings(world, db):
+    """The world's stub given earnings, so its Gross Pay is more than its base pay.
+
+    A Phone Allowance paycheck line printed at $60.00 and a "Retro pay"
+    one-off of $55.00, both taxable earnings, and a "Reimbursement" one-off of
+    $25.00, an after-tax earning.  By the stub page's rule
+    (``pay_stub_gross.checked_gross``) the stub's Gross Pay is:
+
+        "no" job:  2884.62 + 60.00 + 55.00         = 2999.62
+        "yes" job: 2884.62 + 60.00 + 55.00 + 25.00 = 3024.62
+
+    and a calibration's Gross Pay defaults to $2,999.62
+    (:func:`_insert_calibration`), so on a "no" job all five figures agree.
+    """
+    profile, stub = world["profile"], world["stub"]
+    taxable = ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.TAXABLE_EARNING)
+    phone = make_flat_paycheck_line(
+        profile, "Phone Allowance", "60.00", PaycheckLineKindEnum.TAXABLE_EARNING,
+    )
+    db.session.add_all([
+        PayStubLineAmount(
+            pay_stub_id=stub.id, paycheck_line_id=phone.id, salary_profile_id=profile.id,
+            paycheck_line_kind_id=taxable, amount=Decimal("60.00"),
+        ),
+        PayStubOneOff(
+            pay_stub_id=stub.id, paycheck_line_kind_id=taxable, name="Retro pay",
+            amount=Decimal("55.00"),
+        ),
+        PayStubOneOff(
+            pay_stub_id=stub.id, name="Reimbursement", amount=Decimal("25.00"),
+            paycheck_line_kind_id=ref_cache.paycheck_line_kind_id(
+                PaycheckLineKindEnum.AFTER_TAX_EARNING,
+            ),
+        ),
+    ])
+    db.session.commit()
+    return world
+
+
+class TestTheRehearsalMeasure:
+    """R-SAL127's rehearsal: all five figures of each held calibration beside its stub's.
+
+    Each case recreates the table by the downgrade, seeds a calibration and
+    runs the measure's :func:`~measure.run` on the test's own session, the
+    way its ``main`` runs it on a production clone.
+    """
+
+    @staticmethod
+    def _block(lines: list[str], calibration_id: int) -> list[str]:
+        """Return the calibration's heading and the five figure lines under it."""
+        start = next(
+            index for index, line in enumerate(lines)
+            if f"calibration {calibration_id})" in line
+        )
+        return lines[start:start + 6]
+
+    @staticmethod
+    def _heading(world, calibration_id: int) -> str:
+        """The heading the measure gives the world's job's 2026-03-27 calibration."""
+        profile = world["profile"]
+        return (
+            f"The old calibration of 2026-03-27 (job '{profile.name}' "
+            f"(salary profile {profile.id}), calibration {calibration_id}):"
+        )
+
+    def test_five_agreeing_figures_are_shown_and_none_is_flagged(self, db, earnings):
+        """A "no" job: Gross Pay 2884.62 + 60.00 + 55.00 = 2999.62 on both sides, and the taxes."""
+        _run(db.session, "downgrade")
+        row_id = _insert_calibration(db.session, earnings["profile"].id, PAYDAY)
+        lines, status = measure.run()
+        assert self._block(lines, row_id) == [
+            self._heading(earnings, row_id),
+            "  Gross Pay: $2,999.62 then, $2,999.62 on the stub",
+            "  Federal income tax: $150.00 then, $150.00 on the stub",
+            "  State income tax: $100.00 then, $100.00 on the stub",
+            "  Social Security: $180.00 then, $180.00 on the stub",
+            "  Medicare: $42.00 then, $42.00 on the stub",
+        ]
+        assert status == 0
+        assert lines[0].startswith("S11-d rehearsal: 1 old calibration(s) held")
+        assert lines[-2:] == [
+            "S11-d rehearsal: 0 of 1 held calibration(s) differ from their stub in "
+            "at least one figure.",
+            "S11-d rehearsal: every held calibration has its stub; the drop will not refuse.",
+        ]
+
+    def test_a_gross_that_differs_is_flagged(self, db, earnings):
+        """R-SAL127's own example's shape: $3,004.00 then against the stub's $2,999.62."""
+        _run(db.session, "downgrade")
+        row_id = _insert_calibration(
+            db.session, earnings["profile"].id, PAYDAY, actual_gross_pay=Decimal("3004.00"),
+        )
+        lines, status = measure.run()
+        block = self._block(lines, row_id)
+        assert block[1] == "  Gross Pay: $3,004.00 then, $2,999.62 on the stub  DIFFERS"
+        assert not any(line.endswith("DIFFERS") for line in block[2:])
+        assert status == 0
+        assert "S11-d rehearsal: 1 of 1 held calibration(s) differ" in lines[-2]
+
+    def test_a_tax_that_differs_is_flagged(self, db, earnings):
+        """State $91.00 then against the stub's $100.00; the gross and the other three agree."""
+        _run(db.session, "downgrade")
+        row_id = _insert_calibration(
+            db.session, earnings["profile"].id, PAYDAY, actual_state_tax=Decimal("91.00"),
+        )
+        lines, status = measure.run()
+        block = self._block(lines, row_id)
+        assert [line for line in block if line.endswith("DIFFERS")] == [
+            "  State income tax: $91.00 then, $100.00 on the stub  DIFFERS",
+        ]
+        assert status == 0
+
+    def test_a_tax_the_stub_does_not_record_reads_as_none(self, db, earnings):
+        """The stub's Medicare row deleted: "none on the stub", flagged."""
+        db.session.execute(text(
+            "DELETE FROM salary.pay_stub_withholdings w USING ref.withholding_kinds k "
+            " WHERE w.pay_stub_id = :id AND k.id = w.withholding_kind_id "
+            "   AND k.name = 'medicare'"
+        ), {"id": earnings["stub"].id})
+        _run(db.session, "downgrade")
+        row_id = _insert_calibration(db.session, earnings["profile"].id, PAYDAY)
+        block = self._block(measure.run()[0], row_id)
+        assert block[5] == "  Medicare: $42.00 then, none on the stub  DIFFERS"
+
+    def test_a_yes_job_s_gross_holds_its_untaxed_pay(self, db, earnings):
+        """A "yes" job: 2884.62 + 60.00 + 55.00 + 25.00 = 3024.62, so $2,999.62 then differs.
+
+        The stub page's rule adds the after-tax earnings on such a job
+        (ruling R-SAL102); the stub's own ``totals.gross`` alone would read
+        $2,999.62 and agree.
+        """
+        db.session.execute(text(
+            "UPDATE salary.salary_profiles SET stub_gross_includes_after_tax = true "
+            " WHERE id = :id"
+        ), {"id": earnings["profile"].id})
+        db.session.expire_all()
+        _run(db.session, "downgrade")
+        row_id = _insert_calibration(db.session, earnings["profile"].id, PAYDAY)
+        block = self._block(measure.run()[0], row_id)
+        assert block[1] == "  Gross Pay: $2,999.62 then, $3,024.62 on the stub  DIFFERS"
+
+    def test_a_calibration_without_its_stub_is_named_and_the_refusal_follows(self, db, world):
+        """A calibration on 03-13, where no stub is: named, the migration's refusal, status 1."""
+        _run(db.session, "downgrade")
+        row_id = _insert_calibration(db.session, world["profile"].id, _NO_STUB_DAY)
+        lines, status = measure.run()
+        profile = world["profile"]
+        assert (
+            f"The old calibration of 2026-03-13 (job '{profile.name}' (salary profile "
+            f"{profile.id}), calibration {row_id}): no pay stub on its date, so the drop "
+            "refuses."
+        ) in lines
+        assert lines[-1].startswith("S11-d refuses: an old calibration has no pay stub")
+        assert f"2026-03-13 for job '{profile.name}'" in lines[-1]
+        assert status == 1
+
+    def test_a_state_only_the_change_log_holds_is_measured(self, db, earnings):
+        """A calibration deleted under the trigger is still shown: "held" is the migration's."""
+        _run(db.session, "downgrade")
+        _attach_the_audit_trigger(db.session)
+        row_id = _insert_calibration(
+            db.session, earnings["profile"].id, PAYDAY, actual_federal_tax=Decimal("151.00"),
+        )
+        db.session.execute(text(
+            "DELETE FROM salary.calibration_overrides WHERE id = :id"
+        ), {"id": row_id})
+        block = self._block(measure.run()[0], row_id)
+        assert block[2] == "  Federal income tax: $151.00 then, $150.00 on the stub  DIFFERS"
+
+    def test_it_only_reads(self, db, earnings):
+        """Every statement the measure sends is a read: a SELECT, or the collector's WITH."""
+        _run(db.session, "downgrade")
+        _insert_calibration(db.session, earnings["profile"].id, PAYDAY)
+        sent = []
+
+        def _record(_conn, _cursor, statement, *_args):
+            """Keep each statement's opening word."""
+            sent.append(statement.lstrip().split(None, 1)[0].upper())
+
+        event.listen(Engine, "before_cursor_execute", _record)
+        try:
+            measure.run()
+        finally:
+            event.remove(Engine, "before_cursor_execute", _record)
+        assert sent
+        assert set(sent) <= {"SELECT", "WITH"}

@@ -48,10 +48,12 @@ of the same kind (``ref.withholding_kinds``) and prints any that differ.  It
 adds nothing up and loads no app module: a stub's Gross Pay is derived, never
 stored, so it is compared before the release, at the rehearsal on a copy of
 production while the old rows still exist, by
-``tests/manual/measure_s11d_old_calibrations.py``, which reads the calibrations
-through :func:`held_calibrations` and adds each stub's Gross Pay up with the
-stub page's own rule (``app.services.pay_stub_gross.checked_gross``).  This
-printout lands in a deploy log, after the rows are gone, for the record.
+``tests/manual/measure_s11d_old_calibrations.py``, which reads the calibrations,
+their stubs' taxes and the refusal through this revision's own
+:func:`held_calibrations`, :func:`stub_taxes`, :data:`TAXES` and
+:func:`refuse_a_calibration_without_its_stub`, and adds each stub's Gross Pay
+up with the stub page's own rule (``app.services.pay_stub_gross.checked_gross``).
+This printout lands in a deploy log, after the rows are gone, for the record.
 
 **No money moves.**  Nothing has read the table since plan step
 salary:S11-c-2c, so the drop changes no figure.
@@ -103,7 +105,8 @@ _TABLE = 'calibration_overrides'
 #: Each of the four taxes a calibration stored, as its column, the
 #: ``ref.withholding_kinds`` name a stub records the same tax under, and the
 #: words the printout uses.  Frozen here: a migration reads no app module.
-_TAXES = (
+#: Also read by the rehearsal's measure, so the pairing has one spelling.
+TAXES = (
     ('actual_federal_tax', 'federal_income', 'Federal income tax'),
     ('actual_state_tax', 'state_income', 'State income tax'),
     ('actual_social_security', 'social_security', 'Social Security'),
@@ -286,7 +289,7 @@ def tax_report(held: list, stubs: dict, names: dict) -> list[str]:
         differ = [
             f"{label} {_money(getattr(row, column))} then, "
             + (f"{_money(stub[kind])} on the stub" if kind in stub else "none on the stub")
-            for column, kind, label in _TAXES
+            for column, kind, label in TAXES
             if stub.get(kind) != getattr(row, column)
         ]
         if differ:

@@ -590,6 +590,39 @@ class TestBuildLineRows:
         # calculator order (sorted() is stable).
         assert [r["name"] for r in rows] == ["Gamma", "Alpha", "Beta"]
 
+    def test_the_two_pre_tax_kinds_are_two_groups_from_one_list(self):
+        """Both pre-tax kinds share the breakdown's ``pre_tax`` list and head two groups.
+
+        The engine's list (all-payroll-taxes lines first, plan step
+        salary:S11-e): Health 200 and FSA 50 of "Pre-tax, all payroll taxes",
+        then 401k 300 of "Pre-tax, income tax only".  Grouped by the kind each
+        line carries, in waterfall order, each group largest-first: Health,
+        FSA, then 401k, each under its own kind's heading.  Grouped by the
+        breakdown's lists instead, 401k would lead the one pre-tax group and
+        Health would sit under the other kind's heading.  bar_pct scales to
+        the largest line, 300:
+          Health 200/300*100 = 66.7   FSA 50/300*100 = 16.7   401k 100.0
+        """
+        breakdown = _pair(
+            1, date(2026, 6, 1), date(2026, 6, 14), "52000", "2000", "1400",
+        )[1]
+        breakdown.deductions = DeductionBreakdown(
+            pre_tax=[
+                *_priced(
+                    [("Health", "200"), ("FSA", "50")],
+                    PaycheckLineKindEnum.PRE_FICA_DEDUCTION,
+                ),
+                *_priced([("401k", "300")], PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
+            ],
+            post_tax=[],
+        )
+        rows = svc.build_line_rows(breakdown)
+        assert [(r["name"], r["kind"], r["group_label"], r["bar_pct"]) for r in rows] == [
+            ("Health", "pre_fica_deduction", "Pre-tax, all payroll taxes", Decimal("66.7")),
+            ("FSA", "pre_fica_deduction", "Pre-tax, all payroll taxes", Decimal("16.7")),
+            ("401k", "pre_tax_deduction", "Pre-tax, income tax only", Decimal("100.0")),
+        ]
+
 
 class TestBuildChartSeries:
     """build_chart_series: staircase line with the third-paycheck base rule."""

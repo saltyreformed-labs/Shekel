@@ -123,6 +123,32 @@ class TestTheAllPayrollTaxesKindOnOnePaycheck:
         assert breakdown.deductions.total_pre_tax == Decimal("300")
         assert breakdown.deductions.total_pre_fica == Decimal("200")
 
+    def test_lines_above_the_gross_floor_the_wages_at_zero(self, simple_tax_configs):
+        """$2,500 of Health against a 2,307.69 gross: Social Security and Medicare are $0.00.
+
+        Hand calculation::
+
+            FICA wages  max(2,307.69 - 2,500.00, 0) = 0.00
+            taxable     max(2,307.69 - 2,500.00, 0) = 0.00
+            SS          0.00 x 6.2%  = 0.00
+            Medicare    0.00 x 1.45% = 0.00
+
+        ``waterfall_fica_wages`` floors at $0.00, as ``waterfall_taxable``
+        does.  Without the floor the wages would be -192.31: Social Security
+        would still read 0.00, held by its own wage-base clamp
+        (``tax_calculator.capped_social_security``), but Medicare would be
+        ``-192.31 x 1.45% = -2.788495 -> -2.79`` and RAISE the net (measured
+        with the floor removed).
+        """
+        period = _period(start_date=date(2026, 1, 16), period_id=1)
+        breakdown = calculate_paycheck(
+            payroll_basis(_owner(_health("2500")), [period]), period, simple_tax_configs,
+        )
+        assert breakdown.deductions.total_pre_fica == Decimal("2500")
+        assert breakdown.earnings.taxable_income == Decimal("0.00")
+        assert breakdown.taxes.social_security == Decimal("0.00")
+        assert breakdown.taxes.medicare == Decimal("0.00")
+
 
 class TestTheYearToDateCountsSocialSecurityWages:
     """The wage-base total sums each earlier payday's FICA wages, not its gross."""

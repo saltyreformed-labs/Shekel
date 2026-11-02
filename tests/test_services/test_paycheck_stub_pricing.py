@@ -973,3 +973,67 @@ class TestAnAllPayrollTaxesLineThroughAStub:
         assert _four(breakdown) == (
             Decimal("240.00"), Decimal("143.00"), Decimal("164.92"), Decimal("38.57"),
         )
+
+    def test_a_stub_without_the_line_is_a_stub_of_other_lines(self, owner, db):
+        """The all-payroll-taxes kind is taxed: a stub lacking the line loses to one with it.
+
+        The 01-16 stub records both lines; the later 01-30 stub records Phone
+        alone (a paycheck that skipped Health), printing the employer's
+        figures on 3,060.00 with nothing excluded: state 153.00, SS 189.72,
+        Medicare 44.37.  The 02-13 paycheck carries Health, so the 01-16 stub
+        is its one same-lines stub and prices it at its own pay: its four
+        figures exactly, federal ``240.00``.  Were the kind left out of the
+        taxed set (``_stubs.TAXED_KINDS``), Health would drop from "the same
+        lines" on every side, both stubs would match, and the later 01-30
+        would price it: federal ``250.00``, and the stub the Taxes tab names
+        the wrong one.
+        """
+        self._health_is_all_payroll_taxes(owner, db)
+        self._stub(owner, _taxes("240.00", "143.00", "177.32", "41.47"))
+        add_test_pay_stub(
+            owner["profile"], date(2026, 1, 30), "3000.00",
+            _taxes("250.00", "153.00", "189.72", "44.37"),
+            lines=((owner["phone"], "60.00"),),
+        )
+        db.session.commit()
+        breakdown = _priced(owner, date(2026, 2, 13))
+        assert breakdown.taxes.stub_payday == date(2026, 1, 16)
+        assert _four(breakdown) == (
+            Decimal("240.00"), Decimal("143.00"), Decimal("177.32"), Decimal("41.47"),
+        )
+
+    def test_a_one_off_of_the_kind_changes_the_stubs_taxes(self, owner, db):
+        """R-SAL123: a one-off of the all-payroll-taxes kind makes a stub one of other lines.
+
+        The 01-30 stub records both lines and a made-up ``$40.00`` "Retro
+        FSA" one-off of the kind, printing what it leaves: taxable and FICA
+        wages ``3,060.00 - 200.00 - 40.00 = 2,820.00``, so state 141.00, SS
+        174.84 (2,820.00 x 6.2%) and Medicare 40.89 (2,820.00 x 1.45% =
+        40.89).  The one-off changes its taxes, so the stub page says so
+        (``one_offs_change_taxes``) and the 01-16 stub, of the paycheck's own
+        lines, prices 02-13: federal ``240.00``.  Read as changing no tax, the
+        01-30 stub would price it: federal ``250.00``.
+        """
+        self._health_is_all_payroll_taxes(owner, db)
+        self._stub(owner, _taxes("240.00", "143.00", "177.32", "41.47"))
+        later = add_test_pay_stub(
+            owner["profile"], date(2026, 1, 30), "3000.00",
+            _taxes("250.00", "141.00", "174.84", "40.89"),
+            lines=(
+                (owner["health"], "200.00", PaycheckLineKindEnum.PRE_FICA_DEDUCTION),
+                (owner["phone"], "60.00"),
+            ),
+        )
+        later.one_offs.append(PayStubOneOff(
+            name="Retro FSA", amount=Decimal("40.00"),
+            paycheck_line_kind_id=ref_cache.paycheck_line_kind_id(
+                PaycheckLineKindEnum.PRE_FICA_DEDUCTION,
+            ),
+        ))
+        db.session.commit()
+        assert paycheck_calculator.one_offs_change_taxes(later.one_offs) is True
+        breakdown = _priced(owner, date(2026, 2, 13))
+        assert breakdown.taxes.stub_payday == date(2026, 1, 16)
+        assert _four(breakdown) == (
+            Decimal("240.00"), Decimal("143.00"), Decimal("177.32"), Decimal("41.47"),
+        )

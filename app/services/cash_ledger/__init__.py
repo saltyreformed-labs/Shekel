@@ -264,13 +264,10 @@ from ._books import (
 )
 from ._events import (
     CashAnchorFact,
-    CashOpeningFact,
     CashSourceFact,
     InFlightMovement,
-    account_opening_fact,
     cash_anchor_facts,
     coverage_for,
-    governing_account_opening,
     in_flight_movements,
     settled_cash_facts,
 )
@@ -283,10 +280,16 @@ from ._facts import (
     resolve_anchor,
 )
 from ._flows import sum_projected
-from ._movement_scope import owner_dated_movements
+from ._openings import (
+    CashOpeningFact,
+    account_opening_fact,
+    governing_account_opening,
+)
 from ._walk import (
     CashLedgerWalk,
+    OwnerCashRecords,
     dated_deltas,
+    owner_cash_records,
     walk_cash_ledger,
 )
 
@@ -302,6 +305,7 @@ __all__ = [
     "governing_anchor_on",
     "CashAnchorFact",
     "CashLedgerWalk",
+    "OwnerCashRecords",
     "CashOpeningFact",
     "CashSourceFact",
     "InFlightMovement",
@@ -334,7 +338,7 @@ __all__ = [
     "movement_cash_leg",
     "movement_figure_for",
     "off_statement_sum",
-    "owner_dated_movements",
+    "owner_cash_records",
     "settled_contribution",
     "planned_cash_rows",
     "posted_purchase_sum",

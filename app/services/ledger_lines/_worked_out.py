@@ -14,7 +14,7 @@ X-ew's second leaf moves every report onto.  Three kinds of line:
   paycheck on its own bank day -- the owner's budgeting choice, which ruling
   pay_calendar:R-PC53 measured off its date 105 times;
 * **the account corrections**: each non-loan account's opening and true-ups
-  from the one records walk (:func:`._account_walk.walk_account_ledger`,
+  from the one records walk (:func:`._account_walk.account_corrections`,
   :func:`._account_anchors.account_correction_targets`), each filed by its
   day on the paychecks the owner has when it is read (ruling plan#2519);
 * **the loan lines**: each loan's opening, true-ups and settled payment
@@ -25,14 +25,18 @@ line names its chart account by a :class:`~._chart.ChartKey` (ruling
 plan#2518), where the writers resolve each key to a stored chart row and mint
 the rows they lack.
 
-**The movements are read owner-wide in a fixed number of statements**
-(finding plan#2147's requirement, ruling plan#2136):
-:func:`app.services.cash_ledger.owner_dated_movements` takes the fold's own
-clause set over the owner, two statements whatever their number.  The
-corrections are one walk per account, as the writers walk them: a walk
-loads its own records (``cash_ledger.walk_cash_ledger``, which takes no
-stream from a caller, deliberately), so the read's statements grow with the
-owner's ACCOUNTS and never with their movements.
+**The records are read owner-wide, each kind once** (finding plan#2147's
+requirement, ruling plan#2136; ruling plan#2623):
+:func:`app.services.cash_ledger.owner_cash_records` loads the owner's
+movements under the fold's own clause set, and every non-loan account's
+opening and assertions, in four statements whatever the number of accounts
+or movements, and hands back each account's walk built from its own slice --
+so a movement's lines and its account's walk read it once.  Each walk is
+then framed and booked in memory (:func:`._account_walk.account_corrections`).
+A loan still loads its own records through its walk
+(:func:`app.services.loan_ledger.walk_loan_ledger`), so the read's
+statements grow with the owner's LOANS alone, until plan task plan#2649
+loads them owner-wide too.
 
 **A scenario the store has never reconciled can differ from it by
 construction**, and that difference is the store's: its account and loan
@@ -50,16 +54,18 @@ from decimal import Decimal
 from app import ref_cache
 from app.extensions import db
 from app.models.account import Account
+from app.models.transaction_entry import TransactionEntry
 from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
 )
-from app.services.cash_ledger import owner_dated_movements
+from app.services.cash_ledger import CashLedgerWalk, owner_cash_records
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.pay_calendar import PayCalendar, calendar_for
+from app.services.transfer_legs import PlanItem
 
 from ._account_anchors import account_correction_targets
-from ._account_walk import walk_account_ledger
+from ._account_walk import account_corrections
 from ._chart import ChartKey
 from ._loan_corrections import loan_correction_targets
 from ._movements import (
@@ -121,7 +127,11 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
     The owner's accounts are loaded once, up front, and held for the read:
     each movement's account (its cash line's key) and each walked account
     is one of them, so neither costs a statement of its own -- a movement's
-    account is the owner's by ``fk_transaction_entries_owner_account``.
+    account is the owner's by ``fk_transaction_entries_owner_account``.  The
+    owner's cash records are loaded once too
+    (:func:`app.services.cash_ledger.owner_cash_records`): the movements the
+    lines are booked from, and each non-loan account's walk built from the
+    same movements.
 
     Args:
         owner_id: The owner whose ledger to read.
@@ -147,33 +157,54 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
         .all()
     )
     calendar = calendar_for(owner_id)
-    lines = _movement_lines(owner_id, scenario_id)
+    cash = owner_cash_records(owner_id, scenario_id, [
+        account for account in accounts if not _is_loan(account)
+    ])
+    lines = _movement_lines(cash.movements)
     for account in accounts:
         lines.extend(_correction_lines(
-            _correction_targets(account, scenario_id, calendar),
+            _correction_targets(account, scenario_id, calendar, cash.walks),
         ))
     return [line for line in lines if line.amount != 0]
 
 
-def _movement_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
+def _is_loan(account: Account) -> bool:
+    """Return whether *account* walks as a loan rather than on its records.
+
+    :func:`app.services.account_projection.classify_account`'s answer, the
+    predicate both writers split their account sets by: an amortizing
+    account is a loan.
+
+    Args:
+        account: The account, with ``account_type`` loaded.
+
+    Returns:
+        ``True`` for an amortizing account.
+    """
+    return classify_account(account) is AccountProjectionKind.AMORTIZING
+
+
+def _movement_lines(
+    movements: list[tuple[TransactionEntry, PlanItem]],
+) -> list[LedgerLine]:
     """Return each posting movement's two lines, by the movement rule.
 
     Every dated movement the owner holds in the scenario
-    (:func:`app.services.cash_ledger.owner_dated_movements`), kept where
+    (:attr:`app.services.cash_ledger.OwnerCashRecords.movements`), kept where
     :func:`._movements.purchase_posts` says it books -- the gate the writer
     posts by, which the loader's transfer arm does not state in SQL -- and
     booked as :func:`._movements.purchase_target`'s two legs under the
     source and leg kinds its parent's shape decides.
 
     Args:
-        owner_id: The owner.
-        scenario_id: The scenario.
+        movements: The owner's dated movements, each with its parent, in
+            movement-id order.
 
     Returns:
         Two lines per posting movement, in movement-id order.
     """
     lines: list[LedgerLine] = []
-    for entry, parent in owner_dated_movements(owner_id, scenario_id):
+    for entry, parent in movements:
         if not purchase_posts(parent, entry):
             continue
         source_kind_id = ref_cache.posting_source_id(purchase_source(parent))
@@ -194,34 +225,40 @@ def _movement_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
 
 
 def _correction_targets(
-    account: Account, scenario_id: int, calendar: PayCalendar,
+    account: Account,
+    scenario_id: int,
+    calendar: PayCalendar,
+    walks: dict[int, CashLedgerWalk],
 ) -> dict[CorrectionKey, ChartLegMap]:
     """Return one account's correction legs, by the walk its kind takes.
 
     An amortizing account is a loan, whose opening, true-ups and payment
     splits come off its loan walk; every other account's opening and
-    true-ups come off its records walk.  The dispatch is
-    :func:`app.services.account_projection.classify_account`'s, the
-    predicate both writers split their account sets by (the account walk
-    refuses a loan by it, and the non-loan set's SQL filter reads the column
-    it maps).  A loan with no terms walks to nothing, as it posts nothing.
+    true-ups come off its records walk, the one the owner's load built
+    (*walks*).  The dispatch is :func:`_is_loan`'s, the predicate both
+    writers split their account sets by (the account walk refuses a loan by
+    it, and the non-loan set's SQL filter reads the column it maps), and the
+    one the read chose *walks*' accounts by.  A loan with no terms walks to
+    nothing, as it posts nothing.
 
     Args:
         account: The account, with ``account_type`` loaded.
-        scenario_id: The scenario its records are walked in.
+        scenario_id: The scenario a loan's records are walked in.
         calendar: The owner's whole pay calendar, which files each anchor
             correction by its day.
+        walks: Each non-loan account's walk, by account id
+            (:attr:`app.services.cash_ledger.OwnerCashRecords.walks`).
 
     Returns:
         ``{(source_kind_id, pay_period_id, entry_date): {chart key: (amount,
         posting_kind_id)}}``.
     """
-    if classify_account(account) is AccountProjectionKind.AMORTIZING:
+    if _is_loan(account):
         return loan_correction_targets(
             walk_loan_ledger(account.id, scenario_id), account, calendar,
         )
     return account_correction_targets(
-        account, walk_account_ledger(account.id, scenario_id), calendar,
+        account, account_corrections(walks[account.id]), calendar,
     )
 
 

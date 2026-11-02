@@ -288,13 +288,21 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # per-movement leg.  Where one lands and what the plan holds at time T
     # are ``balance_at._cash_fold``'s, exactly as for ``planned_cash_rows``.
     "in_flight_movements",
-    # ``owner_dated_movements`` (plan task plan#2526) -- the dated movements
-    # ``settled_cash_facts`` loads, over every account one owner holds, each
-    # returned as the movement and its parent: a LOADER of stored records
-    # under the fold's own clause set (``_movement_scope``), valuing nothing
-    # and summing nothing.  What the worked-out ledger books from each is
-    # ``ledger_lines``' movement rule, and a balance at T is no part of it.
-    "owner_dated_movements",
+    # ``owner_cash_records`` (plan task plan#2648, ruling plan#2623) -- the
+    # dated movements ``settled_cash_facts`` loads, over every account one
+    # owner holds, each returned as the movement and its parent, beside each
+    # walked account's ``walk_cash_ledger`` built from the same load: a
+    # LOADER of stored records under the fold's own clause set
+    # (``_movement_scope``).  Its walks VALUE each movement -- each source
+    # fact carries its per-row signed effect, ``settled_cash_facts``' ground
+    # above -- and it SUMS nothing: no running balance, no assertion
+    # applied.  Ruled on the grounds of the names it joins:
+    # ``owner_dated_movements`` (plan task plan#2526, the bare pairs it
+    # replaces, its one reader moved onto this), ``settled_cash_facts`` and
+    # ``walk_cash_ledger`` (``_walk`` below).  What the worked-out ledger
+    # books from each movement is ``ledger_lines``' movement rule, and a
+    # balance at T is no part of it.
+    "owner_cash_records",
     # (``movements_with_parents``, ruled here from plan step
     # ``balance:X-bi-6-3`` because the posting writer's transfer-family
     # loader shared the fold's join, was folded into the fold's

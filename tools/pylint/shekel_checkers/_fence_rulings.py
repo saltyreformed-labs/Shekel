@@ -369,6 +369,14 @@ _FENCED_MODULE_RULINGS = {
         # the seam's door does not already give, and answers no balance at
         # an arbitrary T.
         "walk_account_ledger",
+        # Its framing over a walk the caller holds (plan task plan#2648,
+        # ruling plan#2623), so the worked-out read frames each account's
+        # walk from the owner's one load: ``walk_account_ledger``'s framing
+        # without its load, its missing-account answer or its loan refusal
+        # -- it is kind-blind, and the read's own dispatch walks a loan
+        # elsewhere -- ruled on its grounds: the replay's figure carried
+        # through, at an assertion's moment only.
+        "account_corrections",
         # The worked-out read (plan task plan#2526): every LINE of one
         # owner's ledger -- each amount on a chart account, its paycheck and
         # day, built by the rules above -- and never a sum of them.  The

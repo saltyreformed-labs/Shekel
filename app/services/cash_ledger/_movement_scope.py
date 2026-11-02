@@ -3,8 +3,8 @@
 A DATED movement is read by two readers.  The cash fold reads one account's
 at a time (:func:`~._events.settled_cash_facts`, beside its un-dated twin
 :func:`~._events.in_flight_movements`); the worked-out ledger reads every
-account one owner holds at once (:func:`owner_dated_movements`, plan task
-plan#2526).  This module is the clause set both narrow by, stated once so
+account one owner holds at once (:func:`~._walk.owner_cash_records`, plan
+tasks plan#2526 and plan#2648).  This module is the clause set both narrow by, stated once so
 neither can come to admit a movement the other does not: the plan-row arm's
 clauses (:func:`_movements_of`) and the transfer arm's (:func:`_dated_arms`),
 each taken over the caller's SCOPE -- one account's (:func:`_on_account`) or
@@ -69,9 +69,9 @@ def _movements_of(scope, scenario_id: int, *narrowing):
 
     * *scope* -- WHOSE movements: one account's for the fold
       (:func:`_on_account`), or every account one owner holds for the
-      worked-out ledger (:func:`owner_dated_movements`, plan task
-      plan#2526), so the fold and the ledger narrow a movement by every
-      other clause here alike.  It was an ``account_id`` argument, the
+      worked-out ledger (:func:`_of_owner`, plan task plan#2526), so the
+      fold and the ledger narrow a movement by every other clause here
+      alike.  It was an ``account_id`` argument, the
       fold's alone, until that task.
     * the parent's ``scenario_id`` -- a movement's scenario is its plan row's,
       read through ``transaction_id`` and never copied (ruling **R-BAL35**).
@@ -179,42 +179,48 @@ def _dated_arms(
     )
 
 
-def owner_dated_movements(
-    owner_id: int, scenario_id: int,
-) -> list[tuple[TransactionEntry, PlanItem]]:
-    """Return every DATED movement one owner holds in a scenario, with its parent.
+def _of_owner(owner_id: int):
+    """Return the scope clause of one owner's movements: the worked-out read's.
 
-    The worked-out ledger's movement load (plan task plan#2526): the very
-    movements :func:`~._events.settled_cash_facts` folds, over every account
-    the owner holds rather than one -- the same two queries
-    (:func:`_dated_arms`) under an owner's scope, so the fold and the
-    ledger admit a movement by one clause set.  TWO statements whatever the
-    number of movements, transfers or accounts: the records a report needs
-    are read in a fixed number of statements, never one transfer at a time
-    (finding plan#2147's requirement on the computed ledger, ruling
-    plan#2136).
-
-    **The scope is the movement's own ``owner_id``, never a parent's
-    ``user_id``**: a transfer side's record names no plan row, so a row's
-    owner cannot scope it, and the movement's column is held to its row's
-    owner and to its account's (``fk_transaction_entries_owner_transaction``,
+    **The movement's own ``owner_id``, never a parent's ``user_id``**: a
+    transfer side's record names no plan row, so a row's owner cannot scope
+    it, and the movement's column is held to its row's owner and to its
+    account's (``fk_transaction_entries_owner_transaction``,
     ``fk_transaction_entries_owner_account``) and, for a side record, to its
-    transfer's by the side keys' chain (ruling **R-BAL107**).
-
-    The transfer arm states no contributing gate in SQL (:func:`_dated_arms`),
-    so a reader that books lines asks the gate of each parent, as the
-    worked-out ledger does through ``ledger_lines.purchase_posts``.
+    transfer's by the side keys' chain (ruling **R-BAL107**).  So the owner's
+    movements are exactly the union of :func:`_on_account`'s over the
+    accounts the owner holds, which is what lets the owner's read file each
+    under its account (ruling **plan#2623**).
 
     Args:
-        owner_id: The owner whose movements to load.
-        scenario_id: The budget scenario their parents live in.
+        owner_id: The owner whose movements to scope to.
 
     Returns:
-        ``(movement, parent)`` pairs ascending by movement id: the parent is
-        the movement's plan row, or the
-        :class:`~app.services.transfer_legs.TransferLeg` whose record it is.
+        The clause over ``TransactionEntry``.
     """
-    rows, legs = _dated_arms(TransactionEntry.owner_id == owner_id, scenario_id)
+    return TransactionEntry.owner_id == owner_id
+
+
+def _movement_pairs(
+    rows: list[TransactionEntry], legs: list[TransferLeg],
+) -> list[tuple[TransactionEntry, PlanItem]]:
+    """Return :func:`_dated_arms`' two arms as one list of movements and parents.
+
+    The worked-out ledger's movement stream (plan task plan#2526): each
+    dated movement beside the parent a reader books its lines from -- its
+    plan row, or the :class:`~app.services.transfer_legs.TransferLeg` whose
+    record it is.  The transfer arm states no contributing gate in SQL
+    (:func:`_dated_arms`), so a reader that books lines asks the gate of each
+    parent, as the worked-out ledger does through
+    ``ledger_lines.purchase_posts``.
+
+    Args:
+        rows: The plan-row movements, each with ``.transaction`` populated.
+        legs: The transfer legs, each holding its movement as its record.
+
+    Returns:
+        ``(movement, parent)`` pairs ascending by movement id.
+    """
     pairs: list[tuple[TransactionEntry, PlanItem]] = [
         (entry, entry.transaction) for entry in rows
     ]

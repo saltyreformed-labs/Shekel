@@ -83,7 +83,7 @@ from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
 )
-from app.services.cash_ledger import walk_cash_ledger
+from app.services.cash_ledger import CashLedgerWalk, walk_cash_ledger
 
 _ZERO_MONEY = Decimal("0.00")
 
@@ -208,7 +208,31 @@ def walk_account_ledger(
             f"amortizing loan (loans book their anchor corrections through "
             f"the loan posting package, never the account walk)"
         )
-    walk = walk_cash_ledger(account_id, scenario_id)
+    return account_corrections(walk_cash_ledger(account_id, scenario_id))
+
+
+def account_corrections(walk: CashLedgerWalk) -> list[AccountAnchorCorrection]:
+    """Return a non-loan account's corrections, framed off its walk.
+
+    :func:`walk_account_ledger`'s framing of the read fold's replay, over a
+    walk the caller already holds: the opening equity first, then one
+    correction per assertion carrying the records' running total just
+    before it (:func:`app.services.balance_at.assertion_corrections`).  The
+    worked-out read hands it each account's walk from the owner's one load
+    (:func:`app.services.cash_ledger.owner_cash_records`, ruling
+    **plan#2623**), so it walks no account a second time; the account door
+    hands it the account's own.  Pure: no query.
+
+    Args:
+        walk: A non-loan account's :class:`~app.services.cash_ledger.CashLedgerWalk`.
+            Which kind of account walks here is the caller's dispatch: the
+            account door refuses a loan, and the worked-out read walks a
+            loan through its loan walk.
+
+    Returns:
+        The :class:`AccountAnchorCorrection` list, chronological; empty for a
+        walk carrying no assertion.
+    """
     if not walk.anchor_facts:
         return []
     # The OPENING EQUITY is the first correction and it is not an assertion

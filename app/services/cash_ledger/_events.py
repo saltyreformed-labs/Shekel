@@ -107,14 +107,15 @@ Plan step **X-a** (shipped at ``929b3a72``).
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
 from app.extensions import db
 from app.models.account import AccountAnchorHistory
-from app.models.account_opening import AccountOpening
 from app.models.transaction_entry import TransactionEntry
+from app.services.transfer_legs import TransferLeg
 from app.utils.balance_predicates import owner_declared_clause
 from app.utils.dates import utc_instant
 
@@ -122,58 +123,6 @@ from ._amounts import ReconciledThrough
 from ._cash_leg import movement_cash_leg
 from ._clearing import StatementCoverage, statement_coverage
 from ._movement_scope import _dated_arms, _movements_of, _on_account
-
-
-@dataclass(frozen=True)
-class CashOpeningFact:
-    """What an account held BEFORE its records begin, as a loaded fact.
-
-    The governing :class:`~app.models.account_opening.AccountOpening` row for
-    one account (plan step **X-f3c-2a**, ruling **R-GX**), read once per walk
-    and carried on :class:`~._walk.CashLedgerWalk` beside the assertions and the
-    movements.  It is the LEVEL the fold's running total starts from: every
-    balance the app renders is this figure plus what the records say happened
-    since.
-
-    **It replaces a derivation, and the model docstring lists the four defects
-    that derivation caused.**  Until this step the same quantity was recomputed
-    on every read as "the earliest assertion minus the movements dated at or
-    before it" (ruling **R-I**), which made it move when an assertion was
-    back-dated, differ between scenarios, impossible to correct, and derived a
-    second time by the posted ledger.
-
-    Attributes:
-        opening_id: The ``budget.account_openings`` row's own id -- the
-            restatement this fact is, so a reader can tell two apart.
-        account_id: The account whose books these are.
-        opened_on: The civil day the books opened.  The ``account_opening``
-            journal entry is dated on it, which is what stops a back-dated
-            assertion re-dating that entry.
-        opening_equity: The capital the books opened with, LEDGER-NATIVE and
-            in the same sign convention as
-            :attr:`CashAnchorFact.anchor_balance`.
-        source_id: ``ref.account_opening_sources.id`` -- whether a human stated
-            this figure or the X-f3c-2a migration derived it.  Carried because
-            a derived figure is the old inference frozen and may be WRONG
-            (finding **N-275** measures one wrong by ``$436.05``), so a surface
-            must be able to tell a guess from an observation.  The walk itself
-            never branches on it: an opening is an opening whatever wrote it.
-        recorded_at: The RECORDING instant, aware-UTC.  It is what ORDERS the
-            restatements (see :func:`account_opening_fact`) and it dates
-            nothing -- :attr:`opened_on` is the business date, the same
-            two-clock split :attr:`CashAnchorFact.asserted_at` documents one
-            table over.  Carried since plan step **X-f3c-2b** so the history
-            card can caption a RESTATED opening the way it captions a
-            back-dated assertion: books opening in March, recorded in August,
-            is a fact the owner should be able to see rather than infer.
-    """
-
-    opening_id: int
-    account_id: int
-    opened_on: date
-    opening_equity: Decimal
-    source_id: int
-    recorded_at: datetime
 
 
 @dataclass(frozen=True)
@@ -444,126 +393,6 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     delta: Decimal
 
 
-def governing_account_opening(account_id: int) -> CashOpeningFact | None:
-    """Return *account_id*'s governing opening record, or ``None`` for no row.
-
-    **The WRITE door's question**, and the non-raising twin of
-    :func:`account_opening_fact` exactly as
-    :func:`~._facts.governing_anchor_on` is :func:`~._facts.resolve_anchor`'s
-    (plan step **X-f3c-2b-2a**).  Before appending a restatement, the door has
-    to know what already stands so it can decline a submission that changes
-    nothing (ruling **R-EQ**'s rule, one table over) -- and
-    ``account_service.create_account`` reaches the same writer with an account
-    that by construction carries none.  "This account has no opening yet" is an
-    honest answer to a writer where it is a broken invariant to a reader, which
-    is why the two policies are two functions over ONE query rather than one
-    function with a flag.
-
-    **The order is ``id`` DESC alone, and the term it LOST is the interesting
-    half.**  The positional read plan step X-f3c-2a deleted
-    (``is_opening = index == 0``) ordered by ``observed_on``, a business date
-    any owner may back-date, so an ordinary act silently re-elected the
-    opening.  Its replacement led on ``created_at``, justified as "set by the
-    database on INSERT and therefore monotone in recording order" -- **which is
-    false, and plan step X-f3c-2b-2a's review measured what it cost.**
-    :class:`app.models.mixins.CreatedAtMixin` defaults the column to
-    ``db.func.now()``, and PostgreSQL's ``now()`` is ``transaction_timestamp()``
-    -- the instant the transaction BEGAN.  Two restatements from two tabs can
-    therefore commit in the opposite order to their instants, and the second
-    one's row sorts BELOW the row it was meant to supersede: the owner is told
-    "Books restated" and nothing moves.
-    :func:`app.services.loan_anchor_service._governing_loan_anchor` already stated
-    the ``now()`` fact for the loan twin; this door never carried it across.
-
-    ``id`` is a sequence value allocated when the INSERT executes, and
-    :func:`app.services.opening_service.stage_account_opening` runs under the
-    owner's write lock across its compare-and-append wherever another
-    transaction could reach the account (a signed-in request's transaction
-    takes it before reading any of the owner's data, plan step
-    ``balance:X-bn``; at registration the account is uncommitted and no
-    other transaction can see it), so within one account
-    the id order IS the order the owner made the statements.  The SQL tier
-    orders identically from one stated constant
-    (:data:`app.opening_infrastructure.GOVERNING_ORDER_SQL`), so the Python
-    reader and the database constraint cannot disagree about which restatement
-    is in force.
-
-    Args:
-        account_id: The account whose opening to load.
-
-    Returns:
-        The governing :class:`CashOpeningFact`, or ``None`` when the account
-        carries no ``budget.account_openings`` row at all.
-    """
-    row = (
-        db.session.query(AccountOpening)
-        .filter_by(account_id=account_id)
-        .order_by(AccountOpening.id.desc())
-        .first()
-    )
-    if row is None:
-        return None
-    return CashOpeningFact(
-        opening_id=row.id,
-        account_id=account_id,
-        opened_on=row.opened_on,
-        opening_equity=Decimal(str(row.opening_equity)),
-        source_id=row.source_id,
-        # Normalised the same way ``cash_anchor_facts`` normalises an
-        # assertion's instant: PostgreSQL hands back an aware value, and
-        # ``utc_instant`` is where a naive one from a fixture is refused
-        # rather than compared against an aware one further downstream.
-        recorded_at=utc_instant(row.created_at),
-    )
-
-
-def account_opening_fact(account_id: int) -> CashOpeningFact:
-    """Return *account_id*'s GOVERNING opening-equity record.
-
-    The level a cash fold starts from (plan step **X-f3c-2a**).  The table is
-    append-only, so an account may carry several rows -- each a restatement of
-    what its books opened with -- and the one with the greatest ``id`` governs.
-    Which row that is comes from :func:`governing_account_opening`, whose
-    docstring states why the order lost its ``created_at`` term at plan step
-    **X-f3c-2b-2a**; this adds the READER's policy for an account that carries
-    none, and nothing else.
-
-    **It RAISES on an account with no row, and that is reachable only through a
-    broken invariant.**  Every account gets one at creation
-    (``account_service.create_account``) and migration ``a7c41f9d2b60``
-    backfilled every account that predated the table -- including the two
-    amortizing loans, because ``balance_at.balance_at`` falls through to this
-    fold for an amortizing account carrying no ``LoanParams``.  Answering a
-    missing row with ``Decimal("0.00")`` was the alternative and it is exactly
-    the fabrication that step exists to delete: it would silently move every
-    balance on the account to a level nothing recorded.  The same fail-loud
-    placement :func:`~._facts.resolve_anchor` documents for the assertion half.
-
-    Args:
-        account_id: The account whose opening to load.
-
-    Returns:
-        The account's governing :class:`CashOpeningFact`.
-
-    Raises:
-        RuntimeError: When the account carries no ``AccountOpening`` row --
-            a broken invariant, not an empty state.
-    """
-    fact = governing_account_opening(account_id)
-    if fact is None:
-        raise RuntimeError(
-            f"account_opening_fact: account id={account_id} has zero "
-            "AccountOpening rows.  Every account carries one -- "
-            "account_service.create_account writes it and migration "
-            "a7c41f9d2b60 backfilled every account that predated the table -- "
-            "so investigate any code path that constructed the Account row "
-            "without routing through the canonical factory.  A balance cannot "
-            "be folded without the level it starts from, and answering 0.00 "
-            "would move every figure on this account silently."
-        )
-    return fact
-
-
 def cash_anchor_facts(account_id: int) -> list[CashAnchorFact]:
     """Return an account's balance assertions as facts, in assertion order.
 
@@ -611,10 +440,33 @@ def cash_anchor_facts(account_id: int) -> list[CashAnchorFact]:
         factory guarantee one), and the state
         :func:`app.services.cash_ledger.resolve_anchor` raises on.
     """
+    return _anchor_facts_by_account((account_id,)).get(account_id, [])
+
+
+def _anchor_facts_by_account(
+    account_ids: Collection[int],
+) -> dict[int, list[CashAnchorFact]]:
+    """Return each of *account_ids*' balance assertions, in assertion order.
+
+    The ONE load of the assertion table, over one account's ids or every
+    account one owner holds (ruling **plan#2623**, as
+    :func:`~._openings._governing_openings` is for the openings): one statement whatever
+    the number of accounts, its order :func:`cash_anchor_facts`' and its
+    reasons.  The rows are grouped by account in the order they arrive, so
+    each account's list keeps that order and its first row is its OPENING
+    exactly as a single account's read marks it.
+
+    Args:
+        account_ids: The accounts whose assertion history to load.
+
+    Returns:
+        ``{account id: its CashAnchorFact list, chronological}``; an account
+        carrying no row is absent.
+    """
     rows = (
         db.session.query(AccountAnchorHistory)
         .filter(
-            AccountAnchorHistory.account_id == account_id,
+            AccountAnchorHistory.account_id.in_(account_ids),
             # THE RESET reads the owner's levels and nothing else, until the
             # flip (plan step ``balance:X-bj-1``, ruling **R-JN**): a bank
             # statement's placement sits in the same relation since that
@@ -630,10 +482,12 @@ def cash_anchor_facts(account_id: int) -> list[CashAnchorFact]:
         )
         .all()
     )
-    return [
-        CashAnchorFact(
+    by_account: dict[int, list[CashAnchorFact]] = {}
+    for row in rows:
+        facts = by_account.setdefault(row.account_id, [])
+        facts.append(CashAnchorFact(
             anchor_id=row.id,
-            account_id=account_id,
+            account_id=row.account_id,
             anchor_balance=Decimal(str(row.anchor_balance)),
             # The business date the partition turns on, READ rather than
             # derived (ruling R-DH, plan step 2), beside the recording instant
@@ -648,10 +502,10 @@ def cash_anchor_facts(account_id: int) -> list[CashAnchorFact]:
             # the caption that reads it compares against ``observed_on``, and
             # the two must come off one clock.
             recorded_on=row.recorded_on,
-            is_opening=(index == 0),
-        )
-        for index, row in enumerate(rows)
-    ]
+            # The account's first in business-date order is its opening.
+            is_opening=len(facts) == 0,
+        ))
+    return by_account
 
 
 def coverage_for(account_id: int) -> StatementCoverage:
@@ -729,8 +583,7 @@ def settled_cash_facts(
     which states each): a plan row's movements and a transfer leg's, dated,
     not on a card, under a parent that contributes -- taken over this one
     account (``_on_account``), the scope the worked-out ledger takes over an
-    owner (:func:`._movement_scope.owner_dated_movements`, plan task
-    plan#2526).
+    owner (:func:`._movement_scope._of_owner`, plan task plan#2526).
 
     **It loads its own rows and takes no period window, deliberately.**  An
     argument a caller can get wrong is a defect, not a contract (plan Section
@@ -759,21 +612,51 @@ def settled_cash_facts(
         because a nondeterministic order in a financial replay is a
         reproducibility defect even where it is arithmetically inert.
     """
-    rows, legs = _dated_arms(_on_account(account_id), scenario_id)
-    facts = [
-        _source_fact(entry, entry.transaction, transfer_id=None)
-        for entry in rows
-    ]
-    facts.extend(
-        _source_fact(leg.record, leg, transfer_id=leg.transfer.id)
-        for leg in legs
-    )
-    # The movement's own id breaks a same-day tie: it is the fact's identity
-    # (a primary key) and the one id every fact carries, where a transfer
-    # leg's ``transaction_id`` is NULL since ``X-bi-6-4d-2`` re-parented it
-    # onto its transfer -- a ``None`` beside an ``int`` does not sort.
-    facts.sort(key=lambda fact: (fact.settled_on, fact.entry_id))
-    return facts
+    return _settled_facts_by_account(
+        *_dated_arms(_on_account(account_id), scenario_id),
+    ).get(account_id, [])
+
+
+def _settled_facts_by_account(
+    rows: list[TransactionEntry], legs: list[TransferLeg],
+) -> dict[int, list[CashSourceFact]]:
+    """Return the dated movements *rows* and *legs* hold, as each account's facts.
+
+    The facts of the movements :func:`._movement_scope._dated_arms` loaded,
+    over one account (:func:`settled_cash_facts`) or every account one owner
+    holds (:func:`~._walk.owner_cash_records`, ruling **plan#2623**), so the
+    owner's read builds each account's facts from the movements it already
+    loaded for their lines rather than loading them a second time.  Each
+    movement is filed under the account its money moved through (ruling
+    **R-BAL75**, the scope :func:`._movement_scope._on_account` states), so
+    an account's list here is the one its own read returns.
+
+    Args:
+        rows: The plan-row movements, each with ``.transaction`` populated.
+        legs: The transfer legs, each holding its movement as its record.
+
+    Returns:
+        ``{account id: its CashSourceFact list}``, each ASCENDING by
+        ``(settled_on, entry_id)`` (:func:`settled_cash_facts` says why);
+        an account holding no dated movement is absent.
+    """
+    by_account: dict[int, list[CashSourceFact]] = {}
+    for entry in rows:
+        by_account.setdefault(entry.account_id, []).append(
+            _source_fact(entry, entry.transaction, transfer_id=None),
+        )
+    for leg in legs:
+        by_account.setdefault(leg.record.account_id, []).append(
+            _source_fact(leg.record, leg, transfer_id=leg.transfer.id),
+        )
+    for facts in by_account.values():
+        # The movement's own id breaks a same-day tie: it is the fact's
+        # identity (a primary key) and the one id every fact carries, where
+        # a transfer leg's ``transaction_id`` is NULL since ``X-bi-6-4d-2``
+        # re-parented it onto its transfer -- a ``None`` beside an ``int``
+        # does not sort.
+        facts.sort(key=lambda fact: (fact.settled_on, fact.entry_id))
+    return by_account
 
 
 def _source_fact(entry, parent, *, transfer_id: "int | None") -> CashSourceFact:

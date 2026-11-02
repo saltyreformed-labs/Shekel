@@ -24,7 +24,8 @@ What these cases pin:
   purchase books nothing, and a purchase past its envelope's figure books its
   whole figure OUT, never in;
 * **its statements do not grow with the number of sources** (finding
-  plan#2147's requirement, ruling plan#2136).
+  plan#2147's requirement, ruling plan#2136), **nor with the number of
+  accounts** (ruling plan#2623).
 
 Whether the lines equal the STORED ledger's to the cent is the parity test's
 (plan#2527) and the production run's (plan#2528).
@@ -714,7 +715,7 @@ class TestRefundsCardsAndOverPostedEnvelopes:
 
 
 class TestItsStatementsDoNotGrowWithItsSources:
-    """Finding plan#2147's requirement on the computed ledger (ruling plan#2136)."""
+    """Finding plan#2147's requirement (ruling plan#2136), and ruling plan#2623's."""
 
     def test_three_times_the_sources_read_in_the_same_statements(
         self, app, db, seed_user, seed_periods,
@@ -764,3 +765,43 @@ class TestItsStatementsDoNotGrowWithItsSources:
 
             assert len(many) > len(few)
             assert len(many_statements) == len(few_statements)
+
+    def test_six_accounts_read_in_the_statements_two_do(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """Two non-loan accounts, then six: one count (ruling plan#2623).
+
+        Each account holds its opening, its balance check and a settled
+        transfer from Checking, so every account the second read walks has
+        records of each kind the walk folds.  The owner's openings, balance
+        checks and movements are each loaded once whatever the number of
+        accounts (``cash_ledger.owner_cash_records``), so a per-account load
+        -- a walk that loads its own account's records -- makes the second
+        read issue four more statements per added account and fails this.
+        Each read starts from an expired session, and the second reads more
+        lines than the first, so both measured a read that grew.
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+
+            def _add_accounts(count, first):
+                """Add *count* Savings accounts, each paid into once."""
+                for number in range(first, first + count):
+                    savings = create_account_of_type(
+                        seed_user, _db.session, "Savings",
+                        f"Counted Savings {number}",
+                    )
+                    create_settled_transfer(
+                        seed_user, _db.session, checking, savings,
+                        seed_periods[1], amount=Decimal("25.00"),
+                    )
+                _db.session.commit()
+                _db.session.expire_all()
+
+            _add_accounts(1, 1)
+            two, two_statements = _statements_of(lambda: _read(seed_user))
+            _add_accounts(4, 2)
+            six, six_statements = _statements_of(lambda: _read(seed_user))
+
+            assert len(six) > len(two)
+            assert len(six_statements) == len(two_statements)

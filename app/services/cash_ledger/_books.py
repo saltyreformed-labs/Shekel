@@ -99,10 +99,10 @@ from app.opening_infrastructure import (
     MATCHED_LINE_DAYS_SQL, SETTLED_MOVEMENTS_SQL,
 )
 
-from ._events import account_opening_fact
+from ._openings import account_opening_fact
 
 if TYPE_CHECKING:  # pragma: no cover -- annotation only
-    from ._events import CashOpeningFact
+    from ._openings import CashOpeningFact
 
 
 def reject_movement_before_books_open(account_id: int, day: date) -> None:
@@ -110,7 +110,7 @@ def reject_movement_before_books_open(account_id: int, day: date) -> None:
 
     The MOVEMENT side of the boundary (plan step X-f3c-2b, finding **N-378**).
     An account's opening equity is what it held at the CLOSE of
-    :attr:`~._events.CashOpeningFact.opened_on`, so a movement dated on or
+    :attr:`~._openings.CashOpeningFact.opened_on`, so a movement dated on or
     before that day is ALREADY INSIDE the figure, and recording it counts the
     money twice.
 
@@ -153,7 +153,7 @@ def reject_movement_before_books_open(account_id: int, day: date) -> None:
             box, and the message names both the offending value and the bound
             it broke so a surface can render it verbatim.
         RuntimeError: When the account carries no opening record, propagated
-            from :func:`~._events.account_opening_fact` -- a broken invariant,
+            from :func:`~._openings.account_opening_fact` -- a broken invariant,
             and deliberately not softened here into "then anything is allowed".
     """
     # **Under ``no_autoflush``, and that is a defect plan step X-f3c-2b's own
@@ -238,7 +238,7 @@ def reject_line_before_books_open(
 
     Args:
         opening: The account's governing
-            :class:`~._events.CashOpeningFact`.  The caller proved ownership
+            :class:`~._openings.CashOpeningFact`.  The caller proved ownership
             when it built the pass this came from; nothing is re-scoped here.
         posted_on: The day the bank posted the line.  **The posting day and
             never the transaction day**: a swipe MADE before the books opened

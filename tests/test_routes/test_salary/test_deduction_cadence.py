@@ -508,6 +508,12 @@ class TestWeeksStayOffTheSalaryPage:
     per-paycheck amount instead.  These cases hold the salary page's offer and
     its door to that set while the template forms offer the week unit (plan
     step R8-b).
+
+    **The route cases assert the line schema's own words in the response**
+    since plan step R8-b: until then the shared cadence refusal fired for the
+    week unit beside this one and the flash showed the first, so the stored
+    state was all a route case could grade.  The shared refusal no longer
+    fires for weeks, so this one is the only message the flash can carry.
     """
 
     #: What the line schema says when a weekly cadence is posted.
@@ -563,6 +569,7 @@ class TestWeeksStayOffTheSalaryPage:
                 follow_redirects=True,
             )
             assert response.status_code == 200
+            assert self.WEEKS_REFUSED in response.data.decode()
             assert db.session.query(PaycheckLine).filter_by(
                 salary_profile_id=profile.id, name="Union dues",
             ).count() == 0
@@ -589,6 +596,7 @@ class TestWeeksStayOffTheSalaryPage:
                 follow_redirects=True,
             )
             assert response.status_code == 200
+            assert self.WEEKS_REFUSED in response.data.decode()
             db.session.expire_all()
             line = db.session.get(PaycheckLine, line.id)
             assert line.recurrence_rule.id == rule_id
@@ -599,10 +607,9 @@ class TestWeeksStayOffTheSalaryPage:
     ):
         """The refusal names the units a line repeats by and what to do instead.
 
-        Graded on the schema rather than the flash: while the template forms
-        still withhold the week unit their own refusal fires beside this one,
-        and the flash shows the first; the stored-state cases above hold the
-        route to writing nothing either way.
+        Graded on the schema as well as the flash: the route cases above show
+        this message reaches the user, and this one pins it as the field error
+        on ``recurrence_unit``, the control the user changes.
         """
         with app.app_context():
             payload = _line_form(

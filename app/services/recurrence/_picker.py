@@ -22,10 +22,11 @@ named its cadence with a closed pattern set, so ``(2, MONTH)`` walked correctly
 and had nowhere to be written.  With ``unit_id`` and ``interval_n`` authored
 columns every reading can be stored, and what is left is whether the
 application can HONOUR it -- which since plan step R8-a is
-:func:`~app.services.recurrence._offer.authorable_cadences`' two derived
-rules, replacing the ``anchor_family`` router that gated it on
-first-occurrence derivations ruling **R-R16** had already deleted.  Three
-consequences here:
+:func:`~app.services.recurrence._offer.authorable_cadences`' derived rules,
+replacing the ``anchor_family`` router that gated it on first-occurrence
+derivations ruling **R-R16** had already deleted.  R8-a stated two; plan step
+R8-b deleted the one that withheld the ``WEEK`` unit, by dating a weekly row
+from its occurrence.  Three consequences here:
 
 * **the interval is a free number box for every unit.**  ``fixed_intervals``
   and ``free_unit_ids`` are deleted with the ``<select>`` they fed, and
@@ -85,15 +86,13 @@ from app.services.recurrence._offer import AuthorableCadence
 #:
 #: Keyed by enum member, so a unit added to
 #: :class:`~app.enums.RecurrenceUnitEnum` without copy raises ``KeyError`` at
-#: the first render rather than shipping a blank option.  ``WEEK`` is absent
-#: DELIBERATELY, and since plan step R8-a the reason is a LIVE one:
-#: :func:`~app.services.recurrence._offer.has_row_date_coordinate` keeps the
-#: unit out of the offer set because ``recurrence.compute_due_date`` has
-#: no way to date a weekly row, so this map is never asked for it.  Plan step
-#: **R5** deletes that function; the leaf that adds the copy is the one that
-#: makes the unit authorable.
+#: the first render rather than shipping a blank option.  ``WEEK`` joined at
+#: plan step R8-b, the leaf that made the unit authorable by dating a weekly
+#: row from its occurrence; until then the offer set withheld it and this map
+#: was never asked for it.
 _UNIT_LABELS: dict[RecurrenceUnitEnum, tuple[str, str]] = {
     RecurrenceUnitEnum.PERIOD: ("paycheck", "paychecks"),
+    RecurrenceUnitEnum.WEEK: ("week", "weeks"),
     RecurrenceUnitEnum.MONTH: ("month", "months"),
     RecurrenceUnitEnum.YEAR: ("year", "years"),
 }

@@ -337,7 +337,7 @@ def _leftover_recipient(mutable):
     unique index is keyed on that
     (``idx_transactions_template_scenario_occurrence``); a cadence that names
     one paycheck twice -- a monthly bill at a pay cadence of 30 days or more, a
-    weekly one once plan step R5 makes weekly rules authorable -- now stores
+    weekly one since plan step R8-b made weekly rules authorable -- now stores
     both rows instead of being refused.  Measured on the developer's own
     templates: at ``cadence_days`` 30 two of them repeat a paycheck, at 31
     eleven of them do across 12 paychecks.

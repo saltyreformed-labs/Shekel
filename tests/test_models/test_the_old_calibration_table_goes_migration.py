@@ -25,6 +25,9 @@ downgrade has the table back.
 """
 from __future__ import annotations
 
+import pathlib
+import subprocess
+import sys
 from datetime import date
 from decimal import Decimal
 
@@ -664,3 +667,18 @@ class TestTheRehearsalMeasure:
             event.remove(Engine, "before_cursor_execute", _record)
         assert sent
         assert set(sent) <= {"SELECT", "WITH"}
+
+    def test_it_imports_with_no_test_package(self):
+        """It imports under production's pins, which hold no ``pytest``: the kit runs it so.
+
+        A fresh interpreter with ``pytest`` made unimportable imports the
+        measure; one that pulled in ``tests._test_helpers`` would fail.
+        """
+        imported = subprocess.run(
+            [sys.executable, "-c",
+             "import sys; sys.modules['pytest'] = None; "
+             "import tests.manual.measure_s11d_old_calibrations"],
+            cwd=pathlib.Path(__file__).resolve().parents[2],
+            capture_output=True, text=True, check=False,
+        )
+        assert imported.returncode == 0, imported.stderr

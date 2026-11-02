@@ -38,16 +38,24 @@ transaction opens.  The suite grades :func:`run` on a seeded database
 (``tests/test_models/test_the_old_calibration_table_goes_migration.py``,
 ``TestTheRehearsalMeasure``), including that it sends only reads.
 
+**It imports only what production's image holds** -- ``app`` and its pins --
+because the release kit runs it under a venv of the cut's ``requirements.txt``,
+which holds no test package.  So it loads the migration by path itself rather
+than through ``tests._test_helpers.load_migration_module``, whose module imports
+``pytest``; the suite grades that it still imports without one.
+
 **Usage** (from the repository root, against a database at ``69634349bdce``)::
 
     DATABASE_URL=postgresql://shekel_user:...@127.0.0.1:5432/shekel_s11d_a \\
         PYTHONPATH=. .venv/bin/python tests/manual/measure_s11d_old_calibrations.py
 """
 
+import importlib.util
 import sys
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.engine import Row
@@ -56,9 +64,16 @@ from app import create_app, db
 from app.models.salary_profile import SalaryProfile
 from app.services import pay_stub_service
 from app.services.pay_stub_gross import checked_gross
-from tests._test_helpers import load_migration_module
 
-_MIGRATION = load_migration_module("858f569b2c17_the_old_calibration_table_goes.py")
+#: The drop's migration, whose collector, stub reads, tax pairing and refusal
+#: this reads.  ``migrations/versions`` is no package, so it is loaded by path.
+_MIGRATION_PATH = (
+    Path(__file__).resolve().parents[2] / "migrations" / "versions"
+    / "858f569b2c17_the_old_calibration_table_goes.py"
+)
+_SPEC = importlib.util.spec_from_file_location(_MIGRATION_PATH.stem, _MIGRATION_PATH)
+_MIGRATION = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MIGRATION)
 
 #: The label the calibration's and the stub's Gross Pay are printed under.
 _GROSS_LABEL = "Gross Pay"

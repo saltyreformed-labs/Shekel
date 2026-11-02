@@ -82,9 +82,11 @@ def is_salary_linked_template(template) -> bool:
     A salary-linked template's instance amounts are paycheck-calculated per
     period (``income_service.SalaryPricing``), so its
     ``default_amount`` is vestigial: editing it does not change a generated row.
-    Two callers read this, and they are the same question asked for two
-    purposes -- the update route skips the amount-change conflict chooser for
-    such a template, and :func:`owns_its_amount` refuses it a price series.
+    :func:`owns_its_amount` refuses such a template a price series on this
+    answer, and that refusal is also why its edit never asks the conflict
+    chooser's question: the edit writes the series nothing, and the chooser
+    asks only when the series changed (plan step X-bp; the update route
+    passed this predicate as a flag to the chooser until then).
 
     It lives HERE rather than in ``recurrence_engine`` (its original home, plan
     step R2e-1) because the dependency has to run this way round: plan step
@@ -168,6 +170,30 @@ def amount_versions(template) -> list[TemplateAmountVersion]:
     return sorted(
         template.amount_versions,
         key=lambda version: (version.effective_date, version.id or 0),
+    )
+
+
+def series_image(template) -> tuple[tuple[date, Decimal], ...]:
+    """Return *template*'s price history as plain values, oldest first.
+
+    ``((effective_date, amount), ...)`` off :func:`amount_versions`, for a
+    caller that asks whether an act CHANGED the series: the update routes
+    capture it before an edit and the conflict chooser compares it after
+    (``routes/_recurrence_conflict_chooser.PreEditTemplateState``, plan step
+    X-bp).  **Values, not the version rows**, because a same-day restatement
+    corrects a version IN PLACE (:func:`set_amount`), so an image holding the
+    rows would read the edit's own figure back and see no change.
+
+    Args:
+        template: The transaction or transfer template to read.
+
+    Returns:
+        One ``(effective_date, amount)`` pair per version, ascending; empty for
+        a template with no series.
+    """
+    return tuple(
+        (version.effective_date, Decimal(str(version.amount)))
+        for version in amount_versions(template)
     )
 
 
@@ -276,13 +302,14 @@ def _resync_scalar(template) -> None:
     ``effective_from`` forward; since plan steps balance:X-au-e (a
     transaction) and X-au-f-2 (a transfer) generation writes no figure at
     all, and the column is read rather than copied (``git grep -n
-    default_amount app/`` is the census): the conflict chooser's
-    amount-change gate, carry-forward's generated target, and
-    :func:`current_amount` for a definition holding no series among them.
-    (The Recurring list, its Archived drawer and the savings page's floors
-    read it until plan step X-bp, which prices them as of the read pass's
-    day by the rule that prices the definition's rows instead,
-    ``obligations_aggregator.todays_price``.)  A
+    default_amount app/`` is the census): carry-forward's generated target,
+    and :func:`current_amount` for a definition holding no series, among
+    them.  (The Recurring list, its Archived drawer and the savings page's
+    floors read it until plan step X-bp, which prices them as of the read
+    pass's day by the rule that prices the definition's rows instead,
+    ``obligations_aggregator.todays_price``; the conflict chooser's gate
+    read it until the same step, which compares the series before and after
+    the edit instead, :func:`series_image`.)  A
     scheduled rise still has to reach the column the moment it is stated, or
     those readers would go on answering the old figure.  Today's price is a
     different question, and the edit form asks it separately
@@ -359,8 +386,8 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     (rulings **R-IY**, **R-BAL16**), and until then it is still READ.  The
     census of its readers is ``git grep -n default_amount app/``; among them,
     a salary profile's archive (``routes/salary/profiles.delete_profile``)
-    opens the template's series AT it, the conflict chooser gates on it, and
-    the X-au-e and X-au-f cutover migrations' downgrades restore from it.
+    opens the template's series AT it, and the X-au-e and X-au-f cutover
+    migrations' downgrades restore from it.
 
     Every route that states a template's amount goes through this door: the
     two create forms, the two edit forms, the investment contribution and loan
@@ -716,5 +743,6 @@ __all__ = [
     "is_salary_linked_template",
     "owns_its_amount",
     "restate_in_effect",
+    "series_image",
     "set_amount",
 ]

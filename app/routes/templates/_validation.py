@@ -181,8 +181,9 @@ def validate_template_form(data, on_invalid, template=None):
     # classifies by the DEFINITION and would still place the row under amount
     # rule 2.  The classifier and its producer would then disagree, and after
     # X-au-d that disagreement is a REFUSAL on a row that stores no figure:
-    # ``regenerate_or_conflict_chooser`` skips the chooser for a salary-linked
-    # template, so this save silently flips every projected paycheck in the
+    # ``regenerate_or_conflict_chooser`` never asks about a salary-linked
+    # template (its edit writes the price series nothing, plan step X-bp),
+    # so this save silently flips every projected paycheck in the
     # write window to Expense, and ``routes/grid/page`` prices every row it
     # loads with no status gate and no ``try`` -- a 500 on the primary screen
     # with no in-app repair.  Found by an adversarial review of this step.

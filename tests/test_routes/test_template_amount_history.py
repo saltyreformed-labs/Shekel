@@ -18,20 +18,33 @@ because the door and the panel are ONE implementation over two forms
 twice and its shared rules nowhere.
 """
 
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from html.parser import HTMLParser
 
+from app.enums import RecurrenceUnitEnum
 from app.extensions import db
 from app.utils.dates import display_today
 from app.models.ref import TransactionType
+from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
+from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service as tas
+from app.services.balance_at import BalanceContext
+from app.services.generation_schedule import GenerationSchedule
 from tests._test_helpers import (
+    all_periods,
     cadence_payload,
+    create_loan_account,
     create_savings_account,
     make_every_period_rule,
+    make_loan_payment_template,
+    make_salary_profile,
+    resolved_amount,
+    transfer_amount,
+    transfer_repriced_by_the_owner,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 
@@ -360,11 +373,15 @@ class TestTheConflictChooserRoundTrip:
         ``2026-06-01`` was silently wrong once the opening version moved to
         today.**  ``default_amount`` means the NEWEST stated price, so a
         statement dated before an existing version does not move the scalar --
-        and the chooser is gated on the scalar having moved
+        and the chooser was gated on the scalar having moved
         (``regenerate_or_conflict_chooser``).  With a back-dated edit the first
         case stopped rendering the chooser at all and returned 302: it was
         still asserting something true, about a path that no longer reached the
-        code the class exists to grade.
+        code the class exists to grade.  *The gate is the price history since
+        plan step X-bp, which a back-dated statement changes too
+        (:class:`TestTheChooserAsksWhetherThePriceHistoryChanged`); the date
+        stays future, after every existing version, so the delta below is an
+        append in sorted order.*
         """
         from tests.test_routes.test_templates import (
             _create_template, _future_override_txn,
@@ -481,6 +498,183 @@ class TestTheConflictChooserRoundTrip:
             # The column still carries the queued price, so the rows that edit
             # rebuilt are regenerated at it.
             assert template.default_amount == Decimal("200.00")
+
+
+class TestTheChooserAsksWhetherThePriceHistoryChanged:
+    """The hand-edited prompt asks when the edit changed the price HISTORY.
+
+    Plan step X-bp (plan#1045), an edge case decided under ruling R-BAL207.
+    The prompt was gated on ``default_amount`` moving -- the NEWEST stated
+    price -- and named that figure.  The newest price is not what an edit
+    changes when a later price is already scheduled: a price stated under it
+    reprices every row between the two dates and leaves the newest where it
+    was, so the owner's hand-edited rows in that window were never asked
+    about.  The gate is the series itself now, the price before the edit
+    against the price after it, and the figure the page names is the one the
+    edit stated.
+
+    A definition whose amount is WORKED OUT -- a salary profile's paycheck, a
+    loan payment that follows its loan -- has no history the edit door
+    writes, so its edit never asks, whatever its Amount box said.  That
+    replaces the salary-only flag the update route passed, which never
+    covered the loan payment: its edit asked about a figure no row reads.
+    """
+
+    @staticmethod
+    def _chooser_names(body, name, figure):
+        """Whether the page's framing sentence names *figure* for *name*."""
+        return re.search(
+            rf"You changed <strong>{re.escape(name)}</strong> to\s*"
+            rf'<span class="font-mono">{re.escape(figure)}</span>',
+            body,
+        ) is not None
+
+    def test_a_price_stated_under_a_scheduled_one_asks_and_names_it(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """$1,300.00 stated under a scheduled $1,800.00: the page asks about $1,300.00.
+
+        The newest price is $1,800.00 before the edit and after it, so the
+        old gate stayed shut over a row whose definition the edit repriced
+        from $1,200.00 to $1,300.00.  The scheduled rise is dated after every
+        generated row, so the hand-edited one sits inside the window the edit
+        moved.
+        """
+        with app.app_context():
+            from tests.test_routes.test_templates import (
+                _create_template, _future_override_txn,
+            )
+            template = _create_template(
+                seed_user, cadence=EVERY_PERIOD, amount="1200.00",
+            )
+            txn = _future_override_txn(seed_user, template, amount="1500.00")
+            tas.set_amount(
+                template, Decimal("1800.00"),
+                effective_on=txn.due_date + timedelta(days=30),
+            )
+            db.session.commit()
+            tid = template.id
+            before = TestTheConflictChooserRoundTrip._series(template)
+
+            resp = auth_client.post(f"/templates/{tid}", data={
+                "default_amount": "1300.00",
+                "effective_from": (
+                    display_today() + timedelta(days=1)
+                ).isoformat(),
+            })
+
+            assert resp.status_code == 200
+            body = resp.get_data(as_text=True)
+            assert "Some upcoming instances were hand-edited" in body
+            assert self._chooser_names(body, "Rent", "$1,300.00")
+            assert "$1,800.00" not in body
+            # The page rolled the pending edit back, price included.
+            db.session.expire_all()
+            assert TestTheConflictChooserRoundTrip._series(
+                db.session.get(TransactionTemplate, tid),
+            ) == before
+
+    def test_a_salary_profiles_definition_never_asks(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """A paycheck's edit commits without asking, its hand-edited row kept.
+
+        The definition is priced before the profile names it, so it HOLDS a
+        series, dormant while the profile is active: the door writes it no
+        version (``template_amount_service.owns_its_amount``), so the history
+        before and after the edit is the same one.  The edit renames it too,
+        which is how the commit is read back.
+        """
+        with app.app_context():
+            from tests.test_routes.test_templates import (
+                _create_template, _future_override_txn,
+            )
+            template = _create_template(
+                seed_user, name="Day Job", txn_type="Income",
+                cadence=EVERY_PERIOD, amount="2000.00",
+            )
+            profile = make_salary_profile(seed_user, db.session)
+            profile.template_id = template.id
+            db.session.commit()
+            txn = _future_override_txn(seed_user, template, amount="2500.00")
+            tid, txn_id = template.id, txn.id
+            before = TestTheConflictChooserRoundTrip._series(template)
+            assert before, "precondition: the definition holds a dormant series"
+
+            resp = auth_client.post(f"/templates/{tid}", data={
+                "name": "Day Job, renamed",
+                "default_amount": "2600.00",
+            }, follow_redirects=True)
+
+            assert resp.status_code == 200
+            assert b"Some upcoming instances were hand-edited" not in resp.data
+            db.session.expire_all()
+            saved = db.session.get(TransactionTemplate, tid)
+            assert saved.name == "Day Job, renamed"
+            assert TestTheConflictChooserRoundTrip._series(saved) == before
+            kept = db.session.get(Transaction, txn_id)
+            assert kept.is_override is True
+            assert resolved_amount(kept) == Decimal("2500.00")
+
+    def test_a_loan_payment_that_follows_its_loan_never_asks(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """A derive-mode payment's Amount box moves no row, so its edit asks nothing.
+
+        The transfer door passed the flag as always-true, so this edit asked
+        "You changed it to $999.00" over a hand-edited payment while every
+        row of it reads the loan's own figure.  The payment is priced before
+        it is put in derive mode, the order the loan door takes, so it holds
+        a dormant series as the salary case does.
+        """
+        with app.app_context():
+            from app.services import transfer_recurrence
+            loan = create_loan_account(seed_user, db.session)
+            template = make_loan_payment_template(
+                db.session, seed_user, loan, amount="500.00",
+            )
+            assert template.settings.derive_from_loan is True
+            transfer_recurrence.generate_for_template(
+                template, GenerationSchedule.for_period_ids(
+                    BalanceContext.build(template.user_id),
+                    {p.id for p in all_periods(seed_user["user"].id)},
+                ), seed_user["scenario"].id,
+            )
+            db.session.flush()
+            latest = (
+                db.session.query(Transfer)
+                .filter_by(transfer_template_id=template.id)
+                .order_by(Transfer.due_date.desc())
+                .first()
+            )
+            assert latest.due_date > display_today(), (
+                "precondition: a future payment the edit's window reaches"
+            )
+            transfer_repriced_by_the_owner(latest, "650.00")
+            db.session.commit()
+            tid, latest_id = template.id, latest.id
+            before = TestTheConflictChooserRoundTrip._series(template)
+            assert before, "precondition: the payment holds a dormant series"
+
+            resp = auth_client.post(f"/transfers/{tid}", data={
+                "name": "Loan payment, renamed",
+                "default_amount": "999.00",
+                "from_account_id": str(template.from_account_id),
+                "version_id": str(template.version_id),
+                **cadence_payload(
+                    unit=RecurrenceUnitEnum.MONTH, states_a_start=False,
+                ),
+            }, follow_redirects=True)
+
+            assert resp.status_code == 200
+            assert b"Some upcoming instances were hand-edited" not in resp.data
+            db.session.expire_all()
+            saved = db.session.get(TransferTemplate, tid)
+            assert saved.name == "Loan payment, renamed"
+            assert TestTheConflictChooserRoundTrip._series(saved) == before
+            kept = db.session.get(Transfer, latest_id)
+            assert kept.is_override is True
+            assert transfer_amount(kept) == Decimal("650.00")
 
 
 class TestTheOptimisticLockCounter:

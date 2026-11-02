@@ -391,9 +391,11 @@ def update_template(template_id):
     # (plan step R2e-1).  ``had_recurrence_rule`` is what lets the
     # regeneration below tell "the user just cleared the recurrence" -- which
     # must sweep the instances the deleted rule generated -- from "this
-    # template never recurred", which must not.
+    # template never recurred", which must not; ``series`` is what lets the
+    # chooser ask only when the edit changed the price history (plan step
+    # X-bp).
     before = PreEditTemplateState(
-        amount=template.default_amount,
+        series=template_amount_service.series_image(template),
         had_recurrence_rule=template.recurs,
     )
 
@@ -490,9 +492,6 @@ def update_template(template_id):
         kind=_TXN_TEMPLATE_KIND, effective_from=effective_from,
     ) or regenerate_or_conflict_chooser(
         template, before, effective_from, _TXN_TEMPLATE_KIND,
-        amount_drives_instances=not template_amount_service.is_salary_linked_template(
-            template,
-        ),
     )
 
     # The chooser short-circuits (its pending edit is already rolled back);

@@ -526,9 +526,10 @@ def update_transfer_template(template_id):
     # template's single Transfer is an ordinary auto-generated row, so a
     # rename would otherwise delete it -- which is exactly what a
     # ``Once``-ruled transfer suffered until plan step R2e-3 made it
-    # rule-less (defect D16).
+    # rule-less (defect D16).  ``series`` lets the chooser ask only when the
+    # edit changed the price history (plan step X-bp).
     before = PreEditTemplateState(
-        amount=template.default_amount,
+        series=template_amount_service.series_image(template),
         had_recurrence_rule=template.recurs,
     )
 
@@ -725,9 +726,10 @@ def _regenerate_and_commit_template(
         template: The TransferTemplate whose field changes are already staged
             in the session.
         before: The template's pre-edit state
-            (:class:`~app.routes._recurrence_form_helpers.PreEditTemplateState`)
-            -- its amount gates the chooser and its ``had_recurrence_rule``
-            gates the sweep; see :func:`regenerate_or_conflict_chooser`.
+            (:class:`~app.routes._recurrence_conflict_chooser.PreEditTemplateState`)
+            -- its price history gates the chooser and its
+            ``had_recurrence_rule`` gates the sweep; see
+            :func:`~app.routes._recurrence_conflict_chooser.regenerate_or_conflict_chooser`.
         effective_from: Date from which regeneration applies.
         template_id: The template's id, used for redirect kwargs and logging.
         stranding: The route's

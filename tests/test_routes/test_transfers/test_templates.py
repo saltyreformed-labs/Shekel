@@ -565,8 +565,9 @@ class TestTemplateUpdate:
             elsewhere_id = elsewhere.id
 
             # The amount MOVES (200 -> 275), which is what arms the chooser
-            # branch at all: it is gated on ``template.default_amount !=
-            # before.amount``.  An adversarial review of R10-b found the first
+            # branch at all: it is gated on the edit changing the price
+            # history (``series_image(template) != before.series`` since plan
+            # step X-bp).  An adversarial review of R10-b found the first
             # version posting the unchanged 200.00, so the "no chooser"
             # assertion below was dead however the branch behaved.
             resp = auth_client.post(f"/transfers/{tid}", data={

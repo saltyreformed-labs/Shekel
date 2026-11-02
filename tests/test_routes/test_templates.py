@@ -889,13 +889,16 @@ class TestTemplateUpdate:
     def test_is_salary_linked_template_detects_active_link(
         self, app, seed_user, seed_periods_today,
     ):
-        """The signal the update route uses to skip the chooser for salary
-        rows: True iff an active salary profile references the template.
+        """True iff an active salary profile references the template.
 
         A salary-linked template's instances are paycheck-calculated, so its
-        ``default_amount`` is vestigial; the update route passes
-        ``amount_drives_instances=False`` for it, suppressing a chooser that
-        would otherwise mis-state a paycheck on 'use'.
+        ``default_amount`` is vestigial and ``owns_its_amount`` refuses it a
+        price series on this answer.  The update route passed it to the
+        chooser as ``amount_drives_instances=False`` until plan step X-bp;
+        the chooser asks only when the price series changed now, which an
+        edit to such a template never does
+        (``test_template_amount_history``'s
+        ``TestTheChooserAsksWhetherThePriceHistoryChanged``).
         """
         with app.app_context():
             from app.services.template_amount_service import (

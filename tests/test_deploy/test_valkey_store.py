@@ -14,11 +14,13 @@ rate-limited request would fail.  These tests run the store as production does:
   runs it.  Not its resource caps (a rootless daemon need not delegate the cgroup controllers
   they use), and in place of its socket volume a folder of the test's own
   (:func:`_sockets_folder`), where the test, on the host, connects to the socket at the path
-  the app's store address names (ruling plan#2612): the server listens on no network port.
+  the app's store address names (ruling plan#2612), the address the app's configuration
+  holds in code (ruling plan#2633): the server listens on no network port.
   The volume itself, as declared, is graded on its own: it admits the app's user and no
   other.
 * The app's own limiter (Flask-Limiter on limits' moving-window strategy, BaseConfig's
-  settings) drives ``/login``'s ``5 per 15 minutes`` as the ``shekel`` user: each request's
+  settings) drives ``/login``'s ``5 per 15 minutes`` logged in by the app's own storage
+  options, as the ``shekel`` user with the server's password: each request's
   acquire (``acquire_moving_window.lua``) and the window read behind its X-RateLimit-*
   headers (``moving_window.lua``), each run by EVALSHA on a server that holds no script yet,
   so valkey-py loads each by SCRIPT LOAD first.
@@ -44,6 +46,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import os
 import re
 import secrets
 import shutil
@@ -53,6 +56,7 @@ import time
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from unittest import mock
 
 import pytest
 import valkey
@@ -60,6 +64,7 @@ from valkey.exceptions import AuthenticationError, NoPermissionError
 from werkzeug.test import TestResponse
 
 from app import create_app
+from app.config import DevContainerConfig, ProdConfig
 from app.extensions import db, limiter
 from tests.conftest import SEED_USER_EMAIL
 from tests.test_deploy._compose import REPO_ROOT, service, volume
@@ -81,23 +86,20 @@ _APP = service("app")
 _SOCKET_VOLUME = volume(_SOCKETS["source"])
 #: The rules and start script the service mounts, as committed.
 _RULES = (REPO_ROOT / _BIND["source"]).resolve()
-#: How the app's ``RATELIMIT_STORAGE_URI`` names the store by default: a socket file, as the
-#: ``shekel`` user, its password left to compose's interpolation.
-_APP_STORE = re.compile(r"\$\{RATELIMIT_STORAGE_URI:-valkey\+unix://shekel:\$\{[^}]+\}"
-                        r"@(?P<socket>/[^}]+)\}")
+#: How a store address names a socket file: limits' scheme for the valkey client over one.
+_SOCKET_SCHEME = "valkey+unix://"
 
 
 def _app_socket() -> PurePosixPath:
-    """Where the app connects to the store: the socket its store address names, in the
-    container.
+    """Where the app connects to the store: the socket production's configuration names, in
+    the container.
 
     Raises:
-        AssertionError: when the app's ``RATELIMIT_STORAGE_URI`` does not name the store as
-            :data:`_APP_STORE` reads one.
+        AssertionError: when that configuration names its store by other than a socket file.
     """
-    named = _APP_STORE.fullmatch(_APP["environment"]["RATELIMIT_STORAGE_URI"])
-    assert named, f"the app names no socket: {_APP['environment']['RATELIMIT_STORAGE_URI']}"
-    return PurePosixPath(named["socket"])
+    address = ProdConfig.RATELIMIT_STORAGE_URI
+    assert address.startswith(_SOCKET_SCHEME), f"the app names no socket: {address}"
+    return PurePosixPath(address.removeprefix(_SOCKET_SCHEME))
 
 
 #: The app's socket, in the container, and its path inside the socket volume.
@@ -169,13 +171,17 @@ class _Store:
     password: str
 
     @property
-    def uri(self) -> str:
-        """The store as the app names it: the ``shekel`` user on this server."""
-        return self.uri_of(_APP_USER, self.password)
+    def login(self) -> dict[str, str]:
+        """The app's own login to this server: the storage options its configurations beside
+        Valkey build (``app.config._ValkeyStore``, shared by DevContainerConfig and
+        ProdConfig), given this server's ``shekel`` password where the entrypoint puts it."""
+        with mock.patch.dict(os.environ, {"VALKEY_PASSWORD": self.password}):
+            return DevContainerConfig().RATELIMIT_STORAGE_OPTIONS
 
-    def uri_of(self, username: str, password: str) -> str:
-        """The store as the app would name it logged in as ``username`` by ``password``."""
-        return f"valkey+unix://{username}:{password}@{self.socket}"
+    @staticmethod
+    def login_of(username: str, password: str) -> dict[str, str]:
+        """The storage options that log in as ``username`` by ``password``."""
+        return {"username": username, "password": password}
 
     def client(self, username: str | None = None, password: str | None = None
                ) -> valkey.Valkey:
@@ -248,12 +254,15 @@ def _store() -> Iterator[_Store]:
         yield store
 
 
-def _login_answers(uri: str) -> list[TestResponse]:
-    """``/login``'s limit and one more POSTs, through the app's own limiter on the store
-    ``uri``, each answer in turn.  The limiter is fail-closed, so a command the store refuses
-    raises out of the request (a :class:`valkey.exceptions.ValkeyError`)."""
+def _login_answers(socket: Path, login: dict[str, str]) -> list[TestResponse]:
+    """``/login``'s limit and one more POSTs, through the app's own limiter on the store at
+    ``socket``, logged in by the storage options ``login``, each answer in turn.  The limiter
+    is fail-closed, so a command the store refuses raises out of the request (a
+    :class:`valkey.exceptions.ValkeyError`)."""
     rate_app = create_app("testing")
-    rate_app.config.update(RATELIMIT_ENABLED=True, RATELIMIT_STORAGE_URI=uri)
+    rate_app.config.update(RATELIMIT_ENABLED=True,
+                           RATELIMIT_STORAGE_URI=f"{_SOCKET_SCHEME}{socket}",
+                           RATELIMIT_STORAGE_OPTIONS=login)
     limiter.enabled = True
     limiter.init_app(rate_app)
     try:
@@ -290,7 +299,7 @@ def test_a_limited_route_runs_on_the_store_as_the_app_s_user(store):
     (X-RateLimit-Remaining 4 down to 0), and the sixth is refused, with when to retry: the
     acquire and the window read each ran, by EVALSHA after SCRIPT LOAD on the fresh server,
     as the ``shekel`` user.  A grant missing from the ACL fails a request instead."""
-    answers = _login_answers(store.uri)
+    answers = _login_answers(store.socket, store.login)
     assert [answer.status_code for answer in answers] == [200] * _LOGIN_LIMIT + [429]
     assert [answer.headers.get("X-RateLimit-Remaining") for answer in answers] == [
         "4", "3", "2", "1", "0", "0"]
@@ -397,7 +406,7 @@ def test_the_rules_copied_whole_serve_the_limiter(tmp_path):
     password = secrets.token_hex(16)
     rules = _rules_where_shekel(tmp_path, _shekel_tokens())
     with _served(password, ["--env", f"VALKEY_PASSWORD={password}"], rules) as store:
-        answers = _login_answers(store.uri)
+        answers = _login_answers(store.socket, store.login)
     assert [answer.status_code for answer in answers] == [200] * _LOGIN_LIMIT + [429]
 
 
@@ -417,7 +426,7 @@ def test_each_grant_of_the_app_s_user_is_one_the_limiter_needs(tmp_path, grant):
                                            if token != grant])
     with _served(password, ["--env", f"VALKEY_PASSWORD={password}"], rules) as store:
         with pytest.raises(valkey.exceptions.ValkeyError, match=_REFUSED):
-            _login_answers(store.uri)
+            _login_answers(store.socket, store.login)
 
 
 #: The census's test-only users, none in the committed file.  ``census`` is granted every
@@ -553,7 +562,7 @@ def _login_watched(store: _Store) -> tuple[list[TestResponse], list[list[bytes]]
     sentinel = store.client(username=_CENSUS, password=_NOPASS)
     sentinel.ping()
     with store.client(username=_CENSUS, password=_NOPASS).monitor() as monitor:
-        answers = _login_answers(store.uri_of(_CENSUS, _NOPASS))
+        answers = _login_answers(store.socket, _Store.login_of(_CENSUS, _NOPASS))
         sentinel.echo(marker)
         seen = []
         while (argv := _argv(monitor.connection.read_response())) != [b"ECHO", marker]:
@@ -585,7 +594,7 @@ def _needed(store: _Store, sent: Iterable[str], outcome: list[tuple[int, str | N
         census.flushall()
         census.script_flush()
         try:
-            answers = _login_answers(store.uri_of(_WITHHELD, _NOPASS))
+            answers = _login_answers(store.socket, _Store.login_of(_WITHHELD, _NOPASS))
         except valkey.exceptions.ValkeyError as error:
             if not re.search(_REFUSED, str(error)):
                 raise

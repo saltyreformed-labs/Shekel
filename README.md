@@ -122,10 +122,9 @@ your `shekel` directory:
 1. Run the block of [step 2](#2-download-configuration-files) that pulls the image and downloads the
    files again.
 2. Once, for an install from before the rate limiter moved from Redis to Valkey: if `.env` names
-   `SHEKEL_REDIS_PASSWORD`, rename it to `SHEKEL_VALKEY_PASSWORD`, keeping its value. The image no
-   longer installs the Redis client, so if `.env` sets `RATELIMIT_STORAGE_URI` to the bundled store
-   (host `redis`), delete the line, and if it names a store of your own, change `redis` to `valkey`
-   in its scheme (`rediss://` becomes `valkeys://`).
+   `SHEKEL_REDIS_PASSWORD`, rename it to `SHEKEL_VALKEY_PASSWORD`, keeping its value. The app now
+   names its store itself, the bundled Valkey, so if `.env` sets `RATELIMIT_STORAGE_URI`, delete the
+   line: nothing reads it, and a store of your own is no longer supported.
 3. Start the new release:
 
    ```bash
@@ -167,8 +166,8 @@ docker volume rm shekel-prod-pgdata
 | Container marked unhealthy during first startup | First-time initialization (schema creation, migrations, seeding) can take over 60 seconds. The healthcheck `start_period` allows 120 seconds before failures count. Wait and check `docker compose logs -f app`. |
 | `curl` not found inside the container | The slim image does not include curl. Use Python instead: `docker compose exec app python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"` |
 | `Can't locate revision identified by ...` | The GHCR image may be older than your database. Update to the latest release ([Updating](#updating)). |
-| `'redis' prerequisite not available` in `docker compose logs app` | The image no longer installs the Redis client, and your `docker-compose.yml` is from before the switch to Valkey or `.env` sets a `RATELIMIT_STORAGE_URI` with a `redis` scheme. Follow [Updating](#updating) from step 1. |
-| `'valkey' prerequisite not available` in `docker compose logs app` | Your configuration files are newer than the image, as when a `docker-compose.override.yml` pins an older digest. Follow [Updating](#updating) from step 1. |
+| `VALKEY_PASSWORD is not set` in `docker compose logs app` | Your `docker-compose.yml` is older than the image, so it does not hand the app the rate limiter's password. Follow [Updating](#updating) from step 1. |
+| Signing in fails, and `docker compose logs app` names `redis:6379` | Your configuration files are newer than the image, as when a `docker-compose.override.yml` pins an older digest: an image from before the switch to Valkey looks for a Redis the files no longer start. Follow [Updating](#updating) from step 1. |
 
 ### Deployment Architecture
 

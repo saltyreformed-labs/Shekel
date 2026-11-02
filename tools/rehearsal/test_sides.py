@@ -17,14 +17,19 @@ import pytest
 from tools.rehearsal import bench, sides
 
 
-#: The app's store as each tree's base compose file sets it, verbatim: ``main``'s before the
-#: Valkey switch (plan#2332) and the switch's own, over a socket file (ruling plan#2612).
+#: The app's store as each tree's base compose file set it, verbatim: ``main``'s before the
+#: Valkey switch (plan#2332) and the switch's own, over a socket file (ruling plan#2612), before
+#: the app named its store in its own code (plan#2634).
 _REDIS_STORE = ("      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-redis://shekel:"
                 "${SHEKEL_REDIS_PASSWORD}@redis:6379/0}\n")
 _VALKEY_STORE = ("      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-valkey+unix://shekel:"
                  "${SHEKEL_VALKEY_PASSWORD:?Set SHEKEL_VALKEY_PASSWORD in .env}"
                  "@/run/valkey/valkey.sock}\n")
 _BASE_COMPOSE = "services:\n  app:\n    environment:\n" + _VALKEY_STORE
+#: A base compose file from plan#2634 on, verbatim in its app's store line: the store's password
+#: alone, as the app names the store in its own code.
+_CODE_STORE_COMPOSE = ("services:\n  app:\n    environment:\n      VALKEY_PASSWORD: "
+                       "${SHEKEL_VALKEY_PASSWORD:?Set SHEKEL_VALKEY_PASSWORD in .env}\n")
 
 
 def _side(root: Path, dockerfile: str, compose: str, base: str = _BASE_COMPOSE) -> Path:
@@ -68,9 +73,24 @@ def test_the_side_environment_is_built_whole_from_the_side_s_tree(tmp_path, monk
         "FLASK_ENV": "production", "SECRET_KEY": "k" * 64,
         "DATABASE_URL": "postgresql:///copy",
         "RATELIMIT_STORAGE_URI": "valkey+unix:///rehearsal.invalid/valkey.sock",
+        "VALKEY_PASSWORD": "rehearsal.invalid",
         "PYTHONHASHSEED": "0",
         "PYTHON_DOTENV_DISABLED": "1",
         "PATH": f"{tmp_path / 'venv' / 'bin'}{os.pathsep}/usr/bin{os.pathsep}/bin"}
+
+
+def test_a_side_whose_code_names_its_store_is_given_its_password_and_no_store(tmp_path,
+                                                                              monkeypatch):
+    """A tree from plan#2634 on, whose compose files hand the app the store's password alone:
+    the side is given a password no store holds and no ``RATELIMIT_STORAGE_URI``, the
+    operator's included, which such an app reads nowhere."""
+    monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://operator:6379/0")
+    monkeypatch.setenv("VALKEY_PASSWORD", "the-operator-s")
+    tree = _side(tmp_path / "tree", _DOCKERFILE, _PROD_COMPOSE, _CODE_STORE_COMPOSE)
+    built = sides.side_environment(_state(tree, tmp_path / "venv" / "bin" / "python"),
+                                   "postgresql:///copy", "k" * 64)
+    assert "RATELIMIT_STORAGE_URI" not in built
+    assert built["VALKEY_PASSWORD"] == "rehearsal.invalid"
 
 
 @pytest.mark.parametrize("compose", ["services: {}\n", _PROD_COMPOSE + "      TZ: UTC\n"])
@@ -81,31 +101,31 @@ def test_a_side_whose_compose_file_pins_no_single_timezone_is_refused(tmp_path, 
         sides.image_environment(tree)
 
 
-@pytest.mark.parametrize(("store", "given"), [
-    (_REDIS_STORE, "redis://rehearsal.invalid:6379/0"),
-    (_VALKEY_STORE, "valkey+unix:///rehearsal.invalid/valkey.sock"),
+@pytest.mark.parametrize(("base", "given"), [
+    ("services:\n  app:\n    environment:\n" + _REDIS_STORE, "redis://rehearsal.invalid:6379/0"),
+    (_BASE_COMPOSE, "valkey+unix:///rehearsal.invalid/valkey.sock"),
+    (_CODE_STORE_COMPOSE, None),
 ])
-def test_a_side_is_given_the_store_scheme_its_own_compose_file_names(tmp_path, store, given):
+def test_a_side_is_given_the_store_scheme_its_own_compose_file_names(tmp_path, base, given):
     """A tree before the Valkey switch is given ``redis``, one after it ``valkey+unix``, each
     at an address no deploy could reach: the host, or for a scheme that reaches its store over
-    a socket file, a socket in a folder no host holds.  One scheme for both sides of the
-    release that switches would fail the side whose lock holds no client for it."""
-    tree = _side(tmp_path, _DOCKERFILE, _PROD_COMPOSE,
-                 "services:\n  app:\n    environment:\n" + store)
+    a socket file, a socket in a folder no host holds; and one that names its store in its own
+    code (plan#2634), whose compose files set none, is given no store.  One scheme for both
+    sides of the release that switches would fail the side whose lock holds no client for it."""
+    tree = _side(tmp_path, _DOCKERFILE, _PROD_COMPOSE, base)
     assert sides.limiter_uri(tree) == given
 
 
 @pytest.mark.parametrize(("base", "prod", "refusal"), [
-    ("services: {}\n", _PROD_COMPOSE, "on 0 lines, not one"),
     (_BASE_COMPOSE, _PROD_COMPOSE + _REDIS_STORE, "on 2 lines, not one"),
     ("services:\n  app:\n    environment:\n"
      "      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI}\n", _PROD_COMPOSE, "naming no scheme"),
 ])
 def test_a_side_whose_compose_files_name_no_single_store_scheme_is_refused(tmp_path, base, prod,
                                                                           refusal):
-    """No setting of the store, one in the base file and another in production's override
-    (which production would lay over it), or a setting that leaves the scheme to the
-    operator's environment: each refused by name rather than guessed."""
+    """One setting of the store in the base file and another in production's override (which
+    production would lay over it), or a setting that leaves the scheme to the operator's
+    environment: each refused by name rather than guessed."""
     tree = _side(tmp_path, _DOCKERFILE, prod, base)
     with pytest.raises(bench.BenchError, match=r"docker-compose\.yml and \S+docker-compose\.prod"
                                                r"\.yml set RATELIMIT_STORAGE_URI " + refusal):

@@ -603,8 +603,8 @@ The script:
    `secrets/` (mode 0600), and writes Valkey's password file `secrets/valkey_password` (mode 0640,
    for the valkey container's gid) from `.env`'s `SHEKEL_VALKEY_PASSWORD`
 4. Rewrites `/opt/docker/shekel/.env` with `replaced_by_docker_secret` placeholders for the four
-   secrets, plus `SHEKEL_IMAGE_DIGEST`, `SHEKEL_VALKEY_PASSWORD`, and `REGISTRATION_ENABLED=false`.
-   Backs up the old `.env` to `.env.bak.<timestamp>`.
+   secrets and `SHEKEL_VALKEY_PASSWORD`, plus `SHEKEL_IMAGE_DIGEST` and
+   `REGISTRATION_ENABLED=false`. Backs up the old `.env` to `.env.bak.<timestamp>`.
 5. Creates the `shekel-frontend` bridge with the pinned subnet (172.32.0.0/24) if missing
 6. Snapshots `/opt/docker/nginx/nginx.conf` and prints critical- directive presence (limit_req_zone,
    set_real_ip_from, timeouts) before overwriting from `deploy/nginx-shared/`. The pre-overwrite
@@ -648,8 +648,8 @@ pulling the trigger. Its trailing output prints the exact post-script commands.
 
   ```bash
   docker run --rm --entrypoint sh ghcr.io/saltyreformed-labs/shekel@sha256:<pinned> \
-      -c 'grep -c _load_secret /home/shekel/app/entrypoint.sh'
-  # Output must be >= 5 (one definition + four call sites).
+      -c "grep -cE '^_load_secret (SECRET_KEY|POSTGRES_PASSWORD|APP_ROLE_PASSWORD|TOTP_ENCRYPTION_KEY|VALKEY_PASSWORD) ' /home/shekel/app/entrypoint.sh"
+  # Output must be 5: one call for each secret the script turns into a placeholder.
   ```
 
   An image without `_load_secret` reads the placeholders as the literal SECRET_KEY value and fails
@@ -672,7 +672,7 @@ cd /opt/docker/shekel && docker compose down && docker compose up -d
 # Health checks:
 docker compose ps                                            # all four healthy
 docker inspect shekel-prod-app --format '{{.HostConfig.ReadonlyRootfs}}'    # → true
-docker logs shekel-prod-app 2>&1 | grep '^Loaded '            # → 4 lines, one per secret
+docker logs shekel-prod-app 2>&1 | grep '^Loaded '            # → 5 lines, one per secret
 curl -sI https://shekel.saltyreformed.com/login | head -5     # → 200 + sec headers
 docker exec jellyfin bash -c 'getent hosts shekel-prod-app'   # → fails (isolation confirmed)
 ```
@@ -692,14 +692,18 @@ history, and the next change to this section deletes it.
 The release carrying plan#1183 moves the rate limiter's store from Redis to Valkey (R-BAL298). The
 image and the host files must move together, and only the steps below move them back:
 
-- The new image installs `valkey`, not `redis`, so on the host's `redis://` files it dies at boot
-  (`limits.errors.ConfigurationError: 'redis' prerequisite not available`), and `shekel-deploy`'s
-  rollback restores the old image, healthy.
-- The old image installs `redis`, not `valkey`, so once the host files say `valkey+unix://` it dies
-  the same way (`'valkey' prerequisite not available`). After step 1, `shekel-deploy`'s own rollback
-  cannot recover: it ends `rollback container also unhealthy`, or, when compose could not start the
-  new service at all, `revert compose up also failed` (whose alert still says it reverted). Step 3
-  restores files and image together.
+- The new image names its store in its own code and needs the store's password in `VALKEY_PASSWORD`,
+  which the host's old files never hand the app, so on them it refuses to boot
+  (`ValueError: VALKEY_PASSWORD is not set`), and `shekel-deploy`'s rollback restores the old image,
+  healthy.
+- The old image takes its store from `RATELIMIT_STORAGE_URI`, which the new files no longer set, so
+  on them it falls back to its own default, `redis://redis:6379/0`, with no password: it boots and
+  passes `/health`, and every rate-limited route fails, as no store there lets it in (reasoned from
+  `main`'s `app/config.py`, not yet measured: plan#2622 measures it). After step 1, then,
+  `shekel-deploy`'s own rollback cannot recover: it reports a healthy rollback on an app that cannot
+  sign anyone in, or, when compose could not start the new service at all, ends
+  `revert compose up also failed` (whose alert still says it reverted). Step 3 restores files and
+  image together.
 - `/health` is exempt from the limiter, so a store fault only limited routes meet (a missing grant,
   a password the store does not hold) passes `shekel-deploy`'s health wait:
   `verify_prod_deploy.sh`'s `GET /login` is this release's gate.
@@ -717,6 +721,7 @@ S="$P/.valkey-cutover-$(date +%Y%m%d-%H%M%S)"
     && sed -i 's/^SHEKEL_REDIS_PASSWORD=/SHEKEL_VALKEY_PASSWORD=/' "$P/.env" \
     && (umask 027 && sed -n 's/^SHEKEL_VALKEY_PASSWORD=//p' "$P/.env" | tr -d '\n' > "$P/secrets/valkey_password") \
     && [ -s "$P/secrets/valkey_password" ] \
+    && sed -i 's/^SHEKEL_VALKEY_PASSWORD=.*/SHEKEL_VALKEY_PASSWORD=replaced_by_docker_secret/' "$P/.env" \
     && install -d -m 0755 "$P/deploy/valkey" \
     && install -m 0644 "$Q/deploy/valkey/users.acl" "$Q/deploy/valkey/start.sh" "$P/deploy/valkey/" \
     && install -m 0644 "$Q/docker-compose.yml" "$P/docker-compose.yml" \
@@ -728,9 +733,11 @@ It writes nothing unless `.env` names `SHEKEL_REDIS_PASSWORD` once and no passwo
 It snapshots what it replaces into `$S` (0700) and prints `snapshot=$S`: `.env`, holding the old
 pin, both compose files, and the Redis ACL file step 4 deletes. Then it renames the variable, writes
 `secrets/valkey_password` from the bytes `.env` holds (0640: `deploy/docker-compose.prod.yml` says
-why), copies `deploy/valkey/` and both compose files in from `main`, and has compose parse the
-result. No container changes until compose recreates one. Exit 0 goes on to step 2. Any other exit
-is a STOP: with no `snapshot=` line nothing was written; with one, step 3 puts the files back first.
+why), leaves `.env` the placeholder `replaced_by_docker_secret` in its place, since the valkey
+service and the app both read the file (ruling plan#2633), copies `deploy/valkey/` and both compose
+files in from `main`, and has compose parse the result. No container changes until compose recreates
+one. Exit 0 goes on to step 2. Any other exit is a STOP: with no `snapshot=` line nothing was
+written; with one, step 3 puts the files back first.
 
 **2. Deploy and verify**, as every release does (`/release` step 11). `shekel-deploy` creates the
 `valkey` service as the app's dependency and recreates the app; `shekel-prod-redis` stays up, unused
@@ -783,15 +790,18 @@ cd ~/projects/Shekel && docker compose -f docker-compose.dev.yml up -d --remove-
 ```
 
 Then delete the `RATELIMIT_STORAGE_URI` line from `~/projects/Shekel/.flaskenv`: it names
-`redis://...@localhost:6379`, which nothing serves once Redis goes, and host-run `flask run` runs
-the limiter in memory, since dev's Valkey listens only on a socket the dev app shares (ruling
-plan#2619).
+`redis://...@localhost:6379`, and nothing reads the variable once the release is in `main` (ruling
+plan#2633). Host-run `flask run` runs the limiter in memory, always, since dev's Valkey listens only
+on a socket the dev app shares (ruling plan#2619); the containerized dev app runs its own
+configuration, `development-container`, on that socket (ruling plan#2651).
 
 Between plan#1183's landing in `dev` and its release, the dev stack runs `main`'s Redis, and a dev
 app started from a `dev` worktree names a Valkey socket that nothing serves: its rate-limited routes
 fail until the release.
 
-**Measured 2026-11-01** on a throwaway stack on the rootless daemon: `main`'s two compose files
+**Measured 2026-11-01**, before the store moved onto a socket file (plan#2586) and the app onto
+Valkey's password file (plan#2634), so of the blocks as they stood then; plan#2622 measures them as
+they stand now. On a throwaway stack on the rootless daemon: `main`'s two compose files
 (`fc9dcfba7`, the files production holds) and production's image `506313c73408`, then the files and
 an image built from this card at `d03c5077c`, both images by digest from a local registry; its
 `shekel-deploy.sh`, unchanged, aimed at the stack by its own overrides; the blocks above verbatim
@@ -1871,7 +1881,7 @@ curl -s https://<domain>/health
 | Cloudflare 522 Connection Timed Out | cloudflared cannot reach Nginx | Verify Nginx is running: `docker compose ps`. Check cloudflared logs: `journalctl -u cloudflared -n 20` |
 | 429 on first login attempt | Cloudflare rate limit too aggressive | Check WAF rules in Cloudflare dashboard (Security > WAF > Rate limiting rules); increase threshold |
 | 429 after a few login attempts | Flask-Limiter rate limit (5/15min) | Wait 15 minutes. To clear immediately: `docker restart shekel-prod-valkey` -- counters are stored in Valkey's memory alone (persistence off), so restarting it clears them, while restarting the app does NOT. No Valkey user may flush: the app's ACL user runs only the limiter's commands (`deploy/valkey/users.acl`). Limited requests fail closed for the seconds it is down |
-| 500 on every login attempt | Valkey container down or unreachable, or the app's Valkey password wrong | App is configured fail-closed: rate-limit storage outage rejects every limited request. `docker compose ps valkey` to check status; `docker logs shekel-prod-valkey --tail 50` for errors (start.sh names an empty password or a missing `user shekel` rule); `docker compose up -d valkey` to restart. A healthy Valkey with 500s still is a password mismatch (`.env`'s `SHEKEL_VALKEY_PASSWORD` and `secrets/valkey_password` must match, two homes until plan#2168) or a socket the app cannot reach: `docker compose exec valkey stat -c '%a %u:%g %n' /run/valkey /run/valkey/valkey.sock` must print `2710 999:1000` and `660 999:1000`, and the app must mount the `valkey-socket` volume as `docker-compose.yml` declares. Login resumes immediately once Valkey accepts the app's login |
+| 500 on every login attempt | Valkey container down or unreachable, or the app's Valkey password wrong | App is configured fail-closed: rate-limit storage outage rejects every limited request. `docker compose ps valkey` to check status; `docker logs shekel-prod-valkey --tail 50` for errors (start.sh names an empty password or a missing `user shekel` rule); `docker compose up -d valkey` to restart. A healthy Valkey with 500s still is a password the two do not share (production's override must mount `secrets/valkey_password` into both, and blank both `VALKEY_PASSWORD` variables) or a socket the app cannot reach: `docker compose exec valkey stat -c '%a %u:%g %n' /run/valkey /run/valkey/valkey.sock` must print `2710 999:1000` and `660 999:1000`, and the app must mount the `valkey-socket` volume as `docker-compose.yml` declares. Login resumes immediately once Valkey accepts the app's login |
 | Wrong IP in logs (127.0.0.1) | Nginx real IP config issue | Verify `set_real_ip_from` and `real_ip_header CF-Connecting-IP` in the active Nginx config: `deploy/nginx-bundled/nginx.conf` (bundled mode) or `deploy/nginx-shared/nginx.conf` (shared mode -- the runtime copy is `/opt/docker/nginx/nginx.conf`) |
 | No logs in Grafana | Promtail not scraping | `docker logs promtail`. Verify `monitoring` network exists. Verify app is on the network: `docker network inspect monitoring` |
 | CSS/JS not loading | Static files volume issue | `docker exec shekel-prod-nginx ls /var/www/static/` to verify files exist. Rebuild app: `docker compose build app && docker compose up -d` |

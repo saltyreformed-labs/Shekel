@@ -904,7 +904,7 @@ class TestMergedComposeCarriesTLS:
             "SECRET_KEY": "a" * 32,
             "APP_ROLE_PASSWORD": "test-app-role-password",
             "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # The Valkey password the app's URI and the valkey service
+            # The Valkey password the app and the valkey service
             # interpolate (``${SHEKEL_VALKEY_PASSWORD:?...}``).
             "SHEKEL_VALKEY_PASSWORD": "test-valkey-password",
         }

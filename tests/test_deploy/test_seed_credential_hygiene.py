@@ -375,9 +375,11 @@ class TestRegistrationDisabledByDefault:
         # Find the ProdConfig class block and check it carries an
         # explicit override.  We look for the class header + body and
         # then the ``REGISTRATION_ENABLED`` assignment with a
-        # ``"false"`` default inside it.
+        # ``"false"`` default inside it.  The header is matched whatever
+        # its bases (from plan#2634 it also takes the store's settings
+        # from ``_ValkeyStore``; the developer's word, 2026-11-02).
         match = re.search(
-            r"class ProdConfig\(BaseConfig\):(.+?)(?=\nclass |\Z)",
+            r"class ProdConfig\([^)]*\):(.+?)(?=\nclass |\Z)",
             text,
             re.DOTALL,
         )

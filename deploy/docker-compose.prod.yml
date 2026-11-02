@@ -376,21 +376,19 @@ services:
       - ./deploy/postgres/server.key:/etc/postgresql/certs/server.key:ro
 
   # ── Valkey's password from production's password file ───────────
-  # The base file hands the valkey service its password in the
-  # environment variable VALKEY_PASSWORD.  Production mounts it from a
-  # file under secrets/ instead, as it reads its other secrets (Commit
-  # C-38), and blanks the variable so the container's stored
-  # environment (``docker inspect``) holds no password: start.sh reads
-  # the file when one is mounted, as entrypoint.sh's _load_secret does.
+  # The base file hands the valkey service and the app their one
+  # password in the environment variable VALKEY_PASSWORD, from .env.
+  # Production mounts it into both from one file under secrets/ instead,
+  # as it reads its other secrets (Commit C-38), and blanks both
+  # variables so neither container's stored environment (``docker
+  # inspect``) holds the password: start.sh reads the file when one is
+  # mounted, and so does entrypoint.sh's _load_secret, for the app
+  # (ruling plan#2633).  .env keeps a placeholder, which the base file's
+  # ``${SHEKEL_VALKEY_PASSWORD:?...}`` needs and neither container sees.
   # Everything else is the base file's: the rules (deploy/valkey/
   # users.acl, their one home, ruling plan#2350, read here from the
   # host copy /opt/docker/shekel/deploy/valkey/), start.sh, which
   # hashes this file's password into them, and the server flags.
-  #
-  # Two homes until plan#2168: the app's RATELIMIT_STORAGE_URI still
-  # interpolates SHEKEL_VALKEY_PASSWORD from .env (base file), so .env
-  # and this file must hold the same password.  plan#2168 moves the app
-  # onto a secret file and deletes the .env copy.
   #
   # The password file, 0640, and the host copy of deploy/valkey/ are
   # made by scripts/reconcile_prod_to_canonical.sh (steps 3 and 7) on a
@@ -401,7 +399,7 @@ services:
   # image runs as uid 999 gid 1000, and gid 1000 is the operating
   # user's group on this host, so 0640 group-read suffices -- no
   # world-readable bit, and the 0700 secrets/ directory contains the
-  # rest.
+  # rest.  The app runs as uid 1000, the file's owner.
   valkey:
     environment:
       VALKEY_PASSWORD: ""
@@ -455,6 +453,10 @@ services:
       # same TLS posture as the owner role above.  See
       # entrypoint.sh §9 for the construction.
       DB_SSLMODE: require
+      # Blanked: the app reads the store's password from the
+      # valkey_password file below, as the valkey service does (see its
+      # block above), so its stored environment holds none.
+      VALKEY_PASSWORD: ""
       # Standard libpq env var.  Every psql call in entrypoint.sh
       # (init_db.sql apply, role provisioning, audit-trigger
       # health check) reads PGSSLMODE for its connection.  Setting
@@ -498,6 +500,11 @@ services:
         uid: "1000"
         gid: "1000"
         mode: 0400
+      - source: valkey_password
+        target: valkey_password
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
     networks:
       - backend
       - shekel-frontend
@@ -527,8 +534,8 @@ secrets:
     file: /opt/docker/shekel/secrets/app_role_password
   totp_encryption_key:
     file: /opt/docker/shekel/secrets/totp_encryption_key
-  # Valkey's password, which start.sh hashes into the ACL (see the
-  # valkey service above).
+  # Valkey's password, which start.sh hashes into the ACL and the app
+  # logs in with (see the valkey service above).
   valkey_password:
     file: /opt/docker/shekel/secrets/valkey_password
 

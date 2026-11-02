@@ -2,7 +2,7 @@
 Shekel Budget App -- Application Factory
 
 Creates and configures the Flask application.  Call create_app()
-with an optional config_name ('development', 'testing', 'production')
+with an optional config_name (a key of ``app.config.CONFIG_MAP``)
 to get a fully wired Flask instance.
 """
 
@@ -31,7 +31,7 @@ def create_app(config_name=None, *, init_ref_cache=True):
     """Build and return the configured Flask application.
 
     Args:
-        config_name: One of 'development', 'testing', 'production'.
+        config_name: A key of ``app.config.CONFIG_MAP``.
                      Defaults to the FLASK_ENV environment variable
                      or 'development' if unset.
         init_ref_cache: When True (the default -- used by Gunicorn and the
@@ -53,8 +53,8 @@ def create_app(config_name=None, *, init_ref_cache=True):
 
     Raises:
         ValueError: When ``LC_ALL`` is not :data:`PINNED_LOCALE` (see
-            :func:`_require_pinned_locale`), or ``config_name`` names no
-            configuration.
+            :func:`_require_pinned_locale`), ``config_name`` names no
+            configuration, or the configuration refuses a setting it names.
     """
     # FIRST, before anything is built: the dev/test arm below writes schemas
     # and reference rows, so a refusal placed after it would refuse after
@@ -68,7 +68,9 @@ def create_app(config_name=None, *, init_ref_cache=True):
     config_class = CONFIG_MAP.get(config_name)
     if config_class is None:
         raise ValueError(f"Unknown config_name: {config_name!r}")
-    app.config.from_object(config_class)
+    # Built, not copied off the class: ``from_object`` instantiates nothing,
+    # so ProdConfig's refusals ran in no boot until finding plan#2652.
+    app.config.from_object(config_class())
 
     # --- Logging ---------------------------------------------------------
     setup_logging(app)
@@ -182,8 +184,8 @@ def create_app(config_name=None, *, init_ref_cache=True):
     _register_static_versioning(app)
 
     # --- Create schemas & seed ref data (development convenience) --------
-    # In production, schemas are managed by Alembic migrations and
-    # reference data is seeded by the Docker entrypoint.
+    # In a container (production, development-container) the entrypoint
+    # runs the migrations and seeds the reference data instead.
     if config_name in ("development", "testing"):
         with app.app_context():
             _ensure_schemas()

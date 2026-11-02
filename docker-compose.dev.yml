@@ -28,12 +28,13 @@
 # limiter in memory):
 #   1. docker compose -f docker-compose.dev.yml up -d --remove-orphans db
 #   2. flask run    (connects to containerized Postgres; the limiter
-#      runs on DevConfig's default in-memory store, since the valkey
+#      runs on DevConfig's in-memory store, always, since the valkey
 #      service listens only on a socket in a volume host flask run
-#      cannot reach (ruling plan#2619).  A RATELIMIT_STORAGE_URI in
-#      .flaskenv or .env naming localhost:6379 names a store nothing
-#      serves, and the fail-closed limiter fails on it: delete that
-#      line)
+#      cannot reach (ruling plan#2619).  The containerized app runs
+#      its own configuration, development-container, which needs the
+#      store (ruling plan#2651).  Nothing reads RATELIMIT_STORAGE_URI
+#      (ruling plan#2633), so a line naming it in .flaskenv or .env
+#      changes nothing: delete it)
 #
 # There is no test database here.  ``scripts/test.sh`` starts a throwaway
 # postgres container per run from the image ``scripts/build_test_db_image.py``
@@ -144,9 +145,10 @@ services:
         volume:
           nocopy: true
     environment:
-      # The dev-only password, the same committed value the app's URI
-      # below carries; start.sh hashes it into the ACL.
-      VALKEY_PASSWORD: dev-only-shekel-valkey-password
+      # The dev-only password, written once: the anchor hands the app
+      # below this same value (ruling plan#2633).  start.sh hashes it
+      # into the ACL.
+      VALKEY_PASSWORD: &valkey-password dev-only-shekel-valkey-password
     healthcheck:
       # Same probe as prod: PING over the socket via the nopass
       # healthcheck ACL user; ``-a ''`` forces the AUTH frame, grep
@@ -172,7 +174,11 @@ services:
         condition: service_healthy
     environment:
       FLASK_APP: run.py
-      FLASK_ENV: development
+      # The containerized dev app's own configuration (ruling plan#2651):
+      # DevConfig on the valkey store above, refusing to boot without its
+      # password as production does.  Host ``flask run`` keeps
+      # ``development``, in memory.
+      FLASK_ENV: development-container
       FLASK_DEBUG: "1"
       # Match prod's pinned civil timezone (parity audit 2026-06-12,
       # finding M01; see deploy/docker-compose.prod.yml for the full
@@ -221,10 +227,10 @@ services:
       IDLE_TIMEOUT_MINUTES: ${IDLE_TIMEOUT_MINUTES:-10080}
       # Rate-limit storage on the dev valkey above (parity audit
       # 2026-06-12, finding D04), over its socket in the valkey-socket
-      # volume mounted below, as production's app reaches it.
-      # Hardcoded rather than interpolated so the container value
-      # cannot be shadowed by a RATELIMIT_STORAGE_URI in .env.  NOTE
-      # the behavior change vs the old ``memory://`` default: counters
+      # volume mounted below, at the address the app's code names, as
+      # production's app reaches it; this is its password, the valkey
+      # service's own value.  NOTE the behavior change vs the old
+      # ``memory://`` default: counters
       # now persist across the reloader's restarts, so the global
       # default limit (``200 per hour; 30 per minute``, app/config.py)
       # is enforced for real per client IP.  All host-originated
@@ -232,7 +238,7 @@ services:
       # aggressive automated crawl can now meet 429s that memory://
       # never surfaced.  That is prod behavior -- fix the crawl rate,
       # not the limit.
-      RATELIMIT_STORAGE_URI: valkey+unix://shekel:dev-only-shekel-valkey-password@/run/valkey/valkey.sock
+      VALKEY_PASSWORD: *valkey-password
     ports:
       # Loopback bind for the developer's own browser plus an explicit
       # bind on the shekel-frontend bridge gateway so the operator's

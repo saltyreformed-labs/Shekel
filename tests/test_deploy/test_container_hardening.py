@@ -701,8 +701,8 @@ class TestMergedComposeHardeningSurvivesOverride:
             # value never reaches a real pull because ``compose config``
             # only renders the merged YAML.
             "SHEKEL_IMAGE_DIGEST": "sha256:" + "0" * 64,
-            # The Valkey password: the app's RATELIMIT_STORAGE_URI and
-            # the valkey service's VALKEY_PASSWORD interpolate
+            # The Valkey password: the app's and the valkey service's
+            # VALKEY_PASSWORD interpolate
             # ``${SHEKEL_VALKEY_PASSWORD:?...}`` from .env.  Synthetic
             # value satisfies the required-form check; the test never
             # actually starts the valkey container.
@@ -834,3 +834,25 @@ class TestMergedComposeHardeningSurvivesOverride:
         assert merged["secrets"]["valkey_password"]["file"] == (
             "/opt/docker/shekel/secrets/valkey_password")
         assert valkey["environment"]["VALKEY_PASSWORD"] == ""
+
+    def test_merged_app_reads_valkey_s_own_password_file(
+        self,
+        merged: dict,
+    ) -> None:
+        """The app logs in with the password Valkey holds, from the same file
+        (ruling plan#2633): the merge mounts the ``valkey_password`` secret into
+        the app at the path Valkey reads it from, blanks the app's
+        ``VALKEY_PASSWORD`` so its stored environment holds no password (and
+        .env's placeholder never reaches it), and gives it no store address,
+        which its code names.
+        """
+        app, valkey = merged["services"]["app"], merged["services"]["valkey"]
+
+        def mounted(service: dict) -> list[str]:
+            """Where ``service`` mounts the ``valkey_password`` secret."""
+            return [mount["target"] for mount in service["secrets"]
+                    if mount["source"] == "valkey_password"]
+
+        assert mounted(app) == mounted(valkey) == ["valkey_password"]
+        assert app["environment"]["VALKEY_PASSWORD"] == ""
+        assert "RATELIMIT_STORAGE_URI" not in app["environment"]

@@ -466,16 +466,16 @@ class TestStorageBackendIsConfigDriven:
         from app.extensions import limiter
 
         # At this point the test session has already imported app and
-        # called init_app(testing), which sets _storage_uri to the
-        # TestConfig override ("memory://").  A regression that pins
-        # the constructor URI would manifest as _storage_uri being a
-        # production URI (valkey+unix://...) instead.
+        # called init_app(testing), whose store is TestConfig's
+        # ("memory://").  A regression that pins the constructor URI
+        # would manifest as _storage_uri being a production URI
+        # (valkey+unix://...) instead.
         assert limiter._storage_uri is None or limiter._storage_uri == "memory://", (
             "Limiter._storage_uri should be None (constructor) or "
-            "memory:// (TestConfig override).  A valkey+unix:// or other "
+            "memory:// (TestConfig's store).  A valkey+unix:// or other "
             "production URI here means app/extensions.py is pinning "
-            "storage at construction, which would break "
-            "TestConfig.RATELIMIT_STORAGE_URI override."
+            "storage at construction, which would override each "
+            "configuration's RATELIMIT_STORAGE_URI."
         )
 
     def test_test_config_forces_memory_backend(self):

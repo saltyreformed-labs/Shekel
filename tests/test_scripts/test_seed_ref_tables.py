@@ -32,8 +32,8 @@ def _production_env(database_url: str) -> dict:
     """Build the child's environment: the production config, on *database_url*.
 
     Only what Python needs to run is inherited.  ``ProdConfig`` refuses to
-    start without a SECRET_KEY of real length and a non-memory rate-limit
-    store; neither is contacted by the seed.
+    start without a SECRET_KEY of real length and its rate-limit store's
+    password; the seed uses neither.
 
     Args:
         database_url: The URL of this test's database, password included.
@@ -52,7 +52,7 @@ def _production_env(database_url: str) -> dict:
         "DATABASE_URL": database_url,
         "DATABASE_URL_APP": "",
         "SECRET_KEY": secrets.token_hex(32),
-        "RATELIMIT_STORAGE_URI": "valkey+unix:///run/valkey/valkey.sock",
+        "VALKEY_PASSWORD": secrets.token_hex(16),
     })
     return env
 

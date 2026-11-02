@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from app.config import CONFIG_MAP
 from tests.test_deploy._compose import BASE_COMPOSE, REPO_ROOT
 
 DEV_COMPOSE = REPO_ROOT / "docker-compose.dev.yml"
@@ -45,26 +46,25 @@ def _socket_mount(service: dict) -> dict:
     return mounts[0]
 
 
-def _named_socket(uri: str) -> str:
-    """The socket file a ``valkey+unix://`` store address names: what follows its last ``@``,
-    less the close of a compose default (``${RATELIMIT_STORAGE_URI:-...}``)."""
-    return uri.rsplit("@", 1)[1].removesuffix("}")
+#: How a store address names a socket file: limits' scheme for the valkey client over one.
+_SOCKET_SCHEME = "valkey+unix://"
 
 
 def _meeting(parsed: dict) -> dict:
     """How a file's valkey service and app meet: Valkey's network, its published ports, its
-    socket mount and healthcheck; the app's socket mount, the scheme and user of its store
-    address and the socket it names; and the socket volume's options."""
+    socket mount and healthcheck; the app's socket mount, whether it is handed Valkey's own
+    password, and the store its configuration (its ``FLASK_ENV``'s) names in code (ruling
+    plan#2633); and the socket volume's options."""
     valkey, app = parsed["services"]["valkey"], parsed["services"]["app"]
-    uri = app["environment"]["RATELIMIT_STORAGE_URI"]
     return {
         "valkey network": valkey.get("network_mode"),
         "valkey ports": valkey.get("ports"),
         "valkey mount": _socket_mount(valkey),
         "healthcheck": valkey["healthcheck"]["test"],
         "app mount": _socket_mount(app),
-        "app scheme and user": "valkey+unix://shekel:" in uri,
-        "app socket": _named_socket(uri),
+        "app password is valkey's": (app["environment"]["VALKEY_PASSWORD"]
+                                     == valkey["environment"]["VALKEY_PASSWORD"]),
+        "app store": CONFIG_MAP[app["environment"]["FLASK_ENV"]].RATELIMIT_STORAGE_URI,
         "volume": parsed["volumes"][_SOCKETS],
     }
 
@@ -77,12 +77,14 @@ def test_dev_meets_valkey_as_production_does():
 
 @pytest.mark.parametrize("name", list(_FILES))
 def test_valkey_is_reached_only_over_the_socket_the_app_mounts_read_only(name):
-    """In each file Valkey joins no network and publishes no port, the app names the socket
-    inside the folder both mount, and mounts it read-only, so it can neither remove the socket
-    nor put a file of its own beside it."""
+    """In each file Valkey joins no network and publishes no port, the app is handed the
+    password Valkey is, its configuration names the socket inside the folder both mount, and
+    it mounts that folder read-only, so it can neither remove the socket nor put a file of its
+    own beside it."""
     meeting = _meeting(_FILES[name])
     assert (meeting["valkey network"], meeting["valkey ports"]) == ("none", None)
-    assert meeting["app scheme and user"]
-    assert meeting["app socket"].startswith(f"{meeting['valkey mount']['target']}/")
+    assert meeting["app password is valkey's"]
+    assert meeting["app store"].startswith(
+        f"{_SOCKET_SCHEME}{meeting['valkey mount']['target']}/")
     assert meeting["app mount"]["target"] == meeting["valkey mount"]["target"]
     assert meeting["app mount"].get("read_only") is True

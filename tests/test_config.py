@@ -16,13 +16,15 @@ gate covers every static security knob the app ships with.
 from importlib import reload
 
 import pytest
-from flask import request
+from flask import Config, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from app import config as config_module
+from app import create_app
 from app.config import (
     BaseConfig,
     DevConfig,
+    DevContainerConfig,
     ProdConfig,
     TestConfig,
     _DATABASE_URL_SENTINEL,
@@ -37,6 +39,16 @@ from app.extensions import login_manager
 # tests that deploy this value would still fail because it is short
 # entropy and well-known.  Used only for unit tests of ProdConfig.
 _VALID_SECRET_KEY = "0123456789abcdef" * 4  # 64 chars
+
+# A rate-limit store password for the tests that expect a configuration
+# beside Valkey (ProdConfig, DevContainerConfig) to build: from ruling
+# plan#2633 such a configuration refuses to build without one.
+_STORE_PASSWORD = "a-store-password"
+
+# Where those configurations name their store (ruling plan#2633), written
+# out here so a moved address fails a test rather than passing on its own
+# constant.
+_STORE_SOCKET = "valkey+unix:///run/valkey/valkey.sock"
 
 
 class TestTheUploadCeiling:
@@ -311,6 +323,7 @@ class TestProdConfig:
         monkeypatch.setattr(
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
         config = ProdConfig()
         assert config.SECRET_KEY == _VALID_SECRET_KEY
 
@@ -391,6 +404,7 @@ class TestProdConfig:
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
         monkeypatch.setattr(BaseConfig, "TOTP_ENCRYPTION_KEY", None)
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
         config = ProdConfig()
         assert config.TOTP_ENCRYPTION_KEY is None
 
@@ -815,18 +829,41 @@ class TestRateLimitConfig:
     storage strategy and the developer's fail-closed Phase D-12 choice.
     """
 
-    def test_base_config_defaults_to_memory_storage(self):
-        """BaseConfig.RATELIMIT_STORAGE_URI falls back to memory://.
+    def test_base_config_stores_counters_in_memory(self):
+        """BaseConfig.RATELIMIT_STORAGE_URI is memory://.
 
-        DevConfig inherits this fallback so a developer running
-        ``flask run`` does not need a Valkey container.  Production
-        overrides explicitly via ProdConfig.
+        DevConfig and TestConfig keep it, so host ``flask run`` and the
+        suite need no Valkey; the configurations beside Valkey name its
+        socket instead (ruling plan#2633).
         """
-        # The class attribute is captured at import time from os.getenv,
-        # so the value reflects whatever was in the environment when
-        # tests started.  In the test suite, conftest.py does not set
-        # RATELIMIT_STORAGE_URI, so the fallback wins.
         assert BaseConfig.RATELIMIT_STORAGE_URI == "memory://"
+
+    def test_no_environment_variable_moves_the_store(self, monkeypatch):
+        """RATELIMIT_STORAGE_URI in the environment changes no configuration.
+
+        Ruling plan#2633: the deployment fixes where the store is, so the
+        app names it in code and reads no setting for it.  Each class is
+        re-evaluated under the variable (module reload), and each still
+        names its own store.
+        """
+        monkeypatch.setenv("RATELIMIT_STORAGE_URI", "valkey://elsewhere:6379/0")
+        try:
+            reload(config_module)
+            stores = {
+                name: getattr(config_module, name).RATELIMIT_STORAGE_URI
+                for name in ("BaseConfig", "DevConfig", "TestConfig",
+                             "DevContainerConfig", "ProdConfig")
+            }
+        finally:
+            monkeypatch.delenv("RATELIMIT_STORAGE_URI")
+            reload(config_module)
+        assert stores == {
+            "BaseConfig": "memory://",
+            "DevConfig": "memory://",
+            "TestConfig": "memory://",
+            "DevContainerConfig": _STORE_SOCKET,
+            "ProdConfig": _STORE_SOCKET,
+        }
 
     def test_base_config_default_limits_string(self):
         """BaseConfig sets a per-IP ceiling for un-decorated routes.
@@ -870,25 +907,21 @@ class TestRateLimitConfig:
         """
         assert BaseConfig.RATELIMIT_HEADERS_ENABLED is True
 
-    def test_devconfig_inherits_memory_storage(self):
-        """DevConfig leaves RATELIMIT_STORAGE_URI at the BaseConfig default.
+    def test_devconfig_stays_in_memory_given_a_password(self, monkeypatch):
+        """Host ``flask run`` (DevConfig) is in memory even with a password.
 
-        ``flask run`` against a local checkout has no Valkey container
-        available, so the in-memory backend is the only sensible
-        default for development.
+        Ruling plan#2619: host ``flask run`` cannot reach dev's Valkey,
+        which listens only on a socket in a volume.  Ruling plan#2651: the
+        containerized dev app has a configuration of its own, so a store
+        password in the host's environment switches nothing here.
         """
-        assert DevConfig.RATELIMIT_STORAGE_URI == "memory://"
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        config = DevConfig()
+        assert config.RATELIMIT_STORAGE_URI == "memory://"
+        assert not hasattr(config, "RATELIMIT_STORAGE_OPTIONS")
 
-    def test_testconfig_forces_memory_storage(self):
-        """TestConfig overrides RATELIMIT_STORAGE_URI to memory://.
-
-        The override is unconditional -- it ignores any
-        ``RATELIMIT_STORAGE_URI`` set in the developer's shell or .env.
-        Without this override the test suite would attempt to connect
-        to whatever URI is in the environment (likely a developer's
-        local Valkey or the docker-compose valkey service), making the
-        suite hostile to CI without a Valkey instance.
-        """
+    def test_testconfig_stores_counters_in_memory(self):
+        """TestConfig keeps BaseConfig's memory://, so the suite needs no Valkey."""
         assert TestConfig.RATELIMIT_STORAGE_URI == "memory://"
 
     def test_testconfig_disables_rate_limiting(self):
@@ -902,86 +935,153 @@ class TestRateLimitConfig:
         """
         assert TestConfig.RATELIMIT_ENABLED is False
 
-    def test_prodconfig_defaults_to_valkey(self, monkeypatch):
-        """ProdConfig.RATELIMIT_STORAGE_URI defaults to the bundled valkey service.
+    @pytest.mark.parametrize("config", [DevContainerConfig, ProdConfig])
+    def test_the_configs_beside_valkey_name_its_socket(self, config):
+        """The store's address, in code: Valkey's socket file.
 
-        The default URI ``valkey+unix:///run/valkey/valkey.sock`` is the
-        socket file docker-compose.yml's ``valkey`` service makes in the
-        volume the app mounts (ruling plan#2612), and its scheme makes
+        The socket ``deploy/valkey/start.sh`` makes in the volume the app
+        mounts at /run/valkey (ruling plan#2612), and a scheme that makes
         limits use the valkey client, the one the lock holds (ruling
-        R-BAL298), over a socket.  An operator using another store
-        overrides via the ``RATELIMIT_STORAGE_URI`` environment variable.
+        R-BAL298), over a socket file.
         """
-        # Because ProdConfig.RATELIMIT_STORAGE_URI is captured at
-        # class-body evaluation time, we cannot simply unset the env
-        # var and re-evaluate; instead, assert the class attribute as
-        # imported reflects the documented default in the absence of an
-        # env override.  conftest.py does not set RATELIMIT_STORAGE_URI.
-        monkeypatch.delenv("RATELIMIT_STORAGE_URI", raising=False)
-        # Assert against the captured class attribute (the import-time
-        # value); if a developer ever runs the test suite with the env
-        # var set, the class attribute would not match -- the assertion
-        # protects the documented default from accidental change.
-        assert (
-            ProdConfig.RATELIMIT_STORAGE_URI
-            == "valkey+unix:///run/valkey/valkey.sock"
-            or ProdConfig.RATELIMIT_STORAGE_URI.startswith("valkey+unix://")
-        )
+        assert config.RATELIMIT_STORAGE_URI == _STORE_SOCKET
 
-    def test_prodconfig_rejects_memory_storage(self, monkeypatch):
-        """ProdConfig.__init__ raises ValueError when RATELIMIT_STORAGE_URI is memory://.
+    @pytest.mark.parametrize("given", [None, ""])
+    def test_devcontainerconfig_refuses_to_build_without_the_password(
+        self, monkeypatch, given
+    ):
+        """The containerized dev app refuses to boot without the store's password.
 
-        A memory backend silently fragments rate-limit counters across
-        Gunicorn workers -- audit finding F-034.  Even if an operator
-        manually sets ``RATELIMIT_STORAGE_URI=memory://`` in the
-        production environment, the application must refuse to start.
+        Ruling plan#2651: it needs the store as production does, so a
+        missing or empty password stops it by name rather than leaving
+        every rate-limited request to fail on a store it cannot log in to.
         """
-        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
-        monkeypatch.setattr(
-            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
-        )
-        monkeypatch.setattr(
-            ProdConfig, "RATELIMIT_STORAGE_URI", "memory://"
-        )
-        with pytest.raises(ValueError, match="RATELIMIT_STORAGE_URI"):
-            ProdConfig()
+        if given is None:
+            monkeypatch.delenv("VALKEY_PASSWORD", raising=False)
+        else:
+            monkeypatch.setenv("VALKEY_PASSWORD", given)
+        with pytest.raises(ValueError, match="VALKEY_PASSWORD is not set"):
+            DevContainerConfig()
 
-    def test_prodconfig_accepts_valkey_storage(self, monkeypatch):
-        """ProdConfig.__init__ accepts production's valkey+unix:// URI.
-
-        Closes the loop on the rejection test above by proving that a
-        properly-shaped Valkey URI is accepted.  Without this test a
-        buggy validator could reject everything and still pass the
-        rejection test.
-        """
-        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
-        monkeypatch.setattr(
-            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
-        )
-        monkeypatch.setattr(
-            ProdConfig, "RATELIMIT_STORAGE_URI",
-            "valkey+unix:///run/valkey/valkey.sock",
-        )
-        config = ProdConfig()
-        assert config.RATELIMIT_STORAGE_URI == (
-            "valkey+unix:///run/valkey/valkey.sock"
-        )
-
-    def test_prodconfig_validates_storage_uri_after_secret_key(
+    def test_devcontainerconfig_logs_in_as_shekel_with_the_password(
         self, monkeypatch
     ):
-        """SECRET_KEY validation fires before RATELIMIT_STORAGE_URI validation.
+        """Its store options: the ``shekel`` ACL user and the password read.
 
-        Operator misconfiguring multiple secrets should see the
-        higher-severity SECRET_KEY error first.  Lock the order in a
-        test so an accidental refactor cannot swap them.
+        The password rides as a storage option beside the address, never
+        inside it, so no character it holds can change what the address
+        names (plan#2586's review finding 7).
         """
-        monkeypatch.setattr(BaseConfig, "SECRET_KEY", "")
+        monkeypatch.setenv("VALKEY_PASSWORD", "p/a?s#s@w:o%rd")
+        config = DevContainerConfig()
+        assert config.RATELIMIT_STORAGE_OPTIONS == {
+            "username": "shekel", "password": "p/a?s#s@w:o%rd",
+        }
+        assert config.RATELIMIT_STORAGE_URI == _STORE_SOCKET
+
+    @pytest.mark.parametrize("given", [None, ""])
+    def test_prodconfig_refuses_to_build_without_the_password(
+        self, monkeypatch, given
+    ):
+        """ProdConfig refuses a missing or empty store password by name.
+
+        Ruling plan#2633: with the limiter fail-closed, an app that could
+        not log in to its store would fail every rate-limited request
+        while the boot and /health passed.
+        """
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
         monkeypatch.setattr(
-            ProdConfig, "RATELIMIT_STORAGE_URI", "memory://"
+            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
-        with pytest.raises(ValueError, match="SECRET_KEY is required"):
+        if given is None:
+            monkeypatch.delenv("VALKEY_PASSWORD", raising=False)
+        else:
+            monkeypatch.setenv("VALKEY_PASSWORD", given)
+        with pytest.raises(ValueError, match="VALKEY_PASSWORD is not set"):
             ProdConfig()
+
+    def test_prodconfig_logs_in_as_shekel_with_the_password(self, monkeypatch):
+        """The control for the refusals above: a password is accepted and carried."""
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
+        monkeypatch.setattr(
+            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
+        )
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        config = ProdConfig()
+        assert config.RATELIMIT_STORAGE_OPTIONS == {
+            "username": "shekel", "password": _STORE_PASSWORD,
+        }
+
+    @pytest.mark.parametrize(("secret_key", "database_uri", "named"), [
+        ("", "postgresql:///shekel", "SECRET_KEY is required"),
+        (_VALID_SECRET_KEY, None, "DATABASE_URL"),
+    ])
+    def test_prodconfig_checks_the_password_after_its_other_settings(
+        self, monkeypatch, secret_key, database_uri, named
+    ):
+        """SECRET_KEY and DATABASE_URL are named before the store's password.
+
+        An operator misconfiguring several settings sees the
+        higher-severity error first; locking the order here stops a
+        refactor from swapping them.
+        """
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", secret_key)
+        monkeypatch.setattr(ProdConfig, "SQLALCHEMY_DATABASE_URI", database_uri)
+        monkeypatch.delenv("VALKEY_PASSWORD", raising=False)
+        with pytest.raises(ValueError, match=named):
+            ProdConfig()
+
+    def test_the_options_reach_flask_config(self, monkeypatch):
+        """A configuration built, as ``create_app`` builds one, hands Flask its options.
+
+        ``from_object`` copies a configuration object's upper-case
+        attributes, the ones set when it was built among them, so the
+        store's login reaches ``app.config`` for Flask-Limiter to read.
+        """
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        config = Config(root_path=".")
+        config.from_object(DevContainerConfig())
+        assert config["RATELIMIT_STORAGE_URI"] == _STORE_SOCKET
+        assert config["RATELIMIT_STORAGE_OPTIONS"] == {
+            "username": "shekel", "password": _STORE_PASSWORD,
+        }
+
+
+class TestCreateAppBuildsTheConfiguration:
+    """``create_app`` builds its configuration, so ProdConfig's refusals run (finding plan#2652).
+
+    It once handed ``from_object`` the class itself, which copies attributes
+    and instantiates nothing, so no boot ran ``ProdConfig.__init__``: measured
+    2026-11-02, ``create_app("production")`` booted with a one-character
+    SECRET_KEY.  Each case refuses in ``create_app`` before any extension
+    binds, so none touches a database or the limiter.
+    """
+
+    def test_a_short_secret_key_stops_the_production_boot(self, monkeypatch):
+        """A one-character SECRET_KEY: ``create_app`` raises, naming it."""
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", "x")
+        monkeypatch.setattr(
+            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
+        )
+        monkeypatch.setenv("VALKEY_PASSWORD", _STORE_PASSWORD)
+        with pytest.raises(ValueError, match="SECRET_KEY must be at least"):
+            create_app("production")
+
+    def test_a_missing_store_password_stops_the_production_boot(self, monkeypatch):
+        """Every other setting valid and no store password: ``create_app`` raises, naming it."""
+        monkeypatch.setattr(BaseConfig, "SECRET_KEY", _VALID_SECRET_KEY)
+        monkeypatch.setattr(
+            ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
+        )
+        monkeypatch.delenv("VALKEY_PASSWORD", raising=False)
+        with pytest.raises(ValueError, match="VALKEY_PASSWORD is not set"):
+            create_app("production")
+
+    def test_a_missing_store_password_stops_the_dev_container_boot(self, monkeypatch):
+        """The containerized dev app's configuration refuses in ``create_app`` too."""
+        monkeypatch.delenv("VALKEY_PASSWORD", raising=False)
+        with pytest.raises(ValueError, match="VALKEY_PASSWORD is not set"):
+            create_app("development-container")
 
 
 class TestLoginManagerConfig:
@@ -1024,7 +1124,9 @@ class TestEveryConfigConnectsTheSameWay:
     would not (``app.config._DRIVER_CONNECT_ARGS`` gives the argument).
     """
 
-    @pytest.mark.parametrize("config", [DevConfig, TestConfig, ProdConfig])
+    @pytest.mark.parametrize(
+        "config", [DevConfig, DevContainerConfig, TestConfig, ProdConfig]
+    )
     def test_each_config_carries_the_driver_arguments(self, config):
         """A five-second connect timeout and no server-side preparing."""
         assert config.SQLALCHEMY_ENGINE_OPTIONS["connect_args"] == {
@@ -1038,6 +1140,9 @@ class TestEveryConfigConnectsTheSameWay:
         Paired with the control below, so the zero is a measurement and not a
         probe that cannot see a prepared statement at all.
         """
+        # Pylint: ``import-outside-toplevel`` -- used by these two
+        # database cases alone, so the module's other tests import nothing
+        # of the driver layer.
         # pylint: disable=import-outside-toplevel
         from sqlalchemy import text
 
@@ -1049,8 +1154,11 @@ class TestEveryConfigConnectsTheSameWay:
             ).scalar()
         assert prepared == 0
 
-    def test_the_control_sees_the_default_threshold_prepare(self, app, db):
+    @pytest.mark.usefixtures("app")
+    def test_the_control_sees_the_default_threshold_prepare(self, db):
         """Under psycopg's default threshold the same six runs DO prepare one."""
+        # Pylint: ``import-outside-toplevel`` -- the driver itself, for this
+        # control alone, as the case above imports its one name.
         # pylint: disable=import-outside-toplevel
         import psycopg
 

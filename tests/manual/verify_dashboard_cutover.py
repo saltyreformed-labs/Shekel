@@ -63,12 +63,16 @@ spellings at import, so ONE file dumps both trees.
 
 **Usage** (from the repository root, against a production CLONE)::
 
-    DATABASE_URL=postgresql://.../shekel_dev \\
+    DATABASE_URL=postgresql://.../shekel_dev VALKEY_PASSWORD=unused \\
         .venv/bin/python tests/manual/verify_dashboard_cutover.py before.json
     # ... make the change ...
-    DATABASE_URL=postgresql://.../shekel_dev \\
+    DATABASE_URL=postgresql://.../shekel_dev VALKEY_PASSWORD=unused \\
         .venv/bin/python tests/manual/verify_dashboard_cutover.py after.json
     diff before.json after.json
+
+``VALKEY_PASSWORD``: ``create_app("production")`` refuses to build without the
+rate-limit store's password from plan#2634 on, and a tree before it reads none; this
+harness reaches no store, so any value serves both sides.
 
 For the HEAD side use ``git worktree add`` -- never ``git checkout``, which
 reverts the working tree and discards the change under test

@@ -117,12 +117,12 @@ for pair in \
     echo "wrote $target ($(wc -c <"$target") bytes)"
 done
 
-# Valkey's password file, which the override's valkey service reads.
-# Unlike the four above it stays real in .env too: the app's
-# RATELIMIT_STORAGE_URI interpolates SHEKEL_VALKEY_PASSWORD until
-# plan#2168 moves the app onto this file.  0640, not 0600: the valkey
-# container reads it as uid 999 gid 1000, gid 1000 is the operating
-# user's group, and compose v2 ignores the secret reference's mode.
+# Valkey's password file, which the override's valkey service and app
+# both read (ruling plan#2633), so step 4 leaves a placeholder in .env
+# for it as for the four above.  0640, not 0600: the valkey container
+# reads it as uid 999 gid 1000, gid 1000 is the operating user's group,
+# and compose v2 ignores the secret reference's mode; the app reads it
+# as uid 1000, its owner.
 valkey_target="$PROD_ROOT/secrets/valkey_password"
 if [[ -s "$valkey_target" ]]; then
     warn "$valkey_target already non-empty -- skipping"
@@ -166,11 +166,9 @@ if [[ -z "$current_digest" ]]; then
 fi
 [[ -n "$current_digest" ]] || die "could not determine the image digest: no SHEKEL_IMAGE_DIGEST in $PROD_ROOT/.env and no inline digest on the shekel image line of $PROD_ROOT/docker-compose.yml"
 
-# Carry forward the values that should survive: SHEKEL_VALKEY_PASSWORD,
-# SEED_USER_*, GUNICORN_WORKERS, NGINX_PORT, AUDIT_RETENTION_DAYS,
-# LOG_LEVEL, SLOW_REQUEST_THRESHOLD_MS, TOTP_ENCRYPTION_KEY_OLD.
-SHEKEL_VALKEY_PASSWORD=$(extract_env_value SHEKEL_VALKEY_PASSWORD)
-[[ -n "$SHEKEL_VALKEY_PASSWORD" ]] || die "SHEKEL_VALKEY_PASSWORD missing in current .env"
+# Carry forward the values that should survive: SEED_USER_*,
+# GUNICORN_WORKERS, NGINX_PORT, AUDIT_RETENTION_DAYS, LOG_LEVEL,
+# SLOW_REQUEST_THRESHOLD_MS, TOTP_ENCRYPTION_KEY_OLD.
 SEED_USER_EMAIL=$(extract_env_value SEED_USER_EMAIL)
 SEED_USER_PASSWORD=$(extract_env_value SEED_USER_PASSWORD)
 SEED_USER_DISPLAY_NAME=$(extract_env_value SEED_USER_DISPLAY_NAME)
@@ -211,11 +209,10 @@ TOTP_ENCRYPTION_KEY_OLD=
 # Per-app Valkey ACL user password.  Lower sensitivity than the four
 # secrets above (gates a Valkey user restricted to the limiter's own
 # commands on the LIMITS:* keys, reached only over a socket file the app
-# shares).  The valkey service reads it from
-# /opt/docker/shekel/secrets/valkey_password; the app's
-# RATELIMIT_STORAGE_URI still reads it here, so the two must match until
-# plan#2168.
-SHEKEL_VALKEY_PASSWORD=$SHEKEL_VALKEY_PASSWORD
+# shares).  The valkey service and the app both read it from
+# /opt/docker/shekel/secrets/valkey_password; the placeholder satisfies
+# the base docker-compose.yml's interpolation, as the four above do.
+SHEKEL_VALKEY_PASSWORD=replaced_by_docker_secret
 
 # Image digest pin.  Carried forward from the previous .env unchanged
 # so this reconciliation does not double as an image bump.  Rotate
@@ -321,9 +318,7 @@ cp -v "$REPO_ROOT/deploy/valkey/users.acl" "$REPO_ROOT/deploy/valkey/start.sh" "
 
 # Validate the merged config before exiting.  The rendered merge
 # INTERPOLATES .env values -- any credential that is not yet a docker
-# secret (e.g. SHEKEL_VALKEY_PASSWORD inside the bundled valkey
-# service's VALKEY_PASSWORD and the app's RATELIMIT_STORAGE_URI
-# default) appears in cleartext -- so
+# secret appears in cleartext -- so
 # the file must be owner-only from the moment it exists (umask first,
 # then chmod is belt-and-braces; finding M08).
 log "Validation: docker compose config (merged)"

@@ -34,6 +34,7 @@ from app.extensions import db
 from app.models.ref import RecurrenceUnit
 from app.services.recurrence import (
     UNREADABLE_CADENCE_MESSAGE,
+    authorable_cadences,
     cadence_options,
     modelled_placement,
     modelled_unit,
@@ -100,42 +101,25 @@ class TestAnUnmodelledRowIsInvisible:
         inserting into that table could not move the answer whatever the
         producer did.  Plan step R7c-c deleted that table with the closed set;
         the options come from ``_offer.authorable_cadences`` now, which is
-        derived from two predicates over the ENUM members (plan step R8-a; it
-        was the anchor router until then) and reads no ``ref`` table either.
+        derived from a predicate over the ENUM members (plan step R8-a stated
+        two, and R8-b deleted the one that withheld ``WEEK``; it was the anchor
+        router until then) and reads no ``ref`` table either.
 
         The UNIT table is where the same mistake is now available: a picker
         that offered ``db.session.query(RecurrenceUnit).all()`` would offer
-        ``WEEK`` -- which the closed set cannot store -- and this row besides.
+        this row beside the four units the enum names.
         Comparing the whole tuple rather than a count is what catches a row
         that changes only a LABEL.
         """
         with app.app_context():
-            before = cadence_options()
+            before = cadence_options(authorable_cadences())
 
             surplus = RecurrenceUnit(name="Fortnight")
             db.session.add(surplus)
             db.session.flush()
 
             assert db.session.get(RecurrenceUnit, surplus.id) is not None
-            assert cadence_options() == before
-
-    def test_the_offer_set_omits_a_unit_the_resolver_cannot_anchor(self, app):
-        """``WEEK`` is a modelled unit with no anchor, so it is not offered.
-
-        The property the surplus-row test above stands in for, asked of a
-        member that really exists: ``RecurrenceUnitEnum.WEEK`` has a ``ref``
-        row and an enum member, and a generated row cannot carry the date its
-        occurrences name until plan step **R5** (``has_row_date_coordinate``,
-        plan step R8-a).  A table-driven offer set would offer it and the write
-        door would refuse the save.
-        """
-        with app.app_context():
-            week_id = ref_cache.recurrence_unit_id(RecurrenceUnitEnum.WEEK)
-
-            assert modelled_unit(week_id) is RecurrenceUnitEnum.WEEK
-            assert week_id not in {
-                option.unit_id for option in cadence_options()
-            }
+            assert cadence_options(authorable_cadences()) == before
 
     def test_a_ref_row_the_enum_does_not_name_is_not_modelled(self, app):
         """The membership answer for such a row is ``None``.
@@ -168,7 +152,7 @@ class TestAnUnmodelledRowIsInvisible:
         offer set is not driven by any ``ref`` table.
         """
         with app.app_context():
-            options = cadence_options()
+            options = cadence_options(authorable_cadences())
 
             assert options, "the offer set is empty"
             for option in options:

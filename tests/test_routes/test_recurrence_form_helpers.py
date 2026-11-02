@@ -818,11 +818,11 @@ class TestTheColumnSaysWhatTheCadenceSays:
     ):
         """An unauthorable cadence raises at the door rather than being coerced.
 
-        **The unauthorable cadence MOVED at plan step R7c-c**: it was any month
-        interval the closed set could not name, and it is now a
-        ``(unit, placement)`` pair with no first-occurrence derivation -- the
-        WEEK unit, and a year-scale cadence deferred onto a month's first
-        paycheck, both plan step R8's.
+        **The unauthorable cadence has MOVED with each step that closed a
+        gap**: any month interval the closed set could not name until plan
+        step R7c-c, a year-scale cadence deferred onto a later paycheck until
+        R8-a, the WEEK unit until R8-b.  What is left is a pay-period cadence
+        funded from a LATER paycheck, whose placement is inert.
 
         **The disposition matters more than the refusal**: coercing such a
         cadence to the nearest authorable one would silently re-price a bill.
@@ -836,7 +836,10 @@ class TestTheColumnSaysWhatTheCadenceSays:
             )
             before = rule.unit_id
             data = {
-                **validated_cadence(unit=RecurrenceUnitEnum.WEEK),
+                **validated_cadence(
+                    unit=RecurrenceUnitEnum.PERIOD,
+                    placement=PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
+                ),
             }
             with pytest.raises(RecurrenceResolutionError) as excinfo:
                 update_recurrence_rule_from_form(

@@ -132,7 +132,8 @@ def _stated_amount(template, on_date: date, subject: str) -> Decimal:
     every writer of a linked row dates it (``compute_due_date``'s answer,
     which always exists, or the chosen paycheck's start where the definition
     names no cadence -- the one-time transfer, the cleared-rule carry-forward
-    arm -- which is that function's own answer for a rule naming no day),
+    arm -- which is that function's own answer for a rule dated on its
+    funding payday),
     and an occurrence no row answers yet is dated by the same function -- so
     ``on_date`` is a ``date`` here by construction, and a refusal over a
     state that cannot be stored is a fence.

@@ -87,7 +87,6 @@ from app.services.recurrence._frequency import (
     placement_member,
     unit_member,
 )
-from app.services.recurrence._offer import require_row_date_coordinate
 from app.services.recurrence._row_day import cadence_scheduled_day
 from app.services.recurrence._vocabulary import (
     modelled_placement,
@@ -316,10 +315,12 @@ def scheduling_day_of_month(rule: RecurrenceRule) -> int | None:
     columns that survive** (plan step R7c-c, developer ruling 2026-08-16 on
     plan ledger row **D37**).  ``recurrence.compute_due_date`` dated every
     generated row from that day until plan step recurrence:R5-a, which dates a
-    row from its OCCURRENCE and reads this only for whether it is ``None``;
-    R7c-c dropped the column ahead of that, so the reader reads the derivation
-    the write door was encoding the column FROM rather than a column that is
-    gone.
+    row from its OCCURRENCE and read this only for whether it was ``None``;
+    plan step **R8-b** stopped that too, dating a row from the cadence's unit
+    and placement (``_row_day.date_row``), so no generated row's date reads
+    this any more.  R7c-c dropped the column ahead of both, so the reader
+    reads the derivation the write door was encoding the column FROM rather
+    than a column that is gone.
 
     It is ``_authoring._author``'s own expression, moved rather than restated:
     the day the cadence fires on
@@ -331,48 +332,40 @@ def scheduling_day_of_month(rule: RecurrenceRule) -> int | None:
     it asserts the same equality in SQL before the ``ALTER TABLE``.
 
     **The gate is ``fires_on_day_of_month`` and NOT
-    ``has_day_of_month_coordinate``, and the difference moves dates.**  The two
+    ``has_day_of_month_coordinate``, and the difference moved dates.**  The two
     answer differently for exactly one cadence: a MONTH-unit rule funded from a
     month's FIRST paycheck fires on days of the month, so the second predicate
     says yes -- but the column has always been NULL for it, and NULL is what
-    makes ``compute_due_date`` date the row from its PAYCHECK.  Answering the
-    day here would be plan ledger row **D26**'s fix arriving in the wrong step,
-    measured there at 11 rows.  See
+    made ``compute_due_date`` date the row from its PAYCHECK.  Answering the
+    day here would have been plan ledger row **D26**'s fix arriving in the
+    wrong step, measured there at 11 rows.  See
     :func:`~app.services.recurrence.has_day_of_month_coordinate` for the two
     wrong-money defects that came of reaching for the other predicate.
 
-    Reads no calendar, because none of its inputs needs one -- which is what
-    lets ``compute_due_date`` stay the pure function of a rule, an occurrence
-    and a period that its callers, the frozen baseline included, take it as.
+    Reads no calendar, because none of its inputs needs one.
 
-    **``None`` means "date this row from its PAYCHECK", so a unit that cannot
-    be dated either way is REFUSED rather than answered** -- plan step R8-a's
-    :func:`~app.services.recurrence._offer.require_row_date_coordinate`,
-    which restates a refusal this function used to inherit.  Until that step
-    ``fires_on_day_of_month`` RAISED for the ``WEEK`` unit (it read the
-    anchor-family router, which had no derivation for it); stating that
-    predicate directly made it answer ``False``, and ``False`` here dates every
-    weekly row on the funding payday with the authored weekday discarded.  The
-    refusal is asked FIRST, before the placement is consulted, because it is a
-    property of the unit alone.
+    **``None`` means "no day of the month", and no longer "date this row from
+    its PAYCHECK"** (plan step R8-b).  A weekly rule answers ``None`` and its
+    rows are dated on their occurrences.  From plan step R8-a until R8-b this
+    function REFUSED the ``WEEK`` unit instead
+    (``_offer.require_row_date_coordinate``), because ``compute_due_date``
+    read ``None`` as "date from the paycheck" and would have dated every
+    weekly row on its funding payday; R8-b moved the dating onto the unit and
+    placement and deleted the refusal.
 
     Args:
         rule: The stored (or transient) recurrence rule.
 
     Returns:
         The day 1-31 the rule's rows are scheduled on, or ``None`` for a
-        cadence whose rows are dated from their PAYCHECK -- a pay-period
-        cadence, or a calendar one funded from a later paycheck.
+        cadence that schedules on no day of the month -- a pay-period or
+        weekly cadence, or a calendar one funded from a later paycheck.
 
     Raises:
         RecurrenceResolutionError: When the row names a unit or a placement
-            this application does not model (see :func:`cadence_of`), or a unit
-            whose occurrences a generated row cannot carry the date of (see
-            :func:`~app.services.recurrence._frequency
-            .require_row_date_coordinate`).
+            this application does not model (see :func:`cadence_of`).
     """
     unit = unit_member(rule.unit_id)
-    require_row_date_coordinate(unit, f"recurrence rule {rule.id}")
     placement = placement_member(rule.placement_id)
     # The gate and the join live in the pure leaf the occurrence walk asks
     # too (plan step pay_calendar:C18-a): one statement of "which day a

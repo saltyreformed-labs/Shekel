@@ -376,6 +376,52 @@ class TestTemplateCreate:
             assert template.recurrence_rule is not None
             assert template.recurrence_rule.starts_on == starts_on
 
+    def test_create_a_weekly_template_at_the_interval_ceiling_fires_once(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """Every 2,147,483,647 weeks saves, and generates its first row alone.
+
+        The column's ceiling is what the interval box admits, and until plan
+        step R8-b made the unit authorable the WEEK walk's ``timedelta``
+        stride raised ``OverflowError`` for it -- a 500 on save, which
+        generates rows through the same walk the preview reads.  The second
+        occurrence lies past the application's calendar, so the honest
+        answer is one row, due on the first occurrence: the paycheck that
+        covers it funds it (ruling R-R94).
+        """
+        with app.app_context():
+            txn_type = db.session.query(TransactionType).filter_by(
+                name="Expense",
+            ).one()
+            category = seed_user["categories"]["Rent"]
+            starts_on = seed_periods_today[4].start_date + timedelta(days=3)
+
+            resp = auth_client.post("/templates", data={
+                "name": "Once In A Long While",
+                "default_amount": "24.99",
+                "category_id": category.id,
+                "transaction_type_id": txn_type.id,
+                "account_id": seed_user["account"].id,
+                **cadence_payload(
+                    unit=RecurrenceUnitEnum.WEEK, interval_n=2_147_483_647,
+                    starts_on=starts_on,
+                ),
+            }, follow_redirects=True)
+
+            assert resp.status_code == 200
+            template = (
+                db.session.query(TransactionTemplate)
+                .filter_by(name="Once In A Long While")
+                .one()
+            )
+            assert template.recurrence_rule.interval_n == 2_147_483_647
+            rows = db.session.query(Transaction).filter_by(
+                template_id=template.id, is_deleted=False,
+            ).all()
+            assert [(row.occurs_on, row.due_date) for row in rows] == [
+                (starts_on, starts_on),
+            ]
+
     def test_create_template_with_no_unit_at_all_is_refused(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
@@ -1584,6 +1630,18 @@ class TestPreviewRecurrence:
             # to a year past 9999 and ``date()`` raises ValueError.
             ("years past the calendar", RecurrenceUnitEnum.YEAR, 10_000),
             ("months past the calendar", RecurrenceUnitEnum.MONTH, 120_000),
+            # The WEEK unit's two 500s before plan step R8-b bounded its walk:
+            # 450000 weeks (3,150,000 days) steps past ``date.max``, which the
+            # old walk raised OverflowError for at its next yield, and the
+            # column's own ceiling made the old stride's ``timedelta`` raise
+            # OverflowError before any date at all.  (A stride landing past
+            # the app's calendar but inside ``date`` previewed one date either
+            # way, since no paycheck hosts it; the walk's own case grades it.)
+            ("weeks past date's own end", RecurrenceUnitEnum.WEEK, 450_000),
+            (
+                "weeks at the column's ceiling", RecurrenceUnitEnum.WEEK,
+                2_147_483_647,
+            ),
         ],
     )
     def test_a_huge_interval_previews_ONE_date_and_not_a_stack_trace(
@@ -1613,6 +1671,11 @@ class TestPreviewRecurrence:
         names no second date this application can hold -- and the invariant the
         case was written for still holds: no stack trace, and the preview shows
         what the save would produce.
+
+        **The WEEK unit's walk took the same bound at plan step R8-b**, the step
+        that made the unit authorable: ``_occurrence._week_walk`` strides on day
+        ordinals and stops at ``CALENDAR_DATE_MAX``, so neither of its ways off
+        the end raises.
         """
         assert seed_periods_today
         resp = auth_client.get(
@@ -1623,46 +1686,84 @@ class TestPreviewRecurrence:
         assert resp.status_code == 200, label
         assert b"Next 1 occurrences" in resp.data, label
 
-    def test_preview_refuses_a_cadence_the_save_would_refuse(
-        self, app, auth_client, seed_user, seed_periods_today,
+    @pytest.mark.parametrize(
+        ("placement", "expected"),
+        [
+            # 01-06, 01-27, 02-17, 03-10 and 03-31 each in the paycheck that
+            # contains it.  01-30 - 02-12 and 03-13 - 03-26 hold none of them.
+            (
+                PeriodPlacementEnum.CONTAINING_DATE,
+                [
+                    "Jan 02, 2026 - Jan 15, 2026",
+                    "Jan 16, 2026 - Jan 29, 2026",
+                    "Feb 13, 2026 - Feb 26, 2026",
+                    "Feb 27, 2026 - Mar 12, 2026",
+                    "Mar 27, 2026 - Apr 09, 2026",
+                ],
+            ),
+            # The same five dates, each in the first paycheck starting on or
+            # after it: 01-16, 01-30, 02-27, 03-13 and 04-10.
+            (
+                PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
+                [
+                    "Jan 16, 2026 - Jan 29, 2026",
+                    "Jan 30, 2026 - Feb 12, 2026",
+                    "Feb 27, 2026 - Mar 12, 2026",
+                    "Mar 13, 2026 - Mar 26, 2026",
+                    "Apr 10, 2026 - Apr 23, 2026",
+                ],
+            ),
+        ],
+        ids=lambda value: getattr(value, "value", None),
+    )
+    def test_the_week_unit_previews_because_it_can_now_be_saved(
+        self, auth_client, seed_periods, placement, expected,
     ):
-        """The preview must not show a schedule that cannot be saved.
+        """The WEEK unit previews the paychecks that fund it (plan step R8-b).
 
-        **The unsavable cadence has MOVED TWICE, and each move closed a real
-        gap.**  It was ``(2, MONTH)`` -- which walked correctly and had no
-        closed-set pattern to be stored as -- until plan step R7c-c freed the
-        interval.  It was then ``(1, YEAR, first paycheck)``, refused because
-        ``anchor_family`` had no first-occurrence derivation for it; plan step
-        **R8-a** measured that refusal stale -- ruling **R-R16** made the first
-        occurrence AUTHORED and deleted the derivation it cited -- and admitted
-        the pair.
+        **The unsavable cadence this case pinned has MOVED THREE TIMES, and
+        each move closed a real gap.**  It was ``(2, MONTH)`` until plan step
+        R7c-c freed the interval, then ``(1, YEAR, first paycheck)`` until plan
+        step **R8-a** measured that refusal stale, then the ``WEEK`` unit until
+        plan step **R8-b** dated a weekly row from its occurrence.  The preview
+        refused the unit while the save would; the save takes it now, so the
+        preview must show what saving would produce.  The one reading still
+        refused is graded by
+        ``test_preview_refuses_a_cadence_the_form_does_not_offer``.
 
-        What is unsavable now is the ``WEEK`` unit: a weekly occurrence is
-        neither a payday nor a day of the month, so
-        ``recurrence.compute_due_date`` has nothing to date its
-        generated rows from until plan step **R5**.
-
-        Not reachable by clicking -- the picker never renders the WEEK unit --
-        so this is the crafted-args door, pinned because the endpoint's own
-        reasoning stops one case short of it.
+        **It asserts the exact list, at both placements.**  It asserted only
+        that "occurrences" appeared until an adversarial review of R8-b
+        measured that it could not see a wrong paycheck or the two placements
+        swapped.  seed_periods is ten 14-day paychecks from 2026-01-02, and
+        the rule fires every 21 days from Tuesday 2026-01-06.  Three weeks,
+        not two: two weeks is one paycheck on this schedule, so ``(2, WEEK)``
+        previews the same list "every paycheck" does and a unit misread as
+        paychecks would pass.  Not one week either: ``(1, WEEK)`` lists each
+        paycheck once per occurrence, twice here, which plan#2604 records as
+        a defect, and this case does not pin it.
         """
-        assert seed_periods_today
+        assert seed_periods[0].start_date == date(2026, 1, 2), (
+            "precondition: the paychecks the expected lists name"
+        )
         resp = auth_client.get(
             "/templates/preview-recurrence",
-            query_string=cadence_payload(unit=RecurrenceUnitEnum.WEEK),
+            query_string=cadence_payload(
+                unit=RecurrenceUnitEnum.WEEK, interval_n=3,
+                placement=placement, starts_on=date(2026, 1, 6),
+            ),
         )
 
         assert resp.status_code == 200
-        assert b"No preview" in resp.data
-        assert b"occurrences" not in resp.data
+        assert re.findall(r"<li>(.*?)</li>", resp.data.decode()) == expected
 
     def test_the_cadence_that_case_refused_is_now_SAVABLE(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
         """``(2, MONTH)`` previews real dates, because it can now be stored.
 
-        The negative control for the case above, and the one that says plan
-        step R7c-c actually landed rather than merely moving a refusal around:
+        The first cadence the case above pinned as unsavable, and the one that
+        says plan step R7c-c actually landed rather than merely moving a
+        refusal around:
         "every other month" is the cadence this whole arc exists for -- it
         resolved and walked correctly from plan step R3 and had nowhere to be
         written -- so the preview showing its dates is the arc's own thesis
@@ -1683,14 +1784,11 @@ class TestPreviewRecurrence:
     @pytest.mark.parametrize(
         ("label", "unit", "placement"),
         [
-            # Resolves and WALKS -- ``_week_walk`` has existed since plan step
-            # R3 -- so nothing downstream refuses it.  What refuses it is the
-            # offer set, and this is the case that says the preview asks.
-            (
-                "the WEEK unit", RecurrenceUnitEnum.WEEK,
-                PeriodPlacementEnum.CONTAINING_DATE,
-            ),
-            # Resolves too: the pay-period anchor does not read the placement
+            # The WEEK unit was the other case here until plan step R8-b made
+            # it authorable; it previews now
+            # (``test_the_week_unit_previews_because_it_can_now_be_saved``).
+            #
+            # Resolves: the pay-period anchor does not read the placement
             # at all.  Offering it would store a choice the edit form cannot
             # preselect, which is plan ledger row D32's hazard by another door.
             (
@@ -1705,8 +1803,8 @@ class TestPreviewRecurrence:
     ):
         """The preview asks the OFFER SET, not what happens to walk.
 
-        **The load-bearing case of plan step R7c-c's refusal move.**  Both of
-        these resolve and walk perfectly well; what made them unpreviewable
+        **The load-bearing case of plan step R7c-c's refusal move.**  This
+        reading resolves and walks perfectly well; what made it unpreviewable
         before that step was ``encode_cadence``, which the preview inherited by
         building its transient rule through the write door.  Deleting the
         encoder deleted that inheritance -- measured, the WEEK unit previewed

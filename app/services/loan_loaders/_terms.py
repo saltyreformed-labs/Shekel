@@ -691,11 +691,11 @@ def loan_payment_due_date(
 
     PRECONDITION on the stored value, and plan step R7c-c re-words it without
     changing it (plan ledger row **D27**): the payment's recurrence rule must
-    fire ON A DAY OF THE MONTH, so
-    :func:`app.services.recurrence.compute_due_date` stamps each instance
-    with the installment date rather than falling back to ``period.start_date``
-    (its no-day behaviour, and the origin of the legacy rows migration
-    ``c4e91a7b2d38`` backfills).
+    fire ON A DAY OF THE MONTH and fund it from the paycheck containing it,
+    so :func:`app.services.recurrence.compute_due_date` stamps each instance
+    with the installment date rather than with ``period.start_date`` (its
+    answer for a pay-period cadence or one funded from a later paycheck, and
+    the origin of the legacy rows migration ``c4e91a7b2d38`` backfills).
 
     **The predicate was a COLUMN and is now a derivation.** It read
     ``recurrence_rules.day_of_month``, which R7c-c drops; the same question is
@@ -705,6 +705,13 @@ def loan_payment_due_date(
     first occurrence.  The rules that satisfy it are unchanged -- the migration
     graded the two equal on all 46 live rules before dropping the column -- so
     this is the same precondition stated over the columns that survive.
+
+    **"Dated from its occurrence" is no longer the same fact** (plan step
+    recurrence:R8-b).  A weekly rule's rows are dated on their occurrences too,
+    while ``scheduling_day_of_month`` answers ``None`` for it: a weekly date is
+    no monthly installment, so such a rule fails this precondition as a
+    pay-period one does, though its rows carry their own dates rather than a
+    payday.
 
     The loan payment-transfer flow guarantees it: ``app/routes/loan/
     payment_transfer.py`` derives the cadence through

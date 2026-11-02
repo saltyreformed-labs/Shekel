@@ -367,8 +367,9 @@ def downgrade():
     **The unsafe half is :func:`upgrade`'s re-backfill, not this function's
     DDL.**  Dropping the three CHECKs and the four ``NOT NULL``s drops no value
     and rewrites no row.  What makes the pair unsafe is that Alembic's contract
-    invites the reverse trip: a database sitting at ``f2a94c7e1b60`` may be
-    upgraded again, and by then its rules were written by THIS revision's write
+    invites the reverse trip: a database sitting at this revision's parent
+    (:data:`down_revision`) may be upgraded again, and by then its rules were
+    written by THIS revision's write
     door, which does not write ``start_date`` or ``month_of_year`` --
     two of the three columns :data:`BACKFILL_SQL` derives ``starts_on`` from.
     Re-running it therefore re-derives every first occurrence from columns
@@ -385,6 +386,11 @@ def downgrade():
 
     Raises:
         NotImplementedError: Always, with the SQL to loosen the schema by hand.
+            The revision it re-stamps to is :data:`down_revision` itself
+            rather than a literal: a literal named ``f2a94c7e1b60``, the
+            parent this revision had until a 2026-08-15 merge re-pointed it,
+            and an operator following it landed one revision low, where the
+            next upgrade failed re-adding a column (finding plan#1902).
     """
     raise NotImplementedError(
         "Migration b6d41f0a9c27 has no safe automatic downgrade.  Loosening "
@@ -406,5 +412,5 @@ def downgrade():
         "    ALTER COLUMN placement_id DROP NOT NULL,\n"
         "    ALTER COLUMN shift_id DROP NOT NULL,\n"
         "    ALTER COLUMN starts_on DROP NOT NULL;\n"
-        "  UPDATE alembic_version SET version_num = 'f2a94c7e1b60';"
+        f"  UPDATE alembic_version SET version_num = '{down_revision}';"
     )

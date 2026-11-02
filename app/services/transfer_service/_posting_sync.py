@@ -68,7 +68,7 @@ from app.services.transfer_service._loan_posting import (
 # posting counts from (the ``entry_date``, step C2's one clock) -- and
 # ``_reconcile_postings_after_update`` runs the full reconcile for that case
 # explicitly (the per-(period, date) reconcile re-dates the entries, finding
-# N-13) plus the two endpoint accounts' anchor-correction resync (F1).  The
+# N-13), whose tail self-heal re-derives the endpoints' anchor corrections.  The
 # reconcile is idempotent, so listing a field that did not move the effect is a
 # harmless no-op; this set is the cheap pre-filter that avoids a ledger
 # round-trip on a pure metadata edit.
@@ -131,23 +131,23 @@ def _reconcile_postings_after_update(
       old-dated entries reverse at their own date, the effect re-posts at the
       new settle date, and the loan sync's checked-projection assert verifies
       the result -- so the fold and the ledger cannot disagree about WHEN.
-    * **Step-5 account-anchor resync on a settled ``settled_on`` edit (F1)**:
-      resync the two endpoint accounts' anchor corrections so a settled
-      ``settled_on`` move cannot strand a stale anchor correction (their
-      reconcile is anchor-walk-derived, not delta-keyed off this transfer).
-      Only for a SETTLED transfer (a projected one posts nothing); a no-op for
-      a loan endpoint (the account walk skips amortizing accounts).
-      ``pay_period_id`` needs no such branch -- it is in
-      ``_POSTING_RELEVANT_FIELDS``, so a period move reconciles R2-correctly
-      and self-heals via the cash reconcile above.  Fires on ANY settled
-      ``settled_on`` edit, not only a pure one: on the common settle path (status
-      + ``settled_on`` together) the reconcile's tail self-heal already covers
-      both endpoints, so these two idempotent walks are redundant there -- an
-      accepted, safe cost.  It is deliberately NOT narrowed to
-      ``not needs_reconcile``, because a future COMBINED edit (e.g. ``amount``
-      + ``settled_on``) could move the attribution in a way the delta-keyed
-      self-heal does not cover; an always-correct resync is the point of this
-      seam.
+    * **No anchor resync of its own on a settled ``settled_on`` edit**
+      (ruling **plan#2574**).  The full reconcile above re-dates the side's
+      entries -- a reversal at the old day, the effect at the new -- and its
+      tail self-heal asks each endpoint's boundary about the earlier of the
+      two, which every door that moves a day keeps sound by releasing the
+      statement link (``account_posting_service.self_heal_anchor_corrections``
+      states the argument); an edit that moves a leg any other way emits
+      the entries that self-heal reads too.  Step-5's F1 resynced both
+      endpoints here directly (2026-07-04) while a settle-day edit moved an
+      attribution INSTANT and no leg, so no delta could carry it.  That reason
+      went when the leg took the movement's own day, and once the walk read
+      the records (plan task plan#2525) its two walks ran the records walk
+      again for each endpoint after every settle.  Measured at plan#2559:
+      without them a settle-day move across an anchor still re-derives both
+      openings (``TestSettledTransferAttributionMutation``), and with the
+      self-heal gone too it does not (Savings ``$350.00`` against
+      ``$200.00``).
 
     * **The accounts an ENDPOINT MOVE left behind (plan step R10-b), LAST**: the cash
       reconcile above heals the LEGS by itself -- ``reconcile_periods`` takes
@@ -207,13 +207,6 @@ def _reconcile_postings_after_update(
         # the seam has already dated or un-dated the movements above.
         posting_service.sync_transfer_postings(xfer)
         _sync_loan_postings_if_loan(xfer)
-    if settle_day_edited and current_status.is_settled:
-        account_posting_service.sync_account_anchor_postings(
-            xfer.from_account_id, xfer.scenario_id,
-        )
-        account_posting_service.sync_account_anchor_postings(
-            xfer.to_account_id, xfer.scenario_id,
-        )
     # LAST, and the position is load-bearing rather than tidy: both walks below
     # read the vacated account's ledger, and until ``sync_transfer_postings``
     # above has reversed this transfer's legs off it that ledger still holds a

@@ -631,14 +631,19 @@ class TestSettledTransferAttributionMutation:
         anchors (rides on top): Savings 200 + 150 = 350, Checking 1000 - 150 =
         850.  Moving its settle day to BEFORE the anchors (a 2024 day)
         through ``update_transfer`` makes the transfer PRE-assertion, so it must
-        be ABSORBED into the openings.  The settle day changes no leg, so the
-        Step-2 reconcile-to-target writes nothing and its effect-time self-heal
-        never fires; the F1 direct resync re-derives both endpoints' openings so
-        the absolute invariant still holds with NO manual sync.  Post-move both
-        accounts read their anchors (Savings 200, Checking 1000): the transfer
-        is absorbed, nothing rides on top.  Before F1 the openings stayed at
-        their ride-on-top values (Savings 350) while the invariant's RHS dropped
-        to 200 -- a silently stale correction.
+        be ABSORBED into the openings.  The move re-dates each side's leg -- a
+        reversal at the old day, the effect at 2024-01-05 -- and the cash
+        reconcile's effect-time self-heal, asked about that earlier day,
+        re-derives both endpoints' openings, so the absolute invariant still
+        holds with NO manual sync.  Post-move both accounts read their anchors
+        (Savings 200, Checking 1000): the transfer is absorbed, nothing rides
+        on top.  Before F1 the openings stayed at their ride-on-top values
+        (Savings 350) while the invariant's RHS dropped to 200 -- a silently
+        stale correction.  *F1 re-derived them through a direct resync of both
+        endpoints while a settle-day edit moved no leg; ruling plan#2574
+        deleted it once the leg carried the movement's day, and with the
+        self-heal also removed this case reads Savings 350 (measured at
+        plan#2559).*
         """
         with app.app_context():
             user_id = seed_user["user"].id

@@ -69,6 +69,8 @@ one producer of each side's signed cash.
 """
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from sqlalchemy.orm import selectinload
 
@@ -91,6 +93,12 @@ from app.services._posting_purchases import (
 from app.utils.balance_predicates import settled_status_ids
 
 logger = logging.getLogger(__name__)
+
+#: The ``Session.info`` key an act's held anchor re-check sits under while
+#: :func:`holding_the_anchor_re_check` is open (ruling **plan#2574**).  On the
+#: SESSION because the re-check holds that session's journal entries and
+#: belongs to its unit of work.
+_HELD_RE_CHECK_KEY = "posting_service.held_anchor_re_check"
 
 # Re-exported read-side API.  The reconciliation readers moved to
 # :mod:`app.services.posting_reads` when this module crossed the size gate
@@ -126,8 +134,10 @@ def _self_heal_account_anchor_corrections(
     (which every settle and revert path routes through), and called ONCE per
     scenario after a batch by :func:`re_check_held_anchor_corrections` --
     after :func:`resync_all_cash_postings`' whole loop with every entry that
-    loop emitted (ruling **R-BAL103**), and after the one removal act's
-    deletes with every reversal it emitted (ruling **plan#2564**): when the
+    loop emitted (ruling **R-BAL103**), after the one removal act's
+    deletes with every reversal it emitted (ruling **plan#2564**), and at
+    the close of an act that holds it (:func:`holding_the_anchor_re_check`,
+    ruling **plan#2574**), inside which this QUEUES rather than walks: when the
     emitted deltas touch a
     non-loan account whose latest anchor assertion sits at-or-after the
     earliest emitted ``entry_date``, that account's opening / true-up
@@ -143,6 +153,10 @@ def _self_heal_account_anchor_corrections(
         entries: The just-emitted delta entries (empty -> no-op).
     """
     if not entries:
+        return
+    held = db.session.info.get(_HELD_RE_CHECK_KEY)
+    if held is not None:
+        _hold_for_the_re_check(held, scenario_id, account_ids, entries)
         return
     # Pylint: ``import-outside-toplevel`` -- reverse dependency: the account
     # posting package imports this module's balanced-write path, so the
@@ -500,10 +514,13 @@ def re_check_held_anchor_corrections(
     """Run a batch's held anchor re-check: once per scenario, accounts ascending.
 
     The ONE re-check after a batch, shared by the deploy resync (ruling
-    **R-BAL103**: after every source is re-booked) and the one removal act
+    **R-BAL103**: after every source is re-booked), the one removal act
     (ruling **plan#2564**: after its deletes have flushed,
-    :func:`reverse_leaving_movements` held it), so the walk reads the records
-    as the batch leaves them.  A no-op when *held* is empty.
+    :func:`reverse_leaving_movements` held it) and the close of
+    :func:`holding_the_anchor_re_check` (ruling **plan#2574**), so the walk
+    reads the records as the batch leaves them.  Run inside an open hold --
+    the removal act inside a reconcile -- it queues onto that hold, still
+    after this batch's writes.  A no-op when *held* is empty.
 
     Args:
         held: A scenario id -> (accounts touched, entries emitted), as
@@ -528,6 +545,54 @@ def _hold_for_the_re_check(held: dict, scenario_id: int, accounts, entries) -> N
     held_accounts, held_entries = held.setdefault(scenario_id, (set(), []))
     held_accounts.update(accounts)
     held_entries.extend(entries)
+
+
+@contextmanager
+def holding_the_anchor_re_check() -> Iterator[None]:
+    """Hold every anchor re-check the block's syncs owe, and run it ONCE at its close.
+
+    Ruling **plan#2574** (developer 2026-11-01): an act that settles several
+    rows re-checks the anchor corrections once per scenario after its last
+    write -- the shape the deploy resync (ruling **R-BAL103**) and the one
+    removal act (ruling **plan#2564**) already take.  Inside the block each
+    :func:`_self_heal_account_anchor_corrections` QUEUES its accounts and
+    entries rather than walking, and the close runs
+    :func:`re_check_held_anchor_corrections` over them.  Since plan task
+    plan#2525 that re-check walks each account's RECORDS
+    (``cash_ledger.walk_cash_ledger``), which fetches the account's transfer
+    sides' records, so a re-check per settle fetched them once per tick
+    where ruling **plan#2136** asks one query for all of them (finding
+    **plan#2147**'s requirement); held, the act walks each account it touched
+    once, over the records as its last write leaves them.  The reconcile
+    opens it (``reconcile_service.record_reconciliation``).
+
+    **Deferring the writes moves nothing the act reads.**  Between an act's
+    settles nothing reads a non-loan account's anchor corrections but the
+    anchor reconcile itself: the loan sync reads only the loan's own linked
+    ledger (``loan_posting_service._linked_ledger``), which this re-check
+    never writes, and each source sync reads back only its own movement's
+    legs.
+
+    **A block that raises runs none**: its act is refused and its
+    transaction rolls back, and the key leaves the session either way, so a
+    later act in the same session re-checks for itself.  Plan step plan#2516
+    deletes this with the self-heal and the stored corrections it keeps.
+
+    Yields:
+        Nothing; the block's syncs queue onto the session.
+
+    Raises:
+        PostingError: From the close's re-check, as
+            :func:`re_check_held_anchor_corrections` raises it.
+    """
+    info = db.session.info
+    held: dict[int, tuple[set[int], list[JournalEntry]]] = {}
+    info[_HELD_RE_CHECK_KEY] = held
+    try:
+        yield
+    finally:
+        del info[_HELD_RE_CHECK_KEY]
+    re_check_held_anchor_corrections(held)
 
 
 def _skip_reasons(skipped: "dict[int, str]") -> str:

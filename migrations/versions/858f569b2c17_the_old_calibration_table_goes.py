@@ -61,10 +61,13 @@ salary:S11-c-2c, so the drop changes no figure.
 **The drop and the change log.**  ``AUDITED_TABLES`` loses the table in the
 same change, so ``EXPECTED_TRIGGER_COUNT`` falls by one.  The trigger is
 dropped first and by name so the intent is visible; ``DROP TABLE`` fires no
-row-level DELETE, so each live row's last state stays in the log as the
-``new_data`` of its last INSERT or UPDATE.  No foreign key points at the table
-(the last, ``calibration_deduction_overrides``, went at ``78782c6ac75e``), and
-the drop names no CASCADE, so one added later makes it refuse.
+row-level DELETE, so the log keeps what it holds and records no deletion.  A
+live row's last state stays there, as the ``new_data`` of its last INSERT or
+UPDATE, only if the log recorded that write and still holds it: a row last
+written before the log began, or whose last change was pruned, leaves no image
+of its last state.  No foreign key points at the table (the last,
+``calibration_deduction_overrides``, went at ``78782c6ac75e``), and the drop
+names no CASCADE, so one added later makes it refuse.
 
 **On a database built from an empty chain** the table holds nothing and the log
 nothing for it, so the refusal passes vacuously; the rebuild migration
@@ -73,15 +76,20 @@ nothing for it, so the refusal passes vacuously; the rebuild migration
 entered (the shared dev database's 2026-09-05 snapshot) is refused here until
 they are: catching it up is the developer's call.
 
-**The downgrade recreates the table EMPTY** (R-SAL124), with the shape
-production held at ``69634349bdce`` (measured on its catalogue 2026-11-02):
+**The downgrade recreates the table EMPTY** (R-SAL124), in the shape
+production's catalogue showed on 2026-11-02, read at ``1712c506ee99`` (the
+table's own columns and constraints unchanged since ``c5d20b701a4e``):
 sixteen columns, the primary key and the CASCADE foreign key under
-PostgreSQL's generated names, the unique profile key, the ten CHECKs, both
-timestamps NOT NULL (``8a21d16c9bde``) and ``is_active`` defaulting true
-(``c5d20b701a4e``).  No audit trigger: the table is not in ``AUDITED_TABLES``,
-whose rebuild migration owns the triggers (``78782c6ac75e``'s precedent).  The
-rows are not restored; the deploy's pre-release dump keeps them.
+PostgreSQL's generated names, the unique profile key, the nine CHECKs (five on
+the amounts, four on the rates), both timestamps NOT NULL (``8a21d16c9bde``)
+and ``is_active`` defaulting true (``c5d20b701a4e``).  That it equals the table
+``69634349bdce`` holds is measured on a bench copy of production, by the
+release kit's downgrade grade (G6a).  No audit trigger: the table is not in
+``AUDITED_TABLES``, whose rebuild migration owns the triggers
+(``78782c6ac75e``'s precedent).  The rows are not restored; the deploy's
+pre-release dump keeps them.
 """
+from datetime import date
 from decimal import Decimal
 
 from alembic import op
@@ -155,8 +163,12 @@ _STUB_TAXES_SQL = """
 #: The jobs' names, for the printout and the refusal.
 _PROFILE_NAMES_SQL = "SELECT id, name FROM salary.salary_profiles"
 
+#: :func:`stub_taxes`'s answer: each stub's withholdings by kind name, keyed by
+#: its ``(salary_profile_id, payday)``.
+StubTaxes = dict[tuple[int, date], dict[str, Decimal]]
 
-def held_calibrations(bind) -> list:
+
+def held_calibrations(bind: sa.engine.Connection) -> list[sa.engine.Row]:
     """Return every calibration the database still has a record of, each state once.
 
     The live rows and every state the change log holds for the table (the
@@ -174,7 +186,7 @@ def held_calibrations(bind) -> list:
     return bind.execute(sa.text(_HELD_CALIBRATIONS_SQL)).all()
 
 
-def stub_taxes(bind) -> dict:
+def stub_taxes(bind: sa.engine.Connection) -> StubTaxes:
     """Return every pay stub's four taxes, keyed by its salary profile and payday.
 
     Args:
@@ -184,7 +196,7 @@ def stub_taxes(bind) -> dict:
         ``{(salary_profile_id, payday): {withholding kind name: amount}}``; a
         stub holding no withholding maps to an empty dict.
     """
-    stubs: dict = {}
+    stubs: StubTaxes = {}
     for row in bind.execute(sa.text(_STUB_TAXES_SQL)):
         taxes = stubs.setdefault((row.salary_profile_id, row.payday), {})
         if row.kind is not None:
@@ -192,7 +204,7 @@ def stub_taxes(bind) -> dict:
     return stubs
 
 
-def profile_names(bind) -> dict:
+def profile_names(bind: sa.engine.Connection) -> dict[int, str]:
     """Return each salary profile's name, keyed by its id.
 
     Args:
@@ -204,7 +216,7 @@ def profile_names(bind) -> dict:
     return {row.id: row.name for row in bind.execute(sa.text(_PROFILE_NAMES_SQL))}
 
 
-def job_words(profile_id: int, names: dict) -> str:
+def job_words(profile_id: int, names: dict[int, str]) -> str:
     """Name a calibration's job in the printout's and the refusal's plain words.
 
     Args:
@@ -220,7 +232,9 @@ def job_words(profile_id: int, names: dict) -> str:
     return f"salary profile {profile_id}, which no longer exists"
 
 
-def refuse_a_calibration_without_its_stub(held: list, stubs: dict, names: dict) -> None:
+def refuse_a_calibration_without_its_stub(
+    held: list[sa.engine.Row], stubs: StubTaxes, names: dict[int, str],
+) -> None:
     """Refuse, naming each, while a held calibration has no pay stub on its date.
 
     Fork 9 of ruling R-SAL42 as R-SAL124 approved it.  A date and job are named
@@ -252,17 +266,21 @@ def refuse_a_calibration_without_its_stub(held: list, stubs: dict, names: dict) 
         )
         + ".  A calibration counts while salary.calibration_overrides or the "
         "change log (system.audit_log) still holds it.  A job that no longer "
-        "exists can take no stub: the developer rules what happens to it.  "
-        "Nothing was written: the revision rolls back whole."
+        "exists can take no stub, nor can a date that is not one of its "
+        "owner's paydays (the Pay stubs page refuses it): the developer rules "
+        "what happens to either.  Nothing was written: the revision rolls back "
+        "whole."
     )
 
 
-def _money(amount: Decimal) -> str:
-    """Word an amount as the app does: ``$1,234.56``."""
+def money(amount: Decimal) -> str:
+    """Word an amount as the app does: ``$1,234.56``; the printout's one spelling."""
     return f"${amount:,.2f}"
 
 
-def tax_report(held: list, stubs: dict, names: dict) -> list[str]:
+def tax_report(
+    held: list[sa.engine.Row], stubs: StubTaxes, names: dict[int, str],
+) -> list[str]:
     """Return the printout: each held calibration's four taxes beside its stub's.
 
     Ruling R-SAL127: any of the four that differ, "State $91.00 then, $90.00
@@ -287,8 +305,8 @@ def tax_report(held: list, stubs: dict, names: dict) -> list[str]:
             f"({job_words(row.salary_profile_id, names)}, calibration {row.calibration_id})"
         )
         differ = [
-            f"{label} {_money(getattr(row, column))} then, "
-            + (f"{_money(stub[kind])} on the stub" if kind in stub else "none on the stub")
+            f"{label} {money(getattr(row, column))} then, "
+            + (f"{money(stub[kind])} on the stub" if kind in stub else "none on the stub")
             for column, kind, label in TAXES
             if stub.get(kind) != getattr(row, column)
         ]

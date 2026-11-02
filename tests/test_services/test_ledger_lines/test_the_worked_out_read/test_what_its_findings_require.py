@@ -1,26 +1,30 @@
 """What the card's findings require of the worked-out read: a source that left the settled set has
-no line (N-162), a transfer's effect has one rule (N-164), and a refund, a card purchase and an
-over-posted envelope book what moved (N-318).
+no line (N-162), a moved settle day is read where it lands (N-310), a transfer's effect has one
+rule (N-164), and a refund, a card purchase, an over-posted envelope and a purchase beside a stated
+close book what moved (N-318).
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
 
 from app import ref_cache
 from app.enums import LedgerAccountClassEnum, PostingKindEnum, PostingSourceEnum, StatusEnum
+from app.exceptions import ValidationError
 from app.extensions import db as _db
 from app.models.account import AccountAnchorHistory
 from app.models.transaction_entry import TransactionEntry
 from app.services import credit_workflow, entry_service, transaction_service, transfer_service
 from app.services.cash_ledger import settled_cash_facts
 from app.services.ledger_lines import LedgerLine, category_key, linked_key, transit_key
+from app.services.settle_day import record_settle_day
 from app.services.transfer_legs import transfer_family_movements
 from tests._test_helpers import (
     an_entered_day,
     create_account_of_type,
     create_settled_transfer,
+    figure_source_columns,
     generate_row_of,
     make_expense_template,
     typed,
@@ -56,17 +60,17 @@ def _envelope(seed_user, period, amount):
     return generate_row_of(template, period)
 
 
-def _purchase(seed_user, txn, amount, *, is_credit=False):
-    """Record a purchase of *amount* on *txn*, made and posted today."""
+def _purchase(seed_user, txn, amount, *, is_credit=False, posted_on=_TODAY):
+    """Record a purchase of *amount* on *txn*, made and posted on *posted_on*."""
     return entry_service.create_entry(
         transaction_id=txn.id,
         user_id=seed_user["user"].id,
         details=entry_service.EntryDetails(
             figure=typed(Decimal(amount)),
             description="Market",
-            purchased_on=_TODAY,
+            purchased_on=posted_on,
             is_credit=is_credit,
-            settle_day=an_entered_day(_TODAY),
+            settle_day=an_entered_day(posted_on),
         ),
     )
 
@@ -97,6 +101,38 @@ def _revert_then_cancel(txn):
 def _delete(txn):
     """Delete *txn* through the one removal act (soft: its definition recurs)."""
     transaction_service.delete_transaction(txn, txn.user_id)
+
+
+def _soft_delete_transfer(xfer):
+    """Soft-delete *xfer* through the transfer door."""
+    transfer_service.delete_transfer(xfer.id, xfer.user_id, soft=True)
+
+
+def _revert_transfer(xfer):
+    """Put *xfer* back to Projected through the transfer door."""
+    transfer_service.update_transfer(
+        xfer.id, xfer.user_id,
+        status_id=ref_cache.status_id(StatusEnum.PROJECTED),
+    )
+
+
+def _clear_bank_day(purchase):
+    """Clear *purchase*'s bank posting day through the purchase door."""
+    entry_service.update_entry(purchase.id, purchase.owner_id, settle_day=None)
+
+
+def _delete_purchase(purchase):
+    """Delete *purchase* through the purchase door."""
+    entry_service.delete_entry(purchase.id, purchase.owner_id)
+
+
+def _checked_today(checking):
+    """Add a $5,000.00 balance check on *checking*, observed today; flush."""
+    _db.session.add(AccountAnchorHistory(
+        account_id=checking.id, anchor_balance=Decimal("5000.00"),
+        observed_on=_TODAY, recorded_on=_TODAY,
+    ))
+    _db.session.flush()
 
 
 class TestASourceThatLeftHasNoLine:
@@ -135,11 +171,7 @@ class TestASourceThatLeftHasNoLine:
         with app.app_context():
             checking = seed_user["account"]
             txn = _bill(seed_user, seed_periods[0])
-            _db.session.add(AccountAnchorHistory(
-                account_id=checking.id, anchor_balance=Decimal("5000.00"),
-                observed_on=_TODAY, recorded_on=_TODAY,
-            ))
-            _db.session.flush()
+            _checked_today(checking)
             before = _read(seed_user)
             assert _true_ups_of(before, checking) == [Decimal("4000.00")]
             transaction_service.settle_transaction(
@@ -158,13 +190,19 @@ class TestASourceThatLeftHasNoLine:
 
             assert _read(seed_user) == before
 
-    def test_a_soft_deleted_transfer_reads_as_if_it_never_settled(
-        self, app, db, seed_user, seed_periods,
+    @pytest.mark.parametrize(
+        "leave", [_soft_delete_transfer, _revert_transfer],
+        ids=["soft-delete", "revert"],
+    )
+    def test_a_transfer_that_left_reads_as_if_it_never_settled(
+        self, app, db, seed_user, seed_periods, leave,
     ):
-        """A settled $250.00 transfer soft-deleted: the read is as before it.
+        """A settled $250.00 transfer soft-deleted or reverted: the read is as before it.
 
-        Its soft delete takes both sides' records with it, so neither side's
-        two lines stay and the read is the one taken before the transfer.
+        A soft delete takes both sides' records with it; a revert keeps them
+        and un-dates them, the most common way a transfer leaves.  Either
+        way neither side's two lines stay, and the read is the one taken
+        before the transfer.
         """
         with app.app_context():
             savings = create_account_of_type(
@@ -180,12 +218,104 @@ class TestASourceThatLeftHasNoLine:
                 line for line in _read(seed_user) if line.movement_id
             ]) == 4
 
-            transfer_service.delete_transfer(
-                xfer.id, seed_user["user"].id, soft=True,
-            )
+            leave(xfer)
             _db.session.flush()
 
             assert _read(seed_user) == before
+
+    @pytest.mark.parametrize(
+        "leave", [_clear_bank_day, _delete_purchase],
+        ids=["bank-day-cleared", "delete"],
+    )
+    def test_a_purchase_that_left_reads_as_if_it_never_posted(
+        self, app, db, seed_user, seed_periods, leave,
+    ):
+        """A $40.00 purchase posted yesterday, then un-posted or deleted: as before it.
+
+        Checking opens at $1,000.00 under today's $5,000.00 balance check, so
+        before the purchase the true-up is ``4,000.00``.  Posted yesterday on
+        an open Groceries envelope, the purchase books Checking ``-40.00`` and
+        Groceries ``+40.00``, and the check absorbs it: ``5,000.00 -
+        (1,000.00 - 40.00) = 4,040.00`` (the controls).  Clearing its bank
+        day puts it back in flight, off every dated read, and deleting it
+        removes it; either way the whole read is the one from before it.
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            envelope = _envelope(seed_user, seed_periods[0], "200.00")
+            _checked_today(checking)
+            before = _read(seed_user)
+            assert _true_ups_of(before, checking) == [Decimal("4000.00")]
+            purchase = _purchase(
+                seed_user, envelope, "40.00",
+                posted_on=_TODAY - timedelta(days=1),
+            )
+            posted = _read(seed_user)
+            assert sorted(
+                line.amount for line in _lines_of(posted, purchase.id)
+            ) == [Decimal("-40.00"), Decimal("40.00")]
+            assert _true_ups_of(posted, checking) == [Decimal("4040.00")]
+
+            leave(purchase)
+            _db.session.flush()
+
+            assert _read(seed_user) == before
+
+
+class TestAMovedSettleDayIsReadWhereItLands:
+    """Finding N-310 (plan#1310): what a moved settle day owes the corrections.
+
+    Nothing special: the read is the records each time, so a settle day
+    moved across a balance check moves the movement's lines and the check's
+    true-up with it, both ways.  ``TestASettleDayMoveAcrossAnAssertion``
+    (``test_account_posting_service.py``) shows the stored half through the
+    same door.
+    """
+
+    def test_a_day_moved_past_a_balance_check_and_back_moves_its_true_up(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """A $148.32 bill settled May 12, moved past a May 13 check to May 14, then back.
+
+        Checking opens at $1,000.00 and a $5,000.00 balance check is observed
+        May 13.  Settled May 12, the bill is before the check, which absorbs
+        it: the true-up is ``5,000.00 - (1,000.00 - 148.32) = 4,148.32``.
+        Moved to May 14 through the door a settle-day correction takes
+        (``apply_requested_status`` at the row's own status), it rides on top
+        of the check: ``5,000.00 - 1,000.00 = 4,000.00``, and its two lines
+        are dated May 14.  Moved back, the read is the first one again: the
+        second time the read is asked, after a true-up it must now restore.
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            txn = _bill(seed_user, seed_periods[0])
+            _db.session.add(AccountAnchorHistory(
+                account_id=checking.id, anchor_balance=Decimal("5000.00"),
+                observed_on=date(2026, 5, 13), recorded_on=date(2026, 5, 13),
+            ))
+            transaction_service.settle_transaction(
+                txn, settle_day=an_entered_day(date(2026, 5, 12)),
+            )
+            _db.session.flush()
+            first = _read(seed_user)
+            assert _true_ups_of(first, checking) == [Decimal("4148.32")]
+
+            for moved_to, true_up in (
+                (date(2026, 5, 14), Decimal("4000.00")),
+                (date(2026, 5, 12), Decimal("4148.32")),
+            ):
+                transaction_service.apply_requested_status(
+                    txn, txn.status_id, settle_day=an_entered_day(moved_to),
+                )
+                _db.session.flush()
+                (movement,) = txn.covering_movements
+                lines = _read(seed_user)
+                assert {
+                    line.entry_date for line in _lines_of(lines, movement.id)
+                } == {moved_to}, f"moved to {moved_to}"
+                assert _true_ups_of(lines, checking) == [true_up]
+
+            assert lines == first
 
 
 def _folded_cash(account, movement, scenario_id):
@@ -315,20 +445,16 @@ class TestRefundsCardsAndOverPostedEnvelopes:
     def test_a_purchase_past_its_envelopes_figure_books_its_whole_figure_out(
         self, app, db, seed_user, seed_periods,
     ):
-        """A $367.62 purchase on a $163.95 envelope, then closed: -367.62, never +203.67.
+        """A $367.62 purchase on a $163.95 envelope, then closed: -367.62 out.
 
-        Finding N-318's own figures: through ``X-bi-3e`` the cash helper
-        netted a settled row's purchases against its recorded figure and
-        negated the result, so an envelope recording ``$163.95`` with a
-        ``$367.62`` purchase read ``-(163.95 - 367.62) = +203.67``, an
-        expense row publishing an inflow.  Worked out from the records each
-        purchase books its own figure in its parent's direction and the row
-        books nothing (ruling R-BAL80), so the closed envelope's one
-        movement is Checking ``-367.62`` against Groceries ``+367.62`` and no
-        line nets anything against the envelope's figure.  Every line booked
-        under the ``purchase`` source is read, with a movement or without,
-        so a line netted against the row itself -- the shape N-318 was, which
-        comes from no movement -- would show here as a line with none.
+        A row holding a purchase settles on its purchases (ruling R-BAL78),
+        so the close writes no covering movement and records $367.62, past
+        the envelope's budget.  Each purchase books its own figure in its
+        parent's direction and the row books nothing (ruling R-BAL80): the
+        one movement is Checking ``-367.62`` against Groceries ``+367.62``,
+        and nothing is booked against the envelope's $163.95.  This is not
+        N-318's state, which a close holding no purchase leaves (the next
+        case).
         """
         with app.app_context():
             envelope = _envelope(seed_user, seed_periods[0], "163.95")
@@ -359,3 +485,60 @@ class TestRefundsCardsAndOverPostedEnvelopes:
             assert _db.session.query(TransactionEntry).filter_by(
                 transaction_id=envelope.id,
             ).count() == 1
+
+    def test_a_purchase_beside_a_stated_close_books_each_movement_at_its_own_figure(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """N-318's own state, written past the door: -163.95 and -367.62, never +203.67.
+
+        A $163.95 Groceries envelope closed with nothing spent settles at its
+        stated figure, so its close is ONE covering movement of $163.95.  The
+        purchase door refuses a $367.62 purchase on it (the control,
+        ``entry_service._reject_settled_addition``: the pair records the
+        close twice, ruling R-BAL80), so the case writes it past the door,
+        posted today.  Through ``X-bi-3e`` a settled row's own leg netted
+        its posted purchases against its recorded figure and negated the
+        result, ``-(163.95 - 367.62) = +203.67`` on Checking: an expense row
+        publishing an inflow.  Worked out from the records each movement
+        books its own figure in its parent's direction, so Checking's
+        ``purchase`` lines are exactly ``-163.95`` and ``-367.62``, each
+        against Groceries, and none is ``+203.67``.
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+            envelope = _envelope(seed_user, seed_periods[0], "163.95")
+            transaction_service.settle_transaction(envelope)
+            _db.session.flush()
+            (close,) = envelope.covering_movements
+            assert close.amount == Decimal("163.95")
+            with pytest.raises(ValidationError, match="records a fixed figure"):
+                _purchase(seed_user, envelope, "367.62")
+            past_the_door = TransactionEntry(
+                **figure_source_columns(),
+                transaction_id=envelope.id, account_id=checking.id,
+                owner_id=envelope.user_id, user_id=envelope.user_id,
+                amount=Decimal("367.62"), description="Past the door",
+                purchased_on=_TODAY, is_credit=False,
+            )
+            record_settle_day(past_the_door, an_entered_day(_TODAY))
+            _db.session.add(past_the_door)
+            _db.session.flush()
+
+            lines = _read(seed_user)
+
+            groceries = category_key(
+                seed_user["categories"]["Groceries"].id,
+                LedgerAccountClassEnum.EXPENSE,
+            )
+            for movement, figure in (
+                (close, Decimal("163.95")), (past_the_door, Decimal("367.62")),
+            ):
+                assert [
+                    (line.key, line.amount)
+                    for line in _lines_of(lines, movement.id)
+                ] == [(linked_key(checking), -figure), (groceries, figure)]
+            assert sorted(
+                line.amount for line in lines
+                if line.key == linked_key(checking)
+                and line.source_kind_id == _source(PostingSourceEnum.PURCHASE)
+            ) == [Decimal("-367.62"), Decimal("-163.95")]

@@ -49,8 +49,9 @@ adds nothing up and loads no app module: a stub's Gross Pay is derived, never
 stored, so it is compared before the release, at the rehearsal on a copy of
 production while the old rows still exist, by
 ``tests/manual/measure_s11d_old_calibrations.py``, which reads the calibrations,
-their stubs' taxes and the refusal through this revision's own
-:func:`held_calibrations`, :func:`stub_taxes`, :data:`TAXES` and
+their stubs' taxes and the refusal, and words them, through this revision's own
+:func:`held_calibrations`, :func:`stub_taxes`, :func:`profile_names`,
+:data:`TAXES`, :func:`job_words`, :func:`money` and
 :func:`refuse_a_calibration_without_its_stub`, and adds each stub's Gross Pay
 up with the stub page's own rule (``app.services.pay_stub_gross.checked_gross``).
 This printout lands in a deploy log, after the rows are gone, for the record.
@@ -274,7 +275,11 @@ def refuse_a_calibration_without_its_stub(
 
 
 def money(amount: Decimal) -> str:
-    """Word an amount as the app does: ``$1,234.56``; the printout's one spelling."""
+    """Word an amount as the app does: ``$1,234.56``.
+
+    The printout's one spelling of an amount: the rehearsal's measure words
+    its figures with it too.
+    """
     return f"${amount:,.2f}"
 
 

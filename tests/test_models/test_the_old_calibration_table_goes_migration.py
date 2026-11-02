@@ -25,7 +25,9 @@ downgrade has the table back.
 """
 from __future__ import annotations
 
+import json
 import pathlib
+import re
 import subprocess
 import sys
 from datetime import date
@@ -34,6 +36,8 @@ from decimal import Decimal
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import Engine
 
@@ -520,6 +524,42 @@ def _earnings(world, db):
     return world
 
 
+#: The repository's root, where both requirements files and ``app`` are.
+_REPO = pathlib.Path(__file__).resolve().parents[2]
+
+#: Run in a fresh interpreter: load the script at ``argv[1]`` by path, under a
+#: name that is not ``__main__`` (so its ``main`` does not run), then print, as
+#: JSON on the last line, every distribution a module then loaded belongs to.
+_LOADED_DISTRIBUTIONS = (
+    "import json, runpy, sys\n"
+    "from importlib.metadata import packages_distributions\n"
+    "runpy.run_path(sys.argv[1], run_name='measure_by_path')\n"
+    "owners = packages_distributions()\n"
+    "print(json.dumps(sorted({owner for name in tuple(sys.modules)"
+    " for owner in owners.get(name.partition('.')[0], ())})))\n"
+)
+
+
+def _pins(requirements: str) -> set[str]:
+    """Return each distribution a requirements file pins, by its canonical name.
+
+    Its ``-r`` include is not followed: ``requirements-dev.txt`` includes
+    ``requirements.txt``, and what the dev file alone pins is the difference.
+
+    Args:
+        requirements: The file's name, under the repository's root.
+
+    Returns:
+        The canonical (PEP 503) names.
+    """
+    pinned = set()
+    for line in (_REPO / requirements).read_text(encoding="utf-8").splitlines():
+        requirement = line.split("#", 1)[0].strip()
+        if requirement and not requirement.startswith("-"):
+            pinned.add(canonicalize_name(Requirement(requirement).name))
+    return pinned
+
+
 class TestTheRehearsalMeasure:
     """R-SAL127's rehearsal: all five figures of each held calibration beside its stub's.
 
@@ -623,7 +663,12 @@ class TestTheRehearsalMeasure:
         assert block[1] == "  Gross Pay: $2,999.62 then, $3,024.62 on the stub  DIFFERS"
 
     def test_a_calibration_without_its_stub_is_named_and_the_refusal_follows(self, db, world):
-        """A calibration on 03-13, where no stub is: named, the migration's refusal, status 1."""
+        """A calibration on 03-13, where no stub is: named, the refusal, and the refusal's status.
+
+        The refusal's status is none of Python's own (1 for an uncaught
+        exception, 2 for a script it cannot open), so the kit can never read a
+        broken measure as a refusal.
+        """
         _run(db.session, "downgrade")
         row_id = _insert_calibration(db.session, world["profile"].id, _NO_STUB_DAY)
         lines, status = measure.run()
@@ -635,7 +680,8 @@ class TestTheRehearsalMeasure:
         ) in lines
         assert lines[-1].startswith("S11-d refuses: an old calibration has no pay stub")
         assert f"2026-03-13 for job '{profile.name}'" in lines[-1]
-        assert status == 1
+        assert status == measure.EXIT_REFUSES
+        assert measure.EXIT_REFUSES not in (0, 1, 2)
 
     def test_a_state_only_the_change_log_holds_is_measured(self, db, earnings):
         """A calibration deleted under the trigger is still shown: "held" is the migration's."""
@@ -649,6 +695,27 @@ class TestTheRehearsalMeasure:
         ), {"id": row_id})
         block = self._block(measure.run()[0], row_id)
         assert block[2] == "  Federal income tax: $151.00 then, $150.00 on the stub  DIFFERS"
+
+    def test_two_reads_of_one_stub_that_disagree_stop_it_naming_the_stub(
+        self, db, earnings, monkeypatch,
+    ):
+        """The app's read finding no stub where the migration's found one: an error naming it.
+
+        The two reads agree on any database, so the disagreement is made: the
+        app's ``stub_on`` answers ``None`` for the world's stub.  Unchecked, the
+        measure would stop on an ``AttributeError`` inside ``figures_of``,
+        naming no stub.
+        """
+        _run(db.session, "downgrade")
+        _insert_calibration(db.session, earnings["profile"].id, PAYDAY)
+        monkeypatch.setattr(measure.pay_stub_service, "stub_on", lambda _profile, _day: None)
+        named = (
+            "The migration's stub_taxes found a pay stub on 2026-03-27 for salary "
+            f"profile {earnings['profile'].id}, and the app's pay_stub_service.stub_on "
+            "finds none"
+        )
+        with pytest.raises(RuntimeError, match=re.escape(named)):
+            measure.run()
 
     def test_it_only_reads(self, db, earnings):
         """Every statement the measure sends is a read: a SELECT, or the collector's WITH."""
@@ -668,17 +735,26 @@ class TestTheRehearsalMeasure:
         assert sent
         assert set(sent) <= {"SELECT", "WITH"}
 
-    def test_it_imports_with_no_test_package(self):
-        """It imports under production's pins, which hold no ``pytest``: the kit runs it so.
+    def test_it_loads_no_distribution_only_the_dev_pins_hold(self):
+        """Loaded by path in a fresh interpreter, it loads no distribution only the dev pins hold.
 
-        A fresh interpreter with ``pytest`` made unimportable imports the
-        measure; one that pulled in ``tests._test_helpers`` would fail.
+        The kit runs it under a venv of ``requirements.txt`` and the
+        ``time-machine`` pin, and production's image holds only the first.  The
+        measure is loaded by its path (``runpy``), never through the ``tests``
+        package, whose helpers import ``pytest``; each module it then holds is
+        mapped to its distribution.  A distribution neither file pins (a pin's
+        own dependency) is not graded.
         """
-        imported = subprocess.run(
-            [sys.executable, "-c",
-             "import sys; sys.modules['pytest'] = None; "
-             "import tests.manual.measure_s11d_old_calibrations"],
-            cwd=pathlib.Path(__file__).resolve().parents[2],
-            capture_output=True, text=True, check=False,
+        dev_only = _pins("requirements-dev.txt") - _pins("requirements.txt")
+        loaded = subprocess.run(
+            [sys.executable, "-c", _LOADED_DISTRIBUTIONS, measure.__file__],
+            cwd=_REPO, capture_output=True, text=True, check=False,
         )
-        assert imported.returncode == 0, imported.stderr
+        assert loaded.returncode == 0, loaded.stderr
+        distributions = {
+            canonicalize_name(name) for name in json.loads(loaded.stdout.splitlines()[-1])
+        }
+        # Neither side can be read empty, so the last assertion cannot pass vacuously.
+        assert {"pytest", "time-machine"} <= dev_only
+        assert {"flask", "sqlalchemy"} <= distributions
+        assert not distributions & dev_only

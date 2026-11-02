@@ -267,6 +267,10 @@ Header "Release ok". The question lists, in plain words with each id after its w
   the question holds (the lock's first release adds every package), say how many of each file and
   that `production.txt` lists each. A change moving pinned versions alone lands with no card (ruling
   plan#2351), so no card above names it;
+- each card the release carries that `docs/runbook.md` 2.6 holds host steps for, in plain words:
+  what they change on the host, and that `shekel-deploy`'s own rollback cannot undo them; and each
+  host copy in 2.5's table that `production.txt` lists and no such step copies, which the deploy
+  leaves as it is on the host (finding plan#2567);
 - each kit's verdict, or that nothing needed rehearsal.
 
 Options: "Approve this release" or "Not now". "Not now" merges nothing (step 0's early end).
@@ -447,6 +451,15 @@ record says so, and the next `/release` stops at step 1 until this one resumes h
 
 ## 11. Deploy, verify, read main's CI
 
+**Host steps first.** `shekel-deploy` re-pins the image and nothing else, and its rollback restores
+the image alone. For each card the release carries that `docs/runbook.md` 2.6 holds host steps for,
+run them as 2.6 orders them around the block below, each block a call of its own opening with the
+source line, its output into `$R/host_<card>_<step>.txt`, and append the snapshot path a step prints
+for its rollback to `current.sh` as `HS`. A step, deploy or verify that fails after them is never
+answered by running `shekel-deploy` again: run their rollback only where 2.6 says it applies, then
+STOP and tell Josh, as for any rolled-back release; where 2.6 says it does not apply, STOP and ask
+Josh, with the ways out 2.6 names, before anything else.
+
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
 : "${R:?}" "${C:?}"
@@ -498,10 +511,12 @@ With kits, the guard names `"${KITS:?}"` too, and each directory gets a `--kit` 
 
 `$R/README.md`: the base (production's commit), the cut, the release branch, the PR, the merge
 sha, the resync PR and its merge sha (`RS`, `RM`), the image digest old -> new, the dry run's
-stamp, the dump's path, and each verdict with its exit (plan, each kit, the checks, each queue run,
-the build, the dry run, the deploy, verify, main's CI, the census); a run that ended early says
+stamp, the dump's path, the host steps run and their snapshot (`HS`), and each verdict with its exit
+(plan, each kit, the checks, each queue run, the build, each host step, the dry run, the deploy,
+verify, main's CI, the census); a run that ended early says
 where and why, and names what it left open. Beside it: `plan.txt`, `production.txt`, `dump.txt`,
-`dump_err.txt` and `rehearsal.txt` (when rehearsed), `checks_<PR>.txt`, `checks_<RS>.txt`, each
+`dump_err.txt` and `rehearsal.txt` (when rehearsed), each `host_<card>_<step>.txt`,
+`checks_<PR>.txt`, `checks_<RS>.txt`, each
 `queue_<run>.txt`, `build_<run>.txt`, `build_log_<run>.txt`, `dryrun.txt`, `deploy_since.txt`,
 `deploy.txt`, `verify.txt`, `main_ci_<run>.txt`, `cleanup.txt`.
 

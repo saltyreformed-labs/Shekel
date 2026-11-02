@@ -17,12 +17,16 @@
 # pipeline incl. the audit-trigger boot gate, least-privilege
 # shekel_app role, valkey-backed fail-closed rate limiting, hardened
 # read-only rootfs) with live reload via the source bind mount:
-#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml up -d --remove-orphans
 #   docker logs -f shekel-dev-app
+# --remove-orphans removes a container whose service this file no
+# longer names before the new services start: the shekel-dev-redis
+# that Valkey replaced held 127.0.0.1:6379, the port the valkey
+# service binds, and compose only warns about an orphan without it.
 #
 # Fallback (host flask run -- supported, intentionally NOT prod
 # parity: owner-role DB access, no entrypoint pipeline):
-#   1. docker compose -f docker-compose.dev.yml up -d db valkey
+#   1. docker compose -f docker-compose.dev.yml up -d --remove-orphans db valkey
 #   2. flask run    (connects to containerized Postgres; reads
 #      RATELIMIT_STORAGE_URI from .flaskenv, so the limiter is
 #      fail-closed against the valkey service -- starting db alone

@@ -168,10 +168,12 @@ services:
     # escape from a sibling) gets network access to Valkey, and the ACL
     # limits what that pivot can do.  The users and the commands each
     # may run are deploy/valkey/users.acl, the ONE home of those rules
-    # (ruling plan#2350), which the dev compose file and the production
-    # override mount too.  start.sh adds the shekel user's password to
-    # them as its hash, from VALKEY_PASSWORD below, and starts the
-    # server.
+    # (ruling plan#2350).  The bind below is relative to this file, so
+    # production, running from /opt/docker/shekel, reads its HOST COPY
+    # of deploy/valkey/ (docs/runbook.md 2.5), and every stack reads the
+    # rules when this container starts: a changed copy is live once it
+    # restarts.  start.sh adds the shekel user's password to them as its
+    # hash, from VALKEY_PASSWORD below, and starts the server.
     command: ["sh", "/etc/valkey/start.sh"]
     volumes:
       # create_host_path: false makes a missing directory (a production

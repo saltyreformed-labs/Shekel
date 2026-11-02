@@ -1,7 +1,11 @@
 # Valkey's users and the commands each may run: the ONE home of these rules
-# (ruling plan#2350).  The bundled compose file, the dev compose file and
-# production's override all mount this file, and the real-store test runs the
-# pinned Valkey image under it.  deploy/valkey/start.sh reads it at boot: it
+# (ruling plan#2350).  Each compose file binds ./deploy/valkey beside it, so
+# a stack reads the copy in its own directory: dev, the checkout's; bundled
+# mode, the one the README's Quick Start downloads; production, the host copy
+# /opt/docker/shekel/deploy/valkey/ (docs/runbook.md 2.5).  A stack reads it
+# when its valkey container starts, so a changed copy is live only once that
+# container restarts.  The real-store test runs the pinned Valkey image under
+# this file.  deploy/valkey/start.sh reads it at boot: it
 # drops these comment lines, which Valkey's ACL file format refuses, and adds
 # the shekel user's password as its SHA-256 hash from the password each
 # compose file hands the container (start.sh says how), so no password is

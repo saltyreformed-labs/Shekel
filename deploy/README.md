@@ -130,7 +130,9 @@ truth.
    git pull --ff-only
    sudo cp deploy/nginx-shared/nginx.conf            /opt/docker/nginx/nginx.conf
    sudo cp deploy/nginx-shared/conf.d/shekel.conf    /opt/docker/nginx/conf.d/shekel.conf
+   sudo cp docker-compose.yml                        /opt/docker/shekel/docker-compose.yml
    sudo cp deploy/docker-compose.prod.yml            /opt/docker/shekel/docker-compose.override.yml
+   sudo cp deploy/valkey/users.acl deploy/valkey/start.sh /opt/docker/shekel/deploy/valkey/
    ```
 
 3. Validate the Nginx config before reloading:
@@ -145,12 +147,17 @@ truth.
    sudo docker exec nginx nginx -s reload
    ```
 
-5. If only the compose override changed, recreate the affected containers:
+5. If a compose file or `deploy/valkey/` changed, recreate the affected containers. Valkey reads its
+   rules when it starts, and a rules change alters no compose setting, so restart it by name:
 
    ```bash
    cd /opt/docker/shekel
    docker compose up -d
+   docker compose up -d --force-recreate valkey   # when deploy/valkey/ changed
    ```
+
+A change that needs more than a copy (a renamed `.env` variable, a new file under `secrets/`)
+carries host steps of its own, in `docs/runbook.md` 2.6, which `/release` runs.
 
 See `docs/runbook.md` -> "Shared-mode deployment" for full details including the rollback procedure
 and the planned `scripts/config_audit.py` drift check.

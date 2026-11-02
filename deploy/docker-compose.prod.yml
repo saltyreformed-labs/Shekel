@@ -383,7 +383,8 @@ services:
   # environment (``docker inspect``) holds no password: start.sh reads
   # the file when one is mounted, as entrypoint.sh's _load_secret does.
   # Everything else is the base file's: the rules (deploy/valkey/
-  # users.acl, their one home, ruling plan#2350), start.sh, which
+  # users.acl, their one home, ruling plan#2350, read here from the
+  # host copy /opt/docker/shekel/deploy/valkey/), start.sh, which
   # hashes this file's password into them, and the server flags.
   #
   # Two homes until plan#2168: the app's RATELIMIT_STORAGE_URI still
@@ -391,12 +392,10 @@ services:
   # and this file must hold the same password.  plan#2168 moves the app
   # onto a secret file and deletes the .env copy.
   #
-  # Operator pre-flight (one-time): write the password file --
-  #   (umask 027 && printf '%s' "$SHEKEL_VALKEY_PASSWORD" \
-  #       > /opt/docker/shekel/secrets/valkey_password)
-  #   chmod 0640 /opt/docker/shekel/secrets/valkey_password
-  # and copy the repository's deploy/valkey/ directory to
-  # /opt/docker/shekel/deploy/valkey/, which the base file mounts.
+  # The password file, 0640, and the host copy of deploy/valkey/ are
+  # made by scripts/reconcile_prod_to_canonical.sh (steps 3 and 7) on a
+  # fresh host, and by the Valkey cutover (docs/runbook.md 2.6) on the
+  # host that ran Redis.
   # Mode rationale: compose v2 ignores the uid/gid/mode fields on a file
   # secret's reference; the container sees the HOST file.  The valkey
   # image runs as uid 999 gid 1000, and gid 1000 is the operating

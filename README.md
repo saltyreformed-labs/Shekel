@@ -8,7 +8,7 @@ paycheck and projecting balances forward over a ~2-year horizon.
 
 **Two ways to run Shekel:**
 
-- **Docker (recommended):** Download two files, create a volume, run `docker compose up`. No Python
+- **Docker (recommended):** Download five files, create a volume, run `docker compose up`. No Python
   or PostgreSQL install needed. See [Quick Start (Docker)](#quick-start-docker).
 - **From source:** Clone the repo, set up Python, use Docker for databases. See
   [Developer Setup (from source)](#developer-setup-from-source).
@@ -29,10 +29,12 @@ docker compose version
 ### 2. Download Configuration Files
 
 ```bash
-mkdir -p shekel/deploy/nginx-bundled && cd shekel
+mkdir -p shekel/deploy/nginx-bundled shekel/deploy/valkey && cd shekel
 curl -O https://raw.githubusercontent.com/saltyreformed-labs/Shekel/main/docker-compose.yml
 curl -O https://raw.githubusercontent.com/saltyreformed-labs/Shekel/main/.env.example
 curl -o deploy/nginx-bundled/nginx.conf https://raw.githubusercontent.com/saltyreformed-labs/Shekel/main/deploy/nginx-bundled/nginx.conf
+curl -o deploy/valkey/users.acl https://raw.githubusercontent.com/saltyreformed-labs/Shekel/main/deploy/valkey/users.acl
+curl -o deploy/valkey/start.sh https://raw.githubusercontent.com/saltyreformed-labs/Shekel/main/deploy/valkey/start.sh
 cp .env.example .env
 ```
 
@@ -44,11 +46,13 @@ Edit `.env` and set these values:
 |---|---|---|
 | `POSTGRES_PASSWORD` | Yes | Choose a strong database password. |
 | `SECRET_KEY` | Yes | Run `openssl rand -hex 32` and paste the output. |
+| `APP_ROLE_PASSWORD` | Yes | The app's least-privilege database role. Run `openssl rand -hex 24` and paste the output. |
+| `SHEKEL_VALKEY_PASSWORD` | Yes | The rate limiter's store. Run `openssl rand -hex 24` and paste the output. |
 | `TOTP_ENCRYPTION_KEY` | No | Required before enabling MFA/TOTP. See [MFA Setup](#mfa-setup). |
 | `REGISTRATION_ENABLED` | No | Set to `true` to enable the `/register` endpoint. Default in production: `false` (see [Security](#security)). |
-| `SEED_USER_EMAIL` | No | Login email. Default: `admin@shekel.local`. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
-| `SEED_USER_PASSWORD` | No | Login password (min 12 characters). Default: `ChangeMe!2026`. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
-| `SEED_USER_LAST_PAYDAY` | Only with `SEED_USER_EMAIL` | The day the seeded owner was last paid, ISO `YYYY-MM-DD`. No default -- Shekel budgets by paycheck and will not invent one. Must fall within one pay cadence of the first boot. |
+| `SEED_USER_EMAIL` | No | Login email, `admin@shekel.local` in `.env.example`. While it is set, the first boot creates this user and the two rows below are required. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
+| `SEED_USER_PASSWORD` | With `SEED_USER_EMAIL` | Login password, at least 12 characters. The app refuses to start with `.env.example`'s `ChangeMe!2026`. **Remove from `.env` after the first successful boot** (see [Security](#security)). |
+| `SEED_USER_LAST_PAYDAY` | With `SEED_USER_EMAIL` | The day the seeded owner was last paid, ISO `YYYY-MM-DD`. No default -- Shekel budgets by paycheck and will not invent one. Must fall within one pay cadence of the first boot. |
 | `SEED_USER_CADENCE_DAYS` | No | Days between the seeded owner's paydays. Default: `14`. |
 | `SEED_USER_NUM_PERIODS` | No | How many pay periods to generate ahead. Default: `52`. |
 
@@ -73,8 +77,8 @@ Look for `=== Starting Application ===` to confirm the app is running.
 
 ### 5. Log In
 
-Open <http://localhost> and log in with the credentials from your `.env` file (or the defaults
-above).
+Open <http://localhost> and log in with `SEED_USER_EMAIL` and `SEED_USER_PASSWORD` from your `.env`
+file.
 
 ### 6. First-Time Setup in the App
 

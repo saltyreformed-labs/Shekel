@@ -458,12 +458,15 @@ F-020/F-129 closed in Commit C-33). The version-controlled copies of the runtime
 
 | Repo path | Runtime path on the host |
 |-----------|--------------------------|
+| `docker-compose.yml` | `/opt/docker/shekel/docker-compose.yml` |
 | `deploy/docker-compose.prod.yml` | `/opt/docker/shekel/docker-compose.override.yml` |
+| `deploy/valkey/` (`users.acl`, `start.sh`) | `/opt/docker/shekel/deploy/valkey/` |
 | `deploy/nginx-shared/nginx.conf` | `/opt/docker/nginx/nginx.conf` |
 | `deploy/nginx-shared/conf.d/shekel.conf` | `/opt/docker/nginx/conf.d/shekel.conf` |
 
 The repo is the source of truth. The on-host copies must match byte-for-byte; drift between them is
-a deployment-integrity bug (security-2026-04-15 finding F-021).
+a deployment-integrity bug (security-2026-04-15 finding F-021). `shekel-deploy` copies none of them:
+a release that changes one runs its host steps (2.6).
 
 #### Bringing up shared mode (first-time)
 
@@ -564,7 +567,9 @@ C-49). Until that lands, verify manually:
 ```bash
 diff -u /opt/shekel/deploy/nginx-shared/nginx.conf            /opt/docker/nginx/nginx.conf
 diff -u /opt/shekel/deploy/nginx-shared/conf.d/shekel.conf    /opt/docker/nginx/conf.d/shekel.conf
+diff -u /opt/shekel/docker-compose.yml                        /opt/docker/shekel/docker-compose.yml
 diff -u /opt/shekel/deploy/docker-compose.prod.yml            /opt/docker/shekel/docker-compose.override.yml
+diff -ru /opt/shekel/deploy/valkey                            /opt/docker/shekel/deploy/valkey
 ```
 
 Any non-empty diff is an incident: investigate before re-syncing, because the host change may carry
@@ -575,7 +580,9 @@ an undocumented production fix that must be brought into the repo first.
 `scripts/reconcile_prod_to_canonical.sh` bundles the seven host-side steps that bring a drifted
 `/opt/docker/shekel/` runtime back to the repo's canonical state. Use this when the host has
 diverged substantially (multiple files, secrets directory missing, network attachment wrong) or to
-bootstrap a fresh shared-mode deployment from a host that previously ran bundled-mode.
+bootstrap a fresh shared-mode deployment from a host that previously ran bundled-mode. It reads
+`SHEKEL_VALKEY_PASSWORD` from `.env` and stops at step 3 without it, so on a host from before the
+Valkey switch, whose `.env` names `SHEKEL_REDIS_PASSWORD`, rename that variable first.
 
 ```bash
 # On the host, from the repo root:
@@ -667,6 +674,139 @@ docker logs shekel-prod-app 2>&1 | grep '^Loaded '            # → 4 lines, one
 curl -sI https://shekel.saltyreformed.com/login | head -5     # → 200 + sec headers
 docker exec jellyfin bash -c 'getent hosts shekel-prod-app'   # → fails (isolation confirmed)
 ```
+
+### 2.6 Host Steps a Release Carries
+
+`shekel-deploy` changes one thing in production, the image pin, and its automatic rollback re-pins
+the previous image onto whatever host files are in place. It copies none of 2.5's host copies and
+writes nothing under `/opt/docker/shekel/secrets/`. A card whose change needs the host changed too
+writes the steps here, one subsection naming the card, each with its rollback and what was measured;
+`/release` runs them at its step 11 for each card the release carries, after the developer's "Logged
+out, deploy now", from `~/projects/Shekel` at `main`. Once production runs a card, its subsection is
+history, and the next change to this section deletes it.
+
+#### The Valkey switch (plan#1183)
+
+The release carrying plan#1183 moves the rate limiter's store from Redis to Valkey (R-BAL298). The
+image and the host files must move together, and only the steps below move them back:
+
+- The new image installs `valkey`, not `redis`, so on the host's `redis://` files it dies at boot
+  (`limits.errors.ConfigurationError: 'redis' prerequisite not available`), and `shekel-deploy`'s
+  rollback restores the old image, healthy.
+- The old image installs `redis`, not `valkey`, so once the host files say `valkey://` it dies the
+  same way (`'valkey' prerequisite not available`). After step 1, `shekel-deploy`'s own rollback
+  cannot recover: it ends `rollback container also unhealthy`, or, when compose could not start the
+  new service at all, `revert compose up also failed` (whose alert still says it reverted). Step 3
+  restores files and image together.
+- `/health` is exempt from the limiter, so a store fault only limited routes meet (a missing grant,
+  a password the store does not hold) passes `shekel-deploy`'s health wait:
+  `verify_prod_deploy.sh`'s `GET /login` is this release's gate.
+
+**1. Host steps**, before `shekel-deploy`, in one call. The rename comes first: everything after it
+reads `SHEKEL_VALKEY_PASSWORD`.
+
+```bash
+P=/opt/docker/shekel; Q=~/projects/Shekel
+S="$P/.valkey-cutover-$(date +%Y%m%d-%H%M%S)"
+[ "$(grep -c '^SHEKEL_REDIS_PASSWORD=' "$P/.env")" = 1 ] && [ ! -e "$P/secrets/valkey_password" ] \
+    && install -d -m 0700 "$S" \
+    && cp -p "$P/.env" "$P/docker-compose.yml" "$P/docker-compose.override.yml" "$P/secrets/redis_users.acl" "$S/" \
+    && echo "snapshot=$S" \
+    && sed -i 's/^SHEKEL_REDIS_PASSWORD=/SHEKEL_VALKEY_PASSWORD=/' "$P/.env" \
+    && (umask 027 && sed -n 's/^SHEKEL_VALKEY_PASSWORD=//p' "$P/.env" | tr -d '\n' > "$P/secrets/valkey_password") \
+    && [ -s "$P/secrets/valkey_password" ] \
+    && install -d -m 0755 "$P/deploy/valkey" \
+    && install -m 0644 "$Q/deploy/valkey/users.acl" "$Q/deploy/valkey/start.sh" "$P/deploy/valkey/" \
+    && install -m 0644 "$Q/docker-compose.yml" "$P/docker-compose.yml" \
+    && install -m 0644 "$Q/deploy/docker-compose.prod.yml" "$P/docker-compose.override.yml" \
+    && (cd "$P" && docker compose config -q); echo "exit=$?"
+```
+
+It writes nothing unless `.env` names `SHEKEL_REDIS_PASSWORD` once and no password file exists yet.
+It snapshots what it replaces into `$S` (0700) and prints `snapshot=$S`: `.env`, holding the old
+pin, both compose files, and the Redis ACL file step 4 deletes. Then it renames the variable, writes
+`secrets/valkey_password` from the bytes `.env` holds (0640: `deploy/docker-compose.prod.yml` says
+why), copies `deploy/valkey/` and both compose files in from `main`, and has compose parse the
+result. No container changes until compose recreates one. Exit 0 goes on to step 2. Any other exit
+is a STOP: with no `snapshot=` line nothing was written; with one, step 3 puts the files back first.
+
+**2. Deploy and verify**, as every release does (`/release` step 11). `shekel-deploy` creates the
+`valkey` service as the app's dependency and recreates the app; `shekel-prod-redis` stays up, unused
+(compose warns `Found orphan containers`), for step 3. Exit 0 and `VERIFY OK` go on to step 4.
+Anything else goes to step 3 only where step 3 applies, and is otherwise a STOP for the developer.
+
+**3. Rollback**, only while the old image can read the database's schema: `shekel-deploy` failed
+without printing `rollback REFUSED`, or it printed `deploy OK` for a release whose dry run read
+`the target adds no migrations`. After `deploy OK` on a release that adds migrations, entrypoint
+step 3 has committed them, and the old image would crash-loop on `Can't locate revision`; that, and
+`rollback REFUSED`, are a STOP for the developer, with two ways out: forward, by correcting what
+`verify_prod_deploy.sh` found (a fault in the host's ACL copy is corrected there, then
+`docker compose up -d --force-recreate valkey`, since Valkey reads its rules when it starts), or
+back, by 2.3's restore through its step 4 and then this step in place of 2.3's step 5. The snapshot
+serves until the next deploy rewrites the pin. With step 1's snapshot path:
+
+```bash
+P=/opt/docker/shekel; S=<step 1's snapshot path>
+[ -s "$S/.env" ] \
+    && cp -p "$S/.env" "$S/docker-compose.yml" "$S/docker-compose.override.yml" "$P/" \
+    && { [ -e "$P/secrets/redis_users.acl" ] || cp -p "$S/redis_users.acl" "$P/secrets/"; } \
+    && (cd "$P" && docker compose config -q && docker compose up -d --wait --remove-orphans); echo "exit=$?"
+```
+
+It puts back the old pin, the old variable and both compose files, recreates the app on the old
+image against Redis (recreating Redis from the snapshot's ACL file when step 4 already removed it),
+and removes the Valkey container; the database container keeps running. Then `verify_prod_deploy.sh`
+must print `VERIFY OK`, and the files step 1 added go:
+`rm -r "$P/deploy/valkey" "$P/secrets/valkey_password"`. Production is then behind `main`, as after
+any rolled-back release.
+
+**4. After `VERIFY OK`**, remove Redis and its ACL file:
+
+```bash
+P=/opt/docker/shekel
+(cd "$P" && docker compose up -d --wait --remove-orphans) && rm "$P/secrets/redis_users.acl"; echo "exit=$?"
+```
+
+Compose recreates nothing here, as every service already matches the files; it removes
+`shekel-prod-redis`. Step 3 still works after this step. The snapshot holds a copy of `.env`, the
+store's password with it, so the release's last act removes it (`rm -r "$S"`); an undo after that is
+a revert of plan#1183, released with host steps of its own.
+
+**5. The dev stack.** `~/projects/Shekel` holds the switch once `/release` step 8 brings it to
+`main`, and there the dev compose file names `valkey` while `shekel-dev-redis` still holds
+`127.0.0.1:6379`, so the new service cannot bind the port until the old one goes. The start commands
+in the dev compose file's header carry `--remove-orphans`, which removes it first:
+
+```bash
+cd ~/projects/Shekel && docker compose -f docker-compose.dev.yml up -d --remove-orphans valkey; echo "exit=$?"
+```
+
+Between plan#1183's landing in `dev` and its release, the dev stack runs `main`'s Redis, and a dev
+app started from a `dev` worktree names a `valkey` host that nothing serves: its rate-limited routes
+fail until the release.
+
+**Measured 2026-11-01** on a throwaway stack on the rootless daemon: `main`'s two compose files
+(`fc9dcfba7`, the files production holds) and production's image `506313c73408`, then the files and
+an image built from this card at `d03c5077c`, both images by digest from a local registry; its
+`shekel-deploy.sh`, unchanged, aimed at the stack by its own overrides; the blocks above verbatim
+but for `P` and `Q`, and a third compose file pointing the secrets and the app's registry at the
+rehearsal. The new image on the old files died and `shekel-deploy` rolled it back, healthy. Step 1
+then exited 0, step 2 gave `deploy OK` and `VERIFY OK`, and `GET /login` counted down in Valkey. The
+old image on the new files died and `shekel-deploy` could only roll forward. Step 3 gave `VERIFY OK`
+on the old image with Redis, both with Redis still running and after step 4 had removed it. Step 4
+recreated nothing and removed Redis. With `+lpush` taken out of the host's ACL copy, `shekel-deploy`
+printed `deploy OK` and `verify_prod_deploy.sh` `FAIL /login -> 500`; step 3 then gave `VERIFY OK`.
+In a separate project, a service renamed onto a published port failed to bind beside its orphan, and
+`up -d --remove-orphans <service>` removed the orphan first and left the other service running.
+Where the rehearsal differs: its secrets were 0644, because the rootless daemon maps uids, so a 0640
+file is not group-readable to a container there (production's gid-1000 read is the one
+`shekel-prod-redis` makes of `redis_users.acl` today, and the Valkey image's `valkey` user is uid
+999 gid 1000); its Redis was the `redis:7.4-alpine` tag's build there, not production's
+`8da19c7399dc`; `shekel-deploy` ran with `--no-verify`, as no local image carries a signature, and a
+120 s health wait; its compose files were named by `COMPOSE_FILE`; the release it rehearsed added no
+migration, so step 3's migration case was not run; and no run took `shekel-deploy`'s compose-failure
+path. Block 1's `snapshot=` line moved inside its chain after the rehearsal, at the review's word;
+its new form was run on the stack's files once refused and once through.
 
 ---
 

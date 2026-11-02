@@ -55,7 +55,7 @@ the others), and a downgrade that chose would delete terms the owner stated.
 Self-contained dependency policy: this migration imports nothing from ``app``.
 
 Revision ID: 0703995c8536
-Revises: 69634349bdce
+Revises: 858f569b2c17
 Create Date: 2026-11-02
 """
 from alembic import op
@@ -64,11 +64,14 @@ import sqlalchemy as sa
 
 # Revision identifiers, used by Alembic.
 revision = '0703995c8536'
-# The head of ``dev`` at authoring, measured (222 revisions, one head).
-# Another lane landing a revision first makes two heads, which git merges
-# cleanly and ``flask db upgrade`` refuses: re-point this at the measured head
-# as the last edit before the pull request.
-down_revision = '69634349bdce'
+# The head of ``dev`` at ``bb637cafe``, measured on this branch after its merge
+# (224 revisions, one head, by alembic.script.ScriptDirectory).  It was
+# ``69634349bdce`` at authoring, until PR #641 landed ``858f569b2c17`` on it
+# first and the merge queue refused this card's two heads.  Another lane
+# landing a revision first makes two heads, which git merges cleanly and
+# ``flask db upgrade`` refuses: re-point this at the measured head as the last
+# edit before the pull request.
+down_revision = '858f569b2c17'
 branch_labels = None
 depends_on = None
 

@@ -11,7 +11,9 @@ the version already on that date (**R-CC27**'s set-by-date shape, the APR's)
 it stands.  A second door REMOVES a version (developer ruling **plan#2587**),
 the fix a mistyped date needs, and refuses the card's only one.  Both are
 redirect-style POST handlers that flash and return to the cash detail page
-hosting the form (**R-CC25**).
+hosting the form (**R-CC25**).  A third, a GET, fills that form from one
+version, its date included, so a correction states that version's own terms
+rather than the ones in force today (plan#2331's review, plan#2576).
 
 The writes are :mod:`app.services.card_terms`'s; the transaction is this
 module's.
@@ -19,7 +21,7 @@ module's.
 
 import logging
 
-from flask import Response, abort, flash
+from flask import Response, abort, flash, render_template, request
 
 from app.exceptions import CardTermsRemovalRefused
 from app.extensions import db
@@ -75,6 +77,42 @@ def save_terms(account_id):
     )
     flash("Card terms saved.", "success")
     return back.to_response()
+
+
+@card_bp.route("/accounts/<int:account_id>/card/terms/<int:row_id>/edit")
+@require_owner
+def edit_terms(account_id, row_id):
+    """HTMX partial: the terms form filled from one version, to correct it.
+
+    The page fills its form from the version in force TODAY, and a save on a
+    date already listed rewrites every term of that version (ruling
+    **plan#2587**: "Saving the same date again corrects an entry's terms").
+    So an older version corrected from the page would take today's terms
+    for every control the owner did not retype.  Each version's Edit button
+    swaps this fragment in instead: the same form
+    (``accounts/_card_terms_form.html``), filled with THAT version's seven
+    terms and its date, so a save on that date corrects only what the owner
+    changed, and a save on another date adds a version starting from them.
+
+    Gated by :func:`~app.routes.card._helpers.load_card_or_404` (404 for
+    not-found, not-yours and not-a-card alike); the version is found among
+    the card's own (:func:`~app.services.card_terms.version_with_id`), so
+    another account's row, and every row of a dormant card, is 404 too.  A
+    request without HTMX is sent to the page, as the cash detail band's
+    fragment does: this is a piece of that page, not a page.
+    """
+    if not request.headers.get("HX-Request"):
+        return back_to_card(account_id).to_response()
+    account = load_card_or_404(account_id)
+    version = card_terms.version_with_id(
+        card_terms.load_card_term_versions(account.id), row_id,
+    )
+    if version is None:
+        abort(404)
+    return render_template(
+        "accounts/_card_terms_form.html",
+        account=account, form_terms=version, editing=True,
+    )
 
 
 @card_bp.route(

@@ -37,7 +37,15 @@ it names.  What is pinned:
   dormant card are each 404, paired with this card's row routing; and two
   tabs each removing one of the card's two versions, raced as two real
   requests, leave one -- the second waits on the owner's write lock, counts
-  after the first commits, and is refused in words.
+  after the first commits, and is refused in words;
+* the edit fragment (plan#2331's review, plan#2576): each version's Edit
+  button fetches the form filled from THAT version and its date, so the
+  review's worked example -- January's floor corrected while March's terms
+  are in force today -- posted exactly as the fragment's form emits it,
+  changes January's floor and nothing else; a request without HTMX is sent
+  to the page; another owner's card, another owner's row named through this
+  card, a checking account and a dormant card are each 404, paired with
+  this card's row serving.
 """
 
 import html
@@ -707,3 +715,194 @@ class TestTwoTabsRemovingBothVersions:
             assert [r.id for r in _terms_of(account)] == [march]
             assert "Card terms removed." in _page(one, account)
             assert _ONLY_MARCH_REFUSED in _page(two, account)
+
+
+def _edit(client, account_id, row_id, htmx=True):
+    """GET the Edit fragment of terms version *row_id* on card *account_id*."""
+    headers = {"HX-Request": "true"} if htmx else {}
+    return client.get(
+        f"/accounts/{account_id}/card/terms/{row_id}/edit", headers=headers,
+    )
+
+
+def _emitted_form(fragment):
+    """Every control the fragment's one form submits: name to value.
+
+    Read off each ``<input>`` tag of the form, its ``value`` decoded and an
+    absent one read as empty, so a POST built from this is the browser's
+    submit and not a hand-picked payload.
+    """
+    form = fragment.split("<form", 1)[1].split("</form>", 1)[0]
+    controls = {}
+    for tag in re.findall(r"<input\b[^>]*>", form):
+        name = re.search(r'name="([^"]+)"', tag)
+        value = re.search(r'value="([^"]*)"', tag)
+        controls[name.group(1)] = html.unescape(value.group(1)) if value else ""
+    return controls
+
+
+class TestTheEditFragment:
+    """Each version's Edit fills the form from that version; every other request is 404."""
+
+    def test_it_fills_the_form_from_that_version_and_its_date(
+        self, auth_client, seed_user,
+    ):
+        """January's Edit: January's seven terms and its date, and the form says so.
+
+        Also the pair for every 404 below: the same URL, this card's own row,
+        serves -- so a 404 from the URL map cannot pass for one from the gate.
+        """
+        account = _card(seed_user)
+        january, _march = _two_versions(account)
+
+        response = _edit(auth_client, account.id, january)
+
+        assert response.status_code == 200
+        fragment = html.unescape(response.data.decode())
+        assert _rendered_values(fragment) == {
+            "effective_date": "2026-01-01",
+            "statement_close_day": "20",
+            "payment_due_day": "15",
+            "min_payment_percent": "2.50",
+            "min_payment_floor": "25.00",
+            "cashback_rate": "1.50",
+            "auto_redeem_threshold": "25.00",
+            "credit_limit": "5000.00",
+        }
+        assert "Editing the terms from Jan 1, 2026." in fragment
+        assert 'id="card-terms-form"' in fragment
+
+    def test_a_correction_posted_from_it_changes_only_what_the_owner_changed(
+        self, auth_client, seed_user, seed_periods_today,
+    ):
+        """The review's example: January's floor to $30.00, March in force today.
+
+        Jan 1 (close 20th, due 15th, 2.5% / $25.00, 1.5% back) and Mar 1
+        (close 5th, due 30th, 1.0% back); today's terms, which fill the
+        page's form, are March's.  The fragment's form, posted as it renders
+        with only the floor retyped, writes January with a $30.00 floor and
+        every other term its own: still closing on the 20th and paying 1.5%,
+        so a $600.00 Feb 10 purchase keeps $9.00 back (600 x 0.015), where
+        March's 1.0% would have made it $6.00.
+        """
+        account = _card(seed_user)
+        january = _add_version(account, date(2026, 1, 1))
+        march = _add_version(
+            account, date(2026, 3, 1), statement_close_day=5,
+            payment_due_day=30, cashback_rate=Decimal("0.0100"),
+        )
+        # The page's own form starts from March's terms today, which is the
+        # state a correction from it would have written over January.
+        assert _rendered_values(_page(auth_client, account))[
+            "statement_close_day"] == "5"
+        form = _emitted_form(
+            html.unescape(_edit(auth_client, account.id, january).data.decode()),
+        )
+        assert set(form) == {"csrf_token", *_FORM}
+
+        response = auth_client.post(
+            f"/accounts/{account.id}/card/terms",
+            data={**form, "min_payment_floor": "30.00"},
+        )
+
+        assert response.status_code == 302
+        first, second = _terms_of(account)
+        assert first.id == january
+        assert {column: getattr(first, column) for column in _STORED} == {
+            **_STORED, "min_payment_floor": Decimal("30.00"),
+        }
+        assert second.id == march
+        assert (second.statement_close_day, second.payment_due_day,
+                second.cashback_rate, second.min_payment_floor) == (
+            5, 30, Decimal("0.0100"), Decimal("25.00"))
+
+    def test_without_htmx_it_sends_the_owner_to_the_page(
+        self, auth_client, seed_user,
+    ):
+        """A plain GET is a fragment fetched outside its page: redirected there."""
+        account = _card(seed_user)
+        january, _march = _two_versions(account)
+
+        response = _edit(auth_client, account.id, january, htmx=False)
+
+        assert response.status_code == 302
+        assert response.headers["Location"].endswith(
+            f"/accounts/{account.id}/details",
+        )
+
+    def test_another_owners_card_is_404(self, auth_client, second_user):
+        """The victim's card URL: refused by the gate, its terms not shown."""
+        victim = _card(second_user, name="Other Visa")
+        january, _march = _two_versions(victim)
+
+        response = _edit(auth_client, victim.id, january)
+
+        assert response.status_code == 404
+        assert b"Other Visa" not in response.data
+        assert b"Editing the terms" not in response.data
+
+    def test_another_owners_row_named_through_this_card_is_404(
+        self, auth_client, seed_user, second_user,
+    ):
+        """This card's URL, the victim's row id: not this card's, so 404."""
+        account = _card(seed_user)
+        _two_versions(account)
+        victim = _card(second_user, name="Other Visa")
+        theirs = _two_versions(victim)
+
+        response = _edit(auth_client, account.id, theirs[0])
+
+        assert response.status_code == 404
+        assert b"Editing the terms" not in response.data
+
+    def test_a_checking_account_is_404(self, auth_client, seed_user):
+        """The kind gate: a checking account's surviving version is not offered."""
+        checking = seed_user["account"]
+        january, _march = _two_versions(checking)
+
+        response = _edit(auth_client, checking.id, january)
+
+        assert response.status_code == 404
+
+    def test_a_dormant_card_is_404(self, auth_client, seed_user):
+        """No version: every row is missing for it, another card's real row included."""
+        dormant = _card(seed_user)
+        other = _card(seed_user, name="Other")
+        january, _march = _two_versions(other)
+
+        response = _edit(auth_client, dormant.id, january)
+
+        assert response.status_code == 404
+
+
+class TestThePageOffersEdit:
+    """An Edit per version, fetching its own row's fragment into the form."""
+
+    def test_each_version_has_an_edit_fetching_its_row(
+        self, auth_client, seed_user, seed_periods_today,
+    ):
+        """Newest first, each history item's Edit fetches its own row into ``#card-terms-form``."""
+        account = _card(seed_user)
+        january, march = _two_versions(account)
+
+        page = _page(auth_client, account)
+
+        history = page.split('id="card-terms-history"', 1)[1].split("</ul>", 1)[0]
+        items = history.split("<li")[1:]
+        assert re.findall(r"/card/terms/(\d+)/edit", items[0]) == [str(march)]
+        assert re.findall(r"/card/terms/(\d+)/edit", items[1]) == [str(january)]
+        assert 'hx-target="#card-terms-form"' in items[0]
+        assert "Edit the terms effective Mar 1, 2026" in items[0]
+        assert page.count('id="card-terms-form"') == 1
+        assert "Filled in with the terms in effect today." in page
+
+    def test_the_only_version_has_an_edit(
+        self, auth_client, seed_user, seed_periods_today,
+    ):
+        """One version: no Remove, but an Edit, the way to correct its terms."""
+        account = _card(seed_user)
+        only = _add_version(account, date(2026, 1, 1))
+
+        page = _page(auth_client, account)
+
+        assert re.findall(r"/card/terms/(\d+)/edit", page) == [str(only)]

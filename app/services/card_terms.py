@@ -3,8 +3,9 @@ Shekel Budget App -- The Card's Terms (a dated series)
 
 The ONE home of every read and write of ``budget.credit_card_params``
 (:class:`~app.models.credit_card_params.CreditCardParams`, plan step
-credit_card:CC-2): the terms door, the cash detail page that renders the
-terms, and the card gate a configured-card feature takes (plan step CC-3).
+credit_card:CC-2): the terms doors (save, remove, and the form that corrects
+one version), the cash detail page that renders the terms, and the card gate
+a configured-card feature takes (plan step CC-3).
 Each spelled the query itself until CC-3's review counted three; the loan
 side's :func:`~app.services.loan_loaders.load_loan_params` exists for the
 same reason.
@@ -82,6 +83,29 @@ def load_card_term_versions(account_id: int) -> list[CreditCardParams]:
     )
 
 
+def version_with_id(
+    versions: list[CreditCardParams], row_id: int,
+) -> CreditCardParams | None:
+    """Return the card's version *row_id* from *versions*, or ``None``.
+
+    Looked for among the card's OWN versions (*versions* is
+    :func:`load_card_term_versions`'s answer for the card the door gated), so
+    a row of another account -- another owner's card, or another of the
+    owner's -- is not this card's and answers ``None``, as a missing id does:
+    the door renders both as 404 (the project's "not found" and "not yours"
+    rule).  One spelling for the two doors that name a version by its id,
+    :func:`remove_terms` and the form that corrects one.
+
+    Args:
+        versions: The card's versions, in any order.
+        row_id: The ``budget.credit_card_params`` row's id, from the URL.
+
+    Returns:
+        The version, or ``None`` when the card holds none with that id.
+    """
+    return next((v for v in versions if v.id == row_id), None)
+
+
 def set_terms(
     account_id: int, user_id: int, effective_date: date, terms: dict,
 ) -> None:
@@ -125,12 +149,13 @@ def set_terms(
 def remove_terms(account_id: int, row_id: int) -> bool:
     """Delete the card's terms version *row_id*, reporting whether it was there.
 
-    The version is looked for among the card's OWN versions, so a row of
-    another account -- another owner's card, or another of the owner's --
-    is not this card's to remove, and the answer is the same ``False`` a
-    missing id gets, which the door renders as 404 (the project's "not found"
-    and "not yours" rule; :func:`app.services.card_apr.remove_apr`'s scope).
-    A dormant card holds no version, so every id is missing for it.
+    The version is looked for among the card's OWN versions
+    (:func:`version_with_id`), so a row of another account -- another owner's
+    card, or another of the owner's -- is not this card's to remove, and the
+    answer is the same ``False`` a missing id gets, which the door renders as
+    404 (the project's "not found" and "not yours" rule;
+    :func:`app.services.card_apr.remove_apr`'s scope).  A dormant card holds
+    no version, so every id is missing for it.
 
     **The card's only version is refused, not deleted** (developer ruling
     **plan#2587**; rule 4 in the module docstring).  The count and the delete
@@ -156,7 +181,7 @@ def remove_terms(account_id: int, row_id: int) -> bool:
             (nothing written).
     """
     versions = load_card_term_versions(account_id)
-    doomed = next((v for v in versions if v.id == row_id), None)
+    doomed = version_with_id(versions, row_id)
     if doomed is None:
         return False
     if len(versions) == 1:

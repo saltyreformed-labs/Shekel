@@ -370,9 +370,12 @@ def scheduling_day_of_month(rule: RecurrenceRule) -> int | None:
     # The gate and the join live in the pure leaf the occurrence walk asks
     # too (plan step pay_calendar:C18-a): one statement of "which day a
     # cadence schedules its rows on", from a rule here and from a resolved
-    # value there.
+    # value there.  No column holds a weekday reading until the storage task
+    # of plan step recurrence:R8-c adds one, so every stored rule is read by
+    # its day of the month.
     return cadence_scheduled_day(
         unit, placement, rule.starts_on, rule.nominal_day,
+        weekday_reading=None,
     )
 
 

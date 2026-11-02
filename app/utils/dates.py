@@ -9,6 +9,7 @@ only, so they import cleanly into any service or test without the app
 stack.
 """
 import calendar
+from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from typing import Protocol
 from zoneinfo import ZoneInfo
@@ -583,8 +584,32 @@ def grid_month_on_or_before(day: date, nominal_day: int) -> int:
         A month ordinal (:func:`month_ordinal`) whose ``clamped_day`` is on or
         before *day*, and whose next month's is after it.
     """
+    return month_on_or_before(
+        day, lambda ordinal: clamped_day(ordinal, nominal_day),
+    )
+
+
+def month_on_or_before(day: date, day_in: Callable[[int], date]) -> int:
+    """Return the month whose grid day is the LATEST one on or before *day*.
+
+    :func:`grid_month_on_or_before`'s comparison over ANY grid of one day a
+    month, which *day_in* lands in a month ordinal.  The clamped meant day is
+    one such grid; the recurrence walk's "third Tuesday" and "last Friday"
+    (plan step ``recurrence:R8-c``) are two more, and its stop is the last
+    month whose day is on or before the calendar's last day whichever grid it
+    walks, so the comparison is stated here once rather than per grid.
+
+    Args:
+        day: The date to place.
+        day_in: The grid's day in a month ordinal.  Its day must fall inside
+            that month, so the answer is *day*'s own month or the one before.
+
+    Returns:
+        A month ordinal whose grid day is on or before *day*, and whose next
+        month's is after it.
+    """
     ordinal = month_ordinal(day)
-    if clamped_day(ordinal, nominal_day) <= day:
+    if day_in(ordinal) <= day:
         return ordinal
     return ordinal - 1
 

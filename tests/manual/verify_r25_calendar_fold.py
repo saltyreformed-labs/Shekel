@@ -82,7 +82,7 @@ from app.services.cash_ledger import _loan_installment
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.pay_calendar import _grid
 from app.services.pay_rhythm import Monthly, SemiMonthly
-from app.services.recurrence import _months
+from app.services.recurrence import DayOfMonth, _months
 from app.utils.dates import (
     CALENDAR_DATE_MAX,
     CALENDAR_DATE_MIN,
@@ -260,7 +260,8 @@ def pure_sequences():
     for start in MONTHS[::7]:
         for nominal in NOMINAL_DAYS:
             for step in (1, 2, 3, 6, 12, 24, 120):
-                dates = list(_months.walk_months(start, nominal, step))
+                dates = list(_months.walk_months(
+                    start, DayOfMonth(nominal).date_in, step))
                 walk.add((len(dates), dates[:30], dates[-3:]))
     for digest in (installments, statements, walk):
         print(digest.line())

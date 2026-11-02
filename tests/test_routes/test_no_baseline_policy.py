@@ -105,6 +105,7 @@ import app as shekel_app_package
 from app import ref_cache
 from app.enums import WithholdingKindEnum
 from app.models.account import Account
+from app.models.credit_card_params import CreditCardParams
 from app.models.pay_stub import PayStub, PayStubWithholding
 from app.models.pension_profile import PensionProfile
 from app.models.ref import AccountType
@@ -246,6 +247,7 @@ _CONVERTER_TOKEN = re.compile(r"<(?:[^<>:]+:)?([^<>:]+)>")
 #: ``transaction_templates`` at all: repointing it at ``transfer_templates``
 #: 404s there, since that test creates none.
 _CONVERTER_ROWS = {
+    ("card", "row_id"): "card_terms",
     ("companion", "period_id"): "period",
     ("entries", "txn_id"): "transaction",
     ("retirement", "pension_id"): "pension",
@@ -419,6 +421,20 @@ def _build_baseline_less_owner(db):
         ],
     )
     db.session.add(pay_stub)
+    # A version of the card's terms (plan#2331), for
+    # ``/accounts/<int:account_id>/card/terms/<int:row_id>/edit``: constructed
+    # here as the pension and the goal are.  It makes the world's card a
+    # configured one, so the ``card`` kind reaches the card-gated doors'
+    # producers where a dormant card's 404 would measure none.  Any date in the
+    # calendar window serves: a card with one version derives the same terms on
+    # every day.  Made-up terms.
+    card_terms = CreditCardParams(
+        account_id=card.id, user_id=user.id, effective_date=anchor.start_date,
+        statement_close_day=20, payment_due_day=15,
+        min_payment_percent=Decimal("0.0200"),
+        min_payment_floor=Decimal("25.00"), cashback_rate=Decimal("0.0150"),
+    )
+    db.session.add(card_terms)
     # A PROJECTED instance of each movement kind.  Projected rather than
     # settled deliberately: a settled row carries a settle day, and the edit
     # doors this reaches (`/transactions/<id>/full-edit`,
@@ -448,6 +464,7 @@ def _build_baseline_less_owner(db):
         "period": periods[4].id,
         "salary_profile": salary_profile.id,
         "pay_stub": pay_stub.id,
+        "card_terms": card_terms.id,
         "pension": pension.id,
         "goal": goal.id,
         "transaction_template": txn_template.id,
@@ -865,9 +882,10 @@ class TestNoRouteCrashesWithoutABaseline:
         # So the axis is PINNED as a literal -- a pin is the one form that
         # cannot shrink along with what it grades.  It is NOT keyed on the
         # world's dict minus a stop-list: a set defined by SUBTRACTION claims
-        # members nobody censused, and the world hands out TEN keys that are
-        # not account kinds (`user_id`, `period`, `rent_category` and the seven
-        # rows X-be-3 added), every one of which would have to be named in the
+        # members nobody censused, and the world hands out TWELVE keys that are
+        # not account kinds (`user_id`, `period`, `rent_category`, the seven
+        # rows X-be-3 added, salary:S11-b's pay stub and plan#2331's card terms
+        # version), every one of which would have to be named in the
         # stop-list. An earlier draft of this sentence said seven, which is
         # what X-be-3 added rather than what the world holds. The containment
         # arm below keeps the pin honest against the world without inheriting

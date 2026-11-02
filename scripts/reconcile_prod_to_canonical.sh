@@ -210,10 +210,11 @@ TOTP_ENCRYPTION_KEY_OLD=
 
 # Per-app Valkey ACL user password.  Lower sensitivity than the four
 # secrets above (gates a Valkey user restricted to the limiter's own
-# commands on the LIMITS:* keys, on an internal network).  The valkey
-# service reads it from /opt/docker/shekel/secrets/valkey_password; the
-# app's RATELIMIT_STORAGE_URI still reads it here, so the two must
-# match until plan#2168.
+# commands on the LIMITS:* keys, reached only over a socket file the app
+# shares).  The valkey service reads it from
+# /opt/docker/shekel/secrets/valkey_password; the app's
+# RATELIMIT_STORAGE_URI still reads it here, so the two must match until
+# plan#2168.
 SHEKEL_VALKEY_PASSWORD=$SHEKEL_VALKEY_PASSWORD
 
 # Image digest pin.  Carried forward from the previous .env unchanged

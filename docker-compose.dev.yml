@@ -20,17 +20,20 @@
 #   docker compose -f docker-compose.dev.yml up -d --remove-orphans
 #   docker logs -f shekel-dev-app
 # --remove-orphans removes a container whose service this file no
-# longer names before the new services start: the shekel-dev-redis
-# that Valkey replaced held 127.0.0.1:6379, the port the valkey
-# service binds, and compose only warns about an orphan without it.
+# longer names, as the shekel-dev-redis that Valkey replaced; compose
+# only warns about an orphan without it.
 #
 # Fallback (host flask run -- supported, intentionally NOT prod
-# parity: owner-role DB access, no entrypoint pipeline):
-#   1. docker compose -f docker-compose.dev.yml up -d --remove-orphans db valkey
-#   2. flask run    (connects to containerized Postgres; reads
-#      RATELIMIT_STORAGE_URI from .flaskenv, so the limiter is
-#      fail-closed against the valkey service -- starting db alone
-#      would 500 every non-exempt request)
+# parity: owner-role DB access, no entrypoint pipeline, and the rate
+# limiter in memory):
+#   1. docker compose -f docker-compose.dev.yml up -d --remove-orphans db
+#   2. flask run    (connects to containerized Postgres; the limiter
+#      runs on DevConfig's default in-memory store, since the valkey
+#      service listens only on a socket in a volume host flask run
+#      cannot reach (ruling plan#2619).  A RATELIMIT_STORAGE_URI in
+#      .flaskenv or .env naming localhost:6379 names a store nothing
+#      serves, and the fail-closed limiter fails on it: delete that
+#      line)
 #
 # There is no test database here.  ``scripts/test.sh`` starts a throwaway
 # postgres container per run from the image ``scripts/build_test_db_image.py``
@@ -108,10 +111,12 @@ services:
   # to ``memory://``, and a grant production lacks fails here first.
   # The password is a committed dev-only value, consistent with the
   # other public dev credentials in this file (see the db service
-  # comment); the port is loopback-bound so host ``flask run`` can
-  # reach it but the LAN cannot.  No hardening keys beyond ``user``,
-  # matching the dev db posture (D08 hardens only the app service,
-  # whose writes are the code under test).
+  # comment).  It runs as production's does (ruling plan#2619): no
+  # network and no port, reached only over its socket file in the
+  # valkey-socket volume, which the app mounts read-only as production's
+  # does.  No hardening keys beyond ``user`` and the network, matching
+  # the dev db posture (D08 hardens only the app service, whose writes
+  # are the code under test).
   valkey:
     # The same image and digest as docker-compose.yml's valkey service;
     # bump both in the same commit, which
@@ -120,8 +125,7 @@ services:
     image: valkey/valkey:9.1.2-alpine@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11
     container_name: shekel-dev-valkey
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:6379:6379"
+    network_mode: none
     command: ["sh", "/etc/valkey/start.sh"]
     # Start as the valkey user: the image's entrypoint drops root only
     # for the command ``valkey-server``, so under ``sh start.sh`` the
@@ -134,16 +138,21 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - type: volume
+        source: valkey-socket
+        target: /run/valkey
+        volume:
+          nocopy: true
     environment:
       # The dev-only password, the same committed value the app's URI
       # below carries; start.sh hashes it into the ACL.
       VALKEY_PASSWORD: dev-only-shekel-valkey-password
     healthcheck:
-      # Same probe as prod: PING via the nopass healthcheck ACL user;
-      # ``-a ''`` forces the AUTH frame, grep makes the exit code
-      # reflect the actual response (see docker-compose.yml valkey
-      # service for the full rationale).
-      test: ["CMD-SHELL", "valkey-cli --user healthcheck -a '' --no-auth-warning ping | grep -q PONG"]
+      # Same probe as prod: PING over the socket via the nopass
+      # healthcheck ACL user; ``-a ''`` forces the AUTH frame, grep
+      # makes the exit code reflect the actual response (see
+      # docker-compose.yml valkey service for the full rationale).
+      test: ["CMD-SHELL", "valkey-cli -s /run/valkey/valkey.sock --user healthcheck -a '' --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -211,19 +220,19 @@ services:
       # file.
       IDLE_TIMEOUT_MINUTES: ${IDLE_TIMEOUT_MINUTES:-10080}
       # Rate-limit storage on the dev valkey above (parity audit
-      # 2026-06-12, finding D04).  Hardcoded rather than interpolated
-      # so the container value cannot be shadowed by the .env entry
-      # host ``flask run`` uses (which points at localhost instead of
-      # the compose service name).  NOTE the behavior change vs the
-      # old ``memory://`` default: counters now persist across the
-      # reloader's restarts, so the global default limit
-      # (``200 per hour; 30 per minute``, app/config.py) is enforced
-      # for real per client IP.  All host-originated traffic NATs to
-      # the bridge gateway and shares one bucket; an aggressive
-      # automated crawl can now meet 429s that memory:// never
-      # surfaced.  That is prod behavior -- fix the crawl rate, not
-      # the limit.
-      RATELIMIT_STORAGE_URI: valkey://shekel:dev-only-shekel-valkey-password@valkey:6379/0
+      # 2026-06-12, finding D04), over its socket in the valkey-socket
+      # volume mounted below, as production's app reaches it.
+      # Hardcoded rather than interpolated so the container value
+      # cannot be shadowed by a RATELIMIT_STORAGE_URI in .env.  NOTE
+      # the behavior change vs the old ``memory://`` default: counters
+      # now persist across the reloader's restarts, so the global
+      # default limit (``200 per hour; 30 per minute``, app/config.py)
+      # is enforced for real per client IP.  All host-originated
+      # traffic NATs to the bridge gateway and shares one bucket; an
+      # aggressive automated crawl can now meet 429s that memory://
+      # never surfaced.  That is prod behavior -- fix the crawl rate,
+      # not the limit.
+      RATELIMIT_STORAGE_URI: valkey+unix://shekel:dev-only-shekel-valkey-password@/run/valkey/valkey.sock
     ports:
       # Loopback bind for the developer's own browser plus an explicit
       # bind on the shekel-frontend bridge gateway so the operator's
@@ -242,6 +251,13 @@ services:
       # Mount source code for live reload.  Flask's reloader detects
       # file changes and restarts automatically.
       - .:/home/shekel/app
+      # Valkey's socket, read-only, as production's app mounts it.
+      - type: volume
+        source: valkey-socket
+        target: /run/valkey
+        read_only: true
+        volume:
+          nocopy: true
     # Override: use Flask dev server instead of Gunicorn.
     # The entrypoint.sh still runs (DB init, seeding), then exec's
     # this command instead of the Dockerfile CMD (gunicorn).
@@ -291,3 +307,10 @@ volumes:
   pgdata:
     external: true
     name: shekel-dev_pgdata
+  # Valkey's socket, as docker-compose.yml declares it (that file says
+  # why each option).
+  valkey-socket:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=999,gid=1000,mode=2710

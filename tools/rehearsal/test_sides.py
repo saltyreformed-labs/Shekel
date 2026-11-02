@@ -18,11 +18,12 @@ from tools.rehearsal import bench, sides
 
 
 #: The app's store as each tree's base compose file sets it, verbatim: ``main``'s before the
-#: Valkey switch (plan#2332) and the switch's own.
+#: Valkey switch (plan#2332) and the switch's own, over a socket file (ruling plan#2612).
 _REDIS_STORE = ("      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-redis://shekel:"
                 "${SHEKEL_REDIS_PASSWORD}@redis:6379/0}\n")
-_VALKEY_STORE = ("      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-valkey://shekel:"
-                 "${SHEKEL_VALKEY_PASSWORD:?Set SHEKEL_VALKEY_PASSWORD in .env}@valkey:6379/0}\n")
+_VALKEY_STORE = ("      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-valkey+unix://shekel:"
+                 "${SHEKEL_VALKEY_PASSWORD:?Set SHEKEL_VALKEY_PASSWORD in .env}"
+                 "@/run/valkey/valkey.sock}\n")
 _BASE_COMPOSE = "services:\n  app:\n    environment:\n" + _VALKEY_STORE
 
 
@@ -66,7 +67,8 @@ def test_the_side_environment_is_built_whole_from_the_side_s_tree(tmp_path, monk
         "PSYCOPG_IMPL": "c", "LC_ALL": "C.UTF-8", "TZ": "America/New_York",
         "FLASK_ENV": "production", "SECRET_KEY": "k" * 64,
         "DATABASE_URL": "postgresql:///copy",
-        "RATELIMIT_STORAGE_URI": "valkey://rehearsal.invalid:6379/0", "PYTHONHASHSEED": "0",
+        "RATELIMIT_STORAGE_URI": "valkey+unix:///rehearsal.invalid/valkey.sock",
+        "PYTHONHASHSEED": "0",
         "PYTHON_DOTENV_DISABLED": "1",
         "PATH": f"{tmp_path / 'venv' / 'bin'}{os.pathsep}/usr/bin{os.pathsep}/bin"}
 
@@ -79,15 +81,18 @@ def test_a_side_whose_compose_file_pins_no_single_timezone_is_refused(tmp_path, 
         sides.image_environment(tree)
 
 
-@pytest.mark.parametrize(("store", "scheme"), [(_REDIS_STORE, "redis"),
-                                               (_VALKEY_STORE, "valkey")])
-def test_a_side_is_given_the_store_scheme_its_own_compose_file_names(tmp_path, store, scheme):
-    """A tree before the Valkey switch is given ``redis``, one after it ``valkey``, each at
-    the host no deploy could reach: one scheme for both sides of the release that switches
-    would fail the side whose lock holds no client for it."""
+@pytest.mark.parametrize(("store", "given"), [
+    (_REDIS_STORE, "redis://rehearsal.invalid:6379/0"),
+    (_VALKEY_STORE, "valkey+unix:///rehearsal.invalid/valkey.sock"),
+])
+def test_a_side_is_given_the_store_scheme_its_own_compose_file_names(tmp_path, store, given):
+    """A tree before the Valkey switch is given ``redis``, one after it ``valkey+unix``, each
+    at an address no deploy could reach: the host, or for a scheme that reaches its store over
+    a socket file, a socket in a folder no host holds.  One scheme for both sides of the
+    release that switches would fail the side whose lock holds no client for it."""
     tree = _side(tmp_path, _DOCKERFILE, _PROD_COMPOSE,
                  "services:\n  app:\n    environment:\n" + store)
-    assert sides.limiter_uri(tree) == f"{scheme}://rehearsal.invalid:6379/0"
+    assert sides.limiter_uri(tree) == given
 
 
 @pytest.mark.parametrize(("base", "prod", "refusal"), [

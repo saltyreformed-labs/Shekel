@@ -8,11 +8,15 @@ rate-limited request would fail.  These tests run the store as production does:
 
 * The container is ``docker-compose.yml``'s ``valkey`` service as that file declares it
   (:func:`_service_args`): its image by tag and digest, its command (``sh
-  /etc/valkey/start.sh``), its user, its read-only root and tmpfs mounts, its dropped
-  capabilities, its security options and its bind of ``deploy/valkey/`` at ``/etc/valkey``.
-  Not its resource caps (a rootless daemon need not delegate the cgroup controllers they
-  use), its network (the test reaches it on a loopback port) or its healthcheck (the test
-  waits on the healthcheck user's PING itself).
+  /etc/valkey/start.sh``), its user, its network (none), its read-only root and tmpfs mounts,
+  its dropped capabilities, its security options and its bind of ``deploy/valkey/`` at
+  ``/etc/valkey``, and the test waits on its healthcheck, run in the container as docker
+  runs it.  Not its resource caps (a rootless daemon need not delegate the cgroup controllers
+  they use), and in place of its socket volume a folder of the test's own
+  (:func:`_sockets_folder`), where the test, on the host, connects to the socket at the path
+  the app's store address names (ruling plan#2612): the server listens on no network port.
+  The volume itself, as declared, is graded on its own: it admits the app's user and no
+  other.
 * The app's own limiter (Flask-Limiter on limits' moving-window strategy, BaseConfig's
   settings) drives ``/login``'s ``5 per 15 minutes`` as the ``shekel`` user: each request's
   acquire (``acquire_moving_window.lua``) and the window read behind its X-RateLimit-*
@@ -44,10 +48,11 @@ import re
 import secrets
 import shutil
 import subprocess
+import tempfile
 import time
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 import valkey
@@ -57,20 +62,55 @@ from werkzeug.test import TestResponse
 from app import create_app
 from app.extensions import db, limiter
 from tests.conftest import SEED_USER_EMAIL
-from tests.test_deploy._compose import REPO_ROOT, service
+from tests.test_deploy._compose import REPO_ROOT, service, volume
 
 pytestmark = pytest.mark.docker
 
 #: The valkey service as ``docker-compose.yml`` declares it.
 _VALKEY = service("valkey")
-#: The service's one mount: ``deploy/valkey/``, bound read-only at ``/etc/valkey``.
-(_BIND,) = _VALKEY["volumes"]
+#: The app service as ``docker-compose.yml`` declares it.
+_APP = service("app")
+#: The valkey service's two mounts: ``deploy/valkey/``, bound read-only at ``/etc/valkey``,
+#: and the volume it makes its socket in.
+(_BIND,) = [mount for mount in _VALKEY["volumes"] if mount["type"] == "bind"]
+(_SOCKETS,) = [mount for mount in _VALKEY["volumes"] if mount["type"] == "volume"]
+#: The app's mount of that volume.
+(_APP_SOCKETS,) = [mount for mount in _APP["volumes"]
+                   if isinstance(mount, dict) and mount["source"] == _SOCKETS["source"]]
+#: That volume, as the file's top-level ``volumes`` declares it.
+_SOCKET_VOLUME = volume(_SOCKETS["source"])
 #: The rules and start script the service mounts, as committed.
 _RULES = (REPO_ROOT / _BIND["source"]).resolve()
-#: Where the test reaches a server: a port published on loopback only.
-_HOST = "127.0.0.1"
-#: The port the server listens on inside its container.
-_SERVER_PORT = "6379/tcp"
+#: How the app's ``RATELIMIT_STORAGE_URI`` names the store by default: a socket file, as the
+#: ``shekel`` user, its password left to compose's interpolation.
+_APP_STORE = re.compile(r"\$\{RATELIMIT_STORAGE_URI:-valkey\+unix://shekel:\$\{[^}]+\}"
+                        r"@(?P<socket>/[^}]+)\}")
+
+
+def _app_socket() -> PurePosixPath:
+    """Where the app connects to the store: the socket its store address names, in the
+    container.
+
+    Raises:
+        AssertionError: when the app's ``RATELIMIT_STORAGE_URI`` does not name the store as
+            :data:`_APP_STORE` reads one.
+    """
+    named = _APP_STORE.fullmatch(_APP["environment"]["RATELIMIT_STORAGE_URI"])
+    assert named, f"the app names no socket: {_APP['environment']['RATELIMIT_STORAGE_URI']}"
+    return PurePosixPath(named["socket"])
+
+
+#: The app's socket, in the container, and its path inside the socket volume.
+_SOCKET = _app_socket()
+_SOCKET_NAME = _SOCKET.relative_to(_SOCKETS["target"])
+#: The service's healthcheck, a shell command docker runs in the container.
+_HEALTHCHECK_FORM, _HEALTHCHECK = _VALKEY["healthcheck"]["test"]
+#: A folder the test binds where the service mounts its socket's: anyone may write in it, so
+#: the server's user, no user on the host, may make its socket there, and its setgid bit
+#: hands the folder's group, the test's own, to the socket, so the test's user connects
+#: through the group's permission (``start.sh``'s ``--unixsocketperm``), as the app connects
+#: through the volume's group in production.  Its parent is the test's alone.
+_SOCKETS_MODE = 0o2777
 #: Where ``start.sh`` reads a mounted password file from.
 _SECRET = "/run/secrets/valkey_password"
 #: The app's user in ``users.acl``, as whom the app logs in.
@@ -91,31 +131,41 @@ def _docker(*args: str) -> subprocess.CompletedProcess[str]:
                           timeout=_DOCKER_TIMEOUT_S, check=False)
 
 
-def _service_args(name: str, rules: Path) -> list[str]:
+def _service_args(name: str, rules: Path, sockets: str, user: str = _VALKEY["user"]
+                  ) -> list[str]:
     """``docker run``'s arguments for the valkey service, named ``name``, with ``rules``
-    mounted where the service mounts ``deploy/valkey/``: each option :data:`_VALKEY` declares
-    that shapes how the server starts and as whom, then its image and command."""
+    mounted where the service mounts ``deploy/valkey/`` and ``sockets`` (a mount's type and
+    source) where it mounts its socket's volume: each option :data:`_VALKEY` declares that
+    shapes how the server starts, as whom (``user``, the declared one unless given) and where
+    it may be reached, then its image and command."""
     readonly = ",readonly" if _BIND["read_only"] else ""
-    args = ["--name", name, "--user", _VALKEY["user"],
-            "--mount", f"type=bind,source={rules},target={_BIND['target']}{readonly}"]
-    if _VALKEY["read_only"]:
-        args.append("--read-only")
+    args = ["--name", name, "--user", user, "--network", _VALKEY["network_mode"],
+            "--mount", f"type=bind,source={rules},target={_BIND['target']}{readonly}",
+            "--mount", f"{sockets},target={_SOCKETS['target']}"
+                       f"{',readonly' if _SOCKETS.get('read_only') else ''}"]
     for path in _VALKEY["tmpfs"]:
         args += ["--tmpfs", path]
-    for capability in _VALKEY["cap_drop"]:
+    return [*args, *_hardening(_VALKEY), _VALKEY["image"], *_VALKEY["command"]]
+
+
+def _hardening(declared: dict) -> list[str]:
+    """``docker run``'s arguments for what the service ``declared`` locks down: its read-only
+    root, its dropped capabilities and its security options."""
+    args = ["--read-only"] if declared["read_only"] else []
+    for capability in declared["cap_drop"]:
         args += ["--cap-drop", capability]
-    for option in _VALKEY["security_opt"]:
+    for option in declared["security_opt"]:
         args += ["--security-opt", option]
-    return [*args, _VALKEY["image"], *_VALKEY["command"]]
+    return args
 
 
 @dataclass(frozen=True)
 class _Store:
-    """A running server: its container's ``name``, the loopback port the test reaches it on,
-    and the password of its ``shekel`` user."""
+    """A running server: its container's ``name``, the socket the test reaches it at on the
+    host, and the password of its ``shekel`` user."""
 
     name: str
-    port: int
+    socket: Path
     password: str
 
     @property
@@ -125,21 +175,13 @@ class _Store:
 
     def uri_of(self, username: str, password: str) -> str:
         """The store as the app would name it logged in as ``username`` by ``password``."""
-        return f"valkey://{username}:{password}@{_HOST}:{self.port}/0"
+        return f"valkey+unix://{username}:{password}@{self.socket}"
 
     def client(self, username: str | None = None, password: str | None = None
                ) -> valkey.Valkey:
         """A client of this server, logged in as ``username`` (none: not logged in)."""
-        return valkey.Valkey(host=_HOST, port=self.port, username=username, password=password,
-                             socket_timeout=_READY_S)
-
-
-def _answers(store: _Store) -> bool:
-    """Whether the server answers its healthcheck user's PING, the compose healthcheck's test."""
-    try:
-        return store.client(username="healthcheck", password="").ping()
-    except (valkey.exceptions.ConnectionError, valkey.exceptions.TimeoutError):
-        return False
+        return valkey.Valkey(unix_socket_path=str(self.socket), username=username,
+                             password=password, socket_timeout=_READY_S)
 
 
 def _logs(name: str) -> str:
@@ -148,32 +190,53 @@ def _logs(name: str) -> str:
     return logs.stdout + logs.stderr
 
 
-@contextlib.contextmanager
-def _served(password: str, given: list[str], rules: Path = _RULES) -> Iterator[_Store]:
-    """Run the valkey service with ``rules`` mounted, handed its ``shekel`` password
-    ``password`` by the options ``given``, on a free loopback port, until it answers; yield
-    it, then remove its container whatever happened.
+def _started(name: str, args: list[str]) -> None:
+    """Run the valkey service as ``args`` give it, named ``name``, and wait until its
+    healthcheck passes, run in the container as docker runs it (``CMD-SHELL``: by the
+    container's shell).
 
     Raises:
-        AssertionError: when the container does not start or publish its port, or the server
-            does not answer within :data:`_READY_S`, naming what docker or the server said.
+        AssertionError: when the container does not start, or its healthcheck does not pass
+            within :data:`_READY_S`, naming what docker or the server said.
+    """
+    assert _HEALTHCHECK_FORM == "CMD-SHELL", f"a healthcheck run as {_HEALTHCHECK_FORM}"
+    started = _docker("run", "--detach", *args)
+    assert started.returncode == 0, f"the valkey service did not start: {started.stderr}"
+    deadline = time.monotonic() + _READY_S
+    while _docker("exec", name, "sh", "-c", _HEALTHCHECK).returncode != 0:
+        assert time.monotonic() <= deadline, (
+            f"the valkey service's healthcheck did not pass within {_READY_S} s:\n"
+            f"{_logs(name)}")
+        time.sleep(0.1)
+
+
+def _sockets_folder(parent: Path) -> Path:
+    """A folder in ``parent`` for the server's socket, made :data:`_SOCKETS_MODE`."""
+    folder = parent / "sockets"
+    folder.mkdir()
+    folder.chmod(_SOCKETS_MODE)
+    return folder
+
+
+@contextlib.contextmanager
+def _served(password: str, given: list[str], rules: Path = _RULES) -> Iterator[_Store]:
+    """Run the valkey service with ``rules`` mounted and a folder of the test's own where it
+    mounts its socket's volume, handed its ``shekel`` password ``password`` by the options
+    ``given``, until its healthcheck passes; yield it, then remove its container and the
+    folder whatever happened.
+
+    Raises:
+        AssertionError: when the container does not start, or its healthcheck does not pass
+            within :data:`_READY_S`.
     """
     name = f"shekel-test-valkey-{secrets.token_hex(4)}"
-    try:
-        started = _docker("run", "--detach", "--publish", f"{_HOST}::{_SERVER_PORT}", *given,
-                          *_service_args(name, rules))
-        assert started.returncode == 0, f"the valkey service did not start: {started.stderr}"
-        published = _docker("port", name, _SERVER_PORT)
-        assert published.returncode == 0, f"no port was published: {published.stderr}"
-        store = _Store(name, int(published.stdout.split()[0].rsplit(":", 1)[1]), password)
-        deadline = time.monotonic() + _READY_S
-        while not _answers(store):
-            assert time.monotonic() <= deadline, (
-                f"the valkey service did not answer within {_READY_S} s:\n{_logs(name)}")
-            time.sleep(0.1)
-        yield store
-    finally:
-        _docker("rm", "--force", name)
+    with tempfile.TemporaryDirectory() as parent:
+        sockets = _sockets_folder(Path(parent))
+        try:
+            _started(name, [*given, *_service_args(name, rules, f"type=bind,source={sockets}")])
+            yield _Store(name, sockets / _SOCKET_NAME, password)
+        finally:
+            _docker("rm", "--force", name)
 
 
 @pytest.fixture(name="store")
@@ -204,6 +267,21 @@ def _login_answers(uri: str) -> list[TestResponse]:
         with rate_app.app_context():
             db.engine.dispose()
         limiter.enabled = False
+
+
+#: How ``/proc/net/tcp`` and ``tcp6`` mark a socket that listens (``TCP_LISTEN``), in their
+#: fourth column.
+_LISTENING = "0A"
+
+
+def test_the_server_listens_on_no_network_port(store):
+    """The server is reached only through its socket: in its container, which joins no
+    network, ``/proc/net/tcp`` and ``tcp6`` hold no listening socket, where without
+    ``start.sh``'s ``--port 0`` it would listen on the container's own loopback."""
+    tables = _docker("exec", store.name, "cat", "/proc/net/tcp", "/proc/net/tcp6")
+    assert tables.returncode == 0, tables.stderr
+    rows = [line.split() for line in tables.stdout.splitlines()]
+    assert [row[1] for row in rows if row[3] == _LISTENING] == []
 
 
 @pytest.mark.usefixtures("seed_user")
@@ -615,12 +693,95 @@ def test_start_sh_refuses_a_server_the_app_could_not_log_in_to(tmp_path, case):
     name = f"shekel-test-valkey-{secrets.token_hex(4)}"
     rules = _rules_where_shekel(tmp_path, None) if case == "no shekel user" else _RULES
     password = "" if case == "an empty password" else secrets.token_hex(16)
+    sockets = f"type=bind,source={_sockets_folder(tmp_path)}"
     try:
         # ``--quiet``: on a daemon that has not pulled the image, the CLI writes its own
         # "Unable to find image" and the pull's progress to stderr first (measured
         # 2026-11-01), and the assertion is of start.sh's line alone.
         ran = _docker("run", "--rm", "--quiet", "--env", f"VALKEY_PASSWORD={password}",
-                      *_service_args(name, rules))
+                      *_service_args(name, rules, sockets))
     finally:
         _docker("rm", "--force", name)
     assert (ran.returncode, ran.stderr) == (1, f"start.sh: {_REFUSALS[case]}\n")
+
+
+#: The user and group the app runs as: the Dockerfile's one ``USER``.
+(_APP_RUNS_AS,) = re.findall(r"^USER (\S+)$",
+                             (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8"),
+                             re.MULTILINE)
+#: A user and group that neither image runs as and the volume's options do not name.
+_STRANGER = "4242:4242"
+#: How long a container standing in for the app holds the socket volume, far past the test.
+_HOLD_S = 120
+
+
+def _volume_options(mount: dict) -> str:
+    """The ``--mount`` options a declared volume mount takes beyond its type, source and
+    target: ``volume-nocopy`` where it declares ``nocopy``."""
+    return ",volume-nocopy" if mount.get("volume", {}).get("nocopy") else ""
+
+
+def _as_the_app(user: str, sockets: str, *command: str) -> list[str]:
+    """``docker run``'s arguments for ``command`` run as ``user`` (``uid:gid``) in the valkey
+    image, with the socket volume ``sockets`` mounted as the app service mounts it, under the
+    app service's lock-downs."""
+    readonly = ",readonly" if _APP_SOCKETS.get("read_only") else ""
+    return ["--user", user, "--network", "none", "--entrypoint", "",
+            "--mount", f"type=volume,source={sockets},target={_APP_SOCKETS['target']}"
+                       f"{readonly}{_volume_options(_APP_SOCKETS)}",
+            *_hardening(_APP), _VALKEY["image"], *command]
+
+
+def _granted_as(user: str, sockets: str, password: str) -> tuple[int, str]:
+    """What a client run as ``user`` (:func:`_as_the_app`) says when it runs a command the
+    ``shekel`` user is granted: its exit status, and its output and errors."""
+    ran = _docker("run", "--rm", *_as_the_app(
+        user, sockets, "valkey-cli", "-s", str(_SOCKET), "--user", _APP_USER, "-a", password,
+        "--no-auth-warning", "lpush", "LIMITS:a", "1"))
+    return ran.returncode, (ran.stdout + ran.stderr).strip()
+
+
+#: The server's user as declared, and that user with a group of the stranger's in place of
+#: its own: the volume's setgid bit, not the server's group, decides the socket's.
+_SERVER_USERS = (_VALKEY["user"], f"{_VALKEY['user']}:{_STRANGER.split(':')[1]}")
+
+
+@pytest.mark.parametrize("held", [False, True], ids=["fresh", "held"])
+@pytest.mark.parametrize("server_user", _SERVER_USERS)
+def test_the_socket_volume_admits_the_app_s_user_alone(server_user, held):
+    """The socket's folder as production makes it: ``docker-compose.yml``'s volume, made with
+    the driver options it declares, mounted by the valkey service as declared.  A client run
+    as the app's user and group, with the volume mounted as the app service mounts it
+    (read-only), reaches the server and runs a granted command as ``shekel``; a client run as
+    another user and group is refused the socket.  So the volume lets the server's user make
+    its socket, hands the socket the app's group, and lets no one else in.  The same holds
+    with the server's own group a stranger's: the socket takes the volume's group, so the app
+    is admitted whatever group the valkey image gives its user.  And it holds ``held``, the
+    server created while a container mounted as the app already holds the volume empty, as a
+    recreate after a clean stop meets it: there docker copies the valkey image's own
+    ``/run/valkey`` over the volume's root, its mode and setgid bit with it, unless the
+    mounts say ``nocopy``."""
+    password = secrets.token_hex(16)
+    name = f"shekel-test-valkey-{secrets.token_hex(4)}"
+    holder = f"shekel-test-valkey-holder-{secrets.token_hex(4)}"
+    sockets = f"shekel-test-valkey-sockets-{secrets.token_hex(4)}"
+    options = [argument for key, value in _SOCKET_VOLUME["driver_opts"].items()
+               for argument in ("--opt", f"{key}={value}")]
+    try:
+        made = _docker("volume", "create", *options, sockets)
+        assert made.returncode == 0, made.stderr
+        if held:
+            holding = _docker("run", "--detach", "--name", holder,
+                              *_as_the_app(_APP_RUNS_AS, sockets, "sleep", str(_HOLD_S)))
+            assert holding.returncode == 0, holding.stderr
+        _started(name, ["--env", f"VALKEY_PASSWORD={password}",
+                        *_service_args(name, _RULES, f"type=volume,source={sockets}"
+                                       f"{_volume_options(_SOCKETS)}", server_user)])
+        answers = {user: _granted_as(user, sockets, password)
+                   for user in (_APP_RUNS_AS, _STRANGER)}
+    finally:
+        _docker("rm", "--force", name, holder)
+        _docker("volume", "rm", "--force", sockets)
+    assert answers == {
+        _APP_RUNS_AS: (0, "1"),
+        _STRANGER: (1, f"Could not connect to Valkey at {_SOCKET}: Permission denied")}

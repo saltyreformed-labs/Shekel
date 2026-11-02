@@ -81,9 +81,10 @@ dependencies = [
     # writes its counters to the bundled compose ``valkey`` service so they
     # are shared across Gunicorn workers and survive app restarts (audit
     # finding F-034; Valkey replaced Redis under ruling R-BAL298).  limits
-    # picks this client by the URI's ``valkey://`` scheme; a ``redis://``
-    # URI asks for the ``redis`` package, which the lock does not hold, and
-    # fails at startup by name.
+    # picks this client by a URI scheme naming valkey (production's
+    # ``valkey+unix://``, over a socket file); a ``redis`` scheme asks for
+    # the ``redis`` package, which the lock does not hold, and fails at
+    # startup by name.
     "valkey>=6.2.0,<7.0.0",
     # HTTP client -- ``app/services/auth_service.py`` queries the Have I Been
     # Pwned k-anonymity API at password-set time (audit finding F-086, commit

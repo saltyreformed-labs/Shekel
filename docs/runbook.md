@@ -41,8 +41,10 @@ also `docs/runbook_secrets.md`.
        v
 [Flask Application]        -- Shekel budget app, structured JSON logging
        |
-       +------> [Valkey :6379]    -- Docker container, Flask-Limiter counters
-       |                              (no persistence; counters evaporate on
+       +------> [Valkey]          -- Docker container, Flask-Limiter counters
+       |                              (no network: reached over a socket file
+       |                              in a volume the app shares; no
+       |                              persistence, counters evaporate on
        |                              restart by design)
        v
 [PostgreSQL :5432]         -- Docker container, multi-schema, audit triggers
@@ -75,7 +77,7 @@ Measured against the running maintainer host 2026-08-08. The nginx row differs b
 | Container | Image | Network(s) | Health Check |
 |-----------|-------|------------|--------------|
 | `shekel-prod-db` | `postgres:18-alpine` (digest-pinned; server 18.4) | backend | `pg_isready` every 10s |
-| `shekel-prod-valkey` | `valkey/valkey:<version>-alpine` (digest-pinned in `docker-compose.yml`; Valkey replaced Redis under ruling R-BAL298) | backend | `valkey-cli ping` as the `healthcheck` ACL user every 10s |
+| `shekel-prod-valkey` | `valkey/valkey:<version>-alpine` (digest-pinned in `docker-compose.yml`; Valkey replaced Redis under ruling R-BAL298) | none: the app reaches it over a socket file in the `valkey-socket` volume (ruling plan#2612) | `valkey-cli ping` over the socket as the `healthcheck` ACL user every 10s |
 | `shekel-prod-app` | `ghcr.io/saltyreformed-labs/shekel@sha256:...`, the digest `shekel-deploy` pins in `.env` | backend, monitoring | `GET /health` every 30s |
 | `shekel-prod-nginx` | the `nginx:<minor>-alpine` tag `docker-compose.yml` pins (`1.29-alpine` since #434) -- **bundled mode only**. In shared mode (this host) there is no such container; the shared `nginx` reverse proxy fronts it | frontend, backend | `wget /health` every 30s |
 
@@ -693,8 +695,8 @@ image and the host files must move together, and only the steps below move them 
 - The new image installs `valkey`, not `redis`, so on the host's `redis://` files it dies at boot
   (`limits.errors.ConfigurationError: 'redis' prerequisite not available`), and `shekel-deploy`'s
   rollback restores the old image, healthy.
-- The old image installs `redis`, not `valkey`, so once the host files say `valkey://` it dies the
-  same way (`'valkey' prerequisite not available`). After step 1, `shekel-deploy`'s own rollback
+- The old image installs `redis`, not `valkey`, so once the host files say `valkey+unix://` it dies
+  the same way (`'valkey' prerequisite not available`). After step 1, `shekel-deploy`'s own rollback
   cannot recover: it ends `rollback container also unhealthy`, or, when compose could not start the
   new service at all, `revert compose up also failed` (whose alert still says it reverted). Step 3
   restores files and image together.
@@ -773,16 +775,20 @@ store's password with it, so the release's last act removes it (`rm -r "$S"`); a
 a revert of plan#1183, released with host steps of its own.
 
 **5. The dev stack.** `~/projects/Shekel` holds the switch once `/release` step 8 brings it to
-`main`, and there the dev compose file names `valkey` while `shekel-dev-redis` still holds
-`127.0.0.1:6379`, so the new service cannot bind the port until the old one goes. The start commands
-in the dev compose file's header carry `--remove-orphans`, which removes it first:
+`main`, and there the dev compose file names `valkey` while `shekel-dev-redis` still runs. The start
+commands in the dev compose file's header carry `--remove-orphans`, which removes it:
 
 ```bash
 cd ~/projects/Shekel && docker compose -f docker-compose.dev.yml up -d --remove-orphans valkey; echo "exit=$?"
 ```
 
+Then delete the `RATELIMIT_STORAGE_URI` line from `~/projects/Shekel/.flaskenv`: it names
+`redis://...@localhost:6379`, which nothing serves once Redis goes, and host-run `flask run` runs
+the limiter in memory, since dev's Valkey listens only on a socket the dev app shares (ruling
+plan#2619).
+
 Between plan#1183's landing in `dev` and its release, the dev stack runs `main`'s Redis, and a dev
-app started from a `dev` worktree names a `valkey` host that nothing serves: its rate-limited routes
+app started from a `dev` worktree names a Valkey socket that nothing serves: its rate-limited routes
 fail until the release.
 
 **Measured 2026-11-01** on a throwaway stack on the rootless daemon: `main`'s two compose files
@@ -1865,7 +1871,7 @@ curl -s https://<domain>/health
 | Cloudflare 522 Connection Timed Out | cloudflared cannot reach Nginx | Verify Nginx is running: `docker compose ps`. Check cloudflared logs: `journalctl -u cloudflared -n 20` |
 | 429 on first login attempt | Cloudflare rate limit too aggressive | Check WAF rules in Cloudflare dashboard (Security > WAF > Rate limiting rules); increase threshold |
 | 429 after a few login attempts | Flask-Limiter rate limit (5/15min) | Wait 15 minutes. To clear immediately: `docker restart shekel-prod-valkey` -- counters are stored in Valkey's memory alone (persistence off), so restarting it clears them, while restarting the app does NOT. No Valkey user may flush: the app's ACL user runs only the limiter's commands (`deploy/valkey/users.acl`). Limited requests fail closed for the seconds it is down |
-| 500 on every login attempt | Valkey container down or unreachable, or the app's Valkey password wrong | App is configured fail-closed: rate-limit storage outage rejects every limited request. `docker compose ps valkey` to check status; `docker logs shekel-prod-valkey --tail 50` for errors (start.sh names an empty password or a missing `user shekel` rule); `docker compose up -d valkey` to restart. A healthy Valkey with 500s still is a password mismatch: `.env`'s `SHEKEL_VALKEY_PASSWORD` and `secrets/valkey_password` must match (two homes until plan#2168). Login resumes immediately once Valkey accepts the app's login |
+| 500 on every login attempt | Valkey container down or unreachable, or the app's Valkey password wrong | App is configured fail-closed: rate-limit storage outage rejects every limited request. `docker compose ps valkey` to check status; `docker logs shekel-prod-valkey --tail 50` for errors (start.sh names an empty password or a missing `user shekel` rule); `docker compose up -d valkey` to restart. A healthy Valkey with 500s still is a password mismatch (`.env`'s `SHEKEL_VALKEY_PASSWORD` and `secrets/valkey_password` must match, two homes until plan#2168) or a socket the app cannot reach: `docker compose exec valkey stat -c '%a %u:%g %n' /run/valkey /run/valkey/valkey.sock` must print `2710 999:1000` and `660 999:1000`, and the app must mount the `valkey-socket` volume as `docker-compose.yml` declares. Login resumes immediately once Valkey accepts the app's login |
 | Wrong IP in logs (127.0.0.1) | Nginx real IP config issue | Verify `set_real_ip_from` and `real_ip_header CF-Connecting-IP` in the active Nginx config: `deploy/nginx-bundled/nginx.conf` (bundled mode) or `deploy/nginx-shared/nginx.conf` (shared mode -- the runtime copy is `/opt/docker/nginx/nginx.conf`) |
 | No logs in Grafana | Promtail not scraping | `docker logs promtail`. Verify `monitoring` network exists. Verify app is on the network: `docker network inspect monitoring` |
 | CSS/JS not loading | Static files volume issue | `docker exec shekel-prod-nginx ls /var/www/static/` to verify files exist. Rebuild app: `docker compose build app && docker compose up -d` |

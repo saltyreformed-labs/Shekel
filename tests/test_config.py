@@ -905,11 +905,12 @@ class TestRateLimitConfig:
     def test_prodconfig_defaults_to_valkey(self, monkeypatch):
         """ProdConfig.RATELIMIT_STORAGE_URI defaults to the bundled valkey service.
 
-        The default URI ``valkey://valkey:6379/0`` matches the
-        ``valkey`` service name in docker-compose.yml, and its scheme
-        makes limits use the valkey client, the one the lock holds
-        (ruling R-BAL298).  An operator using another store overrides
-        via the ``RATELIMIT_STORAGE_URI`` environment variable.
+        The default URI ``valkey+unix:///run/valkey/valkey.sock`` is the
+        socket file docker-compose.yml's ``valkey`` service makes in the
+        volume the app mounts (ruling plan#2612), and its scheme makes
+        limits use the valkey client, the one the lock holds (ruling
+        R-BAL298), over a socket.  An operator using another store
+        overrides via the ``RATELIMIT_STORAGE_URI`` environment variable.
         """
         # Because ProdConfig.RATELIMIT_STORAGE_URI is captured at
         # class-body evaluation time, we cannot simply unset the env
@@ -922,8 +923,9 @@ class TestRateLimitConfig:
         # var set, the class attribute would not match -- the assertion
         # protects the documented default from accidental change.
         assert (
-            ProdConfig.RATELIMIT_STORAGE_URI == "valkey://valkey:6379/0"
-            or ProdConfig.RATELIMIT_STORAGE_URI.startswith("valkey://")
+            ProdConfig.RATELIMIT_STORAGE_URI
+            == "valkey+unix:///run/valkey/valkey.sock"
+            or ProdConfig.RATELIMIT_STORAGE_URI.startswith("valkey+unix://")
         )
 
     def test_prodconfig_rejects_memory_storage(self, monkeypatch):
@@ -945,7 +947,7 @@ class TestRateLimitConfig:
             ProdConfig()
 
     def test_prodconfig_accepts_valkey_storage(self, monkeypatch):
-        """ProdConfig.__init__ accepts a valkey:// URI.
+        """ProdConfig.__init__ accepts production's valkey+unix:// URI.
 
         Closes the loop on the rejection test above by proving that a
         properly-shaped Valkey URI is accepted.  Without this test a
@@ -957,10 +959,13 @@ class TestRateLimitConfig:
             ProdConfig, "SQLALCHEMY_DATABASE_URI", "postgresql:///shekel"
         )
         monkeypatch.setattr(
-            ProdConfig, "RATELIMIT_STORAGE_URI", "valkey://valkey:6379/0"
+            ProdConfig, "RATELIMIT_STORAGE_URI",
+            "valkey+unix:///run/valkey/valkey.sock",
         )
         config = ProdConfig()
-        assert config.RATELIMIT_STORAGE_URI == "valkey://valkey:6379/0"
+        assert config.RATELIMIT_STORAGE_URI == (
+            "valkey+unix:///run/valkey/valkey.sock"
+        )
 
     def test_prodconfig_validates_storage_uri_after_secret_key(
         self, monkeypatch

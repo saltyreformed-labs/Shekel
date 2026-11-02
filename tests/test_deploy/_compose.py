@@ -6,7 +6,8 @@ proxy up) read the tag from there instead of restating it: a Dependabot bump
 of the compose (``#434`` moved it 1.27 -> 1.29 while two test modules still
 said 1.27) then moves the tested parser in the same commit, with no second
 spelling to fall behind.  ``test_valkey_store.py`` starts the ``valkey``
-service as that file declares it, for the same reason.
+service, and makes its socket's volume, as that file declares them, for the
+same reason.
 
 What this is NOT: the version fronting production.  The prod override parks
 the bundled service and the shared ``/opt/docker/nginx`` container proxies
@@ -36,6 +37,17 @@ def service(name: str) -> dict[str, object]:
     """
     with BASE_COMPOSE.open(encoding="utf-8") as fh:
         return yaml.safe_load(fh)["services"][name]
+
+
+def volume(name: str) -> dict[str, object]:
+    """Return ``docker-compose.yml``'s top-level volume ``name`` as parsed.
+
+    Raises:
+        KeyError: The compose no longer declares the volume -- the tests
+            that call this have nothing to test.
+    """
+    with BASE_COMPOSE.open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh)["volumes"][name]
 
 
 def bundled_nginx_image() -> str:

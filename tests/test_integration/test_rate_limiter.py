@@ -469,10 +469,10 @@ class TestStorageBackendIsConfigDriven:
         # called init_app(testing), which sets _storage_uri to the
         # TestConfig override ("memory://").  A regression that pins
         # the constructor URI would manifest as _storage_uri being a
-        # production URI (valkey://...) instead.
+        # production URI (valkey+unix://...) instead.
         assert limiter._storage_uri is None or limiter._storage_uri == "memory://", (
             "Limiter._storage_uri should be None (constructor) or "
-            "memory:// (TestConfig override).  A valkey:// or other "
+            "memory:// (TestConfig override).  A valkey+unix:// or other "
             "production URI here means app/extensions.py is pinning "
             "storage at construction, which would break "
             "TestConfig.RATELIMIT_STORAGE_URI override."

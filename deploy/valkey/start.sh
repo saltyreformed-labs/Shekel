@@ -3,7 +3,8 @@
 # users in users.acl beside this file (ruling plan#2350).
 #
 # Every compose file runs this as the valkey service's command, with this
-# directory mounted read-only at /etc/valkey.  The password is read as the
+# directory mounted read-only at /etc/valkey and the folder the server makes
+# its socket in at /run/valkey (ruling plan#2612).  The password is read as the
 # app's entrypoint reads a secret (entrypoint.sh's _load_secret): the file
 # /run/secrets/valkey_password when one is mounted, else the environment
 # variable VALKEY_PASSWORD.
@@ -47,6 +48,23 @@
 #                                   full, rather than refuse a write, which
 #                                   the fail-closed limiter would turn into
 #                                   a 500.
+#   --port 0                        no network listener: the server is
+#                                   reached only through its socket file,
+#                                   so only a container that mounts the
+#                                   socket's folder reaches it (ruling
+#                                   plan#2612).
+#   --unixsocket /run/valkey/valkey.sock
+#                                   that socket file, in the folder each
+#                                   compose file mounts at /run/valkey.
+#   --unixsocketperm 660            its owner (this server's user, whose
+#                                   healthcheck connects) and its group may
+#                                   connect, and no one else.  The socket
+#                                   takes its folder's group, which the
+#                                   folder's setgid bit hands down: the
+#                                   app's, where docker-compose.yml makes
+#                                   the folder.  Connecting needs write
+#                                   permission; read grants nothing on a
+#                                   socket.
 set -eu
 umask 077
 
@@ -80,4 +98,7 @@ exec valkey-server \
     --appendonly no \
     --maxmemory 64mb \
     --maxmemory-policy allkeys-lru \
+    --port 0 \
+    --unixsocket /run/valkey/valkey.sock \
+    --unixsocketperm 660 \
     --aclfile "$acl"

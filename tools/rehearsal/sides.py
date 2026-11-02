@@ -32,6 +32,12 @@ _BOOT_PROBE = _SIDE / "boot.py"
 #: which serves no request, that reached for the store would fail by name rather than pass on
 #: a live one.
 _UNREACHABLE_STORE = "rehearsal.invalid:6379/0"
+#: The same for a scheme that reaches its store over a socket file (limits' ``+unix``
+#: schemes, production's since ruling plan#2612): a socket in a folder no host holds, named
+#: for the server above, so a reach for it fails naming that path.
+_UNREACHABLE_SOCKET = "/rehearsal.invalid/valkey.sock"
+#: How limits spells a scheme that reaches its store over a socket file.
+_SOCKET_SCHEME = "+unix"
 #: The side's ``Dockerfile`` lines that set its image's environment.
 _IMAGE_ENV = re.compile(r"^ENV ([A-Z_][A-Z0-9_]*)=(\S+)$", re.MULTILINE)
 #: The production compose file's pin of the app's civil timezone.
@@ -84,7 +90,8 @@ def image_environment(worktree: Path) -> dict[str, str]:
 def limiter_uri(worktree: Path) -> str:
     """The rate-limit store a side is given: :data:`_UNREACHABLE_STORE` under the scheme
     production's compose files, read from the side's own tree, give the app's
-    ``RATELIMIT_STORAGE_URI`` by default.  limits picks its client by the scheme and
+    ``RATELIMIT_STORAGE_URI`` by default, or :data:`_UNREACHABLE_SOCKET` where that scheme
+    reaches its store over a socket file.  limits picks its client by the scheme and
     Flask-Limiter builds the store when the app is made, so a side given a scheme its lock
     holds no client for fails at app creation: one scheme for every side would fail one side
     of a release that changes the store.
@@ -107,7 +114,9 @@ def limiter_uri(worktree: Path) -> str:
     if scheme is None:
         raise bench.BenchError(f"{files[0]} and {files[1]} set RATELIMIT_STORAGE_URI naming "
                                "no scheme")
-    return f"{scheme.group(1)}://{_UNREACHABLE_STORE}"
+    name = scheme.group(1)
+    store = _UNREACHABLE_SOCKET if name.endswith(_SOCKET_SCHEME) else _UNREACHABLE_STORE
+    return f"{name}://{store}"
 
 
 def side_environment(state: bench.State, url: str, secret_key: str) -> dict[str, str]:

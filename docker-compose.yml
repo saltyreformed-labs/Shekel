@@ -6,6 +6,8 @@
 # Networks:
 #   frontend: Nginx (externally accessible)
 #   backend:  Nginx + App + DB (internal only)
+#   Valkey joins none: the app reaches it over a socket file in the
+#   valkey-socket volume the two share.
 #
 # Quick start and updates: README.md, "Quick Start (Docker)" and its
 # "Updating".  A release changes the image and this file together, so
@@ -139,11 +141,12 @@ services:
   # Holds rate-limit counters that must be shared across Gunicorn
   # workers and survive app-container restarts.  See audit finding
   # F-034 and remediation Commit C-06; Valkey replaced Redis under
-  # ruling R-BAL298.  Only the services on the backend network
-  # (internal: true, see networks block at end of file) can reach it,
-  # nothing on the host or outside this stack.  Persistence is off:
-  # rate-limit counters are short-lived state, and deploy/valkey/
-  # start.sh, which starts the server, holds each flag and its reason.
+  # ruling R-BAL298.  It joins no network and listens on no port: it
+  # makes a socket file in the valkey-socket volume (below), and only a
+  # container that mounts that volume, the app alone, can reach it
+  # (ruling plan#2612).  Persistence is off: rate-limit counters are
+  # short-lived state, and deploy/valkey/start.sh, which starts the
+  # server, holds each flag and its reason.
   valkey:
     # Pinned by tag and digest: the tag documents the version and the
     # digest pins the bytes, and no comment restates either; update both
@@ -155,13 +158,14 @@ services:
     # the pin above uses.
     labels:
       - "wud.tag.include=^\\d+\\.\\d+\\.\\d+-alpine$$"
-    networks:
-      - backend
+    # No network at all, not even the internal backend: nothing reaches
+    # Valkey over one, and Valkey reaches nothing.  The healthcheck runs
+    # inside this container, over the socket.
+    network_mode: none
     # ACL hardening (Phase B3, 2026-05-09; narrowed from "everything
-    # but @dangerous" to an allowlist under ruling R-BAL298).  Even
-    # though the backend network is internal, an attacker who lands
-    # code execution in the app container (Gunicorn RCE, a container
-    # escape from a sibling) gets network access to Valkey, and the ACL
+    # but @dangerous" to an allowlist under ruling R-BAL298).  An
+    # attacker who lands code execution in the app container (a
+    # Gunicorn RCE) reaches Valkey through the app's socket, and the ACL
     # limits what that pivot can do.  The users and the commands each
     # may run are deploy/valkey/users.acl, the ONE home of those rules
     # (ruling plan#2350).  The bind below is relative to this file, so
@@ -182,6 +186,18 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      # The folder start.sh makes the server's socket in, which the app
+      # mounts too (the valkey-socket volume says who may connect).
+      # nocopy: the valkey image holds a /run/valkey of its own (1777),
+      # which docker would otherwise copy over the volume's root, mode
+      # and setgid bit included, whenever this container is created on
+      # the volume while the app holds it empty (a recreate after a
+      # clean stop).
+      - type: volume
+        source: valkey-socket
+        target: /run/valkey
+        volume:
+          nocopy: true
     environment:
       # The password the app's RATELIMIT_STORAGE_URI carries (below),
       # from .env; start.sh hashes it and unsets it before the server
@@ -193,14 +209,15 @@ services:
       # override mounts its password file instead and blanks this.
       VALKEY_PASSWORD: ${SHEKEL_VALKEY_PASSWORD:?Set SHEKEL_VALKEY_PASSWORD in .env}
     healthcheck:
-      # PING via the dedicated healthcheck ACL user (no password, PING
-      # only).  `-a ''` is required because valkey-cli's --user flag
-      # does NOT send an AUTH frame unless -a is also present (even
-      # with an empty password for a nopass user).  Without -a the
-      # connection stays unauthenticated and PING returns NOAUTH but
-      # valkey-cli exits 0 -- a silent false-healthy.  Grep for PONG
-      # to make the exit code reflect the actual response.
-      test: ["CMD-SHELL", "valkey-cli --user healthcheck -a '' --no-auth-warning ping | grep -q PONG"]
+      # PING over the server's socket (-s, start.sh's --unixsocket) via
+      # the dedicated healthcheck ACL user (no password, PING only).
+      # `-a ''` is required because valkey-cli's --user flag does NOT
+      # send an AUTH frame unless -a is also present (even with an empty
+      # password for a nopass user).  Without -a the connection stays
+      # unauthenticated and PING returns NOAUTH but valkey-cli exits 0
+      # -- a silent false-healthy.  Grep for PONG to make the exit code
+      # reflect the actual response.
+      test: ["CMD-SHELL", "valkey-cli -s /run/valkey/valkey.sock --user healthcheck -a '' --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -219,8 +236,9 @@ services:
         limits: { cpus: '0.5', memory: 96M, pids: 100 }
     # Container hardening: drop every Linux capability, prevent
     # privilege escalation, and run with a read-only root filesystem.
-    # Valkey writes only to /tmp (start.sh's generated ACL file) and
-    # /data (its working directory, a tmpfs since persistence is off).
+    # Valkey writes only to /tmp (start.sh's generated ACL file), /data
+    # (its working directory, a tmpfs since persistence is off) and
+    # /run/valkey (its socket, in the valkey-socket volume).
     #
     # ``user: valkey`` is load-bearing.  The image's entrypoint, when it
     # sees uid 0 and the command ``valkey-server``, chowns /data and
@@ -373,10 +391,13 @@ services:
       SLOW_REQUEST_THRESHOLD_MS: ${SLOW_REQUEST_THRESHOLD_MS:-500}
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
       # Flask-Limiter storage.  Defaults to the bundled valkey service
-      # above; override with another store's URI if not running Valkey
-      # as a sibling container.  See audit finding F-034 and
-      # remediation Commit C-06.  The ``valkey://`` scheme is what makes
-      # limits use the valkey client, the only one the lock holds.
+      # above, over its socket file in the valkey-socket volume (mounted
+      # below; ruling plan#2612); override with another store's URI if
+      # not running Valkey as a sibling container.  See audit finding
+      # F-034 and remediation Commit C-06.  The ``valkey+unix://``
+      # scheme is what makes limits use the valkey client, the only one
+      # the lock holds, over a socket; the path after the ``@`` is the
+      # socket, where start.sh's --unixsocket makes it.
       #
       # The bundled Valkey runs under ACLs (default user disabled, see
       # deploy/valkey/users.acl).  The URI carries the per-app user
@@ -386,7 +407,7 @@ services:
       # library's Lua scripts use its own key prefix (LIMITS:...), which
       # this setting does not change -- but is kept for any code paths
       # that DO honour it.
-      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-valkey://shekel:${SHEKEL_VALKEY_PASSWORD:?Set SHEKEL_VALKEY_PASSWORD in .env}@valkey:6379/0}
+      RATELIMIT_STORAGE_URI: ${RATELIMIT_STORAGE_URI:-valkey+unix://shekel:${SHEKEL_VALKEY_PASSWORD:?Set SHEKEL_VALKEY_PASSWORD in .env}@/run/valkey/valkey.sock}
       RATELIMIT_KEY_PREFIX: ${RATELIMIT_KEY_PREFIX:-shekel}
       # Gunicorn proxy trust.  Pinned to the ``backend`` bridge subnet
       # below (172.31.0.0/24) so Gunicorn honours X-Forwarded-* only
@@ -422,6 +443,17 @@ services:
       # The volume is internal -- nginx never reads it, so the path
       # cannot be served as a static asset.  See audit finding F-022.
       - shekel-prod-app-state:/home/shekel/app/state
+      # Valkey's socket, the rate limiter's store (RATELIMIT_STORAGE_URI
+      # above).  Read-only: the app connects to the socket, which a
+      # read-only mount allows, and can neither remove it nor put a file
+      # of its own beside it.  nocopy: nothing of the app's image is
+      # copied into it (the valkey service says why that matters).
+      - type: volume
+        source: valkey-socket
+        target: /run/valkey
+        read_only: true
+        volume:
+          nocopy: true
     networks:
       - backend
     # Container logs rotate locally so the host disk cannot fill from
@@ -474,6 +506,7 @@ services:
     #   - /tmp:                              tmpfs (Python/cryptography temps)
     #   - /home/shekel/app/state:            named volume (seed sentinel)
     #   - /var/www/static:                   shared volume (entrypoint copies static files)
+    # (/run/valkey, Valkey's socket, is mounted read-only.)
     # PYTHONDONTWRITEBYTECODE=1 above suppresses the __pycache__
     # write attempts that would otherwise log "permission denied" on
     # every module import.
@@ -627,6 +660,22 @@ volumes:
   # losing the sentinel only causes the next start to re-run the
   # idempotent seed script.  Audit finding F-022 / Commit C-34.
   shekel-prod-app-state:
+  # Valkey's socket file, the one way to reach it (ruling plan#2612):
+  # mounted by the valkey service, which makes the socket, and the app
+  # alone, read-only.  A tmpfs, so the socket lives in memory, never on
+  # disk.  Its root belongs to the valkey user (uid 999 in the valkey
+  # image) and the app's group (gid 1000, the Dockerfile's USER
+  # 1000:1000), mode 2710: Valkey makes the socket, the app's group may
+  # pass through to it but not list the folder, and no one else may
+  # enter.  The setgid bit (the 2) hands the folder's group to the
+  # socket, so the app's group is named here once, whatever group the
+  # valkey image gives its own user; start.sh's --unixsocketperm 660
+  # then lets that group connect.
+  valkey-socket:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=999,gid=1000,mode=2710
 
 networks:
   # Frontend network: Nginx only.  Externally accessible via port mapping

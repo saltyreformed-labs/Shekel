@@ -905,7 +905,7 @@ class TestProdConfigRejectsDockerSecretPlaceholder:
         # exception in the test body still rolls the env back.
         monkeypatch.setenv("SECRET_KEY", placeholder_value)
         monkeypatch.setenv("DATABASE_URL", "postgresql://x:x@x:5432/x")
-        monkeypatch.setenv("RATELIMIT_STORAGE_URI", "valkey://x:6379/0")
+        monkeypatch.setenv("RATELIMIT_STORAGE_URI", "valkey+unix:///x/valkey.sock")
         try:
             reload(config_module)
             with pytest.raises(ValueError, match="known placeholder"):

@@ -277,15 +277,16 @@ class BaseConfig:
     # Storage backend URI for rate-limit counters.  BaseConfig defaults
     # to "memory://" so that a developer running ``flask run`` against
     # a local checkout does not need a Valkey container.  ProdConfig
-    # overrides to ``valkey://valkey:6379/0`` so that counters are shared
-    # across Gunicorn workers and survive ``docker compose restart app``
-    # cycles -- see audit finding F-034 and remediation Commit C-06.
+    # overrides to the bundled Valkey's socket file so that counters are
+    # shared across Gunicorn workers and survive ``docker compose restart
+    # app`` cycles -- see audit finding F-034 and remediation Commit C-06.
     # TestConfig forces ``memory://`` so the test suite does not require
     # a running Valkey instance.
     #
     # The env-var override always wins, in any environment, so an
     # operator can point dev or staging at a real Valkey without code
-    # changes.  A store URI's scheme is ``valkey://``: limits picks its
+    # changes.  A store URI's scheme names valkey (``valkey+unix://``
+    # over a socket file, ``valkey://`` over a network): limits picks its
     # client by scheme, and the valkey client is the one the lock holds
     # (ruling R-BAL298).
     RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
@@ -596,8 +597,9 @@ class ProdConfig(BaseConfig):
     REMEMBER_COOKIE_HTTPONLY = True
     REMEMBER_COOKIE_SAMESITE = "Lax"
 
-    # Production rate-limit storage: shared Valkey on the backend Docker
-    # network.  Defaults assume the bundled docker-compose ``valkey``
+    # Production rate-limit storage: shared Valkey, reached only over its
+    # socket file in the volume the app and Valkey share (ruling
+    # plan#2612).  Defaults assume the bundled docker-compose ``valkey``
     # service; an operator using another store can override via
     # ``RATELIMIT_STORAGE_URI`` in the environment.  See audit finding
     # F-034 and remediation Commit C-06.  ProdConfig.__init__ rejects
@@ -605,7 +607,7 @@ class ProdConfig(BaseConfig):
     # production silently re-introduces the multi-worker drift this
     # commit set out to close.
     RATELIMIT_STORAGE_URI = os.getenv(
-        "RATELIMIT_STORAGE_URI", "valkey://valkey:6379/0"
+        "RATELIMIT_STORAGE_URI", "valkey+unix:///run/valkey/valkey.sock"
     )
 
     # Production registration posture: defaults to disabled even when
@@ -657,9 +659,9 @@ class ProdConfig(BaseConfig):
         if self.RATELIMIT_STORAGE_URI.startswith("memory:"):
             raise ValueError(
                 "RATELIMIT_STORAGE_URI must point to a shared backend "
-                "(e.g. valkey://valkey:6379/0) in production. The in-memory "
-                "backend silently fragments rate-limit counters across "
-                "Gunicorn workers -- see audit finding F-034."
+                "(e.g. valkey+unix:///run/valkey/valkey.sock) in production. "
+                "The in-memory backend silently fragments rate-limit "
+                "counters across Gunicorn workers -- see audit finding F-034."
             )
 
 

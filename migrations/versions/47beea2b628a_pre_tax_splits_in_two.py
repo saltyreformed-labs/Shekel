@@ -1,7 +1,7 @@
 """pre-tax splits in two: a pre-tax line says whether it skips Social Security and Medicare
 
 Revision ID: 47beea2b628a
-Revises: 858f569b2c17
+Revises: 0703995c8536
 Create Date: 2026-11-02
 
 Plan step **salary:S11-e**, card plan#1156 (ruling **plan#2639**, "A new line
@@ -45,11 +45,13 @@ from sqlalchemy import text
 
 # Revision identifiers, used by Alembic.
 revision = "47beea2b628a"
-# The head of ``dev`` at authoring, measured (one head).  Another lane landing
-# a revision first makes two heads, which git merges cleanly and ``flask db
-# upgrade`` refuses: re-point this at the measured head as the last edit
-# before the pull request.
-down_revision = "858f569b2c17"
+# The head of ``dev`` at ``a0b73c01a``, measured on this branch after its merge
+# (225 revisions, one head, by alembic.script.ScriptDirectory).  It was
+# ``858f569b2c17`` at authoring, until PR #642 landed ``0703995c8536`` on it
+# first.  Another lane landing a revision first makes two heads, which git
+# merges cleanly and ``flask db upgrade`` refuses: re-point this at the
+# measured head as the last edit before the pull request.
+down_revision = "0703995c8536"
 branch_labels = None
 depends_on = None
 

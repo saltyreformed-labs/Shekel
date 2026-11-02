@@ -265,7 +265,8 @@ def _line_cadence_context(
       :func:`~app.services.payroll_line_cadence.line_cadences`: the set every
       recurrence form takes, narrowed to the units a payroll line may repeat
       by (ruling plan#2591, amending **R-SAL37**'s "the whole set": a line's
-      rule picks which paychecks take it, and the week unit picks none);
+      rule picks which paychecks take it, so a weekly amount would be taken
+      once a paycheck however many weeks the paycheck holds);
     * ``selected_cadences`` -- ``{deduction id: SelectedCadence | None}``,
       what an EDIT of each line starts its controls on, through the one
       render-side reader the template forms use

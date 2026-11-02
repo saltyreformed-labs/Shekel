@@ -88,9 +88,9 @@ plan's section 3 says the opposite ("a mid-period bound places differently
 under the two placements"); that claim reads the anchor as the emitted
 occurrence, which the paragraph above is exactly the decision not to do.
 Emitting the payday is what reproduced the reverse matcher's date as well as
-its period: ``compute_due_date`` returns ``period.start_date`` for a rule
-naming no day of the month, so a mid-period bound emitted verbatim would have
-moved the first row's date.
+its period: ``compute_due_date`` returns ``period.start_date`` for a
+paycheck cadence, so a mid-period bound emitted verbatim would have moved the
+first row's date.
 
 The per-month CEILING (plan step salary:R15-a, ruling R-SAL29)
 --------------------------------------------------------------

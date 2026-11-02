@@ -712,8 +712,9 @@ class TestDueDateGeneration:
         the occurrence when the paycheck CONTAINING it funds it (ruling R-R94),
         on the funding payday when a later paycheck does (ruling R-R95).
 
-        2026-03-17 is a Tuesday strictly inside the 03-13 - 03-26 paycheck, so
-        the two sources differ and a wrong one cannot pass.
+        2026-03-17 is a Tuesday strictly inside the 03-13 - 03-26 paycheck,
+        and the first paycheck on or after it opens 03-27, so each reading's
+        two candidate days differ and a wrong one cannot pass.
         """
         with app.app_context():
             period = DerivedPeriod(
@@ -721,6 +722,13 @@ class TestDueDateGeneration:
                 period_index=5,
                 start_date=date(2026, 3, 13),
                 end_date=date(2026, 3, 26),
+                end_is_projected=False,
+            )
+            later = DerivedPeriod(
+                period_id=2,
+                period_index=6,
+                start_date=date(2026, 3, 27),
+                end_date=date(2026, 4, 9),
                 end_is_projected=False,
             )
             containing = build_rule(
@@ -735,10 +743,10 @@ class TestDueDateGeneration:
                 containing, date(2026, 3, 17), period,
             ) == date(2026, 3, 17)
             # Funded from a later paycheck: due on THAT paycheck's payday,
-            # the 03-13 start of the period it was placed in.
+            # 03-27, the first paycheck on or after the 03-17 occurrence.
             assert compute_due_date(
-                deferring, date(2026, 3, 17), period,
-            ) == date(2026, 3, 13)
+                deferring, date(2026, 3, 17), later,
+            ) == date(2026, 3, 27)
 
     def test_every_other_week_rows_carry_their_occurrences(
         self, app, db, seed_user, seed_periods,

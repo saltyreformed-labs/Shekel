@@ -56,8 +56,9 @@ def fires_on_day_of_month(
     It is NOT "is this unit measured in months", and an adversarial review of
     plan step R7b-2 is why the distinction is stated here.  ``Monthly First``
     is a MONTH-unit cadence whose rows are dated from the PAYCHECK they defer
-    onto, so ``scheduling_day_of_month`` answers ``None`` for it and the form
-    has always hidden the Due Day input -- while its occurrences still land on
+    onto, so ``scheduling_day_of_month`` answers ``None`` for it (the form hid
+    a Due Day input for it until that input left at plan step R5-a) -- while
+    its occurrences still land on
     days of the month, which is :func:`has_day_of_month_coordinate`'s question.
     Reaching for the wrong one of the two moved money twice; see that function.
 

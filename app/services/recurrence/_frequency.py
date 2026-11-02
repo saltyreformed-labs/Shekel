@@ -52,8 +52,8 @@ eight ``(unit, placement)`` pairs: the router agreed exactly with
 pair it answered for, and disagreed only on the three it refused.
 
 **The OFFER SET is derived from what a rule can DO, not from a name it can
-have** (:func:`~._offer.authorable_cadences` -- the offer set and the two
-predicates it rests on live in :mod:`._offer` since plan step salary:R15-a, a
+have** (:func:`~._offer.authorable_cadences` -- the offer set and the
+predicate it rests on live in :mod:`._offer` since plan step salary:R15-a, a
 pure move made when the cadence's third value took this module past pylint's
 1000-line ceiling; the argument stays here, the code implements it there), and
 that is plan step R7b-2's property restated on live constraints.  R7b-2 served

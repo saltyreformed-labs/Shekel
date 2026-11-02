@@ -587,8 +587,8 @@ class TestCarryForwardStatusRecheck:
         keeps its link and ``is_override = False``.
 
         **Its DATE moves with it since plan step balance:X-bi-7b** (ruling
-        **R-BAL33**): the engine dated this row from its paycheck's start (a
-        cadence naming no day of the month), which reads as the R-BAL22
+        **R-BAL33**): the engine dated this row from its paycheck's start (an
+        every-paycheck cadence, dated on its payday), which reads as the R-BAL22
         default, so the move re-places it on the target's start.  This case
         asserted ``due_date == generated_due`` until then.
         """

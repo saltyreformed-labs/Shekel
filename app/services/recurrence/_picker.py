@@ -224,7 +224,8 @@ def cadence_options(
     :func:`~app.services.recurrence.authorable_cadences`, and the salary page
     offers that set narrowed to the units a payroll line may repeat by
     (``payroll_line_cadence.line_cadences``), because a line's rule picks
-    WHICH paychecks take it and the week unit picks none.  Each caller passes
+    WHICH paychecks take it, so a weekly amount would be taken once a paycheck
+    however many weeks the paycheck holds.  Each caller passes
     the set its own door refuses against, so the property above still holds
     per form: nothing a form renders is refused by its door.
 

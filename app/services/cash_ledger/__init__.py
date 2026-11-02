@@ -11,6 +11,7 @@ question                        here                      loan analog
 ==============================  ========================  ======================
 what is stored?                 :mod:`._facts`            ``loan_loaders``
 what happened, when?            :mod:`._events`           ``loan_ledger._events``
+whose movements?                :mod:`._movement_scope`   (no loan analog)
 where do books open?            :mod:`._books`            (no loan analog)
 what IS the amount?             :mod:`._amount_source`    (see below)
 what would a row be worth?      :mod:`._definition_cash`  (see below)
@@ -282,6 +283,7 @@ from ._facts import (
     resolve_anchor,
 )
 from ._flows import sum_projected
+from ._movement_scope import owner_dated_movements
 from ._walk import (
     CashLedgerWalk,
     dated_deltas,
@@ -332,6 +334,7 @@ __all__ = [
     "movement_cash_leg",
     "movement_figure_for",
     "off_statement_sum",
+    "owner_dated_movements",
     "settled_contribution",
     "planned_cash_rows",
     "posted_purchase_sum",

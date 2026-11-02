@@ -513,8 +513,8 @@ class TransactionEntry(
     income_transfer_id = db.Column(db.Integer, nullable=True)
     # The account this movement's money moved THROUGH -- its OWN fact since
     # plan step ``credit_card:CC-5-1`` (rulings **R-BAL75**, **R-BAL76**), read
-    # on this account by the fold (``cash_ledger._events._movements_of``), the
-    # posted ledger (``ledger_lines.purchase_target``) and the anchor
+    # on this account by the fold (``cash_ledger._movement_scope._on_account``),
+    # the posted ledger (``ledger_lines.purchase_target``) and the anchor
     # self-heal (``posting_service._family_accounts``), whatever account its
     # parent row names.  ``ON DELETE RESTRICT``, as ``transactions.account_id``
     # is: a record of money that moved through an account does not vanish with

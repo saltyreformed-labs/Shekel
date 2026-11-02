@@ -369,6 +369,16 @@ _FENCED_MODULE_RULINGS = {
         # the seam's door does not already give, and answers no balance at
         # an arbitrary T.
         "walk_account_ledger",
+        # The worked-out read (plan task plan#2526): every LINE of one
+        # owner's ledger -- each amount on a chart account, its paycheck and
+        # day, built by the rules above -- and never a sum of them.  The
+        # ground ``cash_ledger.settled_cash_facts`` and
+        # ``loan_ledger.walk_loan_ledger`` are ruled on: a loader of facts,
+        # where folding them to a balance at T is a reader's step, and a
+        # reader that folds them to an account's balance belongs in
+        # ``balance_at`` (X-ew's second leaf, plan#2515, moves the statements
+        # onto these lines).
+        "worked_out_lines",
     })),
     # The account-KIND classifier -- why it is scoped is recorded once, at
     # :data:`_KIND_CLASSIFIER_MODULES`.  Its ``find_period_containing_date``

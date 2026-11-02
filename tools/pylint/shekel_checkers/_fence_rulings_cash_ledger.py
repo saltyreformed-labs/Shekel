@@ -282,6 +282,13 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # per-movement leg.  Where one lands and what the plan holds at time T
     # are ``balance_at._cash_fold``'s, exactly as for ``planned_cash_rows``.
     "in_flight_movements",
+    # ``owner_dated_movements`` (plan task plan#2526) -- the dated movements
+    # ``settled_cash_facts`` loads, over every account one owner holds, each
+    # returned as the movement and its parent: a LOADER of stored records
+    # under the fold's own clause set (``_movement_scope``), valuing nothing
+    # and summing nothing.  What the worked-out ledger books from each is
+    # ``ledger_lines``' movement rule, and a balance at T is no part of it.
+    "owner_dated_movements",
     # (``movements_with_parents``, ruled here from plan step
     # ``balance:X-bi-6-3`` because the posting writer's transfer-family
     # loader shared the fold's join, was folded into the fold's

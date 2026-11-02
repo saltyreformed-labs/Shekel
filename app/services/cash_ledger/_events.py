@@ -111,24 +111,17 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy.orm import contains_eager
-
 from app.extensions import db
 from app.models.account import AccountAnchorHistory
 from app.models.account_opening import AccountOpening
-from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
-from app.models.transfer import Transfer
-from app.services.transfer_legs import recorded_transfer_legs
-from app.utils.balance_predicates import (
-    balance_contributing_clause,
-    owner_declared_clause,
-)
+from app.utils.balance_predicates import owner_declared_clause
 from app.utils.dates import utc_instant
 
 from ._amounts import ReconciledThrough
 from ._cash_leg import movement_cash_leg
 from ._clearing import StatementCoverage, statement_coverage
+from ._movement_scope import _dated_arms, _movements_of, _on_account
 
 
 @dataclass(frozen=True)
@@ -700,75 +693,6 @@ def coverage_for(account_id: int) -> StatementCoverage:
     return statement_coverage(cash_anchor_facts(account_id))
 
 
-def _movements_of(account_id: int, scenario_id: int, *narrowing):
-    """Return the account's PLAN-ROW movements WITH their parents, scoped once.
-
-    The ONE statement of what the plan-row movement stream is scoped by --
-    shared by the SETTLED tier (:func:`settled_cash_facts`, the dated
-    movements) and the IN-FLIGHT tier (:func:`in_flight_movements`, the
-    un-dated ones) so the two are a PARTITION of the same set rather than two
-    filters that could disagree about which movements exist at all (plan step
-    ``balance:X-bi-4a``).  Four clauses, each load-bearing:
-
-    * ``TransactionEntry.account_id == account_id`` -- **the MOVEMENT's own
-      account, never its parent's** (ruling **R-BAL75**): a movement is
-      counted where its money moved, and its plan row's ``account_id`` is
-      where the row was EXPECTED to be paid from.  The two were held equal
-      by ``fk_transaction_entries_parent_account`` until plan step
-      ``credit_card:CC-5-1`` dropped it (ruling **R-BAL76**) ahead of the
-      card's doors, which write the first movements whose account is not
-      their parent's; the posted ledger already attributes by the movement
-      (``ledger_lines.purchase_target``), so the fold, the ledger and
-      the anchor self-heal read one predicate rather than agreeing by a key.
-    * the parent's ``scenario_id`` -- a movement's scenario is its plan row's,
-      read through ``transaction_id`` and never copied (ruling **R-BAL35**).
-    * the parent is BALANCE-CONTRIBUTING -- the shared
-      :func:`~app.utils.balance_predicates.balance_contributing_clause`, so a
-      soft-deleted or Credit / Cancelled parent's movements are worth nothing
-      here, as they post nothing (``ledger_lines.purchase_posts``).
-    * the parent is a PLAN ROW, by the join on ``transaction_id``: a
-      transfer side's movement names no row (plan step
-      ``balance:X-bi-6-4d-2``, ruling **R-BAL88**) and is read with its
-      transfer by :func:`settled_cash_facts`' other arm.
-
-    Deliberately NOT narrowed by the parent's STATUS: a dated purchase
-    against a still-Projected envelope has left the bank exactly as one
-    against a closed envelope has, and an un-dated purchase against a closed
-    envelope is in flight exactly as one against an open envelope is
-    (ruling **R-BAL77**).
-
-    The parent rides along through ``contains_eager`` on the join that
-    already scopes the query, so no movement costs a second SELECT for its
-    direction, budget column or type.  (It was ``movements_with_parents``,
-    public, from plan step ``balance:X-bi-6-3`` -- the posting writer's
-    transfer-family loader shared the join -- until leaf ``X-bi-6-4a`` moved
-    that loader onto ``transfer_legs``' join, where a transfer movement's
-    parent is its LEG, not its shadow row.)
-
-    Args:
-        account_id: The account the movements are ON.
-        scenario_id: The budget scenario the parent rows live in.
-        *narrowing: The tier's own clauses over ``TransactionEntry``.
-
-    Returns:
-        The matching ``TransactionEntry`` rows, each with ``.transaction``
-        populated, unordered.
-    """
-    return (
-        db.session.query(TransactionEntry)
-        .join(Transaction, TransactionEntry.transaction_id == Transaction.id)
-        .options(contains_eager(TransactionEntry.transaction))
-        .filter(
-            TransactionEntry.account_id == account_id,
-            Transaction.scenario_id == scenario_id,
-            balance_contributing_clause(),
-            TransactionEntry.is_credit.is_(False),
-            *narrowing,
-        )
-        .all()
-    )
-
-
 def settled_cash_facts(
     account_id: int, scenario_id: int,
 ) -> list[CashSourceFact]:
@@ -801,31 +725,12 @@ def settled_cash_facts(
     every kind of row, and this stream reads movements alone.  The row's
     record columns are the stale cache ``X-bi-4b`` deletes.
 
-    **Two arms** (leaf ``X-bi-6-4a``, ruling **R-BAL106**): a plan row's
-    movements (:func:`_movements_of`), and each transfer LEG's
-    (:func:`app.services.transfer_legs.recorded_transfer_legs`) under the
-    same scope stated over the TRANSFER, its period, side and figure read
-    there.  **The transfer arm states no contributing gate in
-    SQL** (finding **BAL-534**, deleted at plan step ``balance:X-bi-6-4d-2``
-    rather than graded): a DATED side record cannot sit under a deleted
-    transfer (``app.deleted_row_infrastructure``'s transfer arm) nor under
-    one that is not Paid or Received (``app.side_band_infrastructure``), so
-    the filter selected nothing the dated narrowing did not; the walk's
-    :func:`~._cash_leg.movement_cash_leg` still asks the leg's gate.
-
-    **Three narrowings, each load-bearing** (:func:`_movements_of` holds the
-    account, scenario and contributing gate):
-
-    * ``settled_on IS NOT NULL`` -- the trigger itself (ruling R-FM as
-      refined by **R-FR**): the day the bank was seen to take the money.
-      Whether a STATEMENT was recorded as showing it is
-      :class:`~._clearing.StatementCoverage`'s separate question.
-    * ``is_credit IS FALSE`` -- a card purchase never touches this account;
-      it leaves later through its own CC Payback sibling (the card arc
-      retires the flag at CC-7, when a card purchase is a movement on the
-      card).
-    * the parent is BALANCE-CONTRIBUTING -- a soft-deleted or Credit /
-      Cancelled parent's movements are worth nothing, as they post nothing.
+    **Two arms and three narrowings** (:func:`._movement_scope._dated_arms`,
+    which states each): a plan row's movements and a transfer leg's, dated,
+    not on a card, under a parent that contributes -- taken over this one
+    account (``_on_account``), the scope the worked-out ledger takes over an
+    owner (:func:`._movement_scope.owner_dated_movements`, plan task
+    plan#2526).
 
     **It loads its own rows and takes no period window, deliberately.**  An
     argument a caller can get wrong is a defect, not a contract (plan Section
@@ -854,20 +759,14 @@ def settled_cash_facts(
         because a nondeterministic order in a financial replay is a
         reproducibility defect even where it is arithmetically inert.
     """
+    rows, legs = _dated_arms(_on_account(account_id), scenario_id)
     facts = [
         _source_fact(entry, entry.transaction, transfer_id=None)
-        for entry in _movements_of(
-            account_id, scenario_id, TransactionEntry.settled_on.isnot(None),
-        )
+        for entry in rows
     ]
     facts.extend(
         _source_fact(leg.record, leg, transfer_id=leg.transfer.id)
-        for leg in recorded_transfer_legs(
-            TransactionEntry.account_id == account_id,
-            Transfer.scenario_id == scenario_id,
-            TransactionEntry.is_credit.is_(False),
-            TransactionEntry.settled_on.isnot(None),
-        )
+        for leg in legs
     )
     # The movement's own id breaks a same-day tie: it is the fact's identity
     # (a primary key) and the one id every fact carries, where a transfer
@@ -952,7 +851,8 @@ def in_flight_movements(
     """Return the account's movements in flight -- ruling **R-BAL77**.
 
     The un-dated half of the movement stream :func:`settled_cash_facts` holds
-    the dated half of, scoped by the same :func:`_movements_of` so the two
+    the dated half of, scoped by the same
+    :func:`._movement_scope._movements_of` so the two
     partition one set; what this half adds is ``settled_on IS NULL`` and
     ``NOT covers_settlement``: a row's own covering movement, kept un-dated
     across a revert (ruling **R-BAL61**), is a retained RECORD and not a
@@ -979,7 +879,7 @@ def in_flight_movements(
         )
         for entry in sorted(
             _movements_of(
-                account_id,
+                _on_account(account_id),
                 scenario_id,
                 TransactionEntry.settled_on.is_(None),
                 TransactionEntry.covers_settlement.is_(False),

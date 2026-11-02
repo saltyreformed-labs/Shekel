@@ -17,8 +17,8 @@ derived before it stands.  CC-2 built one row per card that the form rewrote
 in place, and because every statement and reward is DERIVED from these terms
 (never stored), that rewrite would have re-cut every past statement and
 re-priced every past reward once a reader existed.  Before the earliest row
-the earliest governs (:func:`app.services.card_terms.terms_in_effect`), so a
-card with one row derives exactly as the undated row did.
+the earliest governs (:func:`app.services.card_statement.terms_in_effect`),
+so a card with one row derives exactly as the undated row did.
 
 **The series is OPTIONAL, and nothing writes it but the owner** (design 3.4:
 "no auto-create").  A Credit Card account with no row here is a dormant plain

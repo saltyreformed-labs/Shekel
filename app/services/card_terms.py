@@ -15,19 +15,16 @@ same reason.
 every statement and reward before it stands.  Three rules, each answering a
 question the one rewritten row could not:
 
-1. **Which version governs a day** (:func:`terms_in_effect`): the row with
-   the greatest ``effective_date`` on or before the day; before the earliest
-   row, the earliest -- the series holds flat backwards, ruling **R-I**'s
-   shape for a stated figure, which a recurring definition's price series
-   already takes (:func:`app.services.template_amount_service.amount_as_of`).
-   So a card with one version derives exactly as the undated row did, and the
-   date the owner first saves terms can never make a statement before it
-   vanish: the cycle open on the day terms are first saved began at the
-   close before it, and its statement is cut by those terms.  The APR
-   series answers ``None`` before its first row instead
-   (:func:`app.services.card_apr.apr_in_effect`): that is one rate a finance
-   charge multiplies, and ``None`` refuses to price interest at a rate
-   nobody stated for those days.
+1. **Which version governs a day**
+   (:func:`app.services.card_statement.terms_in_effect`, the one walk, in the
+   pure module every reader can reach): the row with the greatest
+   ``effective_date`` on or before the day; before the earliest row, the
+   earliest -- the series holds flat backwards, ruling **R-I**'s shape for a
+   stated figure.  So a card with one version derives exactly as the undated
+   row did, and the date the owner first saves terms can never make a
+   statement before it vanish: the cycle open on the day terms are first
+   saved began at the close before it, and its statement is cut by those
+   terms.
 2. **How terms are stated** (:func:`set_terms`): FOR a date, creating the
    version or rewriting the one already on that date -- developer ruling
    **R-CC27**'s set-by-date shape, the APR's, so a same-date save is the
@@ -35,7 +32,7 @@ question the one rewritten row could not:
 3. **Which reader takes which version**: a statement reads the version in
    force at its CLOSE, a reward the one in force on its purchase's day (the
    card's spec, plan#2331).  :mod:`app.services.card_statement` takes the
-   series and picks for itself.
+   series and picks for itself, so no caller hands it one version's day.
 4. **How a version goes** (:func:`remove_terms`, developer ruling
    **plan#2587**): any version but the card's only one, the fix for a
    mistyped date, which a same-date save cannot correct.  Its days fall to
@@ -65,7 +62,7 @@ from app.models.credit_card_params import (
     CREDIT_CARD_TERMS_UNIQUE_CONSTRAINT,
     CreditCardParams,
 )
-from app.utils.effective_dated import in_effect_or_earliest
+
 
 def load_card_term_versions(account_id: int) -> list[CreditCardParams]:
     """Return the account's terms versions, earliest effective date first.
@@ -83,27 +80,6 @@ def load_card_term_versions(account_id: int) -> list[CreditCardParams]:
         .order_by(CreditCardParams.effective_date)
         .all()
     )
-
-
-def terms_in_effect(
-    versions: list[CreditCardParams], day: date,
-) -> CreditCardParams | None:
-    """Return the version of the card's terms that governs *day*.
-
-    The ONE walk (:func:`app.utils.effective_dated.in_effect_or_earliest`):
-    the version with the greatest ``effective_date <= day``, and the earliest
-    version for a day before every version (rule 1 in the module docstring).
-
-    Args:
-        versions: The card's versions (:func:`load_card_term_versions`), in
-            any order.
-        day: The day to resolve.
-
-    Returns:
-        The governing version; ``None`` only for an empty series (a dormant
-        card).
-    """
-    return in_effect_or_earliest(versions, day)
 
 
 def set_terms(

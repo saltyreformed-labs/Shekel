@@ -81,7 +81,8 @@ from app.services import (
 )
 from app.services.account_projection import is_revolving
 from app.services.balance_at import BalanceContext
-from app.services.card_terms import load_card_term_versions, terms_in_effect
+from app.services.card_statement import terms_in_effect
+from app.services.card_terms import load_card_term_versions
 from app.utils.account_validation import (
     _appreciation_params_schema,
     _interest_params_schema,
@@ -235,8 +236,6 @@ def _card_context(
         "card_aprs": aprs,
         "card_apr_today": card_apr.apr_in_effect(aprs, ctx.as_of),
     }
-
-
 
 
 def _build_horizons(

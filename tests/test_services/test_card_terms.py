@@ -6,11 +6,13 @@ in force from its ``effective_date`` until the next one's, so a change governs
 from its day and every statement and reward before it stands.  What is
 pinned:
 
-* the walk (:func:`~app.services.card_terms.terms_in_effect`): before, at,
-  between and after two versions -- the earlier governs up to the day before
-  the later, the later from its own day -- and before the EARLIEST version the
-  earliest governs (the series holds flat backwards), while an empty series
-  is ``None``; in any input order;
+* the done-when of plan#2331, on plan#2333's own example saved through
+  :func:`~app.services.card_terms.set_terms`: the statement a Feb 10 purchase
+  is on -- its window, due date and minimum -- and the cash back rate the
+  purchase reads are the same before and after the Mar 1 version is saved,
+  and the statement after is the changeover cycle (the walk itself,
+  :func:`~app.services.card_statement.terms_in_effect`, is graded beside it in
+  ``tests/test_services/test_card_statement.py``);
 * the read (:func:`~app.services.card_terms.load_card_term_versions`) is the
   account's own versions, earliest first;
 * the write (:func:`~app.services.card_terms.set_terms`): a new date adds a
@@ -31,18 +33,23 @@ pinned:
 
 from datetime import date
 from decimal import Decimal
-from types import SimpleNamespace
 
 import pytest
 
 from app.exceptions import CardTermsRemovalRefused
 from app.extensions import db
 from app.models.credit_card_params import CreditCardParams
+from app.services.card_statement import (
+    CycleWindow,
+    cycle_containing,
+    due_date_for,
+    minimum_payment,
+    terms_in_effect,
+)
 from app.services.card_terms import (
     load_card_term_versions,
     remove_terms,
     set_terms,
-    terms_in_effect,
 )
 from tests._test_helpers import create_account_of_type
 
@@ -69,10 +76,9 @@ _MARCH = {
     "credit_limit": None,
 }
 
-
-def _version(effective_date):
-    """A stand-in version: the walk reads only ``effective_date``."""
-    return SimpleNamespace(effective_date=effective_date)
+#: The examples' purchase (rulings plan#2333 and plan#2587): $600.00 on Feb 10.
+_FEB_10 = date(2026, 2, 10)
+_PURCHASE = Decimal("600.00")
 
 
 def _card(seed_user, name="Visa"):
@@ -89,41 +95,55 @@ def _set(account, effective_date, terms):
     db.session.expire_all()
 
 
-class TestTheWalk:
-    """Which version governs a day."""
+class TestADateChangeLeavesThePastStanding:
+    """Plan#2331's done-when, on plan#2333's example, through saved versions."""
 
-    JAN = _version(date(2026, 1, 1))
-    MAR = _version(date(2026, 3, 1))
+    @staticmethod
+    def _what_feb_10_reads(account):
+        """The Feb 10 purchase's statement, its due date and minimum, and its cash back rate."""
+        versions = load_card_term_versions(account.id)
+        window = cycle_containing(versions, _FEB_10)
+        return (
+            window,
+            due_date_for(versions, window.closes),
+            minimum_payment(versions, window.closes, _PURCHASE),
+            terms_in_effect(versions, _FEB_10).cashback_rate,
+        )
 
-    def test_the_earlier_version_governs_up_to_the_day_before_the_later(self):
-        """Jan 1 through Feb 28 read January's; Mar 1 is March's from its own day."""
-        versions = [self.JAN, self.MAR]
-        assert terms_in_effect(versions, date(2026, 1, 1)) is self.JAN
-        assert terms_in_effect(versions, date(2026, 2, 10)) is self.JAN
-        assert terms_in_effect(versions, date(2026, 2, 28)) is self.JAN
-        assert terms_in_effect(versions, date(2026, 3, 1)) is self.MAR
-        assert terms_in_effect(versions, date(2027, 6, 1)) is self.MAR
+    def test_saving_march_leaves_februarys_statement_and_cash_back(self, app, seed_user):
+        """The Feb 20 statement keeps $600.00 due Mar 15, minimum $25.00, and $9.00 back.
 
-    def test_before_the_earliest_version_the_earliest_governs(self):
-        """The series holds flat backwards: Dec 31 and years before read January's.
-
-        So the date the first terms are saved never makes a statement before
-        it vanish -- the cycle open on that day began at the close before it.
+        Close 20, due 15, 2% with a $25.00 floor, 1.5% back: the Feb 10
+        purchase is on ``[Jan 20, Feb 20)``, due Mar 15; its minimum is
+        max(25.00, 2% x 600.00 = 12.00) = $25.00 and its cash back
+        600.00 x 0.0150 = $9.00.  Saving March's terms (close 5, due 30,
+        1.0%) from Mar 1 moves none of it; the statement after is the
+        changeover cycle ``[Feb 20, Mar 5)``, due Mar 30.
         """
-        versions = [self.JAN, self.MAR]
-        assert terms_in_effect(versions, date(2025, 12, 31)) is self.JAN
-        assert terms_in_effect(versions, date(2020, 1, 1)) is self.JAN
+        with app.app_context():
+            account = _card(seed_user)
+            february = {**_FEBRUARY, "min_payment_percent": Decimal("0.0200")}
+            _set(account, date(2026, 1, 1), february)
+            before = self._what_feb_10_reads(account)
+            assert before == (
+                CycleWindow(date(2026, 1, 20), date(2026, 2, 20)),
+                date(2026, 3, 15),
+                Decimal("25.00"),
+                Decimal("0.0150"),
+            )
+            assert _PURCHASE * before[3] == Decimal("9.00")
 
-    def test_the_input_order_does_not_matter(self):
-        """Newest-first input answers exactly as earliest-first does."""
-        versions = [self.MAR, self.JAN]
-        assert terms_in_effect(versions, date(2025, 12, 31)) is self.JAN
-        assert terms_in_effect(versions, date(2026, 2, 28)) is self.JAN
-        assert terms_in_effect(versions, date(2026, 3, 1)) is self.MAR
+            _set(account, date(2026, 3, 1), _MARCH)
 
-    def test_an_empty_series_is_none(self):
-        """No version: the dormant card, and the one ``None`` the walk returns."""
-        assert terms_in_effect([], date(2026, 3, 1)) is None
+            assert self._what_feb_10_reads(account) == before
+            versions = load_card_term_versions(account.id)
+            after_the_change = cycle_containing(versions, date(2026, 2, 25))
+            assert after_the_change == CycleWindow(date(2026, 2, 20), date(2026, 3, 5))
+            assert due_date_for(versions, after_the_change.closes) == date(2026, 3, 30)
+            # A Mar 10 purchase reads March's 1.0%: 600.00 x 0.0100 = $6.00.
+            assert _PURCHASE * terms_in_effect(
+                versions, date(2026, 3, 10),
+            ).cashback_rate == Decimal("6.00")
 
 
 class TestTheReadAndTheWrite:
@@ -228,10 +248,6 @@ class TestTheReadAndTheWrite:
         with app.app_context():
             account = _card(seed_user)
             assert load_card_term_versions(account.id) == []
-
-
-#: Ruling plan#2587's example: a $600.00 purchase on Feb 10.
-_FEB_10 = date(2026, 2, 10)
 
 
 def _version_on(account, effective_date):

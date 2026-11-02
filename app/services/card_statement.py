@@ -5,9 +5,31 @@ A credit card's STATEMENT, derived from its terms and the balance seam's
 figure -- never stored (ruling **R-CC2**; plan step **credit_card:CC-3**,
 design ``docs/design/credit_card_from_scratch.md`` 3.4).  No Flask, no ``db``:
 the caller loads the card's terms
-(:class:`~app.models.credit_card_params.CreditCardParams`) and reads the fold
+(:func:`app.services.card_terms.load_card_term_versions`) and reads the fold
 through the seam, and every function here takes plain values and returns
 plain data -- the :mod:`app.services.rate_period_engine` discipline.
+
+**The terms are a DATED SERIES** (plan#2331, developer ruling **plan#2333**):
+each :class:`~app.models.credit_card_params.CreditCardParams` version is in
+force from its ``effective_date`` until the next one's, and before the
+earliest the earliest (:func:`terms_in_effect`, the ONE walk every reader of
+the terms takes -- here, because this pure module is the one every reader can
+reach).  So every function below takes the card's SERIES, never a bare day or
+rule, and picks the version itself:
+
+* **A day is a CLOSE DATE when it is the close day, clamped, of the version in
+  force on that day.**  A change of the close day therefore cuts one
+  TRANSITIONAL cycle, from the last close under the old day to the first under
+  the new one -- short or long by the date the owner enters, as Regulation Z
+  allows (official interpretation comment 2(a)(4)-3 exempts it from the
+  equal-cycle rule).  plan#2333's example: close 20 through February, close 5
+  from Mar 1, so the Feb 20 statement is ``[Jan 20, Feb 20)`` and the next
+  ``[Feb 20, Mar 5)``.  A month that holds a change can hold two closes, which
+  is why nothing here is keyed by month.
+* **A statement's due date and minimum read the version in force at its
+  CLOSE** -- the statement the bank printed then -- never today's, and never
+  one the caller picked: :func:`due_date_for` and :func:`minimum_payment` take
+  the series and the close.
 
 **The cycle is CLOSED-OPEN.**  A statement that closes on the 20th holds every
 movement dated from the previous 20th up to but NOT including this one; a row
@@ -59,15 +81,21 @@ percentage of the balance), never in between (**R-CC8**'s convention).
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from app.utils.dates import (
     clamped_day,
     grid_month_after,
-    grid_months_within,
+    grid_month_on_or_before,
 )
+from app.utils.effective_dated import in_effect_or_earliest
 from app.utils.money import ZERO, round_money
 
-# The close instant is the end of the day BEFORE the close date.
+if TYPE_CHECKING:
+    from app.models.credit_card_params import CreditCardParams
+
+# The close instant is the end of the day BEFORE the close date, and the
+# close walks step from a span's end to the day before it by one day.
 _ONE_DAY = timedelta(days=1)
 
 
@@ -107,75 +135,213 @@ class CycleWindow:
         return self.closes - _ONE_DAY
 
 
-def cycle_window(close_day: int, closing_month: int) -> CycleWindow:
-    """Return the cycle that CLOSES in the month *closing_month* numbers.
+def terms_in_effect(
+    versions: "list[CreditCardParams]", day: date,
+) -> "CreditCardParams | None":
+    """Return the version of the card's terms that governs *day*.
+
+    The ONE walk (:func:`app.utils.effective_dated.in_effect_or_earliest`):
+    the version with the greatest ``effective_date <= day``, and the earliest
+    version for a day before every version -- the series holds flat
+    backwards, ruling **R-I**'s shape for a stated figure, which a recurring
+    definition's price series already takes
+    (:func:`app.services.template_amount_service.amount_as_of`).  So a card
+    with one version derives exactly as the undated row did, and the date the
+    owner first saves terms can never make a statement before it vanish.  The
+    APR series answers ``None`` before its first row instead
+    (:func:`app.services.card_apr.apr_in_effect`): that is one rate a finance
+    charge multiplies, and ``None`` refuses to price interest at a rate
+    nobody stated for those days.
+
+    Every reader of the terms takes this walk: the statement's close, due date
+    and minimum below, the cash detail page's terms in force, and a reward at
+    its purchase's day.  It lives in this module, not beside the loader in
+    :mod:`app.services.card_terms`, because this module is pure and so is
+    the one every reader can import.
 
     Args:
-        close_day: The nominal day of the month the issuer closes a statement
-            (1-31, :attr:`~app.models.credit_card_params.CreditCardParams.statement_close_day`).
-        closing_month: The absolute month ordinal
-            (:func:`app.utils.dates.month_ordinal`) of the month the cycle
-            closes in.
+        versions: The card's versions
+            (:func:`app.services.card_terms.load_card_term_versions`), in any
+            order.
+        day: The day to resolve.
 
     Returns:
-        The :class:`CycleWindow` opening at the previous month's close date
-        and closing at this month's, each clamped to its month's length.
+        The governing version; ``None`` only for an empty series (a dormant
+        card).
     """
-    return CycleWindow(
-        opens=clamped_day(closing_month - 1, close_day),
-        closes=clamped_day(closing_month, close_day),
-    )
+    return in_effect_or_earliest(versions, day)
 
 
-def cycle_containing(close_day: int, day: date) -> CycleWindow:
-    """Return the cycle *day* belongs to.
+def _governing(versions: "list[CreditCardParams]", day: date) -> "CreditCardParams":
+    """Return :func:`terms_in_effect`'s version for *day*, refusing an empty series.
 
-    The cycle whose close is the first close date strictly after *day*: a
-    day before this month's close date is in the cycle closing this month; a
-    day on or after it is in the one closing next month (closed-open).  The
-    placement the payment's "fold at the LAST close" (design 3.5, CC-6) and
-    the finance charge's "the cycle before the close it posts at" (design
-    3.6, CC-3i) both start from.
+    A dormant card has no terms and so no statement; every card feature gates
+    on a version existing (design 3.4), and a caller that reaches here
+    without one is told so rather than meeting an ``AttributeError``.
+
+    Raises:
+        ValueError: When *versions* is empty.
+    """
+    terms = terms_in_effect(versions, day)
+    if terms is None:
+        raise ValueError(
+            f"The card has no terms version, so no statement exists on {day}: "
+            f"gate on app.services.card_terms.load_card_term_versions first."
+        )
+    return terms
+
+
+def _in_force(
+    versions: "list[CreditCardParams]", day: date,
+) -> "tuple[CreditCardParams, date | None, date | None]":
+    """Return the version in force on *day* and the span ``[start, end)`` it governs.
+
+    The span is the days :func:`terms_in_effect` answers this same version
+    on: from its own date -- or from the beginning of time for the earliest,
+    which holds flat backwards -- until the next version's date, or forever
+    for the latest.  The close walks below jump from span to span, because
+    within one span the close day is one version's and the monthly-grid set
+    answers its next or last grid day directly.
 
     Args:
-        close_day: The nominal close day (1-31).
+        versions: The card's versions, in any order (non-empty).
+        day: The day whose governing version to resolve.
+
+    Returns:
+        ``(terms, start, end)``: ``start`` is ``None`` for the earliest
+        version and ``end`` is ``None`` for the latest.
+    """
+    terms = _governing(versions, day)
+    has_earlier = any(v.effective_date < terms.effective_date for v in versions)
+    end = min(
+        (v.effective_date for v in versions
+         if v.effective_date > terms.effective_date),
+        default=None,
+    )
+    return terms, (terms.effective_date if has_earlier else None), end
+
+
+def _first_close_after(versions: "list[CreditCardParams]", day: date) -> date:
+    """Return the card's first close date strictly after *day*.
+
+    The version in force on the next day governs every day up to its span's
+    end, so its first grid day after *day* is the close when it falls before
+    that end; when it does not, no day of the span is a close, and the walk
+    resumes from the span's end under the next version.  Each step moves to a
+    later span and the latest span is unbounded, so the walk ends.
+
+    Args:
+        versions: The card's versions (non-empty).
+        day: The date to search after.
+
+    Returns:
+        The first date after *day* that is the clamped close day of the
+        version in force on it.
+    """
+    while True:
+        terms, _start, end = _in_force(versions, day + _ONE_DAY)
+        close_day = terms.statement_close_day
+        close = clamped_day(grid_month_after(day, close_day), close_day)
+        if end is None or close < end:
+            return close
+        day = end - _ONE_DAY
+
+
+def _last_close_on_or_before(versions: "list[CreditCardParams]", day: date) -> date:
+    """Return the card's latest close date on or before *day*.
+
+    :func:`_first_close_after`'s mirror: the version in force on *day*
+    governs back to its span's start, so its last grid day on or before
+    *day* is the close when it falls inside the span; when it does not, the
+    walk resumes from the day before the span under the version before.  The
+    earliest span is unbounded backwards, so the walk ends.
+
+    Args:
+        versions: The card's versions (non-empty).
+        day: The date to search on or before.
+
+    Returns:
+        The latest date on or before *day* that is the clamped close day of
+        the version in force on it.
+    """
+    while True:
+        terms, start, _end = _in_force(versions, day)
+        close_day = terms.statement_close_day
+        close = clamped_day(grid_month_on_or_before(day, close_day), close_day)
+        if start is None or close >= start:
+            return close
+        day = start - _ONE_DAY
+
+
+def cycle_containing(versions: "list[CreditCardParams]", day: date) -> CycleWindow:
+    """Return the cycle *day* belongs to.
+
+    From the card's latest close on or before *day* up to its first close
+    strictly after it (closed-open): a day before a close is in the cycle
+    that close ends, and the close date itself opens the next.  Each close
+    is the close day of the version in force on that date (the module
+    docstring), so the cycle open when the close day changes is the
+    transitional one.  The placement the payment's "fold at the LAST close"
+    (design 3.5, CC-6) and the finance charge's "the cycle before the close
+    it posts at" (design 3.6, CC-3i) both start from.
+
+    Args:
+        versions: The card's terms versions (non-empty), in any order.
         day: The date to place.
 
     Returns:
         The :class:`CycleWindow` with ``window.contains(day)``.
+
+    Raises:
+        ValueError: When *versions* is empty (a dormant card).
     """
-    return cycle_window(close_day, grid_month_after(day, close_day))
+    return CycleWindow(
+        opens=_last_close_on_or_before(versions, day),
+        closes=_first_close_after(versions, day),
+    )
 
 
 def statement_sequence(
-    close_day: int, first: date, last: date,
+    versions: "list[CreditCardParams]", first: date, last: date,
 ) -> list[CycleWindow]:
     """Return every cycle whose CLOSE date falls within ``[first, last]``.
 
-    Ascending, one per month whose clamped close date lies in the inclusive
-    span; empty when no close date does (a span shorter than a month can hold
-    zero or one).
+    Ascending, each opening at the close before it; empty when no close date
+    lies in the inclusive span (a span shorter than a month can hold zero or
+    one, and a month holding a change of the close day can hold two).
 
     Args:
-        close_day: The nominal close day (1-31).
+        versions: The card's terms versions (non-empty), in any order.
         first: The earliest close date to include.
         last: The latest close date to include.
 
     Returns:
         The :class:`CycleWindow` list, oldest first.
+
+    Raises:
+        ValueError: When *versions* is empty (a dormant card).
     """
-    return [
-        cycle_window(close_day, month)
-        for month in grid_months_within(close_day, first, last)
-    ]
+    windows: list[CycleWindow] = []
+    closes = _first_close_after(versions, first - _ONE_DAY)
+    while closes <= last:
+        opens = (
+            windows[-1].closes if windows
+            else _last_close_on_or_before(versions, closes - _ONE_DAY)
+        )
+        windows.append(CycleWindow(opens=opens, closes=closes))
+        closes = _first_close_after(versions, closes)
+    return windows
 
 
-def due_date_for(closes: date, due_day: int) -> date:
+def due_date_for(versions: "list[CreditCardParams]", closes: date) -> date:
     """Return the payment due date of the statement that closed on *closes*.
 
-    The first occurrence of *due_day* strictly after *closes* (**R-CC26**):
-    this month's when that date is still ahead of the close, next month's
-    otherwise.  A due day equal to the close day is therefore next month's.
+    The first occurrence of the due day strictly after *closes*
+    (**R-CC26**): this month's when that date is still ahead of the close,
+    next month's otherwise, so a due day equal to the close day is next
+    month's.  The due day is the version in force AT THE CLOSE's (the module
+    docstring): a change of the due day that takes effect after a close does
+    not move the payment that statement printed.
 
     The clamp is the ONE clamp's and the "which month's occurrence" comparison
     over it is the monthly-grid set's
@@ -184,42 +350,54 @@ def due_date_for(closes: date, due_day: int) -> date:
     ``recurrence:R25`` closed ledger row ``recurrence:REC-547``.
 
     Args:
+        versions: The card's terms versions (non-empty), in any order.
         closes: The statement's close date (:attr:`CycleWindow.closes`).
-        due_day: The nominal due day (1-31,
-            :attr:`~app.models.credit_card_params.CreditCardParams.payment_due_day`).
 
     Returns:
         The due date, clamped to its month's length.
+
+    Raises:
+        ValueError: When *versions* is empty (a dormant card).
     """
+    due_day = _governing(versions, closes).payment_due_day
     return clamped_day(grid_month_after(closes, due_day), due_day)
 
 
 def minimum_payment(
-    balance: Decimal, percent: Decimal, floor: Decimal,
+    versions: "list[CreditCardParams]", closes: date, balance: Decimal,
 ) -> Decimal:
-    """Return the issuer's minimum payment on a statement *balance*.
+    """Return the issuer's minimum payment on the statement closing on *closes*.
 
     ``max(floor, round_money(percent x balance))``, clamped to the balance
     and never below zero (design 3.4; **R-CC29**): a balance smaller than
     the floor is due whole, and a zero or credit balance has nothing due.
+    The percent and the floor are the version in force AT THE CLOSE's
+    (:attr:`~app.models.credit_card_params.CreditCardParams.min_payment_percent`,
+    ``Decimal("0.0250")`` for 2.5%, and
+    :attr:`~app.models.credit_card_params.CreditCardParams.min_payment_floor`).
 
     Args:
+        versions: The card's terms versions (non-empty), in any order.
+        closes: The statement's close date (:attr:`CycleWindow.closes`).
         balance: The statement balance as an OWED figure
             (:func:`app.services.liability_sign.owed`).
-        percent: The minimum's fraction of the balance
-            (:attr:`~app.models.credit_card_params.CreditCardParams.min_payment_percent`,
-            ``Decimal("0.0250")`` for 2.5%).
-        floor: The dollar floor of the minimum
-            (:attr:`~app.models.credit_card_params.CreditCardParams.min_payment_floor`).
 
     Returns:
         The minimum, cent-quantized on every arm: ``0.00`` for a zero or
         credit balance, else ``min(max(floor, round_money(percent x
         balance)), balance)``.
+
+    Raises:
+        ValueError: When *versions* is empty (a dormant card).
     """
+    terms = _governing(versions, closes)
     if balance <= ZERO:
         return round_money(ZERO)
-    return min(max(floor, round_money(percent * balance)), balance)
+    return min(
+        max(terms.min_payment_floor,
+            round_money(terms.min_payment_percent * balance)),
+        balance,
+    )
 
 
 def grace_kept(prior_balance: Decimal, credited_by_due: Decimal) -> bool:

@@ -125,6 +125,7 @@ from tests._test_helpers import (
     make_appreciating_account,
     make_investment_account,
     make_salary_profile,
+    state_template_price,
 )
 # The world builders and the registry live in ``tests/conftest.py`` beside the
 # worker-database plumbing they drive.  Importing them from there is safe and
@@ -451,6 +452,10 @@ def _build_baseline_less_owner(db):
         Decimal("50.00"), name="Policy Transfer",
     )
     db.session.flush()
+    # The transfer definition's price, through the one write door as its
+    # create route states it: ``/templates`` prices a definition by its series
+    # since plan step X-bp, and rule 3 needs no baseline to do it.
+    state_template_price(xfer_template)
 
     scenario = db.session.get(Scenario, seed_user["scenario"].id)
     scenario.is_baseline = False

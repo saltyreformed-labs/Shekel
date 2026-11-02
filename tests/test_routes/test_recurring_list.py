@@ -32,6 +32,7 @@ from tests._test_helpers import (
     loan_params_for,
     make_cadence_rule,
     make_loan_payment_template,
+    state_template_price,
 )
 from tests.oracles.recurrence_baseline import (
     EVERY_PERIOD,
@@ -73,6 +74,9 @@ def _txn(user, account, category, cadence, amount, *, type_enum, name,
     )
     db.session.add(tmpl)
     db.session.flush()
+    # Its price, through the one write door as the create route states it:
+    # the page prices a definition by its series since plan step X-bp.
+    state_template_price(tmpl)
     if cadence is not None:
         _rule(tmpl, cadence, **rule_kwargs)
     return tmpl
@@ -105,6 +109,7 @@ def _transfer(user, from_account, to_account, cadence, amount, *, name,
     )
     db.session.add(tmpl)
     db.session.flush()
+    state_template_price(tmpl)
     _rule(tmpl, cadence, **rule_kwargs)
     return tmpl
 

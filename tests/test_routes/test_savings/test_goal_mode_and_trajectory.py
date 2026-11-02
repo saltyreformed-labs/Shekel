@@ -12,7 +12,11 @@ from app.models.salary_profile import SalaryProfile
 from app.models.savings_goal import SavingsGoal
 from app.models.transfer_template import TransferTemplate
 
-from tests._test_helpers import make_cadence_rule, start_test_pay_list
+from tests._test_helpers import (
+    make_cadence_rule,
+    start_test_pay_list,
+    state_template_price,
+)
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY
 
 from ._helpers import _create_savings_account, _create_goal
@@ -368,7 +372,10 @@ class TestTrajectoryDisplay:
             )
             db.session.add(template)
             db.session.flush()
-            # The definition first, then the cadence onto it (plan step R-F6).
+            # Its price through the one write door (the goal's contribution
+            # reads the series since plan step X-bp), then the cadence onto
+            # the definition (plan step R-F6).
+            state_template_price(template)
             make_cadence_rule(template, MONTHLY)
 
             _create_goal(seed_user, acct, name="Trajectory Goal")
@@ -482,7 +489,10 @@ class TestTrajectoryDisplay:
             )
             db.session.add(template)
             db.session.flush()
-            # The definition first, then the cadence onto it (plan step R-F6).
+            # Its price through the one write door (the goal's contribution
+            # reads the series since plan step X-bp), then the cadence onto
+            # the definition (plan step R-F6).
+            state_template_price(template)
             make_cadence_rule(template, EVERY_PERIOD)
 
             _create_goal(seed_user, acct, name="Biweekly Goal")

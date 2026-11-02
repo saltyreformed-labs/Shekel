@@ -2,8 +2,11 @@
 
 from decimal import Decimal, ROUND_HALF_UP
 
+import pytest
+
 from app import ref_cache
 from app.enums import StatusEnum, TxnTypeEnum
+from app.exceptions import AmountUnresolvable
 from app.extensions import db
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
@@ -15,6 +18,7 @@ from tests._test_helpers import (
     make_cadence_rule,
     one_off_row_of,
     settle_day_columns,
+    state_template_price,
     transient_cadence_rule,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, EVERY_N_PERIODS, MONTHLY, ANNUAL
@@ -56,6 +60,9 @@ def _create_expense_template(seed_user, cadence, amount, name="Test Expense",
     )
     db.session.add(tmpl)
     db.session.flush()
+    # Its price, through the one write door as the create route states it:
+    # the floor prices a definition by its series since plan step X-bp.
+    state_template_price(tmpl)
     if cadence is not None:
         make_cadence_rule(tmpl, cadence, interval_n=interval_n)
     return tmpl
@@ -89,6 +96,7 @@ def _create_test_transfer_template(seed_user, to_account, cadence, amount,
     )
     db.session.add(tmpl)
     db.session.flush()
+    state_template_price(tmpl)
     make_cadence_rule(tmpl, cadence)
     return tmpl
 
@@ -219,7 +227,7 @@ class TestEmergencyFundCommittedBaseline:
         expense on a NON-checking account (here a Savings account) no
         longer inflates the emergency-fund denominator.  The floor is $0
         -- each row's definition is rule-less, and a definition with no
-        rule commits nothing (``obligations_aggregator._committed_amount``)
+        rule commits nothing (``obligations_aggregator.template_monthly_or_none``)
         -- so the displayed average is driven entirely by the historical
         operand, which must reflect only the $120/period checking
         expenses, not the $300/period Savings ones.  Today is frozen to
@@ -461,24 +469,28 @@ class TestEmergencyFundCommittedBaseline:
                 "Inactive template should not contribute"
             )
 
-    def test_emergency_fund_handles_none_default_amount(
+    def test_a_definition_that_states_no_price_is_refused(
         self, app, seed_user,
     ):
-        """Templates with default_amount=None are skipped without error.
+        """A definition with no price is REFUSED, never counted as zero.
 
-        The column is NOT NULL in the schema, but the function handles it
-        defensively for robustness, so the row is built UNSAVED rather than
-        flushed.
+        **This case asserted the opposite until plan step X-bp**, as
+        ``test_emergency_fund_handles_none_default_amount``: a template whose
+        ``default_amount`` was ``None`` -- a state the NOT NULL column cannot
+        hold -- was skipped by a defensive branch and the floor read
+        ``$0.00``.  That branch read the column this step stops reading.  The
+        floor prices a definition by the rule that prices its rows now
+        (``obligations_aggregator.todays_price``, ruling plan#2693), and the
+        nearest state a definition can reach -- a price series left EMPTY by
+        a writer that went around the one write door -- is one its rows
+        refuse (``cash_ledger.stated_price``).  Skipping it would understate
+        what the owner is committed to with nothing on the page saying so,
+        the disposition plan step R7a-2b removed from this same total for a
+        rule the app cannot read.
 
-        **Both halves are real model instances from plan step R9**, where the
-        rule half was a ``SimpleNamespace`` carrying four hand-listed
-        attributes -- one of them ``pattern_id``, a column dropped at R7c-c
-        that nothing had read since.  A stand-in that lists what the reader
-        happens to touch stops being a stand-in the moment the reader touches
-        something else, and it cannot fail loud when it does: the shape it
-        mirrors has no constraint to violate.  An unsaved
-        ``TransactionTemplate`` holding a rule authored through the real door
-        costs no flush and cannot drift from either model.
+        Built UNSAVED, as the case it replaces was, with its rule authored
+        through the real door: a real model instance cannot drift from either
+        model, and nothing is flushed.
         """
         with app.app_context():
             template = TransactionTemplate(
@@ -486,19 +498,21 @@ class TestEmergencyFundCommittedBaseline:
                 account_id=seed_user["account"].id,
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
-                name="No amount",
-                default_amount=None,
+                name="No price",
                 recurrence_rule=transient_cadence_rule(
                     seed_user["user"].id, EVERY_PERIOD,
                 ),
             )
+            assert template.amount_versions == [], (
+                "precondition: the definition states no price"
+            )
 
-            result = obligations_aggregator.committed_monthly(
-                [template], BalanceContext.build(seed_user["user"].id),
-            )
-            assert result == Decimal("0.00"), (
-                f"Expected 0.00 when template has None amount, got {result}"
-            )
+            with pytest.raises(
+                AmountUnresolvable, match="its price series is EMPTY",
+            ):
+                obligations_aggregator.committed_monthly(
+                    [template], BalanceContext.build(seed_user["user"].id),
+                )
 
     def test_emergency_fund_every_n_periods_template(
         self, app, seed_user,

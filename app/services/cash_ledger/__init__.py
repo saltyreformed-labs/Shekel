@@ -220,7 +220,7 @@ from ._amount_rule import (
     is_loan_payment_definition,
     transfer_amount_rule,
 )
-from ._definition_cash import DefinitionRow, definition_cash
+from ._definition_cash import DefinitionRow, definition_cash, stated_price
 from ._amount_source import (
     amounts_by_key,
     resolve_amount,
@@ -349,6 +349,7 @@ __all__ = [
     "reject_movement_before_books_open",
     "settled_amounts_by_key",
     "settled_cash_facts",
+    "stated_price",
     "statement_coverage",
     "sum_projected",
     "walk_cash_ledger",

@@ -16,7 +16,7 @@ from app.services import savings_dashboard_service
 from app.services import account_service
 from app.services.balance_at import BalanceContext
 
-from tests._test_helpers import start_test_pay_list
+from tests._test_helpers import start_test_pay_list, state_template_price
 from tests.oracles.recurrence_baseline import MONTHLY
 
 
@@ -606,6 +606,9 @@ class TestGoalTrajectoryDashboard:
             )
             db.session.add(template)
             db.session.flush()
+            # Its price through the one write door: the goal's contribution
+            # reads the series since plan step X-bp.
+            state_template_price(template)
             # Authored through the write door (plan step R7c-b): the
             # two-axis columns are NOT NULL, so a rule naming only a pattern
             # cannot be stored.  Onto the definition, which plan step R-F6

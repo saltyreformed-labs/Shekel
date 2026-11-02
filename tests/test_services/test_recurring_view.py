@@ -35,6 +35,7 @@ from tests._test_helpers import (
     make_cadence_rule,
     make_loan_payment_template,
     make_retired_loan_payment,
+    state_template_price,
 )
 from tests.oracles.recurrence_baseline import (
     EVERY_PERIOD,
@@ -48,7 +49,7 @@ from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import account_service, balance_at, recurring_view
 from app.services.balance_at import BalanceContext, is_standing_loan_payment
-from app.services.obligations_aggregator import committed_monthly
+from app.services.obligations_aggregator import TodaysPrice, committed_monthly
 from app.services.pay_calendar import (
     PayCadence,
     PayCalendar,
@@ -187,6 +188,9 @@ def _create_txn_template(seed_user, cadence, amount, *, type_enum, name,
     )
     db.session.add(tmpl)
     db.session.flush()
+    # Its price, through the one write door as the create route states it:
+    # the surface prices a definition by its series since plan step X-bp.
+    state_template_price(tmpl)
     if cadence is not None:
         _author_cadence(tmpl, cadence, **rule_kwargs)
     return tmpl
@@ -239,6 +243,7 @@ def _create_transfer(seed_user, cadence, amount, to_account, *,
     )
     db.session.add(tmpl)
     db.session.flush()
+    state_template_price(tmpl)
     _author_cadence(tmpl, cadence, **rule_kwargs)
     return tmpl
 
@@ -1108,10 +1113,13 @@ class TestTheDestinationsStopReachesTheRow:
             [], [], [tpl], _ctx(seed_user, _LOAN_TODAY),
         )
 
-        # ``$200.00`` monthly is ``200 * 12 / 12``: the fixture authors the
-        # loan door's monthly rule since plan step R16-b-2 (it read
-        # ``433.33`` for the every-paycheck rule it authored before).
-        assert view.transfers.rows[0].equivalent.monthly == Decimal("200.00"), (
+        # One installment a month at the contract's level payment: $12,000.00
+        # at 5% over 24 months, r = 0.05 / 12, 12000 * r / (1 - (1 + r) ** -24)
+        # = 526.4569 -> $526.46.  The payment TRACKS the loan, so since plan
+        # step X-bp (ruling plan#2693) it is priced by the loan rather than by
+        # the fixture's stored $200.00 snapshot; the fixture authors the loan
+        # door's monthly rule since plan step R16-b-2.
+        assert view.transfers.rows[0].equivalent.monthly == Decimal("526.46"), (
             "precondition: the synced payment is still a live commitment"
         )
         assert len(calls) == 1, (
@@ -1351,6 +1359,12 @@ class TestAnAbsentCadenceIsRefused:
             recurring_view.build_view([], [tmpl], [], ctx)
 
 
+#: The price the two cases below hand a prepared row: the $10.00 their
+#: template states, as ``todays_price`` would answer it.  Neither case reads
+#: it; the row requires one (plan step X-bp).
+_PRICE_TEN = TodaysPrice(amount=Decimal("10.00"), paycheck_cadence=None)
+
+
 class TestTheValuesCannotDisagree:
     """The pairs are checked, not merely documented."""
 
@@ -1364,7 +1378,7 @@ class TestTheValuesCannotDisagree:
 
         with pytest.raises(ValueError, match="rule and its reading"):
             recurring_view._PreparedRow(
-                template=tmpl, monthly_full=None,
+                template=tmpl, price=_PRICE_TEN, monthly_full=None,
                 rule=tmpl.recurrence_rule, reading=None,
             )
 
@@ -1379,5 +1393,6 @@ class TestTheValuesCannotDisagree:
 
         with pytest.raises(ValueError, match="rule and its reading"):
             recurring_view._PreparedRow(
-                template=tmpl, monthly_full=None, rule=None, reading=reading,
+                template=tmpl, price=_PRICE_TEN, monthly_full=None, rule=None,
+                reading=reading,
             )

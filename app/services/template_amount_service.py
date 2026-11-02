@@ -277,9 +277,12 @@ def _resync_scalar(template) -> None:
     transaction) and X-au-f-2 (a transfer) generation writes no figure at
     all, and the column is read rather than copied (``git grep -n
     default_amount app/`` is the census): the conflict chooser's
-    amount-change gate, the Recurring list's archived rows,
-    ``obligations_aggregator``, carry-forward's generated target, and
-    :func:`current_amount` for a definition holding no series among them.  A
+    amount-change gate, carry-forward's generated target, and
+    :func:`current_amount` for a definition holding no series among them.
+    (The Recurring list, its Archived drawer and the savings page's floors
+    read it until plan step X-bp, which prices them as of the read pass's
+    day by the rule that prices the definition's rows instead,
+    ``obligations_aggregator.todays_price``.)  A
     scheduled rise still has to reach the column the moment it is stated, or
     those readers would go on answering the old figure.  Today's price is a
     different question, and the edit form asks it separately

@@ -7,7 +7,11 @@ from app.models.transfer_template import TransferTemplate
 from app.models.transfer import Transfer
 from app.models.ref import Status
 from app.services import transfer_service
-from tests._test_helpers import generate_transfer_of, transfer_side_record
+from tests._test_helpers import (
+    generate_transfer_of,
+    state_template_price,
+    transfer_side_record,
+)
 from tests._test_helpers import transfer_amount
 
 from ._helpers import (
@@ -437,6 +441,12 @@ class TestTransferTemplateHardDelete:
                 is_active=False,
             )
             db.session.add_all([active, archived])
+            db.session.flush()
+            # Their prices, through the one write door as the create route
+            # states them: the page prices a definition, archived or not, by
+            # its series since plan step X-bp.
+            state_template_price(active)
+            state_template_price(archived)
             db.session.commit()
 
             resp = auth_client.get("/transfers", follow_redirects=True)

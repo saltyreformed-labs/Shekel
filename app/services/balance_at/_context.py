@@ -778,11 +778,13 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         **Two callers, and each is one whose own rule has an answer here.**
         The second, since plan step salary:X-av-2, is
         ``obligations_aggregator._todays_paycheck``: with no baseline no salary
-        profile is in scope, so no definition is priced as a paycheck and a
-        salary row shows its stored amount (ruling **R-SAL71**), where
-        :meth:`amounts` would refuse the whole page for an owner missing a
-        baseline -- which ruling **R-R30** does only when a definition pays
-        into a configured loan.  The first (plan step X-au-g-2c):
+        profile is in scope, so no definition is priced as a paycheck and
+        every other definition is priced by its own series (ruling
+        **R-SAL71**; a salary definition is refused one tier down since plan
+        step X-bp, its stored copy being gone), where :meth:`amounts` would
+        refuse the whole page for an owner missing a baseline -- which ruling
+        **R-R30** does only when a definition pays into a configured loan.
+        The first (plan step X-au-g-2c):
         :func:`._resolution.resolve_loan_bundle`, which
         already spelled the nullable for the SAME loan and the SAME reason.  A
         loan's payment feed is its one scenario-scoped input; its params,

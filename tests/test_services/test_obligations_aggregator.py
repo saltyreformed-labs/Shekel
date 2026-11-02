@@ -50,14 +50,17 @@ from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum, TxnTypeEnum
 from app.extensions import db
 from app.models.recurrence_rule import RecurrenceRule
 from app.models.transaction_template import TransactionTemplate
-from app.models.transfer_template import TransferTemplate
 from app.services import obligations_aggregator, recurring_view
 from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import PayCadence, calendar_for
 from app.services.pay_rhythm import FixedDays
 from app.services.recurrence import RecurrenceResolutionError
 from app.utils.money import MONTHS_PER_YEAR
-from tests._test_helpers import make_cadence_rule, read_pass_over_paydays
+from tests._test_helpers import (
+    make_cadence_rule,
+    read_pass_over_paydays,
+    state_template_price,
+)
 from tests.oracles.recurrence_baseline import (
     EVERY_PERIOD,
     MONTHLY,
@@ -88,6 +91,11 @@ _SCHEDULE_PAYDAYS = 78
 #: ``balance:R-BAL356``), which is fine: nothing here reads the owner from the
 #: database, only compares the rule's owner with the pass's.
 _STAND_IN_OWNER = 1
+
+#: The id every duck-typed template and its one price version carry.  Read
+#: only by a refusal message and by the series' tie-break sort, so any value
+#: serves; named so the stand-in does not look like a row someone seeded.
+_STAND_IN_TEMPLATE = 1
 
 
 def _pass(
@@ -127,7 +135,7 @@ def _pass(
 
 
 def _fake_template(
-    unit_id: int, interval_n: int, amount: Decimal | None, *,
+    unit_id: int, interval_n: int, amount: Decimal, *,
     end_date: date | None = None,
 ) -> SimpleNamespace:
     """Return a duck-typed template whose rule the composed door can READ.
@@ -142,17 +150,35 @@ def _fake_template(
     and the placement is the containing one, so the value resolves for every
     authorable unit.
 
+    **Its price is a one-version SERIES since plan step X-bp**, where it was a
+    ``default_amount`` attribute: the aggregator prices a definition by the
+    rule that prices its rows (``obligations_aggregator.todays_price``, ruling
+    plan#2693), which for a definition no loan settings row names is rule 3
+    -- the series as of the pass's day, holding flat before its earliest
+    version.  One version dated on the schedule's first payday states
+    *amount* on every day these cases read, so no figure moved.  ``settings``
+    is ``None`` (no loan payment, and a definition that owns its price) and
+    ``id`` names it in a refusal message.
+
     Args:
         unit_id: The ``ref.recurrence_units`` id -- possibly one the enum does
             not model, which is the case that must REFUSE.
         interval_n: The cadence interval.
-        amount: The template's ``default_amount``.
+        amount: The one price the template's series states.
         end_date: An authored closing date, or ``None``.
 
     Returns:
         The :class:`types.SimpleNamespace` template.
     """
     return SimpleNamespace(
+        id=_STAND_IN_TEMPLATE,
+        settings=None,
+        amount_versions=[
+            SimpleNamespace(
+                id=_STAND_IN_TEMPLATE, effective_date=_SCHEDULE_START,
+                amount=amount,
+            ),
+        ],
         recurrence_rule=SimpleNamespace(
             user_id=_STAND_IN_OWNER,
             unit_id=unit_id,
@@ -166,7 +192,6 @@ def _fake_template(
             max_occurrences=None,
             max_per_month=None,
         ),
-        default_amount=amount,
     )
 
 
@@ -196,6 +221,9 @@ def _create_expense(seed_user, cadence, amount, *, name="Expense",
     )
     db.session.add(tmpl)
     db.session.flush()
+    # Its price, stated through the one write door as the create route states
+    # it: the aggregator reads the series since plan step X-bp.
+    state_template_price(tmpl)
     if cadence is not None:
         make_cadence_rule(
             tmpl, cadence, interval_n=interval_n, end_date=end_date,
@@ -403,9 +431,9 @@ class TestObligationsAggregator:
             RecurrenceUnitEnum.PERIOD,
         )
         with app.app_context():
-            no_rule = SimpleNamespace(
-                recurrence_rule=None, default_amount=Decimal("100.00"),
-            )
+            # Nothing but the missing rule: a definition that does not repeat
+            # is skipped before it is priced, so it needs no price to skip.
+            no_rule = SimpleNamespace(recurrence_rule=None)
             expired = _fake_template(
                 every_period, 1, Decimal("100.00"),
                 end_date=as_of - timedelta(days=1),

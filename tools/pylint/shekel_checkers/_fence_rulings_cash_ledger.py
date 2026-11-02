@@ -154,6 +154,13 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # reads one relationship and answers a bool.
     "definition_cash",
     "is_loan_payment_definition",
+    # Rule 3's series arm, public for a reader pricing a DEFINITION on a day
+    # rather than a row (plan step X-bp, ruling plan#2693: the Recurring and
+    # savings pages price a definition as of the read pass's day).  One
+    # definition's stated price, a non-producer on ``definition_cash``'s
+    # ground: nothing folded, dated beyond the series lookup, summed or
+    # anchored.
+    "stated_price",
     # The BATCH form of the same answer (plan step X-au-c2b), on the same
     # ground as ``contributions_by_key`` above: a dict keyed by a row's id or
     # a transfer leg's ``(transfer id, account id)``, one entry per item the

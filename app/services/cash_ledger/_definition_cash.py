@@ -298,5 +298,34 @@ def definition_cash(
     return _stated_amount(row.template, row.due_date, subject)
 
 
+def stated_price(template, on_date: date, *, subject: str) -> Decimal:
+    """Rule 3 for a reader above this package: what *template* states for ``on_date``.
 
-__all__ = ["DefinitionRow", "definition_cash"]
+    The public door onto :func:`_stated_amount`, the series arm rule 3 and
+    rule 4's manual arm share, for a reader pricing a DEFINITION on a day
+    rather than a row (plan step **X-bp**, ruling plan#2693): the Recurring
+    page and the savings page price each definition as of the read pass's
+    day by the rule that prices its rows
+    (``obligations_aggregator.todays_price``).  A definition no loan-payment
+    settings row names is rule 3 there as it is here, and rule 3 needs no
+    :class:`AmountBasis` -- which is why that reader asks this door rather
+    than :func:`definition_cash`: building a basis refuses an owner with no
+    baseline scenario, and ruling **R-R30** allows that refusal only for a
+    definition that pays into a loan.
+
+    Args:
+        template: The transaction or transfer template that states the price.
+        on_date: The day to price.
+        subject: What is being priced, for the refusal messages.
+
+    Returns:
+        The stated amount on ``on_date``.
+
+    Raises:
+        AmountUnresolvable: See :func:`_stated_amount`: the definition's
+            amount is derived rather than stated, or its series is empty.
+    """
+    return _stated_amount(template, on_date, subject)
+
+
+__all__ = ["DefinitionRow", "definition_cash", "stated_price"]

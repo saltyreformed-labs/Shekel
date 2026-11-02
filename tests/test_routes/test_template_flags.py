@@ -16,7 +16,11 @@ from app.extensions import db
 from app.models.ref import TransactionType
 from app.models.transaction_template import TransactionTemplate
 from app.schemas.validation import TemplateCreateSchema, TemplateUpdateSchema
-from tests._test_helpers import cadence_payload, make_cadence_rule
+from tests._test_helpers import (
+    cadence_payload,
+    make_cadence_rule,
+    state_template_price,
+)
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 
 
@@ -59,6 +63,10 @@ def _make_template(seed_user, name="Test Template",
     )
     db.session.add(template)
     db.session.flush()
+    # Its price, through the one write door as the create route states it:
+    # the Recurring page prices a definition by its series since plan step
+    # X-bp.
+    state_template_price(template)
     if recurs:
         make_cadence_rule(template, EVERY_PERIOD)
     db.session.commit()

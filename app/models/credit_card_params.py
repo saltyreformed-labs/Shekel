@@ -64,6 +64,7 @@ from app.models.mixins import (
     TimestampMixin,
     UserScopedMixin,
 )
+from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN
 
 #: The one-version-per-effective-date key, named ONCE where the table declares
 #: it: the terms door names it as the ``ON CONFLICT`` target of its set-by-date
@@ -146,6 +147,17 @@ class CreditCardParams(AccountScopedMixin, UserScopedMixin,
         db.UniqueConstraint(
             "account_id", "effective_date",
             name=CREDIT_CARD_TERMS_UNIQUE_CONSTRAINT,
+        ),
+        # The window a stated date may fall in, the schema's bound
+        # (``app.utils.dates.CALENDAR_DATE_MIN`` / ``_MAX``) at the storage
+        # tier for a writer no schema stands in front of.  An HTML date input
+        # accepts a four-digit-year typo, and the series holds flat
+        # backwards: a stray ``0202`` would become the card's earliest
+        # version and govern every day before the next one.
+        db.CheckConstraint(
+            f"effective_date BETWEEN DATE '{CALENDAR_DATE_MIN.isoformat()}' "
+            f"AND DATE '{CALENDAR_DATE_MAX.isoformat()}'",
+            name="ck_credit_card_params_effective_date_range",
         ),
         # The day-of-month domain, stated as the loan's ``payment_day`` is.
         db.CheckConstraint(

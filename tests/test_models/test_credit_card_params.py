@@ -8,7 +8,7 @@ leaf:
 * every CHECK refuses its out-of-domain value BY NAME, one case per
   constraint, with the control that an in-domain row is stored (a CHECK that
   refused everything would pass every refusal case);
-* the CHECKs' text on the model equals the migration's, name for name,
+* the CHECKs' text on the model equals the migrations', name for name,
   because Alembic autogenerate does not diff a CHECK and the migration's
   docstring names this module as what keeps them equal;
 * a card holds one version of its terms per effective date (plan#2331,
@@ -73,6 +73,10 @@ _REFUSED = [
     ("auto_redeem_threshold", Decimal("0.00"),
      "ck_credit_card_params_auto_redeem_threshold"),
     ("credit_limit", Decimal("0.00"), "ck_credit_card_params_credit_limit"),
+    ("effective_date", date(1999, 12, 31),
+     "ck_credit_card_params_effective_date_range"),
+    ("effective_date", date(2101, 1, 1),
+     "ck_credit_card_params_effective_date_range"),
 ]
 
 
@@ -135,7 +139,9 @@ class TestTheDomainIsTheDatabases:
             assert stored.user_id == seed_user["user"].id
 
     def test_the_bound_of_each_domain_is_admitted(self, app, seed_user):
-        """Day 1 and 31, 0% and 100%, a zero floor and a one-cent limit are stored.
+        """Each domain's bounds are stored: the date window's, day 1 and 31, 0% and 100%.
+
+        Jan 1, 2000 and Dec 31, 2100, a zero floor and a one-cent limit too.
 
         The refusal cases below probe one step OUTSIDE each domain; without
         this, a CHECK written one step too tight (``<= 30``, ``< 1``) would
@@ -146,14 +152,16 @@ class TestTheDomainIsTheDatabases:
             low = _card(seed_user, name="Low")
             high = _card(seed_user, name="High")
             db.session.add(_terms_for(
-                low, statement_close_day=1, payment_due_day=1,
+                low, effective_date=date(2000, 1, 1),
+                statement_close_day=1, payment_due_day=1,
                 min_payment_percent=Decimal("0"), cashback_rate=Decimal("0"),
                 min_payment_floor=Decimal("0.00"),
                 auto_redeem_threshold=Decimal("0.01"),
                 credit_limit=Decimal("0.01"),
             ))
             db.session.add(_terms_for(
-                high, statement_close_day=31, payment_due_day=31,
+                high, effective_date=date(2100, 12, 31),
+                statement_close_day=31, payment_due_day=31,
                 min_payment_percent=Decimal("1"), cashback_rate=Decimal("1"),
             ))
             db.session.commit()
@@ -163,6 +171,8 @@ class TestTheDomainIsTheDatabases:
             stored_high = db.session.query(CreditCardParams).filter_by(
                 account_id=high.id,
             ).one()
+            assert stored_low.effective_date == date(2000, 1, 1)
+            assert stored_high.effective_date == date(2100, 12, 31)
             assert (stored_low.statement_close_day, stored_low.payment_due_day) == (1, 1)
             assert stored_low.min_payment_percent == stored_low.cashback_rate == Decimal("0")
             assert stored_low.min_payment_floor == Decimal("0")
@@ -255,7 +265,10 @@ class TestTheDomainIsTheDatabases:
             assert compare_metadata(ctx, db.metadata) == []
 
     def test_the_model_and_the_migration_state_the_same_checks(self, app):
-        """Every CHECK's SQL on the model equals the migration's, by name.
+        """Every CHECK's SQL on the model equals the migrations', by name.
+
+        The table's CHECKs come from two revisions: the seven of the one that
+        creates it, and the date window the dating revision adds.
 
         Compared on the model's own rendering of each constraint the test
         database was created WITH, not on prose; and compared as a MAPPING so
@@ -267,7 +280,11 @@ class TestTheDomainIsTheDatabases:
                 for c in CreditCardParams.__table__.constraints
                 if isinstance(c, sqlalchemy.CheckConstraint)
             }
-            assert model_checks == _MIGRATION._CHECKS  # pylint: disable=protected-access
+            # pylint: disable=protected-access
+            assert model_checks == {
+                **_MIGRATION._CHECKS,
+                _DATED._DATE_WINDOW: _DATED._DATE_WINDOW_SQL,
+            }
 
 
 class TestOneVersionPerDayAndOwned:

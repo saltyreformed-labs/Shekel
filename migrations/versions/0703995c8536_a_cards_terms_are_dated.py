@@ -11,6 +11,8 @@ one row per card per date).
 
     budget.credit_card_params
         + effective_date DATE NOT NULL   backfilled, then NOT NULL
+        + ck_credit_card_params_effective_date_range
+                                         2000-01-01 <= effective_date <= 2100-12-31
         - credit_card_params_account_id_key        UNIQUE (account_id)
         + uq_credit_card_params_account_effective_date
                                          UNIQUE (account_id, effective_date)
@@ -33,6 +35,12 @@ derives a figure from the terms yet in any case (no ``app/`` module calls
 ``card_statement``), and production held no Credit Card account when this was
 written (measured read-only 2026-11-02 11:30 UTC: 10 accounts, none revolving,
 0 rows here).
+
+**The date window** is the schema's (``app.utils.dates.CALENDAR_DATE_MIN`` /
+``_MAX``) at the storage tier, as ``budget.template_amount_versions`` holds it:
+the series holds flat backwards, so a four-digit-year typo would become a card's
+earliest version.  It is added after the backfill, which reads ``created_at``,
+a timestamp the application wrote, so every backfilled date is inside it.
 
 The NOT NULL is the three-step form: add nullable, backfill, then verify no
 row was missed before the constraint is set -- ``created_at`` is itself NOT
@@ -75,6 +83,13 @@ _ONE_PER_CARD = 'credit_card_params_account_id_key'
 #: The key that replaces it, the model's ``CREDIT_CARD_TERMS_UNIQUE_CONSTRAINT``.
 _ONE_PER_CARD_PER_DATE = 'uq_credit_card_params_account_effective_date'
 
+#: The calendar window a stated date may fall in, the model's CHECK; literal
+#: dates, because a migration imports nothing from ``app``.
+_DATE_WINDOW = 'ck_credit_card_params_effective_date_range'
+_DATE_WINDOW_SQL = (
+    "effective_date BETWEEN DATE '2000-01-01' AND DATE '2100-12-31'"
+)
+
 #: The cards a downgrade cannot hold: more than one version each.
 _CARDS_WITH_VERSIONS = (
     "SELECT account_id, COUNT(*) AS versions "
@@ -107,6 +122,9 @@ def upgrade():
             f"budget.credit_card_params WHERE effective_date IS NULL"
         )
     op.alter_column(_TABLE, 'effective_date', nullable=False, schema='budget')
+    op.create_check_constraint(
+        _DATE_WINDOW, _TABLE, _DATE_WINDOW_SQL, schema='budget',
+    )
     op.drop_constraint(_ONE_PER_CARD, _TABLE, schema='budget', type_='unique')
     op.create_unique_constraint(
         _ONE_PER_CARD_PER_DATE, _TABLE, ['account_id', 'effective_date'],
@@ -136,4 +154,5 @@ def downgrade():
     op.create_unique_constraint(
         _ONE_PER_CARD, _TABLE, ['account_id'], schema='budget',
     )
+    op.drop_constraint(_DATE_WINDOW, _TABLE, schema='budget', type_='check')
     op.drop_column(_TABLE, 'effective_date', schema='budget')

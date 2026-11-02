@@ -8,9 +8,10 @@ date.  What is pinned, each on this test's own clone:
 * the UPGRADE dates an existing row by the day it was first saved, read in
   the owner's display timezone -- a row saved at 03:30 UTC on Mar 1 was saved
   on Feb 28 in New York (EST, UTC-5), and is dated Feb 28 -- and leaves the
-  new key in place (a second date stores, a second row on one date does not);
+  new key and the date window's CHECK in place (a second date stores, a
+  second row on one date does not, a date outside the window does not);
 * the DOWNGRADE, while every card holds one version, restores the
-  one-row-per-card key and drops the column;
+  one-row-per-card key and drops the column and its CHECK;
 * the downgrade REFUSES while a card holds two versions, names that card, and
   changes nothing -- which version a card keeps is the owner's to choose.
 """
@@ -73,6 +74,15 @@ def _constraints():
     )).scalars())
 
 
+def _checks():
+    """The table's CHECK constraint names."""
+    return set(db.session.execute(sqlalchemy.text(
+        "SELECT conname FROM pg_constraint "
+        "WHERE conrelid = 'budget.credit_card_params'::regclass "
+        "AND contype = 'c'"
+    )).scalars())
+
+
 def _insert_dated(account, effective_date):
     """Store one dated version for *account* by raw SQL and flush it."""
     db.session.execute(sqlalchemy.text(_INSERT_DATED), {
@@ -110,12 +120,13 @@ class TestTheUpgradeDatesEachRow:
             assert stored == date(2026, 2, 28)
 
     def test_the_upgrade_keys_one_row_per_card_per_date(self, app, seed_user):
-        """After the upgrade a second date stores and a second row on one date does not."""
+        """After the upgrade a second date stores; a date twice, or out of the window, does not."""
         with app.app_context():
             run_migration_callable(_MIGRATION.downgrade, db.session)
             run_migration_callable(_MIGRATION.upgrade, db.session)
             assert _constraints() >= {"uq_credit_card_params_account_effective_date"}
             assert "credit_card_params_account_id_key" not in _constraints()
+            assert "ck_credit_card_params_effective_date_range" in _checks()
 
             account = _card(seed_user)
             _insert_dated(account, date(2026, 1, 1))
@@ -125,6 +136,12 @@ class TestTheUpgradeDatesEachRow:
                 _insert_dated(account, date(2026, 3, 1))
             db.session.rollback()
             assert "uq_credit_card_params_account_effective_date" in str(
+                excinfo.value,
+            )
+            with pytest.raises(IntegrityError) as excinfo:
+                _insert_dated(account, date(1999, 12, 31))
+            db.session.rollback()
+            assert "ck_credit_card_params_effective_date_range" in str(
                 excinfo.value,
             )
 
@@ -144,6 +161,7 @@ class TestTheDowngrade:
             assert _has_column() is False
             assert "credit_card_params_account_id_key" in _constraints()
             assert "uq_credit_card_params_account_effective_date" not in _constraints()
+            assert "ck_credit_card_params_effective_date_range" not in _checks()
             assert db.session.execute(sqlalchemy.text(
                 "SELECT COUNT(*) FROM budget.credit_card_params "
                 "WHERE account_id = :account_id"

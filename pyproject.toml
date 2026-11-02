@@ -210,10 +210,14 @@ exclude-newer = "7 days"
 # here.  Without it a tool listed nowhere here is installed with no hash
 # checked (measured 2026-11-01, uv 0.13.6: a source package needing
 # flit_core built by a plain ``uv sync`` and ``uv lock``, and refused by
-# both with it).  uv calls the setting experimental and warns so each run;
-# a uv that no longer knew it would warn that it cannot parse this file and
-# drop every setting here, ``exclude-newer`` too, so a ``--locked`` run
-# fails but a plain one goes on with no hash checked.
+# both with it).  uv calls the setting experimental and warns so each run.
+# A uv that no longer knew it would warn that it cannot parse this file's
+# settings and drop some of them, ``exclude-newer`` and this one among them,
+# while still reading each tool's pin and hash below: a ``--locked`` run
+# fails, and a plain one installs a tool listed nowhere here with no hash
+# checked (measured 2026-11-02, uv 0.13.6, the key misspelled).  The tests
+# in tests/test_deploy/test_uv_build_hashes.py run uv on this file, so a uv
+# update that stops refusing such a tool fails CI.
 require-build-hashes = true
 
 [[tool.uv.build-constraint-dependencies]]

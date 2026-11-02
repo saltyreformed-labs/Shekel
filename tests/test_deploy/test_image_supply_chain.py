@@ -42,6 +42,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.test_deploy.test_uv_build_hashes import BUILD_HASHES_SETTING, PYPROJECT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -67,9 +68,6 @@ PYTHON_BASE_PATTERN = re.compile(
 )
 #: The one home of the Python version (ruling balance:R-BAL294).
 PYTHON_VERSION_FILE = REPO_ROOT / ".python-version"
-#: The project file every uv run reads its settings from, the build hashes it requires among
-#: them (task plan#2550).
-PYPROJECT = REPO_ROOT / "pyproject.toml"
 #: The uv stage's FROM line: astral's uv image by its version tag and its digest.
 UV_STAGE_PATTERN = re.compile(
     r"FROM\s+ghcr\.io/astral-sh/uv:[\w.-]+@sha256:[0-9a-f]{64}\s+AS\s+uv", re.IGNORECASE,
@@ -585,9 +583,8 @@ class TestDockerfileInstallsTheLock:
             "under ``[tool.uv]``; a source build could install a build tool "
             "no hash covers (ruling plan#2494)."
         )
-        setting = "require-build-hashes = true\n"
-        assert pyproject.count(setting) == 1
-        assert not requires_hashes(pyproject.replace(setting, ""))
+        assert pyproject.count(BUILD_HASHES_SETTING) == 1
+        assert not requires_hashes(pyproject.replace(BUILD_HASHES_SETTING, ""))
 
     def test_the_runtime_stage_takes_only_the_builder_s_venv(self, text: str) -> None:
         """The runtime stage is built ``FROM`` the Python base and takes from another stage

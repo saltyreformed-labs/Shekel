@@ -52,10 +52,13 @@ from app.routes._redirect_target import RedirectTarget
 #:   rule is a money decision (an unstated first occurrence backdated five rows
 #:   of a $2,000.00 rent template into closed pay periods), raised it through
 #:   the schema and reached the generic prompt.
-#: * ``nominal_day`` -- ``validate_nominal_day_fits_the_start``, plan step
-#:   R7c-b.  Its message names the offerable days for the chosen date ("Apr 30,
-#:   2026 cannot mean day 30..."), and no other layer says it, so the whole
-#:   refusal was inaudible.
+#: * ``repeats_on`` -- ``validate_repeats_on_fits_the_start``, plan step
+#:   R7c-b as ``nominal_day``, renamed at recurrence:R8-c when the control
+#:   began offering weekday readings too.  Its message names the choices the
+#:   chosen date allows ("Apr 30, 2026 cannot mean day 30...", "Starting on
+#:   Nov 30, 2026, this can repeat on the same day of the month or on the
+#:   last Monday."), and no other layer says it, so the whole refusal was
+#:   inaudible.
 #:
 #: **Those last three are the same defect a third, fourth and fifth time**, and
 #: the R7c-c gate below is what stops a sixth: every field name
@@ -109,7 +112,7 @@ ACTIONABLE_FLASH_FIELDS: tuple[str, ...] = (
     "recurrence_placement",
     "interval_n",
     "starts_on",
-    "nominal_day",
+    "repeats_on",
     "max_per_month",
     "recurrence_end_mode",
     "end_date",

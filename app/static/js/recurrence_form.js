@@ -20,7 +20,7 @@
  * Plan step R7c-b deleted the Day of Month and Month controls: a rule's first
  * occurrence carries its cycle's day AND its cycle's month, so ``starts_on``
  * says both (ruling R-R16).  What is left beside that date is the one question
- * the date cannot answer -- see ``syncNominalDay``.
+ * the date cannot answer, how it is READ -- see ``syncRepeatsOn``.
  *
  * **Plan step R7c-c freed the INTERVAL and kept the FUNDING row on screen.**
  * The cadence was stored as one of eight pattern names until then, so not every
@@ -142,12 +142,18 @@ function initRecurrenceForm() {
   // on the transfer form -- a transfer is never an envelope.
   var envelopeBox = document.getElementById('is_envelope');
 
-  // The one question ``starts_on`` cannot answer: a date that is its own
-  // month's LAST day in a month shorter than 31 days could mean that day or
-  // any larger one the month could not hold.  2026-04-30 is "the 30th" or
-  // "the last day of the month", and those are different cadences from May on.
-  var nominalDayWrap = document.getElementById('field-nominal-day');
-  var nominalDay = document.getElementById('nominal_day');
+  // The one question ``starts_on`` cannot answer: how it is READ.  A date
+  // that is its own month's LAST day in a month shorter than 31 days could
+  // mean that day or any larger one the month could not hold -- 2026-04-30 is
+  // "the 30th" or "the last day of the month" -- and since plan step
+  // recurrence:R8-c any month date can be read by its weekday too:
+  // Tue 2026-11-17 is "the 17th" or "the third Tuesday".  ONE control, so
+  // the form posts one reading.
+  var repeatsOnWrap = document.getElementById('field-repeats-on');
+  var repeatsOn = document.getElementById('repeats_on');
+
+  // Days in a week: the calendar fact a weekday option's window counts in.
+  var DAYS_PER_WEEK = 7;
 
   // The "Ends" control (plan step R7b-3): a mode select and the value inputs
   // its shapes need.  This file never states which shapes exist -- each
@@ -414,27 +420,60 @@ function initRecurrenceForm() {
     if (text) help.textContent = text;
   }
 
-  // The last day of the month ``value`` (an ISO date string) falls in, or null
-  // when it is not a date at all.  Day 0 of the NEXT month is that day, which
-  // is the only calendar fact this file computes -- the DAY a rule fires on is
-  // never computed here, and neither is any amount.
-  function lastDayOfMonth(value) {
+  // The calendar facts of ``value`` (an ISO date string) this file reads, or
+  // null when it is not a date at all: its day, its month's last day (day 0
+  // of the NEXT month), and its weekday as a Python ``date.weekday()`` index
+  // (0 = Monday), which is how the server keys a weekday option's labels --
+  // JavaScript's getDay() counts from Sunday.  These are the only calendar
+  // facts this file computes; the DAY a rule fires on is never computed
+  // here, and neither is any amount.
+  function calendarFacts(value) {
     var parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
     if (!parts) return null;
-    return new Date(
-      parseInt(parts[1], 10), parseInt(parts[2], 10), 0
-    ).getDate();
+    var year = parseInt(parts[1], 10);
+    var month = parseInt(parts[2], 10);
+    var day = parseInt(parts[3], 10);
+    return {
+      day: day,
+      lastDay: new Date(year, month, 0).getDate(),
+      weekday: (new Date(year, month - 1, day).getDay() + DAYS_PER_WEEK - 1) %
+        DAYS_PER_WEEK
+    };
   }
 
-  // Show the "repeating on" control exactly where the chosen date leaves the
-  // question open, and enable exactly the days it leaves open.
+  // Whether a weekday option reads the date ``facts`` describe, and in which
+  // words: the option's window (``data-counts-from-end``, ``data-last-week``,
+  // the server's table) counts the date's week from one end of its month, and
+  // its ``data-labels`` hold the phrase for every week and weekday.  Null when
+  // the window does not reach the date.
+  function weekdayLabel(opt, facts) {
+    var fromEnd = opt.getAttribute('data-counts-from-end') === 'true';
+    var lastWeek = parseInt(opt.getAttribute('data-last-week') || '', 10);
+    var week = Math.floor(
+      (fromEnd ? facts.lastDay - facts.day : facts.day - 1) / DAYS_PER_WEEK
+    ) + 1;
+    if (Number.isNaN(lastWeek) || week > lastWeek) return null;
+    var labels = {};
+    try {
+      labels = JSON.parse(opt.getAttribute('data-labels') || '{}');
+    } catch (_err) {
+      labels = {};
+    }
+    return labels[week + '-' + facts.weekday] || null;
+  }
+
+  // Show the "repeating on" control wherever the chosen date can be read more
+  // than one way, and enable exactly the readings it allows.
   //
-  // The SAME rule the server applies (offerable_nominal_days): the cadence
-  // must fire on a day of the month, the date must BE its month's last day,
-  // and a day qualifies when it is larger than that.  The copy is the
-  // template's and the option set is fixed, so this file states no wording and
-  // no domain -- and the write door refuses any pair it gets wrong, which is
-  // what keeps this an affordance rather than a rule.
+  // The SAME rules the server applies, read off the options the server
+  // rendered rather than restated: a nominal day (offerable_nominal_days)
+  // needs the date to BE its month's last day and the day to be larger than
+  // it; a weekday reading (offerable_weekday_readings) needs the date inside
+  // its window, and shows the phrase the server wrote for where the date
+  // sits ("the third Tuesday").  The copy is the template's and the option
+  // set is fixed, so this file states no wording and no domain -- and the
+  // write door refuses any pair it gets wrong, which is what keeps this an
+  // affordance rather than a rule.
   //
   // ``hasDayCoordinate`` is the offer's has_day_of_month_coordinate, which is
   // keyed on the UNIT -- never the (unit, placement) pair's "is a ROW dated
@@ -444,35 +483,41 @@ function initRecurrenceForm() {
   // wrong one MOVED MONEY: they disagree for Monthly First, whose occurrences
   // are days of the month even though its rows are dated from the paycheck, so
   // this cleared and disabled a control the server had rendered enabled.  The
-  // update door reads nominal_day off the same presence key as starts_on, so
+  // update door reads the reading off the same presence key as starts_on, so
   // changing only "Funded from" on a "last day of every month" rent posted the
   // date without the day, wrote nominal_day = NULL, and moved every later
   // occurrence to the 30th for good.
   //
   // DISABLED as well as hidden, for the reason every other control here is: a
-  // hidden select still SUBMITS, and a nominal day left behind beside a date
-  // that never clamped is exactly what ck_recurrence_rules_nominal_day
-  // refuses.  The selection is cleared with it, because a day the new date
-  // does not leave open is not a day the user can still mean.
-  function syncNominalDay(hasDayCoordinate) {
-    if (!nominalDay || !nominalDayWrap) return;
-    var lastDay = lastDayOfMonth(startsOn && startsOn.value);
-    var chosenDay = lastDay === null ? null : parseInt(
-      startsOn.value.slice(8, 10), 10
-    );
-    var open = hasDayCoordinate && lastDay !== null && chosenDay === lastDay;
+  // hidden select still SUBMITS, and a reading left behind beside a date it
+  // does not fit is exactly what the CHECKs refuse.  The selection is cleared
+  // with an option the new date does not allow, because a reading the date
+  // cannot carry is not one the user can still mean; a weekday reading the
+  // new date DOES allow keeps its place and takes the new date's words ("the
+  // third Tuesday" becomes "the second Tuesday").
+  function syncRepeatsOn(hasDayCoordinate) {
+    if (!repeatsOn || !repeatsOnWrap) return;
+    var facts = hasDayCoordinate ? calendarFacts(startsOn && startsOn.value) : null;
     var any = false;
-    Array.prototype.forEach.call(nominalDay.options, function(opt) {
-      var day = parseInt(opt.getAttribute('data-day') || '', 10);
-      if (Number.isNaN(day)) return;
-      var mine = open && day > chosenDay;
+    Array.prototype.forEach.call(repeatsOn.options, function(opt) {
+      if (opt.value === '') return;
+      var mine = false;
+      var label = null;
+      if (facts !== null && opt.hasAttribute('data-day')) {
+        mine = facts.day === facts.lastDay &&
+          parseInt(opt.getAttribute('data-day'), 10) > facts.day;
+      } else if (facts !== null && opt.hasAttribute('data-last-week')) {
+        label = weekdayLabel(opt, facts);
+        mine = label !== null;
+        if (mine) opt.textContent = label;
+      }
       opt.hidden = !mine;
       opt.disabled = !mine;
       if (mine) any = true;
-      if (!mine && opt.selected) nominalDay.selectedIndex = 0;
+      if (!mine && opt.selected) repeatsOn.selectedIndex = 0;
     });
-    nominalDayWrap.classList.toggle('d-none', !any);
-    if (!startsOnLocked) nominalDay.disabled = !any;
+    repeatsOnWrap.classList.toggle('d-none', !any);
+    if (!startsOnLocked) repeatsOn.disabled = !any;
   }
 
   // The value is NOT cleared with the row: switching to a monthly unit and
@@ -507,7 +552,7 @@ function initRecurrenceForm() {
       syncEndBound(false);
       syncStartPeriod(false);
       syncStartsOn(false);
-      syncNominalDay(false);
+      syncRepeatsOn(false);
       syncCeiling(false);
       fetchPreview();
       return;
@@ -532,7 +577,7 @@ function initRecurrenceForm() {
     // uses the free box, and was never the same fact either way.
     var chosen = currentOption(id, placementSelect.value);
     // The "repeating on" control asks whether occurrences land on a day of the
-    // month at all -- keyed on the unit; see syncNominalDay.
+    // month at all -- keyed on the unit; see syncRepeatsOn.
     var hasDayCoordinate =
       chosen !== null && chosen.has_day_of_month_coordinate;
     syncCeiling(chosen !== null && chosen.can_repeat_within_month);
@@ -540,9 +585,10 @@ function initRecurrenceForm() {
     syncStartPeriod(true);
     syncStartsOn(true);
     // The "repeating on" control rides with the date: a derived first
-    // occurrence brings its own nominal day, so a control the user could still
-    // touch would state a day the route is about to replace.
-    syncNominalDay(hasDayCoordinate && !destinationDerivesTheBounds());
+    // occurrence brings its own reading (the loan's contract day), so a
+    // control the user could still touch would state a reading the route is
+    // about to replace.
+    syncRepeatsOn(hasDayCoordinate && !destinationDerivesTheBounds());
     syncStartsOnHelp();
 
     if (endBoundWrap) {
@@ -597,15 +643,17 @@ function initRecurrenceForm() {
     // cadence" forever.  ``startsOnLocked`` is read once at load and tells the
     // two apart.
     //
-    // The nominal day rides on the same test rather than its own: it is the
-    // second half of one row, the server disables it with the date, and the
-    // preview must show "Apr 30, May 31, Jun 30" rather than "Apr 30, May 30"
-    // for a month-end loan payment as much as for a typed one.
+    // The "repeating on" choice rides on the same test rather than its own:
+    // it is the second half of one row, the server disables it with the date,
+    // and the preview must show "Apr 30, May 31, Jun 30" rather than "Apr 30,
+    // May 30" for a month-end loan payment as much as for a typed one.  An
+    // empty value is the same day of the month, which the endpoint reads from
+    // the key's absence.
     if (statesAStartValue(startsOn)) {
       params.set('starts_on', startsOn.value);
     }
-    if (statesAStartValue(nominalDay)) {
-      params.set('nominal_day', nominalDay.value);
+    if (statesAStartValue(repeatsOn)) {
+      params.set('repeats_on', repeatsOn.value);
     }
 
     // The per-month ceiling, sent exactly when the save would carry it: an
@@ -717,18 +765,22 @@ function initRecurrenceForm() {
   // The source accounts and the envelope box re-preview too (plan step
   // pay_calendar:C18-a): the books floor the endpoint bounds by is theirs,
   // and the box picks which of a row's days it is compared on.
-  ['nominal_day', 'max_per_month', 'end_date',
+  ['repeats_on', 'max_per_month', 'end_date',
    'max_occurrences', 'is_envelope'].concat(SOURCE_ACCOUNT_FIELDS).forEach(function(id) {
     var el = document.getElementById(id);
     if (el) el.addEventListener('change', fetchPreview);
   });
   // The first occurrence re-links the "repeating on" control before it
-  // previews: which days that date leaves open is a property OF the date, so
-  // moving it can retire the choice the user made under the old one.
+  // previews: which readings that date allows, and in which words, are
+  // properties OF the date, so moving it can retire or reword the choice the
+  // user made under the old one.
   if (startsOn) {
     startsOn.addEventListener('change', function() {
       var chosen = currentOption(unitId(), placementSelect.value);
-      syncNominalDay(chosen !== null && chosen.has_day_of_month_coordinate);
+      syncRepeatsOn(
+        chosen !== null && chosen.has_day_of_month_coordinate &&
+        !destinationDerivesTheBounds()
+      );
       fetchPreview();
     });
   }

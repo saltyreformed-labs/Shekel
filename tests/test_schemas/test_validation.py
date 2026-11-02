@@ -21,6 +21,7 @@ from app.schemas.validation._helpers import _normalize_empty_inputs
 from app.schemas.validation.templates import A_CADENCE_IS_REQUIRED
 from tests._test_helpers import EMPTY_TAX_LAW, cadence_payload
 from app.services.pay_rhythm import FixedDays
+from app.services.recurrence import MonthReading
 from app.schemas.validation import (
     RECURRENCE_NEEDS_A_START,
     AccountCreateSchema,
@@ -253,7 +254,11 @@ class TestTemplateCreateSchema:
         assert "offset_periods" not in data
 
     def test_nominal_day_range(self):
-        """nominal_day outside 29-31 fails Range validation.
+        """A "repeating on" day outside 29-31 names no option and fails validation.
+
+        ``repeats_on`` since plan step recurrence:R8-c (``nominal_day`` until
+        then): the control posts each option's own token, so 28 is a token no
+        option posts.
 
         ``day_of_month`` was this field's predecessor and its domain was 1-31,
         because it stated the cycle's day outright.  Plan step R7c-b made the
@@ -270,9 +275,9 @@ class TestTemplateCreateSchema:
                 "category_id": "1",
                 "transaction_type_id": "1",
                 "account_id": "1",
-                "nominal_day": "28",
+                "repeats_on": "28",
             })
-        assert "nominal_day" in exc.value.messages
+        assert "repeats_on" in exc.value.messages
 
     def test_empty_strings_stripped(self):
         """@pre_load drops empty non-nullable fields and nulls the nullable ones.
@@ -1386,7 +1391,7 @@ class TestTemplateCreateSchemaBoundary:
         return data
 
     def test_nominal_day_28_rejected(self):
-        """nominal_day=28 fails Range(min=29, max=31) validation.
+        """repeats_on=28 names no option and fails validation (nominal_day until R8-c).
 
         The lower boundary, and it is a real rule rather than an arbitrary
         floor: every month holds its first 28 days, so no first occurrence can
@@ -1396,24 +1401,24 @@ class TestTemplateCreateSchemaBoundary:
         """
         with pytest.raises(ValidationError) as exc:
             TemplateCreateSchema().load(
-                self._valid_template_data(nominal_day="28")
+                self._valid_template_data(repeats_on="28")
             )
-        assert "nominal_day" in exc.value.messages
+        assert "repeats_on" in exc.value.messages
 
     def test_nominal_day_32_rejected(self):
-        """nominal_day=32 fails Range(min=29, max=31) validation.
+        """repeats_on=32 names no option and fails validation (nominal_day until R8-c).
 
         No month has 32 days. The schema must reject this before it reaches
         the recurrence engine.
         """
         with pytest.raises(ValidationError) as exc:
             TemplateCreateSchema().load(
-                self._valid_template_data(nominal_day="32")
+                self._valid_template_data(repeats_on="32")
             )
-        assert "nominal_day" in exc.value.messages
+        assert "repeats_on" in exc.value.messages
 
     def test_nominal_day_31_accepted(self):
-        """nominal_day=31 is valid -- it is the day a 30-day month clamps.
+        """repeats_on=31 is valid -- it is the day a 30-day month clamps.
 
         The schema grades the DOMAIN alone; whether 31 may sit beside this
         particular ``starts_on`` is a two-field rule the field cannot see, and
@@ -1421,9 +1426,9 @@ class TestTemplateCreateSchemaBoundary:
         write door (mirroring ``ck_recurrence_rules_nominal_day``).
         """
         data = TemplateCreateSchema().load(
-            self._valid_template_data(nominal_day="31")
+            self._valid_template_data(repeats_on="31")
         )
-        assert data["nominal_day"] == 31
+        assert data["repeats_on"] == MonthReading(nominal_day=31)
 
     def test_starts_on_outside_the_calendar_window_rejected(self):
         """A five-digit-year typo in the date box is a FIELD error.

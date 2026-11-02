@@ -55,6 +55,7 @@ from flask_login import current_user
 from app.extensions import db
 from app.routes._redirect_target import RedirectTarget
 from app.schemas.validation import (
+    RECURRENCE_REPEATS_ON_KEY,
     RECURRENCE_STARTS_ON_KEY,
     end_bound_before_start_message,
 )
@@ -582,8 +583,15 @@ def refuse_recurrence_update(
         and data.get("recurrence_unit") is None
         and template.recurs
     )
+    # The opening bound's row is the date AND how it is read: a "repeating
+    # on" choice states the start as surely as the date does (plan step
+    # recurrence:R8-c), and the loan's standing payment reads its date by the
+    # loan's contract day (ruling R-R96), so a crafted reading is refused here
+    # with a crafted date rather than ridden past on the date's absence.
     states_a_bound = (
-        ctx.end_bound is not None or RECURRENCE_STARTS_ON_KEY in data
+        ctx.end_bound is not None
+        or RECURRENCE_STARTS_ON_KEY in data
+        or RECURRENCE_REPEATS_ON_KEY in data
     )
     # The standing identity -- is this the standing payment of the loan it
     # pays into -- is asked ONLY when a submission clears the recurrence or

@@ -62,11 +62,13 @@ from app.services.pay_calendar import DerivedPeriod
 from app.services.recurrence import (
     NEVER_ENDS,
     EndBoundInputError,
+    MonthReading,
     RecurrenceResolutionError,
     RecurrenceSpec,
     end_bound_from_token,
     modelled_placement,
     modelled_unit,
+    month_reading_from_token,
     occurrence_placements,
     placed_periods,
 )
@@ -134,6 +136,7 @@ def build_preview_spec(
     unit: RecurrenceUnitEnum,
     placement: PeriodPlacementEnum,
     starts_on: date,
+    reading: MonthReading,
 ) -> RecurrenceSpec:
     """Build the authored recurrence the preview request describes.
 
@@ -159,21 +162,21 @@ def build_preview_spec(
     R2e-2 was written onto the transient rule's ``pattern`` relationship for a
     reader that does not exist.
 
-    **The four counts -- ``interval_n``, ``nominal_day``, ``max_per_month``,
+    **The three counts -- ``interval_n``, ``max_per_month``,
     ``max_occurrences`` -- are held to one range here and to no rule.**  Each
     is read through :func:`~app.utils.digit_strings.integer_arg`, so a value
     outside a PostgreSQL ``integer``'s range is read exactly as an unparseable
     one already was, as the argument's default (``interval_n`` 1, the other
-    three absent), and the preview lists what THAT rule would generate while
-    the save refuses the submission (the form schema bounds each of the four
+    two absent), and the preview lists what THAT rule would generate while
+    the save refuses the submission (the form schema bounds each of the three
     within its column's range).  Every bound the RULE has -- a
     non-positive interval, a nominal day the first occurrence does not leave
-    open, a per-month ceiling beside a unit that cannot hold it -- is refused
-    by ``RecurrenceSpec`` or the authoring seam, which is the caller's
-    ``RecurrenceResolutionError`` handler's job; see
-    :func:`recurrence_preview_fragment` for why those are stated once, on the
-    column and its mirror in ``resolve``, rather than a third time on this
-    endpoint.
+    open, a weekday reading it cannot be read by, a per-month ceiling beside a
+    unit that cannot hold it -- is refused by ``RecurrenceSpec`` or the
+    authoring seam, which is the caller's ``RecurrenceResolutionError``
+    handler's job; see :func:`recurrence_preview_fragment` for why those are
+    stated once, on the column and its mirror in ``resolve``, rather than a
+    third time on this endpoint.
 
     Args:
         unit: The submitted cadence unit, already checked as modelled by the
@@ -181,6 +184,8 @@ def build_preview_spec(
         placement: The submitted placement, likewise.
         starts_on: The submitted first occurrence, already parsed by the
             caller.
+        reading: How the "repeating on" control reads it, already parsed by
+            the caller through the schema's own token reader.
 
     Returns:
         The :class:`~app.services.recurrence.RecurrenceSpec` the request
@@ -201,12 +206,13 @@ def build_preview_spec(
         starts_on=starts_on,
         interval_n=request.args.get("interval_n", type=integer_arg, default=1),
         placement=placement,
-        # The day a clamped first occurrence MEANT.  Held to an ``integer``'s
-        # range and no rule here, like every count (see the docstring): a
-        # value the date does not leave open is refused by
-        # ``RecurrenceSpec`` itself, which is the caller's
+        # How the first occurrence is READ (plan step recurrence:R8-c): a
+        # clamped month-end day or a weekday reading, from the one token the
+        # "repeating on" control posts.  A choice the date does not allow is
+        # refused by ``RecurrenceSpec`` itself, which is the caller's
         # ``RecurrenceResolutionError`` handler's job.
-        nominal_day=request.args.get("nominal_day", type=integer_arg),
+        nominal_day=reading.nominal_day,
+        weekday_reading=reading.weekday_reading,
         # The per-month ceiling (plan step salary:R15-a), read the way the
         # nominal day is: refused by ``RecurrenceSpec`` and ``resolve``
         # beside a unit that cannot hold it or below one, so the preview
@@ -286,7 +292,7 @@ def _muted(text: str) -> str:
 
 def _submitted_preview(
     starts_on: date | None,
-) -> tuple[RecurrenceUnitEnum, PeriodPlacementEnum, date] | str:
+) -> tuple[RecurrenceUnitEnum, PeriodPlacementEnum, date, MonthReading] | str:
     """Return the inputs a preview needs, or the line to show instead.
 
     Reading the request is a different job from walking the rule, and splitting
@@ -322,8 +328,17 @@ def _submitted_preview(
             absent or unparseable.  Passed in rather than read here so the
             caller states which argument it means.
 
+    **The "repeating on" token is read here too** (plan step
+    recurrence:R8-c), through
+    :func:`~app.services.recurrence.month_reading_from_token` -- the reader
+    the form schema asks, so the preview and the save read one submission
+    one way.  A token no option posts is a hand-crafted query, answered with
+    the line a choice the date does not allow gets -- there is nothing to
+    preview for what was typed; an ABSENT one is the control's default, the
+    same day of the month.
+
     Returns:
-        ``(unit, placement, starts_on)`` when the request describes a
+        ``(unit, placement, starts_on, reading)`` when the request describes a
         previewable rule, or the muted markup to render instead.
     """
     unit_id = request.args.get("recurrence_unit", type=integer_arg)
@@ -335,13 +350,16 @@ def _submitted_preview(
     )
     if unit is None or placement is None:
         return _muted("Unknown cadence")
+    reading = month_reading_from_token(request.args.get("repeats_on", ""))
+    if reading is None:
+        return _muted(NOTHING_TO_PREVIEW)
     # Since plan step R7c-b there is nothing to preview without a first
     # occurrence: a rule cannot be authored without stating when it first
     # happens, so an absent or unparseable value is a request the save could
     # not honour either.
     if starts_on is None:
         return _muted(NOTHING_TO_PREVIEW)
-    return unit, placement, starts_on
+    return unit, placement, starts_on, reading
 
 
 def _submitted_definition() -> UnsavedDefinition:
@@ -432,7 +450,7 @@ def recurrence_preview_fragment() -> str:
 
     **Every OTHER query arg is checked against no rule here, and plan step R4a
     made that a 200 instead of a 500.**  ``interval_n`` / ``starts_on`` /
-    ``nominal_day`` / ``max_per_month`` / ``recurrence_end_mode`` /
+    ``repeats_on`` / ``max_per_month`` / ``recurrence_end_mode`` /
     ``end_date`` / ``max_occurrences`` are read straight from
     ``request.args``; the two form schemas bound them, this endpoint holds the
     integer ones only to a PostgreSQL ``integer``'s range (since plan step
@@ -447,9 +465,11 @@ def recurrence_preview_fragment() -> str:
     seam raises answers all five, and keeps each bound stated once -- on the
     column and its mirror in :func:`app.services.recurrence.resolve` -- rather
     than a third time here.  The day and month args are gone with the columns
-    they named (plan step R7c-b); ``nominal_day`` took their place and takes
+    they named (plan step R7c-b); ``nominal_day`` took their place and took
     the same disposition, refused by ``RecurrenceSpec`` when the date leaves no
-    such day open.
+    such day open -- and ``repeats_on`` took ITS place at plan step
+    recurrence:R8-c, its token read by :func:`_submitted_preview` and its
+    pair with the date refused the same way.
 
     **``starts_on`` is the one that showed the rule needs maintaining rather
     than merely restating.**  R7c-b deleted the anchor walk that
@@ -495,7 +515,7 @@ def recurrence_preview_fragment() -> str:
     requested = _submitted_preview(_submitted_iso_date("starts_on"))
     if isinstance(requested, str):
         return requested
-    unit, placement, starts_on = requested
+    unit, placement, starts_on, reading = requested
     definition = _submitted_definition()
     # The READ PASS, built here because this is the route (the 2026-08-16
     # ruling): the door resolves the rule against its calendar and folds the
@@ -513,7 +533,8 @@ def recurrence_preview_fragment() -> str:
 
     try:
         resolved = resolved_submission(
-            build_preview_spec(unit, placement, starts_on), definition, ctx,
+            build_preview_spec(unit, placement, starts_on, reading),
+            definition, ctx,
         )
         if resolved is None:
             return _muted("No pay periods generated yet")

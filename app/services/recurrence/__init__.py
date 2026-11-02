@@ -287,12 +287,17 @@ from app.services.recurrence._row_date import compute_due_date
 from app.services.recurrence._picker import (
     CadenceOption,
     EndBoundOption,
+    MonthReading,
     PickerModel,
     SelectedCadence,
     cadence_options,
     end_bound_options,
+    month_reading_from_token,
     picker_model,
     selected_cadence,
+    stored_month_reading,
+    weekday_reading_choices,
+    weekday_reading_options,
 )
 from app.services.recurrence._vocabulary import (
     UNREADABLE_CADENCE_MESSAGE,
@@ -327,6 +332,7 @@ __all__ = [
     "Indefinite",
     "LastWeekday",
     "MonthCoordinate",
+    "MonthReading",
     "NeverEnds",
     "NthWeekday",
     "OccurrencePlacement",
@@ -364,6 +370,7 @@ __all__ = [
     "modelled_placement",
     "modelled_unit",
     "month_coordinate",
+    "month_reading_from_token",
     "occurrence_placements",
     "occurrence_walk",
     "offerable_nominal_days",
@@ -386,4 +393,7 @@ __all__ = [
     "scheduling_day_of_month",
     "selected_cadence",
     "stored_cadence",
+    "stored_month_reading",
+    "weekday_reading_choices",
+    "weekday_reading_options",
 ]

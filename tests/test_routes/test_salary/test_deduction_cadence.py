@@ -60,7 +60,7 @@ class TestDeductionCadenceForm(_TestDeductionCadenceFormMembers):
                 'id="cadence-controls"', 'name="recurrence_unit"',
                 'name="interval_n"', 'name="max_per_month"',
                 'name="recurrence_placement"', "data-cadence-options=",
-                'id="recurrence-fields"', 'name="starts_on"', 'name="nominal_day"',
+                'id="recurrence-fields"', 'name="starts_on"', 'name="repeats_on"',
                 'name="recurrence_end_mode"', 'name="end_date"',
                 'name="max_occurrences"', "Leave blank to start from your first paycheck",
             ):
@@ -469,7 +469,7 @@ class TestDeductionCadenceForm(_TestDeductionCadenceFormMembers):
             every = _a_line(profile, "401k", 26)
             html = auth_client.get(f"/salary/{profile.id}/edit").data.decode()
             never_ending = {
-                "nominal-day": "", "end-mode": "never", "end-date": "",
+                "repeats-on": "", "end-mode": "never", "end-date": "",
                 "max-occurrences": "",
             }
             period = str(ref_cache.recurrence_unit_id(RecurrenceUnitEnum.PERIOD))

@@ -8963,7 +8963,12 @@ def validated_cadence(
             else create_form_default_starts_on()
         )
     if nominal_day is not None:
-        payload["nominal_day"] = nominal_day
+        # The schema hands the "repeating on" choice to a helper as the ONE
+        # value its token names (plan step recurrence:R8-c).
+        from app.services.recurrence import (  # pylint: disable=import-outside-toplevel
+            MonthReading,
+        )
+        payload["repeats_on"] = MonthReading(nominal_day=nominal_day)
     if max_per_month is not None:
         payload["max_per_month"] = max_per_month
     return payload
@@ -9052,8 +9057,8 @@ def cadence_payload(
     }
     if "starts_on" in loaded:
         payload["starts_on"] = loaded["starts_on"].isoformat()
-    if "nominal_day" in loaded:
-        payload["nominal_day"] = str(loaded["nominal_day"])
+    if "repeats_on" in loaded:
+        payload["repeats_on"] = loaded["repeats_on"].token
     if "max_per_month" in loaded:
         payload["max_per_month"] = str(loaded["max_per_month"])
     return payload

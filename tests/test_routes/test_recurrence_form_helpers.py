@@ -51,6 +51,7 @@ from app.services.recurrence import (
     EMPTY,
     NEVER_ENDS,
     EndsOnDate,
+    MonthReading,
     RecurrenceResolutionError,
     RecurrenceSpec,
     build_transient_rule,
@@ -1226,7 +1227,7 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
                             nominal_day=31,
                         ),
                         "starts_on": date(2026, 4, 30),
-                        "nominal_day": 31,
+                        "repeats_on": MonthReading(nominal_day=31),
                     },
                     user_id=seed_user["user"].id,
                     ctx=RecurrenceFormContext(
@@ -1281,7 +1282,7 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
                             nominal_day=31,
                         ),
                         "starts_on": date(2026, 4, 30),
-                        "nominal_day": 31,
+                        "repeats_on": MonthReading(nominal_day=31),
                     },
                     user_id=seed_user["user"].id,
                     ctx=RecurrenceFormContext(
@@ -1317,7 +1318,7 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
                             nominal_day=31,
                         ),
                         "starts_on": date(2026, 4, 30),
-                        "nominal_day": 31,
+                        "repeats_on": MonthReading(nominal_day=31),
                     },
                     user_id=seed_user["user"].id,
                     ctx=RecurrenceFormContext(
@@ -1342,7 +1343,7 @@ class TestSwitchingToACadenceWithNoDayOfMonth:
                         nominal_day=31,
                     ),
                     "starts_on": date(2026, 4, 30),
-                    "nominal_day": 31,
+                    "repeats_on": MonthReading(nominal_day=31),
                 },
                 ctx=RecurrenceFormContext(
                     end_bound=None,

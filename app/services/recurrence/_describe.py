@@ -97,7 +97,7 @@ from app.services.recurrence._month_coordinate import (
     NthWeekday,
 )
 from app.services.recurrence._resolution import ResolvedRecurrence
-from app.utils.dates import month_name, weekday_name
+from app.utils.dates import WEEKDAY_NAMES, month_name, weekday_name
 
 #: The cadence stems that have a NAME of their own, per unit.
 #:
@@ -331,10 +331,8 @@ def _nth_weekday_phrase(
 ) -> str:
     """Return ``"third Tuesday"``, or ``"fourth Thursday of Nov"`` for one that skips months.
 
-    The weekday is named off ``starts_on``, the date the coordinate's weekday
-    was read from (:func:`~._month_coordinate.month_coordinate`), through the
-    shared table rather than ``%A`` for the locale reason :func:`_coordinate`
-    gives.
+    The shape's own words are :func:`weekday_words`', which the form's
+    "repeating on" control shows too.
 
     Args:
         coordinate: The week number and weekday.
@@ -343,29 +341,44 @@ def _nth_weekday_phrase(
     Returns:
         The coordinate phrase.
     """
-    week = _WEEK_NUMBER_WORDS[coordinate.nth - 1]
-    return (
-        f"{week} {weekday_name(resolved.starts_on)}"
-        f"{_in_which_months(resolved)}"
-    )
+    return f"{weekday_words(coordinate)}{_in_which_months(resolved)}"
 
 
 def _last_weekday_phrase(
-    _shape: LastWeekday, resolved: ResolvedRecurrence,
+    coordinate: LastWeekday, resolved: ResolvedRecurrence,
 ) -> str:
     """Return ``"last Friday"``, or ``"last Friday of Jan"`` for one that skips months.
 
-    Takes the shape it reads nothing from beyond its type, because the phrase
-    functions share one dispatch signature; the weekday is named off
-    ``starts_on`` as :func:`_nth_weekday_phrase` names it.
-
     Args:
+        coordinate: The weekday.
         resolved: The recurrence's two-axis meaning.
 
     Returns:
         The coordinate phrase.
     """
-    return f"last {weekday_name(resolved.starts_on)}{_in_which_months(resolved)}"
+    return f"{weekday_words(coordinate)}{_in_which_months(resolved)}"
+
+
+def weekday_words(coordinate: NthWeekday | LastWeekday) -> str:
+    """Return a weekday shape's own words: ``"third Tuesday"``, ``"last Friday"``.
+
+    **The ONE producer of them** (plan step recurrence:R8-c), asked by the
+    describer's two phrases above and by the form's "repeating on" control
+    (:func:`~app.services.recurrence.weekday_reading_options`), so the form
+    offers a reading in the words the Recurring row then shows for it.  The
+    weekday is named off the shape's index through the shared table rather
+    than ``%A``, for the locale reason :func:`_coordinate` gives.
+
+    Args:
+        coordinate: A weekday shape.
+
+    Returns:
+        The words, without an article.
+    """
+    weekday = WEEKDAY_NAMES[coordinate.weekday]
+    if isinstance(coordinate, LastWeekday):
+        return f"last {weekday}"
+    return f"{_WEEK_NUMBER_WORDS[coordinate.nth - 1]} {weekday}"
 
 
 #: How each month-coordinate shape is worded, keyed by the shape itself
@@ -872,4 +885,7 @@ def describe(resolved: ResolvedRecurrence) -> RecurrenceDescription:
     )
 
 
-__all__ = ["RecurrenceDescription", "RecurrenceDescriptionError", "describe"]
+__all__ = [
+    "RecurrenceDescription", "RecurrenceDescriptionError", "describe",
+    "weekday_words",
+]

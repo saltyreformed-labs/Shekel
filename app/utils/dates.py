@@ -782,8 +782,9 @@ _MONTH_NAMES_ABBR: tuple[str, ...] = (
 #: ``C``, ``C.utf8`` and ``POSIX`` (measured in the running container
 #: 2026-09-23).  Since ruling ``recurrence:R-R92`` the
 #: process locale is also pinned in the image and asserted at startup, so no
-#: environment the app can start under names a German weekday.
-_WEEKDAY_NAMES: tuple[str, ...] = (
+#: environment the app can start under names a German weekday.  Public since
+#: plan step recurrence:R8-c: a weekday COORDINATE carries its index, not a date.
+WEEKDAY_NAMES: tuple[str, ...] = (
     "Monday", "Tuesday", "Wednesday", "Thursday",
     "Friday", "Saturday", "Sunday",
 )
@@ -802,7 +803,7 @@ def weekday_name(value: date) -> str:
     Returns:
         The English weekday name.
     """
-    return _WEEKDAY_NAMES[value.weekday()]
+    return WEEKDAY_NAMES[value.weekday()]
 
 
 def month_name(value: int | None, abbr: bool = False) -> str:

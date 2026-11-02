@@ -158,7 +158,7 @@ _MUST_BE_HEARD_WITH_A_CADENCE = (
             ),
             "interval_n": "1",
             "starts_on": "2026-04-15",
-            "nominal_day": "30",
+            "repeats_on": "30",
         },
     ),
     # The per-month ceiling's one authored refusal (plan step salary:R15-a):

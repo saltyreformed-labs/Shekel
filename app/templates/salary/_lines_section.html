@@ -88,7 +88,7 @@
             {% set cadence = selected_cadences[d.id] %}
             {% set span = selected_spans[d.id] %}
             {# The SPAN attributes (plan step salary:R18-c): the rule's own
-               start and nominal day, blank for a line with no rule (blank
+               start and "repeating on" choice, blank for a line with no rule (blank
                means the opening payday), and the closing bound as its token
                plus the one value its shape needs -- exactly what the shared
                partial's controls post back. #}
@@ -103,7 +103,7 @@
                     data-line-placement-id="{{ cadence.placement_id if cadence else '' }}"
                     data-line-max-per-month="{{ cadence.max_per_month if cadence and cadence.max_per_month is not none else '' }}"
                     data-line-starts-on="{{ span.starts_on.isoformat() if span.starts_on is not none else '' }}"
-                    data-line-nominal-day="{{ span.nominal_day if span.nominal_day is not none else '' }}"
+                    data-line-repeats-on="{{ span.repeats_on }}"
                     data-line-end-mode="{{ span.end.token }}"
                     data-line-end-date="{{ span.end.end_date.isoformat() if span.end.end_date is not none else '' }}"
                     data-line-max-occurrences="{{ span.end.max_occurrences if span.end.max_occurrences is not none else '' }}"

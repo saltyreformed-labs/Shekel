@@ -28,7 +28,9 @@ What lives here: the closed set a rule states (:class:`WeekdayReading`) and the
 read of its stored value (:func:`weekday_reading_of`), the
 three shapes the join answers (:class:`DayOfMonth`, :class:`NthWeekday`,
 :class:`LastWeekday`), the join itself (:func:`month_coordinate`, which took
-``_nominal_day.cadence_day_of_month``'s place), the one producer of which
+``_nominal_day.cadence_day_of_month``'s place), which dates each reading can
+read (:data:`WEEKDAY_READING_WINDOWS`, counted by :func:`week_of_month`) and
+which shape it names there (:func:`weekday_shape`), the one producer of which
 readings a date allows (:func:`offerable_weekday_readings`) and the refusal
 both value types hold (:func:`_require_weekday_reading_pair`).
 
@@ -266,29 +268,115 @@ class LastWeekday(MonthCoordinate):
         return None
 
 
-def _week_number(day: date) -> int:
-    """Return which of its month's *day*.weekday()s *day* is, counted from the start.
+@dataclass(frozen=True)
+class WeekdayReadingWindow:
+    """Which dates a weekday reading can read: the weeks of a month it counts.
+
+    A weekday reading names its date's place among its weekday's days in the
+    month, counted from ONE end, and it reads only a date that every month
+    holds at that place.  Both readings are that one shape -- "the last
+    Friday" is the first Friday counted back from the end -- so the offer set
+    asks one question of each (:func:`offerable_weekday_readings`) and the
+    form's script interprets the same two numbers rather than holding a rule
+    of its own (``recurrence_form.js``, ``syncRepeatsOn``).
+
+    Attributes:
+        counts_from_end: Whether the week is counted back from the month's
+            last day rather than forward from its first.
+        last_week: The latest week, counted from that end, the reading reads.
+    """
+
+    counts_from_end: bool
+    last_week: int
+
+
+#: The ONE statement of which dates each weekday reading can read, keyed by
+#: the reading so a member added to :class:`WeekdayReading` without a window
+#: raises ``KeyError`` rather than being offered for every date.
+#:
+#: * From the start, the 1st-4th of a weekday: no fifth (ruling plan#2670).
+#: * From the end, the month's last such weekday: the 1st counted back.
+WEEKDAY_READING_WINDOWS: dict[WeekdayReading, WeekdayReadingWindow] = {
+    WeekdayReading.FROM_START: WeekdayReadingWindow(
+        counts_from_end=False, last_week=LAST_WEEK_EVERY_MONTH_HOLDS,
+    ),
+    WeekdayReading.FROM_END: WeekdayReadingWindow(
+        counts_from_end=True, last_week=1,
+    ),
+}
+
+
+def week_of_month(day: date, *, counts_from_end: bool) -> int:
+    """Return which of its month's *day*.weekday()s *day* is, counted from one end.
 
     Args:
         day: Any date.
+        counts_from_end: Count back from the month's last day rather than
+            forward from its first.
 
     Returns:
-        1 for the 1st-7th, 2 for the 8th-14th, and so on to 5.
+        1 for the 1st-7th (or the last seven days, counted from the end), 2
+        for the next seven, and so on to 5.
     """
+    if counts_from_end:
+        last_day = calendar_module.monthrange(day.year, day.month)[1]
+        return (last_day - day.day) // DAYS_PER_WEEK + 1
     return (day.day - 1) // DAYS_PER_WEEK + 1
 
 
-def _is_last_of_its_weekday(day: date) -> bool:
-    """Return whether no later day of *day*'s month falls on its weekday.
+def weekday_shape(
+    reading: WeekdayReading, week: int, weekday: int,
+) -> MonthCoordinate:
+    """Return the coordinate *reading* names for a date at *week* on *weekday*.
+
+    The one mapping from a reading to its shape, asked by
+    :func:`month_coordinate` for a rule and by the form's offer
+    (:func:`~app.services.recurrence.weekday_reading_options`) for every week
+    and weekday a date can sit at, so the words the form shows are the
+    shape's the walk fires on.
 
     Args:
-        day: Any date.
+        reading: The weekday reading.
+        week: The date's week counted from the end *reading* counts from
+            (:func:`week_of_month`).  The last weekday has no week number:
+            it is the first counted back, whatever *week* says.
+        weekday: A :meth:`datetime.date.weekday` index, 0 = Monday.
 
     Returns:
-        ``True`` when *day* is within a week of its month's end.
+        The coordinate.
+
+    Raises:
+        RecurrenceResolutionError: When *reading* is a member this function
+            has no shape for, or a from-start *week* past the 4th
+            (:class:`NthWeekday`).
     """
-    last_day = calendar_module.monthrange(day.year, day.month)[1]
-    return day.day + DAYS_PER_WEEK > last_day
+    if reading is WeekdayReading.FROM_START:
+        return NthWeekday(nth=week, weekday=weekday)
+    if reading is WeekdayReading.FROM_END:
+        return LastWeekday(weekday=weekday)
+    raise _unshaped(reading)
+
+
+def _unshaped(reading: object) -> RecurrenceResolutionError:
+    """Return the refusal for a reading with no window or no shape.
+
+    One sentence for both halves a reading needs, because the harm is the
+    same either way: :func:`month_coordinate` asks the window first and
+    :func:`weekday_shape` the shape, and neither may fall back to the day of
+    the month.
+
+    Args:
+        reading: The reading neither table answers.
+
+    Returns:
+        The error, for the caller to raise.
+    """
+    return RecurrenceResolutionError(
+        f"weekday reading {reading!r} has no month coordinate.  Every "
+        f"member of WeekdayReading must have a window and a shape: reading the "
+        f"date by its day of the month instead would fire the rule on a day "
+        f"its owner did not choose."
+    )
 
 
 def month_coordinate(
@@ -325,10 +413,11 @@ def month_coordinate(
         weekly rule names no day of a month.
 
     Raises:
-        RecurrenceResolutionError: When *weekday_reading* is a member this
-            function has no shape for, or a from-start reading meets a date
-            past the 28th (:class:`NthWeekday`).  Both value types refuse the
-            second before it is asked (:func:`_require_weekday_reading_pair`).
+        RecurrenceResolutionError: When *weekday_reading* has no window in
+            :data:`WEEKDAY_READING_WINDOWS` or no shape in
+            :func:`weekday_shape`, or a from-start reading meets a date past
+            the 28th (:class:`NthWeekday`).  Both value types refuse the
+            last before it is asked (:func:`_require_weekday_reading_pair`).
     """
     if not has_day_of_month_coordinate(unit):
         return None
@@ -336,15 +425,13 @@ def month_coordinate(
         if nominal_day is None:
             return DayOfMonth(day=starts_on.day)
         return DayOfMonth(day=nominal_day)
-    if weekday_reading is WeekdayReading.FROM_START:
-        return NthWeekday(nth=_week_number(starts_on), weekday=starts_on.weekday())
-    if weekday_reading is WeekdayReading.FROM_END:
-        return LastWeekday(weekday=starts_on.weekday())
-    raise RecurrenceResolutionError(
-        f"weekday reading {weekday_reading!r} has no month coordinate.  Every "
-        f"member of WeekdayReading must have a shape: reading the date by its "
-        f"day of the month instead would fire the rule on a day its owner did "
-        f"not choose."
+    window = WEEKDAY_READING_WINDOWS.get(weekday_reading)
+    if window is None:
+        raise _unshaped(weekday_reading)
+    return weekday_shape(
+        weekday_reading,
+        week_of_month(starts_on, counts_from_end=window.counts_from_end),
+        starts_on.weekday(),
     )
 
 
@@ -363,6 +450,9 @@ def offerable_weekday_readings(
     * **From the end** when the date is its month's last such weekday, within
       a week of the month's end.
 
+    Both are read off :data:`WEEKDAY_READING_WINDOWS`, the table the form's
+    script is handed too, so the browser and this function apply one rule.
+
     A 22nd-28th that is also within a week of the end offers both, and they
     are different cadences: Fri 2027-01-22 is the fourth Friday and Jan 29
     the last, so from February on the two part wherever a month holds five.
@@ -373,18 +463,18 @@ def offerable_weekday_readings(
         starts_on: The rule's first occurrence.
 
     Returns:
-        The readings in declaration order -- ``(FROM_START,)`` for the 17th,
+        The readings in the table's order, which is the declaration order --
+        ``(FROM_START,)`` for the 17th,
         ``(FROM_END,)`` for the 30th of a 31-day month, both for Feb 28 of a
         common year, and ``()`` for a weekly or paycheck cadence.
     """
     if not has_day_of_month_coordinate(unit):
         return ()
-    offered = []
-    if _week_number(starts_on) <= LAST_WEEK_EVERY_MONTH_HOLDS:
-        offered.append(WeekdayReading.FROM_START)
-    if _is_last_of_its_weekday(starts_on):
-        offered.append(WeekdayReading.FROM_END)
-    return tuple(offered)
+    return tuple(
+        reading for reading, window in WEEKDAY_READING_WINDOWS.items()
+        if week_of_month(starts_on, counts_from_end=window.counts_from_end)
+        <= window.last_week
+    )
 
 
 def _require_weekday_reading_pair(
@@ -453,12 +543,16 @@ def _require_weekday_reading_pair(
 
 __all__ = [
     "LAST_WEEK_EVERY_MONTH_HOLDS",
+    "WEEKDAY_READING_WINDOWS",
     "DayOfMonth",
     "LastWeekday",
     "MonthCoordinate",
     "NthWeekday",
     "WeekdayReading",
+    "WeekdayReadingWindow",
     "month_coordinate",
     "offerable_weekday_readings",
+    "week_of_month",
     "weekday_reading_of",
+    "weekday_shape",
 ]

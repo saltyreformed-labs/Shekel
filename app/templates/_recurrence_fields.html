@@ -354,16 +354,17 @@
    schedule already held, it vanished (ON DELETE SET NULL) when that paycheck
    was rebuilt, and a caller passing its own window bypassed it (defect D2).
 
-   ``nominal_day`` is the SECOND control and it is rendered only where the
-   date leaves the question open.  A date that is its own month's LAST day in
-   a month shorter than 31 days is ambiguous: 2026-04-30 could be "the 30th"
-   or "the last day of the month", and those are different cadences from May
-   onwards.  Every other date says its day and nothing else -- INCLUDING the
-   31st of a 31-day month, which already IS the last-day idiom because the
-   walk clamps it per month.  The offer set comes from
-   app.services.recurrence.offerable_nominal_days, the same function the write
-   door refuses a bad pair with, so the control cannot offer one the save
-   would reject.
+   "Repeating on" is the SECOND control: how the date is READ.  A date that
+   is its own month's LAST day in a month shorter than 31 days is ambiguous:
+   2026-04-30 could be "the 30th" or "the last day of the month", and those
+   are different cadences from May onwards.  Every other date says its day
+   -- INCLUDING the 31st of a 31-day month, which already IS the last-day
+   idiom because the walk clamps it per month.  And since plan step
+   recurrence:R8-c any month or year date can also be read by its weekday:
+   Tue 2026-11-17 is "the 17th" or "the third Tuesday".  The offer sets come
+   from app.services.recurrence.offerable_nominal_days and
+   offerable_weekday_readings, the functions the write door refuses a bad
+   pair with, so the control cannot offer one the save would reject.
 
    ``selected.locked`` marks the row READ-ONLY, for the same definition
    recurrence_end_bound locks on and for a reason of its own: the loan's
@@ -426,36 +427,58 @@
              value="{{ selected.starts_on.isoformat() if selected.starts_on is not none else '' }}"
              {{ 'disabled' if selected.locked else '' }}>
     </div>
-    {# The ambiguity control.  The COPY is static and the option set is fixed
-       -- the days a month can fail to hold are 29, 30 and 31 and no other --
-       so nothing here is computed and the script has no wording to repeat.
-       What the server decides is which of them the chosen date leaves OPEN
-       (``day_choices``, from app.services.recurrence.offerable_nominal_days)
-       and therefore whether the row shows at all; recurrence_form.js applies
-       the same rule as the user edits the date, and the write door refuses
-       any pair either of them gets wrong.
+    {# The "repeating on" control: HOW the date is read, as ONE choice --
+       the same day of the month, a clamped month-end day the date leaves
+       open (plan step R7c-b), the weekday counted from the month's start
+       ("the third Tuesday") or the month's last such weekday (plan step
+       recurrence:R8-c, rulings plan#2668 and plan#2670).  One <select>
+       because a rule's first date is read exactly one way: it posts one key
+       (``repeats_on``), so a nominal day beside a weekday reading
+       (ck_recurrence_rules_one_month_reading) is a pair no form can post.
 
-       Hidden AND disabled together when there is nothing to ask: a hidden
-       control still submits, and a stale nominal day beside a date that never
-       clamped is exactly what ck_recurrence_rules_nominal_day refuses.  Each
-       option carries ``data-day`` so the script can enable the ones above the
-       chosen day without knowing what any of them are called. #}
-    <div class="col-auto {{ '' if selected.day_choices else 'd-none' }}"
-         id="field-nominal-day">
+       The COPY is the server's and the option set is fixed.  A nominal day's
+       label is static; a weekday reading's depends on the date being typed,
+       so each weekday option carries EVERY phrase it can show
+       (``data-labels``, keyed by where a date sits) beside the window that
+       says which dates it reads (``data-counts-from-end``,
+       ``data-last-week``, the same table offerable_weekday_readings reads).
+       recurrence_form.js picks the phrase and enables the options the date
+       allows; it words nothing and holds no rule, and the write door refuses
+       any pair it gets wrong.  What the server decides at render is which
+       options the stored date allows (``day_choices``, ``weekday_choices``),
+       so the form is correct before any script runs.
+
+       Hidden AND disabled together when there is nothing to ask -- a cadence
+       with no day of a month, or a blank date: a hidden control still
+       submits, and a stale choice beside a date it does not fit is exactly
+       what the CHECKs refuse.  Each nominal-day option carries ``data-day``
+       so the script can enable the ones above the chosen day without knowing
+       what any of them are called. #}
+    {% set has_choices = selected.day_choices or selected.weekday_choices %}
+    <div class="col-auto {{ '' if has_choices else 'd-none' }}"
+         id="field-repeats-on">
       <div class="input-group">
-        <label class="input-group-text" for="nominal_day">repeating on</label>
-        <select id="nominal_day" name="nominal_day" class="form-select"
-                {{ '' if selected.day_choices and not selected.locked else 'disabled' }}>
-          <option value="" {{ 'selected' if selected.nominal_day is none else '' }}>
+        <label class="input-group-text" for="repeats_on">repeating on</label>
+        <select id="repeats_on" name="repeats_on" class="form-select"
+                {{ '' if has_choices and not selected.locked else 'disabled' }}>
+          <option value="" {{ 'selected' if selected.reading.token == '' else '' }}>
             the same day of the month
           </option>
           {% for option in picker.nominal_days %}
-          {% set day = option.day %}
-          {% set label = option.label %}
-          <option value="{{ day }}" data-day="{{ day }}"
-            {{ 'selected' if selected.nominal_day == day else '' }}
-            {{ '' if day in selected.day_choices else 'disabled' }}>
-            {{ label }}
+          <option value="{{ option.token }}" data-day="{{ option.day }}"
+            {{ 'selected' if selected.reading.token == option.token else '' }}
+            {{ '' if option.day in selected.day_choices else 'disabled' }}>
+            {{ option.label }}
+          </option>
+          {% endfor %}
+          {% for option in picker.weekday_readings %}
+          <option value="{{ option.token }}"
+            data-counts-from-end="{{ 'true' if option.counts_from_end else 'false' }}"
+            data-last-week="{{ option.last_week }}"
+            data-labels="{{ option.labels_json }}"
+            {{ 'selected' if selected.reading.token == option.token else '' }}
+            {{ '' if option.token in selected.weekday_choices else 'disabled' }}>
+            {{ selected.weekday_choices.get(option.token, '') }}
           </option>
           {% endfor %}
         </select>

@@ -349,13 +349,14 @@ def resync_all_cash_postings_after_migration():
     the go-forward sync instead
     (:func:`app.services.posting_service.resync_all_cash_postings`).
 
-    **It runs FIRST of the three, and the order is the dependency direction.**
-    The anchor walk computes each correction's ``ledger_before`` from the source
-    postings on the account's linked ledger, so the sources are brought to target
-    before the corrections that sit on top of them are reconciled.  (The anchor
-    walk reads posting AMOUNTS grouped by source rather than their dates, so this
-    ordering is defence rather than a live coupling -- stated so a later reader
-    does not reorder it on the assumption that it is arbitrary.)
+    **It runs FIRST of the three, and since plan task plan#2525 the order is no
+    longer a dependency.**  The anchor walk computed each correction's
+    ``ledger_before`` from the source postings on the account's linked ledger,
+    so the sources were brought to target before the corrections that sat on
+    top of them were reconciled.  It walks the account's settled records now
+    (:func:`app.services.ledger_lines.walk_account_ledger`), which no hook
+    writes, so each correction's target is the same whichever hook runs first;
+    the order is kept as the one every deploy has run.
 
     Runs only on the existing-database path (a fresh database has no settled
     sources).  Idempotent and self-healing via reconcile-to-target, so it is safe
@@ -440,8 +441,8 @@ def backfill_all_account_anchor_postings_after_migration():
     app with ``init_ref_cache=False`` (the pre-migration bootstrap window; see
     the ``3104f87`` deploy fix) so ``ref_cache`` is off while migrations run.
     Unlike the Step-2 / Step-3 cash backfills, an anchor correction is a
-    moment-granular walk over the account's assertions against its linked
-    ledger, not a one-line SQL formula, so it cannot be reproduced in raw SQL
+    day-granular walk over the account's assertions against its settled
+    records, not a one-line SQL formula, so it cannot be reproduced in raw SQL
     without duplicating that walk.  So it runs HERE, once the chain has reached
     head and every ref row (the ``account_opening`` / ``account_trueup``
     sources, and the ``anchor_equity`` / ``interest_income`` /

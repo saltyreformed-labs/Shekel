@@ -169,8 +169,12 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # is a METHOD on ``ReconciledThrough`` rather than a free function, so
     # that a raw ``<=`` against the boundary is a TypeError instead of a
     # fifth answer.  The read fold, the posting walk and the entry
-    # reservation all reach this one implementation -- they had three, in
-    # three different units, and one of them cost production ``$4,001.42``.
+    # reservation all reached this one implementation -- they had three, in
+    # three different units, and one of them cost production ``$4,001.42``
+    # -- until plan step X-f3a-1 moved the cash side onto ``StatementCoverage``
+    # (``_clearing`` below); the posting walk is the read fold's own replay
+    # since plan task plan#2525.  The asset replay's contribution tier and
+    # the anchor self-heal still ask it.
     # It answers nothing about how much an account HOLDS; it answers
     # whether one event precedes one assertion.
     "covers",
@@ -257,9 +261,11 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # ``cash_anchor_facts`` and ``settled_cash_facts`` are LOADERS of stored
     # assertions and per-row signed effects.  The stream ORDERING that
     # ``merge_anchor_and_cash_events`` used to return as a third list is
-    # gone: both walks now advance their own sources against
-    # ``ReconciledThrough.covers``, so the order is applied where the
-    # replay happens rather than published as a fact of its own.
+    # gone: the walks advanced their own sources against
+    # ``ReconciledThrough.covers``, so the order was applied where the
+    # replay happened rather than published as a fact of its own; the one
+    # replay asks ``StatementCoverage`` per source since plan step X-f3a-1,
+    # for the fold and, since plan task plan#2525, the posted ledger.
     # ``observed_on`` and ``delta`` LEFT this set at plan step X-f3c-1 with
     # the class that carried them: ``CashAnchorCorrection`` is
     # ``balance_at._assertions``' now, because its ``balance_before`` is a

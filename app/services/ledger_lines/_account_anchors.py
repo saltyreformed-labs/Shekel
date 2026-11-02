@@ -208,7 +208,7 @@ def _counter_keys(
     and booked to equity, which is the defect ruling R-FO exists to close,
     reintroduced through the back door (adversarial review, 2026-08-14).
     ``is_opening`` is also a property of the ASSERTION HISTORY where a
-    delta-keyed rule is a property of ONE SCENARIO's posted sources: the same
+    delta-keyed rule is a property of ONE SCENARIO's settled records: the same
     correction could open the books in one scenario and not in another.  The
     ``$0`` pre-fill was the real defect and it is fixed where it lives -- the
     create form now ASKS, which is ruling R-EX's own argument about the

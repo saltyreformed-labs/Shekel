@@ -577,7 +577,9 @@ def record_reconciliation(submission: ReconcileSubmission) -> int:
     # named is refused (``_transfers._settle_one``).
     # PROMISED: a row's caption names what ITS tick frees, so a ticked row
     # whose save went another way refuses the save (ledger row BAL-597).
-    with posting_service.holding_the_anchor_re_check(), Press(
+    with posting_service.holding_the_anchor_re_check(
+        "reconcile_service.record_reconciliation",
+    ), Press(
         Shown(submission.named.for_ticks(submission.transaction_ids)),
         promised=True,
     ) as press:

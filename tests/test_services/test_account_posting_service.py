@@ -660,13 +660,16 @@ class TestWalkAccountLedger:
     def test_a_purchases_clearing_link_is_read_off_the_PURCHASE(
         self, app, db, seed_user,
     ):
-        """The posted walk reads a purchase's own link, not its parent's.
+        """The account walk reads a purchase's own link, not its parent's.
 
-        Plan step X-f3b (ruling **R-FM**) gave the walk a FOURTH source loader,
-        and it is the only one whose rows carry a link the parent cannot supply:
-        a still-PROJECTED envelope has no ``reconciled_by_id`` of its own, so a
-        loader reading the parent would answer ``None`` for every purchase and
-        the record would decide nothing here while deciding on the read side.
+        Plan step X-f3b (ruling **R-FM**) gave the posted walk a FOURTH source
+        loader, the only one whose rows carried a link the parent cannot
+        supply: a still-PROJECTED envelope has no ``reconciled_by_id`` of its
+        own, so a loader reading the parent would have answered ``None`` for
+        every purchase and the record would have decided nothing here while
+        deciding on the read side.  The walk reads the records since plan task
+        plan#2525, each purchase as a movement of its own, and this pins that
+        it still reads the purchase's link.
 
         The shape that discriminates it is the one the reconcile panel writes --
         TWO assertions sharing a civil day, where the link picks between them

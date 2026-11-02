@@ -13,65 +13,25 @@ user's correction runs (``transaction_service.apply_requested_status``).
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 
 import pytest
 
-from app.enums import SettledDayBasisEnum
 from app.extensions import db as _db
-from app.models.account import AccountAnchorHistory
 from app.services import anchor_service, posting_service, transaction_service
 from app.services.anchor_service import AnchorTrueUpOutcome
-from app.services.settle_day import SettleDay
-from tests._test_helpers import (
-    create_account_of_type,
-    freeze_today,
-    generate_row_of,
-    make_expense_template,
+from tests._test_helpers import create_account_of_type, freeze_today
+from ._helpers import (
+    _TODAY,
+    _opening_day,
+    _settled_bill_paid_from,
 )
-
-# Inside seed_periods' last paycheck, so every day these cases name is a day
-# the owner's calendar files; each new account opens the day before.
-_TODAY = date(2026, 5, 15)
 
 
 @pytest.fixture(autouse=True)
 def _frozen_today(monkeypatch):
     """Pin the owner's today, which every new account's opening day reads."""
     freeze_today(monkeypatch, _TODAY)
-
-
-def _opening_day(account) -> date:
-    """Return the day *account*'s one balance assertion, its opening, observes."""
-    return (
-        _db.session.query(AccountAnchorHistory.observed_on)
-        .filter_by(account_id=account.id)
-        .one()
-        .observed_on
-    )
-
-
-def _settled_bill_paid_from(seed_user, period, tender, day, *, account=None):
-    """Return a $120.00 bill settled from *tender* on *day*.
-
-    The bill's own account is *account*, the seed's Checking when ``None``:
-    a payment may be paid from its row's own account, the owner's checking
-    account or a credit card.
-    """
-    template = make_expense_template(
-        _db.session, seed_user, amount="120.00", name="Hotel",
-        category_key="Rent", account=account,
-    )
-    row = generate_row_of(template, period)
-    _db.session.commit()
-    transaction_service.settle_transaction(
-        row,
-        settle_day=SettleDay(day=day, basis=SettledDayBasisEnum.ENTERED),
-        tender_account_id=tender.id,
-    )
-    _db.session.commit()
-    return row
 
 
 def _move_paid_from(row, account) -> None:
@@ -91,14 +51,14 @@ class TestAMovedPaymentReChecksTheAccountItLeft:
     ):
         """A $120.00 card payment moved to Checking: the card still reads -$500.00.
 
-        The card opens at -$500.00 on 2026-05-14 and the bill is settled
-        from it that day, inside the opening, so the card's ledger reads its
-        assertion: the -120.00 leg plus an opening correction of -380.00.
-        Moved to Checking, the leg reverses (+120.00 on the card), and the
-        card's records hold nothing but the opening, so its correction must
-        become the whole -500.00:
+        The card opens at -$500.00, asserted on 2026-05-14, and the bill is
+        settled from it that day, so the assertion absorbs it: the card's
+        ledger reads the -500.00 opening, the -120.00 leg and a +120.00
+        true-up.  Moved to Checking, the leg reverses (+120.00 on the card)
+        and the card's records hold no payment, so its true-up must return
+        to 0.00:
 
-            card     -500.00 (asserted; was -380.00 with the card never re-checked)
+            card     -500.00 (asserted; -380.00 with the card never re-checked)
             Checking 1,000.00 opening (2024) - 120.00 riding on top = 880.00
         """
         with app.app_context():

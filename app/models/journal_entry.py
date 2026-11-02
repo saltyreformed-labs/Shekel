@@ -219,11 +219,14 @@ class JournalEntry(UserScopedMixin, CreatedAtMixin, db.Model):
     # correction links no row.
     #
     # **It is a source of its own rather than more legs on the parent's entry**
-    # because the posted walk reads a source's day and its clearing link off the
-    # SOURCE ROW: a purchase carries its own ``settled_on`` and its own
-    # ``reconciled_by_id``, and a still-projected envelope has no settle day at
-    # all -- so legs grouped under the parent row's own link (``transaction_id``,
-    # deleted at card plan#1845) could not be dated or attributed.
+    # because a source's day and its clearing link are the SOURCE ROW's: a
+    # purchase carries its own ``settled_on`` and its own ``reconciled_by_id``,
+    # and a still-projected envelope has no settle day at all -- so legs
+    # grouped under the parent row's own link (``transaction_id``, deleted at
+    # card plan#1845) could not be dated or attributed.  The posted walk read
+    # both off the row by this link until plan task plan#2525 moved the
+    # account walk onto the records; the ledger report still dates a
+    # movement's legs by it.
     transaction_entry_id = db.Column(
         db.Integer,
         db.ForeignKey(

@@ -71,6 +71,7 @@ one producer of each side's signed cash.
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from sqlalchemy.orm import selectinload
 
@@ -94,11 +95,26 @@ from app.utils.balance_predicates import settled_status_ids
 
 logger = logging.getLogger(__name__)
 
-#: The ``Session.info`` key an act's held anchor re-check sits under while
+#: The ``Session.info`` key an act's :class:`_Hold` sits under while
 #: :func:`holding_the_anchor_re_check` is open (ruling **plan#2574**).  On the
 #: SESSION because the re-check holds that session's journal entries and
 #: belongs to its unit of work.
 _HELD_RE_CHECK_KEY = "posting_service.held_anchor_re_check"
+
+
+@dataclass(frozen=True)
+class _Hold:
+    """The one open hold on a session: the act that opened it, and what it holds.
+
+    Attributes:
+        act: The act holding the re-check, which a second hold's refusal
+            names (review plan#2521, finding A2).
+        held: A scenario id -> the entries emitted there, as
+            :func:`_hold_for_the_re_check` builds it.
+    """
+
+    act: str
+    held: dict[int, list[JournalEntry]]
 
 # Re-exported read-side API.  The reconciliation readers moved to
 # :mod:`app.services.posting_reads` when this module crossed the size gate
@@ -154,9 +170,9 @@ def _self_heal_account_anchor_corrections(
     """
     if not entries:
         return
-    held = db.session.info.get(_HELD_RE_CHECK_KEY)
-    if held is not None:
-        _hold_for_the_re_check(held, scenario_id, entries)
+    hold = db.session.info.get(_HELD_RE_CHECK_KEY)
+    if hold is not None:
+        _hold_for_the_re_check(hold.held, scenario_id, entries)
         return
     # Pylint: ``import-outside-toplevel`` -- reverse dependency: the account
     # posting package imports this module's balanced-write path, so the
@@ -500,7 +516,7 @@ def _hold_for_the_re_check(
 
 
 @contextmanager
-def holding_the_anchor_re_check() -> Iterator[None]:
+def holding_the_anchor_re_check(act: str) -> Iterator[None]:
     """Hold every anchor re-check the block's syncs owe, and run it ONCE at its close.
 
     Ruling **plan#2574** (developer 2026-11-01): an act that settles several
@@ -530,21 +546,50 @@ def holding_the_anchor_re_check() -> Iterator[None]:
     later act in the same session re-checks for itself.  Plan step plan#2516
     deletes this with the self-heal and the stored corrections it keeps.
 
+    **A hold does not nest, and a second one is REFUSED before it touches
+    the first** (review plan#2521, finding A2).  The session holds one
+    re-check, so a hold opened inside another would have replaced it: the
+    inner close would run only the inner block's re-check and take the key,
+    every later sync in the outer block would walk at once, and the outer
+    close would find no key and raise, never running the re-check of what
+    its block had queued before the inner hold opened.  Refused, the open
+    hold is left as it was: caught inside its block, its close still runs
+    everything the block queued, before the refusal and after it; uncaught,
+    the act is refused and runs none, as a block that raises does.  An act
+    inside another's hold needs no hold of its own: every sync it makes
+    queues onto the open one.  The reconcile is the one act that holds it
+    today, and nothing nests one.
+
+    Args:
+        act: The act holding the re-check, as a second hold's refusal names
+            it -- the opener's qualified name
+            (``"reconcile_service.record_reconciliation"``).
+
     Yields:
         Nothing; the block's syncs queue onto the session.
 
     Raises:
+        RuntimeError: When a hold is already open on the session, naming the
+            act that holds it and *act*; the open hold is left as it was.
         PostingError: From the close's re-check, as
             :func:`re_check_held_anchor_corrections` raises it.
     """
     info = db.session.info
-    held: dict[int, list[JournalEntry]] = {}
-    info[_HELD_RE_CHECK_KEY] = held
+    open_hold = info.get(_HELD_RE_CHECK_KEY)
+    if open_hold is not None:
+        raise RuntimeError(
+            f"{act} cannot hold the anchor re-check: {open_hold.act} already "
+            f"holds it on this session, and a hold does not nest.  Run {act} "
+            f"inside that hold without opening one of its own; every sync it "
+            f"makes queues onto the open hold, re-checked once at its close."
+        )
+    hold = _Hold(act=act, held={})
+    info[_HELD_RE_CHECK_KEY] = hold
     try:
         yield
     finally:
         del info[_HELD_RE_CHECK_KEY]
-    re_check_held_anchor_corrections(held)
+    re_check_held_anchor_corrections(hold.held)
 
 
 def _skip_reasons(skipped: "dict[int, str]") -> str:
@@ -606,11 +651,12 @@ def resync_all_cash_postings() -> tuple[int, int]:
 
     **It re-books EVERY source first and re-checks the anchor corrections
     ONCE, after both arms** (ruling **R-BAL103**, developer 2026-09-22).  The
-    per-source doors re-check at once, right for one settle and wrong for a
-    batch: a source not yet reached still holds what it posted before this
-    pass, so a walk inside the loop books a true-up for money only waiting its
-    turn and that source's own re-check reverses it -- both permanent in an
-    append-only ledger, 40 of the 97 entries the first 6-3 deploy wrote on its
+    per-source doors re-check at once, right for one settle and, while the
+    walk read what was posted, wrong for a batch: a source not yet reached
+    still held what it posted before this pass, so a walk inside the loop
+    booked a true-up for money only waiting its turn and that source's own
+    re-check reversed it -- both permanent in an append-only ledger, 40 of
+    the 97 entries the first 6-3 deploy wrote on its
     rehearsal over the 2026-09-22 production dump, where the waiting money
     was the legacy one-entry transfer postings.  So both arms run the doors'
     re-book halves

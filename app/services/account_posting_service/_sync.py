@@ -24,9 +24,10 @@ scenario):
 * :func:`self_heal_anchor_corrections` -- the effect-time self-heal the
   tails of ``posting_service.sync_transfer_postings`` /
   ``sync_transaction_postings`` invoke after emitting source delta entries:
-  a source whose posted effect changed at-or-before an account's latest
-  anchor assertion moved that anchor's walked ``ledger_before``, so the
-  stale correction is re-derived in the same transaction.
+  a source whose records moved at-or-before an account's latest anchor
+  assertion, as the deltas it posted show, moved that anchor's walked
+  ``ledger_before``, so the stale correction is re-derived in the same
+  transaction.
 
 An amortizing loan is a documented NO-OP at every entry point (never an
 error: the chokepoints legitimately iterate all of a user's accounts): loans
@@ -94,10 +95,10 @@ def sync_account_anchor_postings(account_id: int, scenario_id: int) -> None:
     """Reconcile one non-loan account's anchor corrections in one scenario.
 
     The per-scenario chokepoint: walks the account's anchor assertions
-    against the scenario's posted sources
-    (:func:`app.services.ledger_lines.walk_account_ledger`) and reconciles the resulting
-    opening / true-up corrections to the ledger
-    (:func:`._anchors.reconcile_account_anchor_corrections`).
+    against the scenario's settled RECORDS, never what is posted
+    (:func:`app.services.ledger_lines.walk_account_ledger`, plan task
+    plan#2525), and reconciles the resulting opening / true-up corrections
+    to the ledger (:func:`._anchors.reconcile_account_anchor_corrections`).
 
     Idempotent and self-healing: a re-run at the same state writes nothing.
     Touches ONLY the account's own chart rows.  A

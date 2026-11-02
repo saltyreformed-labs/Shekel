@@ -397,7 +397,11 @@ def downgrade():
     Per docs/coding-standards.md, irreversible-by-design migrations
     raise NotImplementedError with the manual recovery SQL embedded
     in the message so a ``flask db downgrade`` chain halts here
-    rather than continuing past a half-reverted step.
+    rather than continuing past a half-reverted step.  The revision it
+    stamps is :data:`down_revision` itself rather than a literal, so it
+    cannot name a parent this revision no longer has: migration
+    ``b6d41f0a9c27``'s literal did, after a merge re-pointed it (finding
+    plan#1902).
 
     Review: solo developer, 2026-05-11 (audit 2026-04-15, C-41 / F-069).
     """
@@ -414,5 +418,5 @@ def downgrade():
         "  DROP INDEX budget.uq_scenarios_one_baseline;\n"
         "Then stamp the prior revision before continuing the "
         "downgrade chain:\n"
-        "  flask db stamp 2109f7a490e7"
+        f"  flask db stamp {down_revision}"
     )

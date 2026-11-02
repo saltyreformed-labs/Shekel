@@ -12,11 +12,14 @@ developer ruling **plan#2333**, 2026-11-02; ruling **R-FI**'s rule 1, "every
 financial quantity that VARIES OVER TIME is a dated series resolved as-of").
 Each row is the WHOLE term set in force from its ``effective_date`` until the
 next row's -- the ``budget.rate_history`` shape the card's APR already has --
-so a change of terms governs from its day and every statement and reward
-derived before it stands.  CC-2 built one row per card that the form rewrote
-in place, and because every statement and reward is DERIVED from these terms
-(never stored), that rewrite would have re-cut every past statement and
-re-priced every past reward once a reader existed.  Before the earliest row
+so a change of terms governs from its day: every statement that closes before
+that day, and every reward on a day before it, stands
+(:mod:`app.services.card_statement` states where the boundary falls, and its
+one exception, a version dated before the earliest).  CC-2 built one row
+per card that the form rewrote in place, and because every statement and
+reward is DERIVED from these terms (never stored), that rewrite would have
+re-cut every past statement and re-priced every past reward once a reader
+existed.  Before the earliest row
 the earliest governs (:func:`app.services.card_statement.terms_in_effect`),
 so a card with one row derives exactly as the undated row did.
 

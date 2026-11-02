@@ -30,6 +30,22 @@ rule, and picks the version itself:
   CLOSE** -- the statement the bank printed then -- never today's, and never
   one the caller picked: :func:`due_date_for` and :func:`minimum_payment` take
   the series and the close.
+* **A version dated ON a close date governs the statement closing that day.**
+  The close date is the closing date the issuer prints on the statement, and
+  an issuer applies a change effective on a date to the billing cycle that
+  contains it, the one closing on or after it: a "statements closing on or
+  after Mar 5" change entered as Mar 5 makes Mar 5 the first close on the new
+  day.  This cycle excludes its close date (closed-open, below), so every day
+  of that statement falls before the version's date; the boundary follows
+  the issuer's date anyway, because that is the date the owner enters.  Read
+  from the version in force on the day BEFORE the close instead, the same
+  change would first close on Apr 5.
+
+So what a change of terms leaves standing is every statement that closes
+BEFORE its date and every reward on a day before it.  The one exception is a
+version dated before the card's earliest: the earliest held the days before
+it flat (:func:`terms_in_effect`), and those days now take the new earliest's
+terms, as the nearest terms anyone stated for them.
 
 **The cycle is CLOSED-OPEN.**  A statement that closes on the 20th holds every
 movement dated from the previous 20th up to but NOT including this one; a row
@@ -415,7 +431,7 @@ def grace_kept(prior_balance: Decimal, credited_by_due: Decimal) -> bool:
     Args:
         prior_balance: The prior statement's balance as an OWED figure.
         credited_by_due: The credits into the card dated in
-            ``[prior.closes, due_date_for(prior.closes, due_day)]``, as a
+            ``[prior.closes, due_date_for(versions, prior.closes)]``, as a
             positive amount.
 
     Returns:

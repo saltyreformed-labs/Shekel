@@ -7,13 +7,15 @@ every time, so a submit IS a whole version of the terms.  Since plan#2331
 (developer ruling **plan#2333**) the terms are a DATED SERIES, so the door
 saves the version FOR the date the form names -- creating it, or correcting
 the version already on that date (**R-CC27**'s set-by-date shape, the APR's)
--- and a change governs from its day while every statement and reward before
-it stands.  A second door REMOVES a version (developer ruling **plan#2587**),
-the fix a mistyped date needs, and refuses the card's only one.  Both are
-redirect-style POST handlers that flash and return to the cash detail page
-hosting the form (**R-CC25**).  A third, a GET, fills that form from one
-version, its date included, so a correction states that version's own terms
-rather than the ones in force today (plan#2331's review, plan#2576).
+-- and a change governs from its day: every statement that closes before it,
+and every reward on a day before it, stands (:mod:`app.services.card_statement`
+states where the boundary falls).  A second door REMOVES a version (developer
+ruling **plan#2587**), the fix a mistyped date needs, and refuses the card's
+only one.  Both are redirect-style POST handlers that flash and return to the
+cash detail page hosting the form (**R-CC25**).  A third, a GET, fills that
+form from one version, its date included, so a correction states that
+version's own terms rather than the ones in force today (plan#2331's review,
+plan#2576).
 
 The writes are :mod:`app.services.card_terms`'s; the transaction is this
 module's.

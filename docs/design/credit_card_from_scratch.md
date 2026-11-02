@@ -340,17 +340,21 @@ Each row is the whole term set in force from its `effective_date` until the next
 the earliest row the earliest (it holds flat backwards, R-I's shape, so a card with one row derives
 exactly as the undated row did). Saving the form for a date creates that version or corrects the one
 already on it; a version can be removed (ruling plan#2587) except the card's only one. So a change
-of terms governs from its day, and every statement and reward before it stands. The one walk is
+of terms governs from its day: every statement that closes BEFORE that day, and every reward on a
+day before it, stands. The one exception is a version dated before the earliest, which takes over
+the days the earliest held flat, as the nearest terms anyone stated for them. The one walk is
 `card_statement.terms_in_effect`, and every reader takes it: a statement the version in force at its
 CLOSE, a reward the version in force on its purchase's day.
 
-A STATEMENT is DERIVED (R-CC2): `card_statement.py`, pure, every function taking the card's SERIES
-and picking the version itself -- `cycle_containing` (closed-open, so a row posted AT the close
-belongs to the next cycle), `statement_sequence`, `due_date_for` and `minimum_payment` (each on the
-close's version), `statement_balance` = the fold at the close instant, `grace_kept` (the prior
-statement paid in full by its due date), the minimum = `max(floor, round_money(pct x balance))`
-clamped to the balance, all Decimal, `round_money` at the boundary only. The finance charge is
-3.6's.
+A STATEMENT is DERIVED (R-CC2): `card_statement.py`, pure, every function that reads the terms
+taking the card's SERIES and picking the version itself -- `cycle_containing` (closed-open, so a row
+posted AT the close belongs to the next cycle), `statement_sequence`, `due_date_for` and
+`minimum_payment` (each on the close's version); beside them `grace_kept` (the prior statement paid
+in full by its due date), which reads no terms. The minimum =
+`max(floor, round_money(pct x balance))` clamped to the balance, all Decimal, `round_money` at the
+boundary only. The statement balance is the fold at the close instant,
+`owed(cash_balance_at(account, ctx, window.valuation_date))`, for the producer that will state it
+(no function computes it yet). The finance charge is 3.6's.
 
 **A day is a close date when it is the close day, clamped, of the version in force on that day.** So
 a change of the close day cuts one TRANSITIONAL cycle, from the last close under the old day to the
@@ -360,6 +364,15 @@ from the equal-cycle rule for a cycle that changes the closing date (official in
 is `[Jan 20, Feb 20)`, due Mar 15 by the old due day; the next is `[Feb 20, Mar 5)`, due Mar 30 by
 the new one. A month holding a change can hold two closes (close 5 until Mar 9, close 25 from Mar
 10: Mar 5 and Mar 25), which is why nothing is keyed by month.
+
+**A version dated ON a close date governs the statement closing that day.** The close date is the
+closing date the issuer prints, and an issuer applies a change effective on a date to the billing
+cycle that contains it, the one closing on or after it. So a "statements closing on or after Mar 5"
+change entered as Mar 5 makes Mar 5 the first close on the new day, and a change of the close day
+dated on an old close date (close 5 from Feb 20) makes the cycle that would have closed then the
+changeover one, `[Jan 20, Mar 5)`. Reading the version in force on the day BEFORE the close (the
+cycle's last day, since the close date opens the next cycle) would make the first change close on
+Apr 5 instead; the two readings agree whenever the date is not a close date.
 
 **The card's actual closing balance is an OBSERVATION**, typed on the cockpit or carried by the
 feed, and it lands in the level relation exactly as a bank's closing does (`account_anchor_history`,

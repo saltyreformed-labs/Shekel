@@ -33,11 +33,15 @@ What is pinned:
   cycle, a version whose days hold no close at all, the earliest version's
   close day governing before its date, and a scan of every day against the
   definition itself; the due date and the minimum read the version in force
-  at the CLOSE, not a later one; and an empty series is refused in words.
+  at the CLOSE, not a later one; a version dated ON a close date governs the
+  statement closing that day (its due date and minimum, and a new close day
+  entered as its first close closes then: the issuer's convention); and an
+  empty series is refused in words.
 
 The done-when of plan#2331 -- changing a card's terms leaves every statement
-and reward before the change as it was -- is graded on saved versions in
-``tests/test_services/test_card_terms.py``.
+and reward before the change as it was, read as every statement closing before
+the change's date and every reward on a day before it -- is graded on saved
+versions in ``tests/test_services/test_card_terms.py``.
 """
 
 from datetime import date, timedelta
@@ -484,6 +488,10 @@ class TestTheCloseFollowsTheVersionInForce:
         """Close 5 from Feb 20: Feb 20 is the 5th-closing version's day, so not a close.
 
         The cycle open on Jan 20 runs to Mar 5, 44 days, and Feb 20 is inside it.
+        The boundary is the issuer's (the module docstring): a change effective
+        Feb 20 governs the billing cycle containing Feb 20, the one the issuer
+        closes on or after it, so the cycle the old terms would have closed on
+        Feb 20 is the changeover cycle instead.
         """
         series = [_version(date(2026, 1, 1), close_day=20),
                   _version(date(2026, 2, 20), close_day=5)]
@@ -622,6 +630,48 @@ class TestTheStatementReadsTheVersionAtItsClose:
     def test_the_minimum_is_the_closes_versions(self, closes, balance, expected):
         """Each close's own percent and floor, on the same balance."""
         assert minimum_payment(PLAN_2333, closes, balance) == expected
+
+
+class TestAVersionDatedOnACloseDate:
+    """A version dated ON a close date governs the statement closing that day.
+
+    The issuer's convention (the module docstring): a change effective on a
+    date governs the billing cycle containing it, the one closing on or after
+    it.  Read from the day BEFORE the close instead, each case below would
+    answer the old terms or a month later.
+    """
+
+    def test_it_sets_that_statements_due_date_and_minimum(self):
+        """Due the 28th, 3% with a $35.00 floor, from Feb 20: the Feb 20 statement's.
+
+        Close 20 throughout.  The Jan 20 statement is the old terms': due Feb
+        15, minimum max(25.00, 2% x 600.00 = 12.00) = $25.00.  The Feb 20
+        statement is the new version's: due Feb 28, the first 28th after the
+        close, and minimum max(35.00, 3% x 600.00 = 18.00) = $35.00.
+        """
+        series = [
+            _version(date(2026, 1, 1), due_day=15, percent="0.0200", floor="25.00"),
+            _version(date(2026, 2, 20), due_day=28, percent="0.0300", floor="35.00"),
+        ]
+        assert due_date_for(series, date(2026, 1, 20)) == date(2026, 2, 15)
+        assert minimum_payment(series, date(2026, 1, 20), Decimal("600.00")) == (
+            Decimal("25.00")
+        )
+        assert due_date_for(series, date(2026, 2, 20)) == date(2026, 2, 28)
+        assert minimum_payment(series, date(2026, 2, 20), Decimal("600.00")) == (
+            Decimal("35.00")
+        )
+
+    def test_a_new_close_day_entered_as_its_first_close_closes_then(self):
+        """Close 5 from Mar 5 (a "statements closing on or after Mar 5" notice): Mar 5 closes.
+
+        The cycle open on Feb 20 closes on Mar 5 under the new day, not on
+        Apr 5, and the next runs to Apr 5.
+        """
+        series = [_version(date(2026, 1, 1), close_day=20),
+                  _version(date(2026, 3, 5), close_day=5)]
+        assert cycle_containing(series, date(2026, 3, 1)) == _window((2, 20), (3, 5))
+        assert cycle_containing(series, date(2026, 3, 5)) == _window((3, 5), (4, 5))
 
 
 class TestADormantCardHasNoStatement:

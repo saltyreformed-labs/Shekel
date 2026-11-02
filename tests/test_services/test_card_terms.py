@@ -3,8 +3,11 @@ Shekel Budget App -- the card's terms as a dated series (``app.services.card_ter
 
 Plan#2331, developer ruling **plan#2333**: a card's terms are versions, each
 in force from its ``effective_date`` until the next one's, so a change governs
-from its day and every statement and reward before it stands.  What is
-pinned:
+from its day: every statement that closes before that day, and every reward on
+a day before it, stands.  Where that boundary falls is graded in
+``tests/test_services/test_card_statement.py``, beside the walk holding the
+earliest version flat backwards, which is why a version dated before the
+earliest is the one exception.  What is pinned:
 
 * the done-when of plan#2331, on plan#2333's own example saved through
   :func:`~app.services.card_terms.set_terms`: the statement a Feb 10 purchase
@@ -118,12 +121,14 @@ class TestADateChangeLeavesThePastStanding:
         max(25.00, 2% x 600.00 = 12.00) = $25.00 and its cash back
         600.00 x 0.0150 = $9.00.  Saving March's terms (close 5, due 30,
         1.0%) from Mar 1 moves none of it; the statement after is the
-        changeover cycle ``[Feb 20, Mar 5)``, due Mar 30.
+        changeover cycle ``[Feb 20, Mar 5)``, due Mar 30.  The example's
+        March changes no minimum, so the March saved here also raises it to
+        3% with a $35.00 floor: read from March, the Feb 20 minimum would be
+        max(35.00, 3% x 600.00 = 18.00) = $35.00, so the check can fail.
         """
         with app.app_context():
             account = _card(seed_user)
-            february = {**_FEBRUARY, "min_payment_percent": Decimal("0.0200")}
-            _set(account, date(2026, 1, 1), february)
+            _set(account, date(2026, 1, 1), _FEBRUARY)
             before = self._what_feb_10_reads(account)
             assert before == (
                 CycleWindow(date(2026, 1, 20), date(2026, 2, 20)),
@@ -133,7 +138,11 @@ class TestADateChangeLeavesThePastStanding:
             )
             assert _PURCHASE * before[3] == Decimal("9.00")
 
-            _set(account, date(2026, 3, 1), _MARCH)
+            _set(account, date(2026, 3, 1), {
+                **_MARCH,
+                "min_payment_percent": Decimal("0.0300"),
+                "min_payment_floor": Decimal("35.00"),
+            })
 
             assert self._what_feb_10_reads(account) == before
             versions = load_card_term_versions(account.id)

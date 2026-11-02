@@ -12,9 +12,11 @@ same reason.
 
 **The terms are a DATED SERIES** (plan#2331, developer ruling **plan#2333**,
 2026-11-02): each row is the whole term set in force from its
-``effective_date`` until the next row's, so a change governs from its day and
-every statement and reward before it stands.  Three rules, each answering a
-question the one rewritten row could not:
+``effective_date`` until the next row's, so a change governs from its day:
+every statement that closes before that day, and every reward on a day before
+it, stands (:mod:`app.services.card_statement` states where the boundary
+falls, and its one exception).  Four rules, each answering a question the one
+rewritten row could not:
 
 1. **Which version governs a day**
    (:func:`app.services.card_statement.terms_in_effect`, the one walk, in the
@@ -25,7 +27,8 @@ question the one rewritten row could not:
    row did, and the date the owner first saves terms can never make a
    statement before it vanish: the cycle open on the day terms are first
    saved began at the close before it, and its statement is cut by those
-   terms.
+   terms.  The same rule makes a version dated before the earliest take
+   over the days before it: the one exception to "the past stands".
 2. **How terms are stated** (:func:`set_terms`): FOR a date, creating the
    version or rewriting the one already on that date -- developer ruling
    **R-CC27**'s set-by-date shape, the APR's, so a same-date save is the
@@ -54,6 +57,7 @@ transaction).
 """
 
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -107,7 +111,8 @@ def version_with_id(
 
 
 def set_terms(
-    account_id: int, user_id: int, effective_date: date, terms: dict,
+    account_id: int, user_id: int, effective_date: date,
+    terms: dict[str, int | Decimal | None],
 ) -> None:
     """State the card's terms in force from *effective_date*: create or correct.
 

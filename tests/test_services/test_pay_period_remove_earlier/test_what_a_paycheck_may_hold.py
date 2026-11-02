@@ -535,9 +535,14 @@ class TestTheLedgerIsReFiledAndLosesNothing:
     ):
         """Review 2's firing case: a sourceless Checking to Savings entry, both trued up later.
 
-        Each later true-up's correction absorbs the entry's effect on its
-        account, so removing the entry moves each correction's counter leg:
-        both accounts' booked balances would change, and both are named.
+        Each later true-up is worked from the RECORDS (ruling plan#2572),
+        which hold no row the entry came from, so the entry rides on top of
+        each account's asserted balance and removing it moves each account's
+        own row: both accounts' booked balances would change, and both are
+        named.  *Until plan task plan#2525 each true-up's correction absorbed
+        the entry, its walk summing the stored postings, so the own rows
+        booked exactly the asserted balances and what moved on removal was
+        the corrections' counter legs.*
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -561,11 +566,12 @@ class TestTheLedgerIsReFiledAndLosesNothing:
             paydays, eras = _paydays(user_id), _stored_eras(user_id)
             totals = pay_period_locks.posted_totals(user_id)
             scenario = seed_user["scenario"].id
-            # The true-ups absorbed the entry: each account's own row books
-            # exactly what its owner asserted, so what moves on removal is
-            # the corrections' counter legs.
-            assert totals[(scenario, _ledger_ids_of(seed_user["account"])[0])] == Decimal("900.00")
-            assert totals[(scenario, _ledger_ids_of(savings)[0])] == Decimal("600.00")
+            # The true-ups did not absorb the entry (ruling plan#2572): each
+            # own row books its asserted balance with the $100.00 entry on
+            # top, $900.00 - $100.00 on Checking and $600.00 + $100.00 on
+            # Savings, so what moves on removal is the own rows.
+            assert totals[(scenario, _ledger_ids_of(seed_user["account"])[0])] == Decimal("800.00")
+            assert totals[(scenario, _ledger_ids_of(savings)[0])] == Decimal("700.00")
 
             assert _held(user_id, seed_periods[0]) == (
                 f"Removing these paychecks would change the balance the app has "

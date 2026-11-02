@@ -51,7 +51,9 @@ equity first, then one correction per assertion.  Deleted with the loaders:
   A walk over records cannot see a posting whose row is gone, by construction,
   so a residue that does not net to zero is now a difference between the stored
   ledger and the records -- which the parity run of plan step plan#2513 names
-  -- rather than one the corrections silently absorb.  Measured on production
+  -- rather than one the corrections silently absorb (ruling **plan#2572**,
+  developer 2026-11-01: no guard and no re-read takes its place; the account's
+  own row carries it on top of the asserted balance).  Measured on production
   2026-11-01: its four ``purchase`` residue entries (two reversal pairs) net
   ``$0.00`` per ledger account and per (paycheck, day), so no posted true-up
   moves.

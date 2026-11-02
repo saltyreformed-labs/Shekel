@@ -28,6 +28,10 @@ _M_R18B = load_migration_module("6c15d2a97b78_a_paycheck_has_earning_lines.py")
 
 _DEDUCTION_KINDS = {"pre_tax_deduction", "post_tax_deduction"}
 _EARNING_KINDS = {"taxable_earning", "after_tax_earning"}
+#: The kinds a LATER revision adds, which this one neither seeds nor deletes:
+#: ``pre_fica_deduction`` (``47beea2b628a``, plan step salary:S11-e).  Head
+#: carries them, so every head-state assertion here names them too.
+_LATER_KINDS = {"pre_fica_deduction"}
 
 
 def _kind_names() -> set[str]:
@@ -52,12 +56,12 @@ def _seed_line(seed_user, kind_name, name="Phone Allowance", amount="45.00") -> 
 
 @pytest.mark.xdist_group("recurrence_rules_ddl")
 class TestTheKindsAndTheirRoundTrip:
-    """Head carries four kinds; down leaves two; up restores four; the enum matches."""
+    """Head carries this revision's kinds; down removes its two; up restores them; the enum matches."""
 
     def test_head_carries_the_four_kinds_and_the_enum_names_them(self, app, db):
-        """The rows and the enum spell the same four names, no more and no fewer."""
+        """The rows and the enum spell the same names: this revision's four and the later ones."""
         with app.app_context():
-            assert _kind_names() == _DEDUCTION_KINDS | _EARNING_KINDS
+            assert _kind_names() == _DEDUCTION_KINDS | _EARNING_KINDS | _LATER_KINDS
             assert {member.value for member in PaycheckLineKindEnum} == _kind_names()
             assert set(_M_R18B.EARNING_KINDS) == _EARNING_KINDS
 
@@ -69,10 +73,10 @@ class TestTheKindsAndTheirRoundTrip:
             )).all())
 
             _run(_M_R18B.downgrade, db.session)
-            assert _kind_names() == _DEDUCTION_KINDS
+            assert _kind_names() == _DEDUCTION_KINDS | _LATER_KINDS
 
             _run(_M_R18B.upgrade, db.session)
-            assert _kind_names() == _DEDUCTION_KINDS | _EARNING_KINDS
+            assert _kind_names() == _DEDUCTION_KINDS | _EARNING_KINDS | _LATER_KINDS
             # The deduction rows kept their ids (nothing touched them).
             after = dict(db.session.execute(text(
                 "SELECT name, id FROM ref.paycheck_line_kinds"
@@ -84,7 +88,7 @@ class TestTheKindsAndTheirRoundTrip:
             _run(_M_R18B.upgrade, db.session)
             assert db.session.execute(text(
                 "SELECT count(*) FROM ref.paycheck_line_kinds"
-            )).scalar() == 4
+            )).scalar() == 4 + len(_LATER_KINDS)
 
     @pytest.mark.parametrize("kind_name", sorted(_EARNING_KINDS))
     def test_the_downgrade_refuses_by_name_while_a_line_carries_an_earning_kind(
@@ -107,6 +111,6 @@ class TestTheKindsAndTheirRoundTrip:
             assert f"line {line_id} ('Phone Allowance', {kind_name})" in message
             assert "moves the paycheck" in message or "move the paycheck" in message
             # Refused means untouched.
-            assert _kind_names() == _DEDUCTION_KINDS | _EARNING_KINDS
+            assert _kind_names() == _DEDUCTION_KINDS | _EARNING_KINDS | _LATER_KINDS
             db.session.expire_all()
             assert db.session.get(PaycheckLine, line_id).paycheck_line_kind.name == kind_name

@@ -574,10 +574,14 @@ class TestEarningLinesThroughTheDoor:
     nothing is written.
     """
 
-    def test_the_section_offers_the_four_kinds_under_their_labels(
+    def test_the_section_offers_the_five_kinds_under_their_labels(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """The kind select renders every kind in waterfall order, labelled by the vocabulary."""
+        """The kind select renders every kind in waterfall order, labelled by the vocabulary.
+
+        Five since plan step salary:S11-e split the pre-tax kind in two, under
+        ruling plan#2639's own labels.
+        """
         with app.app_context():
             profile = _create_profile(seed_user)
             html = auth_client.get(f"/salary/{profile.id}/edit").data.decode()
@@ -586,8 +590,8 @@ class TestEarningLinesThroughTheDoor:
             ).group(0)
             options = re.findall(r'<option value="(\d+)">([^<]+)</option>', select)
             assert [label for _id, label in options] == [
-                "Taxable earning", "Pre-tax deduction",
-                "Post-tax deduction", "After-tax earning",
+                "Taxable earning", "Pre-tax, all payroll taxes",
+                "Pre-tax, income tax only", "Post-tax deduction", "After-tax earning",
             ]
             assert [int(kind_id) for kind_id, _label in options] == [
                 ref_cache.paycheck_line_kind_id(member) for member in PaycheckLineKindEnum

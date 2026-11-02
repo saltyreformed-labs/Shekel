@@ -122,6 +122,7 @@ _REF_ID_GLOBALS: tuple[tuple[Callable[[Enum], int], dict[str, Enum]], ...] = (
         "ACCT_CAT_INVESTMENT": AcctCategoryEnum.INVESTMENT,
     }),
     (ref_cache.paycheck_line_kind_id, {
+        "LINE_KIND_PRE_FICA_DEDUCTION": PaycheckLineKindEnum.PRE_FICA_DEDUCTION,
         "LINE_KIND_PRE_TAX_DEDUCTION": PaycheckLineKindEnum.PRE_TAX_DEDUCTION,
         "LINE_KIND_POST_TAX_DEDUCTION": PaycheckLineKindEnum.POST_TAX_DEDUCTION,
     }),

@@ -179,7 +179,10 @@
 
       {# Each line's kind is the one the STUB prints it under (ruling R-SAL58):
          pre-set to the kind a refused form posted, else to what a saved stub
-         recorded, else to the paycheck line's own. #}
+         recorded, else to the paycheck line's own.  A stub that marks both
+         pre-tax kinds alike (the developer's prints "* Reduces Tax" on each;
+         plan step salary:S11-e) shows its Social Security figure, not a
+         heading, as the evidence, so the help sends the owner to his line. #}
       {% macro line_input(line) %}
       {% set field = 'line-' ~ line.id %}
       {% set kind_field = 'line-kind-' ~ line.id %}
@@ -205,7 +208,8 @@
 
       <h6 class="mt-3">Paycheck lines the app takes on this payday</h6>
       <p class="text-muted small">Copy each figure from the stub.  Leave a line blank if the stub does not print it.
-        Each line's kind starts as the heading this stub was saved with, or your paycheck line's where it has none; change it only where the stub prints the line under a different heading.</p>
+        Each line's kind starts as the heading this stub was saved with, or your paycheck line's where it has none; change it only where the stub prints the line under a different heading.
+        A stub often marks both pre-tax kinds the same way; there, pick the one your paycheck line has.</p>
       {% if lines.taken %}
       <div class="row">
         {% for line in lines.taken %}{{ line_input(line) }}{% endfor %}

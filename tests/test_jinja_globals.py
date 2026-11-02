@@ -146,8 +146,10 @@ def test_register_ref_id_globals_is_idempotent(app):
         # 41 until plan step **balance:X-am**, which deleted ``STATUS_SETTLED``
         # along with the status it named.  That global had ZERO template readers
         # for its whole life and the arm below could not see it: the
-        # registered-vs-read check is scoped to ``REC_*``.
-        assert len(registered_keys) == 40, (
+        # registered-vs-read check is scoped to ``REC_*``.  41 again since plan
+        # step **salary:S11-e** added ``LINE_KIND_PRE_FICA_DEDUCTION``, which the
+        # salary page's kind chip reads (``salary/_lines_section.html``).
+        assert len(registered_keys) == 41, (
             "the ID-derived globals changed count -- update this number "
             "deliberately, and check the template that reads the new or "
             "removed constant"

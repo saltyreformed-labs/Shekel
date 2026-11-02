@@ -515,7 +515,12 @@ class TestBuildComposition:
 
 
 class TestBuildLineRows:
-    """build_line_rows: proportional bars scaled to the largest line, four groups in waterfall order."""
+    """build_line_rows: proportional bars scaled to the largest line, kind groups in waterfall order.
+
+    Each row's ``group_label`` is the heading over its kind's group (plan step
+    salary:S11-e, which split the pre-tax kind and gave the headings a map of
+    their own; ruling plan#2639 names the two pre-tax labels).
+    """
 
     def test_rows_scaled_to_largest(self):
         """401k 200 (largest) -> 100.0; Roth 100 -> 50.0."""
@@ -523,9 +528,9 @@ class TestBuildLineRows:
         rows = svc.build_line_rows(breakdown)
         assert rows == [
             {"name": "401k", "amount": Decimal("200"), "kind": "pre_tax_deduction",
-             "kind_label": "Pre-tax deduction", "bar_pct": Decimal("100.0")},
+             "group_label": "Pre-tax, income tax only", "bar_pct": Decimal("100.0")},
             {"name": "Roth", "amount": Decimal("100"), "kind": "post_tax_deduction",
-             "kind_label": "Post-tax deduction", "bar_pct": Decimal("50.0")},
+             "group_label": "Post-tax deductions", "bar_pct": Decimal("50.0")},
         ]
 
     def test_empty_when_no_lines(self):
@@ -541,11 +546,11 @@ class TestBuildLineRows:
             after_tax=[("Reimbursement", "400")],
         )[1]
         rows = svc.build_line_rows(breakdown)
-        assert [(r["name"], r["kind"], r["kind_label"], r["bar_pct"]) for r in rows] == [
-            ("Phone Allowance", "taxable_earning", "Taxable earning", Decimal("11.3")),
-            ("401k", "pre_tax_deduction", "Pre-tax deduction", Decimal("50.0")),
-            ("Roth", "post_tax_deduction", "Post-tax deduction", Decimal("25.0")),
-            ("Reimbursement", "after_tax_earning", "After-tax earning", Decimal("100.0")),
+        assert [(r["name"], r["kind"], r["group_label"], r["bar_pct"]) for r in rows] == [
+            ("Phone Allowance", "taxable_earning", "Taxable earnings", Decimal("11.3")),
+            ("401k", "pre_tax_deduction", "Pre-tax, income tax only", Decimal("50.0")),
+            ("Roth", "post_tax_deduction", "Post-tax deductions", Decimal("25.0")),
+            ("Reimbursement", "after_tax_earning", "After-tax earnings", Decimal("100.0")),
         ]
 
     def test_rows_sorted_desc_within_kind_groups(self):

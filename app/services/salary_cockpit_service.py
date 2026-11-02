@@ -20,6 +20,7 @@ calculator already computed onto each breakdown's
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
+from app import ref_cache
 from app.enums import PaycheckLineKindEnum
 from app.services import paycheck_line_kinds
 from app.services.pay_calendar import DerivedPeriod
@@ -456,13 +457,19 @@ def build_line_rows(breakdown: PaycheckBreakdown) -> list[dict[str, object]]:
     """Build the proportional payroll-line bar-list for the focused period.
 
     Every line of every kind, grouped in WATERFALL order -- taxable
-    earnings, pre-tax deductions, post-tax deductions, after-tax earnings
+    earnings, the two pre-tax kinds, post-tax deductions, after-tax earnings
     (plan step salary:R18-b, ruling **R-SAL38**; ``build_deduction_rows``
     over the two deduction groups until then) -- each group sorted by amount
     DESCENDING (largest-first per group; equal amounts keep the calculator's
     stable order).  ``bar_pct`` is scaled so the largest single line across
     every group renders at 100.0 (route-computed so the template does no
-    math).
+    math).  **Grouped by the kind each line carries, in the enum's order,
+    since plan step salary:S11-e**, which split the pre-tax kind in two
+    inside the breakdown's one ``pre_tax`` list: the groups were the
+    breakdown's four lists, so a kind that shares a list would have been
+    shown under its neighbour's heading.  Every line of
+    :attr:`~app.services.paycheck_calculator.PaycheckBreakdown.priced_lines`
+    lands in exactly one group, so no kind can go unshown.
 
     Args:
         breakdown: The focused period's breakdown.
@@ -470,21 +477,19 @@ def build_line_rows(breakdown: PaycheckBreakdown) -> list[dict[str, object]]:
     Returns:
         A list of dicts, one per line item, each with ``name`` (str),
         ``amount`` (Decimal), ``kind`` (the PaycheckLineKind enum value, the
-        template's CSS suffix and group key), ``kind_label`` (the group's
-        words, from the kind vocabulary's one producer) and ``bar_pct``
-        (Decimal, one decimal).  Empty when the period has no lines.
+        template's CSS suffix and group key), ``group_label`` (the group's
+        heading, :data:`~app.services.paycheck_line_kinds.GROUP_LABELS`) and
+        ``bar_pct`` (Decimal, one decimal).  Empty when the period has no
+        lines.
     """
-    groups = (
-        (PaycheckLineKindEnum.TAXABLE_EARNING, breakdown.earnings.taxable),
-        (PaycheckLineKindEnum.PRE_TAX_DEDUCTION, breakdown.deductions.pre_tax),
-        (PaycheckLineKindEnum.POST_TAX_DEDUCTION, breakdown.deductions.post_tax),
-        (PaycheckLineKindEnum.AFTER_TAX_EARNING, breakdown.earnings.after_tax),
-    )
+    groups = {kind: [] for kind in PaycheckLineKindEnum}
+    for line in breakdown.priced_lines:
+        groups[ref_cache.paycheck_line_kind_member(line.paycheck_line_kind_id)].append(line)
     # ``sorted`` is stable, so equal amounts retain the calculator's
     # original line order within each group.
     lines = [
         (line, kind)
-        for kind, group in groups
+        for kind, group in groups.items()
         for line in sorted(group, key=lambda line: line.amount, reverse=True)
     ]
     if not lines:
@@ -502,7 +507,7 @@ def build_line_rows(breakdown: PaycheckBreakdown) -> list[dict[str, object]]:
             "name": line.name,
             "amount": line.amount,
             "kind": kind.value,
-            "kind_label": paycheck_line_kinds.LABELS[kind],
+            "group_label": paycheck_line_kinds.GROUP_LABELS[kind],
             "bar_pct": bar_pct,
         })
     return rows

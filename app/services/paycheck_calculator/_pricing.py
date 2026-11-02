@@ -151,7 +151,10 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
     # sides read feeds the FICA SS wage-base cap (CRIT-03 / F-037).
     taxes = priced_taxes(
         basis,
-        Pay(period.start_date, gross_biweekly, deductions.total_pre_tax),
+        Pay(
+            period.start_date, gross_biweekly, deductions.total_pre_tax,
+            deductions.total_pre_fica,
+        ),
         every_priced_line(taxable_lines, deductions, after_tax_lines),
         Law(tax_configs, period.start_date.year, configs_by_year),
     )

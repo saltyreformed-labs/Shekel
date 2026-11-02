@@ -44,13 +44,14 @@
         <tr>
           <td>{{ d.name }}</td>
           <td>
-            {# Kind chip on the shared flag-chip (P-SA2 / RC3): pre-tax
-               wears the accent -- matching the cockpit's accent pre-tax
+            {# Kind chip on the shared flag-chip (P-SA2 / RC3): both pre-tax
+               kinds wear the accent -- matching the cockpit's accent pre-tax
                bars -- and every other kind the neutral variant; the label,
-               not the color, carries the meaning.  ID comparison, never the
+               not the color, carries the meaning (and tells the two pre-tax
+               kinds apart, plan step salary:S11-e).  ID comparison, never the
                ref name string; the label from the kind vocabulary's one
                producer. #}
-            <span class="flag-chip {{ '' if d.paycheck_line_kind_id == LINE_KIND_PRE_TAX_DEDUCTION else 'flag-chip--neutral' }}">
+            <span class="flag-chip {{ '' if d.paycheck_line_kind_id in (LINE_KIND_PRE_FICA_DEDUCTION, LINE_KIND_PRE_TAX_DEDUCTION) else 'flag-chip--neutral' }}">
               {{ kind_labels[d.paycheck_line_kind_id] }}
             </span>
           </td>

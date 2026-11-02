@@ -2466,9 +2466,14 @@ _C17D2_REVISION_FILE = "3ec5291ca4e2_a_pay_eras_kind_is_which_columns_it_carries
 _R18A_REVISION_FILE = "0a4d2c3e89f8_a_paycheck_is_a_list_of_lines.py"
 #: Plan step ``salary:R18-b``'s revision, which seeds the two EARNING kinds
 #: whose names the pre-rename column cannot hold; its ``downgrade()`` runs
-#: FIRST in the rewind (Alembic's newest-first order) and its ``upgrade()``
-#: LAST in the replay.
+#: after S11-e's and before R18-a's in the rewind (Alembic's newest-first
+#: order), and its ``upgrade()`` between them in the replay.
 _R18B_REVISION_FILE = "6c15d2a97b78_a_paycheck_has_earning_lines.py"
+
+#: Plan step ``salary:S11-e``'s revision, which seeded the all-payroll-taxes
+#: pre-tax kind -- a name too long for the column R18-a's downgrade narrows,
+#: so a rewind past R18-a takes it down first.
+_S11E_REVISION_FILE = "47beea2b628a_pre_tax_splits_in_two.py"
 
 
 def restore_pay_schedule_rhythm_columns(db_session):
@@ -2594,17 +2599,21 @@ def rewind_paycheck_lines_rename(db_session):
     seed through the ORM first, rewind, drive the old statement in SQL, and
     replay before reading a line back through the model.
 
-    **It runs R18-b's downgrade before R18-a's**: head carries the two
-    earning-kind rows R18-b seeded, and R18-a's downgrade REFUSES to narrow
-    the name column while a name longer than ten characters stands, which is
-    the refusal ``test_r18a_paycheck_lines_rename`` grades; R18-b's downgrade
-    in turn refuses while any line CARRIES an earning kind, so a case that
-    seeded one must delete it before rewinding.
+    **It runs S11-e's downgrade, then R18-b's, before R18-a's**: head carries
+    the all-payroll-taxes kind S11-e seeded and the two earning-kind rows
+    R18-b seeded, and R18-a's downgrade REFUSES to narrow the name column
+    while a name longer than ten characters stands, which is the refusal
+    ``test_r18a_paycheck_lines_rename`` grades; S11-e's and R18-b's
+    downgrades in turn refuse while any row CARRIES their kinds, so a case
+    that seeded one must delete it before rewinding.
 
     Args:
         db_session: The test ``db.session``, in the scope that holds the
             tables' locks (see :func:`run_migration_callable`).
     """
+    run_migration_callable(
+        load_migration_module(_S11E_REVISION_FILE).downgrade, db_session,
+    )
     run_migration_callable(
         load_migration_module(_R18B_REVISION_FILE).downgrade, db_session,
     )
@@ -2614,7 +2623,7 @@ def rewind_paycheck_lines_rename(db_session):
 
 
 def replay_paycheck_lines_rename(db_session):
-    """Run plan step ``salary:R18-a``'s own ``upgrade()`` after a rewind, then R18-b's.
+    """Run plan step ``salary:R18-a``'s own ``upgrade()`` after a rewind, then R18-b's and S11-e's.
 
     :func:`rewind_paycheck_lines_rename`'s inverse: the head names back, so a
     test that drove an older revision's statement can read the result through
@@ -2631,6 +2640,9 @@ def replay_paycheck_lines_rename(db_session):
     )
     run_migration_callable(
         load_migration_module(_R18B_REVISION_FILE).upgrade, db_session,
+    )
+    run_migration_callable(
+        load_migration_module(_S11E_REVISION_FILE).upgrade, db_session,
     )
 
 

@@ -7,11 +7,12 @@ the amount model, the payroll feeds.  They carry no behaviour beyond the
 section totals that belong to the section owning the data (``taxes.total``,
 ``deductions.total_pre_tax``, ``earnings.total_taxable``,
 ``earnings.take_home_rate_pct``), so this leaf imports nothing of the engine
-and every other leaf may import it.  Three rules sit beside them:
-:func:`waterfall_gross`, :func:`waterfall_taxable` and :func:`waterfall_net`,
-the gross, the taxable wage and the net a waterfall of those totals makes,
-which a priced paycheck and a transcribed pay stub share (plan steps
-**salary:S11-b** and **salary:S11-c-2c**).
+and every other leaf may import it.  Four rules sit beside them:
+:func:`waterfall_gross`, :func:`waterfall_fica_wages`,
+:func:`waterfall_taxable` and :func:`waterfall_net`, the gross, the Social
+Security and Medicare wages, the taxable wage and the net a waterfall of
+those totals makes, which a priced paycheck and a transcribed pay stub share
+(plan steps **salary:S11-b**, **salary:S11-c-2c** and **salary:S11-e**).
 
 Split out of the one-module engine at plan step **salary:C12** (ledger row
 **P64**), which is what put the package where the module had been; the
@@ -22,6 +23,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+from app import ref_cache
+from app.enums import PaycheckLineKindEnum
 from app.services.pay_calendar import PayCadence
 from app.utils.money import ZERO, round_money
 
@@ -81,6 +84,31 @@ def waterfall_gross(base_pay: Decimal, taxable_earnings: Decimal) -> Decimal:
     return base_pay + taxable_earnings
 
 
+def waterfall_fica_wages(gross: Decimal, pre_fica: Decimal) -> Decimal:
+    """Return the SOCIAL SECURITY AND MEDICARE wages: the gross less the all-payroll-taxes lines.
+
+    The base the two payroll taxes are charged on and the year-to-date wage
+    total sums, since plan step **salary:S11-e** (ruling **plan#2639**;
+    ledger row **SAL-566**): a "Pre-tax, all payroll taxes" deduction (a
+    Section 125 premium, a flexible spending account) leaves it, and a
+    "Pre-tax, income tax only" one does not.  Until then the formulas
+    charged both taxes on the gross, taxing the lines an employer exempts.
+    Written once for the three readers: the engine's paycheck
+    (:func:`~._pricing.calculate_paycheck`), a pay stub's paycheck on the
+    side of the difference the stub supplies (:mod:`._stubs`), and each
+    earlier payday the year-to-date sums
+    (:func:`~._calendar_questions._get_cumulative_wages`).
+
+    Args:
+        gross: Base pay plus the taxable earnings.
+        pre_fica: The all-payroll-taxes deductions' total.
+
+    Returns:
+        ``gross - pre_fica``, or ``$0.00`` when the deductions exceed it.
+    """
+    return max(gross - pre_fica, ZERO)
+
+
 def waterfall_taxable(gross: Decimal, pre_tax: Decimal) -> Decimal:
     """Return a paycheck's TAXABLE wage: the gross less the pre-tax deductions, floored at zero.
 
@@ -91,7 +119,8 @@ def waterfall_taxable(gross: Decimal, pre_tax: Decimal) -> Decimal:
 
     Args:
         gross: Base pay plus the taxable earnings.
-        pre_tax: The pre-tax deductions' total.
+        pre_tax: The pre-tax deductions' total, both pre-tax kinds: each
+            leaves the income-tax base.
 
     Returns:
         ``gross - pre_tax``, or ``$0.00`` when the deductions exceed it.
@@ -178,14 +207,39 @@ class TaxLines:
 
 @dataclass
 class DeductionBreakdown:
-    """Pre- and post-tax deduction line items for a single paycheck."""
+    """Pre- and post-tax deduction line items for a single paycheck.
+
+    ``pre_tax`` holds BOTH pre-tax kinds, in waterfall order -- the
+    all-payroll-taxes lines, then the income-tax-only ones -- each line
+    carrying the kind it was priced as (plan step **salary:S11-e**, ruling
+    **plan#2639**).  One list rather than two because every reader of it
+    wants both: the income-tax base subtracts both (:attr:`total_pre_tax`),
+    the contribution feed reads the account either funds, and
+    :func:`every_priced_line` lists both; a second list would be a reader
+    each of them could forget.  The one figure that tells them apart is
+    :attr:`total_pre_fica`.
+    """
     pre_tax: list[PricedLine] = field(default_factory=list)
     post_tax: list[PricedLine] = field(default_factory=list)
 
     @property
     def total_pre_tax(self) -> Decimal:
-        """Return the sum of the pre-tax deduction amounts."""
+        """Return the sum of the pre-tax deduction amounts, both pre-tax kinds."""
         return sum((d.amount for d in self.pre_tax), ZERO)
+
+    @property
+    def total_pre_fica(self) -> Decimal:
+        """Return the all-payroll-taxes lines' sum: what leaves Social Security and Medicare wages.
+
+        The lines of ``pre_tax`` priced as
+        :attr:`~app.enums.PaycheckLineKindEnum.PRE_FICA_DEDUCTION`, read by
+        the kind each line carries (required on a priced line since plan step
+        salary:S11-e, ledger row **SAL-597**).
+        """
+        pre_fica = ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_FICA_DEDUCTION)
+        return sum(
+            (d.amount for d in self.pre_tax if d.paycheck_line_kind_id == pre_fica), ZERO,
+        )
 
     @property
     def total_post_tax(self) -> Decimal:

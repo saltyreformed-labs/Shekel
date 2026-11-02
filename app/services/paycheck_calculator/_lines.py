@@ -9,10 +9,11 @@ per kind), a line's raw amount with its inflation escalation
 year-to-date (:func:`_cumulative_line_before`) -- the fourth of the package
 docstring's calendar questions, kept beside the lines it caps because it
 replays exactly what :func:`_raw_line_amount` applies to the live one.  The
-two deduction passes are bundled by :func:`_compute_deductions`; the taxable
-earning pass by :func:`priced_gross`, which is also the ONE producer of a
-paycheck's gross (below); the after-tax earning pass by
-:func:`priced_after_tax`.
+deduction passes are bundled by :func:`_compute_deductions`, the
+all-payroll-taxes one through :func:`priced_pre_fica`, which the
+year-to-date wage total replays too (below); the taxable earning pass by
+:func:`priced_gross`, which is also the ONE producer of a paycheck's gross
+(below); the after-tax earning pass by :func:`priced_after_tax`.
 
 **Which paydays a line lands on is its RECURRENCE RULE's answer, since plan
 step salary:R15-b** (rulings **R-SAL3**, **R-SAL29**; ledger row **F-21**):
@@ -37,7 +38,12 @@ the payday; :func:`~._calendar_questions._get_cumulative_wages` sums the same
 function over the year's earlier paydays, so a taxable allowance paid in
 March is in the Social Security wage base by April rather than only on the
 paycheck it rode -- the shape :func:`_cumulative_line_before` has always had
-for a capped line (``CLAUDE.md`` rule 14: one walk).
+for a capped line (``CLAUDE.md`` rule 14: one walk).  **So do the
+all-payroll-taxes lines, since plan step salary:S11-e** (ruling
+**plan#2639**; ledger row **SAL-566**): the total sums each earlier payday's
+Social Security and Medicare wages, its gross less the lines
+:func:`priced_pre_fica` prices, so a Section 125 premium leaves the wage-base
+total as it leaves the paycheck's own tax.
 
 This leaf was ``_deductions.py`` until R18-b; it was split out of the
 one-module engine at plan step **salary:C12** (ledger row **P64**).  Imports
@@ -127,12 +133,35 @@ def priced_after_tax(ctx) -> list[PricedLine]:
     )
 
 
+def priced_pre_fica(ctx) -> list[PricedLine]:
+    """Price the all-payroll-taxes deduction lines admitted on the payday.
+
+    The "Pre-tax, all payroll taxes" kind (plan step salary:S11-e): what
+    leaves a paycheck's Social Security and Medicare wages.  **The one pass
+    over them**, read for the paycheck priced (:func:`_compute_deductions`)
+    and for each earlier payday the year-to-date wage total sums
+    (:func:`~._calendar_questions._get_cumulative_wages`), so the two cannot
+    disagree on what a payday's wages were.
+
+    Args:
+        ctx: The per-paycheck :class:`_LineContext`.
+
+    Returns:
+        The all-payroll-taxes lines, in the profile's order.
+    """
+    return _priced_lines(
+        ctx, ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_FICA_DEDUCTION),
+    )
+
+
 def _compute_deductions(ctx):
     """Compute the pre- and post-tax deduction lines for a paycheck.
 
     Runs :func:`_priced_lines` once per deduction kind using the shared
-    :class:`_LineContext`, returning both line lists bundled in a
-    :class:`DeductionBreakdown`.
+    :class:`_LineContext`, returning the lines bundled in a
+    :class:`DeductionBreakdown`: both pre-tax kinds in its ``pre_tax`` list,
+    in waterfall order (the all-payroll-taxes lines first, plan step
+    salary:S11-e), and the post-tax lines in ``post_tax``.
 
     Args:
         ctx: The per-paycheck :class:`_LineContext`.
@@ -141,9 +170,12 @@ def _compute_deductions(ctx):
         DeductionBreakdown with the pre- and post-tax line items.
     """
     return DeductionBreakdown(
-        pre_tax=_priced_lines(
-            ctx, ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_TAX_DEDUCTION)
-        ),
+        pre_tax=[
+            *priced_pre_fica(ctx),
+            *_priced_lines(
+                ctx, ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_TAX_DEDUCTION)
+            ),
+        ],
         post_tax=_priced_lines(
             ctx, ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.POST_TAX_DEDUCTION)
         ),

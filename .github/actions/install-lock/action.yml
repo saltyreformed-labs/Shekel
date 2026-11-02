@@ -85,10 +85,10 @@ runs:
         restore-keys: |
           uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.cache.outputs.uv }}-
 
-    # ``--require-build-hashes`` refuses a source build whose build tools no
-    # hash covers (pyproject.toml's ``build-constraint-dependencies``, which
-    # uv records in the lock; ruling plan#2494), as the Dockerfile's sync
-    # does.  An install set not named here fails.
+    # pyproject.toml's ``require-build-hashes`` refuses a source build whose
+    # build tools no hash covers (its ``build-constraint-dependencies``, which
+    # uv records in the lock; ruling plan#2494) in this sync, which reads its
+    # settings.  An install set not named here fails.
     #
     # The PATH line is the one zizmor's github-env check flags: from this
     # file it cannot see what triggers the workflows that call the action,
@@ -107,7 +107,7 @@ runs:
         UV_PYTHON_PREFERENCE: only-managed
       run: | # zizmor: ignore[github-env]
         set -euo pipefail
-        sync=("${UV}" sync --locked --require-build-hashes)
+        sync=("${UV}" sync --locked)
         case "${INSTALL}" in
             all) "${sync[@]}" ;;
             runtime) "${sync[@]}" --no-dev ;;

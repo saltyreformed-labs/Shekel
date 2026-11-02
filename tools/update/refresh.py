@@ -7,8 +7,9 @@ auto-merge; ruling plan#2449).
 **It runs at the root of a checkout of ``dev``** whose ``.venv`` holds the lock's ``landing``
 group (``.github/actions/install-lock``'s install set ``landing``), which this module imports
 through quill's door: ``uv lock`` builds the metadata of a package the lock holds only as
-source in an environment of its own, with the build tools ``pyproject.toml``'s
-``build-constraint-dependencies`` trust by hash (ruling plan#2494), so the run executes
+source in an environment of its own, with only the build tools ``pyproject.toml``'s
+``build-constraint-dependencies`` trust by hash, as its ``require-build-hashes`` holds the
+run to (ruling plan#2494), so the run executes
 package code and the workflow gives its job no secret.  The 7-day cooldown is ``pyproject.toml``'s
 ``exclude-newer``, which the lock keeps, so no flag here states it.  uv is the Dockerfile's
 (the install set puts it on ``PATH``), so the lock's header, which another uv would write

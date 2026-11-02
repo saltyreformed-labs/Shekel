@@ -36,6 +36,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,9 @@ PYTHON_BASE_PATTERN = re.compile(
 )
 #: The one home of the Python version (ruling balance:R-BAL294).
 PYTHON_VERSION_FILE = REPO_ROOT / ".python-version"
+#: The project file every uv run reads its settings from, the build hashes it requires among
+#: them (task plan#2550).
+PYPROJECT = REPO_ROOT / "pyproject.toml"
 #: The uv stage's FROM line: astral's uv image by its version tag and its digest.
 UV_STAGE_PATTERN = re.compile(
     r"FROM\s+ghcr\.io/astral-sh/uv:[\w.-]+@sha256:[0-9a-f]{64}\s+AS\s+uv", re.IGNORECASE,
@@ -542,31 +546,48 @@ class TestDockerfileInstallsTheLock:
     def test_the_builder_syncs_the_lock_with_its_build_hashes(
         self, text: str,
     ) -> None:
-        """The builder runs ``uv sync --locked`` with ``--require-build-hashes``, in a RUN
-        instruction: with that line turned into a comment, which still names it, the check
-        fails.
+        """The builder runs exactly ``uv sync --locked --compile-bytecode --no-install-project
+        --no-default-groups --group server`` in a RUN instruction, so no flag overrides the
+        project's settings and none restates one, and pyproject.toml sets uv's
+        ``require-build-hashes``: with that line turned into a comment, which still names it,
+        a flag added to it, or the setting gone, the check fails.
 
         ``--locked`` refuses a lock that no longer matches pyproject.toml,
-        and ``--require-build-hashes`` refuses a source build whose tools no
+        and ``require-build-hashes`` refuses a source build whose tools no
         hash covers (pyproject.toml's ``build-constraint-dependencies``,
-        ruling plan#2494).
+        ruling plan#2494), in this sync (task plan#2550).
         """
+        exact = ["uv", "sync", "--locked", "--compile-bytecode", "--no-install-project",
+                 "--no-default-groups", "--group", "server"]
+
         def syncs(dockerfile: str) -> bool:
             builder, = (stage for stage in _stages(dockerfile)
                         if re.search(r"\sAS\s+builder$", stage[0], re.IGNORECASE))
-            return any(words[:4] == ["uv", "sync", "--locked", "--require-build-hashes"]
-                       for one in _runs(builder) for words in _commands(one))
+            return any(words == exact for one in _runs(builder) for words in _commands(one))
+
+        def requires_hashes(pyproject: str) -> bool:
+            return tomllib.loads(pyproject)["tool"]["uv"].get("require-build-hashes") is True
 
         assert syncs(text), (
-            "the Dockerfile's builder stage no longer installs with "
-            "``uv sync --locked --require-build-hashes``; the image would "
-            "not be held to uv.lock's versions and hashes (ruling "
-            "balance:R-BAL294)."
+            "the Dockerfile's builder stage no longer installs with exactly "
+            f"``{' '.join(exact)}``; the image would not be held to "
+            "uv.lock's versions and hashes (ruling balance:R-BAL294)."
         )
-        sync = "RUN uv sync --locked --require-build-hashes"
+        sync = "RUN uv sync --locked"
         assert text.count(sync) == 1
         assert not syncs(text.replace(sync, "# " + sync).replace(
             "\n        --no-default-groups --group server\n", "\n"))
+        for flag in ("--no-require-build-hashes", "--require-build-hashes", "--no-config"):
+            assert not syncs(text.replace(sync, f"{sync} {flag}")), flag
+        pyproject = PYPROJECT.read_text(encoding="utf-8")
+        assert requires_hashes(pyproject), (
+            "pyproject.toml no longer sets ``require-build-hashes = true`` "
+            "under ``[tool.uv]``; a source build could install a build tool "
+            "no hash covers (ruling plan#2494)."
+        )
+        setting = "require-build-hashes = true\n"
+        assert pyproject.count(setting) == 1
+        assert not requires_hashes(pyproject.replace(setting, ""))
 
     def test_the_runtime_stage_takes_only_the_builder_s_venv(self, text: str) -> None:
         """The runtime stage is built ``FROM`` the Python base and takes from another stage

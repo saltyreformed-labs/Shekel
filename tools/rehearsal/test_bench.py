@@ -166,8 +166,7 @@ def test_a_venv_is_built_once_for_its_pins_and_then_reused_untouched(tmp_path, b
     base = _side(tmp_path / "base")
     python = bench.venv_for(base)
     venv = python.parent.parent
-    sync = ["uv", "sync", "--locked", "--require-build-hashes", "--no-install-project",
-            "--no-default-groups"]
+    sync = ["uv", "sync", "--locked", "--no-install-project", "--no-default-groups"]
     side = ["--python", sys.executable, "--project", str(base)]
     assert builds.syncs == [[*sync, "--group", "rehearsal", *side]]
     assert builds.into == [str(venv)]

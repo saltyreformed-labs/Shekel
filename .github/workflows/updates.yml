@@ -103,7 +103,8 @@ jobs:
 
       # The landing group, which the refresh imports through quill.  uv lock
       # builds a source-only package's metadata in an environment of its own,
-      # with the build tools pyproject.toml trusts by hash (ruling plan#2494).
+      # with only the build tools pyproject.toml trusts by hash, as its
+      # require-build-hashes holds this run to (ruling plan#2494).
       - name: Install the lock
         uses: $/.github/actions/install-lock
         with:

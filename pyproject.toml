@@ -202,8 +202,20 @@ exclude-newer = "7 days"
 # here is refused as unsatisfiable, and a file of another hash is refused, so
 # a new requirement waits for a session to trust its bytes here (measured
 # 2026-11-01, uv 0.13.6).  uv takes a hash only beside an ``==`` pin, and
-# ``--require-build-hashes`` (the Dockerfile, CI) wants one for every tool a
-# build installs, wheel's own ``packaging`` included.
+# ``require-build-hashes`` below wants one for every tool a build installs,
+# wheel's own ``packaging`` included, in each uv run that reads this file's
+# settings: the image's sync, CI's, the bench's for a side holding this
+# line, the Monday refresh's ``uv lock`` and a local ``uv sync``, none of
+# which passes ``--no-config`` or ``--config-file`` or finds a ``uv.toml``
+# here.  Without it a tool listed nowhere here is installed with no hash
+# checked (measured 2026-11-01, uv 0.13.6: a source package needing
+# flit_core built by a plain ``uv sync`` and ``uv lock``, and refused by
+# both with it).  uv calls the setting experimental and warns so each run;
+# a uv that no longer knew it would warn that it cannot parse this file and
+# drop every setting here, ``exclude-newer`` too, so a ``--locked`` run
+# fails but a plain one goes on with no hash checked.
+require-build-hashes = true
+
 [[tool.uv.build-constraint-dependencies]]
 requirement = "setuptools==83.0.0"
 hashes = ["sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3"]

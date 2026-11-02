@@ -107,13 +107,13 @@ class TestTheInstallActionInstallsTheLock:
         assert output.read_text(encoding="utf-8") == ""
 
     def test_each_install_set_runs_its_one_uv_command_then_puts_the_venv_first(self, tmp_path):
-        """Each set runs its one uv command, every sync ``--locked --require-build-hashes``,
-        then writes the workspace's ``.venv/bin`` and uv's own directory to GITHUB_PATH.  A
-        set the step does not name, and a uv that fails, run nothing more and write no
-        PATH."""
+        """Each set runs its one uv command, every sync ``--locked`` (its build hashes are
+        pyproject.toml's ``require-build-hashes`` to require, task plan#2550), then writes the
+        workspace's ``.venv/bin`` and uv's own directory to GITHUB_PATH.  A set the step does
+        not name, and a uv that fails, run nothing more and write no PATH."""
         uv, log, path = tmp_path / "uv", tmp_path / "uv.log", tmp_path / "github_path"
         run = _action_steps()[self.INSTALL]["run"]
-        sync = "sync --locked --require-build-hashes"
+        sync = "sync --locked"
         cases = {
             "all": (0, [sync]),
             "runtime": (0, [f"{sync} --no-dev"]),

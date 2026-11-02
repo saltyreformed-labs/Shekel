@@ -337,8 +337,8 @@ def venv_for(worktree: Path) -> Path:
     shutil.rmtree(venv, ignore_errors=True)
     venv.parent.mkdir(parents=True, exist_ok=True)
     into = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
-    synced = run(["uv", "sync", "--locked", "--require-build-hashes", "--no-install-project",
-                  *_GROUPS, "--python", sys.executable, "--project", str(worktree)], into)
+    synced = run(["uv", "sync", "--locked", "--no-install-project", *_GROUPS,
+                  "--python", sys.executable, "--project", str(worktree)], into)
     if synced.returncode:
         quoted = "\n".join(synced.stderr.strip().splitlines()[-_QUOTED_LINES:])
         raise BenchError(f"uv could not install {worktree}'s pins into {venv} (exit "

@@ -247,8 +247,9 @@ def test_each_action_the_publish_workflow_loads_runs_production(repo):
     """Each action of the repository's that the publish workflow loads by a step's ``uses:``,
     in either form, quoted or not, and each that one loads in turn, in whichever file GitHub
     reads it from, though the ignore file excludes them (plan#2482); one loading the other
-    back is read once.  Not a ``uses:`` of a directory holding no action, an action only
-    named in the workflow's text, nor one only another workflow loads."""
+    back is read once.  Not a ``uses:`` of a directory holding no action, an action whose
+    directory alone the workflow's text names (its file named would count, as any file
+    named does, ruling plan#2573), nor one only another workflow loads."""
     sha = _files(repo, _commit(repo, "root"), "base", _ACTIONS)
     assert sorted(files(repo, sha)) == [
         ".github/actions/in/action.yaml", ".github/actions/lock/action.yml",
@@ -290,6 +291,98 @@ def test_the_install_action_s_uv_runs_production(repo):
     sha = _files(repo, _commit(repo, "root"), "base",
                  {".dockerignore": ".dockerignore\n.github/\n", **held})
     assert sorted(files(repo, sha)) == sorted(names)
+
+
+#: A publish workflow naming files each way the reading counts and each way it does not, an
+#: action it loads naming one, another workflow naming one, and the files, which the image
+#: excludes.
+_NAMES = {
+    ".dockerignore": ".dockerignore\n.github/\nscripts/\ndocs/\ntools/\n.tool-config\n",
+    _production.PUBLISH: (
+        "# the release: scripts/yaml_comment.py\n"
+        "jobs:\n  b:\n    steps:\n"
+        "      - uses: $/.github/actions/lock\n"
+        "      - uses: some/build@v1\n"
+        "        with:\n          file: tools/input.txt\n"
+        "      - name: Run scripts/step_name.py\n"
+        "        run: python scripts/run.py refuse\n"
+        "      - run: |\n"
+        "          # a shell comment: scripts/shell_comment.py\n"
+        "          epoch=\"$(python ./scripts/dotted.py --starts-epoch)\"\n"
+        "          bash \"${GITHUB_WORKSPACE}/scripts/workspace.sh\"\n"
+        "          python \"$GITHUB_WORKSPACE/scripts/bare.py\"\n"
+        "          cat .tool-config\n"
+        "          echo \"${#v}\" scripts/after_count.py\n"
+        "          curl https://x.example/#frag -o scripts/after_url.py\n"
+        "          echo \"see docs/echoed.md.\"\n"
+        "          echo ok  # scripts/trailing.py\n"
+        "          python scripts/missing.py\n"),
+    ".github/actions/lock/action.yml": "runs:\n  steps:\n    - run: python scripts/action.py\n",
+    ".github/workflows/ci.yml": "jobs:\n  t:\n    steps:\n      - run: python scripts/ci.py\n",
+    "scripts/run.py": "print('scripts/by_named.py')\n",
+    **{name: f"{name}\n" for name in (
+        "tools/input.txt", "scripts/step_name.py", "scripts/dotted.py", "scripts/workspace.sh",
+        "scripts/bare.py", ".tool-config", "scripts/after_count.py", "scripts/after_url.py",
+        "docs/echoed.md", "scripts/action.py", "scripts/yaml_comment.py",
+        "scripts/shell_comment.py", "scripts/trailing.py", "scripts/ci.py",
+        "scripts/by_named.py")},
+}
+
+
+def test_each_file_the_publish_workflow_names_outside_a_comment_runs_production(repo):
+    """Each file of the tree that the publish workflow or an action it loads names outside a
+    comment, though the ignore file excludes it (ruling plan#2573): in a step's input, its
+    name, a ``run:`` line, with a leading ``./``, after a variable's ``/`` braced or bare, a
+    dotfile, after a ``#`` no whitespace precedes (``${#v}``, a URL's fragment), and ending
+    a sentence in an ``echo``.  Not one named in a YAML comment line, a shell comment line or
+    after a ``#`` that follows whitespace, one only another workflow names, or one only a
+    named file names; and what the workflow reaches holds no path the tree does not."""
+    sha = _files(repo, _commit(repo, "root"), "base", _NAMES)
+    reaches = [".github/actions/lock/action.yml", ".tool-config", "docs/echoed.md",
+               "scripts/action.py", "scripts/after_count.py", "scripts/after_url.py",
+               "scripts/bare.py", "scripts/dotted.py", "scripts/run.py", "scripts/step_name.py",
+               "scripts/workspace.sh", "tools/input.txt"]
+    assert sorted(files(repo, sha)) == sorted([*reaches, _production.PUBLISH])
+    assert sorted(_production.reached(repo, _production.tree(repo, sha),
+                                      _production.PUBLISH)) == reaches
+
+
+def test_a_named_file_changes_production_while_the_publish_workflow_names_it(repo):
+    """An edit to a file the publish workflow or its action names changes production; one to
+    a file named only in a comment, only by another workflow or only by a named file changes
+    nothing; and the workflow dropping its name changes the workflow and takes the file out
+    of production."""
+    base = _files(repo, _commit(repo, "root"), "base", _NAMES)
+    publish = _NAMES[_production.PUBLISH]
+    assert publish.count("python scripts/run.py refuse") == 1
+    edits = {"a named file": {"scripts/run.py": "print(1)\n"},
+             "the action's": {"scripts/action.py": "a2\n"},
+             "a commented file": {"scripts/trailing.py": "t2\n"},
+             "another workflow's": {"scripts/ci.py": "c2\n"},
+             "a named file's": {"scripts/by_named.py": "b2\n"},
+             "the name dropped": {_production.PUBLISH: publish.replace(
+                 "python scripts/run.py refuse", "echo done")}}
+    found = {name: tuple(changed(repo, base, _files(repo, base, name, edit)))
+             for name, edit in edits.items()}
+    assert found == {"a named file": ("scripts/run.py",), "the action's": ("scripts/action.py",),
+                     "a commented file": (), "another workflow's": (), "a named file's": (),
+                     "the name dropped": (_production.PUBLISH, "scripts/run.py")}
+
+
+def test_the_release_s_tax_law_gate_runs_its_script(repo):
+    """The publish workflow, its two actions, the ignore file and the tax-law script as this
+    checkout holds them, committed to a scratch repository: the image excludes the script, and
+    the gate that decides whether the image is built runs it, so an edit to it changes
+    production (task plan#2549, ruling plan#2573).  The checkout's files, not HEAD's, so the
+    commit that changes the wiring is graded before it is made."""
+    script = "scripts/check_tax_law.py"
+    names = (_production.PUBLISH, ".github/actions/install-lock/action.yml",
+             ".github/actions/dockerfile-uv/action.yml", ".dockerignore", script)
+    held = {name: (arcs.REPO / name).read_text(encoding="utf-8") for name in names}
+    sha = _files(repo, _commit(repo, "root"), "base", held)
+    assert not kept(rules(held[".dockerignore"]), [script])
+    edited = _files(repo, sha, "an edit", {script: f"{held[script]}# moved\n"})
+    assert tuple(changed(repo, sha, edited)) == (script,)
 
 
 def test_an_ignore_file_docker_refuses_refuses_the_comparison(repo):

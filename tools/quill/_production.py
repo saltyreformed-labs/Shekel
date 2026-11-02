@@ -44,13 +44,21 @@ deploy script becomes two files from the same checkout instead of one"), the onl
 image excludes that production's deploy loads (S3b's review, its finding 1); and
 (``R-BAL401``) the workflow that builds the image on ``main`` and signs it, read whole, its
 comments included, as the others are, with each action of this repository's it loads by a
-step's ``uses:`` and each that one loads in turn (:func:`loaded`; plan#2482): its tax-law
-gate, which decides whether the image is built, runs ``.github/actions/install-lock``, which
-loads ``.github/actions/dockerfile-uv``.  Which actions those are is read from each commit's
-own workflow, the one home of what it runs, so no list of them is kept here.
+step's ``uses:`` and each that one loads in turn (plan#2482), and each file of the tree that
+the workflow or such an action names outside a comment (ruling plan#2573), all read by
+:func:`reached`: its tax-law gate, which decides whether the image is built, runs
+``.github/actions/install-lock``, which loads ``.github/actions/dockerfile-uv``, and runs
+``scripts/check_tax_law.py``, which the image excludes.  Which files those are is read from
+each commit's own workflow, the one home of what it runs, so no list of them is kept here.
+A file named only in a step's name or an ``echo`` counts too, as ruled.  **What the reading
+does not see** includes a path built at run time (``scripts/${name}.py``), one written
+another way (``python -m scripts.check_tax_law``), one relative to a step's
+``working-directory:``, a directory named whose files run (``python tools/pkg``), a file a
+tool reads with no name written, a file a named one loads in turn, and the rest of a line
+after a ``#`` that follows whitespace inside quotes, which it reads as a comment.
 ``docker-compose.dev.yml``, ``docker-compose.build.yml``, ``cloudflared/config.yml`` (a
 template the host's copy differs from) and the other workflows, which only test, are none
-of production's, nor an action that only they load.
+of production's, nor an action that only they load or a file that only they name.
 """
 from __future__ import annotations
 
@@ -85,6 +93,15 @@ _LOCAL_USES = re.compile(r"""\s*(?:-\s+)?uses:\s*(["']?)[$.]/(?P<directory>[^\s"
                          r"\s*(?:#.*)?")
 #: The files GitHub reads a local action from, in its directory.
 ACTION_FILES = ("action.yml", "action.yaml")
+#: A word of a line that may name a file from the checkout's root: a run of the characters a
+#: path is written in, from the first that is no ``/`` or ``-``.
+_PATH_WORD = re.compile(r"[\w.][\w./-]*")
+#: A shell variable by its bare name (``$GITHUB_WORKSPACE``), which is no part of a path a
+#: line names: it ends the word before it, as the ``}`` of a braced one does.
+_VARIABLE = re.compile(r"\$\w+")
+#: Where a comment starts after a line's other text, as YAML and the shell both read it: a
+#: ``#`` after whitespace.
+_COMMENT_AFTER = re.compile(r"\s#")
 #: What Go's ``strings.TrimSpace`` trims (``unicode.IsSpace``): Python's ``str.strip()``
 #: trims U+001C-U+001F too.
 _SPACE = "\t\n\v\f\r \x85\xa0 " + "".join(map(chr, range(0x2000, 0x200B))) + (
@@ -260,38 +277,56 @@ def runs_it(path: str) -> bool:
     production (``R-BAL400``, ``R-BAL401``): the image's recipe, the compose file production
     copies, the workflow that builds and signs the image, the helper the deploy script sources
     (``R-BAL254``), or a file under :data:`DEPLOY` but a :data:`README`.  The actions that
-    workflow loads are its commit's to say (:func:`loaded`)."""
+    workflow loads, and the files it names, are its commit's to say (:func:`reached`)."""
     return path in RECIPE or (path.startswith(f"{DEPLOY}/")
                               and posixpath.basename(path) != README)
 
 
-def loaded(root: Path, held: Mapping[str, str], path: str) -> set[str]:
-    """Each action of this repository's that the file ``path`` of ``held`` (a tree's files,
-    :func:`tree`) loads by a step's ``uses:``, and each that one loads in turn, by the file
-    of :data:`ACTION_FILES` ``held`` holds it in; none when ``held`` holds no ``path``.
+def _named(line: str) -> set[str]:
+    """Each path ``line`` names outside a comment (ruling plan#2573): none on a line whose
+    first character but whitespace is ``#``; on another, each :data:`_PATH_WORD` before
+    :data:`_COMMENT_AFTER`, each :data:`_VARIABLE` read as a space, its trailing dots dropped
+    and written as ``posixpath.normpath`` writes it (``./a``, ``a//b`` and ``a/./b`` each read
+    ``a/b``).  A character no path is written in ends a word, so a path after ``~/``, a
+    variable or a leading ``/`` is read from the checkout's root, which can count a file the
+    step never reads."""
+    if line.lstrip().startswith("#"):
+        return set()
+    text = _VARIABLE.sub(" ", _COMMENT_AFTER.split(line, maxsplit=1)[0])
+    return {posixpath.normpath(word.rstrip(".")) for word in _PATH_WORD.findall(text)}
+
+
+def reached(root: Path, held: Mapping[str, str], path: str) -> set[str]:
+    """Each file of ``held`` (a tree's files, :func:`tree`) that the file ``path`` of it
+    reaches: each action of this repository's it loads by a step's ``uses:``, by the file of
+    :data:`ACTION_FILES` ``held`` holds it in, and each that one loads in turn; and each file
+    ``path`` or such an action names outside a comment (:func:`_named`; ruling plan#2573),
+    which is not read in turn.  None when ``held`` holds no ``path``.
 
     Raises:
         tools.ci.gitcmd.GitError: when git cannot read a file it reads.
     """
-    found: set[str] = set()
+    actions: set[str] = set()
+    named: set[str] = set()
     reading = [path] if path in held else []
     while reading:
         for line in git(root, "cat-file", "blob", held[reading.pop()].split(" ")[1]).split("\n"):
+            named |= {name for name in _named(line) if name in held}
             if (match := _LOCAL_USES.fullmatch(line)) is None:
                 continue
             for name in ACTION_FILES:
                 action = posixpath.join(posixpath.normpath(match["directory"]), name)
-                if action in held and action not in found:
-                    found.add(action)
+                if action in held and action not in actions:
+                    actions.add(action)
                     reading.append(action)
-    return found
+    return actions | named
 
 
 def files(root: Path, commit: str) -> dict[str, str]:
     """Every file of production at ``commit``, by its path, each its mode and object: those
     the image built from it holds (:func:`kept` by :func:`ignore_file`'s rules), and those
-    outside the image that build or run it (:func:`runs_it`, and each action the publish
-    workflow loads, :func:`loaded`).
+    outside the image that build or run it (:func:`runs_it`, and each file the publish
+    workflow reaches, :func:`reached`).
 
     Raises:
         IgnoreFileError: as :func:`rules` raises it.
@@ -300,9 +335,9 @@ def files(root: Path, commit: str) -> dict[str, str]:
     found = rules(ignore_file(root, commit))
     held = tree(root, commit)
     image = kept(found, held)
-    actions = loaded(root, held, PUBLISH)
+    publishing = reached(root, held, PUBLISH)
     return {path: what for path, what in held.items()
-            if path in image or path in actions or runs_it(path)}
+            if path in image or path in publishing or runs_it(path)}
 
 
 def tree(root: Path, commit: str) -> dict[str, str]:

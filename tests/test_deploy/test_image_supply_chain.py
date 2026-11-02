@@ -577,8 +577,9 @@ class TestDockerfileInstallsTheLock:
         hand anything with code execution in the container a way to
         install packages.  What the venv itself holds is not read here:
         ci.yml's ``image`` job finds its packages exactly the lock's
-        runtime and server set, but not a uv the builder put in it as a
-        file, which nothing grades yet (task plan#2543).
+        runtime and server set, and finds no file by uv's names in the
+        built image, so neither a uv the builder copied into the venv nor
+        the uv package passes (task plan#2543).
         """
         runtime = _stages(text)[-1]
         assert _taken_from_elsewhere(runtime) == [self.VENV_COPY], (

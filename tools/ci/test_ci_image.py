@@ -4,7 +4,8 @@
 plan#2366 a change that broke the build landed in ``dev`` and failed only at the release.  The
 job builds the image on every pull request, queue group and push to ``main``, never pushes it,
 and checks that it runs psycopg's C implementation, holds exactly the lock's runtime set and
-its ``server`` group, and holds no pip; ``lint-and-test`` grades it (:mod:`tools.ci.ci_verdict`).
+its ``server`` group, and holds no pip and no uv; ``lint-and-test`` grades it
+(:mod:`tools.ci.ci_verdict`).
 """
 from __future__ import annotations
 
@@ -29,9 +30,8 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
 
     Its three ``run`` steps are RUN here with a stand-in ``docker``, and its uv is the one
     recipe's (:mod:`tools.ci.test_dockerfile_uv_action`); that each check refuses a wrong
-    image is measured against real images (built 2026-10-30: an extra package, a missing one
-    and no psycopg-c each refused; 2026-10-31: the pinned base image's seven pip files each
-    found, and none in the built image) and is graded on every run by the job itself.
+    image is measured against real images, each measurement dated in ``ci.yml``'s comments
+    on the job, and is graded on every run by the job itself.
     """
 
     BUILDX = "Set up Docker Buildx"
@@ -39,7 +39,7 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
     UV = "The Dockerfile's uv"
     IMPL = "The image runs psycopg's C implementation"
     PACKAGES = "The image holds exactly the lock's runtime and server set"
-    PIP = "The image holds no pip"
+    INSTALLERS = "The image holds no pip and no uv"
     #: The local name the image is loaded under.
     IMAGE = "shekel:ci"
 
@@ -92,7 +92,7 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         assert job["env"] == {"IMAGE": self.IMAGE}
         assert [step["name"] for step in job["steps"]] == [
             "Checkout code", self.BUILDX, self.BUILD, self.UV, self.IMPL, self.PACKAGES,
-            self.PIP,
+            self.INSTALLERS,
         ]
         steps = _steps("image")
         assert steps["Checkout code"]["with"] == {"persist-credentials": False}
@@ -125,7 +125,8 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         the binary it hands on."""
         steps = _steps("image")
         assert steps[self.UV] == {"name": self.UV, "id": "uv", "uses": DOCKERFILE_UV}
-        assert steps[self.PACKAGES]["env"] == {"UV": "${{ steps.uv.outputs.bin }}"}
+        assert steps[self.PACKAGES]["env"] == {"UV": "${{ steps.uv.outputs.bin }}",
+                                               "MOUNTED_UV": "/usr/local/bin/uv"}
 
     def test_the_psycopg_check_passes_the_c_implementation_alone(self, tmp_path):
         """The psycopg step, RUN: in the image, offline, it reads which implementation psycopg
@@ -150,22 +151,26 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
                 assert f"psycopg implementation: {impl}" in result.stdout, impl
 
     def test_the_package_check_runs_uv_in_the_image_against_the_lock(self, tmp_path):
-        """The package step, RUN: uv, mounted read-only into the image with the checkout, run
-        offline against the image's own ``/opt/venv``, checking (never changing) it against
-        the lock's runtime set and its ``server`` group; and uv's refusal fails the step."""
+        """The package step, RUN: uv, mounted read-only into the image with the checkout and
+        run by the path it is mounted at (never by name, which the image's ``PATH`` resolves
+        to any uv the image holds), offline against the image's own ``/opt/venv``, checking
+        (never changing) it against the lock's runtime set and its ``server`` group; and uv's
+        refusal fails the step."""
         env = self._docker(tmp_path)
         uv, workspace = tmp_path / "temp" / "uv" / "uv", tmp_path / "ws"
-        run = _steps("image")[self.PACKAGES]["run"]
-        step_env = {**env, "UV": str(uv), "GITHUB_WORKSPACE": str(workspace)}
+        step = _steps("image")[self.PACKAGES]
+        run, mounted = step["run"], step["env"]["MOUNTED_UV"]
+        step_env = {**env, "UV": str(uv), "MOUNTED_UV": mounted,
+                    "GITHUB_WORKSPACE": str(workspace)}
         assert _run_step(run, step_env).returncode == 0
         args = self._called(tmp_path)
         assert args[:4] == ["run", "--rm", "--network", "none"]
         image = args.index(self.IMAGE)
         options = args[4:image]
-        assert options[-2:] == ["--entrypoint", "uv"]
+        assert options[-2:] == ["--entrypoint", mounted]
         pairs = list(zip(options[:-2:2], options[1:-2:2]))
         assert sorted(value for flag, value in pairs if flag == "--volume") == sorted([
-            f"{uv}:/usr/local/bin/uv:ro", f"{workspace}:/src:ro",
+            f"{uv}:{mounted}:ro", f"{workspace}:/src:ro",
         ])
         assert {value for flag, value in pairs if flag == "--env"} == {
             "UV_PROJECT_ENVIRONMENT=/opt/venv", "UV_PYTHON_DOWNLOADS=never", "UV_NO_CACHE=1",
@@ -180,19 +185,21 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         assert "server" in project["dependency-groups"]
         assert _run_step(run, {**step_env, "DOCKER_STATUS": "1"}).returncode != 0
 
-
-    def test_the_pip_check_fails_on_any_pip_the_image_holds(self, tmp_path):
-        """The pip step, RUN: in the image, offline and as root, ``find`` searches its whole
-        filesystem for pip's names, and the step passes only where it finds none; a path
-        found, or a search that fails, fails it.  A stand-in ``find`` reports each case."""
+    def test_the_installer_check_fails_on_any_pip_or_uv_the_image_holds(self, tmp_path):
+        """The installer step, RUN: in the image, offline and as root, ``find`` searches its
+        whole filesystem for pip's names and uv's, and the step passes only where it finds
+        none; a path found, or a search that fails, fails it.  A stand-in ``find`` reports
+        each case, whatever names it is handed, so the names searched for are graded by the
+        exact arguments it records."""
         env = self._docker(tmp_path)
         find = tmp_path / "bin" / "find"
         find.write_text(f"#!{sys.executable}\n{self.FIND}", encoding="utf-8")
         find.chmod(0o755)
-        run = _steps("image")[self.PIP]["run"]
+        run = _steps("image")[self.INSTALLERS]["run"]
         searched = tmp_path / "find.json"
         for found, status, expected, said in (
-                ("", 0, 0, "no pip"), ("/usr/local/bin/pip\n", 0, 1, "/usr/local/bin/pip"),
+                ("", 0, 0, "no pip and no uv"),
+                ("/usr/local/bin/pip\n", 0, 1, "/usr/local/bin/pip"),
                 ("", 1, 1, "")):
             result = _run_step(run, {**env, "FIND_LOG": str(searched), "FOUND": found,
                                      "FIND_STATUS": str(status)})
@@ -203,4 +210,5 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
                 self.IMAGE, "-c"]
             assert json.loads(searched.read_text(encoding="utf-8")) == [
                 "/", "-xdev", "(", "-name", "pip", "-o", "-name", "pip[0-9]*", "-o", "-name",
-                "pip-*", ")", "-print"]
+                "pip-*", "-o", "-name", "uv", "-o", "-name", "uvx", "-o", "-name", "uv-*", ")",
+                "-print"]

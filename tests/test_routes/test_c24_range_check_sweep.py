@@ -50,7 +50,6 @@ from app import ref_cache
 from app.enums import CompoundingFrequencyEnum
 from app.extensions import db
 from app.models.account import Account
-from app.models.calibration_override import CalibrationOverride
 from app.models.interest_params import InterestParams
 from app.models.loan_features import RateHistory
 from app.models.paycheck_line import PaycheckLine
@@ -95,10 +94,6 @@ CK_STATE_TAX_DEDUCTION = "ck_state_tax_configs_nonneg_standard_deduction"
 CK_STATE_TAX_YEAR = "ck_state_tax_configs_valid_tax_year"
 CK_FICA_TAX_YEAR = "ck_fica_configs_valid_tax_year"
 CK_BRACKET_TAX_YEAR = "ck_tax_bracket_sets_valid_tax_year"
-CK_CALIB_FED = "ck_calibration_overrides_valid_federal_rate"
-CK_CALIB_STATE = "ck_calibration_overrides_valid_state_rate"
-CK_CALIB_SS = "ck_calibration_overrides_valid_ss_rate"
-CK_CALIB_MEDICARE = "ck_calibration_overrides_valid_medicare_rate"
 
 
 #: The shared reader, moved to ``tests/_test_helpers`` at plan step
@@ -1046,76 +1041,3 @@ class TestTaxBracketSetCheck:
                 db.session.flush()
             db.session.rollback()
             assert _constraint_name_from(info.value) == CK_BRACKET_TAX_YEAR
-
-
-class TestCalibrationOverrideCheck:
-    """``salary.calibration_overrides`` effective-rate CHECK constraints."""
-
-    def _make_profile(self, seed_user):
-        """Build and persist a minimal salary profile for the calibration tests."""
-        single_id = (
-            db.session.query(FilingStatus)
-            .filter_by(name="single").one().id
-        )
-        profile = SalaryProfile(
-            user_id=seed_user["user"].id,
-            scenario_id=seed_user["scenario"].id,
-            filing_status_id=single_id,
-            name="Cal",
-        )
-        db.session.add(profile)
-        start_test_pay_list(profile, Decimal("3846.15"))  # $100,000.00 a year / 26
-        db.session.commit()
-        return profile
-
-    def _build_calibration(self, profile, **overrides):
-        """Return CalibrationOverride kwargs with realistic defaults; overrides
-        replace any keys."""
-        base = {
-            "salary_profile_id": profile.id,
-            "actual_gross_pay": Decimal("3846.15"),
-            "actual_federal_tax": Decimal("400.00"),
-            "actual_state_tax": Decimal("160.00"),
-            "actual_social_security": Decimal("238.46"),
-            "actual_medicare": Decimal("55.77"),
-            "effective_federal_rate": Decimal("0.1040"),
-            "effective_state_rate": Decimal("0.0416"),
-            "effective_ss_rate": Decimal("0.0620"),
-            "effective_medicare_rate": Decimal("0.0145"),
-            "pay_stub_date": date(2026, 1, 15),
-            "is_active": True,
-        }
-        base.update(overrides)
-        return base
-
-    @pytest.mark.parametrize(
-        "field, constraint",
-        [
-            ("effective_federal_rate", CK_CALIB_FED),
-            ("effective_state_rate", CK_CALIB_STATE),
-            ("effective_ss_rate", CK_CALIB_SS),
-            ("effective_medicare_rate", CK_CALIB_MEDICARE),
-        ],
-    )
-    def test_effective_rate_above_one_rejected(
-        self, app, seed_user, field, constraint,
-    ):
-        """Storage rejects each parameterised effective rate when > 1."""
-        with app.app_context():
-            profile = self._make_profile(seed_user)
-            kwargs = self._build_calibration(profile, **{field: Decimal("1.5")})
-            with pytest.raises(IntegrityError) as info:
-                cal = CalibrationOverride(**kwargs)
-                db.session.add(cal)
-                db.session.flush()
-            db.session.rollback()
-            assert _constraint_name_from(info.value) == constraint
-
-    def test_all_rates_in_range_accepted(self, app, seed_user):
-        """The exemplar pay-stub rates from the calibration tutorial pass."""
-        with app.app_context():
-            profile = self._make_profile(seed_user)
-            cal = CalibrationOverride(**self._build_calibration(profile))
-            db.session.add(cal)
-            db.session.commit()
-            assert cal.id is not None

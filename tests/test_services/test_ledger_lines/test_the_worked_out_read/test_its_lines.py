@@ -2,7 +2,7 @@
 opening and true-up, an archived account, and a loan's anchors and payment split.
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from app.enums import (
@@ -24,12 +24,19 @@ from app.services.ledger_lines import (
 from app.services.pay_calendar import calendar_for
 from tests._test_helpers import (
     create_account_of_type,
-    create_loan_with_trueup,
     create_settled_cash_transaction,
     create_settled_transfer,
 )
 
-from ._helpers import _TODAY, _read, _lines_of, _source, _kind, _loan_anchor_lines
+from ._helpers import (
+    _TODAY,
+    _kind,
+    _lines_of,
+    _loan_anchor_lines,
+    _read,
+    _source,
+    _trued_up_loan,
+)
 
 
 class TestTheLinesAreTheRules:
@@ -207,13 +214,7 @@ class TestTheLinesAreTheRules:
         cash is the transfer's movement lines.
         """
         with app.app_context():
-            loan = create_loan_with_trueup(
-                seed_user, _db.session,
-                origination_principal=Decimal("250000.00"),
-                anchor_balance=Decimal("100000.00"),
-                anchor_date=date(2026, 1, 10), rate=Decimal("0.06000"),
-                origination_date=date(2025, 1, 1), name="Lines Loan",
-            )
+            loan = _trued_up_loan(seed_user, "Lines Loan")
             create_settled_transfer(
                 seed_user, _db.session, seed_user["account"], loan,
                 seed_periods[1], amount=Decimal("1000.00"),

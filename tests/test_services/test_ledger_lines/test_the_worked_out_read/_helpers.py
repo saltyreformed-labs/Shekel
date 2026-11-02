@@ -1,6 +1,7 @@
 """The helpers and constants every part of this package shares: the module-level helpers of
-``tests/test_services/test_ledger_lines/test_the_worked_out_read.py``, moved verbatim by
-``tools/split``.
+``tests/test_services/test_ledger_lines/test_the_worked_out_read.py``, which ``tools/split``
+moved here, and the one builder of the loan their figures were computed from
+(:func:`_trued_up_loan`).
 """
 
 from datetime import date
@@ -8,7 +9,9 @@ from decimal import Decimal
 
 from app import ref_cache
 from app.enums import LedgerAccountKindEnum, PostingKindEnum, PostingSourceEnum
+from app.extensions import db as _db
 from app.services.ledger_lines import LedgerLine, linked_key, loan_key, worked_out_lines
+from tests._test_helpers import create_loan_with_trueup
 
 
 # Inside seed_periods' last paycheck (2026-05-08 - 2026-05-21) and after every
@@ -37,10 +40,29 @@ def _kind(member):
     return ref_cache.posting_kind_id(member)
 
 
+def _trued_up_loan(owner, name, *, escrow_annual=None):
+    """Return a $250,000.00 6% loan from 2025-01-01, trued up to $100,000.00 on 2026-01-10.
+
+    The one builder of the loan whose lines :func:`_loan_anchor_lines` writes
+    out by hand and whose 6% payment split the lines' cases compute, so the
+    loan those figures were computed from is built once.  *owner* is the
+    fixture dict of the owner who holds it, and *escrow_annual* an optional
+    yearly escrow line effective from origination.
+    """
+    return create_loan_with_trueup(
+        owner, _db.session,
+        origination_principal=Decimal("250000.00"),
+        anchor_balance=Decimal("100000.00"),
+        anchor_date=date(2026, 1, 10), rate=Decimal("0.06000"),
+        origination_date=date(2025, 1, 1), name=name,
+        escrow_annual=escrow_annual,
+    )
+
+
 def _loan_anchor_lines(loan, calendar):
     """Return the opening and true-up lines of the suite's trued-up loan.
 
-    The loan ``create_loan_with_trueup`` builds from a $250,000.00 principal
+    The loan :func:`_trued_up_loan` builds, from a $250,000.00 principal
     originated 2025-01-01 and trued up to $100,000.00 on 2026-01-10: the
     opening ``-250,000.00`` owed on its own line against ``+250,000.00`` on
     its opening equity, then the true-up ``250,000.00 - 100,000.00 =

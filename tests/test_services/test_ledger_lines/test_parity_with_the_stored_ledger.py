@@ -29,7 +29,7 @@ What a pass does NOT say: the worked-out read and the store's writers apply
 the same target rules (plan task plan#2526 moved them into
 ``app.services.ledger_lines`` and the writers import them back), so a wrong
 rule moves both sides alike.  The rules are pinned by hand-computed literals
-elsewhere (``test_the_worked_out_read.py``, ``test_the_target_rules.py``, the
+elsewhere (``test_the_worked_out_read/``, ``test_the_target_rules.py``, the
 reconciliation oracles); this grades whether the store, as its writers left
 it, is the ledger the records work out to -- its filing, its chart rows,
 whether it has caught up.

@@ -19,7 +19,7 @@ from its own slice.  What these cases pin:
   :func:`app.services.cash_ledger.account_opening_fact` refuses it with.
 
 That the read's statements stay fixed as the accounts grow is
-``test_ledger_lines/test_the_worked_out_read.py``'s.
+``test_ledger_lines/test_the_worked_out_read/test_what_it_reads.py``'s.
 """
 
 from datetime import date, timedelta

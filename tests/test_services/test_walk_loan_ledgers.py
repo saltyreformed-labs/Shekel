@@ -18,10 +18,10 @@ the escrow lines and the settled payments -- is loaded ONCE for all of them
   loan half of a read.
 
 That the worked-out read's statements stay fixed as the loans grow is
-``test_ledger_lines/test_the_worked_out_read.py``'s, and that each walk is
-RIGHT is the loan walk's own suites' (``test_loan_ledger.py`` and the
-oracles), which reach it through the one-loan door this shares its assembly
-with.
+``test_ledger_lines/test_the_worked_out_read/test_what_it_reads.py``'s, and
+that each walk is RIGHT is the loan walk's own suites' (``test_loan_ledger.py``
+and the oracles), which reach it through the one-loan door this shares its
+assembly with.
 """
 
 from collections import Counter

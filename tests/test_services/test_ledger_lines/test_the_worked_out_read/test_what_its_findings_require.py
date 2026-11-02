@@ -188,6 +188,21 @@ class TestASourceThatLeftHasNoLine:
             assert _read(seed_user) == before
 
 
+def _folded_cash(account, movement, scenario_id):
+    """Return the cash fold's delta for *movement* on *account*: its one fact's.
+
+    The fold's own producer (``settled_cash_facts``, through
+    ``movement_cash_leg``), so a line equal to it is the balance's valuation
+    of the same movement.  A movement the fold holds no fact for, or two,
+    fails the unpacking.
+    """
+    (fact,) = [
+        fact for fact in settled_cash_facts(account.id, scenario_id)
+        if fact.entry_id == movement.id
+    ]
+    return fact.delta
+
+
 class TestATransferHasOneRule:
     """Finding N-164 (plan#1358): a transfer's effect is the movement rule's alone."""
 
@@ -224,35 +239,28 @@ class TestATransferHasOneRule:
 
             moved = _source(PostingSourceEnum.TRANSFER_MOVEMENT)
             transfer = _kind(PostingKindEnum.TRANSFER)
-            period = xfer.pay_period_id
             assert lines == [
                 LedgerLine(
-                    linked_key(checking), period, out.settled_on,
+                    linked_key(checking), xfer.pay_period_id, out.settled_on,
                     Decimal("-250.00"), moved, transfer, out.id,
                 ),
                 LedgerLine(
-                    transit_key(), period, out.settled_on, Decimal("250.00"),
-                    moved, transfer, out.id,
+                    transit_key(), xfer.pay_period_id, out.settled_on,
+                    Decimal("250.00"), moved, transfer, out.id,
                 ),
                 LedgerLine(
-                    linked_key(savings), period, back.settled_on,
+                    linked_key(savings), xfer.pay_period_id, back.settled_on,
                     Decimal("250.00"), moved, transfer, back.id,
                 ),
                 LedgerLine(
-                    transit_key(), period, back.settled_on,
+                    transit_key(), xfer.pay_period_id, back.settled_on,
                     Decimal("-250.00"), moved, transfer, back.id,
                 ),
             ]
-            for account, movement, line in (
-                (checking, out, lines[0]), (savings, back, lines[2]),
-            ):
-                (fact,) = [
-                    fact for fact in settled_cash_facts(
-                        account.id, seed_user["scenario"].id,
-                    )
-                    if fact.entry_id == movement.id
-                ]
-                assert line.amount == fact.delta
+            assert (lines[0].amount, lines[2].amount) == (
+                _folded_cash(checking, out, seed_user["scenario"].id),
+                _folded_cash(savings, back, seed_user["scenario"].id),
+            )
 
 
 class TestRefundsCardsAndOverPostedEnvelopes:

@@ -3,7 +3,6 @@ reads its own owner's records alone, and its statements do not grow with its sou
 or loans.
 """
 
-from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -17,12 +16,18 @@ from app.services.pay_calendar import PayCalendarError, calendar_for
 from tests._test_helpers import (
     capture_sql_statements,
     create_account_of_type,
-    create_loan_with_trueup,
     create_settled_cash_transaction,
     create_settled_transfer,
 )
 
-from ._helpers import _TODAY, _read, _source, _kind, _loan_anchor_lines
+from ._helpers import (
+    _TODAY,
+    _kind,
+    _loan_anchor_lines,
+    _read,
+    _source,
+    _trued_up_loan,
+)
 
 
 def _captured_read(seed_user):
@@ -72,13 +77,7 @@ class TestTheReadWritesNothing:
                 seed_user, _db.session, seed_user["account"], savings,
                 seed_periods[0], amount=Decimal("250.00"),
             )
-            loan = create_loan_with_trueup(
-                seed_user, _db.session,
-                origination_principal=Decimal("250000.00"),
-                anchor_balance=Decimal("100000.00"),
-                anchor_date=date(2026, 1, 10), rate=Decimal("0.06000"),
-                origination_date=date(2025, 1, 1), name="Quiet Loan",
-            )
+            loan = _trued_up_loan(seed_user, "Quiet Loan")
             create_settled_transfer(
                 seed_user, _db.session, seed_user["account"], loan,
                 seed_periods[1], amount=Decimal("1000.00"),
@@ -181,13 +180,7 @@ class TestWhoseRecordsItReads:
             scenario = Scenario(user_id=owner_id, name="Baseline", is_baseline=True)
             _db.session.add(scenario)
             _db.session.flush()
-            loan = create_loan_with_trueup(
-                bare_user, _db.session,
-                origination_principal=Decimal("250000.00"),
-                anchor_balance=Decimal("100000.00"),
-                anchor_date=date(2026, 1, 10), rate=Decimal("0.06000"),
-                origination_date=date(2025, 1, 1), name="Only Loan",
-            )
+            loan = _trued_up_loan(bare_user, "Only Loan")
             calendar = calendar_for(owner_id)
 
             lines = worked_out_lines(owner_id, scenario.id)
@@ -266,13 +259,7 @@ class TestItsStatementsDoNotGrowWithItsSources:
             savings = create_account_of_type(
                 seed_user, _db.session, "Savings", "Counted Savings",
             )
-            loan = create_loan_with_trueup(
-                seed_user, _db.session,
-                origination_principal=Decimal("250000.00"),
-                anchor_balance=Decimal("100000.00"),
-                anchor_date=date(2026, 1, 10), rate=Decimal("0.06000"),
-                origination_date=date(2025, 1, 1), name="Counted Loan",
-            )
+            loan = _trued_up_loan(seed_user, "Counted Loan")
 
             def _add_sources(periods):
                 """One settled bill, transfer and loan payment per period."""
@@ -361,14 +348,8 @@ class TestItsStatementsDoNotGrowWithItsSources:
             def _add_loans(count, first):
                 """Add *count* loans, each with escrow and paid into once."""
                 for number in range(first, first + count):
-                    loan = create_loan_with_trueup(
-                        seed_user, _db.session,
-                        origination_principal=Decimal("250000.00"),
-                        anchor_balance=Decimal("100000.00"),
-                        anchor_date=date(2026, 1, 10),
-                        rate=Decimal("0.06000"),
-                        origination_date=date(2025, 1, 1),
-                        name=f"Counted Loan {number}",
+                    loan = _trued_up_loan(
+                        seed_user, f"Counted Loan {number}",
                         escrow_annual=Decimal("1200.00"),
                     )
                     create_settled_transfer(

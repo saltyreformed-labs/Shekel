@@ -7378,6 +7378,85 @@ def make_cadence_rule(owner, cadence, **kwargs):
     )
 
 
+def rows_by_paycheck(rows, periods):
+    """Group generated rows by their paycheck's payday, as ``(occurs_on, due_date)``.
+
+    Each paycheck's pairs are sorted, so a case can write the exact list a
+    paycheck holds.  Keyed on the payday rather than the period id so the
+    expected value reads as the schedule does.  Both engines' rows carry the
+    three columns it reads, so the weekly cases of the transaction engine and
+    the transfer engine state their expectations in one shape (plan step
+    R8-b).
+
+    Args:
+        rows: The ``Transaction`` or ``Transfer`` rows a generation wrote,
+            as it returned them or as re-read from the database.
+        periods: The saved pay periods the rows were generated into.
+
+    Returns:
+        dict: payday -> sorted list of ``(occurs_on, due_date)``.
+    """
+    payday_by_id = {period.id: period.start_date for period in periods}
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(payday_by_id[row.pay_period_id], []).append(
+            (row.occurs_on, row.due_date),
+        )
+    return {payday: sorted(pairs) for payday, pairs in grouped.items()}
+
+
+#: What :func:`rows_by_paycheck` reads for ``WEEKLY_FIRST`` -- every 7 days
+#: from Tuesday 2026-01-06, funded from the first paycheck starting on or after
+#: each date (ruling R-R95) -- over ``seed_periods``, ten 14-day paychecks from
+#: Friday 2026-01-02.  Both of a paycheck's weeks defer to the NEXT payday and
+#: are due on it: 01-06 and 01-13 to 01-16, 01-20 and 01-27 to 01-30, and so on.
+#: The first paycheck funds nothing, and 05-12 and 05-19 defer to 05-22, past
+#: the ten saved paychecks: eighteen rows in nine paychecks.
+#:
+#: ONE statement for both engines, because both take their placements from the
+#: one shared preamble (``recurrence_engine.resolve_generation_plan``) and their
+#: due days from ``compute_due_date``: the transaction case and the transfer
+#: case grade the same answer through two writes.
+WEEKLY_FIRST_ON_SEED_PERIODS = {
+    _real_date(2026, 1, 16): [
+        (_real_date(2026, 1, 6), _real_date(2026, 1, 16)),
+        (_real_date(2026, 1, 13), _real_date(2026, 1, 16)),
+    ],
+    _real_date(2026, 1, 30): [
+        (_real_date(2026, 1, 20), _real_date(2026, 1, 30)),
+        (_real_date(2026, 1, 27), _real_date(2026, 1, 30)),
+    ],
+    _real_date(2026, 2, 13): [
+        (_real_date(2026, 2, 3), _real_date(2026, 2, 13)),
+        (_real_date(2026, 2, 10), _real_date(2026, 2, 13)),
+    ],
+    _real_date(2026, 2, 27): [
+        (_real_date(2026, 2, 17), _real_date(2026, 2, 27)),
+        (_real_date(2026, 2, 24), _real_date(2026, 2, 27)),
+    ],
+    _real_date(2026, 3, 13): [
+        (_real_date(2026, 3, 3), _real_date(2026, 3, 13)),
+        (_real_date(2026, 3, 10), _real_date(2026, 3, 13)),
+    ],
+    _real_date(2026, 3, 27): [
+        (_real_date(2026, 3, 17), _real_date(2026, 3, 27)),
+        (_real_date(2026, 3, 24), _real_date(2026, 3, 27)),
+    ],
+    _real_date(2026, 4, 10): [
+        (_real_date(2026, 3, 31), _real_date(2026, 4, 10)),
+        (_real_date(2026, 4, 7), _real_date(2026, 4, 10)),
+    ],
+    _real_date(2026, 4, 24): [
+        (_real_date(2026, 4, 14), _real_date(2026, 4, 24)),
+        (_real_date(2026, 4, 21), _real_date(2026, 4, 24)),
+    ],
+    _real_date(2026, 5, 8): [
+        (_real_date(2026, 4, 28), _real_date(2026, 5, 8)),
+        (_real_date(2026, 5, 5), _real_date(2026, 5, 8)),
+    ],
+}
+
+
 def make_expense_template(
     db_session, seed_user, amount="1200.00", is_active=True, *,
     name="Rent", category_key="Rent", is_envelope=False,

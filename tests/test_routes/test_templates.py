@@ -1686,10 +1686,40 @@ class TestPreviewRecurrence:
         assert resp.status_code == 200, label
         assert b"Next 1 occurrences" in resp.data, label
 
+    @pytest.mark.parametrize(
+        ("placement", "expected"),
+        [
+            # 01-06, 01-27, 02-17, 03-10 and 03-31 each in the paycheck that
+            # contains it.  01-30 - 02-12 and 03-13 - 03-26 hold none of them.
+            (
+                PeriodPlacementEnum.CONTAINING_DATE,
+                [
+                    "Jan 02, 2026 - Jan 15, 2026",
+                    "Jan 16, 2026 - Jan 29, 2026",
+                    "Feb 13, 2026 - Feb 26, 2026",
+                    "Feb 27, 2026 - Mar 12, 2026",
+                    "Mar 27, 2026 - Apr 09, 2026",
+                ],
+            ),
+            # The same five dates, each in the first paycheck starting on or
+            # after it: 01-16, 01-30, 02-27, 03-13 and 04-10.
+            (
+                PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
+                [
+                    "Jan 16, 2026 - Jan 29, 2026",
+                    "Jan 30, 2026 - Feb 12, 2026",
+                    "Feb 27, 2026 - Mar 12, 2026",
+                    "Mar 13, 2026 - Mar 26, 2026",
+                    "Apr 10, 2026 - Apr 23, 2026",
+                ],
+            ),
+        ],
+        ids=lambda value: getattr(value, "value", None),
+    )
     def test_the_week_unit_previews_because_it_can_now_be_saved(
-        self, app, auth_client, seed_user, seed_periods_today,
+        self, auth_client, seed_periods, placement, expected,
     ):
-        """The WEEK unit previews real occurrences (plan step R8-b).
+        """The WEEK unit previews the paychecks that fund it (plan step R8-b).
 
         **The unsavable cadence this case pinned has MOVED THREE TIMES, and
         each move closed a real gap.**  It was ``(2, MONTH)`` until plan step
@@ -1700,16 +1730,31 @@ class TestPreviewRecurrence:
         preview must show what saving would produce.  The one reading still
         refused is graded by
         ``test_preview_refuses_a_cadence_the_form_does_not_offer``.
+
+        **It asserts the exact list, at both placements.**  It asserted only
+        that "occurrences" appeared until an adversarial review of R8-b
+        measured that it could not see a wrong paycheck or the two placements
+        swapped.  seed_periods is ten 14-day paychecks from 2026-01-02, and
+        the rule fires every 21 days from Tuesday 2026-01-06.  Three weeks,
+        not two: two weeks is one paycheck on this schedule, so ``(2, WEEK)``
+        previews the same list "every paycheck" does and a unit misread as
+        paychecks would pass.  Not one week either: ``(1, WEEK)`` lists each
+        paycheck once per occurrence, twice here, which plan#2604 records as
+        a defect, and this case does not pin it.
         """
-        assert seed_periods_today
+        assert seed_periods[0].start_date == date(2026, 1, 2), (
+            "precondition: the paychecks the expected lists name"
+        )
         resp = auth_client.get(
             "/templates/preview-recurrence",
-            query_string=cadence_payload(unit=RecurrenceUnitEnum.WEEK),
+            query_string=cadence_payload(
+                unit=RecurrenceUnitEnum.WEEK, interval_n=3,
+                placement=placement, starts_on=date(2026, 1, 6),
+            ),
         )
 
         assert resp.status_code == 200
-        assert b"No preview" not in resp.data
-        assert b"occurrences" in resp.data
+        assert re.findall(r"<li>(.*?)</li>", resp.data.decode()) == expected
 
     def test_the_cadence_that_case_refused_is_now_SAVABLE(
         self, app, auth_client, seed_user, seed_periods_today,

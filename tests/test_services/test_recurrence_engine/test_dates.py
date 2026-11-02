@@ -21,20 +21,19 @@ from tests.oracles.recurrence_baseline import (
     QUARTERLY,
     SEMI_ANNUAL,
     ANNUAL,
+    WEEKLY,
+    WEEKLY_FIRST,
 )
 from tests._test_helpers import (
     make_cadence_rule,
     rebuild_calendar_from_spans,
+    rows_by_paycheck,
     state_template_price,
+    WEEKLY_FIRST_ON_SEED_PERIODS,
 )
 
 from ._helpers import build_rule, _calendar, _matched_periods, _paycheck_covering
 
-
-#: Every week, funded by the paycheck containing each date (plan step R8-b).
-_EVERY_WEEK = ShapeCadence(
-    1, RecurrenceUnitEnum.WEEK, PeriodPlacementEnum.CONTAINING_DATE,
-)
 
 #: Every other week by DATE, funded by the paycheck containing each date.
 _EVERY_2_WEEKS = ShapeCadence(
@@ -47,29 +46,6 @@ _EVERY_2_WEEKS_DEFERRED = ShapeCadence(
     2, RecurrenceUnitEnum.WEEK,
     PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
 )
-
-
-def _rows_by_paycheck(created, periods):
-    """Group generated rows by their paycheck's payday, as ``(occurs_on, due_date)``.
-
-    Each paycheck's pairs are sorted, so a case can write the exact list a
-    paycheck holds.  Keyed on the payday rather than the period id so the
-    expected value reads as the schedule does.
-
-    Args:
-        created: The rows ``generate_for_template`` returned.
-        periods: The saved pay periods the rows were generated into.
-
-    Returns:
-        dict: payday -> sorted list of ``(occurs_on, due_date)``.
-    """
-    payday_by_id = {period.id: period.start_date for period in periods}
-    grouped = {}
-    for txn in created:
-        grouped.setdefault(payday_by_id[txn.pay_period_id], []).append(
-            (txn.occurs_on, txn.due_date),
-        )
-    return {payday: sorted(pairs) for payday, pairs in grouped.items()}
 
 
 class TestEndDate:
@@ -772,7 +748,7 @@ class TestDueDateGeneration:
                 ), seed_user["scenario"].id,
             )
 
-            assert _rows_by_paycheck(created, seed_periods) == {
+            assert rows_by_paycheck(created, seed_periods) == {
                 date(2026, 1, 2): [(date(2026, 1, 6), date(2026, 1, 6))],
                 date(2026, 1, 16): [(date(2026, 1, 20), date(2026, 1, 20))],
                 date(2026, 1, 30): [(date(2026, 2, 3), date(2026, 2, 3))],
@@ -809,7 +785,7 @@ class TestDueDateGeneration:
                 ), seed_user["scenario"].id,
             )
 
-            assert _rows_by_paycheck(created, seed_periods) == {
+            assert rows_by_paycheck(created, seed_periods) == {
                 date(2026, 1, 16): [(date(2026, 1, 6), date(2026, 1, 16))],
                 date(2026, 1, 30): [(date(2026, 1, 20), date(2026, 1, 30))],
                 date(2026, 2, 13): [(date(2026, 2, 3), date(2026, 2, 13))],
@@ -836,7 +812,7 @@ class TestDueDateGeneration:
         """
         with app.app_context():
             template = self._make_template_with_rule(
-                seed_user, _EVERY_WEEK, starts_on=date(2026, 1, 6),
+                seed_user, WEEKLY, starts_on=date(2026, 1, 6),
             )
             created = recurrence_engine.generate_for_template(
                 template, GenerationSchedule.for_period_ids(
@@ -845,7 +821,7 @@ class TestDueDateGeneration:
                 ), seed_user["scenario"].id,
             )
 
-            by_paycheck = _rows_by_paycheck(created, seed_periods)
+            by_paycheck = rows_by_paycheck(created, seed_periods)
             assert by_paycheck[date(2026, 1, 2)] == [
                 (date(2026, 1, 6), date(2026, 1, 6)),
                 (date(2026, 1, 13), date(2026, 1, 13)),
@@ -859,3 +835,41 @@ class TestDueDateGeneration:
                 for week in range(20)
             ]
             assert all(len(rows) == 2 for rows in by_paycheck.values())
+
+    def test_two_weekly_rows_funded_from_the_next_paycheck_share_its_payday(
+        self, app, seed_user, seed_periods,
+    ):
+        """``(1, WEEK)`` from the next paycheck: two rows due one payday, two dates kept.
+
+        The same every-7-days rule from Tuesday 2026-01-06, funded from the
+        first paycheck starting on or after each date (ruling R-R95).  Both of
+        a paycheck's weeks defer to the NEXT payday and are due on it: 01-06
+        and 01-13 to the 01-16 paycheck, 01-20 and 01-27 to 01-30, and so on,
+        eighteen rows in nine paychecks.  The expected value, with its
+        arithmetic, is ``WEEKLY_FIRST_ON_SEED_PERIODS``, which the transfer
+        engine's twin asserts too.
+
+        **The two rows of a paycheck differ ONLY in ``occurs_on``** -- same
+        definition, scenario, paycheck and due day -- so this is the one shape
+        where ``idx_transactions_template_scenario_occurrence`` (plan step R17)
+        is all that tells them apart, and the case reads them back from the
+        database rather than off the objects the pass returned.
+        """
+        with app.app_context():
+            template = self._make_template_with_rule(
+                seed_user, WEEKLY_FIRST, starts_on=date(2026, 1, 6),
+            )
+            recurrence_engine.generate_for_template(
+                template, GenerationSchedule.for_period_ids(
+                    BalanceContext.build(template.user_id),
+                    {p.id for p in seed_periods},
+                ), seed_user["scenario"].id,
+            )
+            db.session.expire_all()
+            stored = db.session.query(Transaction).filter_by(
+                template_id=template.id,
+            ).all()
+
+            assert rows_by_paycheck(
+                stored, seed_periods,
+            ) == WEEKLY_FIRST_ON_SEED_PERIODS

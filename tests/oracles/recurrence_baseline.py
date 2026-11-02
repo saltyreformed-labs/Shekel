@@ -261,6 +261,19 @@ BASELINE_CADENCES: tuple[ShapeCadence, ...] = (
     ANNUAL,
 )
 
+#: Every week, funded by the paycheck containing each date, and the same
+#: cadence funded from the first paycheck starting on or after it -- the
+#: cadence the closed set could never name (plan step R8-b).  Named here
+#: because both engines' weekly cases author them, and in NO sweep: the frozen
+#: blob holds no answer computed for them, so they stay out of the tuple above.
+WEEKLY = ShapeCadence(
+    1, RecurrenceUnitEnum.WEEK, PeriodPlacementEnum.CONTAINING_DATE,
+)
+WEEKLY_FIRST = ShapeCadence(
+    1, RecurrenceUnitEnum.WEEK,
+    PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
+)
+
 
 @dataclass(frozen=True)
 class RuleShape:

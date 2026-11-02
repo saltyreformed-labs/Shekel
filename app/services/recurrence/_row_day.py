@@ -30,6 +30,16 @@ the walk seated, so the day the cadence names is in hand and the scan is
 deleted rather than fixed; the due-day arm went with the rule's
 ``due_day_of_month`` column (ruling **R-R96**).
 
+**:func:`date_row` takes the cadence's UNIT and PLACEMENT since plan step
+recurrence:R8-b**, rather than a ``from_paycheck`` flag each caller computed
+as "the cadence schedules on no day of the month".  That flag was right for
+every unit but one: a weekly occurrence names no day of the month, so it read
+as "date this from the paycheck" and every weekly row would have carried its
+funding PAYDAY with the authored weekday discarded, which is why the ``WEEK``
+unit was withheld from the offer set until this step.  Which source a row is
+dated from is a fact about the unit and the placement, so it is stated once,
+here, over them.
+
 Pure: no Flask, no ORM, no clock, no database.  It imports only the leaves
 ``_resolution`` already imports, so the walk can import it with no cycle.
 """
@@ -38,7 +48,10 @@ from datetime import date
 from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
 from app.services.pay_calendar import DerivedPeriod
 from app.services.recurrence._nominal_day import cadence_day_of_month
-from app.services.recurrence._offer import fires_on_day_of_month
+from app.services.recurrence._offer import (
+    emits_period_starts,
+    fires_on_day_of_month,
+)
 
 
 def cadence_scheduled_day(
@@ -63,13 +76,10 @@ def cadence_scheduled_day(
     See ``scheduling_day_of_month`` for why the gate is that predicate and not
     ``has_day_of_month_coordinate``.
 
-    **It asks no refusal.**  A unit whose occurrences no generated row can
-    carry the date of (the ``WEEK`` unit) is refused by the caller FIRST --
-    ``scheduling_day_of_month`` and
-    :meth:`~app.services.recurrence.ResolvedRecurrence.row_date` both ask
-    :func:`~app.services.recurrence._offer.require_row_date_coordinate`
-    before this -- because that refusal is a property of the unit alone and
-    is asked before the placement is consulted.
+    **``None`` means "no day of the month", and no longer "dated from the
+    paycheck"** (plan step recurrence:R8-b).  A weekly rule answers ``None``
+    and its rows are dated on their occurrences; which day a row is due is
+    :func:`date_row`'s question, asked of the unit and the placement.
 
     Args:
         unit: The cadence unit.
@@ -80,7 +90,8 @@ def cadence_scheduled_day(
 
     Returns:
         The day 1-31 the cadence's rows are scheduled on, or ``None`` for a
-        cadence whose rows are dated from their PAYCHECK.
+        cadence that schedules on no day of the month: a pay-period or weekly
+        cadence, or a calendar one funded from a later paycheck.
     """
     if not fires_on_day_of_month(unit, placement):
         return None
@@ -88,7 +99,11 @@ def cadence_scheduled_day(
 
 
 def date_row(
-    occurrence: date, period: DerivedPeriod, *, from_paycheck: bool,
+    occurrence: date,
+    period: DerivedPeriod,
+    *,
+    unit: RecurrenceUnitEnum,
+    placement: PeriodPlacementEnum,
 ) -> date:
     """Return the calendar day a row answering *occurrence* in *period* is due.
 
@@ -100,10 +115,16 @@ def date_row(
     **R-PC86**) cannot come apart.
 
     **Ruling R-R94's formula over the placed occurrence** (plan step
-    recurrence:R5-a): a cadence dated from a day of the month is due ON the
-    occurrence, and one dated from its paycheck -- every paycheck, every N
-    paychecks, a calendar cadence funded from a LATER paycheck -- is due on
-    its FUNDING paycheck's payday (ruling **R-R95**).
+    recurrence:R5-a), **covering weeks since plan step R8-b**: a CALENDAR
+    cadence -- weeks, months, years -- funded by the paycheck CONTAINING its
+    date is due ON the occurrence.  Every paycheck cadence, and every cadence
+    funded from a LATER paycheck, is due on its FUNDING paycheck's payday
+    (ruling **R-R95**, the answer R-BAL22 gives a one-off).
+
+    The paycheck unit is named on the payday side although its occurrence IS
+    that payday (:func:`~app.services.recurrence._offer.emits_period_starts`),
+    so either side would answer the same day: the rule says what a paycheck
+    cadence is dated FROM, and the two coinciding is a fact about its walk.
 
     Args:
         occurrence: The date the cadence names for this row, off the
@@ -111,13 +132,14 @@ def date_row(
         period: The :class:`~app.services.pay_calendar.DerivedPeriod` that
             placement seated it in -- saved, or PROJECTED past the horizon.
             Read for its payday alone.
-        from_paycheck: ``True`` when the cadence schedules its rows on no day
-            of the month -- :func:`cadence_scheduled_day` answered ``None``,
-            which each caller asks after its own refusal.
+        unit: The cadence unit.
+        placement: Which pay period funds the occurrence.
 
     Returns:
         The due day.
     """
-    if from_paycheck:
+    if emits_period_starts(unit):
+        return period.start_date
+    if placement is not PeriodPlacementEnum.CONTAINING_DATE:
         return period.start_date
     return occurrence

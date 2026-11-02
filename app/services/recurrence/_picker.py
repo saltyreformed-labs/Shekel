@@ -22,10 +22,11 @@ named its cadence with a closed pattern set, so ``(2, MONTH)`` walked correctly
 and had nowhere to be written.  With ``unit_id`` and ``interval_n`` authored
 columns every reading can be stored, and what is left is whether the
 application can HONOUR it -- which since plan step R8-a is
-:func:`~app.services.recurrence._offer.authorable_cadences`' two derived
-rules, replacing the ``anchor_family`` router that gated it on
-first-occurrence derivations ruling **R-R16** had already deleted.  Three
-consequences here:
+:func:`~app.services.recurrence._offer.authorable_cadences`' derived rules,
+replacing the ``anchor_family`` router that gated it on first-occurrence
+derivations ruling **R-R16** had already deleted.  R8-a stated two; plan step
+R8-b deleted the one that withheld the ``WEEK`` unit, by dating a weekly row
+from its occurrence.  Three consequences here:
 
 * **the interval is a free number box for every unit.**  ``fixed_intervals``
   and ``free_unit_ids`` are deleted with the ``<select>`` they fed, and
@@ -74,7 +75,7 @@ from app.services.recurrence._frequency import (
     can_repeat_within_month,
     has_day_of_month_coordinate,
 )
-from app.services.recurrence._offer import authorable_cadences
+from app.services.recurrence._offer import AuthorableCadence
 
 #: What each cadence UNIT is called on the form, singular and plural.
 #:
@@ -85,15 +86,13 @@ from app.services.recurrence._offer import authorable_cadences
 #:
 #: Keyed by enum member, so a unit added to
 #: :class:`~app.enums.RecurrenceUnitEnum` without copy raises ``KeyError`` at
-#: the first render rather than shipping a blank option.  ``WEEK`` is absent
-#: DELIBERATELY, and since plan step R8-a the reason is a LIVE one:
-#: :func:`~app.services.recurrence._offer.has_row_date_coordinate` keeps the
-#: unit out of the offer set because ``recurrence.compute_due_date`` has
-#: no way to date a weekly row, so this map is never asked for it.  Plan step
-#: **R5** deletes that function; the leaf that adds the copy is the one that
-#: makes the unit authorable.
+#: the first render rather than shipping a blank option.  ``WEEK`` joined at
+#: plan step R8-b, the leaf that made the unit authorable by dating a weekly
+#: row from its occurrence; until then the offer set withheld it and this map
+#: was never asked for it.
 _UNIT_LABELS: dict[RecurrenceUnitEnum, tuple[str, str]] = {
     RecurrenceUnitEnum.PERIOD: ("paycheck", "paychecks"),
+    RecurrenceUnitEnum.WEEK: ("week", "weeks"),
     RecurrenceUnitEnum.MONTH: ("month", "months"),
     RecurrenceUnitEnum.YEAR: ("year", "years"),
 }
@@ -211,25 +210,41 @@ class CadenceOption:
         return self.wire.placement_id
 
 
-def cadence_options() -> tuple[CadenceOption, ...]:
-    """Return every cadence the form may offer, worded.
+def cadence_options(
+    cadences: tuple[AuthorableCadence, ...],
+) -> tuple[CadenceOption, ...]:
+    """Return every cadence a form may offer, worded.
 
     The single producer of the recurrence picker's options, for both template
-    kinds and both the create and edit forms.
+    kinds and both the create and edit forms, and for the salary page's
+    payroll lines.
+
+    **It takes the offer set rather than reading one** (ruling plan#2591):
+    the template forms offer
+    :func:`~app.services.recurrence.authorable_cadences`, and the salary page
+    offers that set narrowed to the units a payroll line may repeat by
+    (``payroll_line_cadence.line_cadences``), because a line's rule picks
+    WHICH paychecks take it, so a weekly amount would be taken once a paycheck
+    however many weeks the paycheck holds.  Each caller passes
+    the set its own door refuses against, so the property above still holds
+    per form: nothing a form renders is refused by its door.
+
+    Args:
+        cadences: The ``(unit, placement)`` pairs this form offers, in the
+            order the form renders them.
 
     Returns:
-        One :class:`CadenceOption` per authorable ``(unit, placement)`` pair,
-        most frequent cadence first (paycheck, month, year) -- the order the
-        picker has always rendered.  Every entry RECURS: "does not repeat" is
-        the form's own empty option, not a cadence (plan step R2e-3).
+        One :class:`CadenceOption` per offered pair, in *cadences*' order.
+        Every entry RECURS: "does not repeat" is the form's own empty option,
+        not a cadence (plan step R2e-3).
 
     Raises:
         RuntimeError: If ``ref_cache`` has not been initialized.
-        KeyError: If an authorable unit or placement has no copy in
+        KeyError: If an offered unit or placement has no copy in
             :data:`_UNIT_LABELS` or :data:`_PLACEMENT_LABELS`.
     """
     options = []
-    for cadence in authorable_cadences():
+    for cadence in cadences:
         label_one, label_many = _UNIT_LABELS[cadence.unit]
         options.append(
             CadenceOption(
@@ -482,14 +497,19 @@ class PickerModel:
     placements: tuple["CadenceOption", ...]
 
 
-def picker_model() -> PickerModel:
+def picker_model(cadences: tuple[AuthorableCadence, ...]) -> PickerModel:
     """Return the form's options, their projections and their JSON, from one call.
 
     **Serialized and projected here rather than in each form's route or
-    template** so the two template kinds cannot disagree about either shape, and
-    so the set the browser filters is the same one
-    :func:`~app.services.recurrence.is_authorable` validates against on the way
-    back in.
+    template** so the forms cannot disagree about either shape, and so the set
+    the browser filters is the same one the form's door validates against on
+    the way back in: :func:`~app.services.recurrence.is_authorable` for the
+    template forms, and the line schema's ``picks_paychecks`` refusal beside
+    it for the salary page.
+
+    Args:
+        cadences: The ``(unit, placement)`` pairs this form offers -- see
+            :func:`cadence_options`.
 
     Returns:
         The :class:`PickerModel`.
@@ -498,7 +518,7 @@ def picker_model() -> PickerModel:
         RuntimeError: If ``ref_cache`` has not been initialized.
         KeyError: See :func:`cadence_options`.
     """
-    options = cadence_options()
+    options = cadence_options(cadences)
     return PickerModel(
         options=options,
         options_json=json.dumps(

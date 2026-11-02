@@ -47,7 +47,9 @@ from datetime import date
 from app.enums import RecurrenceUnitEnum
 from app.services.pay_calendar import PayCalendar
 from app.services.recurrence import (
+    AuthorableCadence,
     RecurrenceResolutionError,
+    authorable_cadences,
     canonical_cadence,
     describe,
     resolved_recurrence,
@@ -59,13 +61,28 @@ from app.utils.dates import month_name
 #: states it, so the two cannot drift.
 EVERY_PAYCHECK = "Every paycheck"
 
-#: Each authorable unit's ZERO at the owner's opening payday (ruling
-#: **R-SAL36**): the opening payday itself for a paycheck cadence, the 1st of
-#: its month for a monthly one, January 1st of its year for a yearly one.  A
-#: dict rather than an ``if`` chain so a unit the picker starts offering
-#: (``WEEK``, plan step R8-b) raises at the lookup rather than silently
-#: taking a neighbour's day -- the idiom
-#: ``cash_ledger._amount_rule`` records for its rule table.
+#: Each unit a payroll line may repeat by, and its ZERO at the owner's opening
+#: payday (ruling **R-SAL36**): the opening payday itself for a paycheck
+#: cadence, the 1st of its month for a monthly one, January 1st of its year
+#: for a yearly one.
+#:
+#: **The KEYS are the set of units a line may repeat by** (ruling plan#2591,
+#: amending R-SAL37's "the whole set"), read by :func:`picks_paychecks`, so
+#: the offer the salary page renders, the refusal its schema makes and this
+#: table cannot disagree about it.  A line's rule picks WHICH paychecks take
+#: it -- the paycheck engine asks one yes/no per paycheck
+#: (:meth:`~app.services.payroll_basis.PayrollBasis.line_applies_on`) -- and
+#: these three units pick paychecks.  ``WEEK`` is absent by that ruling, not
+#: for want of a zero: a weekly payroll item is a question of HOW MUCH each
+#: paycheck takes, which payroll answers as a fixed per-paycheck amount
+#: (weekly x 52 / paychecks a year), so it is entered as that amount, every
+#: paycheck.  Offered here it would be taken once per paycheck however many
+#: weeks the paycheck held -- half the money on a biweekly schedule.
+#:
+#: A dict rather than an ``if`` chain so a unit reaching :func:`first_occurrence`
+#: around the schema raises at the lookup rather than silently taking a
+#: neighbour's day -- the idiom ``cash_ledger._amount_rule`` records for its
+#: rule table.
 _ZERO_AT_THE_OPENING = {
     RecurrenceUnitEnum.PERIOD: lambda opening: opening,
     RecurrenceUnitEnum.MONTH: lambda opening: opening.replace(day=1),
@@ -107,10 +124,10 @@ def first_occurrence(
             paycheck rule was authored from one, so an empty schedule here is
             a broken invariant rather than a state to paper over (the same
             refusal ``recurrence.resolve`` makes for a paycheck cadence).
-        KeyError: The canonical unit is one this module states no zero for
-            -- the picker offers the three above and no other (ruling
-            **R-SAL37**), so a fourth reaching here is a new unit that owes
-            this table an entry.
+        KeyError: The canonical unit is not one a payroll line may repeat by
+            -- the salary page offers the three above and its schema refuses
+            any other (:func:`picks_paychecks`, ruling plan#2591), so a unit
+            reaching here came around both.
     """
     opening = calendar.opening_bound()
     if opening is None:
@@ -122,6 +139,41 @@ def first_occurrence(
         )
     stored_unit = canonical_cadence(interval_n, unit).unit
     return _ZERO_AT_THE_OPENING[stored_unit](opening)
+
+
+def picks_paychecks(unit: RecurrenceUnitEnum) -> bool:
+    """Whether a payroll line may repeat by *unit* (ruling plan#2591).
+
+    Read off :data:`_ZERO_AT_THE_OPENING`'s keys, the one statement of the
+    set; see that table for why the ``WEEK`` unit is not in it.  The
+    salary page's offer (:func:`line_cadences`) and the line schema's
+    refusal both ask this, so neither can admit a unit the other does not.
+
+    Args:
+        unit: A cadence unit.
+
+    Returns:
+        ``True`` for the paycheck, month and year units.
+    """
+    return unit in _ZERO_AT_THE_OPENING
+
+
+def line_cadences() -> tuple[AuthorableCadence, ...]:
+    """Every cadence the salary page's Repeats control offers a payroll line.
+
+    The recurrence package's own offer set
+    (:func:`~app.services.recurrence.authorable_cadences`) narrowed to the
+    units a line may repeat by (:func:`picks_paychecks`, ruling plan#2591),
+    in that set's order.  Narrowed rather than restated, so a placement the
+    package stops offering leaves this set too.
+
+    Returns:
+        The offered ``(unit, placement)`` pairs.
+    """
+    return tuple(
+        cadence for cadence in authorable_cadences()
+        if picks_paychecks(cadence.unit)
+    )
 
 
 def is_every_paycheck(

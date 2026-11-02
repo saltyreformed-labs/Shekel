@@ -393,10 +393,11 @@ def loan_cadence_start(
     :class:`~app.services.recurrence.RecurrenceSpec` refuses any other pairing
     at construction.
 
-    A cadence with no day-of-month coordinate (an every-paycheck loan payment,
-    plan ledger row **D27**'s unenforced precondition) states no nominal day:
-    it bills by PAYCHECK, so ``resolve`` normalises the installment date onto
-    the paycheck that hosts it and there is no contractual day to keep.
+    A cadence with no day-of-month coordinate states no nominal day, having no
+    month-end to clamp.  An every-paycheck loan payment (plan ledger row
+    **D27**'s unenforced precondition) bills by PAYCHECK, so ``resolve``
+    normalises the installment date onto the paycheck that hosts it; a weekly
+    one keeps its installment date and steps by whole weeks from it.
 
     Reads no clock: these are contract facts, not functions of when the sync
     happened to run (the A3 rule).

@@ -126,9 +126,10 @@ class DerivedRowFields(NamedTuple):
             cutover deleted.
         due_date: Derived from the rule and the placed occurrence by
             :func:`compute_due_date`, which always answers one -- the
-            occurrence itself for a cadence naming a day of the month, the
-            funding paycheck's payday for one naming none (plan step R5-a,
-            rulings **R-R94** / **R-R95**).
+            occurrence itself for a calendar cadence (weeks, months, years)
+            funded by the paycheck containing it, the funding paycheck's
+            payday for a paycheck cadence or one funded from a later paycheck
+            (plan step R5-a, rulings **R-R94** / **R-R95**; weeks since R8-b).
             It was annotated ``date | None`` until plan step **X-bv-2**, which
             binds ``ck_transactions_template_row_needs_due_date`` (a row of a
             definition is dated) and tightened the type to the fact the

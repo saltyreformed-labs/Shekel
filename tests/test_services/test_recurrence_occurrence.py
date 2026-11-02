@@ -1310,7 +1310,7 @@ class TestTheCalendarUnits:
 
 @pytest.mark.usefixtures("app")
 class TestTheWeekUnit:
-    """The unit no pattern resolves to yet; plan step R8 is its first author."""
+    """Weeks: walked since plan step R3, authorable since plan step R8-b."""
 
     def test_weekly_strides_seven_days(self):
         """Interval 1 WEEK fires every seventh day from the anchor."""
@@ -1334,6 +1334,71 @@ class TestTheWeekUnit:
 
         assert dates_through(value, calendar, date(2026, 4, 23)) == [
             date(2026, 3, 26), date(2026, 4, 9), date(2026, 4, 23),
+        ]
+
+    def test_the_walk_ends_on_the_applications_last_calendar_day(self):
+        """A weekly walk asked past the calendar stops at CALENDAR_DATE_MAX.
+
+        Bounded on day ordinals at plan step R8-b, as the month walk is on
+        month ordinals, so the three walks stop at one day.  Thursday
+        2100-12-02 weekly: 12-02, 12-09, 12-16, 12-23, 12-30; the next,
+        2101-01-06, is past 2100-12-31 and is never named.
+        """
+        calendar = build_calendar()
+        value = resolved_value(
+            unit=RecurrenceUnitEnum.WEEK, starts_on=date(2100, 12, 2),
+        )
+
+        assert dates_through(value, calendar, date(2200, 1, 1)) == [
+            date(2100, 12, 2), date(2100, 12, 9), date(2100, 12, 16),
+            date(2100, 12, 23), date(2100, 12, 30),
+        ]
+
+    def test_a_walk_landing_exactly_on_the_last_day_names_it(self):
+        """The bound is INCLUSIVE: 2100-12-24 + 7 days is 2100-12-31, named.
+
+        The case that grades the bound's edge; a stop one day early would
+        drop the calendar's own last day.
+        """
+        calendar = build_calendar()
+        value = resolved_value(
+            unit=RecurrenceUnitEnum.WEEK, starts_on=date(2100, 12, 24),
+        )
+
+        assert dates_through(value, calendar, date(2200, 1, 1)) == [
+            date(2100, 12, 24), date(2100, 12, 31),
+        ]
+
+    @pytest.mark.parametrize(
+        "interval_n",
+        [
+            # 70,000 days: 2217, past the calendar but a date ``date`` holds.
+            10_000,
+            # 3,150,000 days: past ``date.max``, which the old walk raised
+            # OverflowError for at its second yield.
+            450_000,
+            # The interval column's ceiling: the old ``timedelta`` stride
+            # raised OverflowError before yielding anything.
+            2_147_483_647,
+        ],
+    )
+    def test_a_huge_interval_fires_once_without_an_error(self, interval_n):
+        """A stride whose second occurrence leaves the calendar fires ONCE.
+
+        Every interval the form's box admits is authorable for the week unit
+        since plan step R8-b, so none of these may raise: the honest answer is
+        the first occurrence alone, as ``walk_months`` gives a month stride
+        that leaves the calendar.  Asked through ``date.max``, so the caller's
+        window cannot be what stops the 2217 date the old walk named.
+        """
+        calendar = build_calendar()
+        value = resolved_value(
+            unit=RecurrenceUnitEnum.WEEK, starts_on=date(2026, 3, 26),
+            interval_n=interval_n,
+        )
+
+        assert dates_through(value, calendar, date.max) == [
+            date(2026, 3, 26),
         ]
 
 
@@ -1485,9 +1550,10 @@ class TestThePerMonthCeiling:
     def test_the_week_unit_takes_a_ceiling_too(self):
         """The walk is total: weekly at most 2 a month keeps each month's first two.
 
-        Unreachable through the form until plan step R8-b opens the unit, and
-        implemented rather than refused for the reason the WEEK walk itself
-        is: a ceiling a unit silently ignored would be a wrong answer.
+        Reachable through the form since plan step R8-b opened the unit, and
+        implemented before then rather than refused for the reason the WEEK
+        walk itself was: a ceiling a unit silently ignored would be a wrong
+        answer.
         """
         calendar = build_calendar()
         value = resolved_value(

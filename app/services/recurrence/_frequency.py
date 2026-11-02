@@ -52,22 +52,24 @@ eight ``(unit, placement)`` pairs: the router agreed exactly with
 pair it answered for, and disagreed only on the three it refused.
 
 **The OFFER SET is derived from what a rule can DO, not from a name it can
-have** (:func:`~._offer.authorable_cadences` -- the offer set and the two
-predicates it rests on live in :mod:`._offer` since plan step salary:R15-a, a
+have** (:func:`~._offer.authorable_cadences` -- the offer set and the
+predicate it rests on live in :mod:`._offer` since plan step salary:R15-a, a
 pure move made when the cadence's third value took this module past pylint's
 1000-line ceiling; the argument stays here, the code implements it there), and
 that is plan step R7b-2's property restated on live constraints.  R7b-2 served
 the form's options from the storage ENCODER, so a cadence the closed pattern
 set could not name was unofferable
 rather than fenced; R7c-c dropped that encoder, and R7b-2's successor gate was
-this router.  TWO rules replace it, each derived from a fact stated once
-elsewhere and each naming the live thing it rests on:
+this router.  TWO rules replaced it, each derived from a fact stated once
+elsewhere and each naming the live thing it rested on:
 
 * the cadence's occurrences must be DATABLE onto a generated row
-  (:func:`has_row_date_coordinate`) -- the ``WEEK`` unit's are not, and plan
-  step R5 is what makes them so;
+  (``has_row_date_coordinate``) -- the ``WEEK`` unit's were not, until plan
+  step **R8-b** dated a weekly row from its occurrence
+  (``_row_day.date_row``) and deleted the rule;
 * the placement must be able to CHANGE the answer
-  (:func:`emits_period_starts`) -- under the ``PERIOD`` unit it cannot.
+  (:func:`emits_period_starts`) -- under the ``PERIOD`` unit it cannot.  This
+  is the one rule left.
 
 The interval is not a third: :func:`require_positive_interval` predates the
 router and was never gated by it, and every positive interval is authorable on

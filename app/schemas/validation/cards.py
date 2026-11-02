@@ -1,19 +1,21 @@
 """The credit card's forms: its terms (plan step credit_card:CC-2) and its APR (CC-3).
 
 **The terms.**  ONE schema for ONE door: the "Card terms" form on the cash detail page
-renders every control every time, so a submit IS the whole row, and the door
-creates the row when the card has none and rewrites it when it has one
-(developer ruling **R-CC24**, 2026-09-18: one door, one schema).  There is no
+renders every control every time, so a submit IS a whole version of the terms
+(developer ruling **R-CC24**, 2026-09-18: one door, one schema), stated FOR the
+date its ``effective_date`` names -- the door creates that version or corrects
+the one already on that date (plan#2331, ruling **plan#2333**: the terms are a
+dated series).  There is no
 create / update pair here on purpose -- the loan has two because its CREATE
 also seeds a rate row and posts a genesis ledger, and the interest door's
 every-field-optional shape needs a "required when configuring for the first
 time" branch that restates the NOT NULL rule the database already holds.  The
-five NOT NULL columns are REQUIRED, ``cashback_rate`` among them: the form
-renders it pre-filled with ``0.00`` for a card with no terms, so a browser
-always posts a value, and a submit that carries none is a crafted or truncated
-POST rather than a choice -- refused, never silently written as zero over a
-rate the owner stated.  The two nullable columns read an empty control as
-NULL, the "not set" state the model documents.
+effective date and the five NOT NULL terms are REQUIRED, ``cashback_rate``
+among them: the form renders it pre-filled with ``0.00`` for a card with no
+terms, so a browser always posts a value, and a submit that carries none is a
+crafted or truncated POST rather than a choice -- refused, never silently
+written as zero over a rate the owner stated.  The two nullable columns read
+an empty control as NULL, the "not set" state the model documents.
 
 E-28 / HIGH-06 / PA-02: both rates are validated as decimal fractions pinned
 to ``[0, 1]``, matching the model's CHECKs, and the ``@pre_load`` converts the
@@ -48,12 +50,15 @@ _POSITIVE_MONETARY = validate.Range(
 
 
 class CreditCardTermsSchema(BaseSchema):
-    """Validates the card terms form: the whole ``budget.credit_card_params`` row.
+    """Validates the card terms form: one whole version of the card's terms.
 
     Every field maps to a column of
     :class:`~app.models.credit_card_params.CreditCardParams` by name, so the
-    door can hand the loaded payload to the model as keyword arguments (create)
-    or set each key on the existing row (rewrite).  ``places`` mirrors each
+    door hands ``effective_date`` and the seven terms to
+    :func:`~app.services.card_terms.set_terms` as they load.  The effective
+    date is bounded to the calendar window every effective-dated field holds,
+    so a four-digit-year typo cannot become the series' earliest version
+    (which governs every day before it).  ``places`` mirrors each
     column's scale (``Numeric(5, 4)`` for the rates, ``Numeric(12, 2)`` for the
     dollar figures) so a stored value round-trips to the form without loss,
     the same contract the APY and escrow-inflation fields state.
@@ -66,13 +71,14 @@ class CreditCardTermsSchema(BaseSchema):
         """Normalize empty inputs, then convert percent fields to fractions.
 
         An empty ``auto_redeem_threshold`` or ``credit_limit`` becomes ``None``
-        (their "not set" state); an empty required control -- the five NOT
-        NULL columns -- is dropped so the field's own "Missing data for
-        required field." names it.
+        (their "not set" state); an empty required control -- the effective
+        date or one of the five NOT NULL terms -- is dropped so the field's
+        own "Missing data for required field." names it.
         """
         data = _normalize_empty_inputs(self, data)
         return _normalize_percent_fields(data, self._PERCENT_FIELDS)
 
+    effective_date = fields.Date(required=True, validate=_EFFECTIVE_DATE_RANGE)
     statement_close_day = fields.Integer(
         required=True, validate=_DAY_OF_MONTH_RANGE,
     )

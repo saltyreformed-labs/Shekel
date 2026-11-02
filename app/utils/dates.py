@@ -43,13 +43,14 @@ DISPLAY_TIMEZONE = ZoneInfo("America/New_York")
 # module is what both layers already depend on.  The schema keeps its names as
 # re-exports, so nothing that imported them from there had to move.
 #
-# THREE tables mirror them for writers that never see a schema:
+# FOUR tables mirror them for writers that never see a schema:
 # ``ck_template_amount_versions_effective_date_range``,
-# ``ck_recurrence_rules_starts_on_range`` and, since plan step
-# balance:X-bh-2, ``ck_pay_schedule_history_opens_range``.  The count is
-# restated rather than left at "two", which is what it read until that step
-# added the third: a number in prose about a set that grows is the copy
-# nobody re-reads.
+# ``ck_recurrence_rules_starts_on_range``, since plan step balance:X-bh-2
+# ``ck_pay_schedule_history_opens_range``, and since plan#2331
+# ``ck_credit_card_params_effective_date_range`` (a card's dated terms, which
+# hold flat backwards as a template's amounts do).  The count is restated
+# rather than left at "two", which is what it read until X-bh-2 added the
+# third: a number in prose about a set that grows is the copy nobody re-reads.
 #
 # An HTML date input accepts a four- or five-digit-year typo, and both columns
 # STORE what they are given: a stray ``0202`` becomes a template's earliest

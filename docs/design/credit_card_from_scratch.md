@@ -324,10 +324,10 @@ drops it collapses the two.
 
 ### 3.4 The statement cycle, and where the statement balance comes from -- FORK Q3
 
-`budget.credit_card_params` (1:1 account, CASCADE, the `loan_params` pattern, born with C13-c's
-owner key): `statement_close_day` and `payment_due_day` (SmallInt, CHECK 1-31, month-end clamp
-through `utils/dates.py:398` `clamped_day`), `min_payment_percent` Numeric(5,4) (the form takes a
-percent, the column stores the fraction), `min_payment_floor` Numeric(12,2), `cashback_rate`
+`budget.credit_card_params` (one row per card per effective date since plan#2331, CASCADE, born with
+C13-c's owner key): `statement_close_day` and `payment_due_day` (SmallInt, CHECK 1-31, month-end
+clamp through `utils/dates.py:398` `clamped_day`), `min_payment_percent` Numeric(5,4) (the form
+takes a percent, the column stores the fraction), `min_payment_floor` Numeric(12,2), `cashback_rate`
 Numeric(5,4) default 0, `auto_redeem_threshold` Numeric(12,2) NULL (NULL = manual only),
 `credit_limit` Numeric(12,2) NULL (utilization only). No auto-create: a card with no params row is a
 dormant plain liability and every card feature gates on the row. APR rides `budget.rate_history`
@@ -335,12 +335,44 @@ unchanged: account-scoped, effective-dated, CHECKed to [0,1]; the loan loaders r
 `LoanParams` and never see a card row; the card gets its own thin loader and a card-gated write
 route.
 
-A STATEMENT is DERIVED (R-CC2): `card_statement.py`, pure -- `cycle_window(close_day, month)`
-(closed-open, so a row posted AT the close belongs to the next cycle), `statement_sequence`,
-`due_date_for`, `statement_balance` = the fold at the close instant, `grace_kept` (the prior
-statement paid in full by its due date), `minimum_payment` =
+**The terms are a DATED SERIES** (plan#2331, developer ruling plan#2333, 2026-11-02; R-FI's rule 1).
+Each row is the whole term set in force from its `effective_date` until the next row's, and before
+the earliest row the earliest (it holds flat backwards, R-I's shape, so a card with one row derives
+exactly as the undated row did). Saving the form for a date creates that version or corrects the one
+already on it; a version can be removed (ruling plan#2587) except the card's only one. So a change
+of terms governs from its day: every statement that closes BEFORE that day, and every reward on a
+day before it, stands. The one exception is a version dated before the earliest, which takes over
+the days the earliest held flat, as the nearest terms anyone stated for them. The one walk is
+`card_statement.terms_in_effect`, and every reader takes it: a statement the version in force at its
+CLOSE, a reward the version in force on its purchase's day.
+
+A STATEMENT is DERIVED (R-CC2): `card_statement.py`, pure, every function that reads the terms
+taking the card's SERIES and picking the version itself -- `cycle_containing` (closed-open, so a row
+posted AT the close belongs to the next cycle), `statement_sequence`, `due_date_for` and
+`minimum_payment` (each on the close's version); beside them `grace_kept` (the prior statement paid
+in full by its due date), which reads no terms. The minimum =
 `max(floor, round_money(pct x balance))` clamped to the balance, all Decimal, `round_money` at the
-boundary only. The finance charge is 3.6's.
+boundary only. The statement balance is the fold at the close instant,
+`owed(cash_balance_at(account, ctx, window.valuation_date))`, for the producer that will state it
+(no function computes it yet). The finance charge is 3.6's.
+
+**A day is a close date when it is the close day, clamped, of the version in force on that day.** So
+a change of the close day cuts one TRANSITIONAL cycle, from the last close under the old day to the
+first under the new one, short or long by the date the owner enters: Regulation Z's own exemption
+from the equal-cycle rule for a cycle that changes the closing date (official interpretation comment
+2(a)(4)-3). plan#2333's example: close 20 through February, close 5 from Mar 1. The Feb 20 statement
+is `[Jan 20, Feb 20)`, due Mar 15 by the old due day; the next is `[Feb 20, Mar 5)`, due Mar 30 by
+the new one. A month holding a change can hold two closes (close 5 until Mar 9, close 25 from Mar
+10: Mar 5 and Mar 25), which is why nothing is keyed by month.
+
+**A version dated ON a close date governs the statement closing that day.** The close date is the
+closing date the issuer prints, and an issuer applies a change effective on a date to the billing
+cycle that contains it, the one closing on or after it. So a "statements closing on or after Mar 5"
+change entered as Mar 5 makes Mar 5 the first close on the new day, and a change of the close day
+dated on an old close date (close 5 from Feb 20) makes the cycle that would have closed then the
+changeover one, `[Jan 20, Mar 5)`. Reading the version in force on the day BEFORE the close (the
+cycle's last day, since the close date opens the next cycle) would make the first change close on
+Apr 5 instead; the two readings agree whenever the date is not a close date.
 
 **The card's actual closing balance is an OBSERVATION**, typed on the cockpit or carried by the
 feed, and it lands in the level relation exactly as a bank's closing does (`account_anchor_history`,
@@ -515,16 +547,17 @@ at `<= 1` today and at `= 1` after `X-bi-7d`).
 
 ### 3.7 Rewards accrue as a derived figure; redemptions are rows
 
-`accrued = round_money(cashback_rate x SUM(all card purchases)) - SUM(all redemptions)`, one walk
-over the whole history rounded once (a "since the last redemption" window reads `-$5.00` after a
-`$5.00` partial redemption of `$20.00` accrued, where the answer is `$15.00`), over the card's
-movements (purchases only: expense-parented movements, never the payment leg), a non-producer
-(rewards earned, not a balance). A redemption is a real credit row on the card: manual (a one-off,
-OWN figure, `0 < amount <= accrued`) or auto (`accrued >= auto_redeem_threshold`: one projected row
-of a card-owned rule-less definition, priced by the card rule, at most one live projected row at a
-time, held by a partial unique index the way the payback's `uq_transactions_credit_payback_unique`
-holds it today; confirmed by the ordinary settle). A confirmed redemption reduces the fold and so
-the next derived payment, by construction.
+`accrued = round_money(SUM(rate(day) x amount)) - SUM(redemptions)`, where `rate(day)` is the
+`cashback_rate` of the terms version in force on each purchase's day (3.4: a change of rate governs
+from its date, so a purchase before it keeps its rate). One walk over the whole history rounded once
+(a "since the last redemption" window reads `-$5.00` after a `$5.00` partial redemption of `$20.00`
+accrued, where the answer is `$15.00`), over the card's movements (purchases only: expense-parented
+movements, never the payment leg), a non-producer (rewards earned, not a balance). A redemption is a
+real credit row on the card: manual (a one-off, OWN figure, `0 < amount <= accrued`) or auto
+(`accrued >= auto_redeem_threshold`: one projected row of a card-owned rule-less definition, priced
+by the card rule, at most one live projected row at a time, held by a partial unique index the way
+the payback's `uq_transactions_credit_payback_unique` holds it today; confirmed by the ordinary
+settle). A confirmed redemption reduces the fold and so the next derived payment, by construction.
 
 ### 3.8 What the card refuses
 

@@ -59,7 +59,8 @@ real ``FormData`` can say.
 **Plan step R8-b made the WEEK unit authorable**, and each control it reaches
 is graded by the drive that owns that control: the week option is offered and
 selectable, its interval box and BOTH funding choices enable and the preview
-lists its dates (:func:`_drive_visibility`); the per-month ceiling row shows
+re-fetches for each reading and lists its occurrences (:func:`_drive_visibility`);
+the per-month ceiling row shows
 for it (:func:`_drive_month_ceiling`); and the "repeating on" day control
 stays hidden beside it on a date that opens that question for a monthly
 cadence (:func:`_drive_nominal_day`).  The two WEEK refusal cases went with
@@ -90,6 +91,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
@@ -1250,6 +1252,36 @@ def _choose_placement(page, index: int) -> None:
     _settle(page)
 
 
+def _check_week_preview(page, kind: str, previews: list[str],
+                        reading: dict[str, str]) -> None:
+    """Check the act just taken re-fetched the preview for *reading*, and it answered.
+
+    The request is the evidence, not the fragment.  On a 14-day schedule every
+    other week previews exactly the paychecks every paycheck does (measured
+    2026-11-02; it is why the suite's weekly preview case uses three weeks),
+    so the text left from the paychecks step reads the same whether or not a
+    weekly fetch happened; and
+    :func:`_settle` is a fixed wait, which cannot say one did.  The last
+    request since the caller cleared *previews* must carry every key of
+    *reading* exactly, parsed rather than matched as a substring, since
+    ``recurrence_unit=5`` is a substring of ``recurrence_unit=50``.
+
+    Args:
+        page: The Playwright page.
+        kind: "transaction" or "transfer", for the labels.
+        previews: The preview URLs requested since the caller's last act.
+        reading: The query keys the request must carry, each to one value.
+    """
+    query = parse_qs(urlsplit(previews[-1]).query) if previews else {}
+    named = ", ".join(f"{key}={value}" for key, value in reading.items())
+    _check(f"{kind} W: the preview re-fetched for {named}",
+           all(query.get(key) == [value] for key, value in reading.items()),
+           previews[-1] if previews else "no preview request was made")
+    shown = page.inner_text("#recurrence-preview")
+    _check(f"{kind} W: that preview lists occurrences",
+           "occurrences:" in shown, shown)
+
+
 def _drive_week_visibility(page, kind: str, units: dict[str, str]) -> None:
     """Check the WEEK unit's controls, on one form kind (plan step R8-b).
 
@@ -1261,6 +1293,13 @@ def _drive_week_visibility(page, kind: str, units: dict[str, str]) -> None:
     The cadence is left at every other week, funded by the paycheck
     containing each occurrence.
 
+    **Each preview check reads the REQUEST the act fired**
+    (:func:`_check_week_preview`), as :func:`_drive_month_ceiling` does: clear
+    the captured URLs, act, then require a fetch naming the week unit and,
+    for the second, the deferring placement.  Both checks read only that
+    "occurrences:" was on screen until the adversarial review of R8-b, and the
+    paychecks preview left there passed both whether or not a fetch happened.
+
     Args:
         page: The Playwright page, on the create form, a cadence chosen.
         kind: "transaction" or "transfer", for the labels.
@@ -1271,11 +1310,25 @@ def _drive_week_visibility(page, kind: str, units: dict[str, str]) -> None:
            f"offered units: {sorted(units)}")
     if weeks is None:
         return
+    previews: list[str] = []
+
+    def capture(request) -> None:
+        if "preview-recurrence" in request.url:
+            previews.append(request.url)
+
+    page.on("request", capture)
     page.locator("#recurrence_unit").select_option(weeks)
     _settle(page)
     _check(f"{kind} W: interval box enabled",
            page.evaluate("() => !document.getElementById('interval_n').disabled"),
            "disabled")
+    placements = page.evaluate(
+        """() => Array.from(document.getElementById('recurrence_placement').options)
+                 .map(o => o.value)"""
+    )
+    # Cleared BEFORE the act: the fetch fires on the change event itself (the
+    # ordering ``_drive_month_ceiling`` measured).
+    previews.clear()
     _set_interval(page, 2)
     _check(f"{kind} W: every other week posts its own interval",
            _one_interval(page, kind, "W") == ["2"], "the box lost the typed interval")
@@ -1286,9 +1339,11 @@ def _drive_week_visibility(page, kind: str, units: dict[str, str]) -> None:
     )
     _check(f"{kind} W: both funding choices are enabled for weeks",
            offered_placements == 2, f"{offered_placements} enabled")
-    _check(f"{kind} W: the preview lists the weekly dates",
-           "occurrences:" in page.inner_text("#recurrence-preview"),
-           page.inner_text("#recurrence-preview"))
+    _check_week_preview(page, kind, previews, {
+        "recurrence_unit": weeks, "interval_n": "2",
+        "recurrence_placement": placements[0],
+    })
+    previews.clear()
     _choose_placement(page, 1)
     _check(f"{kind} W: a weekly cadence funded from a later paycheck posts that choice",
            page.evaluate(
@@ -1298,10 +1353,12 @@ def _drive_week_visibility(page, kind: str, units: dict[str, str]) -> None:
                    return posted.length === 1 && posted[0] === s.options[1].value;
                }"""),
            "the deferring placement does not post on the WEEK unit")
-    _check(f"{kind} W: the preview lists that reading's dates too",
-           "occurrences:" in page.inner_text("#recurrence-preview"),
-           page.inner_text("#recurrence-preview"))
+    _check_week_preview(page, kind, previews, {
+        "recurrence_unit": weeks, "interval_n": "2",
+        "recurrence_placement": placements[1],
+    })
     _choose_placement(page, 0)
+    page.remove_listener("request", capture)
 
 
 def _drive_visibility(page, kind: str, url: str) -> None:

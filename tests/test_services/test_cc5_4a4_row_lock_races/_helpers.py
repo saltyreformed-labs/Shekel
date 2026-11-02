@@ -4,45 +4,22 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlsplit
-
 from sqlalchemy import text
 
 from app.extensions import db as _db
 from app.models.transaction import Transaction
 from app.services import transaction_service
 from app.utils.dates import display_today
+from tests._request_race import RACE_WAIT_SECONDS
 from tests._test_helpers import generate_row_of, make_expense_template
-from tests.conftest import SEED_USER_EMAIL, SEED_USER_PASSWORD
 from tests.test_routes._statement_forms import ReconcileFormReader
 from tests.test_routes.test_cc5_4a5_popover_presses import dialog_delete_values
 
 
 #: How long a race waits for a click to reach its commit, or the second click
-#: to block, before calling the harness broken.  The cluster's own
-#: ``lock_timeout`` is 10 s.
-_WAIT = 8.0
-
-
-def _signed_in_clients(app, count=2):
-    """*count* clients, each signed in as the seed user.
-
-    Each sign-in's redirect is checked not to be the sign-in page, so a race
-    cannot quietly run one client signed out.
-
-    Returns:
-        The signed-in clients, in order.
-    """
-    clients = []
-    for _ in range(count):
-        client = app.test_client()
-        response = client.post("/login", data={
-            "email": SEED_USER_EMAIL, "password": SEED_USER_PASSWORD,
-        })
-        assert response.status_code == 302, response.status_code
-        assert urlsplit(response.headers["Location"]).path != "/login"
-        clients.append(client)
-    return clients
+#: to block, before calling the harness broken: the request race's bound
+#: (:data:`tests._request_race.RACE_WAIT_SECONDS`), one value for both kinds.
+_WAIT = RACE_WAIT_SECONDS
 
 
 def _state(row_id):

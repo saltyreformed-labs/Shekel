@@ -17,17 +17,30 @@ pinned:
   version and leaves the one before it as it was; the SAME date corrects that
   version in place (one row, its id kept, every term rewritten, a blank
   nullable term cleared, ``updated_at`` moved) -- the second write graded,
-  because a producer right on the first write can be wrong on the repeat.
+  because a producer right on the first write can be wrong on the repeat;
+* the remove (:func:`~app.services.card_terms.remove_terms`, developer ruling
+  **plan#2587**): the removed version's days re-derive from the version the
+  walk then names, graded on the ruling's own example (a cut to 1.0% mistyped
+  Jan 1 for Mar 1, then removed and saved again) and on the earliest version
+  removed, whose days the next one then governs; the card's only version is
+  refused and stays; a row of another card, an unknown id and any id on a
+  dormant card are ``False``, writing nothing.  The two-tab race is graded at
+  the door (``tests/test_routes/test_card_terms.py``), because the owner's
+  lock that serialises it is a request's.
 """
 
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
+from app.exceptions import CardTermsRemovalRefused
 from app.extensions import db
 from app.models.credit_card_params import CreditCardParams
 from app.services.card_terms import (
     load_card_term_versions,
+    remove_terms,
     set_terms,
     terms_in_effect,
 )
@@ -215,3 +228,176 @@ class TestTheReadAndTheWrite:
         with app.app_context():
             account = _card(seed_user)
             assert load_card_term_versions(account.id) == []
+
+
+#: Ruling plan#2587's example: a $600.00 purchase on Feb 10.
+_FEB_10 = date(2026, 2, 10)
+
+
+def _version_on(account, effective_date):
+    """The id of *account*'s version dated *effective_date*."""
+    return next(
+        v.id for v in load_card_term_versions(account.id)
+        if v.effective_date == effective_date
+    )
+
+
+def _remove(account, row_id):
+    """Remove *row_id* from *account* and commit, as the door does."""
+    removed = remove_terms(account.id, row_id)
+    db.session.commit()
+    db.session.expire_all()
+    return removed
+
+
+class TestTheRemove:
+    """``remove_terms``: a version goes, and its days re-derive; the only one stays."""
+
+    def test_the_rulings_mistyped_date_removed_and_saved_again(self, app, seed_user):
+        """The cut to 1.0% typed Jan 1 for Mar 1: removed, Feb 10 reads 1.5% again.
+
+        Ruling plan#2587's example.  The card's 1.5% terms date from Dec 1,
+        2025; the cut to 1.0% was saved dated Jan 1 instead of Mar 1, so the
+        Feb 10 purchase read 1.0%: $600.00 x 0.0100 = $6.00.  Removing the
+        Jan 1 version gives its days back to Dec 1's: $600.00 x 0.0150 =
+        $9.00.  Saving the cut again dated Mar 1 leaves Feb 10 at 1.5% and
+        governs from Mar 1.
+        """
+        with app.app_context():
+            account = _card(seed_user)
+            _set(account, date(2025, 12, 1), _FEBRUARY)
+            _set(account, date(2026, 1, 1), _MARCH)
+            versions = load_card_term_versions(account.id)
+            assert terms_in_effect(versions, _FEB_10).cashback_rate == Decimal("0.0100")
+
+            assert _remove(account, _version_on(account, date(2026, 1, 1))) is True
+
+            versions = load_card_term_versions(account.id)
+            assert [v.effective_date for v in versions] == [date(2025, 12, 1)]
+            assert terms_in_effect(versions, _FEB_10).cashback_rate == Decimal("0.0150")
+
+            _set(account, date(2026, 3, 1), _MARCH)
+
+            versions = load_card_term_versions(account.id)
+            assert [v.effective_date for v in versions] == [
+                date(2025, 12, 1), date(2026, 3, 1),
+            ]
+            assert terms_in_effect(versions, _FEB_10).cashback_rate == Decimal("0.0150")
+            assert terms_in_effect(versions, date(2026, 3, 1)).cashback_rate == (
+                Decimal("0.0100")
+            )
+
+    def test_the_earliest_removed_its_days_fall_to_the_next(self, app, seed_user):
+        """Jan 1 removed: Feb 10, and every day before Mar 1, reads March's terms.
+
+        The series holds flat backwards (rule 1), so the days the removed
+        earliest version governed are the next version's now -- the close
+        that was the 20th is the 5th on them.  The other version is
+        untouched.
+        """
+        with app.app_context():
+            account = _card(seed_user)
+            _set(account, date(2026, 1, 1), _FEBRUARY)
+            _set(account, date(2026, 3, 1), _MARCH)
+            march_id = _version_on(account, date(2026, 3, 1))
+            versions = load_card_term_versions(account.id)
+            assert terms_in_effect(versions, _FEB_10).statement_close_day == 20
+
+            assert _remove(account, _version_on(account, date(2026, 1, 1))) is True
+
+            versions = load_card_term_versions(account.id)
+            assert [v.id for v in versions] == [march_id]
+            for column, value in _MARCH.items():
+                assert getattr(versions[0], column) == value, column
+            assert terms_in_effect(versions, _FEB_10).statement_close_day == 5
+            assert terms_in_effect(versions, date(2025, 6, 1)).statement_close_day == 5
+
+    def test_the_cards_only_version_is_refused_and_stays(self, app, seed_user):
+        """One version: the refusal names its date, and the version is untouched."""
+        with app.app_context():
+            account = _card(seed_user)
+            _set(account, date(2026, 1, 1), _FEBRUARY)
+            only = _version_on(account, date(2026, 1, 1))
+
+            with pytest.raises(CardTermsRemovalRefused) as refused:
+                remove_terms(account.id, only)
+            db.session.rollback()
+
+            assert refused.value.effective_date == date(2026, 1, 1)
+            assert str(refused.value) == (
+                "The terms from Jan 1, 2026 are this card's only terms, so they "
+                "were not removed: a card always keeps one set. To change their "
+                "date, save the terms again dated the right day, then remove "
+                "these."
+            )
+            db.session.expire_all()
+            versions = load_card_term_versions(account.id)
+            assert [v.id for v in versions] == [only]
+            for column, value in _FEBRUARY.items():
+                assert getattr(versions[0], column) == value, column
+
+    def test_the_last_of_two_is_refused_once_the_other_is_gone(self, app, seed_user):
+        """The repeat: of two versions the first goes, then the second is refused.
+
+        The second removal is graded, because a remove right on the first
+        call can be wrong on the repeat: here the count it refuses on is the
+        one the first removal left.
+        """
+        with app.app_context():
+            account = _card(seed_user)
+            _set(account, date(2026, 1, 1), _FEBRUARY)
+            _set(account, date(2026, 3, 1), _MARCH)
+            january = _version_on(account, date(2026, 1, 1))
+            march = _version_on(account, date(2026, 3, 1))
+
+            assert _remove(account, january) is True
+            with pytest.raises(CardTermsRemovalRefused):
+                remove_terms(account.id, march)
+            db.session.rollback()
+
+            db.session.expire_all()
+            assert [v.id for v in load_card_term_versions(account.id)] == [march]
+
+    def test_another_cards_row_is_not_this_cards_to_remove(self, app, seed_user):
+        """``False``, and the other card's version survives: the scope is BOTH ids.
+
+        This card holds two versions, so the answer cannot be the only-version
+        refusal; the other card holds two as well, so a remove that ignored
+        the account would have deleted one.
+        """
+        with app.app_context():
+            account = _card(seed_user)
+            other = _card(seed_user, name="Other")
+            _set(account, date(2026, 1, 1), _FEBRUARY)
+            _set(account, date(2026, 3, 1), _MARCH)
+            _set(other, date(2026, 1, 1), _FEBRUARY)
+            _set(other, date(2026, 3, 1), _MARCH)
+            theirs = _version_on(other, date(2026, 3, 1))
+
+            assert _remove(account, theirs) is False
+
+            assert len(load_card_term_versions(account.id)) == 2
+            assert theirs in [v.id for v in load_card_term_versions(other.id)]
+
+    def test_an_unknown_id_is_false_and_nothing_is_written(self, app, seed_user):
+        """An id no row carries: ``False``, both versions kept."""
+        with app.app_context():
+            account = _card(seed_user)
+            _set(account, date(2026, 1, 1), _FEBRUARY)
+            _set(account, date(2026, 3, 1), _MARCH)
+
+            assert _remove(account, 999_999) is False
+
+            assert len(load_card_term_versions(account.id)) == 2
+
+    def test_a_dormant_card_has_nothing_to_remove(self, app, seed_user):
+        """No version: every id is ``False``, so the door answers 404, not a refusal."""
+        with app.app_context():
+            account = _card(seed_user)
+            other = _card(seed_user, name="Other")
+            _set(other, date(2026, 1, 1), _FEBRUARY)
+
+            assert _remove(account, _version_on(other, date(2026, 1, 1))) is False
+
+            assert load_card_term_versions(account.id) == []
+            assert len(load_card_term_versions(other.id)) == 1

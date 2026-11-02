@@ -8,20 +8,26 @@ every time, so a submit IS a whole version of the terms.  Since plan#2331
 saves the version FOR the date the form names -- creating it, or correcting
 the version already on that date (**R-CC27**'s set-by-date shape, the APR's)
 -- and a change governs from its day while every statement and reward before
-it stands.  A redirect-style POST handler that flashes and returns to the
-cash detail page hosting the form (**R-CC25**).
+it stands.  A second door REMOVES a version (developer ruling **plan#2587**),
+the fix a mistyped date needs, and refuses the card's only one.  Both are
+redirect-style POST handlers that flash and return to the cash detail page
+hosting the form (**R-CC25**).
+
+The writes are :mod:`app.services.card_terms`'s; the transaction is this
+module's.
 """
 
 import logging
 
-from flask import Response, flash
+from flask import Response, abort, flash
 
+from app.exceptions import CardTermsRemovalRefused
 from app.extensions import db
 from app.routes._form_errors import load_form_or_redirect
 from app.routes.card._bp import card_bp
 from app.routes.card._helpers import back_to_card, load_card_or_404
 from app.schemas.validation import CreditCardTermsSchema
-from app.services.card_terms import set_terms
+from app.services import card_terms
 from app.utils.auth_helpers import require_owner
 
 logger = logging.getLogger(__name__)
@@ -61,11 +67,49 @@ def save_terms(account_id):
         return data
 
     effective_date = data.pop("effective_date")
-    set_terms(account.id, account.user_id, effective_date, data)
+    card_terms.set_terms(account.id, account.user_id, effective_date, data)
     db.session.commit()
     logger.info(
         "Saved card terms for account %d effective %s",
         account.id, effective_date.isoformat(),
     )
     flash("Card terms saved.", "success")
+    return back.to_response()
+
+
+@card_bp.route(
+    "/accounts/<int:account_id>/card/terms/<int:row_id>/delete",
+    methods=["POST"],
+)
+@require_owner
+def remove_terms(account_id, row_id):
+    """Remove one of the card's terms versions, unless it is the only one.
+
+    Gated by :func:`~app.routes.card._helpers.load_card_or_404` (404 for
+    not-found, not-yours and not-a-card alike) and not by the
+    configured-card gate: :func:`~app.services.card_terms.remove_terms` reads
+    the card's versions once, and a dormant card holds none, so its every
+    row answers 404 there -- the configured gate's answer, without its
+    second read of the same versions in one request.  A row of another
+    account answers 404 the same way.
+
+    The card's only version is refused in plain words (developer ruling
+    **plan#2587**), not with a 404: the row is the owner's and real, and the
+    request was drawn when the card held two (a stale tab, or the second of
+    two removes, which waits on the owner's write lock and counts after the
+    first commits).  Nothing was written, and the rollback says so.
+    """
+    account = load_card_or_404(account_id)
+    back = back_to_card(account.id)
+    try:
+        removed = card_terms.remove_terms(account.id, row_id)
+    except CardTermsRemovalRefused as refused:
+        db.session.rollback()
+        flash(str(refused), "danger")
+        return back.to_response()
+    if not removed:
+        abort(404)
+    db.session.commit()
+    logger.info("Removed card terms row %d from account %d", row_id, account.id)
+    flash("Card terms removed.", "success")
     return back.to_response()

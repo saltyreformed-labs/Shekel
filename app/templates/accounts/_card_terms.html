@@ -22,7 +22,11 @@
 
    Below the form, once terms exist: the versions newest first, the one in
    force today marked.  The earliest also governs every day before it
-   (app.services.card_terms.terms_in_effect), and the card says so.
+   (app.services.card_terms.terms_in_effect), and the card says so.  Each
+   version has a Remove button while the card holds more than one
+   (developer ruling plan#2587: the fix for a mistyped date); the only
+   version has none, so a card never loses its terms by a click, and the
+   door (card.remove_terms) refuses it from a stale page too.
 
    Below the terms, once they exist: the card's APR (plan step
    credit_card:CC-3; developer rulings R-CC27 and R-CC28, 2026-09-18) -- the
@@ -139,6 +143,16 @@
           <span>{{ version.effective_date.strftime('%b %-d, %Y') }}</span>
           {% if version.id == card_terms.id %}
           <span class="badge text-bg-secondary">In effect today</span>
+          {% endif %}
+          {% if card_term_versions|length > 1 %}
+          <form method="POST"
+                action="{{ url_for('card.remove_terms', account_id=account.id, row_id=version.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-link btn-sm text-danger p-0"
+                    aria-label="Remove the terms effective {{ version.effective_date.strftime('%b %-d, %Y') }}">
+              Remove
+            </button>
+          </form>
           {% endif %}
         </div>
         <div class="small text-muted">

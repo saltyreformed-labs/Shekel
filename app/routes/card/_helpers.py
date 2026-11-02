@@ -72,9 +72,9 @@ def load_configured_card_or_404(account_id: int) -> Account:
 def back_to_card(account_id: int) -> RedirectTarget:
     """The cash detail page every card door returns to, as a redirect target.
 
-    One spelling for the terms door and the two APR doors (developer rulings
-    **R-CC25** and **R-CC28**: the page that hosts every card form until
-    CC-11's cockpit).
+    One spelling for the two terms doors and the two APR doors (developer
+    rulings **R-CC25** and **R-CC28**: the page that hosts every card form
+    until CC-11's cockpit).
 
     Args:
         account_id: The card's id.

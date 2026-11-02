@@ -7,7 +7,8 @@ declaration lives in :mod:`app.routes.card._bp` (cycle-break), and each
 per-concern module imports it from there and registers its routes against it
 -- the ``app/routes/loan/`` package's shape.  Born at plan step
 **credit_card:CC-2** with one door, the card's terms; CC-3 added the two APR
-doors (set by date, remove); CC-11 adds the card cockpit.
+doors (set by date, remove); plan#2331 the terms' remove door; CC-11 adds the
+card cockpit.
 
 The card's PAGE is not here yet: until CC-11 a card renders on the shared cash
 detail page (``accounts.cash_detail``), which hosts the terms form this
@@ -19,7 +20,8 @@ Module map:
 * :mod:`app.routes.card._helpers` -- the card gates every door in this
   package loads its account through (the kind gate, and the kind-plus-terms
   gate a feature of a configured card takes).
-* :mod:`app.routes.card.terms` -- the terms door (``budget.credit_card_params``).
+* :mod:`app.routes.card.terms` -- the terms doors (save by date, remove;
+  ``budget.credit_card_params``).
 * :mod:`app.routes.card.apr` -- the APR doors (``budget.rate_history``).
 """
 

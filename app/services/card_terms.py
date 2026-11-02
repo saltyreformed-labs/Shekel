@@ -36,6 +36,14 @@ question the one rewritten row could not:
    force at its CLOSE, a reward the one in force on its purchase's day (the
    card's spec, plan#2331).  :mod:`app.services.card_statement` takes the
    series and picks for itself.
+4. **How a version goes** (:func:`remove_terms`, developer ruling
+   **plan#2587**): any version but the card's only one, the fix for a
+   mistyped date, which a same-date save cannot correct.  Its days fall to
+   the version rule 1 then names -- the one before it, or for the earliest
+   the next, which then holds flat backwards over them -- so a removal
+   re-derives every statement and reward those days held, exactly as
+   removing an APR row changes the rate from its date.  The only version
+   stays, so a card never returns to dormancy by a click.
 
 An EMPTY series is the DORMANT state, not an error (design 3.4: no
 auto-create): a card whose owner has not stated its terms is a plain
@@ -43,7 +51,7 @@ liability and every card feature stays off.  A reader gates on
 :func:`~app.services.account_projection.is_revolving` FIRST -- the rows
 outlive a re-type, so their existence alone never means "this is a card".
 
-Flask-isolated; the write flushes and never commits (the door owns the
+Flask-isolated; the writes flush and never commit (the door owns the
 transaction).
 """
 
@@ -51,6 +59,7 @@ from datetime import date
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.exceptions import CardTermsRemovalRefused
 from app.extensions import db
 from app.models.credit_card_params import (
     CREDIT_CARD_TERMS_UNIQUE_CONSTRAINT,
@@ -135,3 +144,47 @@ def set_terms(
             set_={**terms, "updated_at": db.func.now()},
         ),
     )
+
+
+def remove_terms(account_id: int, row_id: int) -> bool:
+    """Delete the card's terms version *row_id*, reporting whether it was there.
+
+    The version is looked for among the card's OWN versions, so a row of
+    another account -- another owner's card, or another of the owner's --
+    is not this card's to remove, and the answer is the same ``False`` a
+    missing id gets, which the door renders as 404 (the project's "not found"
+    and "not yours" rule; :func:`app.services.card_apr.remove_apr`'s scope).
+    A dormant card holds no version, so every id is missing for it.
+
+    **The card's only version is refused, not deleted** (developer ruling
+    **plan#2587**; rule 4 in the module docstring).  The count and the delete
+    are one read then one write, and nothing here locks: two tabs each
+    removing one of a card's two versions are serialised by the owner's
+    write lock every command transaction takes before it reads the owner's
+    data (:mod:`app.db_transaction`, plan step ``balance:X-bn``), so the
+    second reads the versions after the first's commit, counts one, and is
+    refused.  A caller outside a request takes no such lock and owns that
+    serialisation itself.
+
+    Args:
+        account_id: The revolving account the door has gated.
+        row_id: The ``budget.credit_card_params`` row's id, from the URL.
+
+    Returns:
+        ``True`` when the version was this card's and is now deleted;
+        ``False`` when the card holds no version with that id (nothing
+        written).
+
+    Raises:
+        CardTermsRemovalRefused: When *row_id* is the card's only version
+            (nothing written).
+    """
+    versions = load_card_term_versions(account_id)
+    doomed = next((v for v in versions if v.id == row_id), None)
+    if doomed is None:
+        return False
+    if len(versions) == 1:
+        raise CardTermsRemovalRefused(doomed.effective_date)
+    db.session.delete(doomed)
+    db.session.flush()
+    return True

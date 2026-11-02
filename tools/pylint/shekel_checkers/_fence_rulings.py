@@ -426,10 +426,19 @@ _FENCED_MODULE_RULINGS = {
             # sides take it: the posting writer projects it into corrections, the
             # seam's read pass folds it.
             "walk_loan_ledger",
-            # A loan's CONTRACT TERMS, loaded (plan step recurrence:R25, ruling
+            # The same walk for many loans (plan task plan#2649, ruling
+            # plan#2623): ``walk_loan_ledger``'s answer per loan, every loan's
+            # records loaded once, so the worked-out read walks an owner's
+            # loans in a fixed number of statements.  Ruled on
+            # ``walk_loan_ledger``'s ground, which it adds nothing to -- the
+            # precedent ``owner_cash_records`` set beside ``walk_cash_ledger``
+            # (plan task plan#2648): facts per loan, never a balance at T.
+            "walk_loan_ledgers",
+            # A loan's CONTRACT TERMS (plan step recurrence:R25, ruling
             # R-R105): ``build_loan_calendar`` returns the loan's
             # ``LoanCalendar`` -- its origination, due day, rate periods and
-            # escrow lines -- and ``LoanCalendars`` is the read pass's memo of
+            # escrow lines, built from the rows its caller loaded since plan
+            # task plan#2649 -- and ``LoanCalendars`` is the read pass's memo of
             # it, whose ``loan_params_of`` / ``loan_calendar_of`` methods hand
             # back the loan's ``LoanParams`` row and that same calendar.  Terms, not a
             # balance: nothing in them is a figure owed on any date, and the
@@ -525,11 +534,13 @@ _FENCED_MODULE_RULINGS = {
             #     exposure rather than resisting one.
             "loan_event_stream",
             "replay_loan_events",
-            #   * ``load_loan_stream`` (plan step recurrence:R16-c-1) is
-            #     ``walk_loan_ledger``'s LOAD half: the same rows mapped onto
-            #     the same stream, before any replay -- ``loan_event_stream``'s
-            #     ruling with the loads attached; its ``visible_by`` bound is
+            #   * ``load_loan_stream`` (plan step recurrence:R16-c-1) is the
+            #     seam's per-pass load: a loan's rows mapped onto its stream,
+            #     before any replay -- ``loan_event_stream``'s ruling with the
+            #     loads attached; its ``visible_by`` bound is
             #     ``confirmed_shadows_through``'s, below, applied at the load.
+            #     It was ``walk_loan_ledger``'s load half too, unbounded, until
+            #     plan task plan#2649.
             "load_loan_stream",
             #   * ``replay_loan_stream`` (plan step recurrence:R16-c-1) is that
             #     same replay handed a stream and returning the walk --

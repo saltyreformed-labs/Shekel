@@ -33,10 +33,14 @@ opening and assertions, in four statements whatever the number of accounts
 or movements, and hands back each account's walk built from its own slice --
 so a movement's lines and its account's walk read it once.  Each walk is
 then framed and booked in memory (:func:`._account_walk.account_corrections`).
-A loan still loads its own records through its walk
-(:func:`app.services.loan_ledger.walk_loan_ledger`), so the read's
-statements grow with the owner's LOANS alone, until plan task plan#2649
-loads them owner-wide too.
+Every loan is walked from one load too
+(:func:`app.services.loan_ledger.walk_loan_ledgers`, plan task plan#2649):
+its terms off the account load, which joins ``Account.loan_params``, and
+its statements, rate history, escrow lines and settled payments each loaded
+once for all of the owner's loans.  So the read's statements do not grow with
+the number of accounts, loans or movements: they depend only on which kinds of
+record the owner holds (an escrow line's versions, a settled payment's
+paychecks, a $0.00 close's records are each one statement when any exists).
 
 **A scenario the store has never reconciled can differ from it by
 construction**, and that difference is the store's: its account and loan
@@ -60,7 +64,7 @@ from app.services.account_projection import (
     classify_account,
 )
 from app.services.cash_ledger import CashLedgerWalk, owner_cash_records
-from app.services.loan_ledger import walk_loan_ledger
+from app.services.loan_ledger import LoanLedgerWalk, walk_loan_ledgers
 from app.services.pay_calendar import PayCalendar, calendar_for
 from app.services.transfer_legs import PlanItem
 
@@ -131,7 +135,9 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
     owner's cash records are loaded once too
     (:func:`app.services.cash_ledger.owner_cash_records`): the movements the
     lines are booked from, and each non-loan account's walk built from the
-    same movements.
+    same movements; and so are the loans'
+    (:func:`app.services.loan_ledger.walk_loan_ledgers`), each loan's terms
+    the ``loan_params`` its account row was loaded with.
 
     Args:
         owner_id: The owner whose ledger to read.
@@ -160,10 +166,13 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
     cash = owner_cash_records(owner_id, scenario_id, [
         account for account in accounts if not _is_loan(account)
     ])
+    loan_walks = walk_loan_ledgers(
+        [account for account in accounts if _is_loan(account)], scenario_id,
+    )
     lines = _movement_lines(cash.movements)
     for account in accounts:
         lines.extend(_correction_lines(
-            _correction_targets(account, scenario_id, calendar, cash.walks),
+            _correction_targets(account, calendar, cash.walks, loan_walks),
         ))
     return [line for line in lines if line.amount != 0]
 
@@ -226,37 +235,36 @@ def _movement_lines(
 
 def _correction_targets(
     account: Account,
-    scenario_id: int,
     calendar: PayCalendar,
     walks: dict[int, CashLedgerWalk],
+    loan_walks: dict[int, LoanLedgerWalk],
 ) -> dict[CorrectionKey, ChartLegMap]:
     """Return one account's correction legs, by the walk its kind takes.
 
     An amortizing account is a loan, whose opening, true-ups and payment
-    splits come off its loan walk; every other account's opening and
-    true-ups come off its records walk, the one the owner's load built
-    (*walks*).  The dispatch is :func:`_is_loan`'s, the predicate both
-    writers split their account sets by (the account walk refuses a loan by
-    it, and the non-loan set's SQL filter reads the column it maps), and the
-    one the read chose *walks*' accounts by.  A loan with no terms walks to
-    nothing, as it posts nothing.
+    splits come off its loan walk (*loan_walks*); every other account's
+    opening and true-ups come off its records walk (*walks*), each built by
+    the owner's one load of its kind.  The dispatch is :func:`_is_loan`'s,
+    the predicate both writers split their account sets by (the account walk
+    refuses a loan by it, and the non-loan set's SQL filter reads the column
+    it maps), and the one the read chose each map's accounts by.  A loan
+    with no terms walks to nothing, as it posts nothing.
 
     Args:
         account: The account, with ``account_type`` loaded.
-        scenario_id: The scenario a loan's records are walked in.
         calendar: The owner's whole pay calendar, which files each anchor
             correction by its day.
         walks: Each non-loan account's walk, by account id
             (:attr:`app.services.cash_ledger.OwnerCashRecords.walks`).
+        loan_walks: Each loan's walk, by account id
+            (:func:`app.services.loan_ledger.walk_loan_ledgers`).
 
     Returns:
         ``{(source_kind_id, pay_period_id, entry_date): {chart key: (amount,
         posting_kind_id)}}``.
     """
     if _is_loan(account):
-        return loan_correction_targets(
-            walk_loan_ledger(account.id, scenario_id), account, calendar,
-        )
+        return loan_correction_targets(loan_walks[account.id], account, calendar)
     return account_correction_targets(
         account, account_corrections(walks[account.id]), calendar,
     )

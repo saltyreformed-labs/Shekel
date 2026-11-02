@@ -51,6 +51,7 @@ worth the figure its transfer stores
 Architecture).
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from app.extensions import db
@@ -285,6 +286,10 @@ def settled_income_legs(
         Every settled payment's leg, ascending by ``(pay_period.start_date,
         transfer id)``; ``[]`` when the loan has no settled payment.
 
+    A door over :func:`_settled_legs_by_account`, the one query, which the
+    owner's load (:func:`._records.load_loan_records`) runs over every loan
+    at once (plan task plan#2649).
+
     Raises:
         ValueError: When a transfer carries a status that is neither settled
             nor ``Projected``.  Named here because this view is the door the
@@ -292,11 +297,43 @@ def settled_income_legs(
             reach it through, so a broken status seed surfaces on every loan
             surface at once rather than on one.
     """
+    return _settled_legs_by_account(
+        [account_id], scenario_id, options=options,
+    ).get(account_id, [])
+
+
+def _settled_legs_by_account(
+    account_ids: Collection[int], scenario_id: int, *, options: tuple,
+) -> dict[int, list[TransferLeg]]:
+    """Return each account's SETTLED payments as legs, keyed by its id.
+
+    :func:`settled_income_legs`' body over a set of accounts: the transfers
+    into any of them in one statement, their periods in one
+    (:func:`~app.utils.amount_relationships.transfer_period_load_option`)
+    and the records not already held in at most one
+    (:func:`~app.services.transfer_legs.preload_side_records`), whatever the
+    number of accounts.  Each list is the door's answer for its account: the
+    transfers into it alone -- a leg is keyed by its transfer's
+    ``to_account_id`` -- refused by the same status test and sorted by the
+    same key.
+
+    Args:
+        account_ids: The accounts whose settled payments to load.
+        scenario_id: The budget scenario to scope to.
+        options: As :func:`settled_income_legs`.
+
+    Returns:
+        ``{account id: its settled legs, ascending by (pay_period.start_date,
+        transfer id)}``; an account with no settled payment is absent.
+
+    Raises:
+        ValueError: As :func:`settled_income_legs`.
+    """
     transfers = (
         db.session.query(Transfer)
         .options(transfer_period_load_option(), *options)
         .filter(
-            Transfer.to_account_id == account_id,
+            Transfer.to_account_id.in_(account_ids),
             Transfer.scenario_id == scenario_id,
             Transfer.is_deleted.is_(False),
             ~Transfer.status_id.in_(balance_excluded_status_ids()),
@@ -317,7 +354,8 @@ def settled_income_legs(
         # is neither.
         if transfer.status_id not in settled_ids:
             raise ValueError(
-                f"transfer {transfer.id} into account {account_id} carries "
+                f"transfer {transfer.id} into account "
+                f"{transfer.to_account_id} carries "
                 f"status_id {transfer.status_id}, which is neither settled nor "
                 f"Projected: this partition is the app's one settled-payment "
                 f"derivation and cannot place the payment"
@@ -327,7 +365,10 @@ def settled_income_legs(
         transfers, lambda transfer: (transfer.to_account_id,),
     )
     legs.sort(key=lambda leg: (leg.pay_period.start_date, leg.transfer.id))
-    return legs
+    by_account: dict[int, list[TransferLeg]] = {}
+    for leg in legs:
+        by_account.setdefault(leg.transfer.to_account_id, []).append(leg)
+    return by_account
 
 
 def projected_income_legs(

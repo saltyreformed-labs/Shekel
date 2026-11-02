@@ -25,7 +25,7 @@ What these cases pin:
   whole figure OUT, never in;
 * **its statements do not grow with the number of sources** (finding
   plan#2147's requirement, ruling plan#2136), **nor with the number of
-  accounts** (ruling plan#2623).
+  accounts or loans** (ruling plan#2623).
 
 Whether the lines equal the STORED ledger's to the cent is the parity test's
 (plan#2527) and the production run's (plan#2528).
@@ -805,3 +805,50 @@ class TestItsStatementsDoNotGrowWithItsSources:
 
             assert len(six) > len(two)
             assert len(six_statements) == len(two_statements)
+
+    def test_three_loans_read_in_the_statements_one_does(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """One loan, then three: one count (ruling plan#2623, plan task plan#2649).
+
+        Each loan holds its terms, a true-up, an escrow line and a settled
+        payment from Checking, so every loan the second read walks has
+        records of each kind its walk folds.  The loans' terms ride the
+        account load (``Account.loan_params``), and their statements, rate
+        history, escrow lines and payments are each loaded once whatever the
+        number of loans (``loan_ledger.walk_loan_ledgers``), so a per-loan
+        load -- a walk that loads its own loan's records -- makes the second
+        read issue more statements per added loan and fails this.  Each read
+        starts from an expired session, and the second reads more lines than
+        the first, so both measured a read that grew.
+        """
+        with app.app_context():
+            checking = seed_user["account"]
+
+            def _add_loans(count, first):
+                """Add *count* loans, each with escrow and paid into once."""
+                for number in range(first, first + count):
+                    loan = create_loan_with_trueup(
+                        seed_user, _db.session,
+                        origination_principal=Decimal("250000.00"),
+                        anchor_balance=Decimal("100000.00"),
+                        anchor_date=date(2026, 1, 10),
+                        rate=Decimal("0.06000"),
+                        origination_date=date(2025, 1, 1),
+                        name=f"Counted Loan {number}",
+                        escrow_annual=Decimal("1200.00"),
+                    )
+                    create_settled_transfer(
+                        seed_user, _db.session, checking, loan,
+                        seed_periods[1], amount=Decimal("1000.00"),
+                    )
+                _db.session.commit()
+                _db.session.expire_all()
+
+            _add_loans(1, 1)
+            one, one_statements = _statements_of(lambda: _read(seed_user))
+            _add_loans(2, 2)
+            three, three_statements = _statements_of(lambda: _read(seed_user))
+
+            assert len(three) > len(one)
+            assert len(three_statements) == len(one_statements)

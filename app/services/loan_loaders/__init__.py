@@ -1,7 +1,7 @@
 """
 Shekel Budget App -- Loan Data Loaders (the loan services' leaf layer)
 
-The pure data-loading functions every loan consumer shares, in two leaves:
+The pure data-loading functions every loan consumer shares, in three modules:
 
 * :mod:`._terms` -- a loan's CONTRACTUAL facts: the
   :class:`~app.models.loan_params.LoanParams` /
@@ -13,9 +13,13 @@ The pure data-loading functions every loan consumer shares, in two leaves:
 * :mod:`._legs` -- WHICH transfers are an account's payments and which of
   them have HAPPENED: the single settled/projected partition every
   settled-payment consumer reads.
+* :mod:`._records` -- many loans' records at once (plan task plan#2649): each
+  kind a loan's walk folds, loaded once for every loan an owner holds, over
+  the same bodies the one-loan doors above call.
 
-The graph is a line -- ``_terms`` imports ``_legs`` for the settled set the
-escrow forward-only guard bounds on, and nothing there reads back.
+The graph has no cycle -- ``_terms`` imports ``_legs`` for the settled set the
+escrow forward-only guard bounds on, ``_records`` imports both, and nothing
+reads back.
 
 **It was one module until plan step balance:X-bl-2a**, which gave the shadow
 half a partition producer and moved the amount model's eager-load set out of the
@@ -59,6 +63,7 @@ from ._legs import (
     projected_income_legs,
     settled_income_legs,
 )
+from ._records import LoanRecords, load_loan_records
 from ._terms import (
     LoanAnchorFact,
     _rate_change_records_from,
@@ -80,6 +85,7 @@ from ._terms import (
 __all__ = [
     "IncomeLegs",
     "LoanAnchorFact",
+    "LoanRecords",
     "income_legs",
     "installment_for",
     "precedes_origination",
@@ -89,6 +95,7 @@ __all__ = [
     "load_loan_account_ids_for_user",
     "load_loan_anchor_facts",
     "load_loan_params",
+    "load_loan_records",
     "load_rate_changes",
     "load_rate_history",
     "load_standing_loan_assertions",

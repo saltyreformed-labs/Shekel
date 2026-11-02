@@ -49,8 +49,6 @@ from sqlalchemy.exc import IntegrityError
 from app import ref_cache
 from app.enums import CompoundingFrequencyEnum
 from app.extensions import db
-from app.models.account import Account
-from app.models.calibration_override import CalibrationOverride
 from app.models.interest_params import InterestParams
 from app.models.loan_features import RateHistory
 from app.models.paycheck_line import PaycheckLine
@@ -95,10 +93,6 @@ CK_STATE_TAX_DEDUCTION = "ck_state_tax_configs_nonneg_standard_deduction"
 CK_STATE_TAX_YEAR = "ck_state_tax_configs_valid_tax_year"
 CK_FICA_TAX_YEAR = "ck_fica_configs_valid_tax_year"
 CK_BRACKET_TAX_YEAR = "ck_tax_bracket_sets_valid_tax_year"
-CK_CALIB_FED = "ck_calibration_overrides_valid_federal_rate"
-CK_CALIB_STATE = "ck_calibration_overrides_valid_state_rate"
-CK_CALIB_SS = "ck_calibration_overrides_valid_ss_rate"
-CK_CALIB_MEDICARE = "ck_calibration_overrides_valid_medicare_rate"
 
 
 #: The shared reader, moved to ``tests/_test_helpers`` at plan step
@@ -392,6 +386,7 @@ class TestMiscSchemaBounds:
     """Bounds added on F-077-adjacent schemas (investment; FICA and state until X-at-1)."""
 
     def test_invest_negative_contribution_limit_rejected(self):
+        """A -1 annual contribution limit is refused at the form, on its own field."""
         schema = InvestmentParamsCreateSchema()
         with pytest.raises(ValidationError) as info:
             schema.load({
@@ -401,6 +396,7 @@ class TestMiscSchemaBounds:
         assert "annual_contribution_limit" in info.value.messages
 
     def test_invest_contribution_limit_year_out_of_range_rejected(self):
+        """A contribution-limit year of 1999, below the schema's 2000-2100 range, is refused."""
         schema = InvestmentParamsCreateSchema()
         with pytest.raises(ValidationError) as info:
             schema.load({
@@ -483,6 +479,7 @@ class TestInterestParamsCheck:
     """``budget.interest_params.apy`` CHECK (F-077)."""
 
     def test_apy_above_one_rejected(self, app, seed_user):
+        """A raw INSERT of a 150% APY (1.5) is refused by ``ck_interest_params_valid_apy``."""
         with app.app_context():
             account = _insert_account(seed_user, "HYSA 1", "HYSA")
             with pytest.raises(IntegrityError) as info:
@@ -517,6 +514,7 @@ class TestInterestParamsCheck:
             assert params.apy == Decimal("1.00000")
 
     def test_apy_negative_rejected(self, app, seed_user):
+        """A raw INSERT of a -0.01 APY is refused by the same CHECK's lower bound."""
         with app.app_context():
             account = _insert_account(seed_user, "HYSA 3", "HYSA")
             with pytest.raises(IntegrityError) as info:
@@ -540,9 +538,11 @@ class TestInvestmentParamsCheck:
     """``budget.investment_params`` CHECK constraints (F-077)."""
 
     def _account(self, seed_user):
+        """Insert the 401(k) account each case's investment params belong to."""
         return _insert_account(seed_user, "401k", "401(k)")
 
     def test_negative_contribution_limit_rejected(self, app, seed_user):
+        """A raw INSERT of a -$1.00 contribution limit is refused by its non-negative CHECK."""
         with app.app_context():
             account = self._account(seed_user)
             with pytest.raises(IntegrityError) as info:
@@ -590,6 +590,7 @@ class TestInvestmentParamsCheck:
             assert _constraint_name_from(info.value) == CK_INVEST_RETURN
 
     def test_employer_flat_above_one_rejected(self, app, seed_user):
+        """A raw INSERT of a 150% employer flat contribution (1.5) is refused by its CHECK."""
         with app.app_context():
             account = self._account(seed_user)
             with pytest.raises(IntegrityError) as info:
@@ -612,6 +613,11 @@ class TestInvestmentParamsCheck:
             assert _constraint_name_from(info.value) == CK_INVEST_FLAT
 
     def test_employer_match_above_ten_rejected(self, app, seed_user):
+        """A raw UPDATE of the employer match to -0.01 is refused by its CHECK (``0 <= x <= 10``).
+
+        The column's ``Numeric(5,4)`` caps the match at 9.9999, below the CHECK's upper
+        bound of 10, so the case stores 9.9999 and grades the CHECK's lower bound.
+        """
         with app.app_context():
             account = self._account(seed_user)
             # The Numeric(5,4) column physically caps below 10 so we
@@ -662,6 +668,7 @@ class TestInvestmentParamsCheck:
             assert _constraint_name_from(info.value) == CK_INVEST_MATCH
 
     def test_employer_match_cap_above_one_rejected(self, app, seed_user):
+        """A raw INSERT of a 150% employer match cap (1.5) is refused by its CHECK."""
         with app.app_context():
             account = self._account(seed_user)
             with pytest.raises(IntegrityError) as info:
@@ -688,6 +695,7 @@ class TestRateHistoryCheck:
     """``budget.rate_history.interest_rate`` CHECK (F-077)."""
 
     def test_rate_above_one_rejected(self, app, seed_user):
+        """A raw INSERT of a 150% loan rate (1.5) is refused by the rate CHECK's upper bound."""
         with app.app_context():
             account = _insert_account(
                 seed_user, "Mortgage R", "Mortgage",
@@ -707,6 +715,7 @@ class TestRateHistoryCheck:
             assert _constraint_name_from(info.value) == CK_RATE_HISTORY
 
     def test_rate_at_one_accepted(self, app, seed_user):
+        """A 100% loan rate (1.00000) is stored: the rate CHECK's upper bound is inclusive."""
         with app.app_context():
             account = _insert_account(
                 seed_user, "Mortgage R2", "Mortgage",
@@ -752,6 +761,7 @@ class TestUserSettingsCheck:
     """``auth.user_settings`` rate CHECK constraints (F-077)."""
 
     def test_swr_above_one_rejected(self, app, seed_user):
+        """A raw UPDATE of the safe withdrawal rate to 150% (1.5) is refused by its CHECK."""
         with app.app_context():
             settings = (
                 db.session.query(UserSettings)
@@ -771,6 +781,7 @@ class TestUserSettingsCheck:
             assert _constraint_name_from(info.value) == CK_USER_SWR
 
     def test_estimated_tax_rate_above_one_rejected(self, app, seed_user):
+        """A raw UPDATE of the estimated retirement tax rate to 200% (2.0) is refused."""
         with app.app_context():
             settings = (
                 db.session.query(UserSettings)
@@ -794,6 +805,7 @@ class TestPaycheckLineCheck:
     """``salary.paycheck_lines`` CHECK constraints (F-077)."""
 
     def _make_profile(self, seed_user):
+        """Insert a single filer's salary profile, its pay list started at $3,846.15."""
         single_id = (
             db.session.query(FilingStatus)
             .filter_by(name="single").one().id
@@ -810,6 +822,7 @@ class TestPaycheckLineCheck:
         return profile
 
     def _make_deduction_kwargs(self):
+        """Return the kind and calc-method ids of a flat pre-tax deduction."""
         timing_id = (
             db.session.query(PaycheckLineKind)
             .filter_by(name="pre_tax_deduction").one().id
@@ -824,6 +837,7 @@ class TestPaycheckLineCheck:
         }
 
     def test_inflation_rate_above_one_rejected(self, app, seed_user):
+        """A raw UPDATE of a line's inflation rate to 150% (1.5) is refused by its CHECK."""
         with app.app_context():
             profile = self._make_profile(seed_user)
             kwargs = self._make_deduction_kwargs()
@@ -848,6 +862,7 @@ class TestPaycheckLineCheck:
             assert _constraint_name_from(info.value) == CK_DEDUCTION_INFL_RATE
 
     def test_inflation_month_thirteen_rejected(self, app, seed_user):
+        """A raw UPDATE of a line's inflation month to 13 is refused by its 1-12 CHECK."""
         with app.app_context():
             profile = self._make_profile(seed_user)
             kwargs = self._make_deduction_kwargs()
@@ -877,6 +892,7 @@ class TestSalaryRaiseCheck:
     """``salary.salary_raises.effective_year`` CHECK (F-077)."""
 
     def _make_profile(self, seed_user):
+        """Insert a single filer's salary profile, its pay list started at $3,846.15."""
         single_id = (
             db.session.query(FilingStatus)
             .filter_by(name="single").one().id
@@ -893,6 +909,7 @@ class TestSalaryRaiseCheck:
         return profile
 
     def test_effective_year_below_2000_rejected(self, app, seed_user):
+        """A raw INSERT of a raise effective in 1999 is refused by its 2000-2100 year CHECK."""
         with app.app_context():
             profile = self._make_profile(seed_user)
             type_id = (
@@ -1046,76 +1063,3 @@ class TestTaxBracketSetCheck:
                 db.session.flush()
             db.session.rollback()
             assert _constraint_name_from(info.value) == CK_BRACKET_TAX_YEAR
-
-
-class TestCalibrationOverrideCheck:
-    """``salary.calibration_overrides`` effective-rate CHECK constraints."""
-
-    def _make_profile(self, seed_user):
-        """Build and persist a minimal salary profile for the calibration tests."""
-        single_id = (
-            db.session.query(FilingStatus)
-            .filter_by(name="single").one().id
-        )
-        profile = SalaryProfile(
-            user_id=seed_user["user"].id,
-            scenario_id=seed_user["scenario"].id,
-            filing_status_id=single_id,
-            name="Cal",
-        )
-        db.session.add(profile)
-        start_test_pay_list(profile, Decimal("3846.15"))  # $100,000.00 a year / 26
-        db.session.commit()
-        return profile
-
-    def _build_calibration(self, profile, **overrides):
-        """Return CalibrationOverride kwargs with realistic defaults; overrides
-        replace any keys."""
-        base = {
-            "salary_profile_id": profile.id,
-            "actual_gross_pay": Decimal("3846.15"),
-            "actual_federal_tax": Decimal("400.00"),
-            "actual_state_tax": Decimal("160.00"),
-            "actual_social_security": Decimal("238.46"),
-            "actual_medicare": Decimal("55.77"),
-            "effective_federal_rate": Decimal("0.1040"),
-            "effective_state_rate": Decimal("0.0416"),
-            "effective_ss_rate": Decimal("0.0620"),
-            "effective_medicare_rate": Decimal("0.0145"),
-            "pay_stub_date": date(2026, 1, 15),
-            "is_active": True,
-        }
-        base.update(overrides)
-        return base
-
-    @pytest.mark.parametrize(
-        "field, constraint",
-        [
-            ("effective_federal_rate", CK_CALIB_FED),
-            ("effective_state_rate", CK_CALIB_STATE),
-            ("effective_ss_rate", CK_CALIB_SS),
-            ("effective_medicare_rate", CK_CALIB_MEDICARE),
-        ],
-    )
-    def test_effective_rate_above_one_rejected(
-        self, app, seed_user, field, constraint,
-    ):
-        """Storage rejects each parameterised effective rate when > 1."""
-        with app.app_context():
-            profile = self._make_profile(seed_user)
-            kwargs = self._build_calibration(profile, **{field: Decimal("1.5")})
-            with pytest.raises(IntegrityError) as info:
-                cal = CalibrationOverride(**kwargs)
-                db.session.add(cal)
-                db.session.flush()
-            db.session.rollback()
-            assert _constraint_name_from(info.value) == constraint
-
-    def test_all_rates_in_range_accepted(self, app, seed_user):
-        """The exemplar pay-stub rates from the calibration tutorial pass."""
-        with app.app_context():
-            profile = self._make_profile(seed_user)
-            cal = CalibrationOverride(**self._build_calibration(profile))
-            db.session.add(cal)
-            db.session.commit()
-            assert cal.id is not None

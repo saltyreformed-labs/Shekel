@@ -46,7 +46,7 @@ from typing import Callable, Iterable
 # Inclusion criteria:
 #   * Tables in the ``budget``, ``salary``, or ``auth`` schema that
 #     hold user-controlled financial state, salary configuration,
-#     calibration overrides, tax-config admin data, or auth state.
+#     tax-config admin data, or auth state.
 #   * The ``ref`` schema is intentionally excluded with one exception
 #     (``ref.account_types``).  Read-only seed catalogues like
 #     ``ref.statuses`` or ``ref.transaction_types`` would drown the
@@ -119,7 +119,6 @@ AUDITED_TABLES: tuple[tuple[str, str], ...] = (
     # in the seed script's write semantics.
     ("ref", "account_types"),
     # ── salary schema ────────────────────────────────────────────────
-    ("salary", "calibration_overrides"),
     ("salary", "fica_configs"),
     ("salary", "pay_entries"),
     ("salary", "pay_stub_line_amounts"),

@@ -26,7 +26,6 @@ nothing out.  Reads and writes the posting ledger through
 from app.extensions import db
 from app.models.ref import Status
 from app.models.transfer import Transfer
-from app.services import account_posting_service
 from app.services import posting_service
 from app.services.transfer_service._loan_posting import (
     _resync_vacated_loan,
@@ -79,10 +78,12 @@ from app.services.transfer_service._loan_posting import (
 # the sense this set names -- ``_posting_write.reconcile_periods`` takes the
 # per-ledger-account delta over the UNION of what is posted and what is
 # targeted, so the vacated accounts reverse to zero and the new ones post the
-# effect, converging in one pass.  What that reconcile does NOT reach is the
-# vacated accounts' own anchor corrections and, when the vacated destination was
-# an amortizing loan, that loan's genesis ledger; both are re-derived
-# explicitly in :func:`_reconcile_postings_after_update`.
+# effect, converging in one pass.  Each reversal is a delta on the vacated
+# account's own linked row, so the pair's self-heal re-checks that account's
+# anchor corrections (plan task plan#2613).  What that reconcile does NOT
+# reach is, when the vacated destination was an amortizing loan, that loan's
+# genesis ledger, re-derived explicitly in
+# :func:`_reconcile_postings_after_update`.
 _POSTING_RELEVANT_FIELDS = frozenset(
     {
         "status_id", "amount_ownership", "figure", "pay_period_id",
@@ -95,7 +96,6 @@ _POSTING_RELEVANT_FIELDS = frozenset(
 def _reconcile_postings_after_update(
     xfer: Transfer,
     updates: dict[str, object],
-    vacated: "tuple[int, ...]" = (),
     vacated_destination_id: "int | None" = None,
 ) -> None:
     """Bring the posting ledger back in step after an ``update_transfer`` edit.
@@ -149,39 +149,36 @@ def _reconcile_postings_after_update(
       self-heal gone too it does not (Savings ``$350.00`` against
       ``$200.00``).
 
-    * **The accounts an ENDPOINT MOVE left behind (plan step R10-b), LAST**: the cash
-      reconcile above heals the LEGS by itself -- ``reconcile_periods`` takes
-      the per-ledger-account delta over the union of posted and target, so a
-      vacated ledger account reverses to zero in the same pass the new one
-      posts -- but two things it emits are scoped to the transfer's CURRENT
-      endpoints and reach no further.  ``sync_transfer_postings``' own
-      Step-5 self-heal names ``(from_account_id, to_account_id)``, so a vacated
-      account's opening / true-up corrections are re-derived here instead; and
-      when the vacated destination was an amortizing LOAN, that loan's genesis
-      ledger and its recurring payment's window both still count a payment it
-      no longer has (:func:`._loan_posting._resync_vacated_loan`).  Both walks
-      are idempotent and neither is gated on the transfer being settled: a
-      PROJECTED payment posts no cash but is still inside the payoff projection
-      the loan's window is bounded by, so a projected payment moving off a loan
-      moves that loan's payoff.
+    * **The loan an ENDPOINT MOVE left behind (plan step R10-b), LAST**: the
+      cash reconcile above heals the LEGS by itself -- ``reconcile_periods``
+      takes the per-ledger-account delta over the union of posted and target,
+      so a vacated ledger account reverses to zero in the same pass the new
+      one posts -- and its self-heal reads the accounts off the deltas it
+      emitted, so the reversal re-checks the vacated account's opening /
+      true-up corrections (plan task plan#2613; the self-heal named the
+      transfer's CURRENT endpoints until then, and this function walked each
+      vacated account itself).  What no delta carries is a vacated
+      destination LOAN's genesis ledger and its recurring payment's window,
+      which both still count a payment it no longer has
+      (:func:`._loan_posting._resync_vacated_loan`).  That walk is idempotent
+      and not gated on the transfer being settled: a PROJECTED payment posts
+      no cash but is still inside the payoff projection the loan's window is
+      bounded by, so a projected payment moving off a loan moves that loan's
+      payoff.
 
     Args:
         xfer: The updated, flushed :class:`Transfer`.
         updates: The ``update_transfer`` kwargs that were applied.
-        vacated: The account IDs this update moved the transfer OFF
-            (:attr:`_Endpoints.vacated`); empty for every update that names no
-            account, which is every caller outside the recurrence engine and the
-            non-repeating propagation.
-        vacated_destination_id: Which of those was the DESTINATION, or ``None``.
-            Only that one can have been a loan whose payment set counted this
-            transfer; see the comment at the call.
+        vacated_destination_id: The account this update moved the transfer's
+            DESTINATION off (:attr:`_Endpoints.vacated_destination_id`), or
+            ``None``.  Only that one can have been a loan whose payment set
+            counted this transfer; see the comment at the call.
     """
-    # **The vacated walks below need no disjunct of their own**, and three
+    # **The vacated loan's walk below needs no disjunct of its own**, and three
     # adversarial reviews of this step each flagged the one that stood here.
-    # *vacated* is non-empty only when ``from_account_id`` or ``to_account_id``
-    # is in *updates*, and both are members of
-    # :data:`_POSTING_RELEVANT_FIELDS` -- so ``vacated`` implies
-    # ``needs_reconcile`` by MEMBERSHIP in that set, and ``or vacated`` could
+    # *vacated_destination_id* is set only when ``to_account_id`` is in
+    # *updates*, a member of :data:`_POSTING_RELEVANT_FIELDS` -- so it implies
+    # ``needs_reconcile`` by MEMBERSHIP in that set, and an ``or`` on it could
     # never be the term that admitted a call.  A guard no input can exercise is
     # the shape this step deleted from both retention predicates; the
     # implication is stated here instead, where the set it rests on is three
@@ -207,21 +204,13 @@ def _reconcile_postings_after_update(
         # the seam has already dated or un-dated the movements above.
         posting_service.sync_transfer_postings(xfer)
         _sync_loan_postings_if_loan(xfer)
-    # LAST, and the position is load-bearing rather than tidy: both walks below
-    # read the vacated account's ledger, and until ``sync_transfer_postings``
-    # above has reversed this transfer's legs off it that ledger still holds a
-    # net for a transfer with no leg there.  Run first instead, the account
-    # walk raised ``PostingError`` -- *"Ledger account 8 holds a nonzero net for
-    # transfer ids [409] but no active shadow on account 1 resolves them;
-    # Transfer Invariant 1 is broken"* -- which was the invariant correctly
-    # reporting a ledger this function had not finished moving.  Measured on a
-    # production clone before the order was fixed.
-    for account_id in vacated:
-        account_posting_service.sync_account_anchor_postings(
-            account_id, xfer.scenario_id,
-        )
-    # The LOAN half is the vacated DESTINATION's alone, and that narrowing is a
-    # measurement rather than an economy.  A loan reached as a transfer's SOURCE
+    # LAST, and the position is load-bearing rather than tidy: the loan's walk
+    # reads its own linked ledger, which holds this transfer's leg until
+    # ``sync_transfer_postings`` above has reversed it.  (The vacated accounts'
+    # anchor re-check that stood here went at plan task plan#2613: that sync's
+    # self-heal reads them off the reversal's own legs.)  The loan walk is the
+    # vacated DESTINATION's alone, and that narrowing is a measurement rather
+    # than an economy.  A loan reached as a transfer's SOURCE
     # carries that transfer's EXPENSE leg, and a loan's payment set is
     # ``loan_loaders.income_legs`` -- transfers INTO the loan only -- so such
     # a transfer was never one of the loan's payments and there is no split to

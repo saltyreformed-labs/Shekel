@@ -515,9 +515,10 @@ class TransactionEntry(
     # plan step ``credit_card:CC-5-1`` (rulings **R-BAL75**, **R-BAL76**), read
     # on this account by the fold (``cash_ledger._movement_scope._on_account``),
     # the posted ledger (``ledger_lines.purchase_target``) and the anchor
-    # self-heal (``posting_service._family_accounts``), whatever account its
-    # parent row names.  ``ON DELETE RESTRICT``, as ``transactions.account_id``
-    # is: a record of money that moved through an account does not vanish with
+    # self-heal (which reads it off the legs posted on this account's linked
+    # row, plan task plan#2613), whatever account its parent row names.
+    # ``ON DELETE RESTRICT``, as ``transactions.account_id`` is: a record of
+    # money that moved through an account does not vanish with
     # the account (ruling **R-CC32**), and this single-column key is the
     # ``account`` relationship's declared join path beside the composite owner
     # key above that holds the account to the row's owner.

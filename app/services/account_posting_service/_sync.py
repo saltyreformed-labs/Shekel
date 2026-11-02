@@ -42,13 +42,13 @@ commits -- the caller owns the transaction boundary.
 """
 
 import logging
-from collections.abc import Iterable
 
 from app import ref_cache
-from app.enums import PostingSourceEnum
+from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.journal_entry import JournalEntry, Posting
+from app.models.ledger_account import LedgerAccount
 from app.models.ref import AccountType
 from app.services.account_projection import (
     AccountProjectionKind,
@@ -232,7 +232,6 @@ def sync_account_anchor_postings_all_scenarios(account_id: int) -> None:
 
 
 def self_heal_anchor_corrections(
-    account_ids: Iterable[int],
     scenario_id: int,
     delta_entries: list[JournalEntry],
 ) -> None:
@@ -245,6 +244,18 @@ def self_heal_anchor_corrections(
     ONCE per scenario after a batch: ``resync_all_cash_postings`` after
     re-booking every source (ruling **R-BAL103**), and the one removal act
     after deleting the movements it reversed (ruling **plan#2564**).
+
+    **The accounts it visits are the deltas' own** (plan task plan#2613):
+    every real account whose LINKED row one of *delta_entries* posts on
+    (:func:`_accounts_the_deltas_post_on`).  A delta is booked where the
+    money moved and where an earlier posting of it is unwound, so its own
+    legs name every account whose records walk it can have moved.  Each
+    caller named the accounts from its source rows' CURRENT columns until
+    that task, which cannot see an account a reversal just LEFT: a settled
+    $120.00 payment whose Paid from was moved off a card reversed the card's
+    leg and never re-checked the card, whose ledger read -$380.00 against its
+    asserted -$500.00 (review plan#2521, finding A1; a defect at the merge
+    base too).
 
     **What it decides is whether the reconcile can be SKIPPED, and that is
     the honest way round.**  :func:`sync_account_anchor_postings` is
@@ -329,9 +340,6 @@ def self_heal_anchor_corrections(
     Flushes but does not commit (the caller owns the transaction).
 
     Args:
-        account_ids: The real accounts the emitted deltas' LINKED legs can
-            touch (the transfer's two endpoints / the transaction's cash
-            account -- both immutable on their source rows).
         scenario_id: The scenario the deltas were emitted in (postings are
             scenario-scoped, so only that scenario's corrections can have
             moved).
@@ -360,7 +368,7 @@ def self_heal_anchor_corrections(
     # blocks before its first read, then reads a boundary that already covers
     # its own entry, and fires.
     earliest = min(entry.entry_date for entry in delta_entries)
-    for account_id in sorted(set(account_ids)):
+    for account_id in _accounts_the_deltas_post_on(delta_entries):
         # ONE statement of "the account's coverage boundary", asked through the
         # rule's ONE implementation rather than re-spelled as a ``<=`` here.
         # This module had its own copy of both; a second copy of this question
@@ -379,6 +387,43 @@ def self_heal_anchor_corrections(
             account_id, scenario_id,
         ):
             sync_account_anchor_postings(account_id, scenario_id)
+
+
+def _accounts_the_deltas_post_on(delta_entries: list[JournalEntry]) -> list[int]:
+    """Return the real accounts whose LINKED row the deltas post on, ascending.
+
+    :func:`self_heal_anchor_corrections`' account set, read off the legs the
+    caller just emitted: each entry's postings are the ones the balanced
+    write attached in this session, so naming their chart rows reads no
+    statement, and one statement maps those rows to the accounts they are
+    linked to.  A category, transit or owner-bucket leg names no account,
+    and a counter row is never a source delta's leg.
+
+    Args:
+        delta_entries: The just-emitted delta entries (non-empty).
+
+    Returns:
+        The distinct account ids, ascending; a loan's included, which
+        :func:`sync_account_anchor_postings` skips structurally.
+    """
+    ledger_ids = {
+        posting.ledger_account_id
+        for entry in delta_entries
+        for posting in entry.postings
+    }
+    rows = (
+        db.session.query(LedgerAccount.account_id)
+        .filter(
+            LedgerAccount.id.in_(ledger_ids),
+            LedgerAccount.kind_id == ref_cache.ledger_account_kind_id(
+                LedgerAccountKindEnum.LINKED,
+            ),
+        )
+        .distinct()
+        .order_by(LedgerAccount.account_id)
+        .all()
+    )
+    return [account_id for (account_id,) in rows]
 
 
 def _has_posted_anchor_correction(account_id: int, scenario_id: int) -> bool:

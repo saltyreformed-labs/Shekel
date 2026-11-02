@@ -125,7 +125,7 @@ posted_purchase_effect = posting_reads.posted_purchase_effect
 
 
 def _self_heal_account_anchor_corrections(
-    account_ids: tuple, scenario_id: int, entries: list[JournalEntry],
+    scenario_id: int, entries: list[JournalEntry],
 ) -> None:
     """Re-derive anchor corrections the just-emitted source deltas staled.
 
@@ -138,17 +138,17 @@ def _self_heal_account_anchor_corrections(
     deletes with every reversal it emitted (ruling **plan#2564**), and at
     the close of an act that holds it (:func:`holding_the_anchor_re_check`,
     ruling **plan#2574**), inside which this QUEUES rather than walks: when the
-    emitted deltas touch a
+    emitted deltas post on a
     non-loan account whose latest anchor assertion sits at-or-after the
     earliest emitted ``entry_date``, that account's opening / true-up
     corrections are reconciled again in the same transaction -- see
     :func:`app.services.account_posting_service.self_heal_anchor_corrections`
-    for the predicate's correctness argument.  A no-op when nothing was
-    emitted, so the hot idempotent-resync paths pay nothing.
+    for the predicate's correctness argument, and for why the accounts are
+    the ones the deltas' own legs post on (plan task plan#2613).  A no-op
+    when nothing was emitted, so the hot idempotent-resync paths pay
+    nothing.
 
     Args:
-        account_ids: The real accounts the deltas' LINKED legs can touch
-            (immutable on their source rows).
         scenario_id: The scenario the deltas were emitted in.
         entries: The just-emitted delta entries (empty -> no-op).
     """
@@ -156,7 +156,7 @@ def _self_heal_account_anchor_corrections(
         return
     held = db.session.info.get(_HELD_RE_CHECK_KEY)
     if held is not None:
-        _hold_for_the_re_check(held, scenario_id, account_ids, entries)
+        _hold_for_the_re_check(held, scenario_id, entries)
         return
     # Pylint: ``import-outside-toplevel`` -- reverse dependency: the account
     # posting package imports this module's balanced-write path, so the
@@ -165,9 +165,7 @@ def _self_heal_account_anchor_corrections(
     # pylint: disable-next=import-outside-toplevel
     from app.services import account_posting_service
 
-    account_posting_service.self_heal_anchor_corrections(
-        account_ids, scenario_id, entries,
-    )
+    account_posting_service.self_heal_anchor_corrections(scenario_id, entries)
 
 
 # ── Public API ─────────────────────────────────────────────────────
@@ -247,20 +245,19 @@ def sync_transfer_postings(xfer: Transfer) -> list[JournalEntry]:
     Raises:
         PostingError: If a movement's account has no linked ledger account.
     """
-    entries, accounts = _rebook_transfer_family(xfer)
-    _self_heal_account_anchor_corrections(accounts, xfer.scenario_id, entries)
+    entries = _rebook_transfer_family(xfer)
+    _self_heal_account_anchor_corrections(xfer.scenario_id, entries)
     return entries
 
 
-def _rebook_transfer_family(xfer: Transfer) -> "tuple[list[JournalEntry], tuple]":
+def _rebook_transfer_family(xfer: Transfer) -> "list[JournalEntry]":
     """Bring *xfer*'s family to target; re-check no anchor correction.
 
     :func:`sync_transfer_postings`' first half.  The deploy resync runs it
     for every transfer and re-checks the anchors ONCE after its loop (ruling
-    **R-BAL103**; :func:`resync_all_cash_postings` says why).  Returns
-    ``(entries, accounts)``, the emitted deltas (``[]`` at target) and every
-    real account their linked legs can touch.  The family and each
-    movement's LEG are
+    **R-BAL103**; :func:`resync_all_cash_postings` says why).  Returns the
+    emitted deltas, ``[]`` at target.  The family and each movement's LEG
+    are
     :func:`~app.services.transfer_legs.transfer_family_movements`' (leaf
     ``X-bi-6-4a``), so no line here reads a shadow row.  It took a *posts*
     rule beside the transfer until plan task plan#2557 deleted the teardown
@@ -275,27 +272,7 @@ def _rebook_transfer_family(xfer: Transfer) -> "tuple[list[JournalEntry], tuple]
                 movement, leg, posted=purchase_posts(leg, movement),
             )
         )
-    return entries, _transfer_family_accounts(
-        xfer, [movement for movement, _leg in family],
-    )
-
-
-def _transfer_family_accounts(xfer: Transfer, movements) -> tuple:
-    """Return every real account a transfer family's legs can touch.
-
-    The transfer twin of :func:`_family_accounts`: both endpoints (the legacy
-    entry's legs landed there until plan#1845 deleted that shape, the shadows'
-    until ``X-bi-6-4d-2`` deleted them) and each movement's own account (its
-    leg lands there, ruling **R-BAL75**; one with the endpoint until the
-    settle door takes a tender of its own).
-    Deduplicated, first-seen order, so the self-heal visits an account once.
-    """
-    seen: dict[int, None] = {
-        xfer.from_account_id: None, xfer.to_account_id: None,
-    }
-    for movement in movements:
-        seen.setdefault(movement.account_id, None)
-    return tuple(seen)
+    return entries
 
 
 def sync_transaction_postings(txn: Transaction) -> list[JournalEntry]:
@@ -402,9 +379,7 @@ def sync_transaction_postings(txn: Transaction) -> list[JournalEntry]:
             account) has no ledger account.
     """
     entries = _rebook_transaction_family(txn)
-    _self_heal_account_anchor_corrections(
-        _family_accounts(txn), txn.scenario_id, entries,
-    )
+    _self_heal_account_anchor_corrections(txn.scenario_id, entries)
     return entries
 
 
@@ -426,29 +401,7 @@ def _rebook_transaction_family(txn: Transaction) -> "list[JournalEntry]":
     return entries
 
 
-def _family_accounts(txn: Transaction) -> tuple:
-    """Return every real account the family's linked legs can touch.
-
-    The row's own account and each movement's -- one set while every door
-    writes a movement on its parent's account, and two the moment one does
-    not (the key that held them equal,
-    ``fk_transaction_entries_parent_account``, went at plan step
-    ``credit_card:CC-5-1``, ruling **R-BAL76**): a movement's leg lands on
-    the movement's account
-    (``ledger_lines.purchase_target``), so the anchor self-heal must
-    look wherever a leg can land rather than at the parent alone (plan step
-    ``balance:X-bi-4a``, ruling **R-BAL75**).  Deduplicated, in first-seen
-    order, so the self-heal visits an account once.
-    """
-    seen: dict[int, None] = {txn.account_id: None}
-    for movement in txn.entries:
-        seen.setdefault(movement.account_id, None)
-    return tuple(seen)
-
-
-def reverse_leaving_movements(
-    movements,
-) -> "dict[int, tuple[set[int], list[JournalEntry]]]":
+def reverse_leaving_movements(movements) -> "dict[int, list[JournalEntry]]":
     """Reverse every leaving movement's ledger postings; re-check no anchor yet.
 
     The one removal act's first step
@@ -480,10 +433,10 @@ def reverse_leaving_movements(
     $0.00.  The act re-checks once its deletes have flushed
     (:func:`re_check_held_anchor_corrections`).
 
-    **The accounts held are each movement's own** (``account_id``, the
-    column, never the relationship a re-point may not have flushed): that is
-    where its leg lands (ruling **R-BAL75**) and the only account whose
-    records its leaving changes.
+    **No account is held beside the reversals**: the re-check reads the
+    accounts off their legs (plan task plan#2613), which are where each
+    movement was posted, the only accounts whose records its leaving
+    changes.
 
     Idempotent no-op for a movement that never posted (no recorded posting
     day, a card purchase, a non-contributing parent).  Flushes when it emits
@@ -494,24 +447,22 @@ def reverse_leaving_movements(
             (``id`` set) so its reversal can read its posted legs back.
 
     Returns:
-        The held re-check: a scenario id -> (the accounts the reversals
-        touched, the reversal entries emitted), empty when nothing posted.
+        The held re-check: a scenario id -> the reversal entries emitted
+        there, empty when nothing posted.
     """
-    held: dict[int, tuple[set[int], list[JournalEntry]]] = {}
+    held: dict[int, list[JournalEntry]] = {}
     for movement in movements:
         parent = movement_parent(movement)
         entries = emit_purchase_deltas(movement, parent, posted=False)
         if entries:
-            _hold_for_the_re_check(
-                held, parent.scenario_id, (movement.account_id,), entries,
-            )
+            _hold_for_the_re_check(held, parent.scenario_id, entries)
     return held
 
 
 def re_check_held_anchor_corrections(
-    held: "dict[int, tuple[set[int], list[JournalEntry]]]",
+    held: "dict[int, list[JournalEntry]]",
 ) -> None:
-    """Run a batch's held anchor re-check: once per scenario, accounts ascending.
+    """Run a batch's held anchor re-check: once per scenario, scenarios ascending.
 
     The ONE re-check after a batch, shared by the deploy resync (ruling
     **R-BAL103**: after every source is re-booked), the one removal act
@@ -523,28 +474,29 @@ def re_check_held_anchor_corrections(
     after this batch's writes.  A no-op when *held* is empty.
 
     Args:
-        held: A scenario id -> (accounts touched, entries emitted), as
+        held: A scenario id -> the entries emitted there, as
             :func:`_hold_for_the_re_check` builds it.
 
     Raises:
         PostingError: If a re-checked account owes a correction and has no
             linked ledger to book it on (the reconcile's emit step refuses).
     """
-    for scenario_id, (accounts, entries) in sorted(held.items()):
-        _self_heal_account_anchor_corrections(
-            tuple(sorted(accounts)), scenario_id, entries,
-        )
+    for scenario_id, entries in sorted(held.items()):
+        _self_heal_account_anchor_corrections(scenario_id, entries)
 
 
-def _hold_for_the_re_check(held: dict, scenario_id: int, accounts, entries) -> None:
+def _hold_for_the_re_check(
+    held: "dict[int, list[JournalEntry]]",
+    scenario_id: int,
+    entries: list[JournalEntry],
+) -> None:
     """Add one source's re-book or reversal to a batch's one re-check.
 
-    *held* maps a scenario id to (accounts touched, entries emitted), and
-    :func:`re_check_held_anchor_corrections` runs it.
+    *held* maps a scenario id to the entries emitted there, and
+    :func:`re_check_held_anchor_corrections` runs it; the accounts it
+    re-checks are read off those entries' legs (plan task plan#2613).
     """
-    held_accounts, held_entries = held.setdefault(scenario_id, (set(), []))
-    held_accounts.update(accounts)
-    held_entries.extend(entries)
+    held.setdefault(scenario_id, []).extend(entries)
 
 
 @contextmanager
@@ -555,8 +507,8 @@ def holding_the_anchor_re_check() -> Iterator[None]:
     rows re-checks the anchor corrections once per scenario after its last
     write -- the shape the deploy resync (ruling **R-BAL103**) and the one
     removal act (ruling **plan#2564**) already take.  Inside the block each
-    :func:`_self_heal_account_anchor_corrections` QUEUES its accounts and
-    entries rather than walking, and the close runs
+    :func:`_self_heal_account_anchor_corrections` QUEUES its entries
+    rather than walking, and the close runs
     :func:`re_check_held_anchor_corrections` over them.  Since plan task
     plan#2525 that re-check walks each account's RECORDS
     (``cash_ledger.walk_cash_ledger``), which fetches the account's transfer
@@ -586,7 +538,7 @@ def holding_the_anchor_re_check() -> Iterator[None]:
             :func:`re_check_held_anchor_corrections` raises it.
     """
     info = db.session.info
-    held: dict[int, tuple[set[int], list[JournalEntry]]] = {}
+    held: dict[int, list[JournalEntry]] = {}
     info[_HELD_RE_CHECK_KEY] = held
     try:
         yield
@@ -822,16 +774,14 @@ def resync_all_cash_postings() -> tuple[int, int]:
         .all()
     )
     # Every source's re-book is HELD for the one anchor re-check after both
-    # arms (ruling **R-BAL103**): scenario -> (accounts touched, entries).
-    held: dict[int, tuple[set[int], list[JournalEntry]]] = {}
+    # arms (ruling **R-BAL103**): scenario -> entries emitted there.
+    held: dict[int, list[JournalEntry]] = {}
     transactions_changed = 0
     for txn in transactions:
         entries = _rebook_transaction_family(txn)
         if entries:
             transactions_changed += 1
-            _hold_for_the_re_check(
-                held, txn.scenario_id, _family_accounts(txn), entries,
-            )
+            _hold_for_the_re_check(held, txn.scenario_id, entries)
 
     transfers = (
         db.session.query(Transfer)
@@ -886,13 +836,13 @@ def resync_all_cash_postings() -> tuple[int, int]:
     for xfer in transfers:
         try:
             with db.session.begin_nested():
-                entries, accounts = _rebook_transfer_family(xfer)
+                entries = _rebook_transfer_family(xfer)
         except PostingError as exc:
             skipped[xfer.id] = str(exc)
             continue
         if entries:
             transfers_changed += 1
-            _hold_for_the_re_check(held, xfer.scenario_id, accounts, entries)
+            _hold_for_the_re_check(held, xfer.scenario_id, entries)
     # The ONE anchor re-check, after every source is re-booked (ruling
     # **R-BAL103**; the docstring says why).  Outside the per-transfer
     # SAVEPOINT on purpose: the re-check refuses only for the ACCOUNT (a

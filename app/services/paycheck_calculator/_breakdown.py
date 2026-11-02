@@ -117,7 +117,11 @@ def waterfall_taxable(gross: Decimal, pre_tax: Decimal) -> Decimal:
     The income-tax base, written once for the two paychecks the formulas
     price since plan step **salary:S11-c-2c**: the engine's own
     (:func:`~._pricing.calculate_paycheck`) and a pay stub's, on the side of
-    the difference the stub supplies (:mod:`._stubs`).
+    the difference the stub supplies (:mod:`._stubs`); and, since plan step
+    **salary:S11-e** (finding plan#2660), the Taxes tab's W-2 preview, whose
+    box 1 and box 16 are the year's figure
+    (:mod:`app.services.tax_report_service`), which spelled it by hand
+    without the floor.
 
     Args:
         gross: Base pay plus the taxable earnings.

@@ -596,6 +596,34 @@ class TestPreTaxDeductions:
             report.withholding.total.state
         )
 
+    def test_box1_floors_at_zero_when_pretax_exceeds_gross(self, app, db, seed_user):
+        """6,000/period pre-tax against 5,000/period pay: box 1 is $0.00, never negative.
+
+        Finding plan#2660: box 1 is the engine's income-tax wage rule,
+        ``waterfall_taxable``, which floors at $0.00; it was spelled here by
+        hand without the floor.
+        gross = 5,000.00 x 26 = 130,000.00; pre-tax = 6,000.00 x 26 = 156,000.00.
+        Box 1 = box 16 = max(130,000 - 156,000, 0) = 0.00 (the hand spelling
+        gave -26,000.00).  The line is income-tax only, so box 5 stays at the
+        gross, 130,000.00.  The effective rate stays None (box 1 not positive).
+        """
+        profile = _committed_profile(seed_user)
+        _add_pretax_deduction(profile, "6000.0000")
+        _make_full_year_periods(seed_user["user"])
+        db.session.commit()
+
+        report = compute_tax_report(
+            seed_user["user"].id, 2026, date(2026, 3, 1),
+        )
+
+        assert report.withholding.total.gross == Decimal("130000.00")
+        assert report.liability.annual_pretax == Decimal("156000.00")
+        wages = report.w2_preview.wages
+        assert wages.box1_wages == Decimal("0.00")
+        assert wages.box16_state_wages == Decimal("0.00")
+        assert wages.box5_medicare_wages == Decimal("130000.00")
+        assert report.chips.effective_rate is None
+
 
 class TestAllPayrollTaxesLines:
     """An all-payroll-taxes line leaves W-2 boxes 3 and 5 as well as box 1.

@@ -210,6 +210,7 @@ from ._breakdown import (
     waterfall_fica_wages,
     waterfall_gross,
     waterfall_net,
+    waterfall_taxable,
 )
 from ._pricing import calculate_paycheck, project_salary
 from ._stubs import StubTotals, one_offs_change_taxes, stub_totals, tax_years_for
@@ -230,4 +231,5 @@ __all__ = [
     "waterfall_fica_wages",
     "waterfall_gross",
     "waterfall_net",
+    "waterfall_taxable",
 ]

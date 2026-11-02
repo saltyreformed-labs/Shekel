@@ -76,7 +76,10 @@ from app.services import (
     balance_at,
     tax_calculator,
 )
-from app.services.paycheck_calculator import waterfall_fica_wages
+from app.services.paycheck_calculator import (
+    waterfall_fica_wages,
+    waterfall_taxable,
+)
 from app.services.projection_inputs import (
     load_active_accounts_with_types,
     load_active_salary_profiles,
@@ -226,7 +229,10 @@ class W2Wages:
     """The four per-filer W-2 wage boxes.
 
     ``box1_wages`` (and ``box16_state_wages``, equal to it) is hybrid gross
-    less the modeled annual pre-tax, both pre-tax kinds;
+    less the modeled annual pre-tax, both pre-tax kinds, floored at $0.00 by
+    the engine's one rule for the income-tax wage
+    (:func:`~app.services.paycheck_calculator.waterfall_taxable`; finding
+    plan#2660: it was spelled here by hand without the floor);
     ``box5_medicare_wages`` is hybrid gross less the modeled annual
     all-payroll-taxes lines alone (a Section 125 premium, a flexible spending
     account), the one rule the engine charges Social Security and Medicare on
@@ -490,7 +496,7 @@ def compute_tax_report(user_id: int, year: int, today: date) -> TaxReport | None
     liability = compute_annual_liability(
         primary, year, withholding.total.gross, pretax.total_pre_tax,
     )
-    box1_wages = withholding.total.gross - pretax.total_pre_tax
+    box1_wages = waterfall_taxable(withholding.total.gross, pretax.total_pre_tax)
     next_stub = _next_stub(periods, today)
 
     return TaxReport(
@@ -694,7 +700,8 @@ def _build_w2_preview(
 
     Args:
         withholding: The summed withholding-to-date.
-        box1_wages: Hybrid gross less the modeled annual pre-tax.
+        box1_wages: Hybrid gross less the modeled annual pre-tax, by
+            :func:`~app.services.paycheck_calculator.waterfall_taxable`.
         pre_fica: The modeled annual all-payroll-taxes lines
             (:attr:`ModeledPretax.total_pre_fica`).
         fica_config: The year's :class:`app.tax_law.FicaRules` (or ``None``)

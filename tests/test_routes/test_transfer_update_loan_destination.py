@@ -55,6 +55,7 @@ from app.services.recurrence import (
     stored_cadence,
 )
 from tests._test_helpers import (
+    amount_box_payload,
     cadence_payload,
     create_account_of_type,
     create_loan_account,
@@ -206,7 +207,8 @@ def _post_update(auth_client, template, **fields):
     """POST the edit form for *template*; redirect unfollowed so the flash stays.
 
     Carries what the form's non-recurrence controls emit for an unchanged
-    definition -- name, amount, source account, the optimistic-lock counter --
+    definition -- name, the Amount box where the form shows one
+    (:func:`amount_box_payload`), source account, the optimistic-lock counter --
     so every case walks the route the browser does (the amount write door,
     the source-account ownership probe, the version check), and *fields*
     states what THIS case changes or posts for the recurrence controls.  A
@@ -214,7 +216,7 @@ def _post_update(auth_client, template, **fields):
     """
     return auth_client.post(f"/transfers/{template.id}", data={
         "name": template.name,
-        "default_amount": str(template.default_amount),
+        **amount_box_payload(template),
         "from_account_id": str(template.from_account_id),
         "version_id": str(template.version_id),
         **fields,

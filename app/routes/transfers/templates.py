@@ -44,6 +44,8 @@ from app.routes._commit_helpers import (
 )
 from app.routes._amount_version_actions import (
     AmountVersionAction,
+    edit_form_amount,
+    refuse_a_typed_worked_out_amount,
     withdraw_amount_version,
 )
 from app.services.balance_at import BalanceContext
@@ -96,7 +98,8 @@ logger = logging.getLogger(__name__)
 # Field allowlist for the transfer-template update route: which submitted
 # form fields may be written back to the template via setattr.
 #
-# ``default_amount`` is deliberately absent since plan step X-au-a: the amount
+# The amount (the form's ``amount``, ``default_amount`` until plan step X-bp)
+# is deliberately absent since plan step X-au-a: the amount
 # is a dated SERIES as well as a column, and
 # ``template_amount_service.set_amount`` is the one door that moves both
 # together.  A setattr here would move one without the other.
@@ -199,7 +202,7 @@ def new_transfer_template():
         # A template that does not exist yet has no amount history; passed so
         # the shared form never references an undefined value.
         amount_history_rows=[],
-        amount_today=None,
+        form_amount=None,
         amount_version_delete_endpoint="transfers.delete_amount_version",
     )
 
@@ -346,8 +349,13 @@ def create_transfer_template():
         redirect=new_form,
     )
 
+    # The form's Amount is ``amount`` since plan step X-bp, which is not a
+    # column: it is the price the series opens at below, and the stored copy
+    # (still NOT NULL until that step drops it) is handed the same figure.
+    amount = data.pop("amount")
     template = TransferTemplate(
         user_id=current_user.id,
+        default_amount=amount,
         **data,
     )
     db.session.add(template)
@@ -375,7 +383,7 @@ def create_transfer_template():
     # this call is what makes the SERIES exist, and plan step X-bp removes the
     # redundancy by removing the column.
     template_amount_service.set_amount(
-        template, template.default_amount, effective_on=display_today(),
+        template, amount, effective_on=display_today(),
     )
 
     # Create the initial transfer instance(s) for the new template: a single
@@ -428,16 +436,13 @@ def edit_transfer_template(template_id):
         periods=[],
         current_period=None,
         # The amount's dated history (plan step X-au-a), precomputed into
-        # display rows.  Empty for a DERIVE-mode loan payment, whose
-        # ``default_amount`` is a P&I + escrow snapshot and which therefore has
-        # no series at all.
+        # display rows.  Empty for a DERIVE-mode loan payment, whose amount
+        # the loan works out, even where it holds a series from a manual era.
         amount_history_rows=template_amount_service.build_amount_history(
             template, display_today(),
         ),
-        # What the definition costs NOW; see the transaction twin.
-        amount_today=template_amount_service.current_amount(
-            template, display_today(),
-        ),
+        # The Amount box or the worked-out line; see the transaction twin.
+        form_amount=edit_form_amount(template, pass_ctx),
         amount_version_delete_endpoint="transfers.delete_amount_version",
     )
 
@@ -584,10 +589,15 @@ def update_transfer_template(template_id):
     # (F-24): the helper dispatches the existing-rule (mutate in place) vs
     # no-existing-rule (build + link) branches and pops every recurrence key
     # from ``data``.
-    end_bound, refusal = settle_destination_for_update(
-        template, data,
-        end_bound=end_bound, pass_ctx=pass_ctx, redirect=edit_form,
-    )
+    #
+    # Ahead of both, a typed amount on a derive-mode loan payment is refused:
+    # it states no price, and its form shows no Amount box (ruling plan#2694).
+    refusal = refuse_a_typed_worked_out_amount(template, data, edit_form)
+    if refusal is None:
+        end_bound, refusal = settle_destination_for_update(
+            template, data,
+            end_bound=end_bound, pass_ctx=pass_ctx, redirect=edit_form,
+        )
     if refusal is None:
         refusal = resolve_recurrence_rule_for_update(
             template,
@@ -617,9 +627,9 @@ def update_transfer_template(template_id):
     # transfers it reaches decides nothing about money: a transfer it declares
     # resolves by its own due date.  Absent from a partial update means the
     # amount was not restated.
-    if "default_amount" in data:
+    if "amount" in data:
         template_amount_service.set_amount(
-            template, data["default_amount"], effective_on=effective_from,
+            template, data["amount"], effective_on=effective_from,
         )
 
     # Flush template changes first so name-uniqueness violations are caught

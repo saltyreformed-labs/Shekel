@@ -21,10 +21,13 @@ service owns the RULE (which entry may be withdrawn); this owns the response.
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 from logging import Logger
 
 from flask import Response, flash, redirect, url_for
 
+from app.models.transaction_template import TransactionTemplate
+from app.models.transfer_template import TransferTemplate
 from app.routes._commit_helpers import (
     STALE_ACTION_MESSAGE,
     StaleConflictContext,
@@ -32,6 +35,8 @@ from app.routes._commit_helpers import (
 )
 from app.routes._redirect_target import RedirectTarget
 from app.services import template_amount_service
+from app.services.balance_at import BalanceContext
+from app.services.obligations_aggregator import todays_price
 
 
 # Why a withdrawal is refused, stated as the repair rather than as the rule --
@@ -117,7 +122,130 @@ def withdraw_amount_version(
     return redirect(url_for(action.edit_endpoint, template_id=template_id))
 
 
+@dataclass(frozen=True)
+class _WorkedOutWords:
+    """What the app says about one kind of definition whose amount is worked out.
+
+    Attributes:
+        source: The line the edit form shows in place of the Amount box,
+            naming what works the amount out (ruling plan#2694).
+        refusal: The flash for an edit that types an amount anyway.
+    """
+
+    source: str
+    refusal: str
+
+
+#: The words for each kind of worked-out definition, keyed by its model.  A
+#: transaction template that does not own its amount is a salary profile's; a
+#: transfer template that does not is a loan payment in derive mode
+#: (``template_amount_service.owns_its_amount``).
+_WORKED_OUT_WORDS: dict[type, _WorkedOutWords] = {
+    TransactionTemplate: _WorkedOutWords(
+        source="Your salary profile works out this amount.",
+        refusal=(
+            "Your salary profile works out this amount, so it cannot be "
+            "typed here. Change the salary profile to change it."
+        ),
+    ),
+    TransferTemplate: _WorkedOutWords(
+        source="This payment follows the loan.",
+        refusal=(
+            "This payment follows the loan, so its amount cannot be typed "
+            "here. It changes when the loan's payment does."
+        ),
+    ),
+}
+
+
+@dataclass(frozen=True)
+class EditFormAmount:
+    """What a recurring definition's edit form shows for its amount.
+
+    The ONE decision behind both edit forms' Amount row (plan step X-bp,
+    ruling plan#2694, fixing finding plan#2689): a definition that owns its
+    price shows the Amount box, and one whose amount is worked out shows a
+    line naming where it comes from, with no box.  The box was shown for
+    both until then, prefilled for a worked-out one from its stored copy --
+    or, where it had once owned a price (a payment fixed before it tracked
+    its loan, a paycheck whose salary profile was archived and brought
+    back), from that dormant history -- and saving the page wrote the box
+    into the copy the Recurring page and the savings page then counted.
+
+    Attributes:
+        today: What the definition costs on the read pass's day.  For a
+            definition that owns its price, the Amount box's prefill: its
+            history as of today (``template_amount_service.amount_as_of``),
+            the STATED price, never a loan payment's standing extra added
+            to it, because saving the box restates it; ``None`` only for an
+            empty history, which no door writes.  For a worked-out one, the
+            figure its rows are priced at today, the Recurring page's
+            (``obligations_aggregator.todays_price``).
+        worked_out_by: ``None`` for a definition that owns its price;
+            otherwise the line naming what works the amount out, shown with
+            *today* in place of the box.
+    """
+
+    today: Decimal | None
+    worked_out_by: str | None
+
+
+def edit_form_amount(template, ctx: BalanceContext) -> EditFormAmount:
+    """Return what *template*'s edit form shows for its amount.
+
+    Args:
+        template: The owner-checked transaction or transfer template.
+        ctx: The form's read pass; its day is the form's today.
+
+    Returns:
+        The :class:`EditFormAmount`.
+
+    Raises:
+        AmountUnresolvable: A worked-out definition its rows' rule cannot
+            price today, from :func:`~app.services.obligations_aggregator.todays_price`,
+            exactly where the Recurring page would refuse it too.
+    """
+    if template_amount_service.owns_its_amount(template):
+        return EditFormAmount(
+            today=template_amount_service.amount_as_of(template, ctx.as_of),
+            worked_out_by=None,
+        )
+    return EditFormAmount(
+        today=todays_price(template, ctx).amount,
+        worked_out_by=_WORKED_OUT_WORDS[type(template)].source,
+    )
+
+
+def refuse_a_typed_worked_out_amount(
+    template, data: dict, back: RedirectTarget,
+) -> Response | None:
+    """Refuse an edit that types an amount for a definition that works one out.
+
+    The edit form shows no Amount box for such a definition
+    (:func:`edit_form_amount`), so only a crafted or stale submission
+    carries one.  Refused rather than ignored: the write door records
+    nothing for such a definition, so accepting the save would tell the
+    owner their figure was taken when nothing prices from it.
+
+    Args:
+        template: The owner-checked template being edited.
+        data: The validated payload; ``amount`` is the form's Amount box.
+        back: Where the refusal sends the owner (the edit form).
+
+    Returns:
+        ``None`` when the payload states no amount or the definition owns
+        its price; else the redirect, with the reason flashed.
+    """
+    if "amount" not in data or template_amount_service.owns_its_amount(template):
+        return None
+    flash(_WORKED_OUT_WORDS[type(template)].refusal, "danger")
+    return back.to_response()
+
+
 __all__ = [
     "AmountVersionAction",
+    "EditFormAmount",
+    "edit_form_amount",
+    "refuse_a_typed_worked_out_amount",
     "withdraw_amount_version",
 ]

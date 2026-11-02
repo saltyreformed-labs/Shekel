@@ -926,7 +926,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1300.00",
+                "amount": "1300.00",
                 # Exactly what the rendered form submits.
                 "recurrence_unit": "",
                 "recurrence_placement": "",
@@ -975,7 +975,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
 
             resp = auth_client.post(f"/transfers/{template_id}", data={
                 "name": "To Savings",
-                "default_amount": "75.00",
+                "amount": "75.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "category_id": str(seed_user["categories"]["Rent"].id),
@@ -1015,7 +1015,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.MONTH,
                     starts_on=date(2026, 9, 1),
@@ -1079,7 +1079,7 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
 
             resp = auth_client.post("/templates", data={
                 "name": "Every Other Month Bill",
-                "default_amount": "10.00",
+                "amount": "10.00",
                 "category_id": str(seed_user["categories"]["Rent"].id),
                 "transaction_type_id": str(_expense_type_id()),
                 "account_id": str(seed_user["account"].id),
@@ -1111,7 +1111,7 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
 
             resp = auth_client.post("/transfers", data={
                 "name": "Every Other Month Transfer",
-                "default_amount": "25.00",
+                "amount": "25.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "category_id": str(seed_user["categories"]["Rent"].id),
@@ -1147,7 +1147,7 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.PERIOD,
                     placement=PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
@@ -1209,7 +1209,7 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.MONTH,
                     interval_n=3,
@@ -1241,7 +1241,7 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
 
             resp = auth_client.post("/templates", data={
                 "name": "Water Bill",
-                "default_amount": "120.00",
+                "amount": "120.00",
                 "category_id": str(seed_user["categories"]["Rent"].id),
                 "transaction_type_id": str(_expense_type_id()),
                 "account_id": str(seed_user["account"].id),
@@ -1272,7 +1272,7 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.MONTH,
                     interval_n=6,
@@ -1302,7 +1302,7 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1300.00",
+                "amount": "1300.00",
             }, follow_redirects=True)
 
             assert resp.status_code == 200
@@ -1431,7 +1431,7 @@ class TestADeliberateClearIsRefusedOnATransactionTemplate:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1300.00",
+                "amount": "1300.00",
                 "recurrence_unit": "",
             }, follow_redirects=True)
 
@@ -1455,7 +1455,7 @@ class TestADeliberateClearIsRefusedOnATransactionTemplate:
 
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(unit=RecurrenceUnitEnum.MONTH),
             }, follow_redirects=True)
 

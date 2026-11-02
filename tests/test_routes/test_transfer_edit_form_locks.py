@@ -63,6 +63,7 @@ from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import reauthor_rule, recurrence_spec
 from tests._test_helpers import (
+    amount_box_payload,
     cadence_payload,
     create_account_of_type,
     create_loan_account,
@@ -184,8 +185,8 @@ def _pass(seed_user):
 def _post_what_a_pinned_form_emits(auth_client, template, **fields):
     """POST the edit form of a PINNED loan payment exactly as the browser would.
 
-    Every enabled control and nothing else: the name, the amount, the source
-    account, the version pin, and the three cadence controls -- the MONTHLY
+    Every enabled control and nothing else: the name, the Amount box where
+    the form shows one (:func:`amount_box_payload`), the source account, the version pin, and the three cadence controls -- the MONTHLY
     cadence the loan door authors (``make_loan_payment_template``).  NOT
     ``to_account_id`` (the destination select is disabled since plan step
     R7d-f-5), NOT ``starts_on`` and NOT the three "Ends" keys (both rows are
@@ -194,7 +195,7 @@ def _post_what_a_pinned_form_emits(auth_client, template, **fields):
     """
     payload = {
         "name": template.name,
-        "default_amount": str(template.default_amount),
+        **amount_box_payload(template),
         "from_account_id": str(template.from_account_id),
         "version_id": str(template.version_id),
         **cadence_payload(unit=RecurrenceUnitEnum.MONTH, states_a_start=False),
@@ -624,7 +625,7 @@ class TestWhatTheArchivedFormPosts:
 
             resp = auth_client.post(f"/transfers/{archived.id}", data={
                 "name": "Archived, renamed",
-                "default_amount": str(archived.default_amount),
+                "amount": str(archived.default_amount),
                 "from_account_id": str(archived.from_account_id),
                 "version_id": str(archived.version_id),
                 **cadence_payload(unit=RecurrenceUnitEnum.PERIOD, states_a_start=False),
@@ -669,7 +670,7 @@ class TestWhatTheArchivedFormPosts:
 
             resp = auth_client.post(f"/transfers/{archived.id}", data={
                 "name": archived.name,
-                "default_amount": str(archived.default_amount),
+                "amount": str(archived.default_amount),
                 "from_account_id": str(archived.from_account_id),
                 "version_id": str(archived.version_id),
                 **cadence_payload(unit=RecurrenceUnitEnum.PERIOD, states_a_start=False),

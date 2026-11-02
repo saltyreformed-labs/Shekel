@@ -597,7 +597,7 @@ class TestCreateTransferTemplateFkOwnership:
         """Valid template-create payload for the seeded user."""
         return {
             "name": "C-27 Template",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "from_account_id": seed_user["account"].id,
             "to_account_id": savings.id,
             "category_id": str(seed_user["categories"]["Rent"].id),
@@ -710,7 +710,7 @@ class TestUpdateTransferTemplateFkOwnership:
                 f"/transfers/{tpl.id}",
                 data={
                     "name": tpl.name,
-                    "default_amount": str(tpl.default_amount),
+                    "amount": str(tpl.default_amount),
                     "from_account_id": other["account"].id,
                     "to_account_id": tpl.to_account_id,
                     "category_id": str(tpl.category_id),
@@ -737,7 +737,7 @@ class TestUpdateTransferTemplateFkOwnership:
                 f"/transfers/{tpl.id}",
                 data={
                     "name": tpl.name,
-                    "default_amount": str(tpl.default_amount),
+                    "amount": str(tpl.default_amount),
                     "from_account_id": tpl.from_account_id,
                     "to_account_id": tpl.to_account_id,
                     "category_id": str(other["category"].id),

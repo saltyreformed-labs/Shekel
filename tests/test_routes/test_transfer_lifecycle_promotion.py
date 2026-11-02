@@ -57,6 +57,7 @@ from app.services.recurrence import (
     reauthor_rule,
 )
 from tests._test_helpers import (
+    amount_box_payload,
     cadence_payload,
     create_loan_account,
     freeze_today,
@@ -626,7 +627,7 @@ class TestTheUpdateDoorTranslatesTheServicesRefusal:
 
             resp = auth_client.post(f"/transfers/{one_off.id}", data={
                 "name": one_off.name,
-                "default_amount": str(one_off.default_amount),
+                "amount": str(one_off.default_amount),
                 "from_account_id": str(one_off.from_account_id),
                 "to_account_id": str(loan.id),
                 "version_id": str(one_off.version_id),
@@ -683,7 +684,7 @@ class TestTheUpdateDoorReadsTheSeamsIdentity:
 
             resp = auth_client.post(f"/transfers/{older_id}", data={
                 "name": savings.name,
-                "default_amount": str(savings.default_amount),
+                "amount": str(savings.default_amount),
                 "from_account_id": str(savings.from_account_id),
                 "to_account_id": str(loan.id),
                 "version_id": str(savings.version_id),
@@ -706,13 +707,14 @@ class TestTheUpdateDoorReDerivesAfterACadenceUnitEdit:
     def _post_unit(self, auth_client, template, unit):
         """POST the locked standing payment's form with *unit* chosen.
 
-        What the form emits: every enabled control and nothing else -- no
+        What the form emits: every enabled control and nothing else (the
+        Amount box only where the form shows one, :func:`amount_box_payload`) -- no
         ``to_account_id`` (pinned), no ``starts_on`` and no "Ends" keys (both
         rows server-locked).
         """
         return auth_client.post(f"/transfers/{template.id}", data={
             "name": template.name,
-            "default_amount": str(template.default_amount),
+            **amount_box_payload(template),
             "from_account_id": str(template.from_account_id),
             "version_id": str(template.version_id),
             **cadence_payload(unit=unit, states_a_start=False),

@@ -93,7 +93,7 @@ def _base_form_data(seed_user, txn_type="Expense", **overrides):
     )
     data = {
         "name": "Test Template",
-        "default_amount": "100.00",
+        "amount": "100.00",
         "category_id": seed_user["categories"]["Rent"].id,
         "transaction_type_id": txn_type_obj.id,
         "account_id": seed_user["account"].id,
@@ -704,7 +704,7 @@ class TestFlagSchemaValidation:
         schema = TemplateCreateSchema()
         data = schema.load({
             "name": "Test",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "category_id": "1",
             "transaction_type_id": str(expense_id),
             "account_id": "1",
@@ -718,7 +718,7 @@ class TestFlagSchemaValidation:
         schema = TemplateCreateSchema()
         data = schema.load({
             "name": "Test",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "category_id": "1",
             "transaction_type_id": "1",
             "account_id": "1",
@@ -732,7 +732,7 @@ class TestFlagSchemaValidation:
         schema = TemplateCreateSchema()
         errors = schema.validate({
             "name": "Test",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "category_id": "1",
             "transaction_type_id": "1",
             "account_id": "1",
@@ -793,7 +793,7 @@ class TestEnvelopeOnlyOnExpenseSchema:
         with pytest.raises(_ValidationError) as exc_info:
             schema.load({
                 "name": "Bad",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": "1",
                 "transaction_type_id": str(income_id),
                 "account_id": "1",
@@ -818,7 +818,7 @@ class TestEnvelopeOnlyOnExpenseSchema:
         schema = TemplateCreateSchema()
         data = schema.load({
             "name": "Groceries",
-            "default_amount": "200.00",
+            "amount": "200.00",
             "category_id": "1",
             "transaction_type_id": str(expense_id),
             "account_id": "1",
@@ -838,7 +838,7 @@ class TestEnvelopeOnlyOnExpenseSchema:
         # Omit is_envelope -- defaults to False via load_default.
         data = schema.load({
             "name": "Salary",
-            "default_amount": "3000.00",
+            "amount": "3000.00",
             "category_id": "1",
             "transaction_type_id": str(income_id),
             "account_id": "1",
@@ -905,7 +905,7 @@ class TestEnvelopeOnlyOnExpenseSchema:
         schema = TemplateCreateSchema()
         errors = schema.validate({
             "name": "Bad",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "category_id": "1",
             "transaction_type_id": str(income_id),
             "account_id": "1",

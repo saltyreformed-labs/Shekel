@@ -281,7 +281,7 @@ class TestTemplateCreate:
             assert resp.status_code == 200
             assert b"New Recurring Transaction" in resp.data
             assert b'name="name"' in resp.data
-            assert b'name="default_amount"' in resp.data
+            assert b'name="amount"' in resp.data
             # The three cadence controls plan step R7b-2 put in place of the
             # single pattern <select>.  Both interval inputs carry the same
             # name, which is why only one of them is ever enabled.
@@ -313,7 +313,7 @@ class TestTemplateCreate:
 
             resp = auth_client.post("/templates", data={
                 "name": "Browser Shaped No Recurrence",
-                "default_amount": "24.99",
+                "amount": "24.99",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -356,7 +356,7 @@ class TestTemplateCreate:
 
             resp = auth_client.post("/templates", data={
                 "name": "Browser Shaped With Start",
-                "default_amount": "24.99",
+                "amount": "24.99",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -398,7 +398,7 @@ class TestTemplateCreate:
 
             resp = auth_client.post("/templates", data={
                 "name": "Once In A Long While",
-                "default_amount": "24.99",
+                "amount": "24.99",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -438,7 +438,7 @@ class TestTemplateCreate:
 
             resp = auth_client.post("/templates", data={
                 "name": "Internet Bill",
-                "default_amount": "79.99",
+                "amount": "79.99",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -458,7 +458,7 @@ class TestTemplateCreate:
 
             resp = auth_client.post("/templates", data={
                 "name": "Rent Payment",
-                "default_amount": "1500.00",
+                "amount": "1500.00",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -520,7 +520,7 @@ class TestTemplateCreate:
 
             resp = auth_client.post("/templates", data={
                 "name": "Sneaky Template",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": other["account"].id,  # Other user's account.
@@ -540,7 +540,7 @@ class TestTemplateCreate:
 
             resp = auth_client.post("/templates", data={
                 "name": "Sneaky Template",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": other["category"].id,  # Other user's category.
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -579,7 +579,7 @@ class TestTemplateCreate:
 
             resp = auth_client.post("/templates", data={
                 "name": "On A Loan",
-                "default_amount": "300.00",
+                "amount": "300.00",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": loan.id,
@@ -617,7 +617,7 @@ class TestTemplateUpdate:
 
             resp = auth_client.post(f"/templates/{template.id}", data={
                 "name": "Updated Rent",
-                "default_amount": "1300.00",
+                "amount": "1300.00",
             }, follow_redirects=True)
 
             assert resp.status_code == 200
@@ -728,7 +728,7 @@ class TestTemplateUpdate:
             tid = template.id
 
             resp = auth_client.post(f"/templates/{tid}", data={
-                "default_amount": "1400.00",
+                "amount": "1400.00",
                 **cadence_payload(),
             })
             assert resp.status_code == 200
@@ -775,7 +775,7 @@ class TestTemplateUpdate:
             tid, txn_id = template.id, txn.id
 
             resp = auth_client.post(f"/templates/{tid}", data={
-                "default_amount": "1400.00",
+                "amount": "1400.00",
                 **cadence_payload(),
                 "conflict_apply": "1",
                 f"conflict_decision_{txn_id}": "use",
@@ -816,7 +816,7 @@ class TestTemplateUpdate:
             tid = template.id
 
             resp = auth_client.post(f"/templates/{tid}", data={
-                "default_amount": "1400.00",
+                "amount": "1400.00",
                 **cadence_payload(),
             }, follow_redirects=True)
 
@@ -845,7 +845,7 @@ class TestTemplateUpdate:
             tid, txn_id = template.id, txn.id
 
             resp = auth_client.post(f"/templates/{tid}", data={
-                "default_amount": "1400.00",
+                "amount": "1400.00",
                 **cadence_payload(),
                 "conflict_apply": "1",
                 f"conflict_decision_{txn_id}": "keep",
@@ -875,7 +875,7 @@ class TestTemplateUpdate:
 
             resp = auth_client.post(f"/templates/{tid}", data={
                 "name": "Apartment Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 **cadence_payload(),
             }, follow_redirects=True)
             assert resp.status_code == 200
@@ -945,7 +945,7 @@ class TestTemplateUpdate:
 
             resp = auth_client.post(f"/templates/{tid}", data={
                 "name": "Apartment Rent",
-                "default_amount": "1400.00",
+                "amount": "1400.00",
                 **cadence_payload(),
                 "conflict_apply": "1",
                 f"conflict_decision_{txn_id}": "use",
@@ -1041,7 +1041,7 @@ class TestTemplateUpdate:
 
             resp = auth_client.post(f"/templates/{tid}", data={
                 "name": "Groceries",
-                "default_amount": "650.00",
+                "amount": "650.00",
                 "account_id": str(seed_user["account"].id),
                 **cadence_payload(interval_n=2, starts_on=next_start),
             }, follow_redirects=True)
@@ -2005,7 +2005,7 @@ class TestPreviewRecurrence:
             stated_start = own_span.start_date + timedelta(days=1)
             resp = auth_client.post("/templates", data={
                 "name": "Recurring IDOR Template",
-                "default_amount": "1500.00",
+                "amount": "1500.00",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -2092,7 +2092,7 @@ class TestTemplateNegativePaths:
             category = seed_user["categories"]["Rent"]
 
             resp = auth_client.post("/templates", data={
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -2113,7 +2113,7 @@ class TestTemplateNegativePaths:
 
             resp = auth_client.post("/templates", data={
                 "name": "No Category Template",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
             }, follow_redirects=True)
@@ -2134,7 +2134,7 @@ class TestTemplateNegativePaths:
 
             resp = auth_client.post("/templates", data={
                 "name": "Negative Test",
-                "default_amount": "-100.00",
+                "amount": "-100.00",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -2175,7 +2175,7 @@ class TestTemplateNegativePaths:
 
             resp = auth_client.post("/templates", data={
                 "name": "<script>alert(1)</script>",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -2207,7 +2207,7 @@ class TestTemplateNegativePaths:
 
             resp = auth_client.post("/templates", data={
                 "name": "IDOR Category Test",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": other_cat.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -2235,7 +2235,7 @@ class TestTemplateNegativePaths:
 
             resp = auth_client.post("/templates", data={
                 "name": "IDOR Account Test",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": category.id,
                 "transaction_type_id": txn_type.id,
                 "account_id": second_user["account"].id,
@@ -2855,7 +2855,7 @@ class TestEnvelopeIncomeRejection:
 
             resp = auth_client.post("/templates", data={
                 "name": "Phase2 Bad Income Envelope",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": category.id,
                 "transaction_type_id": income_type.id,
                 "account_id": seed_user["account"].id,
@@ -2892,7 +2892,7 @@ class TestEnvelopeIncomeRejection:
 
             resp = auth_client.post("/templates", data={
                 "name": "Phase2 Good Expense Envelope",
-                "default_amount": "150.00",
+                "amount": "150.00",
                 "category_id": category.id,
                 "transaction_type_id": expense_type.id,
                 "account_id": seed_user["account"].id,
@@ -2948,7 +2948,7 @@ class TestEnvelopeIncomeRejection:
 
             resp = auth_client.post(f"/templates/{template.id}", data={
                 "name": "Phase2 Income Template",
-                "default_amount": "250.00",
+                "amount": "250.00",
                 "category_id": category.id,
                 "transaction_type_id": income_type.id,
                 "account_id": seed_user["account"].id,
@@ -3120,7 +3120,7 @@ class TestTheEndsControlIsTheFirstWriterOfMaxOccurrences:
         ).one()
         return auth_client.post("/templates", data={
             "name": name,
-            "default_amount": "100.00",
+            "amount": "100.00",
             "category_id": seed_user["categories"]["Rent"].id,
             "transaction_type_id": txn_type.id,
             "account_id": seed_user["account"].id,
@@ -3322,7 +3322,7 @@ class TestTheEndsControlIsTheFirstWriterOfMaxOccurrences:
 
             auth_client.post(f"/templates/{template.id}", data={
                 "name": "Switcher",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": template.transaction_type_id,
                 "account_id": seed_user["account"].id,
@@ -3358,7 +3358,7 @@ class TestTheEndsControlIsTheFirstWriterOfMaxOccurrences:
 
             auth_client.post(f"/templates/{template.id}", data={
                 "name": "Keeper renamed",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": template.transaction_type_id,
                 "account_id": seed_user["account"].id,
@@ -3395,7 +3395,7 @@ class TestTheEndsControlIsTheFirstWriterOfMaxOccurrences:
 
             auth_client.post(f"/templates/{template.id}", data={
                 "name": "Unbounded Again",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": template.transaction_type_id,
                 "account_id": seed_user["account"].id,
@@ -3585,7 +3585,7 @@ class TestALoanPaymentsClosingBoundIsDerived:
                 f"/transfers/{template.id}",
                 data={
                     "name": template.name,
-                    "default_amount": "500.00",
+                    "amount": "500.00",
                     "from_account_id": template.from_account_id,
                     "to_account_id": template.to_account_id,
                     "version_id": template.version_id,
@@ -3619,7 +3619,7 @@ class TestALoanPaymentsClosingBoundIsDerived:
                 f"/transfers/{template.id}",
                 data={
                     "name": "Renamed Payment",
-                    "default_amount": "500.00",
+                    "amount": "500.00",
                     "from_account_id": template.from_account_id,
                     "to_account_id": template.to_account_id,
                     "version_id": template.version_id,
@@ -3684,7 +3684,7 @@ class TestACreateDoesNotBackfillClosedPayPeriods:
 
             resp = auth_client.post("/templates", data={
                 "name": "Rent Created Today",
-                "default_amount": "2000.00",
+                "amount": "2000.00",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -3806,7 +3806,7 @@ class TestALoanPaymentsOpeningBoundIsDerived:
                 f"/transfers/{template.id}",
                 data={
                     "name": template.name,
-                    "default_amount": "500.00",
+                    "amount": "500.00",
                     "from_account_id": template.from_account_id,
                     "to_account_id": template.to_account_id,
                     "version_id": template.version_id,
@@ -3862,7 +3862,7 @@ class TestALoanPaymentsOpeningBoundIsDerived:
                 f"/transfers/{template.id}",
                 data={
                     "name": "Renamed Loan Payment",
-                    "default_amount": "500.00",
+                    "amount": "500.00",
                     "from_account_id": template.from_account_id,
                     "to_account_id": template.to_account_id,
                     "version_id": template.version_id,
@@ -3911,7 +3911,7 @@ class TestALoanPaymentCannotBeMadeOneTime:
                 f"/transfers/{template.id}",
                 data={
                     "name": template.name,
-                    "default_amount": "500.00",
+                    "amount": "500.00",
                     "from_account_id": template.from_account_id,
                     "to_account_id": template.to_account_id,
                     "version_id": template.version_id,
@@ -3954,7 +3954,7 @@ class TestALoanPaymentCannotBeMadeOneTime:
                 f"/transfers/{template.id}",
                 data={
                     "name": template.name,
-                    "default_amount": "200.00",
+                    "amount": "200.00",
                     "from_account_id": template.from_account_id,
                     "to_account_id": template.to_account_id,
                     "version_id": template.version_id,
@@ -3991,7 +3991,7 @@ class TestALoanPaymentCannotBeMadeOneTime:
                 f"/transfers/{template.id}",
                 data={
                     "name": template.name,
-                    "default_amount": "200.00",
+                    "amount": "200.00",
                     "from_account_id": template.from_account_id,
                     "to_account_id": template.to_account_id,
                     "version_id": template.version_id,
@@ -4047,7 +4047,7 @@ class TestAnEditStatesTheOpeningBoundOrSaysNothing:
                 f"/templates/{template.id}",
                 data={
                     "name": template.name,
-                    "default_amount": "42.00",
+                    "amount": "42.00",
                     "category_id": template.category_id,
                     "transaction_type_id": txn_type.id,
                     "account_id": template.account_id,
@@ -4093,7 +4093,7 @@ class TestAnEditStatesTheOpeningBoundOrSaysNothing:
                 f"/templates/{template.id}",
                 data={
                     "name": template.name,
-                    "default_amount": "42.00",
+                    "amount": "42.00",
                     "category_id": template.category_id,
                     "transaction_type_id": txn_type.id,
                     "account_id": template.account_id,
@@ -4199,7 +4199,7 @@ class TestTheServerRendersTheEndsControlAlreadyCorrect:
             ).one()
             auth_client.post("/templates", data={
                 "name": "Counted",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -4629,7 +4629,7 @@ class TestTheBoundsRefusalsReachTheUser:
         ).one()
         return auth_client.post("/templates", data={
             "name": "Refused",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "category_id": seed_user["categories"]["Rent"].id,
             "transaction_type_id": txn_type.id,
             "account_id": seed_user["account"].id,
@@ -4719,7 +4719,7 @@ class TestThePerMonthCeilingOnTheTemplateForm:
         ).one()
         resp = auth_client.post("/templates", data={
             "name": name,
-            "default_amount": "24.99",
+            "amount": "24.99",
             "category_id": seed_user["categories"]["Rent"].id,
             "transaction_type_id": txn_type.id,
             "account_id": seed_user["account"].id,
@@ -4756,7 +4756,7 @@ class TestThePerMonthCeilingOnTheTemplateForm:
             ).one()
             resp = auth_client.post("/templates", data={
                 "name": "No Ceiling",
-                "default_amount": "24.99",
+                "amount": "24.99",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,
@@ -4788,7 +4788,7 @@ class TestThePerMonthCeilingOnTheTemplateForm:
             ).one()
             resp = auth_client.post("/templates", data={
                 "name": "Contradiction",
-                "default_amount": "24.99",
+                "amount": "24.99",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": txn_type.id,
                 "account_id": seed_user["account"].id,

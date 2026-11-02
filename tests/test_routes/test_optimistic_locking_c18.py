@@ -910,7 +910,7 @@ class TestTransactionTemplateStaleFormPrevention:
                 f"/templates/{tmpl_id}",
                 data={
                     "name": "Renamed Template",
-                    "default_amount": "150.00",
+                    "amount": "150.00",
                     "category_id": str(cat.id),
                     "transaction_type_id": str(expense_type.id),
                     "account_id": str(seed_user["account"].id),
@@ -954,7 +954,7 @@ class TestTransactionTemplateStaleFormPrevention:
                 f"/templates/{tmpl_id}",
                 data={
                     "name": "Should Not Apply",
-                    "default_amount": "999.99",
+                    "amount": "999.99",
                     "category_id": str(cat.id),
                     "transaction_type_id": str(expense_type.id),
                     "account_id": str(seed_user["account"].id),
@@ -1007,7 +1007,7 @@ class TestTransferTemplateStaleFormPrevention:
                 f"/transfers/{tmpl_id}",
                 data={
                     "name": "Should Not Apply",
-                    "default_amount": "9999.99",
+                    "amount": "9999.99",
                     "from_account_id": str(seed_user["account"].id),
                     "to_account_id": str(savings.id),
                     "category_id": str(cat.id),

@@ -34,6 +34,7 @@ from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service as tas
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
+from app.services.obligations_aggregator import todays_price
 from tests._test_helpers import (
     all_periods,
     cadence_payload,
@@ -138,7 +139,7 @@ class TestCreateOpensTheSeries:
         with app.app_context():
             resp = auth_client.post("/templates", data={
                 "name": "Geico",
-                "default_amount": "165.30",
+                "amount": "165.30",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": db.session.query(TransactionType)
                     .filter_by(name="Expense").one().id,
@@ -169,7 +170,7 @@ class TestCreateOpensTheSeries:
 
             resp = auth_client.post("/transfers", data={
                 "name": "Money Market Contribution",
-                "default_amount": "250.00",
+                "amount": "250.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 "category_id": seed_user["categories"]["Rent"].id,
@@ -261,7 +262,7 @@ class TestEditRecordsThePrice:
 
             resp = auth_client.post(f"/templates/{template.id}", data={
                 "name": "Geico",
-                "default_amount": "165.30",
+                "amount": "165.30",
                 "effective_from": "2026-09-01",
             }, follow_redirects=True)
             assert resp.status_code == 200
@@ -291,7 +292,7 @@ class TestEditRecordsThePrice:
 
             resp = auth_client.post(f"/templates/{template.id}", data={
                 "name": "Geico Auto",
-                "default_amount": "178.00",
+                "amount": "178.00",
                 "effective_from": "2026-09-01",
             }, follow_redirects=True)
             assert resp.status_code == 200
@@ -319,7 +320,7 @@ class TestEditRecordsThePrice:
 
             resp = auth_client.post(f"/transfers/{template.id}", data={
                 "name": "Money Market Contribution",
-                "default_amount": "250.00",
+                "amount": "250.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 "category_id": seed_user["categories"]["Rent"].id,
@@ -406,7 +407,7 @@ class TestTheConflictChooserRoundTrip:
 
             rise = display_today() + timedelta(days=30)
             resp = auth_client.post(f"/templates/{tid}", data={
-                "default_amount": "1400.00",
+                "amount": "1400.00",
                 "effective_from": rise.isoformat(),
             })
             assert resp.status_code == 200
@@ -430,7 +431,7 @@ class TestTheConflictChooserRoundTrip:
 
             rise = display_today() + timedelta(days=30)
             resp = auth_client.post(f"/templates/{tid}", data={
-                "default_amount": "1400.00",
+                "amount": "1400.00",
                 "effective_from": rise.isoformat(),
                 "conflict_apply": "1",
                 f"conflict_decision_{txn_id}": "keep",
@@ -470,19 +471,19 @@ class TestTheConflictChooserRoundTrip:
 
             resp = auth_client.post(f"/templates/{tid}", data={
                 "name": "Geico",
-                "default_amount": "200.00",
+                "amount": "200.00",
                 "effective_from": future.isoformat(),
             }, follow_redirects=True)
             assert resp.status_code == 200
 
             # The form now offers TODAY's price, not the queued one.
             body = auth_client.get(f"/templates/{tid}/edit").get_data(as_text=True)
-            assert 'name="default_amount"' in body
+            assert 'name="amount"' in body
             assert 'value="178.00"' in body
 
             resp = auth_client.post(f"/templates/{tid}", data={
                 "name": "Geico Auto",
-                "default_amount": "178.00",
+                "amount": "178.00",
             }, follow_redirects=True)
             assert resp.status_code == 200
 
@@ -515,9 +516,12 @@ class TestTheChooserAsksWhetherThePriceHistoryChanged:
 
     A definition whose amount is WORKED OUT -- a salary profile's paycheck, a
     loan payment that follows its loan -- has no history the edit door
-    writes, so its edit never asks, whatever its Amount box said.  That
-    replaces the salary-only flag the update route passed, which never
-    covered the loan payment: its edit asked about a figure no row reads.
+    writes, so its edit never asks.  That replaces the salary-only flag the
+    update route passed, which never covered the loan payment: its edit
+    asked about a figure no row reads.  Each case posts what that form
+    emits, which since the same step is no Amount at all (ruling plan#2694:
+    a worked-out definition's form shows a line, not a box, and a typed
+    amount is refused, :class:`TestAWorkedOutAmountIsShownNotTyped`).
     """
 
     @staticmethod
@@ -557,7 +561,7 @@ class TestTheChooserAsksWhetherThePriceHistoryChanged:
             before = TestTheConflictChooserRoundTrip._series(template)
 
             resp = auth_client.post(f"/templates/{tid}", data={
-                "default_amount": "1300.00",
+                "amount": "1300.00",
                 "effective_from": (
                     display_today() + timedelta(days=1)
                 ).isoformat(),
@@ -582,8 +586,9 @@ class TestTheChooserAsksWhetherThePriceHistoryChanged:
         The definition is priced before the profile names it, so it HOLDS a
         series, dormant while the profile is active: the door writes it no
         version (``template_amount_service.owns_its_amount``), so the history
-        before and after the edit is the same one.  The edit renames it too,
-        which is how the commit is read back.
+        before and after the edit is the same one.  The edit renames it,
+        which is how the commit is read back, and posts no Amount: the form
+        shows none.
         """
         with app.app_context():
             from tests.test_routes.test_templates import (
@@ -603,7 +608,6 @@ class TestTheChooserAsksWhetherThePriceHistoryChanged:
 
             resp = auth_client.post(f"/templates/{tid}", data={
                 "name": "Day Job, renamed",
-                "default_amount": "2600.00",
             }, follow_redirects=True)
 
             assert resp.status_code == 200
@@ -619,11 +623,13 @@ class TestTheChooserAsksWhetherThePriceHistoryChanged:
     def test_a_loan_payment_that_follows_its_loan_never_asks(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """A derive-mode payment's Amount box moves no row, so its edit asks nothing.
+        """A derive-mode payment's edit asks nothing about a price it does not state.
 
-        The transfer door passed the flag as always-true, so this edit asked
-        "You changed it to $999.00" over a hand-edited payment while every
-        row of it reads the loan's own figure.  The payment is priced before
+        The transfer door passed the flag as always-true, so an edit typing
+        $999.00 in the Amount box asked "You changed it to $999.00" over a
+        hand-edited payment while every row of it reads the loan's own
+        figure (measured failing so before plan step X-bp).  The form shows
+        no box now, so the case renames it and posts no Amount.  The payment is priced before
         it is put in derive mode, the order the loan door takes, so it holds
         a dormant series as the salary case does.
         """
@@ -658,7 +664,6 @@ class TestTheChooserAsksWhetherThePriceHistoryChanged:
 
             resp = auth_client.post(f"/transfers/{tid}", data={
                 "name": "Loan payment, renamed",
-                "default_amount": "999.00",
                 "from_account_id": str(template.from_account_id),
                 "version_id": str(template.version_id),
                 **cadence_payload(
@@ -675,6 +680,153 @@ class TestTheChooserAsksWhetherThePriceHistoryChanged:
             kept = db.session.get(Transfer, latest_id)
             assert kept.is_override is True
             assert transfer_amount(kept) == Decimal("650.00")
+
+
+class TestAWorkedOutAmountIsShownNotTyped:
+    """A worked-out definition's edit page names its source, with no Amount box.
+
+    Plan step X-bp, ruling plan#2694, fixing finding plan#2689.  A salary
+    profile's definition and a loan payment that follows its loan were shown
+    an Amount box prefilled from the stored copy, or from a history they
+    held from before (a paycheck priced before its profile named it, a
+    payment fixed before it tracked), and saving the page wrote the box into
+    the copy the Recurring page and the savings page counted.  Each kind
+    here holds such a DORMANT history, priced before it was worked out, so a
+    form that offered it would show its figure.
+    """
+
+    _BOX = 'name="amount"'
+
+    @staticmethod
+    def _salary_definition(seed_user):
+        """A paycheck definition priced at $2,000.00 before its profile named it."""
+        from tests.test_routes.test_templates import _create_template
+        template = _create_template(
+            seed_user, name="Day Job", txn_type="Income",
+            cadence=EVERY_PERIOD, amount="2000.00",
+        )
+        profile = make_salary_profile(seed_user, db.session)
+        profile.template_id = template.id
+        db.session.commit()
+        return template
+
+    @staticmethod
+    def _tracking_payment(seed_user):
+        """A loan payment priced at $500.00, then put in derive mode."""
+        loan = create_loan_account(seed_user, db.session)
+        template = make_loan_payment_template(
+            db.session, seed_user, loan, amount="500.00",
+        )
+        db.session.commit()
+        assert template.settings.derive_from_loan is True
+        return template
+
+    @staticmethod
+    def _flashes(auth_client):
+        """The unconsumed flash messages an unfollowed redirect left."""
+        with auth_client.session_transaction() as sess:
+            return [message for _category, message in sess.get("_flashes", [])]
+
+    def _assert_the_line(self, body, template, sentence, dormant):
+        """The page shows *sentence* with today's figure, and no box."""
+        today = todays_price(
+            template, BalanceContext.build(template.user_id),
+        ).amount
+        assert today != Decimal(dormant), (
+            "precondition: today's figure is not the dormant history's"
+        )
+        assert self._BOX not in body
+        assert "data-worked-out-amount" in body
+        assert re.search(
+            rf'<span class="font-mono">\${today:,.2f}</span> today\.\s*'
+            rf"{re.escape(sentence)}",
+            body,
+        ), body[body.find("data-worked-out-amount"):][:400]
+
+    def test_a_salary_profiles_definition_shows_todays_paycheck(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """Today's paycheck and its source, never the dormant $2,000.00."""
+        with app.app_context():
+            template = self._salary_definition(seed_user)
+
+            body = auth_client.get(
+                f"/templates/{template.id}/edit",
+            ).get_data(as_text=True)
+
+            self._assert_the_line(
+                body, template, "Your salary profile works out this amount.",
+                "2000.00",
+            )
+
+    def test_a_tracking_payment_shows_the_loans_figure(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """The figure the loan works out today, never the dormant $500.00."""
+        with app.app_context():
+            template = self._tracking_payment(seed_user)
+
+            body = auth_client.get(
+                f"/transfers/{template.id}/edit",
+            ).get_data(as_text=True)
+
+            self._assert_the_line(
+                body, template, "This payment follows the loan.", "500.00",
+            )
+
+    def test_a_typed_amount_on_a_paycheck_definition_is_refused_whole(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """A crafted Amount is refused with the reason; the rename beside it is not saved."""
+        with app.app_context():
+            template = self._salary_definition(seed_user)
+            tid = template.id
+            before = TestTheConflictChooserRoundTrip._series(template)
+
+            resp = auth_client.post(f"/templates/{tid}", data={
+                "name": "Day Job, renamed", "amount": "2600.00",
+            })
+
+            assert resp.status_code == 302
+            assert resp.headers["Location"].endswith(f"/templates/{tid}/edit")
+            assert self._flashes(auth_client) == [
+                "Your salary profile works out this amount, so it cannot be "
+                "typed here. Change the salary profile to change it.",
+            ]
+            db.session.expire_all()
+            saved = db.session.get(TransactionTemplate, tid)
+            assert saved.name == "Day Job"
+            assert TestTheConflictChooserRoundTrip._series(saved) == before
+
+    def test_a_typed_amount_on_a_tracking_payment_is_refused_whole(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """The transfer twin: refused with the loan's reason, nothing saved."""
+        with app.app_context():
+            template = self._tracking_payment(seed_user)
+            tid, name = template.id, template.name
+            before = TestTheConflictChooserRoundTrip._series(template)
+
+            resp = auth_client.post(f"/transfers/{tid}", data={
+                "name": "Loan payment, renamed",
+                "amount": "999.00",
+                "from_account_id": str(template.from_account_id),
+                "version_id": str(template.version_id),
+                **cadence_payload(
+                    unit=RecurrenceUnitEnum.MONTH, states_a_start=False,
+                ),
+            })
+
+            assert resp.status_code == 302
+            assert resp.headers["Location"].endswith(f"/transfers/{tid}/edit")
+            assert self._flashes(auth_client) == [
+                "This payment follows the loan, so its amount cannot be typed "
+                "here. It changes when the loan's payment does.",
+            ]
+            db.session.expire_all()
+            saved = db.session.get(TransferTemplate, tid)
+            assert saved.name == name
+            assert TestTheConflictChooserRoundTrip._series(saved) == before
 
 
 class TestTheOptimisticLockCounter:
@@ -701,7 +853,7 @@ class TestTheOptimisticLockCounter:
 
             resp = auth_client.post(f"/templates/{tid}", data={
                 "name": "Geico Auto",
-                "default_amount": "165.30",
+                "amount": "165.30",
                 "version_id": str(before),
             }, follow_redirects=True)
             assert resp.status_code == 200
@@ -727,7 +879,7 @@ class TestTheOptimisticLockCounter:
 
             resp = auth_client.post(f"/transfers/{tid}", data={
                 "name": "Money Market Savings",
-                "default_amount": "250.00",
+                "amount": "250.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 "category_id": seed_user["categories"]["Rent"].id,
@@ -758,7 +910,7 @@ class TestTheOptimisticLockCounter:
 
             resp = auth_client.post(f"/templates/{tid}", data={
                 "name": "Geico",
-                "default_amount": "165.30",
+                "amount": "165.30",
                 "effective_from": "0202-08-11",
             }, follow_redirects=True)
             assert resp.status_code == 200

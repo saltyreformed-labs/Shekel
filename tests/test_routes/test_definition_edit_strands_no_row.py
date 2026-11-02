@@ -571,7 +571,7 @@ def _transaction_update_payload(
     """
     payload = {
         "name": template.name,
-        "default_amount": str(template.default_amount),
+        "amount": str(template.default_amount),
         "account_id": str(template.account_id),
         "category_id": str(template.category_id),
         "transaction_type_id": str(template.transaction_type_id),
@@ -592,7 +592,7 @@ def _transfer_update_payload(template, **overrides):
     """The transfer edit form's fields, the cadence restated, as a browser posts them."""
     payload = {
         "name": template.name,
-        "default_amount": str(template.default_amount),
+        "amount": str(template.default_amount),
         "from_account_id": str(template.from_account_id),
         "to_account_id": str(template.to_account_id),
         "category_id": str(template.category_id),

@@ -52,6 +52,8 @@ from app.routes._commit_helpers import (
 )
 from app.routes._amount_version_actions import (
     AmountVersionAction,
+    edit_form_amount,
+    refuse_a_typed_worked_out_amount,
     withdraw_amount_version,
 )
 from app.routes._recurrence_preview import recurrence_preview_fragment
@@ -138,7 +140,7 @@ def new_template():
         # A template that does not exist yet has no amount history; passed so
         # the shared form never references an undefined value.
         amount_history_rows=[],
-        amount_today=None,
+        form_amount=None,
         amount_version_delete_endpoint="templates.delete_amount_version",
     )
 
@@ -185,9 +187,14 @@ def create_template():
         redirect=RedirectTarget("templates.new_template"),
     )
 
-    # Create the template.
+    # Create the template.  The form's Amount is ``amount`` since plan step
+    # X-bp, which is not a column: it is the price the series opens at below,
+    # and the stored copy (still NOT NULL until that step drops it) is handed
+    # the same figure.
+    amount = data.pop("amount")
     template = TransactionTemplate(
         user_id=current_user.id,
+        default_amount=amount,
         **data,
     )
     db.session.add(template)
@@ -218,7 +225,7 @@ def create_template():
     # and those resolve by the series holding flat before its earliest version
     # (``template_amount_service.amount_as_of``).
     template_amount_service.set_amount(
-        template, template.default_amount, effective_on=display_today(),
+        template, amount, effective_on=display_today(),
     )
 
     # Auto-generate transactions from the rule into future periods.  ONE read
@@ -252,6 +259,9 @@ def edit_template(template_id):
     categories = category_service.list_active_categories(current_user.id)
     accounts = account_service.list_active_accounts(current_user.id)
     txn_types = db.session.query(TransactionType).all()
+    # The form's ONE read pass (plan step R7d-f): the recurrence controls'
+    # starting state and today's amount both read it.
+    pass_ctx = BalanceContext.build(current_user.id)
 
     return render_template(
         "templates/form.html",
@@ -267,25 +277,21 @@ def edit_template(template_id):
         # (plan step balance:X-bi-7b) whose save the update schema REFUSES, so
         # an unchanged save can no longer delete the rule (R2e-1's hazard).
         # The pass is the form's one read pass (plan step R7d-f).
-        recurrence=edit_form_recurrence_state(
-            template, BalanceContext.build(current_user.id),
-        ),
+        recurrence=edit_form_recurrence_state(template, pass_ctx),
         txn_types=txn_types,
         # Unused when editing (the form reads the template's own type), but
         # passed so the shared template never references an undefined value.
         default_txn_type_id=None,
         # The amount's dated history (plan step X-au-a), precomputed into
         # display rows.  Empty for a salary-linked template, whose amount the
-        # paycheck calculator derives and which therefore has no series at all.
+        # paycheck calculator derives, even where it holds a dormant series.
         amount_history_rows=template_amount_service.build_amount_history(
             template, display_today(),
         ),
-        # What the definition costs NOW, which is not the stored column whenever
-        # a rise is SCHEDULED; the form's date input defaults to today, so the
-        # two have to be the same question.
-        amount_today=template_amount_service.current_amount(
-            template, display_today(),
-        ),
+        # The Amount box prefilled with what the history states TODAY, or, for
+        # a salary profile's definition, the line naming the profile with
+        # today's paycheck and no box (ruling plan#2694).
+        form_amount=edit_form_amount(template, pass_ctx),
         amount_version_delete_endpoint="templates.delete_amount_version",
     )
 
@@ -410,7 +416,13 @@ def update_template(template_id):
     # STANDS -- the rows its unarchive would restore -- asked before the edit
     # touches it (rulings R-PC93, R-PC95).
     stranding = StrandingCheck.before_the_edit(template, pass_ctx)
-    redirect_response = resolve_recurrence_rule_for_update(
+    # A salary profile's definition states no price and its form shows no
+    # Amount box (ruling plan#2694), so a typed amount is refused FIRST,
+    # before the recurrence step below writes the rule.
+    redirect_response = refuse_a_typed_worked_out_amount(
+        template, data,
+        RedirectTarget("templates.edit_template", {"template_id": template_id}),
+    ) or resolve_recurrence_rule_for_update(
         template,
         data,
         ctx=RecurrenceFormContext(
@@ -455,9 +467,9 @@ def update_template(template_id):
     # bulk UPDATE over this template's instances, which autoflushes whatever is
     # dirty; stating the amount afterwards would leave a second dirty write for
     # the commit and bump the optimistic-lock counter twice for one edit.
-    if "default_amount" in data:
+    if "amount" in data:
         template_amount_service.set_amount(
-            template, data["default_amount"], effective_on=effective_from,
+            template, data["amount"], effective_on=effective_from,
         )
 
     # Apply allowlisted field updates, propagating any rename to existing

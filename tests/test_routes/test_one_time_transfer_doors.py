@@ -113,7 +113,7 @@ def _one_time(auth_client, seed_user, savings, period, *, name="Once Payment",
     """
     resp = auth_client.post("/transfers", data={
         "name": name,
-        "default_amount": amount,
+        "amount": amount,
         "from_account_id": str(seed_user["account"].id),
         "to_account_id": str(savings.id),
         "recurrence_unit": "",
@@ -189,7 +189,7 @@ def _rename_definition(auth_client, xfer, name):
     template = xfer.template
     return auth_client.post(f"/transfers/{template.id}", data={
         "name": name,
-        "default_amount": str(template.default_amount),
+        "amount": str(template.default_amount),
         "from_account_id": str(template.from_account_id),
         "to_account_id": str(template.to_account_id),
         "recurrence_unit": "",

@@ -1305,7 +1305,7 @@ class TestTheHandlerItself:
         """
         ids = baseline_less_owner
         base = {
-            "default_amount": "150.00",
+            "amount": "150.00",
             "from_account_id": ids["checking"],
             "to_account_id": ids["hysa"],
             "category_id": str(ids["rent_category"]),

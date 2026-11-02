@@ -219,7 +219,7 @@ def _transfer_update_payload(template, **overrides):
     """The transfer edit form's fields, the cadence restated, as a browser posts them."""
     payload = {
         "name": template.name,
-        "default_amount": str(template.default_amount),
+        "amount": str(template.default_amount),
         "from_account_id": str(template.from_account_id),
         "to_account_id": str(template.to_account_id),
         "version_id": str(template.version_id),
@@ -402,7 +402,7 @@ class TestAnArchivedTransferTemplatesEdit:
 
             resp = auth_client.post(
                 f"/transfers/{template.id}",
-                data=_transfer_update_payload(template, default_amount="250.00"),
+                data=_transfer_update_payload(template, amount="250.00"),
             )
 
             assert resp.status_code == 302, resp.data
@@ -441,7 +441,7 @@ class TestAnArchivedTransactionTemplatesEdit:
 
             resp = auth_client.post(f"/templates/{template.id}", data={
                 "name": "Streaming, renamed",
-                "default_amount": str(template.default_amount),
+                "amount": str(template.default_amount),
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
                 ),
@@ -462,7 +462,7 @@ class TestAnArchivedTransactionTemplatesEdit:
 
             resp = auth_client.post(f"/templates/{template.id}", data={
                 "name": "Streaming, renamed",
-                "default_amount": str(template.default_amount),
+                "amount": str(template.default_amount),
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
                 ),

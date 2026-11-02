@@ -515,8 +515,8 @@ class TestTheGenericFallbackSurvives:
             # back is marshmallow's own stock Range sentence, which is the
             # shape under test.
             errors = TemplateCreateSchema().validate(
-                {"default_amount": "-1.00"}, partial=True,
+                {"amount": "-1.00"}, partial=True,
             )
 
-            assert "default_amount" in errors
+            assert "amount" in errors
             assert flash_message_for_errors(errors) == GENERIC_VALIDATION_FLASH

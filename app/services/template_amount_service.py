@@ -302,9 +302,8 @@ def _resync_scalar(template) -> None:
     ``effective_from`` forward; since plan steps balance:X-au-e (a
     transaction) and X-au-f-2 (a transfer) generation writes no figure at
     all, and the column is read rather than copied (``git grep -n
-    default_amount app/`` is the census): carry-forward's generated target,
-    and :func:`current_amount` for a definition holding no series, among
-    them.  (The Recurring list, its Archived drawer and the savings page's
+    default_amount app/`` is the census): carry-forward's generated target
+    among them.  (The Recurring list, its Archived drawer and the savings page's
     floors read it until plan step X-bp, which prices them as of the read
     pass's day by the rule that prices the definition's rows instead,
     ``obligations_aggregator.todays_price``; the conflict chooser's gate
@@ -313,7 +312,9 @@ def _resync_scalar(template) -> None:
     scheduled rise still has to reach the column the moment it is stated, or
     those readers would go on answering the old figure.  Today's price is a
     different question, and the edit form asks it separately
-    (:func:`current_amount`).
+    (``routes/_amount_version_actions.edit_form_amount``, which reads
+    :func:`amount_as_of` on today; it read a ``current_amount`` here that fell
+    back to the column, until plan step X-bp).
 
     A no-op for a template with no series, which is only ever one whose amount is
     derived -- there the column IS the statement and has already been set.
@@ -324,32 +325,6 @@ def _resync_scalar(template) -> None:
     versions = amount_versions(template)
     if versions:
         template.default_amount = Decimal(str(versions[-1].amount))
-
-
-def current_amount(template, on_date: date) -> Decimal:
-    """Return what *template* costs on ``on_date``, for a form to prefill.
-
-    :func:`amount_as_of` with the derived kinds' answer folded in: a salary or
-    derive-mode loan template holds no series, so its column is its only
-    statement.  Separate from the scalar because the two answer different
-    questions and an adversarial review found the edit form asking the wrong
-    one: it prefilled ``default_amount`` -- the NEWEST stated price -- beside a
-    date input whose blank value means TODAY, so re-saving a template with a
-    scheduled rise restated that rise as today's price.  The page said so out
-    loud, offering an amount its own history panel labelled "Scheduled" while
-    labelling a different one "Current".
-
-    Args:
-        template: The transaction or transfer template to read.
-        on_date: The date to price it on -- today, for both edit forms.
-
-    Returns:
-        The amount in effect on ``on_date``.
-    """
-    resolved = amount_as_of(template, on_date)
-    if resolved is None:
-        return Decimal(str(template.default_amount))
-    return resolved
 
 
 def _version_on(template, effective_on: date) -> TemplateAmountVersion | None:
@@ -419,7 +394,7 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     all, and the meaning now rests on the column's readers rather than on that
     write (the census above).*  Assigning it directly broke both other cases:
     stating a FUTURE price moved the scalar to it immediately, so the edit form
-    (which prefilled from that column until :func:`current_amount` replaced
+    (which prefilled from that column until a ``current_amount`` replaced
     it) then offered the December figure with a blank date meaning today, and
     the next save -- a rename -- recorded the December rise as having happened
     today; and BACK-dating a price below an already-scheduled one silently
@@ -737,7 +712,6 @@ __all__ = [
     "AmountVersionRow",
     "amount_as_of",
     "amount_versions",
-    "current_amount",
     "build_amount_history",
     "delete_amount_version",
     "is_salary_linked_template",

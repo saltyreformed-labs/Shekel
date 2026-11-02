@@ -224,7 +224,7 @@ class TestClearingATransactionTemplatesRecurrence:
 
         resp = auth_client.post(f"/templates/{template.id}", data={
             "recurrence_unit": "",
-            "default_amount": "19.99",
+            "amount": "19.99",
             "effective_from": seed_periods[4].start_date.isoformat(),
             "version_id": str(template.version_id),
         }, follow_redirects=True)
@@ -281,7 +281,7 @@ class TestClearingATransactionTemplatesRecurrence:
         rule_id = template.recurrence_rule.id
 
         resp = auth_client.post(f"/templates/{template.id}", data={
-            "default_amount": "19.99",
+            "amount": "19.99",
             "version_id": str(template.version_id),
         }, follow_redirects=True)
         assert resp.status_code == 200

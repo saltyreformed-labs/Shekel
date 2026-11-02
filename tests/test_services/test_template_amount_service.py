@@ -302,7 +302,9 @@ class TestSetAmount:
         The whole path an adversarial review walked: state $200.00 from December
         while the current price is $178.00, then submit the edit form again --
         which prefills today's amount beside a blank date meaning today.  Because
-        the prefill is what the series says TODAY and not the stored column, that
+        the prefill is what the series says TODAY (``amount_as_of`` on today, the
+        edit form's read since plan step X-bp deleted the ``current_amount``
+        that fell back to the column) and not the stored column, that
         save restates $178.00 as of today, which the series already answers, so
         no version is written and the December rise stays in December.
         """
@@ -317,13 +319,13 @@ class TestSetAmount:
             db.session.flush()
 
             today = date(2026, 8, 11)
-            assert tas.current_amount(template, today) == Decimal("178.00")
+            assert tas.amount_as_of(template, today) == Decimal("178.00")
             # The column carries the NEWEST stated price, so regeneration still
             # writes the December figure onto the rows that edit rebuilt.
             assert template.default_amount == Decimal("200.00")
 
             tas.set_amount(
-                template, tas.current_amount(template, today), effective_on=today,
+                template, tas.amount_as_of(template, today), effective_on=today,
             )
             db.session.flush()
 

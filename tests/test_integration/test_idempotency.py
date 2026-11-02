@@ -126,7 +126,7 @@ class TestTemplateDoubleSubmit:
 
             data = {
                 "name": "Monthly Rent",
-                "default_amount": "1200.00",
+                "amount": "1200.00",
                 "category_id": seed_user["categories"]["Rent"].id,
                 "transaction_type_id": expense_type.id,
                 "account_id": seed_user["account"].id,

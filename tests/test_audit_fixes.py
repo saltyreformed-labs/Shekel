@@ -243,7 +243,7 @@ class TestTransferAccountOwnership:
 
         resp = auth_client.post("/transfers", data={
             "name": "Malicious Transfer",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "from_account_id": str(other["account"].id),  # foreign account
             "to_account_id": str(savings_acct.id),
             "recurrence_pattern": "",
@@ -265,7 +265,7 @@ class TestTransferAccountOwnership:
 
         resp = auth_client.post("/transfers", data={
             "name": "Malicious Transfer 2",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "from_account_id": str(seed_user["account"].id),
             "to_account_id": str(other["account"].id),  # foreign account
             "recurrence_pattern": "",
@@ -321,7 +321,7 @@ class TestTransferAccountOwnership:
             f"/transfers/{template.id}",
             data={
                 "name": "My Transfer",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(second_user["account"].id),
                 "to_account_id": str(savings_acct.id),
             },
@@ -363,7 +363,7 @@ class TestTransferAccountOwnership:
             f"/transfers/{template.id}",
             data={
                 "name": "My Transfer 2",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(second_user["account"].id),
             },
@@ -457,7 +457,7 @@ class TestTemplateOwnership:
 
         resp = auth_client.post("/templates", data={
             "name": "Malicious Template",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "account_id": str(other["account"].id),
             "category_id": str(seed_user["categories"]["Rent"].id),
             "transaction_type_id": str(expense_type.id),
@@ -478,7 +478,7 @@ class TestTemplateOwnership:
 
         resp = auth_client.post("/templates", data={
             "name": "Malicious Template Cat",
-            "default_amount": "50.00",
+            "amount": "50.00",
             "account_id": str(seed_user["account"].id),
             "category_id": str(other["category"].id),
             "transaction_type_id": str(expense_type.id),
@@ -719,7 +719,7 @@ class TestSelfTransferRejection:
         """
         resp = auth_client.post("/transfers", data={
             "name": "Self Transfer",
-            "default_amount": "100.00",
+            "amount": "100.00",
             "from_account_id": str(seed_user["account"].id),
             "to_account_id": str(seed_user["account"].id),
             "recurrence_pattern": "",

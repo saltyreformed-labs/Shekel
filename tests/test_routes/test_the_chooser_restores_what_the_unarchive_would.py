@@ -79,7 +79,7 @@ class TestADeletedTransferItsBooksHoldStaysDeleted:
             assert _forecast(seed_user, seed_user["account"]) == Decimal("550.00")
             edit = _transfer_update_payload(
                 _db.session.get(TransferTemplate, template_id),
-                default_amount="60.00",
+                amount="60.00",
                 effective_from=seed_periods[0].start_date.isoformat(),
                 # The save has no category: its select posts the empty option.
                 category_id="",
@@ -125,7 +125,7 @@ class TestADeletedBillItsBooksHoldStaysDeleted:
             )
             edit = _transaction_update_payload(
                 _db.session.get(TransactionTemplate, template_id),
-                default_amount="12.00",
+                amount="12.00",
                 effective_from=seed_periods[0].start_date.isoformat(),
             )
 
@@ -162,7 +162,7 @@ class TestADeletedBillItsBooksHoldStaysDeleted:
             )
             edit = _transaction_update_payload(
                 _db.session.get(TransactionTemplate, template_id),
-                default_amount="12.00",
+                amount="12.00",
                 effective_from=seed_periods[0].start_date.isoformat(),
             )
 
@@ -199,7 +199,7 @@ class TestOnlyTheRowsTheBooksHoldStay:
             )
             edit = _transaction_update_payload(
                 _db.session.get(TransactionTemplate, template_id),
-                default_amount="12.00",
+                amount="12.00",
                 effective_from=seed_periods[0].start_date.isoformat(),
             )
 

@@ -1526,7 +1526,7 @@ def _drive_refusals(context, page) -> None:
     # written for, and two of them did the moment their own refusal stopped
     # existing.
     base_form = {
-        "name": f"{MARK}-refused", "default_amount": "10.00",
+        "name": f"{MARK}-refused", "amount": "10.00",
         "category_id": ids["category"], "account_id": ids["account"],
         "transaction_type_id": ids["expense"],
         "starts_on": "2026-03-15",

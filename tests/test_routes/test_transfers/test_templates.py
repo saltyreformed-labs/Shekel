@@ -71,7 +71,7 @@ class TestTemplateList:
             response = auth_client.get("/transfers/new")
 
             assert response.status_code == 200
-            assert b'name="default_amount"' in response.data
+            assert b'name="amount"' in response.data
             assert b'name="from_account_id"' in response.data
             assert b"New Recurring Transfer" in response.data
 
@@ -263,7 +263,7 @@ class TestTemplateCreate:
             savings = _create_savings_account(seed_user)
             response = auth_client.post("/transfers", data={
                 "name": "Weekly Savings",
-                "default_amount": "150.00",
+                "amount": "150.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 **cadence_payload(),
@@ -298,7 +298,7 @@ class TestTemplateCreate:
 
             response = auth_client.post("/transfers", data={
                 "name": "Self Transfer",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": acct_id,
                 "to_account_id": acct_id,
                 "category_id": str(seed_user["categories"]["Rent"].id),
@@ -330,7 +330,7 @@ class TestTemplateCreate:
             db.session.commit()
             response = auth_client.post("/transfers", data={
                 "name": "Drain The Mortgage",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(loan.id),        # loan as SOURCE
                 "to_account_id": str(seed_user["account"].id),
                 **cadence_payload(),
@@ -366,7 +366,7 @@ class TestTemplateCreate:
             db.session.commit()
             response = auth_client.post("/transfers", data={
                 "name": "Cash Advance",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(card.id),        # card as SOURCE
                 "to_account_id": str(seed_user["account"].id),
                 **cadence_payload(),
@@ -390,7 +390,7 @@ class TestTemplateCreate:
             savings = _create_savings_account(seed_user)
             form_data = {
                 "name": "Duplicate Transfer",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 **cadence_payload(),
@@ -496,7 +496,7 @@ class TestTemplateUpdate:
             template = _create_template(seed_user, savings)
             response = auth_client.post(f"/transfers/{template.id}", data={
                 "name": "Updated Savings",
-                "default_amount": "300.00",
+                "amount": "300.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 **cadence_payload(),
@@ -572,7 +572,7 @@ class TestTemplateUpdate:
             # assertion below was dead however the branch behaved.
             resp = auth_client.post(f"/transfers/{tid}", data={
                 "name": "Monthly Savings",
-                "default_amount": "275.00",
+                "amount": "275.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(elsewhere_id),
                 **cadence_payload(),
@@ -637,7 +637,7 @@ class TestTemplateUpdate:
             tid = template.id
             resp = auth_client.post(f"/transfers/{tid}", data={
                 "name": "Monthly Savings",
-                "default_amount": "250.00",
+                "amount": "250.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 **cadence_payload(),
@@ -689,7 +689,7 @@ class TestTemplateUpdate:
             tid, xfer_id = template.id, xfer.id
             resp = auth_client.post(f"/transfers/{tid}", data={
                 "name": "Monthly Savings",
-                "default_amount": "250.00",
+                "amount": "250.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 **cadence_payload(),

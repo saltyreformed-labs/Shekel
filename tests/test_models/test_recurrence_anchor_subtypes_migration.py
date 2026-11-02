@@ -5,23 +5,29 @@ as amended by plan step **R2d**.  The migration adds ``max_occurrences`` to
 ``budget.recurrence_rules`` with its two bound CHECKs, creates the two 0-or-1
 anchor subtype tables, and audits them.  It writes no data at all.
 
-Three groups, and the split is deliberate:
+Two groups, and the split is deliberate:
 
 * **Schema at HEAD.**  The migration is already applied when these run (the
-  template builder upgraded base->head), so the column, constraints and
-  subtype tables are asserted against the live catalogue rather than by
-  re-running DDL in an xdist worker.  Every CHECK is additionally shown to
-  REJECT the value it names -- a constraint nobody has seen fire is a
-  constraint nobody knows is wired up.
-* **The audit trigger actually FIRES on both subtype tables**, and writes the
-  right ``row_id``.  This is the regression guard for a defect measured while
-  building the step: the plan specified ``recurrence_rule_id`` as the sole
-  primary key, and ``system.audit_trigger_func`` assigns ``v_row_id :=
-  NEW.id``, so every INSERT into such a table dies with ``record "new" has no
-  field "id"``.  A presence check on ``pg_trigger`` would NOT have caught it
-  -- the trigger exists either way and fails at INSERT time.
-* **The derived columns are ABSENT, and that is asserted.**  See
-  :class:`TestTheDerivedColumnsAreAbsent`.
+  template builder upgraded base->head), so the column and its constraints
+  are asserted against the live catalogue rather than by re-running DDL in an
+  xdist worker.  Every CHECK is additionally shown to REJECT the value it
+  names -- a constraint nobody has seen fire is a constraint nobody knows is
+  wired up.
+* **The downgrade is a reversal**, read from the migration's AST.
+
+**Both subtype tables are gone at HEAD, and the cases that graded them went
+with them.**  ``budget.recurrence_month_anchors`` was dropped unwritten at plan
+step R7c-c (migration ``d9f5c1a48b73``, ruling **R-R16**: the clamped day is
+``recurrence_rules.nominal_day``), and ``budget.recurrence_weekday_anchors``
+at plan step **R8-c** (migration ``897a6663d221``, rulings **R-R25** and
+**plan#2668**: the rule states how its first date is read in
+``recurrence_rules.weekday_reading``).  The emptiness, primary-key, uniqueness,
+cascade, domain and audit cases this file carried for the weekday table grade
+a relation that no longer exists; what replaced the table is graded where it
+lives -- ``test_recurrence_rule_constraints.TestTheWeekdayReadingIsHeldToItsDate``
+for its CHECKs, and ``test_a_rule_states_how_its_first_date_is_read_migration``
+for the drop's refusal and a downgrade that restores the table with its
+audit trigger and proves the trigger fires.
 
 **What this file no longer covers, and where that coverage went.**  An earlier
 version of this migration added four derived columns and backfilled all 50
@@ -51,7 +57,6 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from app.audit_infrastructure import AUDITED_TABLES
 from tests._test_helpers import bare_expense_template, load_migration_module
 
 _MIGRATION_FILENAME = "c8f2b6a41d93_add_recurrence_anchor_subtypes.py"
@@ -64,21 +69,6 @@ _MIGRATION_SOURCE = (_MIGRATIONS_DIR / _MIGRATION_FILENAME).read_text()
 
 #: The one column the migration adds, nullable and unwritten until step R8.
 _NEW_COLUMNS: tuple[str, ...] = ("max_occurrences",)
-
-#: The subtype table this migration created that still exists, with the value
-#: columns it carries.
-#:
-#: **It held TWO until plan step R7c-c**, which dropped
-#: ``budget.recurrence_month_anchors`` unwritten (migration ``d9f5c1a48b73``):
-#: ruling **R-R16** put the day a clamped anchor MEANT on the rule itself, as
-#: ``recurrence_rules.nominal_day`` under a CHECK tying its presence to
-#: meaning, so the satellite never gained a writer.  Every case below that
-#: swept both now sweeps one, and the cases that could only be written against
-#: the dropped table are re-pointed at the survivor -- the constraints are the
-#: same shape, and the survivor is the one plan step R8 will write.
-_SUBTYPE_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("recurrence_weekday_anchors", ("nth_week", "weekday")),
-)
 
 #: The SELECT list every rule INSERT below shares: a storable Monthly rule.
 #:
@@ -116,14 +106,13 @@ _STORABLE_RULE_VALUES = (
 )
 
 
-def _insert_rule_sql(extra_columns="", extra_values="", returning=""):
+def _insert_rule_sql(extra_columns="", extra_values=""):
     """Return an INSERT that lands one storable rule, plus *extra_columns*.
 
     Args:
         extra_columns: Columns to append to :data:`_STORABLE_RULE_COLUMNS`,
             leading comma included.
         extra_values: The matching VALUES entries, leading comma included.
-        returning: A ``RETURNING`` clause, or ``""``.
 
     Returns:
         str: The SQL, taking a ``:u`` OWNING-TEMPLATE parameter.
@@ -131,7 +120,7 @@ def _insert_rule_sql(extra_columns="", extra_values="", returning=""):
     return (
         f"INSERT INTO budget.recurrence_rules "
         f"  ({_STORABLE_RULE_COLUMNS}{extra_columns}) "
-        f"VALUES ({_STORABLE_RULE_VALUES}{extra_values}) {returning}"
+        f"VALUES ({_STORABLE_RULE_VALUES}{extra_values})"
     )
 
 
@@ -171,45 +160,6 @@ class TestNewColumnShape:
                 )
 
 
-class TestTheSubtypeTablesAreStillEmpty:
-    """Neither anchor subtype has a writer yet.
-
-    **This class lost its first test at plan step R7c-a**, which is what that
-    test's own docstring instructed: it asserted that ``unit_id`` /
-    ``anchor_date`` / ``placement_id`` / ``shift_id`` were NOT columns, on the
-    R2d ruling that a derivation must not be stored beside its own inputs.
-    R7c-a adds them, and the ruling is not broken -- see the migration and
-    ``app.models.recurrence_rule`` for why an expand / migrate / contract is
-    not a cache: nothing reads them until R7c-b, and from R7c-b they are
-    AUTHORED rather than derived.
-
-    The coverage moved rather than lapsing, and it inverted:
-    ``test_recurrence_two_axis_backfill.py`` asserts the five columns exist
-    with the shape R7c-a gives them, and that the migration's backfill fills
-    them with what the write door would write.
-    """
-
-    def test_the_subtype_tables_are_still_empty(self, app, db):
-        """Neither anchor subtype has a writer yet.
-
-        ``recurrence_weekday_anchors`` waits for plan step R8, so a row in it
-        now would describe a value nothing stores and nothing reads.  Its
-        sibling ``recurrence_month_anchors`` was still empty when plan step
-        R7c-c dropped it, which is the strongest form of the same statement.
-        """
-        with app.app_context():
-            for table, _values in _SUBTYPE_TABLES:
-                count = db.session.execute(text(
-                    # ``table`` names a RELATION, which no bind parameter can
-                    # carry; it comes from the module literal above.
-                    f"SELECT count(*) FROM budget.{table}"
-                )).scalar()
-                assert count == 0, (
-                    f"budget.{table} holds {count} rows, but its first writer "
-                    f"is a later plan step (R7c / R8)."
-                )
-
-
 class TestRuleCheckConstraintsReject:
     """Each new CHECK is shown to refuse the value it names.
 
@@ -239,193 +189,6 @@ class TestRuleCheckConstraintsReject:
                 db.session.execute(text(_insert_rule_sql(
                     extra_columns=", max_occurrences", extra_values=", 0",
                 )), {"u": bare_expense_template(db.session, seed_user).id})
-            db.session.rollback()
-
-
-class TestSubtypeTables:
-    """Both 0-or-1 anchor tables exist with the cardinality the design needs."""
-
-    def test_both_tables_exist_with_a_surrogate_id_primary_key(self, app, db):
-        """Each has an ``id`` PK -- which the audit trigger requires.
-
-        The design specifies ``recurrence_rule_id`` as the primary key.  That
-        shape is unusable here: ``system.audit_trigger_func`` assigns
-        ``v_row_id := NEW.id`` and both tables are audited, so an ``id``
-        column is not decoration.  ``UNIQUE (recurrence_rule_id)`` carries the
-        0-or-1 cardinality instead.
-        """
-        with app.app_context():
-            for table, _values in _SUBTYPE_TABLES:
-                pk_cols = db.session.execute(text(
-                    "SELECT a.attname FROM pg_index i "
-                    "JOIN pg_attribute a ON a.attrelid = i.indrelid "
-                    " AND a.attnum = ANY(i.indkey) "
-                    "WHERE i.indrelid = ('budget.' || :t)::regclass "
-                    "  AND i.indisprimary"
-                ), {"t": table}).scalars().all()
-                assert pk_cols == ["id"], (
-                    f"budget.{table} primary key is {pk_cols}, expected "
-                    f"['id'] -- the audit trigger reads NEW.id"
-                )
-
-    def test_rule_id_is_unique_so_a_rule_carries_at_most_one(self, app, db):
-        """``recurrence_rule_id`` is UNIQUE on both tables."""
-        with app.app_context():
-            for table, _values in _SUBTYPE_TABLES:
-                unique_cols = db.session.execute(text(
-                    "SELECT a.attname FROM pg_index i "
-                    "JOIN pg_attribute a ON a.attrelid = i.indrelid "
-                    " AND a.attnum = ANY(i.indkey) "
-                    "WHERE i.indrelid = ('budget.' || :t)::regclass "
-                    "  AND i.indisunique AND NOT i.indisprimary"
-                ), {"t": table}).scalars().all()
-                assert unique_cols == ["recurrence_rule_id"], (
-                    f"budget.{table} unique columns are {unique_cols}, "
-                    f"expected ['recurrence_rule_id'] -- without it a rule "
-                    f"could carry two contradictory anchors."
-                )
-
-    def test_a_second_row_for_the_same_rule_is_refused(
-        self, app, db, seed_user,
-    ):
-        """The UNIQUE constraint actually fires on a duplicate.
-
-        Driven against the SURVIVING subtype since plan step R7c-c: it was
-        written against ``recurrence_month_anchors``, which that step dropped,
-        and the cardinality it grades is the same on both.
-        """
-        with app.app_context():
-            rule_id = db.session.execute(text(
-                _insert_rule_sql(returning="RETURNING id")
-            ), {"u": bare_expense_template(db.session, seed_user).id}).scalar()
-            db.session.execute(text(
-                "INSERT INTO budget.recurrence_weekday_anchors "
-                "  (recurrence_rule_id, nth_week, weekday) "
-                "VALUES (:r, 1, 2)"
-            ), {"r": rule_id})
-            with pytest.raises(IntegrityError, match="uq_recurrence_weekday"):
-                db.session.execute(text(
-                    "INSERT INTO budget.recurrence_weekday_anchors "
-                    "  (recurrence_rule_id, nth_week, weekday) "
-                    "VALUES (:r, 3, 4)"
-                ), {"r": rule_id})
-            db.session.rollback()
-
-    def test_deleting_the_rule_cascades_to_its_anchor(self, app, db, seed_user):
-        """A subtype row cannot outlive the rule it describes."""
-        with app.app_context():
-            rule_id = db.session.execute(text(
-                _insert_rule_sql(returning="RETURNING id")
-            ), {"u": bare_expense_template(db.session, seed_user).id}).scalar()
-            db.session.execute(text(
-                "INSERT INTO budget.recurrence_weekday_anchors "
-                "  (recurrence_rule_id, nth_week, weekday) "
-                "VALUES (:r, 1, 2)"
-            ), {"r": rule_id})
-            db.session.execute(text(
-                "DELETE FROM budget.recurrence_rules WHERE id = :r"
-            ), {"r": rule_id})
-            survivors = db.session.execute(text(
-                "SELECT count(*) FROM budget.recurrence_weekday_anchors "
-                " WHERE recurrence_rule_id = :r"
-            ), {"r": rule_id}).scalar()
-            assert survivors == 0, (
-                "the month anchor outlived its rule -- the FK's ON DELETE "
-                "CASCADE is missing or misdirected"
-            )
-            db.session.rollback()
-
-    # ``test_a_nominal_day_that_cannot_clamp_is_refused`` was here until plan
-    # step R7c-c.  It drove ``ck_recurrence_month_anchors_nominal_day`` -- only
-    # 29-31 can be lost to a short month, so a row for day 28 carried no
-    # information and day 32 is not a day -- and that table is dropped.  The
-    # rule itself is not lost: ruling **R-R16** moved the day onto
-    # ``recurrence_rules.nominal_day``, whose CHECK says strictly MORE (the
-    # domain, that it exceeds the day the date carries, AND that the date was
-    # actually clamped by it), and ``test_recurrence_rule_constraints``'s
-    # ``TestTheNominalDayIsOnlyEverAClamp`` drives every conjunct.
-
-    @pytest.mark.parametrize(
-        "nth_week,weekday,constraint",
-        [
-            (0, 4, "nth_week"),     # there is no zeroth Friday
-            (6, 4, "nth_week"),     # no month has a sixth Friday
-            (-2, 4, "nth_week"),    # only -1 ("last") counts backward
-            (1, 7, "weekday"),      # date.weekday() is 0..6
-        ],
-    )
-    def test_out_of_domain_weekday_anchors_are_refused(
-        self, app, db, seed_user, nth_week, weekday, constraint,
-    ):
-        """The nth-weekday domain is enforced by the database, not by hope."""
-        with app.app_context():
-            rule_id = db.session.execute(text(
-                _insert_rule_sql(returning="RETURNING id")
-            ), {"u": bare_expense_template(db.session, seed_user).id}).scalar()
-            with pytest.raises(IntegrityError, match=constraint):
-                db.session.execute(text(
-                    "INSERT INTO budget.recurrence_weekday_anchors "
-                    "  (recurrence_rule_id, nth_week, weekday) "
-                    "VALUES (:r, :n, :w)"
-                ), {"r": rule_id, "n": nth_week, "w": weekday})
-            db.session.rollback()
-
-
-class TestSubtypeTablesAreAudited:
-    """The surviving table is audited, and the trigger is proven to FIRE.
-
-    The presence check alone would have missed the defect this guards: with
-    the design's ``recurrence_rule_id``-only primary key the trigger EXISTS
-    and every INSERT fails at runtime, because ``audit_trigger_func`` assigns
-    ``v_row_id := NEW.id``.  Only an actual INSERT distinguishes the two.
-    """
-
-    def test_the_subtype_table_is_in_audited_tables(self):
-        """It carries user-controlled budget state, so it is audited."""
-        for table, _values in _SUBTYPE_TABLES:
-            assert ("budget", table) in AUDITED_TABLES, (
-                f"budget.{table} holds user-controlled financial state and "
-                f"must be audited; EXPECTED_TRIGGER_COUNT derives from this "
-                f"list and the container entrypoint asserts it at start."
-            )
-
-    def test_inserting_writes_an_audit_row(self, app, db, seed_user):
-        """An INSERT into the subtype table lands in ``system.audit_log``."""
-        with app.app_context():
-            rule_id = db.session.execute(text(
-                _insert_rule_sql(returning="RETURNING id")
-            ), {"u": bare_expense_template(db.session, seed_user).id}).scalar()
-            db.session.execute(text(
-                "INSERT INTO budget.recurrence_weekday_anchors "
-                "  (recurrence_rule_id, nth_week, weekday) "
-                "VALUES (:r, -1, 4)"
-            ), {"r": rule_id})
-            for table, _values in _SUBTYPE_TABLES:
-                inserted_id = db.session.execute(text(
-                    # ``table`` names a RELATION, which no bind parameter
-                    # can carry; it comes from the module literal above.
-                    f"SELECT id FROM budget.{table} "
-                    " WHERE recurrence_rule_id = :r"
-                ), {"r": rule_id}).scalar()
-                logged = db.session.execute(text(
-                    "SELECT row_id, new_data ->> 'recurrence_rule_id' "
-                    "  FROM system.audit_log "
-                    " WHERE table_schema = 'budget' AND table_name = :t "
-                    "   AND operation = 'INSERT' "
-                    "   AND new_data ->> 'recurrence_rule_id' = :r"
-                ), {"t": table, "r": str(rule_id)}).fetchone()
-                assert logged is not None, (
-                    f"no audit row for the INSERT into budget.{table}"
-                )
-                # ``row_id`` is the whole reason these tables carry a
-                # surrogate ``id``: the trigger assigns ``v_row_id := NEW.id``.
-                # Asserting only that SOME row was logged would pass with a
-                # NULL or wrong row_id, which is the failure the surrogate key
-                # exists to prevent.
-                assert logged[0] == inserted_id, (
-                    f"budget.{table} audit row carries row_id={logged[0]!r}, "
-                    f"expected the inserted id {inserted_id}"
-                )
             db.session.rollback()
 
 

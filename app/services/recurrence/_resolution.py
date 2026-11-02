@@ -4,7 +4,8 @@ Shekel Budget App -- Resolving an authored recurrence into its two-axis view
 One pure function, :func:`resolve`, turns what a caller AUTHORS
 (:class:`RecurrenceSpec` -- a cadence, a first occurrence and the bounds) into
 what the recurrence MEANS (:class:`ResolvedRecurrence` -- an interval, a unit, a
-first occurrence, a placement, a shift, the bounds, and the 0-or-1 nominal day).
+first occurrence, a placement, a shift, the bounds, the 0-or-1 nominal day and
+the 0-or-1 weekday reading).
 
 **Since plan step R7c-b the FIRST OCCURRENCE is authored rather than derived**
 (ruling **R-R16**, plan ledger row **D28**).  A caller states ``starts_on``; the
@@ -290,15 +291,8 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
             refused at construction where the date does not fit it
             (:func:`~._month_coordinate._require_weekday_reading_pair`).
             **Read it through :attr:`month_coordinate`**, as *nominal_day*.
-
-            **:func:`resolve` leaves it ``None`` until the storage task of the
-            same step**, which gives :class:`RecurrenceSpec` the field
-            together with its column: a spec field the write door cannot
-            store is one a caller states and the table silently drops
-            (``test_recurrence_authoring``'s
-            ``test_every_spec_field_reaches_the_row``).  Until then it is
-            stated directly, as ``shift`` and the ``WEEK`` unit were before
-            their producers.
+            :func:`resolve` carries :class:`RecurrenceSpec`'s verbatim, and
+            ``budget.recurrence_rules.weekday_reading`` stores it.
         books_opened_on: The latest governing ``opened_on`` across every
             account the definition moves money in, or ``None`` for no
             floor (ruling **R-PC85**, plan step ``pay_calendar:C18-a``).  **The
@@ -504,13 +498,16 @@ class RecurrenceSpec:  # pylint: disable=too-many-instance-attributes
     production clone, 18 of the 24 live multi-month rules would have fired in
     the wrong months forever under the reading it replaced.
 
-    Pylint: ``too-many-instance-attributes`` (8/7) -- these are the irreducible
+    Pylint: ``too-many-instance-attributes`` (9/7) -- these are the irreducible
     inputs of one authoring request, exactly the fields the recurrence form
     collects, read as a flat unit by the single consumer (:func:`resolve`);
     the eighth, ``max_per_month``, is the cadence's third value since plan
-    step salary:R15-a (a ninth, ``due_day_of_month``, left at plan step
-    recurrence:R5-a, ruling **R-R96**).  Mirrors the ``TransferSpec`` precedent.  Frozen so a
-    constructed spec is an immutable record of one request.
+    step salary:R15-a (``due_day_of_month`` left at plan step
+    recurrence:R5-a, ruling **R-R96**), and the ninth, ``weekday_reading``,
+    is how ``starts_on`` is read since plan step recurrence:R8-c, flat beside
+    ``nominal_day`` for the reason :class:`ResolvedRecurrence` gives that
+    pair.  Mirrors the ``TransferSpec`` precedent.  Frozen so a constructed
+    spec is an immutable record of one request.
 
     Attributes:
         user_id: The owning user.
@@ -562,6 +559,19 @@ class RecurrenceSpec:  # pylint: disable=too-many-instance-attributes
             within a month (:func:`_require_month_ceiling_pair`), and below
             one by :func:`_require_authored_domains`, mirroring the column's
             CHECK.
+        weekday_reading: How *starts_on* is read by its WEEKDAY -- "the
+            third Tuesday" from the month's start, "the last Friday" from its
+            end -- or ``None``, the default and every rule authored before
+            plan step recurrence:R8-c, to read it by its day of the month
+            (rulings plan#2668, plan#2670).  The week number and the weekday
+            come from *starts_on*, so this is the whole of what a caller
+            states about them.  Refused at construction beside a
+            *nominal_day*, on a unit with no month coordinate, and where the
+            date does not fit it
+            (:func:`~._month_coordinate._require_weekday_reading_pair`), so
+            ``ck_recurrence_rules_weekday_reading`` and
+            ``ck_recurrence_rules_one_month_reading`` are never what refuses
+            one.
     """
 
     user_id: int
@@ -572,6 +582,7 @@ class RecurrenceSpec:  # pylint: disable=too-many-instance-attributes
     nominal_day: int | None = None
     end_bound: EndBound = NEVER_ENDS
     max_per_month: int | None = None
+    weekday_reading: WeekdayReading | None = None
 
     def __post_init__(self) -> None:
         """Refuse a spec whose first occurrence and nominal day disagree.
@@ -581,11 +592,14 @@ class RecurrenceSpec:  # pylint: disable=too-many-instance-attributes
         :class:`~app.services.recurrence.EndBound` and
         :class:`~app.services.recurrence.OccurrencePlacement` already use in
         this package.  The ``(unit, max_per_month)`` pair is refused here for
-        the same reason (plan step salary:R15-a).
+        the same reason (plan step salary:R15-a), and so is the weekday
+        reading (plan step recurrence:R8-c), the one invariant
+        :class:`ResolvedRecurrence` holds beside them.
 
         Raises:
             RecurrenceResolutionError: When *starts_on* is absent, or see
-                :func:`_require_nominal_day_pair` and
+                :func:`_require_nominal_day_pair`,
+                :func:`~._month_coordinate._require_weekday_reading_pair` and
                 :func:`_require_month_ceiling_pair`.
         """
         # ``starts_on`` is typed ``date`` and the column is ``NOT NULL`` from
@@ -606,6 +620,10 @@ class RecurrenceSpec:  # pylint: disable=too-many-instance-attributes
             )
         _require_nominal_day_pair(
             self.unit, self.starts_on, self.nominal_day,
+            where=f"a {self.unit!r} recurrence (user {self.user_id})",
+        )
+        _require_weekday_reading_pair(
+            self.unit, self.starts_on, self.nominal_day, self.weekday_reading,
             where=f"a {self.unit!r} recurrence (user {self.user_id})",
         )
         _require_month_ceiling_pair(
@@ -897,8 +915,9 @@ def resolve(spec: RecurrenceSpec, calendar: PayCalendar) -> ResolvedRecurrence:
             resolved against an owner with no pay periods.  All are broken
             invariants: a recurrence read with a fabricated cadence is worse
             than a refused read.  The ``(starts_on, nominal_day)`` and
-            ``(unit, max_per_month)`` pairs are refused by
-            :class:`RecurrenceSpec` itself, before this function is reached.
+            ``(unit, max_per_month)`` pairs and the weekday reading are
+            refused by :class:`RecurrenceSpec` itself, before this function is
+            reached.
 
             **The cadence refusal ARRIVED at plan step R7c-c**, and it arrived
             because one left.  ``_authoring._author`` called ``encode_cadence``
@@ -957,9 +976,11 @@ def resolve(spec: RecurrenceSpec, calendar: PayCalendar) -> ResolvedRecurrence:
         # interval and unit are: one pair of values feeds the walk and the
         # count, and the ceiling is the third of them (plan step salary:R15-a).
         max_per_month=cadence.max_per_month,
-        # ``weekday_reading`` stays ``None`` until the spec carries one with
-        # its column (the storage task of plan step recurrence:R8-c); see that
-        # field.
+        # VERBATIM, canonicalisation included: ``(12, MONTH)`` becomes
+        # ``(1, YEAR)`` above and both units have a month coordinate, so a
+        # fourth-Thursday rule every 12 months walks 2026-11-26, 2027-11-25,
+        # 2028-11-23 under either spelling (plan step recurrence:R8-c).
+        weekday_reading=spec.weekday_reading,
         # ``books_opened_on`` stays ``None`` and ``is_envelope`` ``False``:
         # facts about the DEFINITION and its ACCOUNTS, read by the read pass
         # that attaches both (``BalanceContext.resolved_for``), for the

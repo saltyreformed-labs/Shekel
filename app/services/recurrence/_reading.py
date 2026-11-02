@@ -92,6 +92,10 @@ from app.services.recurrence._vocabulary import (
     modelled_placement,
     modelled_unit,
 )
+from app.services.recurrence._month_coordinate import (
+    offerable_weekday_readings,
+    weekday_reading_of,
+)
 from app.services.recurrence._nominal_day import is_offerable_nominal_day
 from app.services.recurrence._resolution import (
     RecurrenceSpec,
@@ -370,12 +374,11 @@ def scheduling_day_of_month(rule: RecurrenceRule) -> int | None:
     # The gate and the join live in the pure leaf the occurrence walk asks
     # too (plan step pay_calendar:C18-a): one statement of "which day a
     # cadence schedules its rows on", from a rule here and from a resolved
-    # value there.  No column holds a weekday reading until the storage task
-    # of plan step recurrence:R8-c adds one, so every stored rule is read by
-    # its day of the month.
+    # value there.  A rule read by its weekday answers ``None``: its day moves
+    # from month to month (plan step recurrence:R8-c).
     return cadence_scheduled_day(
         unit, placement, rule.starts_on, rule.nominal_day,
-        weekday_reading=None,
+        weekday_reading=weekday_reading_of(rule.weekday_reading),
     )
 
 
@@ -490,7 +493,9 @@ def recurrence_spec_with_cadence(
         ``nominal_day`` is the row's own only where the STATED cadence can hold
         it; see the inline comment on that field.  Its ``max_per_month`` is
         the STATED one, DROPPED where the stated unit cannot repeat within a
-        month, for the reason the nominal day is.
+        month, for the reason the nominal day is, and its
+        ``weekday_reading`` the row's own where the stated unit has a month
+        coordinate to read (plan step recurrence:R8-c).
 
     Raises:
         RecurrenceResolutionError: The row carries BOTH closing-bound columns,
@@ -501,7 +506,9 @@ def recurrence_spec_with_cadence(
             ``(starts_on, nominal_day)`` pair cannot raise from here: a day the
             stated cadence cannot hold is dropped rather than carried, which is
             what keeps the edit form's own cadence change off the 500 path.
+            The weekday reading is dropped the same way.
     """
+    reading = weekday_reading_of(rule.weekday_reading)
     return RecurrenceSpec(
         user_id=rule.user_id,
         unit=unit,
@@ -544,6 +551,14 @@ def recurrence_spec_with_cadence(
         # salary:R15-a).
         max_per_month=(
             max_per_month if can_repeat_within_month(unit) else None
+        ),
+        # DROPPED where the STATED cadence cannot read the first occurrence
+        # that way, as the nominal day above, for the same repair path (plan
+        # step recurrence:R8-c): a paycheck cadence has no month coordinate.
+        weekday_reading=(
+            reading if reading in offerable_weekday_readings(
+                unit, rule.starts_on,
+            ) else None
         ),
     )
 

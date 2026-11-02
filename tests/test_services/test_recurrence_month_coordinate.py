@@ -26,11 +26,13 @@ from app.services.recurrence import (
     NthWeekday,
     RecurrenceDescriptionError,
     RecurrenceResolutionError,
+    RecurrenceSpec,
     WeekdayReading,
     describe,
     month_coordinate,
     occurrences,
     offerable_weekday_readings,
+    resolve,
 )
 from app.services.recurrence import _describe, _months
 from app.services.recurrence._month_coordinate import (
@@ -45,6 +47,9 @@ _MONTH = RecurrenceUnitEnum.MONTH
 _YEAR = RecurrenceUnitEnum.YEAR
 _FROM_START = WeekdayReading.FROM_START
 _FROM_END = WeekdayReading.FROM_END
+
+#: The owner a spec below names, and the calendar it resolves against.
+_OWNER_ID = 7
 
 #: Tue 2026-11-17: the third Tuesday of November 2026 (the 17th, 10th, 3rd).
 _THIRD_TUESDAY = date(2026, 11, 17)
@@ -345,36 +350,43 @@ class TestTheYearlyCountIsUnchanged:
             assert sum(day.year == year for day in walked) == 12, year
 
 
-class TestTheRefusals:
-    """The resolved value refuses a reading the rule's other fields contradict.
+#: Every contradiction the weekday-reading refusal names, with the message
+#: that names it: both value types refuse the same four, from one statement
+#: (``_month_coordinate._require_weekday_reading_pair``).
+_CONTRADICTIONS = pytest.mark.parametrize(
+    ("unit", "starts_on", "nominal_day", "reading", "message"),
+    [
+        (
+            RecurrenceUnitEnum.WEEK, _THIRD_TUESDAY, None, _FROM_START,
+            "no day-of-month coordinate",
+        ),
+        (
+            # Thu 2026-04-30 is the last Thursday, but it carries the
+            # clamp's nominal 31st: one date is read one way.
+            _MONTH, date(2026, 4, 30), 31, _FROM_END, "exclusive arc",
+        ),
+        (
+            _MONTH, _LAST_FRIDAY, None, _FROM_START,
+            r"only readings it allows are \['from_end'\]",
+        ),
+        (
+            _MONTH, _THIRD_TUESDAY, None, _FROM_END,
+            r"only readings it allows are \['from_start'\]",
+        ),
+    ],
+    ids=["week-unit", "beside-nominal-day", "fifth", "not-the-last"],
+)
 
-    :class:`~app.services.recurrence.RecurrenceSpec` takes the field, and the
-    same refusal, with its column at the storage task of plan step R8-c.
+
+class TestTheRefusals:
+    """Both value types refuse a reading the rule's other fields contradict.
+
+    The spec took the field with its column (the storage task of plan step
+    R8-c), so a caller cannot author what the resolved value refuses and the
+    write door is never where the contradiction surfaces.
     """
 
-    @pytest.mark.parametrize(
-        ("unit", "starts_on", "nominal_day", "reading", "message"),
-        [
-            (
-                RecurrenceUnitEnum.WEEK, _THIRD_TUESDAY, None, _FROM_START,
-                "no day-of-month coordinate",
-            ),
-            (
-                # Thu 2026-04-30 is the last Thursday, but it carries the
-                # clamp's nominal 31st: one date is read one way.
-                _MONTH, date(2026, 4, 30), 31, _FROM_END, "exclusive arc",
-            ),
-            (
-                _MONTH, _LAST_FRIDAY, None, _FROM_START,
-                r"only readings it allows are \['from_end'\]",
-            ),
-            (
-                _MONTH, _THIRD_TUESDAY, None, _FROM_END,
-                r"only readings it allows are \['from_start'\]",
-            ),
-        ],
-        ids=["week-unit", "beside-nominal-day", "fifth", "not-the-last"],
-    )
+    @_CONTRADICTIONS
     def test_the_resolved_value_refuses(
         self, unit, starts_on, nominal_day, reading, message,
     ):
@@ -384,6 +396,68 @@ class TestTheRefusals:
                 unit=unit, starts_on=starts_on, nominal_day=nominal_day,
                 weekday_reading=reading,
             )
+
+    @_CONTRADICTIONS
+    def test_the_spec_refuses(
+        self, unit, starts_on, nominal_day, reading, message,
+    ):
+        """The authored value refuses the same four, naming the owner."""
+        with pytest.raises(RecurrenceResolutionError, match=message) as refused:
+            RecurrenceSpec(
+                user_id=_OWNER_ID, unit=unit, starts_on=starts_on,
+                nominal_day=nominal_day, weekday_reading=reading,
+            )
+        assert f"user {_OWNER_ID}" in str(refused.value)
+
+
+class TestResolveCarriesTheReading:
+    """``resolve`` hands the spec's reading to the value the walk reads."""
+
+    @pytest.mark.parametrize(
+        ("starts_on", "reading"),
+        [
+            (_THIRD_TUESDAY, None),
+            (_THIRD_TUESDAY, _FROM_START),
+            (_LAST_FRIDAY, _FROM_END),
+        ],
+        ids=["day", "from-start", "from-end"],
+    )
+    def test_every_reading_reaches_the_resolved_value(self, starts_on, reading):
+        """Verbatim, ``None`` included."""
+        resolved = resolve(
+            RecurrenceSpec(
+                user_id=_OWNER_ID, unit=_MONTH, starts_on=starts_on,
+                weekday_reading=reading,
+            ),
+            build_calendar(user_id=_OWNER_ID),
+        )
+
+        assert resolved.weekday_reading is reading
+
+    def test_twelve_months_is_a_year_and_keeps_its_reading(self):
+        """(12, MONTH) canonicalises to (1, YEAR) and walks Thanksgiving.
+
+        Thu 2026-11-26 is the fourth Thursday of November 2026 (5, 12, 19,
+        26); Nov 2027 opens on a Monday, so its fourth is the 25th, and Nov
+        2028 on a Wednesday, so the 23rd.  The 26th, the day reading, would
+        land on a Friday in 2027 and a Sunday in 2028.
+        """
+        resolved = resolve(
+            RecurrenceSpec(
+                user_id=_OWNER_ID, unit=_MONTH, interval_n=12,
+                starts_on=date(2026, 11, 26), weekday_reading=_FROM_START,
+            ),
+            build_calendar(user_id=_OWNER_ID),
+        )
+
+        assert (resolved.interval_n, resolved.unit) == (1, _YEAR)
+        assert resolved.weekday_reading is _FROM_START
+        assert list(
+            occurrences(
+                resolved, build_calendar(user_id=_OWNER_ID),
+                through=date(2028, 12, 31),
+            ),
+        ) == [date(2026, 11, 26), date(2027, 11, 25), date(2028, 11, 23)]
 
 
 class TestNoFixedDay:

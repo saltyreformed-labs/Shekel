@@ -22,7 +22,9 @@ The shape that leaves nothing for a writer to get half-right:
 
 **Since plan step R7c-c there is ONE representation and this function writes
 it.**  The rule states its recurrence in ``interval_n`` / ``unit_id`` /
-``placement_id`` / ``shift_id`` / ``starts_on`` / ``nominal_day``, and that is
+``placement_id`` / ``shift_id`` / ``starts_on`` / ``nominal_day`` (with
+``max_per_month`` since plan step salary:R15-a and ``weekday_reading`` since
+plan step recurrence:R8-c), and that is
 the whole table apart from the closing bound's exclusive arc
 (``due_day_of_month`` was the other exception until plan step
 recurrence:R5-a dropped it, ruling **R-R96**).  The closed set's storage
@@ -232,7 +234,8 @@ def _author(
     #
     # **The WHOLE table since plan step R7c-c**: six columns, every one of them
     # a value a caller states, and no encoding beside them -- seven since plan
-    # step salary:R15-a added the per-month ceiling.  They are written
+    # step salary:R15-a added the per-month ceiling, eight since plan step
+    # recurrence:R8-c added the weekday reading.  They are written
     # from the ONE ``resolve`` call above, whose cadence has already been
     # through
     # :func:`~app.services.recurrence._frequency.canonical_cadence` -- so
@@ -251,6 +254,15 @@ def _author(
     rule.shift_id = ref_cache.business_day_shift_id(resolved.shift)
     rule.starts_on = resolved.starts_on
     rule.nominal_day = resolved.nominal_day
+    # How ``starts_on`` is read (plan step recurrence:R8-c): the member's
+    # value, the literal ``ck_recurrence_rules_weekday_reading`` names, and
+    # ``None`` for a rule read by its day of the month.  Off the resolved
+    # value like the day beside it, so the reading the walk takes and the
+    # reading the row holds are one.
+    rule.weekday_reading = (
+        None if resolved.weekday_reading is None
+        else resolved.weekday_reading.value
+    )
     # The cadence's third value (plan step salary:R15-a, ruling R-SAL29):
     # off the resolved value like the two beside it, so the ceiling the walk
     # applies and the ceiling the row holds come from one canonicalisation.

@@ -24,7 +24,8 @@ as the last weekday.  Every weekday rule therefore fires once in each month it
 is due, and :class:`~app.services.recurrence.Cadence`'s yearly count and
 monthly equivalent are unchanged by the reading.
 
-What lives here: the closed set a rule states (:class:`WeekdayReading`), the
+What lives here: the closed set a rule states (:class:`WeekdayReading`) and the
+read of its stored value (:func:`weekday_reading_of`), the
 three shapes the join answers (:class:`DayOfMonth`, :class:`NthWeekday`,
 :class:`LastWeekday`), the join itself (:func:`month_coordinate`, which took
 ``_nominal_day.cadence_day_of_month``'s place), the one producer of which
@@ -73,8 +74,10 @@ class WeekdayReading(enum.Enum):
     day.
 
     Not a ``ref`` table's mirror (:mod:`app.enums` holds those): nothing
-    compares an id against it, and the column the storage step adds holds the
-    value under same-row CHECKs that a ref id would make name literals.
+    compares an id against it, and ``budget.recurrence_rules.weekday_reading``
+    holds the member's VALUE under same-row CHECKs that a ref id would make
+    name literals.  The write door stores ``.value`` and the read door reads
+    the member back through :func:`weekday_reading_of`.
 
         from_start -- the weekday counted from the month's start: a date on
                       the 15th-21st is "the third" of its weekday.
@@ -83,6 +86,25 @@ class WeekdayReading(enum.Enum):
 
     FROM_START = "from_start"
     FROM_END = "from_end"
+
+
+def weekday_reading_of(stored: str | None) -> WeekdayReading | None:
+    """Return the reading a ``weekday_reading`` column value names.
+
+    The inverse of the write door's ``.value``, held beside the set it reads
+    so the read door names no literal.  ``ck_recurrence_rules_weekday_reading``
+    admits only the members' values, so the lookup cannot meet a third one.
+
+    Args:
+        stored: The column's value, or ``None`` for a rule read by its day of
+            the month.
+
+    Returns:
+        The member, or ``None``.
+    """
+    if stored is None:
+        return None
+    return WeekdayReading(stored)
 
 
 class MonthCoordinate(ABC):
@@ -438,4 +460,5 @@ __all__ = [
     "WeekdayReading",
     "month_coordinate",
     "offerable_weekday_readings",
+    "weekday_reading_of",
 ]

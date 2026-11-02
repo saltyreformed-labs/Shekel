@@ -10,6 +10,8 @@ Covers audit findings:
     BAL-653  Compose images pinned by tag alone (ledger finding, plan step X-em;
              :class:`TestEveryComposeImageIsPinnedByDigest`, which lists the
              compose files with ``git ls-files``)
+    plan#2703  The source build's image named as its own and never pulled (a ruling;
+             :class:`TestTheSourceBuildRunsItsOwnBuild`)
 
 The artifacts under audit are the multi-stage Dockerfile, the
 production compose override at ``deploy/docker-compose.prod.yml``,
@@ -50,6 +52,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
 DOCKER_COMPOSE = REPO_ROOT / "docker-compose.yml"
 DEV_COMPOSE = REPO_ROOT / "docker-compose.dev.yml"
+BUILD_COMPOSE = REPO_ROOT / "docker-compose.build.yml"
 PROD_COMPOSE_OVERRIDE = REPO_ROOT / "deploy" / "docker-compose.prod.yml"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 GITIGNORE = REPO_ROOT / ".gitignore"
@@ -1045,6 +1048,16 @@ PINNED_ELSEWHERE = frozenset({
     ("docker-compose.yml", "app"),
     ("deploy/docker-compose.prod.yml", "app"),
 })
+#: The images a compose file builds on the host and never pulls, each as ``(compose file,
+#: service)``: the source build's (ruling plan#2703).  A digest pins bytes a registry serves,
+#: and these are built here and never fetched; :class:`TestTheSourceBuildRunsItsOwnBuild`
+#: holds each to building, never pulling and a ``localhost/`` name.
+BUILT_HERE = frozenset({
+    ("docker-compose.build.yml", "app"),
+})
+#: The prefix of a name no registry serves: a reference whose first part is ``localhost``
+#: names a registry on the host itself, and a source-build host runs none.
+LOCAL_IMAGE_PREFIX = "localhost/"
 
 
 def _compose_images() -> tuple[list[str], dict[tuple[str, str], str]]:
@@ -1068,23 +1081,99 @@ def _compose_images() -> tuple[list[str], dict[tuple[str, str], str]]:
 class TestEveryComposeImageIsPinnedByDigest:
     """Every image a compose file names is ``name:tag@sha256:<digest>``, so a push to a tag
     cannot change what a ``docker compose up`` runs (finding BAL-653): the tag says which
-    version, the digest pins its bytes.  The app's is pinned elsewhere."""
+    version, the digest pins its bytes.  The app's is pinned elsewhere, and the source
+    build's is built on the host."""
 
     def test_every_image_names_its_tag_and_digest(self) -> None:
-        """Each compose image but the app's carries a tag and a sha256 digest; the census
-        found the compose files production, dev and the build use, and the app's lines are
-        still where the exemption says, so neither can pass by reading nothing."""
+        """Each compose image but the app's and the source build's carries a tag and a sha256
+        digest; the census found the compose files production, dev and the build use, and the
+        exempt lines are still where the exemptions say, so neither can pass by reading
+        nothing."""
         files, images = _compose_images()
         assert {"docker-compose.yml", "docker-compose.dev.yml", "docker-compose.build.yml",
                 "deploy/docker-compose.prod.yml"} <= set(files), files
-        assert PINNED_ELSEWHERE <= images.keys(), sorted(images)
+        assert PINNED_ELSEWHERE | BUILT_HERE <= images.keys(), sorted(images)
         unpinned = {f"{name} {service}": image for (name, service), image in images.items()
-                    if (name, service) not in PINNED_ELSEWHERE
+                    if (name, service) not in PINNED_ELSEWHERE | BUILT_HERE
                     and not TAG_AND_DIGEST_PATTERN.match(image)}
         assert not unpinned, (
             f"compose images pinned by tag alone: {unpinned}.  Pin each as "
             "``name:tag@sha256:<digest>``, the digest the multi-arch index's, read with "
             "``docker buildx imagetools inspect name:tag`` (finding BAL-653).")
+
+
+class TestTheSourceBuildRunsItsOwnBuild:
+    """The source build's image has a name of its own and is never pulled (ruling plan#2703).
+    Under the published name, ``ghcr.io/saltyreformed-labs/shekel:latest``, one name held two
+    images: every ``docker compose up`` over the base file and ``docker-compose.build.yml``
+    pulled GHCR's image over the build ``scripts/deploy.sh`` had just made and ran it, the
+    base file's ``pull_policy: always`` surviving the overlay (measured 2026-11-02, compose
+    5.6.1)."""
+
+    def test_each_image_built_here_builds_never_pulls_and_has_no_registry(self) -> None:
+        """Each service :data:`BUILT_HERE` exempts from the digest census, in its own file,
+        builds its image, never pulls it, and names it under :data:`LOCAL_IMAGE_PREFIX`, so
+        the exemption covers only an image built on the host under a name no pull of a
+        published image can reach."""
+        wrong = {}
+        for name, service in sorted(BUILT_HERE):
+            with (REPO_ROOT / name).open(encoding="utf-8") as fh:
+                spec = yaml.safe_load(fh)["services"][service]
+            if not ("build" in spec and spec.get("pull_policy") == "never"
+                    and str(spec.get("image", "")).startswith(LOCAL_IMAGE_PREFIX)):
+                wrong[f"{name} {service}"] = spec
+        assert not wrong, (
+            f"a compose service the digest census exempts as built here does not build, "
+            f"never pull, and name a {LOCAL_IMAGE_PREFIX!r} image: {wrong}.  Under a "
+            "registry's name a pull replaces the build (ruling plan#2703).")
+
+    @pytest.mark.docker
+    def test_the_merged_source_build_never_pulls_the_app(self) -> None:
+        """Compose's own merge of the base file and the overlay names the app by the
+        overlay's image and never pulls it: the base file's ``pull_policy: always`` does not
+        survive, which a reading of the overlay alone cannot see."""
+        if not _docker_available():
+            pytest.skip("docker not available; cannot run docker compose config")
+        with BUILD_COMPOSE.open(encoding="utf-8") as fh:
+            built = yaml.safe_load(fh)["services"]["app"]["image"]
+        result = subprocess.run(
+            ["docker", "compose", "--env-file", "/dev/null", "-f", str(DOCKER_COMPOSE),
+             "-f", str(BUILD_COMPOSE), "config"],
+            capture_output=True, text=True, timeout=DOCKER_SUBPROCESS_TIMEOUT_S, check=False,
+            cwd=str(REPO_ROOT),
+            # Synthetic values for the base file's required interpolations; ``config``
+            # only renders the merge, so none reaches a container.
+            env={"PATH": "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin",
+                 "POSTGRES_PASSWORD": "test-postgres-password", "SECRET_KEY": "a" * 32,
+                 "APP_ROLE_PASSWORD": "test-app-role-password",
+                 "SHEKEL_VALKEY_PASSWORD": "test-valkey-password"},
+        )
+        assert result.returncode == 0, (
+            f"docker compose config failed for the base file and the build overlay:\n"
+            f"  stdout: {result.stdout}\n  stderr: {result.stderr}")
+        app = yaml.safe_load(result.stdout)["services"]["app"]
+        merged = (app.get("image"), app.get("pull_policy"), "build" in app)
+        assert merged == (built, "never", True), (
+            f"the merged source build's app is {app.get('image')!r}, pull policy "
+            f"{app.get('pull_policy')!r}, build {app.get('build')!r}, where the overlay builds "
+            f"{built!r} and never pulls it: an ``up`` would fetch its image from a registry "
+            "before running it, or run another image (ruling plan#2703).")
+
+    def test_deploy_script_names_the_base_file_and_the_overlay(self) -> None:
+        """``scripts/deploy.sh``'s ``COMPOSE_FILES``, the files its compose calls name, are the
+        base file and the overlay, read by bash itself: without the overlay, ``build app``
+        builds nothing (``No services to build``, exit 0) and ``up`` runs GHCR's image."""
+        assignment = re.search(r"^COMPOSE_FILES=\(.*\)$",
+                               DEPLOY_SCRIPT.read_text(encoding="utf-8"), re.MULTILINE)
+        assert assignment is not None, "scripts/deploy.sh assigns no COMPOSE_FILES=(...) line"
+        result = subprocess.run(
+            ["bash", "-c", assignment.group(0) + '; printf "%s\\n" "${COMPOSE_FILES[@]}"'],
+            capture_output=True, text=True, check=True, timeout=DOCKER_SUBPROCESS_TIMEOUT_S,
+        )
+        expected = ["-f", DOCKER_COMPOSE.name, "-f", BUILD_COMPOSE.name]
+        assert result.stdout.split("\n")[:-1] == expected, (
+            f"scripts/deploy.sh's COMPOSE_FILES is {result.stdout.split()}, not {expected}: "
+            "its build and up would not run the overlay's build (ruling plan#2703).")
 
 
 class TestDevComposeRunsProductionsImages:

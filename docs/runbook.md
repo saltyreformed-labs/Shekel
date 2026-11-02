@@ -396,11 +396,12 @@ docker compose up -d --no-deps --force-recreate app
 # Option B: If the previous image is still tagged.
 # deploy.sh tags the in-place image as ${APP_CONTAINER}:previous
 # (so shekel-prod-app:previous) before each deploy, then on rollback
-# re-tags it as <compose_image>:latest.  The compose image for the
-# bundled deployment is ghcr.io/saltyreformed-labs/shekel:latest -- adjust
-# below if you build a custom image with a different name.
-docker tag shekel-prod-app:previous ghcr.io/saltyreformed-labs/shekel:latest
-docker compose up -d --no-deps --force-recreate app
+# re-tags it as the image the compose files name.  The compose image for
+# a source build is localhost/shekel:latest, the build's own name, which
+# docker-compose.build.yml gives it and never pulls (ruling plan#2703).
+# Both files, as the base file alone names GHCR's image instead.
+docker tag shekel-prod-app:previous localhost/shekel:latest
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --no-deps --force-recreate app
 ```
 
 After rollback, verify health:
@@ -427,8 +428,10 @@ nano .env
 # 3. Create the monitoring network (required by docker-compose.yml).
 docker network create monitoring
 
-# 4. Start the stack.
-docker compose up -d
+# 4. Build this clone's image and start the stack.  Both files, as
+#    scripts/deploy.sh names them: the base file alone runs GHCR's image
+#    instead, migrations and all (ruling plan#2703).
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 # 5. Wait for all services to be healthy.
 docker compose ps
@@ -1949,7 +1952,7 @@ curl -s https://<domain>/health
 | 500 on every login attempt | Valkey container down or unreachable, the app's Valkey password wrong, or a grant missing from Valkey's ACL | App is configured fail-closed: rate-limit storage outage rejects every limited request. `docker compose ps valkey` to check status; `docker logs shekel-prod-valkey --tail 50` for errors (start.sh names an empty password or a missing `user shekel` rule); `docker compose up -d valkey` to restart. A healthy Valkey with 500s still is a password the two do not share (production's override must mount `secrets/valkey_password` into both, and blank both `VALKEY_PASSWORD` variables) or a socket the app cannot reach: `docker compose exec valkey stat -c '%a %u:%g %n' /run/valkey /run/valkey/valkey.sock` must print `2710 999:1000` and `660 999:1000`, and the app must mount the `valkey-socket` volume as `docker-compose.yml` declares. A grant missing from the host's copy of `deploy/valkey/users.acl` shows in the app's log as `ACL failure in script: User shekel has no permissions to run the '<command>' command` for a command the limiter's scripts call (`lindex`, `lpush`, `ltrim`, `expire`), or as `NoPermissionError: User shekel has no permissions to run the '<command>' command` for one it sends itself (`evalsha`, `script|load`): correct the copy, then `cd /opt/docker/shekel && docker compose up -d --wait --force-recreate valkey`. Login resumes immediately once Valkey accepts the app's login |
 | Wrong IP in logs (127.0.0.1) | Nginx real IP config issue | Verify `set_real_ip_from` and `real_ip_header CF-Connecting-IP` in the active Nginx config: `deploy/nginx-bundled/nginx.conf` (bundled mode) or `deploy/nginx-shared/nginx.conf` (shared mode -- the runtime copy is `/opt/docker/nginx/nginx.conf`) |
 | No logs in Grafana | Promtail not scraping | `docker logs promtail`. Verify `monitoring` network exists. Verify app is on the network: `docker network inspect monitoring` |
-| CSS/JS not loading | Static files volume issue | `docker exec shekel-prod-nginx ls /var/www/static/` to verify files exist. Rebuild app: `docker compose build app && docker compose up -d` |
+| CSS/JS not loading | Static files volume issue | `docker exec shekel-prod-nginx ls /var/www/static/` to verify files exist. Rebuild app (a source build, `/opt/shekel`): `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build` |
 | Health check returns 500 | Database connection issue | `docker exec shekel-prod-db pg_isready -U shekel_user -d shekel`. Check `docker logs shekel-prod-app --tail 20` |
 | Database backup failed | Container down or disk full | `docker ps` to check shekel-prod-db. `df -h` to check disk space |
 | NAS backup failed | NAS not mounted | `mount \| grep nas`. Remount: `sudo mount -a` |

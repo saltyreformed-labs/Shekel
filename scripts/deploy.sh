@@ -56,11 +56,14 @@ COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.build.yml)
 
 # Image reference used by Cosign sign + verify steps.  Matches the
 # tag the local build produces (the COMPOSE_FILES merge tags the
-# image as ghcr.io/saltyreformed-labs/shekel:latest).  Cosign signs the
-# image at the digest the local build produced; the digest itself
+# image as localhost/shekel:latest, the build's own name, which
+# docker-compose.build.yml gives it under ruling plan#2703).  Cosign
+# signs the image at the digest the local build produced; the digest itself
 # is captured at sign time and printed for the operator to paste
-# into /opt/docker/shekel/.env (SHEKEL_IMAGE_DIGEST).
-IMAGE_REF="${IMAGE_REF:-ghcr.io/saltyreformed-labs/shekel:latest}"
+# into /opt/docker/shekel/.env (SHEKEL_IMAGE_DIGEST).  Neither holds for
+# an image only this host's store has, which no registry serves to sign
+# or to verify: step plan#2705 decides what a source build's check is.
+IMAGE_REF="${IMAGE_REF:-localhost/shekel:latest}"
 
 # Cosign integration (audit findings F-060, F-155 / Commit C-36).
 # COSIGN_PUBLIC_KEY: path to the verifier key (committed to repo at
@@ -129,7 +132,7 @@ Environment Variables:
     HEALTH_INTERVAL     Health check retry interval in seconds (default: 5)
     NGINX_PORT          Nginx host port for health check URL (default: 80)
     IMAGE_REF           Image reference passed to cosign sign/verify
-                        (default: ghcr.io/saltyreformed-labs/shekel:latest)
+                        (default: localhost/shekel:latest)
     COSIGN_PUBLIC_KEY   Verifier key path (default: deploy/cosign.pub)
     COSIGN_PRIVATE_KEY  Signing key path (default: /etc/shekel/cosign.key)
     COSIGN_REQUIRED     When 'true', missing cosign/key fails the deploy
@@ -488,14 +491,17 @@ rollback() {
     docker compose "${COMPOSE_FILES[@]}" stop app 2>/dev/null || true
 
     # Re-tag the previous image as the current compose image.
-    # Get the compose image name (what docker compose build targets).
+    # Get the compose image name (what docker compose build targets), whole,
+    # tag included, as the compose files name it: docker-compose.build.yml
+    # holds the build's name (ruling plan#2703), and the ``up`` below runs
+    # whatever image the host holds under it, never pulling one.
     local compose_image
-    compose_image=$(docker compose "${COMPOSE_FILES[@]}" images app --format json 2>/dev/null \
-        | python3 -c "import sys,json; data=json.load(sys.stdin); print(data[0].get('Repository','') if isinstance(data,list) else data.get('Repository',''))" 2>/dev/null || true)
+    compose_image=$(docker compose "${COMPOSE_FILES[@]}" config --format json app 2>/dev/null \
+        | python3 -c "import sys,json; print(json.load(sys.stdin)['services']['app'].get('image',''))" 2>/dev/null || true)
 
     if [ -n "$compose_image" ]; then
-        docker tag "${APP_CONTAINER}:previous" "${compose_image}:latest"
-        log "INFO" "Restored previous image as ${compose_image}:latest"
+        docker tag "${APP_CONTAINER}:previous" "${compose_image}"
+        log "INFO" "Restored previous image as ${compose_image}"
     else
         log "WARNING" "Could not determine compose image name. Using direct container restart."
     fi

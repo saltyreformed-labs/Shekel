@@ -3,19 +3,37 @@
 # For self-hosted deployments that build from source.
 # Use alongside docker-compose.yml:
 #
-#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 #
 # End users pulling pre-built images from GHCR do not need this file.
 #
 # This override changes ONLY the image source (local build instead of
-# the GHCR pull).  Networks, hardening, healthchecks, and resource
-# caps all flow through from the base file unchanged.  A previous
-# revision also attached the app to a shared ``monitoring`` network
-# for a Promtail-era log pipeline; the deployed collector (Grafana
-# Alloy) discovers containers over the Docker socket and needs no
-# shared network, so that coupling was removed (parity audit
-# 2026-06-12, finding M06 in shekel-audits/dev-prod-parity/findings.md).
+# the GHCR pull), and so all three lines that say where the app's image
+# comes from: what builds it, its name and its pull policy.  Networks,
+# hardening, healthchecks, and resource caps all flow through from the
+# base file unchanged.  A previous revision also attached the app to a
+# shared ``monitoring`` network for a Promtail-era log pipeline; the
+# deployed collector (Grafana Alloy) discovers containers over the
+# Docker socket and needs no shared network, so that coupling was
+# removed (parity audit 2026-06-12, finding M06 in
+# shekel-audits/dev-prod-parity/findings.md).
+#
+# The build has a name of its own (ruling plan#2703).  Under the base
+# file's name, ghcr.io/saltyreformed-labs/shekel:latest, one name held
+# two images, so whichever was pulled or built last ran: each
+# ``docker compose up`` pulled GHCR's image over the build (the base
+# file's ``pull_policy: always``).  ``pull_policy: never`` alone would
+# not have fixed it, as a pull with the base file alone still swapped
+# the name.  Docker reads a name starting ``localhost/`` as one on a
+# registry on this host, where none runs, never Docker Hub or GHCR, so
+# no pull of GHCR's image touches it.  ``pull_policy: never`` keeps
+# compose from trying to fetch it on each ``up``: ``up`` builds the
+# image when none exists (``--build`` rebuilds it, as above), and
+# otherwise runs the one on the host, the build scripts/deploy.sh just
+# made or the ``:previous`` image its rollback re-tagged.
 
 services:
   app:
     build: .
+    image: localhost/shekel:latest
+    pull_policy: never

@@ -120,6 +120,10 @@ class FakeRule:
         self.starts_on = starts_on
         self.max_per_month = max_per_month
         self.nominal_day = None
+        # The column plan step recurrence:R8-c (plan#2676) added, which
+        # ``recurrence_spec`` reads off every row: ``None`` reads the first
+        # date by its day of the month, as every migrated line's rule does.
+        self.weekday_reading = None
         self.end_date = None
         self.max_occurrences = None
 

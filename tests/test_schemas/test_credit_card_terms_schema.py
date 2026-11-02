@@ -8,17 +8,21 @@ is pinned:
   domain (E-28), quantized to the column's four places -- the tree's
   convention for every rate field, stated here so the rounding is a documented
   behaviour rather than a surprise;
-* the five NOT NULL columns are required -- ``cashback_rate`` among them,
-  so a rate the owner stated is never silently rewritten as zero by a submit
-  that carries no value -- each named in the errors when missing, and an
-  empty control on one of them reads as missing;
+* the effective date and the five NOT NULL terms are required -- the date
+  because a submit is one version of the terms FOR a date (plan#2331, ruling
+  **plan#2333**), ``cashback_rate`` so a rate the owner stated is never
+  silently rewritten as zero by a submit that carries no value -- each named
+  in the errors when missing, and an empty control on one of them reads as
+  missing;
 * the two nullable dollar figures read an empty control as ``None`` (their
   "not set" state) and refuse zero when given, matching the model's
   ``IS NULL OR > 0`` CHECKs;
 * every bound the model's CHECKs state is refused at the schema tier too, so
-  an out-of-domain figure is a designed 400 rather than an IntegrityError.
+  an out-of-domain figure, or a date outside the calendar window, is a
+  designed 400 rather than an IntegrityError.
 """
 
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -28,6 +32,7 @@ from app.schemas.validation import CreditCardTermsSchema
 
 #: A whole valid form, as the browser posts it (every control, as strings).
 _FORM = {
+    "effective_date": "2026-03-01",
     "statement_close_day": "20",
     "payment_due_day": "15",
     "min_payment_percent": "2.5",
@@ -38,8 +43,8 @@ _FORM = {
 }
 
 _REQUIRED = (
-    "statement_close_day", "payment_due_day", "min_payment_percent",
-    "min_payment_floor", "cashback_rate",
+    "effective_date", "statement_close_day", "payment_due_day",
+    "min_payment_percent", "min_payment_floor", "cashback_rate",
 )
 
 
@@ -64,6 +69,7 @@ class TestTheWholeRowLoads:
         """Percents become fractions; days become ints; dollars keep two places."""
         data = _load()
         assert data == {
+            "effective_date": date(2026, 3, 1),
             "statement_close_day": 20,
             "payment_due_day": 15,
             "min_payment_percent": Decimal("0.0250"),
@@ -100,6 +106,18 @@ class TestTheWholeRowLoads:
         assert data["min_payment_floor"] == Decimal("0")
         assert data["auto_redeem_threshold"] == Decimal("0.01")
         assert data["credit_limit"] == Decimal("0.01")
+
+    @pytest.mark.parametrize("stated, loaded", [
+        ("2000-01-01", date(2000, 1, 1)),
+        ("2100-12-31", date(2100, 12, 31)),
+    ])
+    def test_both_ends_of_the_date_window_are_admitted(self, stated, loaded):
+        """The first and last day of the calendar window load as dates.
+
+        ``ck_credit_card_params_effective_date_range`` admits both ends
+        (``CALENDAR_DATE_MIN`` and ``CALENDAR_DATE_MAX``), so the schema does.
+        """
+        assert _load(effective_date=stated)["effective_date"] == loaded
 
     def test_the_csrf_token_is_excluded(self):
         """The form's ``csrf_token`` is dropped, not refused (``BaseSchema``)."""
@@ -162,6 +180,8 @@ class TestTheBoundsAreRefused:
         ("credit_limit", "0"),
         ("credit_limit", "-1"),
         ("credit_limit", "10000000.01"),
+        ("effective_date", "1999-12-31"),
+        ("effective_date", "2101-01-01"),
     ])
     def test_an_out_of_domain_value_is_refused_on_its_field(self, field, value):
         """*field* = *value* is refused, and only that field is named."""

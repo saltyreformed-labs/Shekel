@@ -10,12 +10,12 @@ create / update pair here on purpose -- the loan has two because its CREATE
 also seeds a rate row and posts a genesis ledger, and the interest door's
 every-field-optional shape needs a "required when configuring for the first
 time" branch that restates the NOT NULL rule the database already holds.  The
-five NOT NULL columns are REQUIRED, ``cashback_rate`` among them: the form
-renders it pre-filled with ``0.00`` for a card with no terms, so a browser
-always posts a value, and a submit that carries none is a crafted or truncated
-POST rather than a choice -- refused, never silently written as zero over a
-rate the owner stated.  The two nullable columns read an empty control as
-NULL, the "not set" state the model documents.
+effective date and the five NOT NULL terms are REQUIRED, ``cashback_rate``
+among them: the form renders it pre-filled with ``0.00`` for a card with no
+terms, so a browser always posts a value, and a submit that carries none is a
+crafted or truncated POST rather than a choice -- refused, never silently
+written as zero over a rate the owner stated.  The two nullable columns read
+an empty control as NULL, the "not set" state the model documents.
 
 E-28 / HIGH-06 / PA-02: both rates are validated as decimal fractions pinned
 to ``[0, 1]``, matching the model's CHECKs, and the ``@pre_load`` converts the
@@ -71,9 +71,9 @@ class CreditCardTermsSchema(BaseSchema):
         """Normalize empty inputs, then convert percent fields to fractions.
 
         An empty ``auto_redeem_threshold`` or ``credit_limit`` becomes ``None``
-        (their "not set" state); an empty required control -- the five NOT
-        NULL columns -- is dropped so the field's own "Missing data for
-        required field." names it.
+        (their "not set" state); an empty required control -- the effective
+        date or one of the five NOT NULL terms -- is dropped so the field's
+        own "Missing data for required field." names it.
         """
         data = _normalize_empty_inputs(self, data)
         return _normalize_percent_fields(data, self._PERCENT_FIELDS)

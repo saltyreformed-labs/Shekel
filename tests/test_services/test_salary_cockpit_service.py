@@ -24,6 +24,8 @@ for periods 4-6:
 from datetime import date
 from decimal import Decimal
 
+from app import ref_cache
+from app.enums import PaycheckLineKindEnum
 from app.services import salary_cockpit_service as svc
 from app.services.pay_calendar import DerivedPeriod, PayCadence
 from app.services.pay_rhythm import FixedDays
@@ -58,6 +60,20 @@ def _fake_period(period_id, start_date, end_date):
 
 #: The rhythm a paycheck here is priced at unless a case says otherwise.
 _BIWEEKLY = PayCadence(FixedDays(14))
+
+
+def _priced(lines, kind):
+    """Return ``(name, amount_str)`` pairs as the priced lines of *kind*.
+
+    A priced line names the kind it was priced as, required since plan step
+    salary:S11-e (ledger row SAL-597), so every fake line here names the kind
+    of the list it is built into.
+    """
+    kind_id = ref_cache.paycheck_line_kind_id(kind)
+    return [
+        PricedLine(name=name, amount=Decimal(amount), paycheck_line_kind_id=kind_id)
+        for name, amount in lines
+    ]
 
 
 def _pair(
@@ -95,8 +111,8 @@ def _pair(
             gross_biweekly=Decimal(gross),
             taxable_income=Decimal(taxable),
             net_pay=Decimal(net),
-            taxable=[PricedLine(name=n, amount=Decimal(a)) for n, a in taxable_lines],
-            after_tax=[PricedLine(name=n, amount=Decimal(a)) for n, a in after_tax],
+            taxable=_priced(taxable_lines, PaycheckLineKindEnum.TAXABLE_EARNING),
+            after_tax=_priced(after_tax, PaycheckLineKindEnum.AFTER_TAX_EARNING),
         ),
         taxes=TaxLines(
             federal=Decimal(federal), state=Decimal(state),
@@ -104,8 +120,8 @@ def _pair(
             stub_payday=stub_payday,
         ),
         deductions=DeductionBreakdown(
-            pre_tax=[PricedLine(name=n, amount=Decimal(a)) for n, a in pre],
-            post_tax=[PricedLine(name=n, amount=Decimal(a)) for n, a in post],
+            pre_tax=_priced(pre, PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
+            post_tax=_priced(post, PaycheckLineKindEnum.POST_TAX_DEDUCTION),
         ),
     )
     return period, breakdown

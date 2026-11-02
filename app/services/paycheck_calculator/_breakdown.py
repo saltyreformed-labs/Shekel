@@ -47,15 +47,19 @@ class PricedLine:
     ``paycheck_line_kind_id`` is the kind the line was priced AS, since plan
     step **salary:S11-c-2c**: the engine's stub picker keeps the taxed kinds'
     lines by it, on the paycheck's side and the stub's alike, so the set of
-    kinds a tax formula reads is written once (``_stubs.TAXED_KINDS``).  The
-    engine sets it on every line it prices; it is ``None`` only on a display
-    fake a test builds by hand.
+    kinds a tax formula reads is written once (``_stubs.TAXED_KINDS``).
+    **REQUIRED and keyword-only since plan step salary:S11-e** (ledger row
+    **SAL-597**): it defaulted to ``None``, and ``_stubs._taxed`` keeps a line
+    only by its kind, so a constructor that forgot it had the line dropped
+    from the taxed set with no error and the stub picker comparing the wrong
+    lines.  Required, no constructor can forget it; keyword-only, none can
+    slip an id into it by position (the :attr:`PeriodInfo.cadence` shape).
     """
     name: str
     amount: Decimal
     target_account_id: int = None
     paycheck_line_id: int | None = None
-    paycheck_line_kind_id: int | None = None
+    paycheck_line_kind_id: int = field(kw_only=True)
 
 
 def waterfall_gross(base_pay: Decimal, taxable_earnings: Decimal) -> Decimal:
@@ -131,7 +135,9 @@ def every_priced_line(taxable, deductions, after_tax) -> tuple:
     The taxable earnings, the pre-tax and post-tax deductions, then the
     after-tax earnings: what the pay stub door's report sets each stub line
     beside (:attr:`PaycheckBreakdown.priced_lines`, plan step
-    **salary:S11-c-2c**).
+    **salary:S11-c-2c**), and, since plan step **salary:S11-e** (ledger row
+    **SAL-597**), what :func:`~._pricing.calculate_paycheck` hands the stub
+    picker, which spelled the same lines by hand beside this.
 
     Args:
         taxable: The taxable earning lines.

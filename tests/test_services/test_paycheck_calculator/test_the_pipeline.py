@@ -23,7 +23,9 @@ from app.utils.money import ZERO
 from app.services.pay_calendar import PayCadence, PayCalendarError
 from tests._test_helpers import payroll_basis
 
-from ._helpers import TWO_PLACES, _period, twenty_four_rule, FakeDeduction, FakeProfile
+from ._helpers import (
+    TWO_PLACES, _period, _timing_id, twenty_four_rule, FakeDeduction, FakeProfile,
+)
 
 
 # ── New Tests ────────────────────────────────────────────────────
@@ -44,8 +46,14 @@ class TestPaycheckBreakdownProperties:
             ),
             deductions=DeductionBreakdown(
                 pre_tax=[
-                    PricedLine("401k", Decimal("200.00")),
-                    PricedLine("HSA", Decimal("50.00")),
+                    PricedLine(
+                        "401k", Decimal("200.00"),
+                        paycheck_line_kind_id=_timing_id("pre_tax_deduction"),
+                    ),
+                    PricedLine(
+                        "HSA", Decimal("50.00"),
+                        paycheck_line_kind_id=_timing_id("pre_tax_deduction"),
+                    ),
                 ],
             ),
         )
@@ -63,8 +71,14 @@ class TestPaycheckBreakdownProperties:
             ),
             deductions=DeductionBreakdown(
                 post_tax=[
-                    PricedLine("Roth IRA", Decimal("100.00")),
-                    PricedLine("Life Ins", Decimal("25.00")),
+                    PricedLine(
+                        "Roth IRA", Decimal("100.00"),
+                        paycheck_line_kind_id=_timing_id("post_tax_deduction"),
+                    ),
+                    PricedLine(
+                        "Life Ins", Decimal("25.00"),
+                        paycheck_line_kind_id=_timing_id("post_tax_deduction"),
+                    ),
                 ],
             ),
         )
@@ -103,6 +117,25 @@ class TestPaycheckBreakdownProperties:
         assert breakdown.deductions.total_pre_tax == Decimal("0")
         assert breakdown.deductions.total_post_tax == Decimal("0")
         assert breakdown.taxes.total == Decimal("0")
+
+    def test_a_priced_line_without_its_kind_is_refused_at_construction(self):
+        """A priced line must name its kind, by keyword (plan step salary:S11-e, SAL-597).
+
+        The stub picker keeps a paycheck's taxed lines by kind alone
+        (``_stubs._taxed``), so a line built without one was dropped from the
+        taxed set with no error.  It is refused where it is built now, and a
+        kind id passed by POSITION (after the account and line ids) is refused
+        too, so none can be slipped in as the wrong figure.
+        """
+        # Pylint: ``missing-kwoa`` -- the omitted keyword IS the case under test.
+        with pytest.raises(TypeError, match="paycheck_line_kind_id"):
+            PricedLine("401k", Decimal("200.00"))  # pylint: disable=missing-kwoa
+        with pytest.raises(TypeError):
+            # Pylint: ``missing-kwoa`` -- the kind passed by position IS the case under test.
+            PricedLine(  # pylint: disable=missing-kwoa
+                "401k", Decimal("200.00"), None, None,
+                _timing_id("pre_tax_deduction"),
+            )
 
 
 class TestCalculatePaycheckPipeline:

@@ -20,10 +20,19 @@ X-ew's second leaf moves every report onto.  Three kinds of line:
 * **the loan lines**: each loan's opening, true-ups and settled payment
   splits off its one walk (:func:`._loan_corrections.loan_correction_targets`).
 
-**It writes nothing, flushes nothing and creates no row of any table**: every
+**It issues no write of its own and creates no row of any table**: every
 line names its chart account by a :class:`~._chart.ChartKey` (ruling
 plan#2518), where the writers resolve each key to a stored chart row and mint
-the rows they lack.
+the rows they lack.  **Its queries read the caller's pending rows as
+flushed**: its first query autoflushes whatever the session holds pending,
+as every query in the session does, so a balance check or a movement a
+write has staged is read rather than missed -- which is why the read leaves
+autoflush on, and why "it flushes nothing" is true only of a clean session.
+A relationship the session has already loaded is not re-read, though: a
+loan's terms come off ``Account.loan_params`` as loaded, so terms written
+by their ``account_id`` after that load are not seen
+(:func:`app.services.loan_ledger.walk_loan_ledgers` states it; finding
+plan#2691 holds it for the readers that move onto this read).
 
 **The records are read owner-wide, each kind once** (finding plan#2147's
 requirement, ruling plan#2136; ruling plan#2623):
@@ -40,7 +49,8 @@ its statements, rate history, escrow lines and settled payments each loaded
 once for all of the owner's loans.  So the read's statements do not grow with
 the number of accounts, loans or movements: they depend only on which kinds of
 record the owner holds (an escrow line's versions, a settled payment's
-paychecks, a $0.00 close's records are each one statement when any exists).
+paychecks, a $0.00 close's records are each one statement when any exists,
+and the owner's pay calendar is loaded when any correction is to be filed).
 
 **A scenario the store has never reconciled can differ from it by
 construction**, and that difference is the store's: its account and loan
@@ -63,13 +73,13 @@ from app.services.account_projection import (
     AccountProjectionKind,
     classify_account,
 )
-from app.services.cash_ledger import CashLedgerWalk, owner_cash_records
+from app.services.cash_ledger import owner_cash_records
 from app.services.loan_ledger import LoanLedgerWalk, walk_loan_ledgers
 from app.services.pay_calendar import PayCalendar, calendar_for
 from app.services.transfer_legs import PlanItem
 
 from ._account_anchors import account_correction_targets
-from ._account_walk import account_corrections
+from ._account_walk import AccountAnchorCorrection, account_corrections
 from ._chart import ChartKey
 from ._loan_corrections import loan_correction_targets
 from ._movements import (
@@ -139,6 +149,17 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
     (:func:`app.services.loan_ledger.walk_loan_ledgers`), each loan's terms
     the ``loan_params`` its account row was loaded with.
 
+    **The owner's pay calendar is loaded only when a correction is to be
+    filed**, as the writers load it (``account_posting_service``'s
+    ``reconcile_account_anchor_corrections`` returns before it on an empty
+    corrections list, ``loan_posting_service``'s
+    ``reconcile_loan_corrections`` on an empty walk, which each loan here
+    answers by the same
+    :attr:`~app.services.loan_ledger.LoanLedgerWalk.is_empty`): an owner
+    with no correction to file asks it nothing, so one holding neither a pay
+    schedule (which :func:`~app.services.pay_calendar.calendar_for` refuses)
+    nor a correction reads its ledger rather than that refusal.
+
     Args:
         owner_id: The owner whose ledger to read.
         scenario_id: The budget scenario to read it in.
@@ -148,9 +169,9 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
         owner with no records.
 
     Raises:
-        PayCalendarError: The owner holds no pay schedule (from
-            :func:`app.services.pay_calendar.calendar_for`), or a correction
-            has no materialised paycheck to file in (from
+        PayCalendarError: A correction is to be filed and the owner holds no
+            pay schedule (from :func:`app.services.pay_calendar.calendar_for`),
+            or a correction has no materialised paycheck to file in (from
             :meth:`~app.services.pay_calendar.PayCalendar.filing_period`) --
             the refusals the writers raise for the same states.
         ValueError: An account whose projection kind has no true-up counter
@@ -162,18 +183,25 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
         .order_by(Account.id)
         .all()
     )
-    calendar = calendar_for(owner_id)
     cash = owner_cash_records(owner_id, scenario_id, [
         account for account in accounts if not _is_loan(account)
     ])
     loan_walks = walk_loan_ledgers(
         [account for account in accounts if _is_loan(account)], scenario_id,
     )
+    corrections = {
+        account_id: account_corrections(walk)
+        for account_id, walk in cash.walks.items()
+    }
     lines = _movement_lines(cash.movements)
-    for account in accounts:
-        lines.extend(_correction_lines(
-            _correction_targets(account, calendar, cash.walks, loan_walks),
-        ))
+    if any(corrections.values()) or not all(
+        walk.is_empty for walk in loan_walks.values()
+    ):
+        calendar = calendar_for(owner_id)
+        for account in accounts:
+            lines.extend(_correction_lines(
+                _correction_targets(account, calendar, corrections, loan_walks),
+            ))
     return [line for line in lines if line.amount != 0]
 
 
@@ -236,26 +264,28 @@ def _movement_lines(
 def _correction_targets(
     account: Account,
     calendar: PayCalendar,
-    walks: dict[int, CashLedgerWalk],
+    corrections: dict[int, list[AccountAnchorCorrection]],
     loan_walks: dict[int, LoanLedgerWalk],
 ) -> dict[CorrectionKey, ChartLegMap]:
     """Return one account's correction legs, by the walk its kind takes.
 
     An amortizing account is a loan, whose opening, true-ups and payment
     splits come off its loan walk (*loan_walks*); every other account's
-    opening and true-ups come off its records walk (*walks*), each built by
-    the owner's one load of its kind.  The dispatch is :func:`_is_loan`'s,
-    the predicate both writers split their account sets by (the account walk
-    refuses a loan by it, and the non-loan set's SQL filter reads the column
-    it maps), and the one the read chose each map's accounts by.  A loan
-    with no terms walks to nothing, as it posts nothing.
+    opening and true-ups are framed off its records walk (*corrections*),
+    each walk built by the owner's one load of its kind.  The dispatch is
+    :func:`_is_loan`'s, the predicate both writers split their account sets
+    by (the account walk refuses a loan by it, and the non-loan set's SQL
+    filter reads the column it maps), and the one the read chose each map's
+    accounts by.  A loan with no terms walks to nothing, as it posts nothing.
 
     Args:
         account: The account, with ``account_type`` loaded.
         calendar: The owner's whole pay calendar, which files each anchor
             correction by its day.
-        walks: Each non-loan account's walk, by account id
-            (:attr:`app.services.cash_ledger.OwnerCashRecords.walks`).
+        corrections: Each non-loan account's corrections, by account id,
+            framed off its walk
+            (:attr:`app.services.cash_ledger.OwnerCashRecords.walks`,
+            :func:`._account_walk.account_corrections`).
         loan_walks: Each loan's walk, by account id
             (:func:`app.services.loan_ledger.walk_loan_ledgers`).
 
@@ -266,7 +296,7 @@ def _correction_targets(
     if _is_loan(account):
         return loan_correction_targets(loan_walks[account.id], account, calendar)
     return account_correction_targets(
-        account, account_corrections(walks[account.id]), calendar,
+        account, corrections[account.id], calendar,
     )
 
 

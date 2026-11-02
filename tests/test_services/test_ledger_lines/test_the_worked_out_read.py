@@ -8,14 +8,19 @@ correction lines filed by their day.
 
 What these cases pin:
 
-* **it writes nothing and reads no stored ledger**: no statement it issues
-  writes, or names the stored journal or chart, and nothing is left pending;
+* **it issues no write of its own and reads no stored ledger**: on a clean
+  session no statement it issues writes, or names the stored journal or
+  chart, and nothing is left pending; on a dirty one its one write is the
+  caller's pending change, autoflushed, and its lines read that change;
+* **whose records it reads**: an owner with none reads nothing and asks no
+  pay calendar, and another owner's movements are never read, even in that
+  owner's scenario;
 * **the lines are the rules' own**, written out by hand: a bill, a transfer,
   an account's opening and true-up, a loan's anchors and payment split;
 * **a source that LEFT the settled set has no line** (finding N-162,
   plan#1356): after a revert, a revert then Credit, a revert then Cancel, a
   delete, and a transfer's soft delete, the read is what it was before the
-  source settled;
+  source settled -- the corrections a later balance check books included;
 * **a transfer's effect has one rule** (finding N-164, plan#1358): each side
   is its own movement's two lines, valued by the producer the cash fold
   values it by;
@@ -35,7 +40,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import event
 
 from app import ref_cache
 from app.enums import (
@@ -47,6 +51,7 @@ from app.enums import (
 )
 from app.extensions import db as _db
 from app.models.account import AccountAnchorHistory
+from app.models.scenario import Scenario
 from app.models.transaction_entry import TransactionEntry
 from app.services import (
     credit_workflow,
@@ -64,10 +69,11 @@ from app.services.ledger_lines import (
     transit_key,
     worked_out_lines,
 )
-from app.services.pay_calendar import calendar_for
+from app.services.pay_calendar import PayCalendarError, calendar_for
 from app.services.transfer_legs import transfer_family_movements
 from tests._test_helpers import (
     an_entered_day,
+    capture_sql_statements,
     create_account_of_type,
     create_loan_with_trueup,
     create_settled_cash_transaction,
@@ -95,9 +101,30 @@ def _read(seed_user):
     return worked_out_lines(seed_user["user"].id, seed_user["scenario"].id)
 
 
+def _captured_read(seed_user):
+    """Return the seed owner's read and every statement it issued.
+
+    The owner's and scenario's ids are read before the capture starts, so a
+    refresh of an expired fixture row is not counted as the read's own.
+    """
+    owner_id, scenario_id = seed_user["user"].id, seed_user["scenario"].id
+    return capture_sql_statements(
+        lambda: worked_out_lines(owner_id, scenario_id),
+    )
+
+
 def _lines_of(lines, movement_id):
     """Return the lines booked from one movement, in the read's order."""
     return [line for line in lines if line.movement_id == movement_id]
+
+
+def _true_ups_of(lines, account):
+    """Return the amounts of *account*'s own true-up lines, in the read's order."""
+    return [
+        line.amount for line in lines
+        if line.key == linked_key(account)
+        and line.source_kind_id == _source(PostingSourceEnum.ACCOUNT_TRUEUP)
+    ]
 
 
 def _source(member):
@@ -143,24 +170,56 @@ def _purchase(seed_user, txn, amount, *, is_credit=False):
     )
 
 
-def _statements_of(fn):
-    """Run *fn* and return its result and every SQL statement it issued."""
-    statements = []
+def _loan_anchor_lines(loan, calendar):
+    """Return the opening and true-up lines of the suite's trued-up loan.
 
-    def _capture(_conn, _cursor, statement, *_args):
-        """Record the statement's text."""
-        statements.append(statement)
+    The loan ``create_loan_with_trueup`` builds from a $250,000.00 principal
+    originated 2025-01-01 and trued up to $100,000.00 on 2026-01-10: the
+    opening ``-250,000.00`` owed on its own line against ``+250,000.00`` on
+    its opening equity, then the true-up ``250,000.00 - 100,000.00 =
+    +150,000.00`` and ``-150,000.00`` (no payment falls before it), each filed
+    by its day on *calendar* and from no movement.
+    """
+    own = linked_key(loan)
+    equity = loan_key(LedgerAccountKindEnum.EQUITY_OPENING, loan.id)
+    opened = date(2025, 1, 1)
+    trued = date(2026, 1, 10)
+    opening = (
+        _source(PostingSourceEnum.LOAN_OPENING), _kind(PostingKindEnum.OPENING),
+    )
+    trueup = (
+        _source(PostingSourceEnum.LOAN_TRUEUP), _kind(PostingKindEnum.TRUEUP),
+    )
+    return [
+        LedgerLine(
+            own, calendar.filing_period(opened).period_id, opened,
+            Decimal("-250000.00"), *opening, None,
+        ),
+        LedgerLine(
+            equity, calendar.filing_period(opened).period_id, opened,
+            Decimal("250000.00"), *opening, None,
+        ),
+        LedgerLine(
+            own, calendar.filing_period(trued).period_id, trued,
+            Decimal("150000.00"), *trueup, None,
+        ),
+        LedgerLine(
+            equity, calendar.filing_period(trued).period_id, trued,
+            Decimal("-150000.00"), *trueup, None,
+        ),
+    ]
 
-    event.listen(_db.engine, "before_cursor_execute", _capture)
-    try:
-        result = fn()
-    finally:
-        event.remove(_db.engine, "before_cursor_execute", _capture)
-    return result, statements
+
+def _writes_in(statements):
+    """Return the text of each captured statement that is not a SELECT."""
+    return [
+        text for text, _params in statements
+        if not text.lstrip().upper().startswith("SELECT")
+    ]
 
 
 class TestTheReadWritesNothing:
-    """It reads the records alone, and nothing it does is a write."""
+    """It reads the records alone, and issues no write of its own."""
 
     def test_no_statement_writes_or_reads_the_stored_ledger(
         self, app, db, seed_user, seed_periods,
@@ -199,24 +258,166 @@ class TestTheReadWritesNothing:
             )
             _db.session.commit()
 
-            lines, statements = _statements_of(lambda: _read(seed_user))
+            lines, statements = _captured_read(seed_user)
 
             assert lines
             assert statements
-            not_a_select = [
-                s for s in statements
-                if not s.lstrip().upper().startswith("SELECT")
-            ]
-            assert not_a_select == []
+            assert _writes_in(statements) == []
             store = [
-                s for s in statements
-                if "journal_entries" in s or "account_postings" in s
-                or "ledger_accounts" in s
+                text for text, _params in statements
+                if "journal_entries" in text or "account_postings" in text
+                or "ledger_accounts" in text
             ]
             assert store == []
             assert not _db.session.new
             assert not _db.session.dirty
             assert not _db.session.deleted
+
+    def test_a_pending_change_is_read_as_flushed_and_is_its_one_write(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """A $1,100.00 balance check staged, not flushed: read, and the one write.
+
+        Checking opens at $1,000.00 and holds no movement.  The check,
+        observed today, is added to the session and left pending, so the
+        read's first query autoflushes it: the one statement among the
+        read's that is not a SELECT is that row's INSERT, and the read
+        issues no write of its own.  Its lines read the check as flushed --
+        a true-up of ``1,100.00 - 1,000.00 = +100.00`` on Checking, filed by
+        today -- so a balance check a write has staged is read, not missed.
+        """
+        with app.app_context():
+            _db.session.commit()
+            checking = seed_user["account"]
+            checking_id = checking.id
+            owner_id = seed_user["user"].id
+            scenario_id = seed_user["scenario"].id
+            pending = AccountAnchorHistory(
+                account_id=checking_id, anchor_balance=Decimal("1100.00"),
+                observed_on=_TODAY, recorded_on=_TODAY,
+            )
+            _db.session.add(pending)
+            assert pending in _db.session.new
+
+            lines, statements = capture_sql_statements(
+                lambda: worked_out_lines(owner_id, scenario_id),
+            )
+
+            (write,) = _writes_in(statements)
+            assert write.startswith("INSERT INTO budget.account_anchor_history")
+            assert pending not in _db.session.new
+            filed_in = calendar_for(owner_id).filing_period(_TODAY).period_id
+            assert LedgerLine(
+                linked_key(checking), filed_in, _TODAY, Decimal("100.00"),
+                _source(PostingSourceEnum.ACCOUNT_TRUEUP),
+                _kind(PostingKindEnum.TRUEUP), None,
+            ) in lines
+
+
+class TestWhoseRecordsItReads:
+    """The owner's own records, and nothing when there are none."""
+
+    def test_an_owner_with_no_records_reads_nothing(self, app, db, bare_user):
+        """An owner holding no account, no paycheck and no pay schedule: no line.
+
+        There is nothing to book and no correction to file, so the read asks
+        no pay calendar -- which this owner could not answer: holding no pay
+        schedule, :func:`calendar_for` refuses them (the control, so the case
+        reads the owner it is about).  The writers load the calendar only
+        when a correction is to be filed, and so does the read.  The owner
+        holds its baseline scenario alone, the one it is read in.
+        """
+        with app.app_context():
+            owner_id = bare_user["user"].id
+            scenario = Scenario(user_id=owner_id, name="Baseline", is_baseline=True)
+            _db.session.add(scenario)
+            _db.session.flush()
+            with pytest.raises(PayCalendarError):
+                calendar_for(owner_id)
+
+            assert worked_out_lines(owner_id, scenario.id) == []
+
+    def test_an_owner_whose_one_account_is_a_loan_reads_its_loan_lines(
+        self, app, db, bare_user, bare_periods,
+    ):
+        """An owner holding only a 6% loan trued up to $100,000.00: four lines.
+
+        No account but the loan, so no account has a correction and the
+        loan's walk alone has one to file: the owner's pay calendar is loaded
+        for it (``LoanLedgerWalk.is_empty`` is false), and the read is the
+        loan's opening and true-up lines (:func:`_loan_anchor_lines`).  An
+        owner can hold this: a fresh $0 Checking can be deleted, and a loan
+        added after it.
+        """
+        with app.app_context():
+            owner_id = bare_user["user"].id
+            scenario = Scenario(user_id=owner_id, name="Baseline", is_baseline=True)
+            _db.session.add(scenario)
+            _db.session.flush()
+            loan = create_loan_with_trueup(
+                bare_user, _db.session,
+                origination_principal=Decimal("250000.00"),
+                anchor_balance=Decimal("100000.00"),
+                anchor_date=date(2026, 1, 10), rate=Decimal("0.06000"),
+                origination_date=date(2025, 1, 1), name="Only Loan",
+            )
+            calendar = calendar_for(owner_id)
+
+            lines = worked_out_lines(owner_id, scenario.id)
+
+            assert lines == _loan_anchor_lines(loan, calendar)
+
+    def test_another_owners_movements_are_never_read(
+        self, app, seed_user, seed_periods, seed_second_user,
+        seed_second_periods,
+    ):
+        """Two owners: a $11.11 bill, and a $77.77 bill and $250.00 transfer.
+
+        The second owner's read holds its bill's two lines and each of its
+        transfer's sides' two (the control: the records are there, in that
+        scenario).  The first owner's read holds its own $11.11 bill's and
+        nothing of the second's; and asked in the SECOND owner's scenario it
+        reads no movement at all, of either arm.  That last read is the one
+        the owner clause alone decides: in the first owner's own scenario the
+        scenario clause keeps the second owner's rows out too, while in the
+        second owner's scenario only ``TransactionEntry.owner_id`` does
+        (``cash_ledger._movement_scope._of_owner``), over a plan row's
+        movements and a transfer leg's alike.
+        """
+        with app.app_context():
+            create_settled_cash_transaction(
+                seed_user, _db.session, seed_periods[0], Decimal("11.11"),
+            )
+            create_settled_cash_transaction(
+                seed_second_user, _db.session, seed_second_periods[0],
+                Decimal("77.77"),
+            )
+            other_savings = create_account_of_type(
+                seed_second_user, _db.session, "Savings", "Other Savings",
+            )
+            create_settled_transfer(
+                seed_second_user, _db.session, seed_second_user["account"],
+                other_savings, seed_second_periods[0], amount=Decimal("250.00"),
+            )
+            _db.session.commit()
+            owner_id = seed_user["user"].id
+            other_id = seed_second_user["user"].id
+            other_scenario_id = seed_second_user["scenario"].id
+
+            def _moved(lines):
+                """Return the amounts of the lines booked from a movement."""
+                return sorted(line.amount for line in lines if line.movement_id)
+
+            # The bill's -77.77 / +77.77; each transfer side's -250.00 and
+            # +250.00 against the owner's Transfers in transit.
+            assert _moved(worked_out_lines(other_id, other_scenario_id)) == [
+                Decimal("-250.00"), Decimal("-250.00"), Decimal("-77.77"),
+                Decimal("77.77"), Decimal("250.00"), Decimal("250.00"),
+            ]
+            assert _moved(_read(seed_user)) == [
+                Decimal("-11.11"), Decimal("11.11"),
+            ]
+            assert _moved(worked_out_lines(owner_id, other_scenario_id)) == []
 
 
 class TestTheLinesAreTheRules:
@@ -412,39 +613,13 @@ class TestTheLinesAreTheRules:
                 if line.key.record_id == loan.id and line.movement_id is None
             ]
 
-            own = linked_key(loan)
-            equity = loan_key(LedgerAccountKindEnum.EQUITY_OPENING, loan.id)
-            opened = date(2025, 1, 1)
-            trued = date(2026, 1, 10)
-            opening = (
-                _source(PostingSourceEnum.LOAN_OPENING),
-                _kind(PostingKindEnum.OPENING),
-            )
-            trueup = (
-                _source(PostingSourceEnum.LOAN_TRUEUP),
-                _kind(PostingKindEnum.TRUEUP),
-            )
             split = _source(PostingSourceEnum.LOAN_PAYMENT)
             assert lines == [
+                *_loan_anchor_lines(loan, calendar),
                 LedgerLine(
-                    own, calendar.filing_period(opened).period_id, opened,
-                    Decimal("-250000.00"), *opening, None,
-                ),
-                LedgerLine(
-                    equity, calendar.filing_period(opened).period_id, opened,
-                    Decimal("250000.00"), *opening, None,
-                ),
-                LedgerLine(
-                    own, calendar.filing_period(trued).period_id, trued,
-                    Decimal("150000.00"), *trueup, None,
-                ),
-                LedgerLine(
-                    equity, calendar.filing_period(trued).period_id, trued,
-                    Decimal("-150000.00"), *trueup, None,
-                ),
-                LedgerLine(
-                    own, seed_periods[1].id, _TODAY, Decimal("-500.00"),
-                    split, _kind(PostingKindEnum.PRINCIPAL), None,
+                    linked_key(loan), seed_periods[1].id, _TODAY,
+                    Decimal("-500.00"), split, _kind(PostingKindEnum.PRINCIPAL),
+                    None,
                 ),
                 LedgerLine(
                     loan_key(LedgerAccountKindEnum.LOAN_INTEREST, loan.id),
@@ -503,23 +678,38 @@ class TestASourceThatLeftHasNoLine:
     ):
         """A $148.32 bill settled, then taken out: the read is as before it settled.
 
-        Settled, its covering movement books Checking ``-148.32`` and Rent
-        ``+148.32`` (the control: the source did enter).  Each exit takes the
+        Checking opens at $1,000.00 and a $5,000.00 balance check is observed
+        today, so before the settle its true-up is ``5,000.00 - 1,000.00 =
+        4,000.00``.  Settled yesterday, the bill's covering movement books
+        Checking ``-148.32`` and Rent ``+148.32``, and the check, the closing
+        balance for a later day, absorbs it: the true-up becomes ``5,000.00
+        - (1,000.00 - 148.32) = 4,148.32`` (the controls: the source entered
+        the movement lines AND moved a correction).  Each exit takes the
         movement out of the dated set -- a revert un-dates it, Credit and
         Cancel follow a revert, a delete removes the row with its movements
-        -- and the whole read, corrections included, is then the read from
-        before the settle.
+        -- and the whole read, the true-up back at 4,000.00 included, is then
+        the read from before the settle.
         """
         with app.app_context():
+            checking = seed_user["account"]
             txn = _bill(seed_user, seed_periods[0])
+            _db.session.add(AccountAnchorHistory(
+                account_id=checking.id, anchor_balance=Decimal("5000.00"),
+                observed_on=_TODAY, recorded_on=_TODAY,
+            ))
             _db.session.flush()
             before = _read(seed_user)
-            transaction_service.settle_transaction(txn)
+            assert _true_ups_of(before, checking) == [Decimal("4000.00")]
+            transaction_service.settle_transaction(
+                txn, settle_day=an_entered_day(_TODAY - timedelta(days=1)),
+            )
             _db.session.flush()
             (movement,) = txn.covering_movements
+            settled = _read(seed_user)
             assert sorted(
-                line.amount for line in _lines_of(_read(seed_user), movement.id)
+                line.amount for line in _lines_of(settled, movement.id)
             ) == [Decimal("-148.32"), Decimal("148.32")]
+            assert _true_ups_of(settled, checking) == [Decimal("4148.32")]
 
             leave(txn)
             _db.session.flush()
@@ -685,7 +875,10 @@ class TestRefundsCardsAndOverPostedEnvelopes:
         purchase books its own figure in its parent's direction and the row
         books nothing (ruling R-BAL80), so the closed envelope's one
         movement is Checking ``-367.62`` against Groceries ``+367.62`` and no
-        line nets anything against the envelope's figure.
+        line nets anything against the envelope's figure.  Every line booked
+        under the ``purchase`` source is read, with a movement or without,
+        so a line netted against the row itself -- the shape N-318 was, which
+        comes from no movement -- would show here as a line with none.
         """
         with app.app_context():
             envelope = _envelope(seed_user, seed_periods[0], "163.95")
@@ -693,7 +886,11 @@ class TestRefundsCardsAndOverPostedEnvelopes:
             transaction_service.settle_transaction(envelope)
             _db.session.flush()
 
-            lines = [line for line in _read(seed_user) if line.movement_id]
+            purchase_source = _source(PostingSourceEnum.PURCHASE)
+            lines = [
+                line for line in _read(seed_user)
+                if line.source_kind_id == purchase_source
+            ]
 
             groceries = seed_user["categories"]["Groceries"].id
             assert [
@@ -759,9 +956,9 @@ class TestItsStatementsDoNotGrowWithItsSources:
                 _db.session.expire_all()
 
             _add_sources(seed_periods[1:2])
-            few, few_statements = _statements_of(lambda: _read(seed_user))
+            few, few_statements = _captured_read(seed_user)
             _add_sources(seed_periods[2:4])
-            many, many_statements = _statements_of(lambda: _read(seed_user))
+            many, many_statements = _captured_read(seed_user)
 
             assert len(many) > len(few)
             assert len(many_statements) == len(few_statements)
@@ -799,9 +996,9 @@ class TestItsStatementsDoNotGrowWithItsSources:
                 _db.session.expire_all()
 
             _add_accounts(1, 1)
-            two, two_statements = _statements_of(lambda: _read(seed_user))
+            two, two_statements = _captured_read(seed_user)
             _add_accounts(4, 2)
-            six, six_statements = _statements_of(lambda: _read(seed_user))
+            six, six_statements = _captured_read(seed_user)
 
             assert len(six) > len(two)
             assert len(six_statements) == len(two_statements)
@@ -846,9 +1043,9 @@ class TestItsStatementsDoNotGrowWithItsSources:
                 _db.session.expire_all()
 
             _add_loans(1, 1)
-            one, one_statements = _statements_of(lambda: _read(seed_user))
+            one, one_statements = _captured_read(seed_user)
             _add_loans(2, 2)
-            three, three_statements = _statements_of(lambda: _read(seed_user))
+            three, three_statements = _captured_read(seed_user)
 
             assert len(three) > len(one)
             assert len(three_statements) == len(one_statements)

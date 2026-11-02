@@ -13,7 +13,8 @@ opening is the one fact kind there that is no event in the stream but the
 level the stream starts from, and so the seam the ceiling was measuring, as
 WHOSE movements was for :mod:`._movement_scope`.
 
-Reads only: no write, no flush.
+Reads only: no write of its own.  Each query autoflushes what the caller's
+session holds pending, as every query in the session does.
 """
 
 from __future__ import annotations

@@ -556,10 +556,13 @@ _FENCED_MODULE_RULINGS = {
             "projection_boundary",
             "replay_loan_stream",
             "with_contract_charges",
-            # ``LoanLedgerWalk``'s two views (recurrence:R16-c-1) and
-            # ``PaymentOutcome``'s ten read-through properties.  Not one of them
-            # derives anything: ``settled_splits`` / ``projected_splits`` filter
-            # the walk's own outcome list by its ``is_projected`` flag, and each
+            # ``LoanLedgerWalk``'s two views (recurrence:R16-c-1), its
+            # emptiness test (plan task plan#2615) and ``PaymentOutcome``'s ten
+            # read-through properties.  Not one of them derives anything:
+            # ``settled_splits`` / ``projected_splits`` filter the walk's own
+            # outcome list by its ``is_projected`` flag, ``is_empty`` answers
+            # whether the walk holds any correction or outcome at all (a
+            # ``bool``, which cannot yield a figure), and each
             # property returns a field of the outcome's ``event`` or ``split``
             # under the flat name every reader spells (``outcome.principal`` for
             # ``outcome.split.principal``).  ``balance_after`` is the replay's
@@ -574,6 +577,7 @@ _FENCED_MODULE_RULINGS = {
             "escrow",
             "excess",
             "interest",
+            "is_empty",
             "principal",
             "projected_splits",
             "settled_splits",

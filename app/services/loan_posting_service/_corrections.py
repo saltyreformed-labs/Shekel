@@ -101,7 +101,7 @@ def reconcile_loan_corrections(
             the emit step that resolves the targets' chart keys (plan task
             plan#2524; from either target builder until then).
     """
-    if not walk.anchor_corrections and not walk.payment_splits:
+    if walk.is_empty:
         return
     # The SAME door the account twin takes (plan step C2-d), so the period
     # this writer FILES an anchor under and the period that one files an

@@ -365,7 +365,7 @@ def _assert_checked_projection(
             fold's delta -- the projection is broken and the write must not
             commit.
     """
-    if not walk.anchor_corrections and not walk.payment_splits:
+    if walk.is_empty:
         return
     expected: dict[date, Decimal] = {}
     for visible_on, delta in dated_deltas(walk):

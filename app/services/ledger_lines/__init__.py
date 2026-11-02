@@ -28,7 +28,7 @@ moves every reader onto it, and its third deletes the store.
   (:func:`loan_correction_targets`).
 * :mod:`._worked_out` -- the READ: every :class:`LedgerLine` of one owner's
   ledger in one scenario, worked out by the rules above
-  (:func:`worked_out_lines`), writing nothing.
+  (:func:`worked_out_lines`), issuing no write of its own.
 
 **The rules are the worked-out ledger's, and the writer imports them back**
 (plan task plan#2526): every target rule the stored ledger's writers posted
@@ -38,7 +38,8 @@ part: resolving each chart key to a stored row, reading what is posted, and
 emitting the difference.
 
 Flask-isolated per the project architecture rule (``CLAUDE.md`` Architecture
-section): plain data in, plain data out; nothing here writes.
+section): plain data in, plain data out; nothing here issues a write of
+its own.
 """
 
 from ._account_anchors import account_correction_targets

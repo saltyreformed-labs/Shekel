@@ -15,11 +15,13 @@ took them over an owner and moved them here: the event module stood 11 lines
 under the 1,000-line ceiling, and WHOSE movements is the seam the ceiling was
 measuring.
 
-Reads only: no write, no flush.
+Reads only: no write of its own.  Each query autoflushes what the caller's
+session holds pending, as every query in the session does.
 """
 
 from __future__ import annotations
 
+from sqlalchemy import ColumnElement
 from sqlalchemy.orm import contains_eager
 
 from app.extensions import db
@@ -34,7 +36,7 @@ from app.services.transfer_legs import (
 from app.utils.balance_predicates import balance_contributing_clause
 
 
-def _on_account(account_id: int):
+def _on_account(account_id: int) -> ColumnElement[bool]:
     """Return the scope clause of one account's movements: the fold's.
 
     **The MOVEMENT's own account, never its parent's** (ruling **R-BAL75**):
@@ -56,7 +58,11 @@ def _on_account(account_id: int):
     return TransactionEntry.account_id == account_id
 
 
-def _movements_of(scope, scenario_id: int, *narrowing):
+def _movements_of(
+    scope: ColumnElement[bool],
+    scenario_id: int,
+    *narrowing: ColumnElement[bool],
+) -> list[TransactionEntry]:
     """Return the PLAN-ROW movements in *scope* WITH their parents, scoped once.
 
     The ONE statement of what the plan-row movement stream is scoped by --
@@ -124,7 +130,7 @@ def _movements_of(scope, scenario_id: int, *narrowing):
 
 
 def _dated_arms(
-    scope, scenario_id: int,
+    scope: ColumnElement[bool], scenario_id: int,
 ) -> tuple[list[TransactionEntry], list[TransferLeg]]:
     """Return the DATED movements in *scope*, a plan row's and a transfer leg's.
 
@@ -179,7 +185,7 @@ def _dated_arms(
     )
 
 
-def _of_owner(owner_id: int):
+def _of_owner(owner_id: int) -> ColumnElement[bool]:
     """Return the scope clause of one owner's movements: the worked-out read's.
 
     **The movement's own ``owner_id``, never a parent's ``user_id``**: a

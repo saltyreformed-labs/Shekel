@@ -43,7 +43,10 @@ Pre-tax modelling (assumptions disclosure): the YTD checkpoint captures no
 pre-tax figure, so the annual pre-tax that reduces the liability's taxable
 base is MODELED over the FULL year (``project_salary`` pre-tax totals across
 every one of the year's periods), even for the elapsed periods whose
-WITHHOLDING is measured.  Disclosed via ``pretax_modeled_for_elapsed``.
+WITHHOLDING is measured.  Disclosed via ``pretax_modeled_for_elapsed``.  The
+all-payroll-taxes share of it, which leaves the W-2's Social Security and
+Medicare wages as well, is read off the same breakdowns in the same pass
+(plan step salary:S11-e).
 
 No duplicated data: the liability's own outputs (standard deduction,
 dependent counts + credit amounts, state rate + state standard deduction,
@@ -73,6 +76,7 @@ from app.services import (
     balance_at,
     tax_calculator,
 )
+from app.services.paycheck_calculator import waterfall_fica_wages
 from app.services.projection_inputs import (
     load_active_accounts_with_types,
     load_active_salary_profiles,
@@ -180,6 +184,26 @@ class WithholdingSummary:
 
 
 @dataclass(frozen=True)
+class ModeledPretax:
+    """The year's modeled pre-tax deductions summed across the active profiles.
+
+    Both totals are read off the same breakdowns in one pass
+    (:func:`_aggregate_modeled_pretax`), so the figure the W-2's Social
+    Security and Medicare wages subtract can never be priced apart from the
+    one box 1 subtracts (plan step salary:S11-e).
+
+    Attributes:
+        total_pre_tax: Both pre-tax kinds -- what leaves the income-tax base:
+            the liability's taxable base and W-2 box 1.
+        total_pre_fica: The all-payroll-taxes kind alone, a part of
+            ``total_pre_tax`` -- what leaves W-2 boxes 3 and 5 as well.
+    """
+
+    total_pre_tax: Decimal
+    total_pre_fica: Decimal
+
+
+@dataclass(frozen=True)
 class RefundEstimate:
     """The refund producer's output: federal + state + total refund.
 
@@ -202,12 +226,18 @@ class W2Wages:
     """The four per-filer W-2 wage boxes.
 
     ``box1_wages`` (and ``box16_state_wages``, equal to it) is hybrid gross
-    less the modeled annual pre-tax; ``box3_ss_wages`` caps gross at the
-    year's SS wage base; ``box5_medicare_wages`` is raw gross.  Box 3 / 5
-    use RAW gross (real payroll reduces the SS / Medicare base only by
-    Section-125 pre-tax, not modelled in v1), and box 3 caps the COMBINED
-    gross at one wage base -- an estimate for a multi-job filer whose real
-    per-W-2 caps apply per employer.
+    less the modeled annual pre-tax, both pre-tax kinds;
+    ``box5_medicare_wages`` is hybrid gross less the modeled annual
+    all-payroll-taxes lines alone (a Section 125 premium, a flexible spending
+    account), the one rule the engine charges Social Security and Medicare on
+    (:func:`~app.services.paycheck_calculator.waterfall_fica_wages`); and
+    ``box3_ss_wages`` caps that same figure at the year's SS wage base.  An
+    income-tax-only line (a retirement deferral) leaves box 1 and stays in
+    boxes 3 and 5, as on the employer's W-2.  Until plan step salary:S11-e
+    boxes 3 and 5 were built on the raw gross, which counted the
+    all-payroll-taxes lines the employer's W-2 leaves out.  Box 3 caps the
+    COMBINED figure at one wage base -- an estimate for a multi-job filer
+    whose real per-W-2 caps apply per employer.
     """
 
     box1_wages: Decimal
@@ -455,12 +485,12 @@ def compute_tax_report(user_id: int, year: int, today: date) -> TaxReport | None
     configs = load_tax_configs_for_year(primary, year)
 
     withholding = _aggregate_withholding(year, profiles, balance_ctx)
-    modeled_pretax = _aggregate_modeled_pretax(profiles, periods, balance_ctx)
+    pretax = _aggregate_modeled_pretax(profiles, periods, balance_ctx)
 
     liability = compute_annual_liability(
-        primary, year, withholding.total.gross, modeled_pretax,
+        primary, year, withholding.total.gross, pretax.total_pre_tax,
     )
-    box1_wages = withholding.total.gross - modeled_pretax
+    box1_wages = withholding.total.gross - pretax.total_pre_tax
     next_stub = _next_stub(periods, today)
 
     return TaxReport(
@@ -468,7 +498,8 @@ def compute_tax_report(user_id: int, year: int, today: date) -> TaxReport | None
         withholding=withholding,
         liability=liability,
         w2_preview=_build_w2_preview(
-            withholding, box1_wages, configs.get("fica_config"),
+            withholding, box1_wages, pretax.total_pre_fica,
+            configs.get("fica_config"),
         ),
         schedule_a=_build_schedule_a(
             user_id, year, balance_ctx, withholding, liability,
@@ -544,14 +575,17 @@ def _aggregate_withholding(
 
 def _aggregate_modeled_pretax(
     profiles: list, periods: list, ctx: BalanceContext,
-) -> Decimal:
+) -> ModeledPretax:
     """Sum the FULL-year modeled pre-tax across the active profiles.
 
     The checkpoint captures no pre-tax figure, so the annual pre-tax that
     reduces the liability's taxable base is modelled over EVERY one of the
     year's periods (not just the remainder): the read pass's pricer prices
     the full period list and each breakdown's ``deductions.total_pre_tax``
-    is summed.  A pay stub prices only the tax lines, never the pre-tax
+    is summed, and beside it, from the same breakdowns, its
+    ``deductions.total_pre_fica``: the all-payroll-taxes lines the W-2's
+    Social Security and Medicare wages leave out (plan step salary:S11-e).
+    A pay stub prices only the tax lines, never the pre-tax
     deductions (plan step salary:S11-c-2c), so the stubs move nothing here.
     **The pass's pricer since that step**, where it called ``project_salary``
     with ONE year's tax configs: a stub is priced on its own payday's year
@@ -573,18 +607,19 @@ def _aggregate_modeled_pretax(
             a cadence.
 
     Returns:
-        The summed modeled annual pre-tax (``ZERO`` when there are no
-        periods).
+        The summed modeled annual :class:`ModeledPretax` (both totals
+        ``ZERO`` when there are no periods).
     """
-    total = ZERO
-    if not periods:
-        return total
-    for profile in profiles:
-        breakdowns = ctx.paychecks().for_profile(profile).over(periods)
-        total += sum(
-            (bd.deductions.total_pre_tax for bd in breakdowns), ZERO,
-        )
-    return total
+    total_pre_tax = ZERO
+    total_pre_fica = ZERO
+    if periods:
+        for profile in profiles:
+            for bd in ctx.paychecks().for_profile(profile).over(periods):
+                total_pre_tax += bd.deductions.total_pre_tax
+                total_pre_fica += bd.deductions.total_pre_fica
+    return ModeledPretax(
+        total_pre_tax=total_pre_tax, total_pre_fica=total_pre_fica,
+    )
 
 
 def _sum_components(
@@ -642,34 +677,42 @@ def _build_refund(
 
 
 def _build_w2_preview(
-    withholding: WithholdingSummary, box1_wages: Decimal, fica_config,
+    withholding: WithholdingSummary,
+    box1_wages: Decimal,
+    pre_fica: Decimal,
+    fica_config,
 ) -> W2Preview:
     """Build the per-filer hybrid W-2 preview from the summed withholding.
 
-    Box 3 (SS wages) caps the gross at the year's ``ss_wage_base``; with no
-    FICA config the cap is unknown and the raw gross is used.  Box 1 / 16
-    are the wage base (``box1_wages``); box 5 is raw gross; the withholding
-    boxes are the hybrid lines.
+    Box 5 (Medicare wages) is the hybrid gross less the modeled annual
+    all-payroll-taxes lines, by the engine's one rule
+    (:func:`~app.services.paycheck_calculator.waterfall_fica_wages`); box 3
+    (SS wages) caps that figure at the year's ``ss_wage_base``, the lines
+    leaving it before the cap is applied, and with no FICA config the cap is
+    unknown and box 3 equals box 5.  Box 1 / 16 are the wage base
+    (``box1_wages``); the withholding boxes are the hybrid lines.
 
     Args:
         withholding: The summed withholding-to-date.
         box1_wages: Hybrid gross less the modeled annual pre-tax.
+        pre_fica: The modeled annual all-payroll-taxes lines
+            (:attr:`ModeledPretax.total_pre_fica`).
         fica_config: The year's :class:`app.tax_law.FicaRules` (or ``None``)
             for the SS cap.
 
     Returns:
         The populated :class:`W2Preview`.
     """
-    gross = withholding.total.gross
+    fica_wages = waterfall_fica_wages(withholding.total.gross, pre_fica)
     if fica_config is not None:
-        ss_wages = min(gross, Decimal(str(fica_config.ss_wage_base)))
+        ss_wages = min(fica_wages, Decimal(str(fica_config.ss_wage_base)))
     else:
-        ss_wages = gross
+        ss_wages = fica_wages
     return W2Preview(
         wages=W2Wages(
             box1_wages=box1_wages,
             box3_ss_wages=ss_wages,
-            box5_medicare_wages=gross,
+            box5_medicare_wages=fica_wages,
             box16_state_wages=box1_wages,
         ),
         withheld=W2Withheld(

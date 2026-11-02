@@ -93,11 +93,13 @@ def waterfall_fica_wages(gross: Decimal, pre_fica: Decimal) -> Decimal:
     Section 125 premium, a flexible spending account) leaves it, and a
     "Pre-tax, income tax only" one does not.  Until then the formulas
     charged both taxes on the gross, taxing the lines an employer exempts.
-    Written once for the three readers: the engine's paycheck
+    Written once for the four readers: the engine's paycheck
     (:func:`~._pricing.calculate_paycheck`), a pay stub's paycheck on the
-    side of the difference the stub supplies (:mod:`._stubs`), and each
+    side of the difference the stub supplies (:mod:`._stubs`), each
     earlier payday the year-to-date sums
-    (:func:`~._calendar_questions._get_cumulative_wages`).
+    (:func:`~._calendar_questions._get_cumulative_wages`), and the Taxes
+    tab's W-2 preview, whose Social Security and Medicare wage boxes are the
+    year's figure (:mod:`app.services.tax_report_service`).
 
     Args:
         gross: Base pay plus the taxable earnings.

@@ -207,6 +207,7 @@ from ._breakdown import (
     PeriodInfo,
     PricedLine,
     TaxLines,
+    waterfall_fica_wages,
     waterfall_gross,
     waterfall_net,
 )
@@ -226,6 +227,7 @@ __all__ = [
     "one_offs_change_taxes",
     "stub_totals",
     "tax_years_for",
+    "waterfall_fica_wages",
     "waterfall_gross",
     "waterfall_net",
 ]

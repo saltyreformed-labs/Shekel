@@ -88,7 +88,10 @@ from app.utils.dates import (
     grid_month_after,
     grid_month_on_or_before,
 )
-from app.utils.effective_dated import in_effect_or_earliest
+from app.utils.effective_dated import (
+    in_effect_or_earliest,
+    span_in_effect_or_earliest,
+)
 from app.utils.money import ZERO, round_money
 
 if TYPE_CHECKING:
@@ -172,53 +175,52 @@ def terms_in_effect(
     return in_effect_or_earliest(versions, day)
 
 
-def _governing(versions: "list[CreditCardParams]", day: date) -> "CreditCardParams":
-    """Return :func:`terms_in_effect`'s version for *day*, refusing an empty series.
-
-    A dormant card has no terms and so no statement; every card feature gates
-    on a version existing (design 3.4), and a caller that reaches here
-    without one is told so rather than meeting an ``AttributeError``.
-
-    Raises:
-        ValueError: When *versions* is empty.
-    """
-    terms = terms_in_effect(versions, day)
-    if terms is None:
-        raise ValueError(
-            f"The card has no terms version, so no statement exists on {day}: "
-            f"gate on app.services.card_terms.load_card_term_versions first."
-        )
-    return terms
-
-
 def _in_force(
     versions: "list[CreditCardParams]", day: date,
 ) -> "tuple[CreditCardParams, date | None, date | None]":
     """Return the version in force on *day* and the span ``[start, end)`` it governs.
 
-    The span is the days :func:`terms_in_effect` answers this same version
-    on: from its own date -- or from the beginning of time for the earliest,
-    which holds flat backwards -- until the next version's date, or forever
-    for the latest.  The close walks below jump from span to span, because
-    within one span the close day is one version's and the monthly-grid set
-    answers its next or last grid day directly.
+    :func:`terms_in_effect`'s version and the days that walk gives it, both
+    from the leaf (:func:`app.utils.effective_dated.span_in_effect_or_earliest`).
+    The close walks below jump from span to span, because within one span the
+    close day is one version's and the monthly-grid set answers its next or
+    last grid day directly.
+
+    A dormant card has no terms and so no statement; every card feature gates
+    on a version existing (design 3.4), and a caller that reaches here
+    without one is told so rather than meeting an ``AttributeError`` or a
+    ``TypeError``.
 
     Args:
-        versions: The card's versions, in any order (non-empty).
+        versions: The card's versions, in any order.
         day: The day whose governing version to resolve.
 
     Returns:
         ``(terms, start, end)``: ``start`` is ``None`` for the earliest
         version and ``end`` is ``None`` for the latest.
+
+    Raises:
+        ValueError: When *versions* is empty.
     """
-    terms = _governing(versions, day)
-    has_earlier = any(v.effective_date < terms.effective_date for v in versions)
-    end = min(
-        (v.effective_date for v in versions
-         if v.effective_date > terms.effective_date),
-        default=None,
-    )
-    return terms, (terms.effective_date if has_earlier else None), end
+    span = span_in_effect_or_earliest(versions, day)
+    if span is None:
+        raise ValueError(
+            f"The card has no terms version, so no statement exists on {day}: "
+            f"gate on app.services.card_terms.load_card_term_versions first."
+        )
+    return span
+
+
+def _governing(versions: "list[CreditCardParams]", day: date) -> "CreditCardParams":
+    """Return :func:`terms_in_effect`'s version for *day*, refusing an empty series.
+
+    :func:`_in_force`'s version, so the refusal of a dormant card has one home.
+
+    Raises:
+        ValueError: When *versions* is empty.
+    """
+    terms, _start, _end = _in_force(versions, day)
+    return terms
 
 
 def _first_close_after(versions: "list[CreditCardParams]", day: date) -> date:

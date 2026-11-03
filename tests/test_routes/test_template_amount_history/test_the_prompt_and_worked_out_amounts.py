@@ -85,7 +85,7 @@ class TestTheConflictChooserRoundTrip:
         stays future, after every existing version, so the delta below is an
         append in sorted order.*
         """
-        from tests.test_routes.test_templates import (
+        from tests.test_routes.test_templates._helpers import (
             _create_template, _future_override_txn,
         )
         template = _create_template(
@@ -246,7 +246,7 @@ class TestTheChooserAsksWhetherThePriceHistoryChanged:
         moved.
         """
         with app.app_context():
-            from tests.test_routes.test_templates import (
+            from tests.test_routes.test_templates._helpers import (
                 _create_template, _future_override_txn,
             )
             template = _create_template(
@@ -292,7 +292,7 @@ class TestTheChooserAsksWhetherThePriceHistoryChanged:
         shows none.
         """
         with app.app_context():
-            from tests.test_routes.test_templates import (
+            from tests.test_routes.test_templates._helpers import (
                 _create_template, _future_override_txn,
             )
             template = _create_template(
@@ -401,7 +401,7 @@ class TestAWorkedOutAmountIsShownNotTyped:
     @staticmethod
     def _salary_definition(seed_user):
         """A paycheck definition priced at $2,000.00 before its profile named it."""
-        from tests.test_routes.test_templates import _create_template
+        from tests.test_routes.test_templates._helpers import _create_template
         template = _create_template(
             seed_user, name="Day Job", txn_type="Income",
             cadence=EVERY_PERIOD, amount="2000.00",

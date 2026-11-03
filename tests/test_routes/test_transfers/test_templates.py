@@ -515,7 +515,8 @@ class TestTemplateUpdate:
         """A row the pass declined to change is TOLD, not put to the owner.
 
         Plan step R10-b's route half, and the transfer twin of
-        ``test_templates.py``'s transaction case.  A retained row has no
+        ``tests/test_routes/test_templates/test_the_edit_form_the_chooser_and_renames.py``'s
+        transaction case.  A retained row has no
         keep-vs-use question -- the pass already took the only safe outcome --
         so ``regenerate_or_conflict_chooser`` must NOT render the chooser over
         it, must flash the notice, and must let the edit commit.  Rendering the

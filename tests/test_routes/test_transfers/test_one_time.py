@@ -753,7 +753,8 @@ class TestOneTimeTransfer:
         lands in -- and ``create_transfer_template`` owner-checks it before
         anything is written.  The transaction-template twin of this case is
         gone with the surface: that schema no longer declares the field at all
-        (``test_templates.py::test_create_recurring_template_ignores_a_foreign_start_period``).
+        (``test_templates/test_the_recurrence_preview.py::TestPreviewRecurrence``'s
+        ``test_create_recurring_template_ignores_a_foreign_start_period``).
 
         This POST names a RECURRING cadence, which is the shape that matters:
         the recurrence has no use for the period, so the check must still run

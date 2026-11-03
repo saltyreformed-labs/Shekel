@@ -32,7 +32,10 @@ Run it before a change and after, and diff the two JSON files::
 
 A ``404`` is recorded rather than treated as a failure: most per-kind account
 routes 404 for an account of another kind by design, so the DIFF is the signal
-and an absolute status is not.
+and an absolute status is not.  A server error is the exception, and so is a
+statement partial answering anything but ``200``: either is printed and the
+exit status is 1, so a sweep that rendered nothing cannot pass as a diff of
+two equal sizes (the snapshot is written either way).
 
 It drives the FIRST user in the database, which on a production clone is the
 real owner; a companion role holds no accounts and would measure nothing.
@@ -53,7 +56,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # imported at all.
 # pylint: disable=wrong-import-position
 from app import create_app  # noqa: E402
-from app.extensions import db, login_manager  # noqa: E402
+from app.extensions import db, limiter, login_manager  # noqa: E402
 from app.models.account import Account  # noqa: E402
 from app.models.pay_period import PayPeriod  # noqa: E402
 from app.models.user import User  # noqa: E402
@@ -151,11 +154,33 @@ def _statement_routes(periods):
     ]
 
 
+def _unanswered(snapshot):
+    """Return a line for each probe that did not answer, by route.
+
+    A server error on any route, and a statement partial answering anything
+    but 200: a partial that redirects or refuses rendered no statement, so its
+    size measures nothing.
+
+    Args:
+        snapshot: Each route's recorded shape, by route.
+    """
+    return [
+        f"  {shape['status']} {route}"
+        for route, shape in sorted(snapshot.items())
+        if shape["status"] >= 500
+        or (route.startswith(_HTMX_KEY) and shape["status"] != 200)
+    ]
+
+
 def main(out_path):
-    """Write the snapshot for every route to *out_path*.
+    """Write the snapshot for every route to *out_path*; the exit status.
 
     Args:
         out_path: Destination JSON path.
+
+    Returns:
+        1 when a probe did not answer (:func:`_unanswered`, each printed),
+        else 0.  The snapshot is written either way.
     """
     app = create_app()
     app.config["WTF_CSRF_ENABLED"] = False
@@ -165,6 +190,13 @@ def main(out_path):
     # Disabling it is scoped to this process and touches nothing measured here:
     # every route below is a GET whose RENDER is the subject.
     login_manager.session_protection = None
+    # The rate limiter is switched off on the same terms.  A sweep of every
+    # page from one address is far past production's default limit (30 a
+    # minute), and a production configuration whose store cannot be reached
+    # fails closed: under the release kit's (``tools.rehearsal.rows``) every
+    # GET answered a 500 before its view ran (plan task plan#2773's first
+    # run, 259 of 259 on both sides, byte-identical).
+    limiter.enabled = False
     with app.app_context():
         user = db.session.query(User).order_by(User.id).first()
         if user is None:
@@ -199,16 +231,14 @@ def main(out_path):
         snapshot[_HTMX_KEY + route] = _probe(client, route, _HTMX)
     with open(out_path, "w", encoding="utf-8") as handle:
         json.dump(snapshot, handle, indent=2, sort_keys=True)
-    server_errors = {
-        route: shape for route, shape in snapshot.items()
-        if shape["status"] >= 500
-    }
+    unanswered = _unanswered(snapshot)
     print(
         f"wrote {out_path}: {len(snapshot)} routes, "
-        f"{len(server_errors)} server errors"
+        f"{len(unanswered)} unanswered"
     )
-    for route, shape in sorted(server_errors.items()):
-        print(f"  {shape['status']} {route}")
+    for line in unanswered:
+        print(line)
+    return 1 if unanswered else 0
 
 
 if __name__ == "__main__":
@@ -217,4 +247,4 @@ if __name__ == "__main__":
             "usage: verify_render_surfaces.py OUT.json "
             "(DATABASE_URL selects the database)"
         )
-    main(sys.argv[1])
+    sys.exit(main(sys.argv[1]))

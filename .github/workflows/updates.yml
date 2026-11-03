@@ -45,19 +45,27 @@
 #
 # THE KEY.  The App "Shekel updates" (Contents and Pull requests read and
 # write, installed on Shekel alone; ruling plan#2448), its private key the
-# UPDATE_APP_KEY secret and its Client ID the UPDATE_APP_CLIENT_ID variable.
-# GitHub's own action mints an installation token for one job, scoped to this
-# repository and those two permissions, and revokes it when the job ends, as
-# CI's landing job mints the tracker's (ruling balance:R-BAL311).  Only the
-# mint is handed the key and only the step that uses it the token.  The
-# workflow's own GITHUB_TOKEN could not do this: a pull request it opens or a
-# queue entry it makes starts no workflow run.
+# UPDATE_APP_KEY secret of the deployment environment ``update``, whose
+# deployment branches are main alone (ruling plan#2472), and its Client ID
+# the UPDATE_APP_CLIENT_ID repository variable.  GitHub refuses a job that
+# names the environment on any other ref, so only a run on main reaches the
+# key, whatever a branch's copy of this file says; each keyed run leaves a
+# deployment record.  GitHub's own action mints an installation token for
+# one job, scoped to this repository and those two permissions, and revokes
+# it when the job ends, as CI's landing job mints the tracker's (ruling
+# balance:R-BAL311).  Only the mint is handed the key and only the step that
+# uses it the token.  The workflow's own GITHUB_TOKEN could not do this: a
+# pull request it opens or a queue entry it makes starts no workflow run.
 #
 # WHOSE CODE.  GitHub runs a schedule only from main, so this workflow runs
 # from the release that brings it: refresh runs dev's refresh, publish and
-# queue main's own code (each keyed job checks out the workflow's commit).  A
-# dispatch from any other branch runs nothing: a branch's code never holds the
-# key here.
+# queue main's own code.  A branch's copy of this file never reaches the
+# key: that is GitHub's rule (THE KEY), not this file's.  Within a run on
+# main, this file keeps other code from the key: each keyed job checks out
+# the workflow's own commit, and the refresh, which runs dev's code and
+# package code, names no environment.  The refresh's ``github.ref``
+# condition keeps a dispatch from any other branch from running anything,
+# where the environment would refuse its publish as a red run.
 #
 # WHEN.  The refresh at 11:17 UTC on Mondays (07:17 New York in summer), after
 # Dependabot's 06:00 New York run; the queue at 13:47 UTC every day, so the
@@ -129,6 +137,7 @@ jobs:
   publish:
     needs: refresh
     runs-on: ubuntu-26.04
+    environment: update
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -164,6 +173,7 @@ jobs:
   queue:
     if: github.ref == 'refs/heads/main' && github.event.schedule == '47 13 * * *'
     runs-on: ubuntu-26.04
+    environment: update
     steps:
       # The queue fetches each trial merge it judges from origin by its sha,
       # with no credential: the repository is public.

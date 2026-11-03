@@ -845,8 +845,9 @@ MINT = "actions/create-github-app-token@"
 
 class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
     """``updates.yml``: the job that runs package code sees no secret, each job holding the
-    App's key runs main's own code with the landing group alone and keeps no credential, and
-    each job runs only on the schedule its condition names, from main."""
+    App's key names the environment only main may use (ruling plan#2472), runs main's own code
+    with the landing group alone and keeps no credential, and each job runs only on the
+    schedule its condition names, from main."""
 
     @staticmethod
     def _workflow() -> dict:
@@ -888,11 +889,21 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
             f'"{job}=${{{job.upper()}}}"' for job in alert["needs"]))
 
     def test_each_keyed_job_runs_mains_code_and_hands_its_token_to_one_step(self):
-        """Each keyed job checks out the workflow's own commit; the key goes to the mint alone,
-        narrowed to the two permissions the App holds, and the token to the one step after
-        it, which runs the job's module."""
+        """Each keyed job, and no other, names the environment ``update``, whose secret the
+        key is and which GitHub refuses a job on any ref but main (ruling plan#2472); each holds
+        exactly its keys, so no job-level ``env`` or ``defaults`` reaches its steps; it checks
+        out the workflow's own commit; the key goes to the mint alone, narrowed to the two
+        permissions the App holds, no other step naming a secret by attribute or by index
+        (``secrets['UPDATE_APP_KEY']``), and the token to the one step after it, which runs the
+        job's module."""
+        jobs = self._workflow()["jobs"]
+        assert {name: job["environment"] for name, job in jobs.items()
+                if "environment" in job} == dict.fromkeys(KEYED, "update")
+        assert {name: set(jobs[name]) for name in KEYED} == {
+            "publish": {"needs", "runs-on", "environment", "steps"},
+            "queue": {"if", "runs-on", "environment", "steps"}}
         for name, module in KEYED.items():
-            steps = self._workflow()["jobs"][name]["steps"]
+            steps = jobs[name]["steps"]
             assert steps[0]["uses"].startswith("actions/checkout@")
             assert steps[0]["with"] == {"persist-credentials": False}, name
             mint, use = steps[-2], steps[-1]
@@ -903,15 +914,18 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
                 "permission-contents": "write", "permission-pull-requests": "write"}, name
             assert use["env"]["UPDATE_TOKEN"] == "${{ steps.token.outputs.token }}", name
             assert use["run"].startswith(f"python -m {module}"), name
+            for step in steps:
+                if step is not mint:
+                    assert not re.search(r"\bsecrets\b", yaml.safe_dump(step)), (name, step)
             for step in steps[:-2]:
-                text = yaml.safe_dump(step)
-                assert "secrets." not in text and "steps.token" not in text, (name, step)
+                assert "steps.token" not in yaml.safe_dump(step), (name, step)
 
     def test_each_job_runs_only_from_main_on_the_schedule_its_condition_names(self):
         """The refresh on Monday's schedule or a dispatch, the queue on the daily one, each
-        only from main, whose code alone may hold the key; the publish only after the
-        refresh; and one run at a time, each waiting for the one before, never cancelling it,
-        so a dispatch never races Monday's publish, nor the queue a publish."""
+        only from main, so a dispatch from a branch runs nothing (the environment, not these
+        conditions, keeps the key from a branch's code); the publish only after the refresh;
+        and one run at a time, each waiting for the one before, never cancelling it, so a
+        dispatch never races Monday's publish, nor the queue a publish."""
         workflow = self._workflow()
         on = workflow.get(True, workflow.get("on"))
         monday, daily = (entry["cron"] for entry in on["schedule"])

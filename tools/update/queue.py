@@ -4,8 +4,9 @@ head it was judged at; and the developer mentioned once on each that cannot be (
 plan#2450, plan#2467, plan#2468).
 
 **It runs main's own code** (``.github/workflows/updates.yml``'s ``queue`` job), holding the
-update App's token (ruling plan#2448) and only the ``landing`` group's packages, so the key is
-used by code already released and never by a pull request's.
+update App's token (ruling plan#2448) and only the ``landing`` group's packages; GitHub hands
+the key only to a job of a run on ``main`` (the environment ``update``, ruling plan#2472), so
+it is used by code already released and never by a pull request's.
 
 **Which pull requests**: each open one of this repository (none from a fork) opened by
 Dependabot or by the App, as GraphQL names a bot: by its slug, ``dependabot``, where REST says

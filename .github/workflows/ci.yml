@@ -172,7 +172,10 @@ jobs:
       # as balance:R-BAL311 makes it: the read-only App "Shekel plan reader"
       # (Issues read-only, installed on the tracker only), its private key in
       # the PLAN_READER_KEY secret and its Client ID in the
-      # PLAN_READER_CLIENT_ID variable.  GitHub's own action mints an
+      # PLAN_READER_CLIENT_ID variable.  The key is a repository secret, not
+      # an environment's as the update App's is (ruling plan#2472): this job
+      # runs on every pull request and queue group, which an environment only
+      # main may use would refuse.  GitHub's own action mints an
       # installation token for this run, narrowed again here to reading
       # issues of that one repository, and revokes it when the job ends
       # (GitHub expires one within the hour in any case).

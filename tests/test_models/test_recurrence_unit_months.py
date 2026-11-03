@@ -8,7 +8,7 @@ onto ``ref.recurrence_units`` (migration ``c4e8a1f7d2b6``)::
     months_per_unit   smallint NULL   1 month, 12 year, NULL period and week
     has_day_of_month  boolean NOT NULL GENERATED (months_per_unit IS NOT NULL)
 
-**Three classes.**  What the rows SAY, against the two places a database is
+**Four classes.**  What the rows SAY, against the two places a database is
 born from (the migration for the ones that exist, ``app.ref_seeds`` for a
 fresh one): the test database is migration-built and then reseeded, and
 ``_seed_other_ref_tables`` leaves an existing row alone, so the stored value
@@ -17,7 +17,10 @@ other test reads.  The CHECK on the span.  Then the MIGRATION itself, over
 this test's own clone: the downgrade takes all three objects away, the
 upgrade puts back exactly the spans the seed states, and its refusal over a
 database missing a calendar row is FIRED rather than left as the one path a
-green suite never runs.
+green suite never runs.  And what the ENGINE reads: ``ref_cache`` answers
+each unit's span and flag off the row, and the occurrence stride follows a
+span changed in the database, which is the ruling's whole claim -- the code
+holds no second copy to answer from.
 """
 from unittest.mock import patch
 
@@ -27,8 +30,11 @@ from alembic import op
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 
+from app import ref_cache
+from app.enums import RecurrenceUnitEnum
 from app.models.ref import RecurrenceUnit
 from app.ref_seeds import _REF_TABLE_SEEDS
+from app.services.recurrence import _months, has_day_of_month_coordinate
 from tests._test_helpers import load_migration_module
 
 _MIGRATION = load_migration_module(
@@ -180,3 +186,43 @@ class TestTheMigration:
             )
             assert "SELECT id, name FROM ref.recurrence_units" in str(exc.value)
             db.session.rollback()
+
+
+class TestTheEngineReadsTheRow:
+    """``ref_cache`` answers from the row, and the engine asks the cache."""
+
+    def test_the_cache_answers_each_units_span_and_flag(self, app):
+        """Every member, both accessors, against the hand-written expectation."""
+        with app.app_context():
+            answered = {
+                member.value: (
+                    ref_cache.recurrence_unit_months(member),
+                    ref_cache.recurrence_unit_has_day_of_month(member),
+                )
+                for member in RecurrenceUnitEnum
+            }
+            assert answered == _EXPECTED
+
+    def test_the_stride_follows_a_span_changed_on_the_row(self, app, db):
+        """A yearly span of 24 makes a one-year stride 24 months.
+
+        No reader would author this; it is here because it is the one way to
+        show the engine holds no copy of its own.  With a code table the
+        stride would still read 12.  The flag stays True (24 is not NULL), and
+        the cache is re-initialised clean afterwards so no other test sees it.
+        """
+        with app.app_context():
+            assert _months.months_per_step(RecurrenceUnitEnum.YEAR, 1) == 12
+            db.session.execute(sqlalchemy.text(
+                "UPDATE ref.recurrence_units SET months_per_unit = 24 "
+                "WHERE name = 'year'"
+            ))
+            ref_cache.init(db.session)
+            try:
+                # 24 months a year-unit, times an interval of 2.
+                assert _months.months_per_step(RecurrenceUnitEnum.YEAR, 2) == 48
+                assert has_day_of_month_coordinate(RecurrenceUnitEnum.YEAR)
+            finally:
+                db.session.rollback()
+                ref_cache.init(db.session)
+            assert _months.months_per_step(RecurrenceUnitEnum.YEAR, 1) == 12

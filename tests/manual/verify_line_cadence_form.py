@@ -61,8 +61,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-import verify_recurrence_form as shared
-from verify_recurrence_form import (
+import _recurrence_form_kit as shared
+from _recurrence_form_kit import (
     DEV_BASE_URL,
     POST_SPACING_SECONDS,
     SESSION_STATE,
@@ -597,7 +597,7 @@ def main() -> int:
         browser.close()
 
     print("\n" + "=" * 62)
-    # Pylint: ``protected-access`` -- the failures are the sibling drive's own
+    # Pylint: ``protected-access`` -- the failures are the shared kit's
     # record, which every ``_check`` imported from it appends to; reading it
     # here is this drive reporting the checks it ran through that module.
     failures = shared._failures  # pylint: disable=protected-access

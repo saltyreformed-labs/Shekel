@@ -41,7 +41,7 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 #: scopes its cookie to.
 DEV_BASE_URL = "http://172.32.0.1:5000"
 
-#: The database THE APP IS POINTED AT (see ``verify_recurrence_form.py`` for
+#: The database THE APP IS POINTED AT (see ``_recurrence_form_kit.py`` for
 #: why this must not be hard-coded to ``shekel``).
 DEV_DATABASE = os.environ.get("VERIFY_DEV_DATABASE", "shekel")
 

@@ -4,7 +4,9 @@ ruling plan#2351): what a change that moves pinned versions alone is, and what a
 Each file's two sides are blobs written to a throwaway repository (:mod:`tools.ci.scratch`),
 judged as CI's landing check judges a path where production differs
 (:func:`_production.changed`'s mode and object); the landing check's own use of them is
-``test_landing_versions.py``'s.
+``test_landing_versions.py``'s.  What an action's repository tags is the ``tags`` fixture's
+(``conftest.py``), but where the read of GitHub itself is graded: there ``git ls-remote``
+reads real repositories in a directory standing in for GitHub (:func:`_github`).
 """
 from __future__ import annotations
 
@@ -13,8 +15,10 @@ import re
 
 import pytest
 
-from tools.ci.gitcmd import git
+from tools.ci.gitcmd import GitError, git
 from tools.ci.scratch import commit, commit_files, repository
+from tools.ci.scratch import run as _scratch
+from tools.quill import _versions
 from tools.quill._production import COMPOSE, DOCKERFILE, PUBLISH
 from tools.quill._versions import LOCK, Move, NotVersions, Pin, Reason, moves, pinned
 from tools.quill._versions import pins_versions
@@ -412,15 +416,131 @@ def test_a_compose_change_moving_more_than_versions_is_refused(repo, new, why):
      (Move("actions/checkout", "7.0.1", "7.1.0", False),)),
     (_PUBLISH.replace(f"checkout@{_SHA} # v7.0.1", f"checkout@{_LATER} # v8.0.0"),
      (Move("actions/checkout", "7.0.1", "8.0.0", True),)),
-    (_PUBLISH.replace(f"login-action@{_SHA}", f"login-action@{_LATER}"),
-     (Move("docker/login-action", "4.6.0", "4.6.0", False),)),
     (_PUBLISH.replace(_SHA, _LATER).replace("v7.0.1", "v7.0.2").replace("v4.6.0", "v4.7.0"),
      (Move("actions/checkout", "7.0.1", "7.0.2", False),
       Move("docker/login-action", "4.6.0", "4.7.0", False))),
-], ids=["a minor", "a major", "a commit under its release", "both, a list item one"])
-def test_a_uses_line_moving_its_commit_and_release_moves_versions(repo, new, found):
-    """An action's commit moves with its release, or alone under it."""
-    assert _moved(repo, PUBLISH, _PUBLISH, new) == found
+], ids=["a minor", "a major", "both, a list item one"])
+def test_a_uses_line_moving_its_commit_and_release_moves_versions(repo, tags, new, found):
+    """An action's commit moves with its release, the commit its repository tags with that
+    release, each asked once, in the file's order."""
+    tags.tagged.update({(move.what, move.new): _LATER for move in found})
+    assert (_moved(repo, PUBLISH, _PUBLISH, new), tags.reads) == (
+        found, [(move.what, move.new) for move in found])
+
+
+def test_a_commit_moved_under_its_release_is_refused_unread(repo, tags):
+    """A commit that moves while its release stays is a tag moved after the fact, the shape
+    of a release repointed at another commit: refused before GitHub is asked (ruling
+    plan#2474)."""
+    new = _PUBLISH.replace(f"login-action@{_SHA}", f"login-action@{_LATER}")
+    assert (_refusal(repo, PUBLISH, _PUBLISH, new), tags.reads) == (
+        f"{PUBLISH} pins docker/login-action on line 6 at another commit under its release "
+        "v4.6.0: one release has one commit, so its tag was moved or a pin was never its "
+        "commit", [])
+
+
+@pytest.mark.parametrize(("tagged", "why"), [
+    ({}, "as v7.1.0, a release actions/checkout does not tag"),
+    ({("actions/checkout", "7.1.0"): "3" * 40},
+     f"at {_LATER} as v7.1.0, which actions/checkout tags at {'3' * 40}"),
+], ids=["no such tag", "another commit"])
+def test_a_commit_its_release_does_not_tag_is_refused(repo, tags, tagged, why):
+    """GitHub runs the commit, never its label, and runs one only a fork of the repository
+    holds under the original's name: a commit labelled with a release its repository tags at
+    another commit, or does not tag, is more than a version moved."""
+    tags.tagged.update(tagged)
+    new = _PUBLISH.replace(f"checkout@{_SHA} # v7.0.1", f"checkout@{_LATER} # v7.1.0")
+    assert _refusal(repo, PUBLISH, _PUBLISH, new) == (
+        f"{PUBLISH} pins actions/checkout on line 5 {why}")
+
+
+def test_a_label_moved_alone_is_read_against_its_new_release(repo, tags):
+    """The label moves and the commit stays: the commit must be the new release's, as when
+    both move."""
+    tags.tagged[("actions/checkout", "7.0.2")] = _SHA
+    assert (_moved(repo, PUBLISH, _PUBLISH, _PUBLISH.replace("# v7.0.1", "# v7.0.2")),
+            tags.reads) == ((Move("actions/checkout", "7.0.1", "7.0.2", False),),
+                            [("actions/checkout", "7.0.2")])
+
+
+def test_an_action_below_its_repository_is_read_from_the_repository(repo, tags):
+    """``github/codeql-action/init`` is an action of ``github/codeql-action``, whose tags
+    name its release's commit."""
+    old = f"steps:\n  - uses: github/codeql-action/init@{_SHA} # v4.1.0\n"
+    tags.tagged[("github/codeql-action", "4.2.0")] = _LATER
+    assert (_moved(repo, ".github/workflows/ci.yml", old,
+                   old.replace(f"{_SHA} # v4.1.0", f"{_LATER} # v4.2.0")), tags.reads) == (
+        (Move("github/codeql-action/init", "4.1.0", "4.2.0", False),),
+        [("github/codeql-action", "4.2.0")])
+
+
+@pytest.fixture(name="github")
+def _github(tmp_path, monkeypatch):
+    """A directory standing in for GitHub (``_versions._GITHUB``), each repository under it a
+    real one ``git ls-remote`` reads, as it reads GitHub's; its path."""
+    root = tmp_path / "github"
+    root.mkdir()
+    monkeypatch.setattr(_versions, "_GITHUB", str(root))
+    return root
+
+
+def _upstream(github, owner, name):
+    """The repository ``owner/name`` under ``github``, holding one commit; it and the
+    commit."""
+    (github / owner).mkdir(exist_ok=True)
+    root = repository(github / owner, name)
+    return root, commit(root, "a release")
+
+
+#: A workflow of no production's, where :func:`_checkout` pins checkout.
+_CI = ".github/workflows/ci.yml"
+
+
+def _checkout(at, release):
+    """A workflow pinning checkout at the commit ``at`` as ``release``, on line 2."""
+    return f"steps:\n  - uses: actions/checkout@{at} # v{release}\n"
+
+
+@pytest.mark.parametrize("annotation", [(), ("-a", "-m", "v7.1.0")],
+                         ids=["a lightweight tag", "an annotated tag"])
+def test_a_release_tag_on_github_vouches_for_its_commit(repo, github, annotation):
+    """The repository's tag ``v7.1.0`` names the commit, an annotated tag read through to the
+    commit it tags: the move is a version moved."""
+    upstream, released = _upstream(github, "actions", "checkout")
+    _scratch(upstream, "tag", *annotation, "v7.1.0", released)
+    assert _moved(repo, _CI, _checkout(_SHA, "7.0.1"), _checkout(released, "7.1.0")) == (
+        Move("actions/checkout", "7.0.1", "7.1.0", False),)
+
+
+def test_an_annotated_tag_s_own_object_is_no_release_s_commit(repo, github):
+    """A line pinning the tag's own object, not the commit it tags, is refused: GitHub runs
+    no tag object."""
+    upstream, released = _upstream(github, "actions", "checkout")
+    _scratch(upstream, "tag", "-a", "-m", "v7.1.0", "v7.1.0", released)
+    tag = _scratch(upstream, "rev-parse", "refs/tags/v7.1.0")
+    assert tag != released
+    assert _refusal(repo, _CI, _checkout(_SHA, "7.0.1"), _checkout(tag, "7.1.0")) == (
+        f"{_CI} pins actions/checkout on line 2 at {tag} as v7.1.0, which actions/checkout "
+        f"tags at {released}")
+
+
+def test_a_release_its_repository_on_github_does_not_tag_is_refused(repo, github):
+    """The repository holds ``v7.0.1`` alone: ``v7.1.0`` is a release it does not tag."""
+    upstream, released = _upstream(github, "actions", "checkout")
+    _scratch(upstream, "tag", "v7.0.1", released)
+    assert _refusal(repo, _CI, _checkout(_SHA, "7.0.1"), _checkout(released, "7.1.0")) == (
+        f"{_CI} pins actions/checkout on line 2 as v7.1.0, a release actions/checkout does "
+        "not tag")
+
+
+def test_a_repository_github_cannot_read_is_no_judgment(repo, github):
+    """No such repository: no judgment is made, as for any file git cannot read, so the
+    landing check reports a change it could not judge and the queue a pull request it failed
+    on, never one needing a card; the walk raises git's own error, naming the repository."""
+    changed = {_CI: (_blob(repo, _checkout(_SHA, "7.0.1")),
+                     _blob(repo, _checkout(_LATER, "7.1.0")))}
+    with pytest.raises(GitError, match=f"ls-remote {re.escape(str(github))}/actions/checkout "):
+        unversioned(repo, changed, "the tree")
 
 
 @pytest.mark.parametrize(("new", "why"), [
@@ -567,6 +687,13 @@ def test_the_files_that_pin_versions_are_the_lock_and_each_line_rules_file(path,
     assert pins_versions(path) is pinning
 
 
+@pytest.fixture(name="released")
+def _released(tags):
+    """The releases the cases below move an action to, each tagged at :data:`_LATER`."""
+    tags.tagged.update({("actions/checkout", "8.0.0"): _LATER,
+                        ("actions/cache", "6.2.0"): _LATER})
+
+
 @pytest.mark.parametrize(("path", "old", "new", "found"), [
     ("docker-compose.dev.yml", _COMPOSE,
      _COMPOSE.replace(f"18-alpine@sha256:{_OLD}", f"18.7-alpine@sha256:{_NEW}"),
@@ -578,10 +705,11 @@ def test_the_files_that_pin_versions_are_the_lock_and_each_line_rules_file(path,
      _ACTION.replace(f"{_SHA} # v6.1.0", f"{_LATER} # v6.2.0"),
      (Move("actions/cache", "6.1.0", "6.2.0", False),)),
 ], ids=["the dev compose file", "a test workflow's major", "a local action"])
+@pytest.mark.usefixtures("released")
 def test_a_file_production_never_runs_moves_its_versions_by_its_kind(repo, path, old, new,
                                                                     found):
     """A compose file, workflow or action production never runs pins versions by the same
-    rule as production's own of its kind."""
+    rule as production's own of its kind, an action's commit its release's."""
     assert _moved(repo, path, old, new) == found
 
 
@@ -619,11 +747,12 @@ def _tree_of(root, base, files):
     return commit_files(root, base or commit(root, "start"), "files", files)
 
 
-def test_a_change_between_two_commits_is_judged_over_every_file_it_changes(repo):
+def test_a_change_between_two_commits_is_judged_over_every_file_it_changes(repo, tags):
     """:func:`unversioned_between` reads each file the tree changes, production's or not: a
     Dependabot-like change moving a workflow's action and the dev compose file's digest
     moves versions alone; one also writing a plan record, or crossing a major, is not, each
     reason waiting on its refusal or on what moves into which major."""
+    tags.tagged[("actions/checkout", "7.1.0")] = _LATER
     base = _tree_of(repo, None, {LOCK: _lock(), ".github/workflows/ci.yml": _WORKFLOW,
                                  "docker-compose.dev.yml": _COMPOSE, "app/x.py": "a\n"})
     alone = _tree_of(repo, base, {
@@ -650,12 +779,15 @@ def test_a_major_beside_a_package_added_is_named_beside_it(repo):
         (Reason(added, added), Reason(major, "pillow 13")), (added, major), added)
 
 
-def test_a_move_across_a_major_waits_on_the_major_it_enters_however_far_and_wherever(repo):
+def test_a_move_across_a_major_waits_on_the_major_it_enters_however_far_and_wherever(repo,
+                                                                                     tags):
     """Each move across a major waits on what moves and the major it moves into, spelled as
     :func:`ceiling` spells a release: the same for any release of that major and in any file
     (a lock's package, an action's release, an image's tag), and another major for the next;
     a 0.x package's minor is its major.  Only what each waits on is new here: each clause is
     the one :func:`unversioned` names."""
+    tags.tagged.update({("actions/checkout", release): _LATER
+                        for release in ("8.0.0", "8.3.1", "9.0.0")})
     base = _tree_of(repo, None, {LOCK: _lock(), ".github/workflows/ci.yml": _WORKFLOW,
                                  "docker-compose.dev.yml": _COMPOSE})
     waiting = {}

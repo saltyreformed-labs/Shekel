@@ -83,7 +83,10 @@ updates:
       prefix: "chore(deps)"
 
   # GitHub Actions: SHA-pinned ``uses:`` lines with a version comment;
-  # Dependabot updates both.  jactionlint and zizmor gate the result.  ``/``
+  # Dependabot updates both.  jactionlint and zizmor gate the result, and the
+  # landing check and the daily queue land one with no card only where each
+  # moved commit is the one the action's repository tags with that release
+  # (tools/quill/_versions.py, ruling plan#2474).  ``/``
   # reaches the workflows alone (and a root action.yml, which there is
   # not), so the local composite actions' directories are listed too.
   # Minor and patch moves are grouped into one weekly PR; a major is left

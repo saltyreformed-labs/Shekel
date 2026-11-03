@@ -155,8 +155,9 @@ it leaves as it was (rule 8):**
    path where production differs is a file that pins versions, changed in its versions
    alone, none across a major: ``uv.lock`` with no package added or removed (so no
    ``pyproject.toml`` edit beside it), a ``FROM`` line of the ``Dockerfile``, an ``image:``
-   line of ``docker-compose.yml`` and a ``uses:`` line of the publish workflow
-   (:mod:`tools.quill._versions` says what each may move).  Anything else, a major
+   line of ``docker-compose.yml`` and a ``uses:`` line of the publish workflow, its commit the
+   one its release's tag names on GitHub (:mod:`tools.quill._versions` says what each may
+   move).  Anything else, a major
    included, still records a card, and where the change touches a file that pins versions
    the refusal says what more it does.
 

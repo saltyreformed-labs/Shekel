@@ -44,11 +44,25 @@ and only in the files that pin versions (:func:`pins_versions`):
   (``docker-compose*.yml``), each pinning an image by tag and digest
   (``name:<version><variant>@sha256:<digest>``): only the tag's version and the digest
   move, the image's name, the tag's variant (``-alpine``) and the rest of the line as they
-  were.
+  were.  **An image's version is read from its tag alone** (ruling plan#2474): Docker pulls
+  a digest only from the image's own repository, so no other repository's image can stand
+  in, and which digests a tag named before cannot be read, so whether a digest is its tag's
+  is not asked.
 - a ``uses:`` line of a workflow or of one of this repository's own actions (the files
   Dependabot's ``github-actions`` entry moves), pinning an action by commit with its
   release beside it (``owner/repo@<sha> # v<version>``): only the commit and the release
-  move.
+  move, **and the commit is the release's** (ruling plan#2474, :func:`_vouched`): the one
+  the action's own repository tags ``v<version>``, read from GitHub (:func:`_tagged`).
+  GitHub runs the commit, never the label beside it, and runs a commit that only a fork of
+  the repository holds under the original's name, so a label alone vouches for nothing.  A
+  commit moved under an unchanged release is refused before any read: one release has one
+  commit, so either the release's tag was moved after the fact or one of the two pins was
+  never its commit.  What the repository tags now is read as the release, a tag it moves or
+  creates itself included: Dependabot's seven-day cooldown is what holds a new one back.
+  GitHub unread is no judgment at all: the read's :class:`~tools.ci.gitcmd.GitError` is
+  raised, which the landing check reports as a change it could not judge and the daily
+  queue as a pull request it failed on, each failing closed, never as a change needing a
+  card.
 
 Every other line of those files is as it was, byte for byte: each file is read as git holds
 it, refused when its bytes decode to no text (:func:`_text`, which every file this module
@@ -139,8 +153,9 @@ class NotVersions(ValueError):
 class Move:
     """One version a change moves in a file production runs: ``what`` (a package, an image,
     an action) moves from ``old`` to ``new`` (a package's version, the version in an image's
-    tag, an action's release), across a ``major`` or not.  A digest or a commit moved under
-    the same tag or release is a move from that version to itself."""
+    tag, an action's release), across a ``major`` or not.  A digest moved under the same tag
+    is a move from that version to itself; a commit moved under the same release is refused
+    (:func:`_vouched`)."""
 
     what: str
     old: str
@@ -186,6 +201,13 @@ class _Pins:
 _USES = _Pins(re.compile(r"\s*(?:-\s+)?uses:\s*(?P<what>[^\s@]+)@(?P<exact>[0-9a-f]{40})"
                          r"\s+#\s+v(?P<version>[0-9]+(?:\.[0-9]+)*)\s*"),
               "its action's commit and release")
+#: Where the repository of each action a ``uses:`` line pins is read (:func:`_tagged`):
+#: GitHub, whose git server lists a public repository's tags with no credential.
+_GITHUB = "https://github.com"
+#: What a read of :data:`_GITHUB` runs with beside its environment: git's terminal prompt off,
+#: so a repository GitHub answers for with a request for credentials (one it does not hold)
+#: is a refusal rather than a wait on a terminal no one watches.
+_NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}
 #: How each file that pins versions a line each pins them: the rule of the first pattern its
 #: path matches whole (``PurePath.full_match``, whose ``*`` crosses no ``/``).
 _LINES = (
@@ -315,8 +337,10 @@ def _lines(root: Path, path: str, rule: _Pins, old: str, new: str) -> tuple[Move
 
     Raises:
         NotVersions: when a line is added or deleted, or one changes that pins nothing, or
-            changes more than what it pins (the module's rules).
-        tools.ci.gitcmd.GitError: when git cannot read or hash either object.
+            changes more than what it pins, or moves an action's commit to one that is not
+            its release's (the module's rules, :func:`_vouched`).
+        tools.ci.gitcmd.GitError: when git cannot read or hash either object, or read an
+            action's repository from GitHub (:func:`_tagged`).
     """
     before, after = _exact(root, path, old), _exact(root, path, new)
     if len(before) != len(after):
@@ -331,9 +355,52 @@ def _lines(root: Path, path: str, rule: _Pins, old: str, new: str) -> tuple[Move
                               f"{rule.slots}")
         if _frame(old_pin) != _frame(new_pin):
             raise NotVersions(f"{path} changes more than {rule.slots} on line {number}")
+        if rule is _USES:
+            _vouched(root, f"{path} pins {new_pin['what']} on line {number}", old_pin, new_pin)
         found.append(Move(old_pin["what"], old_pin["version"], new_pin["version"],
                           _major(old_pin["version"]) != _major(new_pin["version"])))
     return tuple(found)
+
+
+def _vouched(root: Path, where: str, old_pin: re.Match[str], new_pin: re.Match[str]) -> None:
+    """Refuse a ``uses:`` line's move from ``old_pin`` to ``new_pin``, ``where`` naming its
+    file, line and action, unless its commit is its release's (ruling plan#2474): a commit
+    moved under an unchanged release is refused unread, and any other move's commit must be
+    the one the action's repository tags with the line's release (:func:`_tagged`).
+
+    Raises:
+        NotVersions: when it is not.
+        tools.ci.gitcmd.GitError: when GitHub cannot be read (:func:`_tagged`).
+    """
+    release, commit = new_pin["version"], new_pin["exact"]
+    if release == old_pin["version"]:
+        raise NotVersions(f"{where} at another commit under its release v{release}: one "
+                          "release has one commit, so its tag was moved or a pin was never "
+                          "its commit")
+    repository = "/".join(new_pin["what"].split("/")[:2])
+    tagged = _tagged(root, repository, release)
+    if tagged is None:
+        raise NotVersions(f"{where} as v{release}, a release {repository} does not tag")
+    if tagged != commit:
+        raise NotVersions(f"{where} at {commit} as v{release}, which {repository} tags at "
+                          f"{tagged}")
+
+
+def _tagged(root: Path, repository: str, release: str) -> str | None:
+    """The commit ``repository`` (``owner/repo``) tags with ``release``: its tag
+    ``v<release>``, an annotated tag read through to the commit it tags, as GitHub
+    (:data:`_GITHUB`) lists it to ``git ls-remote``, run in ``root``; None where it holds no
+    such tag.
+
+    Raises:
+        tools.ci.gitcmd.GitError: when GitHub cannot be read, with git's words.
+    """
+    tag = f"refs/tags/v{release}"
+    listed = {name: commit for commit, _, name in
+              (line.partition("\t") for line in git(
+                  root, "ls-remote", f"{_GITHUB}/{repository}", tag, f"{tag}^{{}}",
+                  environment=_NO_PROMPT).splitlines())}
+    return listed.get(f"{tag}^{{}}", listed.get(tag))
 
 
 def _read(text: str) -> dict[str, object]:
@@ -711,7 +778,8 @@ def _why(path: str, moved: Callable[[], _Read]) -> tuple[Reason, ...]:
     (:class:`NotVersions`), waiting on that; none when it is one.
 
     Raises:
-        tools.ci.gitcmd.GitError: when ``moved`` cannot read a file.
+        tools.ci.gitcmd.GitError: when ``moved`` cannot read a file, or an action's
+            repository on GitHub.
     """
     try:
         read = moved()

@@ -6,7 +6,9 @@ and judge theirs (:mod:`tools.quill._histories`), on a base holding each file th
 versions as the repository's own pins them, the lock and ``pyproject.toml`` in the image and
 the rest outside it (:func:`_pinned`).  What a version-only change is, file by file, is
 graded on its own in ``test__versions.py``; here each kind lands alone and together, and
-each refusal names what more the change does.
+each refusal names what more the change does.  Checkout's repository tags each release an
+action line here moves to at the commit it moves to (the ``tags`` fixture, in place of
+GitHub).
 """
 from __future__ import annotations
 
@@ -64,10 +66,13 @@ def _refused(head, paths, why):
 
 
 @pytest.fixture(name="pinned")
-def _pinned(tmp_path):
+def _pinned(tmp_path, tags):
     """A repository whose ``origin/dev`` and ``origin/main`` hold one base (the start of
     every history) with :data:`_IGNORED` for its ignore file, an app file, a task's done file
-    and each of :data:`_BASE`; the repository and the base."""
+    and each of :data:`_BASE`; the repository and the base.  Checkout's releases 7.1.0 and
+    8.0.0 are tagged at :data:`_LATER`."""
+    tags.tagged.update({("actions/checkout", "7.1.0"): _LATER,
+                        ("actions/checkout", "8.0.0"): _LATER})
     root, start_ = start(tmp_path)
     base = commit_files(root, start_, "the pins", {
         ".dockerignore": _IGNORED, task_file(9): f"done {MON}\n", **_BASE})
@@ -139,15 +144,20 @@ def test_a_version_bump_beside_a_workflow_that_only_tests_lands(check, pinned):
      "app.py pins no version"),
     ({"uv.lock": _MOVED["uv.lock"], task_file(9): None}, "uv.lock",
      "it changes plan/tasks/9 too, a plan record"),
+    ({_PUBLISH: _BASE[_PUBLISH].replace(f"{_SHA} # v7.0.1", f"{'3' * 40} # v7.2.0")}, _PUBLISH,
+     f"{_PUBLISH} pins actions/checkout on line 4 as v7.2.0, a release actions/checkout does "
+     "not tag"),
 ], ids=["a lock major", "an image major", "an action major", "pyproject.toml beside the lock",
         "another Dockerfile edit", "a digest moved with the image's name",
-        "another publish edit", "an app edit beside the lock", "a plan record beside the lock"])
+        "another publish edit", "an app edit beside the lock", "a plan record beside the lock",
+        "an action commit its release does not tag"])
 def test_a_change_moving_more_than_versions_is_refused_saying_what_more(check, pinned, change,
                                                                        paths, why):
     """A major (an indirect package's, an image's, an action's), ``pyproject.toml`` beside
     the lock, a version line with another edit to its file, a digest moved with its image's
-    name, an app edit, or a plan record changed beside the versions: each still needs a
-    card, and the refusal says what more the change does.  The tracker is not read."""
+    name, an app edit, a plan record changed beside the versions, or an action's commit its
+    release does not tag (ruling plan#2474): each still needs a card, and the refusal says
+    what more the change does.  The tracker is not read."""
     root, base = pinned
     head = commit_files(root, base, "chore(deps): versions", change)
     status, out, _ = check(base, head, "dependabot/versions")

@@ -493,7 +493,11 @@ class TestTheStartPeriodBoundSurvivesTheWindow:
 
 
 class TestThePredictionIsTheGenerationCall:
-    """``can_generate_in_period`` answered from a one-period schedule."""
+    """The engine's prediction once answered from a one-period schedule.
+
+    The prediction is ``rows_to_generate_in_period`` since plan#2735 deleted
+    ``can_generate_in_period``, the bool this class graded until then.
+    """
 
     def test_the_predictor_agrees_with_generation_in_every_period(
         self, app, db, seed_user, seed_periods,
@@ -519,7 +523,7 @@ class TestThePredictionIsTheGenerationCall:
 
             predicted = [
                 period.start_date for period in seed_periods
-                if recurrence_engine.can_generate_in_period(
+                if recurrence_engine.rows_to_generate_in_period(
                     template, period.id, scenario_id, schedule=schedule,
                 )
             ]
@@ -1546,7 +1550,7 @@ class TestTheGeneratePassTakesTheReadPass:
 class TestOneScheduleReadServesTheWholeRequest:
     """The N+1 an adversarial review measured, and the gate against its return.
 
-    ``can_generate_in_period`` runs once per envelope row being carried
+    ``rows_to_generate_in_period`` runs once per envelope row being carried
     forward.  Building a ``GenerationSchedule`` inside it cost one schedule
     read AND one full forward occurrence walk per row -- measured at 12 queries
     for the preview and 24 for the execute over 12 envelope rows, against a

@@ -275,7 +275,7 @@ class TestDefinitionRecurs:
     def test_the_carry_forward_prediction_reads_the_same_answer(
         self, app, seed_user,
     ):
-        """``can_generate_in_period`` shares the plan resolver, so it inherits the arm.
+        """``rows_to_generate_in_period`` shares the plan resolver, so it inherits the arm.
 
         The carry-forward's preview and executor ask it whether the engine
         would generate a target row; for an archived envelope the answer is
@@ -288,15 +288,15 @@ class TestDefinitionRecurs:
             schedule = GenerationSchedule.for_pass(ctx)
             period_id = next(iter(schedule.write_period_ids))
             # Live: the engine names this period (a row already answers it,
-            # so the prediction is False for THAT reason; ask the plan).
+            # so the prediction is empty for THAT reason; ask the plan).
             assert recurrence_engine.resolve_generation_plan(
                 template, schedule, ctx.scenario_id, None, block_message="x",
             ) is not None
             template.is_active = False
             db.session.flush()
-            assert recurrence_engine.can_generate_in_period(
+            assert recurrence_engine.rows_to_generate_in_period(
                 template, period_id, ctx.scenario_id, schedule=schedule,
-            ) is False
+            ) == ()
 
     def test_the_plan_resolves_to_nothing_for_an_archived_definition(
         self, app, seed_user,

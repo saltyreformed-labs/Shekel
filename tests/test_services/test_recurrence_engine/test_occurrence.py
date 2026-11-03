@@ -700,7 +700,7 @@ class TestARowRecordsItsOccurrence:
     def test_the_predictor_reads_the_claims_of_rows_that_exist(
         self, app, db, seed_user, seed_periods
     ):
-        """``can_generate_in_period`` against a POPULATED table.
+        """``rows_to_generate_in_period`` against a POPULATED table.
 
         The existing agreement case calls the predictor before generation, on a
         table holding no row for the template -- so step 4, the claims read and
@@ -728,11 +728,11 @@ class TestARowRecordsItsOccurrence:
             db.session.flush()
             assert len(created) >= 2
 
-            # Every period is answered, so the predictor must say NO everywhere.
+            # Every period is answered, so the predictor must name no row anywhere.
             for row in created:
-                assert recurrence_engine.can_generate_in_period(
+                assert recurrence_engine.rows_to_generate_in_period(
                     template, row.pay_period_id, scenario_id, schedule=schedule,
-                ) is False, "the predictor offered a period already answered"
+                ) == (), "the predictor offered a period already answered"
 
             # Move one row out of its period.  The period it LEFT is still
             # answered -- by the row that moved -- so the predictor must still
@@ -744,9 +744,9 @@ class TestARowRecordsItsOccurrence:
             moved.is_override = True
             db.session.flush()
 
-            assert recurrence_engine.can_generate_in_period(
+            assert recurrence_engine.rows_to_generate_in_period(
                 template, vacated, scenario_id, schedule=schedule,
-            ) is False, (
+            ) == (), (
                 "the predictor offered the period a moved row left, whose "
                 "occurrence that row still answers -- D57 through the "
                 "prediction door"

@@ -573,7 +573,7 @@ class TestCarryForwardPreviewReadOnly:
         """Engine-would-generate case must not actually generate.
 
         Specifically guards against the trap where the preview's
-        ``can_generate_in_period`` check could be misimplemented as a
+        ``rows_to_generate_in_period`` check could be misimplemented as a
         ``generate_for_template`` call -- that would create the
         canonical at preview time rather than confirm time, breaking
         the read-only contract.

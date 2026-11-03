@@ -244,9 +244,12 @@ def refuse_a_typed_worked_out_amount(
 
     The edit form shows no Amount box for such a definition
     (:func:`edit_form_amount`), so only a crafted or stale submission
-    carries one.  Refused rather than ignored: the write door records
-    nothing for such a definition, so accepting the save would tell the
-    owner their figure was taken when nothing prices from it.
+    carries one.  Refused rather than ignored: dropping the figure and
+    saving the rest would tell the owner their figure was taken when
+    nothing prices from it.  And refused HERE, ahead of the write door:
+    ``template_amount_service.set_amount`` raises ``ValueError`` for such a
+    definition, which neither update route catches, so a figure reaching it
+    would answer the owner with a server error.
 
     Args:
         template: The owner-checked template being edited.

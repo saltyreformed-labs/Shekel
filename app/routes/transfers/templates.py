@@ -376,10 +376,12 @@ def create_transfer_template():
     if isinstance(rule, Response):
         return rule
 
-    # Open the amount's dated series at today (plan step X-au-a).  The
-    # constructor above also carries the figure because the column is NOT NULL;
-    # this call is what makes the SERIES exist, and plan step X-bp removes the
-    # redundancy by removing the column.
+    # Open the amount's dated series at today (plan step X-au-a).  The series
+    # is this definition's only price: no transfer it makes stores a figure,
+    # and plan step X-bp dropped the template's ``default_amount`` copy
+    # (rulings **R-IY**, **R-BAL16**), so the constructor above carries none.
+    # A template whose series never opened makes transfers ``_stated_amount``
+    # REFUSES.
     template_amount_service.set_amount(
         template, amount, effective_on=display_today(),
     )

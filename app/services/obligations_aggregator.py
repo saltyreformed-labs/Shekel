@@ -352,10 +352,10 @@ def _todays_paycheck(
     ``span_containing`` rather than the saved ``period_containing``: it IS
     the savings page's current period wherever the saved schedule covers the
     day, and past the horizon it keeps answering with the projected paycheck,
-    so the row never falls back to the copy there.  **Before the first
+    so the row there is priced at that day's paycheck.  **Before the first
     SAVED payday** (the calendar's ``opening_bound``) **it prices that first
     saved paycheck** (ruling **R-SAL79**): there is no paycheck today to
-    price, and the copy is exactly the figure the ruling retires -- one a
+    price, and the copy was exactly the figure the ruling retired -- one a
     salary EDIT made in that window left at GROSS pay when the ruling was
     made, because the edit door wrote the gross and ``salary_regeneration``
     re-stated the net only once a saved period contained the day (the gross

@@ -539,8 +539,11 @@ def regenerate_or_conflict_chooser(
     the transfer doors passed ``True`` always, so a derive-mode loan
     payment's edit asked "You changed it to $X" over a hand-edited payment
     while every row of it reads the loan's own figure.  The series answers
-    both kinds: ``template_amount_service.set_amount`` records no version for
-    a definition that does not own its amount, so its edit never changes the
+    both kinds: an edit of a definition that does not own its amount states
+    no price, because both update doors refuse a typed amount for one
+    (``_amount_version_actions.refuse_a_typed_worked_out_amount``) before
+    the write door, which raises for one
+    (``template_amount_service.set_amount``).  So its edit never changes the
     series and the question is never asked.
 
     **A CLEARED recurrence regenerates too**, and the guard that skipped it

@@ -2,9 +2,10 @@
 Shekel Budget App -- Transfer Template Model (budget schema)
 
 A template defines a recurring transfer between accounts (e.g. "Monthly
-savings contribution") along with its recurrence rule and default amount.
-The transfer recurrence engine uses templates to auto-generate Transfer
-rows into future pay periods.
+savings contribution") along with its recurrence rule and its price: a
+dated series (``amount_versions``), or the loan's own payment for a loan
+payment that follows its loan.  The transfer recurrence engine uses
+templates to auto-generate Transfer rows into future pay periods.
 """
 
 from app.extensions import db

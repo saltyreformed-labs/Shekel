@@ -125,7 +125,9 @@ def _created_transfer_flash(source_name, dest_name, base_amount, extra_principal
     Args:
         source_name: The funding account's display name.
         dest_name: The loan account's display name.
-        base_amount: The stored base payment (P&I + escrow, or the typed amount).
+        base_amount: The base payment at creation: today's P&I + escrow for
+            a payment that follows the loan, which stores no figure, or the
+            typed amount, which opens the series.
         extra_principal: The standing extra principal (0.00 when none).
 
     Returns:
@@ -469,7 +471,8 @@ def track_payment(account_id, template_id):
     # extra is preserved, added live on top of the tracked base exactly as
     # before.  The flip is the whole write: a tracking payment states no price
     # (ruling R-FI refuses the fake history a derived figure in the series
-    # would be), so nothing is written to the amount series or its copy.
+    # would be), so nothing is written to the amount series (its
+    # ``default_amount`` copy went at plan step X-bp).
     # Versions the template recorded while it was manual stay as the record
     # of what was stated then.
     if template.settings is None:

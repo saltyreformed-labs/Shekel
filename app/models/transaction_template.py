@@ -2,9 +2,10 @@
 Shekel Budget App -- Transaction Template Model (budget schema)
 
 A template defines a recurring income or expense (e.g. "Car Payment")
-along with its recurrence rule and default amount.  The recurrence
-engine uses templates to auto-generate Transaction rows into future
-pay periods.
+along with its recurrence rule and its price: a dated series
+(``amount_versions``), or the paycheck a salary profile works out.  The
+recurrence engine uses templates to auto-generate Transaction rows into
+future pay periods.
 """
 
 from app.extensions import db

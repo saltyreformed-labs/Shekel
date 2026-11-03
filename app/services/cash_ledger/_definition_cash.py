@@ -116,8 +116,9 @@ def _stated_amount(template, on_date: date, subject: str) -> Decimal:
       the record of what was stated then), so an emptiness test would answer a
       derive-mode payment from a price nobody is stating any more.
     * **an empty series** on a definition that DOES own its amount: its creator
-      wrote the scalar without going through
-      ``template_amount_service.set_amount``, the one write door.  Nobody ever
+      never stated a price through ``template_amount_service.set_amount``, the
+      one write door (until plan step X-bp it could have written the
+      ``default_amount`` scalar instead).  Nobody ever
       stated a price, and X-au-a's own docstring names this refusal as the
       reason it answers ``None`` instead of guessing.
 

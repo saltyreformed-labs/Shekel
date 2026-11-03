@@ -421,8 +421,9 @@ def place_one_off(
     row's key and the series' key both need its id); its series is opened
     with ONE version dated on the row's due date through the series' one
     write door (``template_amount_service.set_amount``, **R-BAL21**) --
-    which also sets the scalar the constructor above had to carry because
-    the column is NOT NULL; and the row is placed by :func:`place_row_of`,
+    the definition's only price, since plan step X-bp dropped the
+    ``default_amount`` copy the constructor had to carry while the column
+    was NOT NULL; and the row is placed by :func:`place_row_of`,
     with the same placing arguments this function takes.
 
     Does NOT commit -- the route or the bank door owns the unit of work, so

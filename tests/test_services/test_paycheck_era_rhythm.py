@@ -41,7 +41,8 @@ by that count.  :class:`TestTodaysPaycheckBecomesAMonthAtItsOwnRhythm` and
 :class:`TestTheRecurringSalaryRow` grade each surface for an owner paid
 biweekly today with a weekly rhythm recorded to start later (rulings
 **R-SAL71** and **R-SAL73** for the Recurring page's salary row, which reads
-today's priced paycheck rather than the template's stored copy).
+today's priced paycheck rather than the template's stored copy, a copy plan
+step X-bp has since deleted).
 """
 
 from datetime import date, timedelta
@@ -694,10 +695,11 @@ class TestTheRecurringSalaryRow:
         """GET /templates: the salary row's Amount cell and sort key read $1,847.00.
 
         Why: the case above grades :attr:`RecurringRow.amount` and never
-        renders the page, so the TEMPLATE could go on reading the stored copy
-        with the suite green -- an adversarial review of this step reverted
-        both template reads to ``default_amount`` and found every test that
-        loads the Recurring page passing.  This renders it.
+        renders the page, so the TEMPLATE could have gone on reading the stored
+        copy with the suite green, until plan step X-bp dropped it -- an
+        adversarial review of this step reverted both template reads to
+        ``default_amount`` and found every test that loads the Recurring page
+        passing.  This renders it.
         """
         with app.app_context():
             self._seed_through_the_salary_form(

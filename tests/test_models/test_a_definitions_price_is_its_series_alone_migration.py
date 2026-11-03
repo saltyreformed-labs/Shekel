@@ -8,10 +8,14 @@ restored -- a definition that states its price from its series' NEWEST
 version, a salary profile's definition from its latest non-deleted Received
 row's recorded figure -- then made ``NOT NULL`` with its CHECK; a loan payment
 that follows its loan, a paycheck no Received row records and a definition
-with no series are REFUSED, by name, and nothing changes.
+with no series are REFUSED, by name, and nothing changes; the refusal prints
+the command that finishes the undo, ``flask db downgrade`` with each such
+copy stated as ``-x <table>.<id>=<figure>`` (ruling **plan#2749**), and that
+re-run writes them and finishes, or refuses a figure the copy cannot hold.
 
-**Both directions are EXECUTED** (``run_migration_callable``) over each case's
-own database, which the ``db`` fixture re-clones per test.  The models on this
+**Both directions are EXECUTED** (``run_migration_callable``; the downgrade
+inside the Alembic environment its ``-x`` arguments need,
+``step_down_through_the_default_amount_drop``) over each case's own database, which the ``db`` fixture re-clones per test.  The models on this
 tree do not map the column, so every world is built through the ORM FIRST and
 the restored copies are read back by SQL.  Each refusal is a control SHOWN TO
 FIRE, and every restore arm is built so that the predicate it rests on can
@@ -45,6 +49,9 @@ from tests._test_helpers import (
     run_migration_callable,
     settle_cash_row,
     state_template_price,
+)
+from tests.test_models._default_amount_drop import (
+    step_down_through_the_default_amount_drop,
 )
 
 _MIGRATION = load_migration_module(
@@ -223,7 +230,7 @@ class TestTheUpgrade:
                 "SELECT * FROM budget.template_amount_versions ORDER BY id"
             )).mappings().all()
 
-            run_migration_callable(_MIGRATION.downgrade, db.session)
+            step_down_through_the_default_amount_drop(db.session)
             assert _is_nullable("transaction_templates") == "NO"
             run_migration_callable(_MIGRATION.upgrade, db.session)
 
@@ -285,7 +292,7 @@ class TestTheDowngradeRestoresEachCopy:
             _received(archived, seed_periods[0], "2572.35")
             db.session.commit()
 
-            run_migration_callable(_MIGRATION.downgrade, db.session)
+            step_down_through_the_default_amount_drop(db.session)
 
             assert _copy("transaction_templates", netflix.id) == Decimal("17.99")
             assert _copy("transfer_templates", transfer.id) == Decimal("250.00")
@@ -316,7 +323,7 @@ class TestTheDowngradeRestoresEachCopy:
             generate_row_of(paycheck, seed_periods[3])
             db.session.commit()
 
-            run_migration_callable(_MIGRATION.downgrade, db.session)
+            step_down_through_the_default_amount_drop(db.session)
 
             assert _copy("transaction_templates", paycheck.id) == Decimal("2572.35")
 
@@ -335,7 +342,7 @@ class TestTheDowngradeRestoresEachCopy:
             _received(paycheck, seed_periods[1], "0.00")
             db.session.commit()
 
-            run_migration_callable(_MIGRATION.downgrade, db.session)
+            step_down_through_the_default_amount_drop(db.session)
 
             assert _copy("transaction_templates", paycheck.id) == Decimal("0.00")
 
@@ -385,6 +392,15 @@ def _unrestorable(app, db, seed_user, seed_periods):
         }
 
 
+#: The table each of :func:`_unrestorable`'s definitions lives in.
+_TABLE_OF = {
+    "rent": "transaction_templates",
+    "day_job": "transaction_templates",
+    "gadget": "transaction_templates",
+    "mortgage": "transfer_templates",
+}
+
+
 class TestTheDowngradeRefuses:
     """No stored fact restores three kinds, and the downgrade changes nothing."""
 
@@ -421,13 +437,16 @@ class TestTheDowngradeRefuses:
     ):
         """It raises before the ``NOT NULL``, and the rollback leaves head.
 
-        The message counts the three, names each with the one line that
-        states its copy in a by-hand run, and gives the diagnostic SELECT
-        per table; afterwards neither column exists.
+        The message counts the three and names each with its reason, then
+        prints the one command that finishes the undo: the downgrade again,
+        with an ``-x`` per refused definition, in the order it names them,
+        down to the revision this one revises (ruling plan#2749).  The
+        restorable ``Rent`` takes no ``-x``.  Afterwards neither column
+        exists.
         """
         with app.app_context():
             with pytest.raises(RuntimeError, match="NOTHING has been changed") as exc:
-                run_migration_callable(_MIGRATION.downgrade, db.session)
+                step_down_through_the_default_amount_drop(db.session)
             db.session.rollback()
 
             message = str(exc.value)
@@ -437,20 +456,110 @@ class TestTheDowngradeRefuses:
                 ("transaction_templates", "gadget", "Gadget"),
                 ("transfer_templates", "mortgage", "Mortgage"),
             ):
-                row_id = unrestorable[key]
-                assert f"  {table} {row_id} ({name!r})," in message, name
-                assert (
-                    f"UPDATE budget.{table} SET default_amount = <figure> "
-                    f"WHERE id = {row_id};"
-                ) in message, name
-            assert (
-                "UPDATE budget.transaction_templates SET default_amount = "
-                f"<figure> WHERE id = {unrestorable['rent']};"
-            ) not in message
-            assert (
-                "  SELECT id, name FROM budget.transaction_templates "
-                "WHERE (default_amount >= 0) IS NOT TRUE;\n"
-                "  SELECT id, name FROM budget.transfer_templates "
-                "WHERE (default_amount > 0) IS NOT TRUE;"
-            ) in message
+                assert f"  {table} {unrestorable[key]} ({name!r})," in message, name
+            assert message.endswith(
+                "\n  flask db downgrade"
+                f" -x transaction_templates.{unrestorable['day_job']}=<figure>"
+                f" -x transaction_templates.{unrestorable['gadget']}=<figure>"
+                f" -x transfer_templates.{unrestorable['mortgage']}=<figure>"
+                f" {_MIGRATION.down_revision}"
+            ), message
+            assert f"transaction_templates.{unrestorable['rent']}=" not in message
+            _assert_head_schema()
+
+    def test_stating_each_copy_finishes_the_undo(self, app, db, unrestorable):
+        """The re-run the refusal prints writes each figure, then the NOT NULLs.
+
+        ``Day Job`` takes its net pay, $2,572.35; ``Gadget`` $40.00;
+        ``Mortgage`` the payment as its loan last priced it, $1,910.95.
+        ``Rent`` still comes back from its series, $1,200.00, and both
+        columns are ``NOT NULL`` under their CHECKs.
+        """
+        with app.app_context():
+            step_down_through_the_default_amount_drop(db.session, figures=(
+                f"transaction_templates.{unrestorable['day_job']}=2572.35",
+                f"transaction_templates.{unrestorable['gadget']}=40.00",
+                f"transfer_templates.{unrestorable['mortgage']}=1910.95",
+            ))
+
+            assert _copy("transaction_templates", unrestorable["day_job"]) == (
+                Decimal("2572.35")
+            )
+            assert _copy("transaction_templates", unrestorable["gadget"]) == (
+                Decimal("40.00")
+            )
+            assert _copy("transfer_templates", unrestorable["mortgage"]) == (
+                Decimal("1910.95")
+            )
+            assert _copy("transaction_templates", unrestorable["rent"]) == (
+                Decimal("1200.00")
+            )
+            for table, (check, definition) in _CHECKS.items():
+                assert _is_nullable(table) == "NO", table
+                assert _constraint(table, check) == definition, table
+
+    def test_a_copy_left_unstated_is_named_and_the_command_keeps_the_others(
+        self, app, db, unrestorable,
+    ):
+        """Two of three stated: the one left is named, and nothing is written.
+
+        The printed command carries the two figures given, so running it
+        with the third filled in finishes the undo.
+        """
+        with app.app_context():
+            with pytest.raises(RuntimeError, match="NOTHING has been changed") as exc:
+                step_down_through_the_default_amount_drop(db.session, figures=(
+                    f"transaction_templates.{unrestorable['day_job']}=2572.35",
+                    f"transfer_templates.{unrestorable['mortgage']}=1910.95",
+                ))
+            db.session.rollback()
+
+            message = str(exc.value)
+            assert "X-bp downgrade refused: 1 definition(s)" in message
+            assert f"({'Gadget'!r})," in message
+            assert "'Day Job'" not in message and "'Mortgage'" not in message
+            assert message.endswith(
+                "\n  flask db downgrade"
+                f" -x transaction_templates.{unrestorable['day_job']}=2572.35"
+                f" -x transaction_templates.{unrestorable['gadget']}=<figure>"
+                f" -x transfer_templates.{unrestorable['mortgage']}=1910.95"
+                f" {_MIGRATION.down_revision}"
+            ), message
+            _assert_head_schema()
+
+    @pytest.mark.parametrize(("key", "value", "why"), [
+        ("rent", "1200.00", "names no definition this downgrade cannot restore"),
+        ("unknown", "40.00", "names no definition this downgrade cannot restore"),
+        ("gadget", "forty", "is not a copy"),
+        ("gadget", "40.005", "is not a copy"),
+        ("gadget", "10000000000.00", "is not a copy"),
+        ("day_job", "-1.00", "admitted by default_amount >= 0"),
+        ("mortgage", "0.00", "admitted by default_amount > 0"),
+    ])
+    def test_a_figure_the_copy_cannot_hold_is_refused(
+        self, app, db, unrestorable, key, value, why,
+    ):
+        """Each ``-x`` names a refused definition and a figure its column admits.
+
+        A figure for ``Rent``, which its series restores, would overwrite
+        the copy ruling plan#2695 restores; an ``-x`` naming no definition
+        is a typo; and a figure that is not whole cents, does not fit
+        ``Numeric(12, 2)``, or that the table's CHECK refuses (a negative
+        paycheck, a $0.00 transfer) is refused by the code before the
+        database would be.  Nothing is written.
+        """
+        with app.app_context():
+            argument = (
+                f"{_TABLE_OF[key]}.{unrestorable[key]}" if key in _TABLE_OF
+                else "transfer_template.1"
+            )
+            with pytest.raises(RuntimeError, match="NOTHING has been changed") as exc:
+                step_down_through_the_default_amount_drop(
+                    db.session, figures=(f"{argument}={value}",),
+                )
+            db.session.rollback()
+
+            message = str(exc.value)
+            assert f"refused -x {argument}={value}," in message, message
+            assert why in message, message
             _assert_head_schema()

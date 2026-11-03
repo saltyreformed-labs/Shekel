@@ -15,12 +15,17 @@ for the next test.
 Beside the tests, not in ``tests/_test_helpers.py``: that module is over the
 1,000-line ceiling, so nothing new goes into it (ruling R-IR).
 """
+from argparse import Namespace
+
+from alembic.config import Config
+from alembic.runtime.environment import EnvironmentContext
+
 from tests._test_helpers import load_migration_module, run_migration_callable
 
 _XBP_REVISION_FILE = "4d4eb9cd3850_a_definitions_price_is_its_series_alone.py"
 
 
-def step_down_through_the_default_amount_drop(db_session):
+def step_down_through_the_default_amount_drop(db_session, figures=()):
     """Run revision ``4d4eb9cd3850``'s whole downgrade: both columns back, restored.
 
     For a case whose definitions all state their price, or whose older
@@ -30,7 +35,16 @@ def step_down_through_the_default_amount_drop(db_session):
     definition holds no copy any stored fact gives back -- a loan payment that
     follows its loan, a paycheck no Received row records, a definition with no
     series -- which is why a case whose subject is such a definition takes
-    :func:`readd_the_default_amount_columns` instead.
+    :func:`readd_the_default_amount_columns` instead -- or states each such
+    copy in *figures*, as ruling plan#2749's re-run does.
+
+    **It runs inside an Alembic environment, as ``flask db downgrade`` does.**
+    The downgrade reads its ``-x`` arguments through ``alembic.context``,
+    which only an :class:`~alembic.runtime.environment.EnvironmentContext`
+    establishes, and :func:`tests._test_helpers.run_migration_callable`
+    configures a bare migration context.  The environment carries *figures*
+    as the command line's ``-x`` values and nothing else: the downgrade
+    reads only its configuration's ``cmd_opts``.
 
     **Build the case's ORM definitions BEFORE calling it.**  The models on
     this tree do not map the column, so an ORM insert after it omits a column
@@ -40,10 +54,14 @@ def step_down_through_the_default_amount_drop(db_session):
         db_session: The test ``db.session``, in the scope that holds the
             template tables' locks (see
             :func:`tests._test_helpers.run_migration_callable`).
+        figures: The ``-x`` values, each ``"<table>.<id>=<figure>"``.
     """
-    run_migration_callable(
-        load_migration_module(_XBP_REVISION_FILE).downgrade, db_session,
-    )
+    config = Config()
+    config.cmd_opts = Namespace(x=list(figures))
+    with EnvironmentContext(config, script=None):
+        run_migration_callable(
+            load_migration_module(_XBP_REVISION_FILE).downgrade, db_session,
+        )
 
 
 def readd_the_default_amount_columns(db_session):

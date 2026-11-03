@@ -28,11 +28,10 @@ flushed**: its first query autoflushes whatever the session holds pending,
 as every query in the session does, so a balance check or a movement a
 write has staged is read rather than missed -- which is why the read leaves
 autoflush on, and why "it flushes nothing" is true only of a clean session.
-A relationship the session has already loaded is not re-read, though: a
-loan's terms come off ``Account.loan_params`` as loaded, so terms written
-by their ``account_id`` after that load are not seen
-(:func:`app.services.loan_ledger.walk_loan_ledgers` states it; finding
-plan#2691 holds it for the readers that move onto this read).
+A loan's terms are read by the loans' ids for the same reason, never off
+``Account.loan_params`` as the session loaded it: terms written by their
+``account_id`` after that load were missed until finding plan#2691 moved the
+read (:func:`app.services.loan_ledger.walk_loan_ledgers`).
 
 **The records are read owner-wide, each kind once** (finding plan#2147's
 requirement, ruling plan#2136; ruling plan#2623):
@@ -44,9 +43,8 @@ so a movement's lines and its account's walk read it once.  Each walk is
 then framed and booked in memory (:func:`._account_walk.account_corrections`).
 Every loan is walked from one load too
 (:func:`app.services.loan_ledger.walk_loan_ledgers`, plan task plan#2649):
-its terms off the account load, which joins ``Account.loan_params``, and
-its statements, rate history, escrow lines and settled payments each loaded
-once for all of the owner's loans.  So the read's statements do not grow with
+its terms, statements, rate history, escrow lines and settled payments
+each loaded once for all of the owner's loans.  So the read's statements do not grow with
 the number of accounts, loans or movements: they depend only on which kinds of
 record the owner holds (an escrow line's versions, a settled payment's
 paychecks, a $0.00 close's records are each one statement when any exists,
@@ -146,8 +144,8 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
     (:func:`app.services.cash_ledger.owner_cash_records`): the movements the
     lines are booked from, and each non-loan account's walk built from the
     same movements; and so are the loans'
-    (:func:`app.services.loan_ledger.walk_loan_ledgers`), each loan's terms
-    the ``loan_params`` its account row was loaded with.
+    (:func:`app.services.loan_ledger.walk_loan_ledgers`), the loans' terms
+    in one statement by their ids.
 
     **The owner's pay calendar is loaded only when a correction is to be
     filed**, as the writers load it (``account_posting_service``'s
@@ -187,7 +185,7 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
         account for account in accounts if not _is_loan(account)
     ])
     loan_walks = walk_loan_ledgers(
-        [account for account in accounts if _is_loan(account)], scenario_id,
+        [account.id for account in accounts if _is_loan(account)], scenario_id,
     )
     corrections = {
         account_id: account_corrections(walk)

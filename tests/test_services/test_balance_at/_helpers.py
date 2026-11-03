@@ -67,22 +67,24 @@ def _derived_income_row(db, seed_user, account, period, amount):
 
     **The newest price is deliberately NOT the graded figure.**  An
     adversarial review of plan step X-au-d found a first version setting both
-    to *amount*, which makes the series and the scalar the same number -- and
-    ``_stated_amount``'s empty-series refusal is then invisible: replacing that
-    refusal with ``return template.default_amount``, the exact fallback its own
-    message forbids, survives every case built on this helper.  A distinct
-    scalar is what makes the series load-bearing.
+    to *amount*, which made the series and the ``default_amount`` scalar the
+    same number -- and ``_stated_amount``'s empty-series refusal was then
+    invisible: replacing that refusal with ``return template.default_amount``,
+    the exact fallback its own message forbids, survived every case built on
+    this helper.  A newest price distinct from the row's own is what makes the
+    series on the row's date load-bearing.
 
     **Passing ``_NOT_THE_SERIES`` to the constructor did not achieve that, and
     plan step balance:X-cf-3 measured it.**  ``set_amount`` re-synced
     ``default_amount`` onto the NEWEST version it states
     (``template_amount_service._resync_scalar``), so the constructor's
     ``7.77`` was overwritten with *amount* on the next line and the resolver
-    mutated to read the scalar passed both cases.  The scalar holds
-    ``_NOT_THE_SERIES`` the only way it can: as a SECOND version, effective
-    the day after this row's due date, which the re-sync copies into the
-    column while ``amount_as_of`` on the row's own day still answers
-    *amount*.  Red with the mutation, green without.
+    mutated to read the scalar passed both cases.  The newest price is
+    ``_NOT_THE_SERIES`` here as a SECOND version, effective the day after
+    this row's due date, while ``amount_as_of`` on the row's own day still
+    answers *amount*.  Red with the mutation, green without; measured again
+    2026-11-02, after plan step X-bp dropped the column, with
+    ``_stated_amount`` reading the newest version: both cases fail.
 
     Args:
         db: The test session fixture.

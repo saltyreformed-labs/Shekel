@@ -2367,7 +2367,7 @@ class TestTheActualHalfAsksTheAmountModel:
         db.session.commit()
         assert newest_price(template) == Decimal("200.00"), (
             "the newest price must differ from the one the row's date "
-            "selects, or a fall-through reading default_amount passes"
+            "selects, or a fall-through reading the newest price passes"
         )
         assert template_amount_service.amount_as_of(
             template, row.due_date,

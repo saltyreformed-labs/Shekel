@@ -537,7 +537,7 @@ class TestPaymentDrift:
         db.session.commit()
         db.session.expire(tpl)
         assert newest_price(tpl) == Decimal("9999.00"), (
-            "precondition: the scalar follows the newest statement"
+            "precondition: the newest stated price is the $9,999.00 one"
         )
 
         resp = auth_client.get(f"/accounts/{acct.id}/loan")

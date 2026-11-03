@@ -167,11 +167,13 @@ class TestGridInterestAccrual:
         bctx = BalanceContext.build(seed_user["user"].id)
         user_id = seed_user["user"].id
         period = seed_periods_today[2]
-        # NOT the graded figure: the definition is built stating $7.77 (its
-        # scalar, and a version dated TODAY), and the $5,000 the assertions
+        # NOT the graded figure: the definition is built stating $7.77 (a
+        # version dated TODAY, its newest price), and the $5,000 the assertions
         # expect is a version dated at the row's own paycheck below -- so a
-        # producer reading the scalar instead of the series on the row's due
-        # date answers a number no assertion here expects.  A first version
+        # producer reading the newest price instead of the series on the row's
+        # due date answers a number no assertion here expects (measured
+        # 2026-11-02: with ``_stated_amount`` reading the newest version, this
+        # case fails).  A first version
         # set both to $5,000 and an adversarial review of plan step X-au-d
         # showed that makes ``_stated_amount``'s empty-series refusal
         # invisible.  The row is the engine's, on the definition's HYSA (plan
@@ -188,8 +190,8 @@ class TestGridInterestAccrual:
         db.session.commit()
         assert income.estimated_amount is None
         assert newest_price(template) == Decimal("7.77"), (
-            "the scalar must still disagree with the series on the row's day, "
-            "or the control cannot see a producer reading the scalar"
+            "the newest price must still disagree with the series on the row's "
+            "day, or the control cannot see a producer reading the newest price"
         )
         current = current_pay_period(user_id)
         # The seam builds the live map itself (ruling R-Q), so no override is

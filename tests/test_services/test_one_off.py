@@ -112,7 +112,7 @@ class TestWhatTheProducerMints:
     def test_the_series_holds_one_version_dated_on_the_rows_due_date(
         self, app, seed_user, seed_periods_today,
     ):
-        """R-BAL21: one version, on the due date, and the scalar agrees."""
+        """R-BAL21: one version, on the due date, and it is the newest price."""
         with app.app_context():
             period = _period(seed_user, seed_periods_today, 4)
             row = place_one_off(

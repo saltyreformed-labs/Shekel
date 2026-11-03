@@ -192,10 +192,10 @@ class TestOwnsItsAmount:
 
 
 class TestSetAmount:
-    """The one write door: the scalar and the series move together."""
+    """The one write door: a stated price is a version of the definition's series."""
 
-    def test_opens_the_series_and_moves_the_scalar(self, app, db, seed_user):
-        """A first statement writes both the column and the opening version."""
+    def test_opens_the_series(self, app, db, seed_user):
+        """A first statement writes the opening version, which is then the newest price."""
         with app.app_context():
             template = _txn_template(seed_user, amount="178.00")
 
@@ -304,8 +304,8 @@ class TestSetAmount:
         which prefills today's amount beside a blank date meaning today.  Because
         the prefill is what the series says TODAY (``amount_as_of`` on today, the
         edit form's read since plan step X-bp deleted the ``current_amount``
-        that fell back to the column) and not the stored column, that
-        save restates $178.00 as of today, which the series already answers, so
+        that fell back to the column) and not the newest price the column
+        held, that save restates $178.00 as of today, which the series already answers, so
         no version is written and the December rise stays in December.
         """
         with app.app_context():
@@ -320,8 +320,9 @@ class TestSetAmount:
 
             today = date(2026, 8, 11)
             assert tas.amount_as_of(template, today) == Decimal("178.00")
-            # The column carries the NEWEST stated price, so regeneration still
-            # writes the December figure onto the rows that edit rebuilt.
+            # The newest price the series states is December's: the figure a
+            # prefill reading the newest price, as one reading the dropped
+            # column did, would re-save as of today.
             assert newest_price(template) == Decimal("200.00")
 
             tas.set_amount(
@@ -339,10 +340,11 @@ class TestSetAmount:
     def test_back_dating_below_a_scheduled_rise_does_not_cancel_it(
         self, app, db, seed_user,
     ):
-        """The column tracks the newest stated price, not the last one typed.
+        """The newest price is the latest-dated version, not the last one typed.
 
         Recording a correction for June must not undo a rise already queued for
-        December -- which assigning the argument to the column did.
+        December -- which assigning the argument to the ``default_amount``
+        column did, before plan step X-bp dropped it.
         """
         with app.app_context():
             template = _txn_template(seed_user, amount="178.00")
@@ -438,7 +440,7 @@ class TestRestateInEffect:
             ]
             assert tas.amount_as_of(template, date(2026, 7, 15)) == Decimal("180.00")
             assert tas.amount_as_of(template, date(2026, 5, 1)) == Decimal("178.00")
-            # The scalar is the NEWEST price, untouched by a middle correction.
+            # The newest price stays September's, untouched by a middle correction.
             assert newest_price(template) == Decimal("165.30")
 
     def test_before_the_earliest_version_the_earliest_is_corrected(
@@ -513,8 +515,12 @@ class TestRestateInEffect:
                     template, Decimal("1.00"), on=date(2026, 5, 7),
                 )
 
-    def test_the_scalar_follows_a_corrected_newest_version(self, app, seed_user):
-        """``_resync_scalar`` runs: correcting the newest version moves the column."""
+    def test_correcting_the_newest_version_moves_the_newest_price(self, app, seed_user):
+        """Correcting the newest version in place moves the newest price.
+
+        ``_resync_scalar`` copied it into the ``default_amount`` column until
+        plan step X-bp dropped the column.
+        """
         with app.app_context():
             template = _txn_template(seed_user)
             _seed_geico_history(template)

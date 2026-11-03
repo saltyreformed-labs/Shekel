@@ -390,7 +390,7 @@ class TestEstimatedTierPricing:
             template, Decimal("700.00"), effective_on=date(2026, 6, 1),
         )
         db.session.flush()
-        # The scalar has moved to the NEWEST price; the series has not.
+        # The newest price is the 06-01 rise, which no earlier occurrence reads.
         assert newest_price(template) == Decimal("700.00")
 
         plan = loan_plan(account, ctx)

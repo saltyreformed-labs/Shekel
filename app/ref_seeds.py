@@ -32,6 +32,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.utils.dates import MONTHS_PER_YEAR
+
 if TYPE_CHECKING:
     # Typing-only imports: keep this module side-effect free at import
     # time (see the deferred ``app.models.ref`` import inside
@@ -255,8 +257,17 @@ _REF_TABLE_SEEDS = (
     # ``e7a4d95c2b18`` inline-seeds the identical rows so a freshly upgraded
     # DB resolves those enums before this idempotent reseed runs -- the same
     # dual-seed pattern the posting refs use.  Names match the enum
-    # ``.value`` strings in ``app/enums.py`` exactly.
-    ("RecurrenceUnit", ["period", "week", "month", "year"]),
+    # ``.value`` strings in ``app/enums.py`` exactly.  ``months_per_unit``
+    # (plan step plan#2302, ruling plan#2748) is the units' one statement of
+    # which are measured in months and how many; migration ``c4e8a1f7d2b6``
+    # writes it onto the rows that exist, and ``has_day_of_month`` is
+    # generated from it.
+    ("RecurrenceUnit", [
+        {"name": "period", "months_per_unit": None},
+        {"name": "week",   "months_per_unit": None},
+        {"name": "month",  "months_per_unit": 1},
+        {"name": "year",   "months_per_unit": MONTHS_PER_YEAR},
+    ]),
     ("PeriodPlacement", ["containing_date", "period_starting_on_or_after"]),
     ("BusinessDayShift", ["none", "prior", "next"]),
     # The amount model's discriminator (balance arc, plan step X-au-c1; ruling

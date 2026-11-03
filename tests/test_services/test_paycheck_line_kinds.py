@@ -51,3 +51,25 @@ class TestTheSideOfEachKind:
     def test_the_three_deduction_kinds_are_deductions(self, member, deduction):
         """Both pre-tax kinds and the post-tax kind leave the paycheck; the earnings do not."""
         assert paycheck_line_kinds.is_deduction(ref_cache.paycheck_line_kind_id(member)) is deduction
+
+
+class TestTheTwoPreTaxKinds:
+    """The one statement of which kinds are pre-tax, and its order (task plan#2715)."""
+
+    def test_the_all_payroll_taxes_kind_comes_first(self):
+        """The engine prices a paycheck's pre-tax lines in this order, so it is pinned.
+
+        Waterfall order: the all-payroll-taxes kind leaves the Social
+        Security and Medicare wages before the income-tax-only kind leaves
+        the taxable wage.
+        """
+        assert paycheck_line_kinds.PRE_TAX_KINDS == (
+            PaycheckLineKindEnum.PRE_FICA_DEDUCTION, PaycheckLineKindEnum.PRE_TAX_DEDUCTION,
+        )
+
+    def test_the_ids_are_the_two_kinds_ids(self):
+        """What the salary page's chip compares a stored id against."""
+        assert paycheck_line_kinds.pre_tax_kind_ids() == frozenset({
+            ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_FICA_DEDUCTION),
+            ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
+        })

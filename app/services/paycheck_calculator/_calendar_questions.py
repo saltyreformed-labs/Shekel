@@ -26,12 +26,14 @@ basis module too until plan step salary:X-av-2, when its year-to-date replay
 began reading base pay off the basis it is handed rather than dividing for
 itself -- and, since plan step salary:R18-b, :mod:`._lines` -- whose
 :func:`~._lines.priced_gross` is the one producer of a payday's gross, and
-since plan step salary:S11-e whose :func:`~._lines.priced_pre_fica` is the
-one pass over the lines that leave its Social Security and Medicare wages,
-both of which the wage cumulative here replays; :mod:`._lines` imports
-nothing of the package above :mod:`._breakdown`, so there is no cycle.
+since plan step salary:S11-e whose :func:`~._lines.priced_kind` is the one
+per-kind pass, which prices the lines that leave its Social Security and
+Medicare wages for the paycheck and for each payday the wage cumulative
+here replays; :mod:`._lines` imports nothing of the package above
+:mod:`._breakdown`, so there is no cycle.
 """
 
+from app.enums import PaycheckLineKindEnum
 from app.services.pay_calendar import (
     PayCalendarError,
     paydays_in_month_through,
@@ -39,8 +41,8 @@ from app.services.pay_calendar import (
 )
 from app.utils.money import ZERO
 
-from ._breakdown import waterfall_fica_wages
-from ._lines import _LineContext, priced_gross, priced_pre_fica
+from ._breakdown import pre_fica_total, waterfall_fica_wages
+from ._lines import _LineContext, priced_gross, priced_kind
 
 
 def _month_ordinal(calendar, payday):
@@ -192,9 +194,10 @@ def _get_cumulative_wages(basis, payday):
     **plan#2639**; ledger row **SAL-566**): the wage base and the surtax
     threshold count Social Security and Medicare wages, which a Section 125
     premium leaves, so each earlier payday adds
-    :func:`~._breakdown.waterfall_fica_wages` of its gross and the lines
-    :func:`~._lines.priced_pre_fica` prices -- the rule and the pass the
-    paycheck's own tax reads.  Until then the total summed the gross,
+    :func:`~._breakdown.waterfall_fica_wages` of its gross and the
+    :func:`~._breakdown.pre_fica_total` of the all-payroll-taxes lines
+    :func:`~._lines.priced_kind` prices -- the rule, the total and the pass
+    the paycheck's own tax reads.  Until then the total summed the gross,
     counting those lines toward the base, so it was reached early (one cause
     of ledger row **SAL-595**, whose rest plan#2637 owns).
 
@@ -215,7 +218,8 @@ def _get_cumulative_wages(basis, payday):
         ctx = _LineContext(basis, earlier, base)
         _taxable, gross = priced_gross(ctx)
         cumulative += waterfall_fica_wages(
-            gross, sum((line.amount for line in priced_pre_fica(ctx)), ZERO),
+            gross,
+            pre_fica_total(priced_kind(ctx, PaycheckLineKindEnum.PRE_FICA_DEDUCTION)),
         )
 
     return cumulative

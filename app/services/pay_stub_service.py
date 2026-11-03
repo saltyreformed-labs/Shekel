@@ -137,7 +137,7 @@ class OneOffFigure:
 
     Attributes:
         name: The name as printed, outer spaces trimmed.
-        paycheck_line_kind_id: Which of the four paycheck-line kinds it is.
+        paycheck_line_kind_id: Which of the five paycheck-line kinds it is.
         amount: Its figure, ``>= 0``.
     """
     name: str

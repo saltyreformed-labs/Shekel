@@ -108,10 +108,12 @@ from decimal import Decimal
 
 from app import ref_cache
 from app.enums import PaycheckLineKindEnum, WithholdingKindEnum
+from app.services.paycheck_line_kinds import PRE_TAX_KINDS
 from app.utils.money import ZERO, round_money
 
 from ._breakdown import (
     TaxLines,
+    totals_by_kind,
     waterfall_fica_wages,
     waterfall_gross,
     waterfall_net,
@@ -126,11 +128,7 @@ from ._withholding import _bracket_tax_lines, _WageBasis
 #: all-payroll-taxes deductions, and the taxable wage is the gross less both
 #: pre-tax kinds -- and so the kinds "the same lines" compares (the module
 #: docstring).  A post-tax deduction and an after-tax earning move no tax.
-TAXED_KINDS = (
-    PaycheckLineKindEnum.TAXABLE_EARNING,
-    PaycheckLineKindEnum.PRE_FICA_DEDUCTION,
-    PaycheckLineKindEnum.PRE_TAX_DEDUCTION,
-)
+TAXED_KINDS = (PaycheckLineKindEnum.TAXABLE_EARNING, *PRE_TAX_KINDS)
 
 
 @dataclass(frozen=True)
@@ -164,7 +162,10 @@ def stub_totals(base_pay: Decimal, kinded: Iterable, taxes: Iterable[Decimal]) -
     Ruling **R-SAL58**: a stub line and a one-off each carry their own kind,
     so nothing here reads a paycheck line.  The ONE producer of a stub's
     totals: the entry door checks a form's figures with it and the engine
-    prices a saved stub's paycheck with it.
+    prices a saved stub's paycheck with it.  The figures are summed by
+    :func:`~._breakdown.totals_by_kind`, the summation a priced paycheck's
+    all-payroll-taxes total reads too (plan step salary:S11-e), so the two
+    sides of the stub's difference total that kind by one rule.
 
     Args:
         base_pay: The base pay the stub prints.
@@ -176,15 +177,11 @@ def stub_totals(base_pay: Decimal, kinded: Iterable, taxes: Iterable[Decimal]) -
     Returns:
         The :class:`StubTotals`.
     """
-    by_kind = {member: ZERO for member in PaycheckLineKindEnum}
-    for figure in kinded:
-        by_kind[ref_cache.paycheck_line_kind_member(figure.paycheck_line_kind_id)] += (
-            figure.amount
-        )
+    by_kind = totals_by_kind(kinded)
     gross = waterfall_gross(base_pay, by_kind[PaycheckLineKindEnum.TAXABLE_EARNING])
     total_taxes = sum(taxes, ZERO)
     pre_fica = by_kind[PaycheckLineKindEnum.PRE_FICA_DEDUCTION]
-    pre_tax = pre_fica + by_kind[PaycheckLineKindEnum.PRE_TAX_DEDUCTION]
+    pre_tax = sum((by_kind[kind] for kind in PRE_TAX_KINDS), ZERO)
     post_tax = by_kind[PaycheckLineKindEnum.POST_TAX_DEDUCTION]
     after_tax = by_kind[PaycheckLineKindEnum.AFTER_TAX_EARNING]
     return StubTotals(

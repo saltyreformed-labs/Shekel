@@ -147,8 +147,10 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
     # before the payday with the same TAXED lines -- the kinds a tax formula
     # reads, kept by ``_stubs``' one filter off every line this paycheck
     # priced -- else of any lines, else the formulas alone (plan step
-    # salary:S11-c-2c; rulings R-SAL42, R-SAL54).  The year-to-date gross both
-    # sides read feeds the FICA SS wage-base cap (CRIT-03 / F-037).
+    # salary:S11-c-2c; rulings R-SAL42, R-SAL54).  The year's Social Security
+    # and Medicare wages before each side's payday (the gross less the
+    # all-payroll-taxes lines, since plan step salary:S11-e) feed the SS
+    # wage-base cap and the Medicare surtax threshold (CRIT-03 / F-037).
     taxes = priced_taxes(
         basis,
         Pay(

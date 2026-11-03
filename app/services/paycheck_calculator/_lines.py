@@ -4,16 +4,18 @@ Shekel Budget App -- Paycheck engine: the LINES of a paycheck, priced.
 **One pass prices a line of any kind, since plan step salary:R18-b** (ruling
 **R-SAL38**; ledger row **D59**): the per-paycheck :class:`_LineContext`
 every kind's pass shares, the pass itself (:func:`_priced_lines`, run once
-per kind), a line's raw amount with its inflation escalation
+per kind, which every caller in the engine reaches through
+:func:`priced_kind`), a line's raw amount with its inflation escalation
 (:func:`_raw_line_amount`, :func:`_inflation_years`), and a capped line's own
 year-to-date (:func:`_cumulative_line_before`) -- the fourth of the package
 docstring's calendar questions, kept beside the lines it caps because it
 replays exactly what :func:`_raw_line_amount` applies to the live one.  The
-deduction passes are bundled by :func:`_compute_deductions`, the
-all-payroll-taxes one through :func:`priced_pre_fica`, which the
-year-to-date wage total replays too (below); the taxable earning pass by
-:func:`priced_gross`, which is also the ONE producer of a paycheck's gross
-(below); the after-tax earning pass by :func:`priced_after_tax`.
+deduction passes are bundled by :func:`_compute_deductions`, the pre-tax
+kinds in the order the kind vocabulary states once
+(:data:`~app.services.paycheck_line_kinds.PRE_TAX_KINDS`); the taxable
+earning pass is :func:`priced_gross`, which is also the ONE producer of a
+paycheck's gross (below); the after-tax earning pass is
+:func:`priced_after_tax`.
 
 **Which paydays a line lands on is its RECURRENCE RULE's answer, since plan
 step salary:R15-b** (rulings **R-SAL3**, **R-SAL29**; ledger row **F-21**):
@@ -41,14 +43,18 @@ paycheck it rode -- the shape :func:`_cumulative_line_before` has always had
 for a capped line (``CLAUDE.md`` rule 14: one walk).  **So do the
 all-payroll-taxes lines, since plan step salary:S11-e** (ruling
 **plan#2639**; ledger row **SAL-566**): the total sums each earlier payday's
-Social Security and Medicare wages, its gross less the lines
-:func:`priced_pre_fica` prices, so a Section 125 premium leaves the wage-base
-total as it leaves the paycheck's own tax.
+Social Security and Medicare wages, its gross less the
+:func:`~._breakdown.pre_fica_total` of the lines :func:`priced_kind` prices for
+that kind -- the call :func:`_compute_deductions` makes for the paycheck
+priced, and the total its tax reads -- so a Section 125 premium leaves the
+wage-base total as it leaves the paycheck's own tax.
 
 This leaf was ``_deductions.py`` until R18-b; it was split out of the
 one-module engine at plan step **salary:C12** (ledger row **P64**).  Imports
 :mod:`._breakdown` and nothing above it, so :mod:`._calendar_questions` and
-:mod:`._pricing` may import it without a cycle.
+:mod:`._pricing` may import it without a cycle.  The kind vocabulary
+(:mod:`app.services.paycheck_line_kinds`) sits outside the package and
+imports nothing of it, so reading it here makes no cycle either.
 """
 
 from dataclasses import dataclass
@@ -58,6 +64,7 @@ from decimal import Decimal
 from app import ref_cache
 from app.enums import CalcMethodEnum, PaycheckLineKindEnum
 from app.services.pay_calendar import paydays_in_year_before
+from app.services.paycheck_line_kinds import PRE_TAX_KINDS
 from app.services.payroll_basis import PayrollBasis
 from app.utils.deduction_cap import cap_period_amount
 from app.utils.money import ZERO, round_money
@@ -95,6 +102,31 @@ class _LineContext:
     base_biweekly: Decimal
 
 
+def priced_kind(ctx, kind: PaycheckLineKindEnum) -> list[PricedLine]:
+    """Price the lines of *kind* admitted on the payday: the one per-kind pass.
+
+    Every pass in the engine is this one: the gross (:func:`priced_gross`),
+    the deductions (:func:`_compute_deductions`), the after-tax earnings
+    (:func:`priced_after_tax`), and the all-payroll-taxes lines each earlier
+    payday the year-to-date wage total sums
+    (:func:`~._calendar_questions._get_cumulative_wages`, plan step
+    salary:S11-e).  The year-to-date prices that kind alone, because pricing
+    every deduction kind there would also replay each capped line's own
+    year-to-date for every earlier payday.  It makes the same call
+    :func:`_compute_deductions` makes for the paycheck priced, so the two
+    cannot disagree on what a payday's Social Security and Medicare wages
+    were.
+
+    Args:
+        ctx: The per-paycheck :class:`_LineContext`.
+        kind: The kind to price.
+
+    Returns:
+        The lines of that kind, in the profile's order.
+    """
+    return _priced_lines(ctx, ref_cache.paycheck_line_kind_id(kind))
+
+
 def priced_gross(ctx) -> tuple[list[PricedLine], Decimal]:
     """Price the taxable earning lines and return them with the gross they make.
 
@@ -111,9 +143,7 @@ def priced_gross(ctx) -> tuple[list[PricedLine], Decimal]:
         ``(taxable lines, gross)`` -- the lines in the profile's order, and
         ``ctx.base_biweekly`` plus their sum.
     """
-    taxable = _priced_lines(
-        ctx, ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.TAXABLE_EARNING),
-    )
+    taxable = priced_kind(ctx, PaycheckLineKindEnum.TAXABLE_EARNING)
     return taxable, waterfall_gross(
         ctx.base_biweekly, sum((line.amount for line in taxable), ZERO),
     )
@@ -128,40 +158,18 @@ def priced_after_tax(ctx) -> list[PricedLine]:
     Returns:
         The after-tax earning lines, in the profile's order.
     """
-    return _priced_lines(
-        ctx, ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.AFTER_TAX_EARNING),
-    )
-
-
-def priced_pre_fica(ctx) -> list[PricedLine]:
-    """Price the all-payroll-taxes deduction lines admitted on the payday.
-
-    The "Pre-tax, all payroll taxes" kind (plan step salary:S11-e): what
-    leaves a paycheck's Social Security and Medicare wages.  **The one pass
-    over them**, read for the paycheck priced (:func:`_compute_deductions`)
-    and for each earlier payday the year-to-date wage total sums
-    (:func:`~._calendar_questions._get_cumulative_wages`), so the two cannot
-    disagree on what a payday's wages were.
-
-    Args:
-        ctx: The per-paycheck :class:`_LineContext`.
-
-    Returns:
-        The all-payroll-taxes lines, in the profile's order.
-    """
-    return _priced_lines(
-        ctx, ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_FICA_DEDUCTION),
-    )
+    return priced_kind(ctx, PaycheckLineKindEnum.AFTER_TAX_EARNING)
 
 
 def _compute_deductions(ctx):
     """Compute the pre- and post-tax deduction lines for a paycheck.
 
-    Runs :func:`_priced_lines` once per deduction kind using the shared
+    Runs :func:`priced_kind` once per deduction kind using the shared
     :class:`_LineContext`, returning the lines bundled in a
     :class:`DeductionBreakdown`: both pre-tax kinds in its ``pre_tax`` list,
-    in waterfall order (the all-payroll-taxes lines first, plan step
-    salary:S11-e), and the post-tax lines in ``post_tax``.
+    in the order :data:`~app.services.paycheck_line_kinds.PRE_TAX_KINDS`
+    states (the all-payroll-taxes lines first, plan step salary:S11-e), and
+    the post-tax lines in ``post_tax``.
 
     Args:
         ctx: The per-paycheck :class:`_LineContext`.
@@ -170,15 +178,8 @@ def _compute_deductions(ctx):
         DeductionBreakdown with the pre- and post-tax line items.
     """
     return DeductionBreakdown(
-        pre_tax=[
-            *priced_pre_fica(ctx),
-            *_priced_lines(
-                ctx, ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_TAX_DEDUCTION)
-            ),
-        ],
-        post_tax=_priced_lines(
-            ctx, ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.POST_TAX_DEDUCTION)
-        ),
+        pre_tax=[line for kind in PRE_TAX_KINDS for line in priced_kind(ctx, kind)],
+        post_tax=priced_kind(ctx, PaycheckLineKindEnum.POST_TAX_DEDUCTION),
     )
 
 

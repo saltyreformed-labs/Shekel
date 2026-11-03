@@ -44,7 +44,6 @@ from app.enums import (
     AcctTypeEnum,
     BusinessDayShiftEnum,
     CalcMethodEnum,
-    PaycheckLineKindEnum,
     EmployerContributionTypeEnum,
     GoalModeEnum,
     IncomeUnitEnum,
@@ -121,11 +120,12 @@ _REF_ID_GLOBALS: tuple[tuple[Callable[[Enum], int], dict[str, Enum]], ...] = (
         "ACCT_CAT_RETIREMENT": AcctCategoryEnum.RETIREMENT,
         "ACCT_CAT_INVESTMENT": AcctCategoryEnum.INVESTMENT,
     }),
-    (ref_cache.paycheck_line_kind_id, {
-        "LINE_KIND_PRE_FICA_DEDUCTION": PaycheckLineKindEnum.PRE_FICA_DEDUCTION,
-        "LINE_KIND_PRE_TAX_DEDUCTION": PaycheckLineKindEnum.PRE_TAX_DEDUCTION,
-        "LINE_KIND_POST_TAX_DEDUCTION": PaycheckLineKindEnum.POST_TAX_DEDUCTION,
-    }),
+    # No ``LINE_KIND_*`` group since task plan#2715 (plan step salary:S11-e).
+    # The salary page's kind chip was the only template that read one, and it
+    # now reads which kinds are pre-tax from the kind vocabulary
+    # (``pre_tax_kind_ids``, on the lines section's context), so the template
+    # does not list the kinds itself.  ``LINE_KIND_POST_TAX_DEDUCTION`` never
+    # had a reader.  Both were deleted on the developer's word (2026-11-02).
     (ref_cache.calc_method_id, {
         "CALC_PERCENTAGE": CalcMethodEnum.PERCENTAGE,
         "CALC_FLAT": CalcMethodEnum.FLAT,

@@ -13,12 +13,18 @@ and every other leaf may import it.  Four rules sit beside them:
 Security and Medicare wages, the taxable wage and the net a waterfall of
 those totals makes, which a priced paycheck and a transcribed pay stub share
 (plan steps **salary:S11-b**, **salary:S11-c-2c** and **salary:S11-e**).
+:func:`totals_by_kind` is the one summation of a list's amounts by kind,
+which a transcribed pay stub's totals read, and :func:`pre_fica_total` its
+all-payroll-taxes total, which a paycheck's breakdown and the year-to-date
+wage total read (plan step **salary:S11-e**), so both sides of a stub's
+difference total that kind by one rule.
 
 Split out of the one-module engine at plan step **salary:C12** (ledger row
 **P64**), which is what put the package where the module had been; the
 package docstring carries the engine's contract and every leaf's place in it.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -35,7 +41,7 @@ class PricedLine:
 
     ``DeductionLine`` until plan step **salary:R18-b** (ruling **R-SAL38**),
     which prices the earning kinds through the same pass; a line of any of
-    the four kinds is this value once priced, and which side it is on is
+    the five kinds is this value once priced, and which side it is on is
     which list of the breakdown holds it.  ``target_account_id`` is the
     account a DEDUCTION funds (the contribution feed reads it) and ``None``
     for every earning.
@@ -165,7 +171,7 @@ def waterfall_net(
 
 
 def every_priced_line(taxable, deductions, after_tax) -> tuple:
-    """Return every line a paycheck priced, all four kinds, in waterfall order.
+    """Return every line a paycheck priced, all five kinds, in waterfall order.
 
     The taxable earnings, the pre-tax and post-tax deductions, then the
     after-tax earnings: what the pay stub door's report sets each stub line
@@ -183,6 +189,59 @@ def every_priced_line(taxable, deductions, after_tax) -> tuple:
         The :class:`PricedLine` values.
     """
     return (*taxable, *deductions.pre_tax, *deductions.post_tax, *after_tax)
+
+
+def totals_by_kind(rows: Iterable) -> dict[PaycheckLineKindEnum, Decimal]:
+    """Return what *rows* add up to, kind by kind: every kind keyed, ``ZERO`` where none.
+
+    **The one summation of a kind's amounts** (plan step salary:S11-e), read
+    by a pay stub's totals (:func:`~._stubs.stub_totals`, where it lived until
+    then) and by :func:`pre_fica_total`, so the paycheck side and the stub
+    side of a stub-priced paycheck total each kind by the same rule.  Each
+    row counts under the kind it carries: the kind a priced line was priced
+    as, and the kind a stub prints a figure under (ruling **R-SAL58**).
+
+    Args:
+        rows: Anything with a ``paycheck_line_kind_id`` and an ``amount``:
+            priced lines, a saved stub's line amounts and one-offs, or the
+            entry form's figures.  Walked once.
+
+    Returns:
+        ``{kind: total}`` over every :class:`~app.enums.PaycheckLineKindEnum`
+        member.
+
+    Raises:
+        KeyError: A row names a kind the ref cache does not hold.  The stub
+            door refuses such an id before it totals a form
+            (:func:`app.services.pay_stub_service.totals_of`'s caller), a
+            saved row's foreign key cannot hold one, and the engine prices
+            each line under a kind it read from the cache.
+    """
+    totals = {member: ZERO for member in PaycheckLineKindEnum}
+    for row in rows:
+        totals[ref_cache.paycheck_line_kind_member(row.paycheck_line_kind_id)] += row.amount
+    return totals
+
+
+def pre_fica_total(lines: Iterable) -> Decimal:
+    """Return the all-payroll-taxes total of *lines*: what leaves the FICA wages.
+
+    The :attr:`~app.enums.PaycheckLineKindEnum.PRE_FICA_DEDUCTION` entry of
+    :func:`totals_by_kind`, read by the kind each line carries (required on
+    a priced line since plan step salary:S11-e, ledger row **SAL-597**).
+    The two readers of a priced paycheck's all-payroll-taxes total call it: a
+    paycheck's :attr:`DeductionBreakdown.total_pre_fica`, and each earlier
+    payday the year-to-date wage total sums
+    (:func:`~._calendar_questions._get_cumulative_wages`).  A pay stub's
+    totals read the same entry off their own :func:`totals_by_kind`.
+
+    Args:
+        lines: Priced lines of any kind.
+
+    Returns:
+        The sum, ``ZERO`` when none is of that kind.
+    """
+    return totals_by_kind(lines)[PaycheckLineKindEnum.PRE_FICA_DEDUCTION]
 
 
 @dataclass
@@ -237,15 +296,10 @@ class DeductionBreakdown:
     def total_pre_fica(self) -> Decimal:
         """Return the all-payroll-taxes lines' sum: what leaves Social Security and Medicare wages.
 
-        The lines of ``pre_tax`` priced as
-        :attr:`~app.enums.PaycheckLineKindEnum.PRE_FICA_DEDUCTION`, read by
-        the kind each line carries (required on a priced line since plan step
-        salary:S11-e, ledger row **SAL-597**).
+        :func:`pre_fica_total` of ``pre_tax``, the rule the year-to-date
+        wage total reads for each earlier payday.
         """
-        pre_fica = ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_FICA_DEDUCTION)
-        return sum(
-            (d.amount for d in self.pre_tax if d.paycheck_line_kind_id == pre_fica), ZERO,
-        )
+        return pre_fica_total(self.pre_tax)
 
     @property
     def total_post_tax(self) -> Decimal:
@@ -391,7 +445,7 @@ class PaycheckBreakdown:
 
     @property
     def priced_lines(self) -> tuple:
-        """Every line this paycheck priced, all four kinds (:func:`every_priced_line`)."""
+        """Every line this paycheck priced, all five kinds (:func:`every_priced_line`)."""
         return every_priced_line(
             self.earnings.taxable, self.deductions, self.earnings.after_tax,
         )

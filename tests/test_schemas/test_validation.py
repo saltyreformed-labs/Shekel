@@ -1030,7 +1030,7 @@ class TestDeductionCreateSchema:
     def test_a_target_account_is_accepted_on_a_deduction_and_refused_on_an_earning(
         self, member,
     ):
-        """The one side-specific rule, swept over all four kinds (plan step salary:R18-b).
+        """The one side-specific rule, swept over every kind (plan step salary:R18-b).
 
         A deduction may name the account it funds; an earning funds nothing,
         so the pair is refused on ``target_account_id`` with the sentence the

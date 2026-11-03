@@ -445,7 +445,7 @@ def add_line(profile_id):
 
     ``add_deduction`` on ``/salary/<id>/deductions`` until plan step
     salary:R18-b (ruling **R-SAL38**): the one door authors a line of any of
-    the four kinds, and the schema refuses the one field that differs by
+    the five kinds, and the schema refuses the one field that differs by
     side (a target account on an earning).
 
     **The line's cadence is a recurrence rule authored onto it** (plan step

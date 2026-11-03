@@ -238,8 +238,10 @@ def paydays_in_year_before(
     """Return the paydays of *day*'s calendar year falling strictly before it.
 
     **The single year-to-date rule.**  The paycheck engine's two cumulatives
-    both walk it -- the gross that drives the FICA Social Security wage-base cap
-    and a deduction's own calendar-year total against its ``annual_cap`` -- and
+    both walk it -- the Social Security and Medicare wages that drive the
+    Social Security wage-base cap and the Medicare surtax threshold (the
+    gross until plan step salary:S11-e) and a deduction's own calendar-year
+    total against its ``annual_cap`` -- and
     they walked two separate copies of it over a caller-supplied period list
     until plan step **balance:X-bh-1**.
 

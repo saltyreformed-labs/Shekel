@@ -49,7 +49,7 @@ recommendations" (plan#1045's comment of that day; the downgrade is plan#2695).
 Self-contained dependency policy: this migration imports nothing from ``app``.
 
 Revision ID: 4d4eb9cd3850
-Revises: 0703995c8536
+Revises: 47beea2b628a
 Create Date: 2026-11-02
 """
 from decimal import Decimal, InvalidOperation
@@ -60,11 +60,13 @@ import sqlalchemy as sa
 
 # Revision identifiers, used by Alembic.
 revision = '4d4eb9cd3850'
-# The head of ``dev`` this card was cut from, measured by
-# alembic.script.ScriptDirectory.  Another lane landing a revision first makes
-# two heads, which git merges cleanly and ``flask db upgrade`` refuses:
-# re-point this at the measured head as the last edit before the pull request.
-down_revision = '0703995c8536'
+# The head of ``dev`` at ``42e370810``, measured on this branch after its merge
+# (226 revisions, one head, by alembic.script.ScriptDirectory).  It was
+# ``0703995c8536`` at authoring, until PR #644 landed ``47beea2b628a`` on it
+# first.  Another lane landing a revision first makes two heads, which git
+# merges cleanly and ``flask db upgrade`` refuses: re-point this at the
+# measured head as the last edit before the pull request.
+down_revision = '47beea2b628a'
 branch_labels = None
 depends_on = None
 

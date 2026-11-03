@@ -568,9 +568,9 @@ class TestEarningLinesThroughTheDoor:
     (``TestEarningLines``); what is graded HERE
     is the door: that the section offers the five kinds under the
     vocabulary's labels and marks the two pre-tax kinds' chips, that a
-    taxable earning added through the form
-    reaches the regeneration and raises the paycheck template's amount (the
-    one stored figure, ``balance:X-au-e``), and that the one rule which
+    taxable earning added through the form raises today's paycheck as the
+    paycheck calculator prices it (no stored copy of the paycheck has stood
+    beside it since plan step X-bp), and that the one rule which
     differs by side -- a target account -- is refused for an earning and
     nothing is written.
     """

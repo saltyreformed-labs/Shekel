@@ -83,7 +83,7 @@ from app.services.recurrence import (
     PickerModel,
     ResolvedRecurrence,
     SelectedCadence,
-    authorable_cadences,
+    cadences_without_a_card,
     describe,
     end_bound_from_columns,
     modelled_unit,
@@ -243,9 +243,12 @@ class RecurrenceFormState:
     Attributes:
         picker: The offer sets every control chooses from
             (:func:`~app.services.recurrence.picker_model` over
-            :func:`~app.services.recurrence.authorable_cadences`).  Identical
-            for every user and both template forms -- what a definition can
-            be, not what this one is.
+            :func:`~app.services.recurrence.cadences_without_a_card`, the
+            offer set less a card's due dates, which no form offers until a
+            transfer into a card can take them: plan step
+            credit_card:CC-6's doors piece).  Identical for every user and
+            both template forms -- what a definition can be, not what this
+            one is.
         selected_cadence: Which ``(unit, interval, placement)`` triple the
             three cadence controls preselect, or ``None`` on a create form AND
             for a rule naming a pattern this application no longer models.
@@ -326,7 +329,7 @@ def create_form_recurrence_state() -> RecurrenceFormState:
         The :class:`RecurrenceFormState`.
     """
     return RecurrenceFormState(
-        picker=picker_model(authorable_cadences()),
+        picker=picker_model(cadences_without_a_card()),
         selected_cadence=None,
         selected_start=RecurrenceStart(
             starts_on=create_form_default_starts_on(), nominal_day=None,
@@ -386,7 +389,7 @@ def edit_form_recurrence_state(
         resolved_definition(template, ctx)
         if locked and cadence is not None else None
     )
-    picker = picker_model(authorable_cadences())
+    picker = picker_model(cadences_without_a_card())
     return RecurrenceFormState(
         picker=picker,
         selected_cadence=cadence,

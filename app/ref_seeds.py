@@ -256,7 +256,9 @@ _REF_TABLE_SEEDS = (
     # DB resolves those enums before this idempotent reseed runs -- the same
     # dual-seed pattern the posting refs use.  Names match the enum
     # ``.value`` strings in ``app/enums/`` exactly.
-    ("RecurrenceUnit", ["period", "week", "month", "year"]),
+    # ``due_date`` joined at plan step ``credit_card:CC-6`` (ruling
+    # plan#2671), inline-seeded by migration ``e2b8c4f1a9d3``.
+    ("RecurrenceUnit", ["period", "week", "month", "year", "due_date"]),
     ("PeriodPlacement", ["containing_date", "period_starting_on_or_after"]),
     ("BusinessDayShift", ["none", "prior", "next"]),
     # The amount model's discriminator (balance arc, plan step X-au-c1; ruling

@@ -43,6 +43,7 @@ from app.services.recurrence import (
     canonical_cadence,
     emits_period_starts,
     fires_on_day_of_month,
+    follows_card_due_dates,
     has_day_of_month_coordinate,
     is_authorable,
 )
@@ -268,7 +269,7 @@ class TestTheOfferSetIsWhatTheAppCanHonour:
     a derivation and an enumeration that happens to agree.
     """
 
-    def test_the_offer_set_is_exactly_these_seven_readings(self):
+    def test_the_offer_set_is_exactly_these_eight_readings(self):
         """The offer set's EXTENSION, written out, beside the derivation.
 
         **This case used to assert ``has_row_date_coordinate(offer.unit)`` over
@@ -277,6 +278,8 @@ class TestTheOfferSetIsWhatTheAppCanHonour:
         dated.  Both adversarial reviews of plan step R8-a named it.  What a
         test can honestly hold here is the EXTENSION: seven readings since plan
         step R8-b (paychecks once, weeks / months / years at both placements),
+        and eight since plan step credit_card:CC-6 added a card's statement
+        due dates, funded by the paycheck covering each (ruling plan#2671),
         written out, so a change to the derived rule surfaces as a diff a reader
         has to justify rather than as a silently different set.
 
@@ -301,23 +304,30 @@ class TestTheOfferSetIsWhatTheAppCanHonour:
                  PeriodPlacementEnum.CONTAINING_DATE),
                 (RecurrenceUnitEnum.YEAR,
                  PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER),
+                (RecurrenceUnitEnum.DUE_DATE,
+                 PeriodPlacementEnum.CONTAINING_DATE),
             ]
         }
 
-    def test_every_honourable_pair_is_offered_unless_it_is_inert(self):
+    def test_every_honourable_pair_is_offered_unless_inert_or_late(self):
         """And nothing honourable is silently withheld.
 
         The REVERSE direction, and it is the one an enumeration fails in: a
         pair the rules admit but the picker forgot is a cadence the app can run
-        and the user cannot choose.  The only admitted exception is a placement
+        and the user cannot choose.  The admitted exceptions are a placement
         that changes nothing
-        (:func:`~app.services.recurrence.emits_period_starts`), and the case
-        below is what proves that claim rather than trusting it.
+        (:func:`~app.services.recurrence.emits_period_starts`) and, since plan
+        step credit_card:CC-6, a placement that would pay a card's due date
+        late (:func:`~app.services.recurrence.follows_card_due_dates`), and
+        the case below is what proves that claim rather than trusting it.
         """
         honourable = set()
         for unit in RecurrenceUnitEnum:
             for placement in PeriodPlacementEnum:
-                if emits_period_starts(unit) and (
+                fixed = (
+                    emits_period_starts(unit) or follows_card_due_dates(unit)
+                )
+                if fixed and (
                     placement is not PeriodPlacementEnum.CONTAINING_DATE
                 ):
                     continue
@@ -435,17 +445,38 @@ class TestTheOfferSetIsWhatTheAppCanHonour:
 
         Swept over intervals the closed set could name and intervals it could
         not, because the whole content of freeing the interval is that the
-        answer no longer depends on it.
+        answer no longer depends on it -- for every unit but a card's due
+        dates, which take 1 alone (plan step credit_card:CC-6: every other
+        statement leaves one unpaid), which
+        :meth:`test_the_due_dates_take_an_interval_of_one_alone` grades.
         """
         for unit in RecurrenceUnitEnum:
             for placement in PeriodPlacementEnum:
                 offered = AuthorableCadence(
                     unit=unit, placement=placement,
-                ) in set(authorable_cadences())
+                ) in set(authorable_cadences()) and (
+                    interval_n == 1 or not follows_card_due_dates(unit)
+                )
 
                 assert is_authorable(interval_n, unit, placement) is offered, (
                     f"{interval_n} {unit} {placement}"
                 )
+
+    @pytest.mark.parametrize("interval_n", [2, 3, 12])
+    def test_the_due_dates_take_an_interval_of_one_alone(self, interval_n):
+        """Every other statement is refused by the validator.
+
+        The one unit whose answer still depends on the interval (plan step
+        credit_card:CC-6): each due date is a deadline, so skipping one is a
+        statement left unpaid.  Graded against interval 1 so a validator
+        refusing the unit outright fails it; the write door's refusal is
+        ``test_recurrence_due_date_walk``'s, through ``resolve``.
+        """
+        due_dates = RecurrenceUnitEnum.DUE_DATE
+        containing = PeriodPlacementEnum.CONTAINING_DATE
+
+        assert is_authorable(1, due_dates, containing)
+        assert not is_authorable(interval_n, due_dates, containing)
 
     @pytest.mark.parametrize("interval_n", [0, -1, -12])
     def test_is_authorable_refuses_a_non_positive_interval(self, interval_n):

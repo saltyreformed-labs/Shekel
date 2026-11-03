@@ -90,6 +90,7 @@ from app.services.recurrence._closing import (
     Empty,
     Indefinite,
 )
+from app.services.recurrence._offer import follows_card_due_dates
 from app.services.recurrence._resolution import ResolvedRecurrence
 from app.utils.dates import month_name, weekday_name
 
@@ -99,7 +100,10 @@ from app.utils.dates import month_name, weekday_name
 #: makes a cadence nobody has authored yet ("every 2 months", "every 2 years")
 #: read correctly the day plan step R8 allows it.  The named entries are
 #: verbatim the copy the old per-pattern branches carried, so no definition's
-#: cell changes wording for a reason unrelated to this step.
+#: cell changes wording for a reason unrelated to this step.  The card's due
+#: dates joined at plan step credit_card:CC-6 in the words ruling plan#2671
+#: gave the repeat; the unit is authorable only every 1, so its stem is
+#: always the named one.
 _NAMED_STEMS: dict[tuple[RecurrenceUnitEnum, int], str] = {
     (RecurrenceUnitEnum.PERIOD, 1): "Every paycheck",
     (RecurrenceUnitEnum.WEEK, 1): "Weekly",
@@ -107,6 +111,7 @@ _NAMED_STEMS: dict[tuple[RecurrenceUnitEnum, int], str] = {
     (RecurrenceUnitEnum.MONTH, 3): "Quarterly",
     (RecurrenceUnitEnum.MONTH, 6): "Every 6 months",
     (RecurrenceUnitEnum.YEAR, 1): "Yearly",
+    (RecurrenceUnitEnum.DUE_DATE, 1): "On each statement's due date",
 }
 
 #: The plural noun each unit is counted in, for the fallback stem.
@@ -115,6 +120,7 @@ _UNIT_PLURALS: dict[RecurrenceUnitEnum, str] = {
     RecurrenceUnitEnum.WEEK: "weeks",
     RecurrenceUnitEnum.MONTH: "months",
     RecurrenceUnitEnum.YEAR: "years",
+    RecurrenceUnitEnum.DUE_DATE: "statements",
 }
 
 #: What a DEFERRING placement is called in the phrase.
@@ -369,6 +375,12 @@ def _parenthetical(resolved: ResolvedRecurrence) -> str | None:
     distinction that makes no difference would be noise, so "Every paycheck"
     is the whole phrase.
 
+    **Nor do the card's due dates** (plan step credit_card:CC-6), for the
+    same two reasons: the day is the card's, so the rule names none, and the
+    one placement it admits is the paycheck covering the due date
+    (:func:`~app.services.recurrence._offer.follows_card_due_dates`), which
+    "On each statement's due date" already says.
+
     Args:
         resolved: The recurrence's two-axis meaning.
 
@@ -376,7 +388,10 @@ def _parenthetical(resolved: ResolvedRecurrence) -> str | None:
         The parenthetical's contents without its brackets, or ``None`` when the
         cadence has none.
     """
-    if resolved.unit is RecurrenceUnitEnum.PERIOD:
+    if (
+        resolved.unit is RecurrenceUnitEnum.PERIOD
+        or follows_card_due_dates(resolved.unit)
+    ):
         return None
     coordinate = _coordinate(resolved)
     note = _placement_note(resolved)

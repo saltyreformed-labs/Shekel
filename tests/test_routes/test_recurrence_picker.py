@@ -78,6 +78,7 @@ from app.services.recurrence import (
     EndsOnDate,
     NeverEnds,
     authorable_cadences,
+    cadences_without_a_card,
     cadence_options,
     end_bound_options,
     is_authorable,
@@ -606,12 +607,15 @@ class TestBothFormsRenderTheSameControls:
 
         The MONTH unit has two offered readings (both placements) and must
         still render a single entry, or the user is asked to choose between two
-        things called "months".
+        things called "months".  The set each form renders is the offer set
+        less a card's due dates (``cadences_without_a_card``, plan step
+        credit_card:CC-6): no form offers them until a transfer into a card
+        can take them.
         """
         assert seed_periods_today
         with app.app_context():
             expected = []
-            for option in cadence_options(authorable_cadences()):
+            for option in cadence_options(cadences_without_a_card()):
                 if str(option.unit_id) not in expected:
                     expected.append(str(option.unit_id))
 

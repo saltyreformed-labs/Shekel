@@ -132,11 +132,23 @@ _WEEKLY = PayCadence(FixedDays(7))
 #: cadence BEFORE consulting this table.  An entry for it would have to be a
 #: placeholder, which is how a per-owner fact becomes a constant again -- the
 #: defect plan step R7a-2a removed.
+#:
+#: ``DUE_DATE`` counts a card's statements, which close once a month (plan
+#: step credit_card:CC-6, ruling plan#2671): Regulation Z's billing cycle is
+#: monthly, and the one exception, the transitional cycle a change of close
+#: day cuts, is a rate's rounding of the kind :meth:`Cadence.units_per_year`
+#: already accepts for a 27-payday year.
 _CALENDAR_UNITS_PER_YEAR: dict[RecurrenceUnitEnum, Decimal] = {
     RecurrenceUnitEnum.WEEK: _WEEKLY.periods_per_year,
     RecurrenceUnitEnum.MONTH: MONTHS_PER_YEAR,
     RecurrenceUnitEnum.YEAR: Decimal(1),
+    RecurrenceUnitEnum.DUE_DATE: MONTHS_PER_YEAR,
 }
+
+#: The units whose occurrences can fall twice in one calendar month by their
+#: own stride, and so the only ones a per-month ceiling can bind
+#: (:func:`can_repeat_within_month`): paychecks and weeks.
+_STRIDE_UNITS = frozenset({RecurrenceUnitEnum.PERIOD, RecurrenceUnitEnum.WEEK})
 
 class RecurrenceFrequencyError(ShekelError):
     """A cadence names a unit with no yearly count.
@@ -485,14 +497,18 @@ def can_repeat_within_month(unit: RecurrenceUnitEnum) -> bool:
     (``_reading.recurrence_spec_with_cadence``) DROPS a stored ceiling where
     the stated unit cannot hold it, which is the arm a restored row meets.
 
-    Derived from :func:`has_day_of_month_coordinate` rather than from a second
-    list of units, which an adversarial review of plan step R7b-1 required of
-    that predicate's own source: a cadence measured in whole months fires at
-    most once a month by construction, so exactly the units WITHOUT a
-    day-of-month coordinate -- paychecks and weeks -- can put a second
-    occurrence in a month.  A ceiling on a monthly cadence would be a value
-    the walk can never read, which is the closed-set defect this package
-    removes rather than stores.
+    **A list of its own since plan step credit_card:CC-6**, where it was
+    derived from :func:`has_day_of_month_coordinate` until then: a cadence
+    measured in whole months fires at most once a month by construction, and
+    while every unit was either that or a stride, exactly the units WITHOUT a
+    day-of-month coordinate could put a second occurrence in a month.  The
+    due-date unit is neither.  It names no day of the month (the day is the
+    card's), and it falls due twice in a month only where a change of close
+    day cuts a short transitional cycle, where a ceiling would skip a
+    statement's payment.  So the class is the STRIDE units,
+    :data:`_STRIDE_UNITS`, stated once.  A ceiling on any other unit would be
+    a value the walk can never read usefully, which is the closed-set defect
+    this package removes rather than stores.
 
     Args:
         unit: The cadence unit.
@@ -500,7 +516,7 @@ def can_repeat_within_month(unit: RecurrenceUnitEnum) -> bool:
     Returns:
         ``True`` for the paycheck and week units.
     """
-    return not has_day_of_month_coordinate(unit)
+    return unit in _STRIDE_UNITS
 
 
 def unit_member(unit_id: int) -> RecurrenceUnitEnum:

@@ -36,6 +36,18 @@ NORMALISES it onto the paycheck that hosts it, so the value this module returns
 is a real occurrence by construction rather than by a second function agreeing
 with the walk.
 
+**The card's due dates are the one unit whose ``starts_on`` is a BOUND**
+(plan step credit_card:CC-6, ruling plan#2671): the first day the repeat
+covers, stored as authored, its first occurrence the first due date on or after
+it and worked out on every read.  Not the first due date itself, because that
+is a day worked out from terms the owner can restate, so storing it would be
+"remembering a day" (the ruling's own words) and a stale copy with no
+reconciler (``CLAUDE.md`` rule 14).  Measured on a due-day correction (terms
+typed with due day 25, corrected to 15, the payment set up in the paycheck
+that began Dec 4): reading on from a stored Dec 25 after the correction
+skipped the statement due Dec 15, and reading on from Dec 4 kept it.  What
+R-R16 exists for still holds: nothing is generated before ``starts_on``.
+
 **The closed set owns nothing here from plan step R7c-c.**  ``interval_n`` was
 the last value this module took through the storage encoding -- the write door
 stored ``1`` for every pattern whose interval was baked into its NAME, so a
@@ -96,6 +108,7 @@ from app.enums import (
     PeriodPlacementEnum,
     RecurrenceUnitEnum,
 )
+from app.services.card_statement import DueDateSchedule
 from app.services.pay_calendar import DerivedPeriod, PayCalendar
 from app.services.recurrence._bounds import NEVER_ENDS, EndBound
 from app.services.recurrence._closing import Closing
@@ -109,7 +122,10 @@ from app.services.recurrence._nominal_day import (
     _require_nominal_day_pair,
     cadence_day_of_month,
 )
-from app.services.recurrence._offer import require_authorable_cadence
+from app.services.recurrence._offer import (
+    follows_card_due_dates,
+    require_authorable_cadence,
+)
 from app.services.recurrence._row_day import date_row
 from app.utils.books_boundary import row_books_day
 from app.utils.dates import CALENDAR_DATE_MAX, CALENDAR_DATE_MIN
@@ -185,7 +201,7 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
     the pay-period normalisation and the cycle phase, both stated in the module
     docstring.
 
-    Pylint: ``too-many-instance-attributes`` (11/7) -- the first nine are what
+    Pylint: ``too-many-instance-attributes`` (12/7) -- the first nine are what
     one recurrence means, read as a flat unit by a single consumer, and the
     plan's END-state table (section 3) carries all but ``offset_periods``; the
     ninth, ``max_per_month``, joined at plan step salary:R15-a as the
@@ -195,7 +211,9 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
     are facts about the DEFINITION the read pass attaches as one
     ``balance_at._definition_books.DefinitionBooks`` value and lays here
     flat, each read on its own by the walk -- the floor by the comparison,
-    the flag by :meth:`books_day`.  Pairing
+    the flag by :meth:`books_day`.  The twelfth, ``due_dates``, is a fact
+    about the definition's DESTINATION the read pass attaches the same way
+    (plan step credit_card:CC-6), read by the walk alone.  Pairing
     ``starts_on`` with ``nominal_day`` was weighed and rejected: it would make
     every consumer unwrap a two-field object to ask for a date, and since this
     step the pair cannot disagree, so there is nothing for a wrapper to police.
@@ -221,12 +239,16 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
             two-axis reading: 3 for Quarterly, 6 for Semi-Annual, the authored
             count for ``Every N Periods``, 1 elsewhere.
         unit: The cadence unit *interval_n* counts.
-        starts_on: The rule's FIRST OCCURRENCE, one meaning for every unit
-            (ruling **R-R16**): the first date a calendar cadence fires on, and
-            the payday of the first paycheck a pay-period cadence bills in.
-            Occurrences are this date plus multiples of *interval_n* units, so
-            its position in the cycle IS the rule's phase and nothing is
-            generated before it.
+        starts_on: The rule's FIRST OCCURRENCE (ruling **R-R16**): the
+            first date a calendar cadence fires on, and the payday of the
+            first paycheck a pay-period cadence bills in.  Occurrences are
+            this date plus multiples of *interval_n* units, so its position in
+            the cycle IS the rule's phase and nothing is generated before it.
+            **For the card's due dates it is the first day the repeat covers**
+            (plan step credit_card:CC-6; the module docstring): the first
+            occurrence is the first due date on or after it, which the card's
+            terms decide and can move, so it is worked out on every walk
+            rather than stored.  Nothing is generated before it there either.
         placement: How an occurrence DATE maps onto the pay period a row lives
             in.  The axis today's Monthly and Monthly First patterns differ on.
         shift: Weekend / holiday adjustment for the occurrence date.  Always
@@ -312,6 +334,16 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
             (``balance_at.resolved_with_books``) and for the same reason
             :func:`resolve` leaves it ``False``: it is a fact about the
             DEFINITION, not the rule.  A transfer is never one.
+        due_dates: The card's :class:`~app.services.card_statement.
+            DueDateSchedule` for a repeat on each statement's due date, which
+            the walk yields from (plan step credit_card:CC-6, ruling
+            plan#2671); ``None`` for every other unit.  **:func:`resolve`
+            leaves it ``None``** for the reason it leaves the books floor:
+            the dates are the card's terms, read from the database by the
+            read pass that attaches them, so the pure package never loads
+            them.  A due-date repeat walked without them is refused by the
+            walk (``_occurrence``) rather than answered with no dates, which
+            would read as a payment that never falls due.
     """
 
     offset_periods: int
@@ -325,6 +357,7 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
     max_per_month: int | None
     books_opened_on: date | None = None
     is_envelope: bool = False
+    due_dates: DueDateSchedule | None = None
 
     def __post_init__(self) -> None:
         """Refuse a value whose first occurrence and nominal day disagree.
@@ -341,9 +374,16 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
         the walk applies and never reads, so it is unconstructible here rather
         than filtered there.
 
+        **And the ``(unit, due_dates)`` pair** (plan step credit_card:CC-6): a
+        card's due dates beside a unit that does not walk them are dates no
+        reader asks, so they are unconstructible here.  Their ABSENCE beside
+        the due-date unit is constructible, because :func:`resolve` is pure
+        and the read pass attaches them; the walk refuses it.
+
         Raises:
             RecurrenceResolutionError: See :func:`_require_nominal_day_pair`
-                and :func:`_require_month_ceiling_pair`.
+                and :func:`_require_month_ceiling_pair`; or *due_dates* beside
+                a unit other than the card's due dates.
         """
         _require_nominal_day_pair(
             self.unit, self.starts_on, self.nominal_day,
@@ -352,6 +392,12 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
         _require_month_ceiling_pair(
             self.unit, self.max_per_month, where="a resolved recurrence",
         )
+        if self.due_dates is not None and not follows_card_due_dates(self.unit):
+            raise RecurrenceResolutionError(
+                f"a {self.unit!r} recurrence cannot carry a card's due dates: "
+                f"only a repeat on each statement's due date walks them, so "
+                f"on any other unit they would be dates no reader asks."
+            )
 
     @property
     def day_of_month(self) -> int | None:
@@ -466,7 +512,9 @@ class RecurrenceSpec:  # pylint: disable=too-many-instance-attributes
             periods that had already closed.  A caller may state any date for
             a pay-period cadence -- :func:`resolve` NORMALISES it onto the
             paycheck that hosts it, so what is stored is always a real
-            occurrence.
+            occurrence.  For the card's due dates it is the first day the
+            repeat covers (plan step credit_card:CC-6; the module
+            docstring).
         interval_n: How many *unit*\\ s pass between occurrences.  Meaningful
             for EVERY unit since plan step R7b, which is the point: it was
             read only for ``Every N Periods`` while the other three cadences
@@ -697,9 +745,12 @@ def _first_occurrence(spec: RecurrenceSpec, calendar: PayCalendar) -> date:
     """Return the date this recurrence FIRST fires on, for any unit.
 
     **The value ``budget.recurrence_rules.starts_on`` holds** (ruling
-    **R-R16**), and for three of the four units it is simply what the caller
-    authored: a calendar cadence names its own dates, so the first one is a
-    fact about the rule rather than about the owner's schedule.
+    **R-R16**), and for every unit but the paycheck it is simply what the
+    caller authored: a calendar cadence names its own dates, so the first one
+    is a fact about the rule rather than about the owner's schedule.  For the
+    card's due dates it is the first day the repeat covers, also as authored
+    (plan step credit_card:CC-6; the module docstring says why the first due
+    date is not stored).
 
     **The ``PERIOD`` unit is the one that normalises, and that is what removes
     plan ledger row D6's asymmetry rather than restating it.**  Its occurrences

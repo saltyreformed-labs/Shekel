@@ -62,6 +62,13 @@ What an occurrence IS, per unit
   refused all along because a partial function over an enum is the defect this
   redesign exists to remove, and because a walk that silently ignored the unit
   would be a wrong answer rather than an error.
+* ``DUE_DATE`` -- **each statement's due date on a credit card** (plan step
+  credit_card:CC-6, ruling plan#2671), every one on or after ``starts_on``,
+  which for this unit is the first day the repeat covers rather than an
+  occurrence (``_resolution``'s module docstring says why).  The dates are the
+  card's :class:`~app.services.card_statement.DueDateSchedule`, which the read
+  pass attaches to the resolved value; this pure walk never loads terms, and a
+  value without them is refused rather than walked as empty.
 * ``PERIOD`` -- **the qualifying paycheck's own payday.**  A paycheck qualifies
   when it has not already ENDED before ``starts_on`` -- which is what the
   reverse matcher selected (``p.end_date >= effective_from``) -- and it is
@@ -407,6 +414,38 @@ def _period_walk(
         yield period.start_date
 
 
+def _due_date_walk(resolved: ResolvedRecurrence) -> Iterator[date]:
+    """Yield every statement due date on or after ``starts_on``, ascending.
+
+    The ``DUE_DATE`` unit's occurrences (plan step credit_card:CC-6): the
+    card's :class:`~app.services.card_statement.DueDateSchedule`, which
+    yields in date order with no date twice and stops at
+    :data:`~app.utils.dates.CALENDAR_DATE_MAX`, as the three siblings do.
+
+    Args:
+        resolved: A due-date repeat's two-axis meaning, its card's schedule
+            attached.
+
+    Returns:
+        The due dates on or after ``resolved.starts_on``.
+
+    Raises:
+        RecurrenceGenerationError: When the schedule is not attached.  The
+            read pass attaches it (``BalanceContext.resolved_for``); a value
+            without it came round that door, and walking it as empty would
+            read as a card payment that never falls due.
+    """
+    if resolved.due_dates is None:
+        raise RecurrenceGenerationError(
+            f"a repeat on each statement's due date starting "
+            f"{resolved.starts_on} was walked without its card's due dates.  "
+            f"The read pass attaches them (BalanceContext.resolved_for); a "
+            f"value resolved round it has no dates to walk, and walking none "
+            f"would read as a card payment that never falls due."
+        )
+    return resolved.due_dates.on_or_after(resolved.starts_on)
+
+
 def _unbounded(
     resolved: ResolvedRecurrence, calendar: PayCalendar,
 ) -> Iterator[date]:
@@ -438,21 +477,24 @@ def _unbounded(
         return _period_walk(resolved, calendar)
     if unit is RecurrenceUnitEnum.WEEK:
         return _week_walk(resolved.starts_on, resolved.interval_n)
+    if unit is RecurrenceUnitEnum.DUE_DATE:
+        return _due_date_walk(resolved)
     # The day the rule MEANS, read through the ONE accessor that joins
     # ``starts_on``'s day to ``nominal_day`` (plan step R7a).  It was open-coded here
     # until the display describer needed the same join: two copies of "which of
     # these two fields holds the day" is how a rule comes to fire on the 31st
     # and read as the 30th.  It answers ``None`` for a unit that does not fire
-    # on a day of the month, which after the two returns above means a unit
+    # on a day of the month, which after the three returns above means a unit
     # this engine has no walk for -- so ONE refusal covers both, and neither
     # ``walk_months`` nor ``clamped_day`` is ever handed a ``None`` to fail on
     # three frames down with a bare ``TypeError``.
     month_day = resolved.day_of_month
     if month_day is None:
         raise RecurrenceGenerationError(
-            f"recurrence unit {unit!r} has no occurrence walk: it is neither "
-            f"PERIOD nor WEEK and it names no day of the month.  Every member "
-            f"of RecurrenceUnitEnum must have a walk -- returning nothing "
+            f"recurrence unit {unit!r} has no occurrence walk: it is not "
+            f"PERIOD, WEEK or DUE_DATE and it names no day of the month.  "
+            f"Every member of RecurrenceUnitEnum must have a walk -- "
+            f"returning nothing "
             f"would read as a rule that never fires -- and walking a "
             f"day-of-month cadence without a day would fire it on a "
             f"fabricated one."
@@ -578,7 +620,7 @@ def _bounded(
 ) -> Iterator[date]:
     """Yield from *raw* until the first occurrence past any stopping bound.
 
-    The ONE place a bound is applied, so the three walks cannot come to
+    The ONE place a bound is applied, so the four walks cannot come to
     disagree about what a closing bound means.  Every walk is ascending, so the
     first occurrence the bound refuses is also the last one to check.
 
@@ -716,7 +758,7 @@ def occurrences(
             :func:`app.services.recurrence.resolve`.
         calendar: The owner's pay-period schedule.  Required for the
             ``PERIOD`` unit, whose occurrences are paydays (finding D9), and
-            unread by the other three.
+            unread by the other four.
         through: The last day to generate through.  Required, and there is
             deliberately no default: an unbounded walk over a calendar unit
             does not terminate.

@@ -116,8 +116,9 @@ def date_row(
 
     **Ruling R-R94's formula over the placed occurrence** (plan step
     recurrence:R5-a), **covering weeks since plan step R8-b**: a CALENDAR
-    cadence -- weeks, months, years -- funded by the paycheck CONTAINING its
-    date is due ON the occurrence.  Every paycheck cadence, and every cadence
+    cadence -- weeks, months, years, and a card's statement due dates since
+    plan step credit_card:CC-6 -- funded by the paycheck CONTAINING its date
+    is due ON the occurrence.  Every paycheck cadence, and every cadence
     funded from a LATER paycheck, is due on its FUNDING paycheck's payday
     (ruling **R-R95**, the answer R-BAL22 gives a one-off).
 

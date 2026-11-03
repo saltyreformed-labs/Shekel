@@ -212,8 +212,10 @@ from app.services.recurrence._frequency import (
 from app.services.recurrence._offer import (
     AuthorableCadence,
     authorable_cadences,
+    cadences_without_a_card,
     emits_period_starts,
     fires_on_day_of_month,
+    follows_card_due_dates,
     is_authorable,
 )
 from app.services.recurrence._nominal_day import (
@@ -331,6 +333,7 @@ __all__ = [
     "cadence_day_of_month",
     "cadence_of",
     "cadence_options",
+    "cadences_without_a_card",
     "canonical_cadence",
     "compute_due_date",
     "describe",
@@ -339,6 +342,7 @@ __all__ = [
     "end_bound_from_token",
     "end_bound_options",
     "fires_on_day_of_month",
+    "follows_card_due_dates",
     "has_ended",
     "is_authorable",
     "has_day_of_month_coordinate",

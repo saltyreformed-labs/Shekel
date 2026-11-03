@@ -89,12 +89,15 @@ from app.services.recurrence._offer import AuthorableCadence
 #: the first render rather than shipping a blank option.  ``WEEK`` joined at
 #: plan step R8-b, the leaf that made the unit authorable by dating a weekly
 #: row from its occurrence; until then the offer set withheld it and this map
-#: was never asked for it.
+#: was never asked for it.  The card's due dates joined at plan step
+#: credit_card:CC-6 (ruling plan#2671): authorable every 1 alone, so the
+#: control reads "every 1 statement due date".
 _UNIT_LABELS: dict[RecurrenceUnitEnum, tuple[str, str]] = {
     RecurrenceUnitEnum.PERIOD: ("paycheck", "paychecks"),
     RecurrenceUnitEnum.WEEK: ("week", "weeks"),
     RecurrenceUnitEnum.MONTH: ("month", "months"),
     RecurrenceUnitEnum.YEAR: ("year", "years"),
+    RecurrenceUnitEnum.DUE_DATE: ("statement due date", "statement due dates"),
 }
 
 #: What each PLACEMENT is called on the form.

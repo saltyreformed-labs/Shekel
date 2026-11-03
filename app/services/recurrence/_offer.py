@@ -12,11 +12,13 @@ by AST in the same commit.  The argument for the offer set being DERIVED from
 what a rule can DO rather than from a name it can have stays in
 :mod:`._frequency`'s own docstring, which this leaf implements.
 
-What lives here: the predicate the offer set is derived from
-(:func:`emits_period_starts`), the day-of-month question asked of a PAIR
-(:func:`fires_on_day_of_month`), the offer itself (:class:`AuthorableCadence`,
-:func:`authorable_cadences`) and the two doors that ask it of a submission
-(:func:`is_authorable`, :func:`require_authorable_cadence`).  A second
+What lives here: the predicates the offer set is derived from
+(:func:`emits_period_starts`, :func:`follows_card_due_dates`), the
+day-of-month question asked of a PAIR (:func:`fires_on_day_of_month`), the
+offer itself (:class:`AuthorableCadence`, :func:`authorable_cadences`), the
+set a definition with no card behind it is offered
+(:func:`cadences_without_a_card`) and the two doors that ask it of a
+submission (:func:`is_authorable`, :func:`require_authorable_cadence`).  A second
 predicate, ``has_row_date_coordinate``, and its raising twin
 ``require_row_date_coordinate`` withheld the ``WEEK`` unit from plan step R8-a
 until plan step **R8-b** dated a weekly row from its occurrence
@@ -129,9 +131,10 @@ def emits_period_starts(unit: RecurrenceUnitEnum) -> bool:
     day-of-month one, because the two are different questions: this one says
     whether the placement can move a row, and
     :func:`has_day_of_month_coordinate` says whether the cadence names a day.
-    They answer differently for three of the four units and agree only on
-    ``WEEK``, where BOTH are ``False``: a weekly occurrence is a calendar date
-    that can fall strictly inside a paycheck, and names no day of the month.
+    They answer differently for three of the five units and agree only on
+    ``WEEK`` and ``DUE_DATE``, where BOTH are ``False``: a weekly occurrence
+    or a card's due date is a calendar date that can fall strictly inside a
+    paycheck, and names no day of the month (a due date's day is the card's).
     Pinned by driving ``place`` over a whole schedule under both placements
     (``test_recurrence_occurrence``), which is a proof over the schedule rather
     than the argument above.
@@ -143,6 +146,31 @@ def emits_period_starts(unit: RecurrenceUnitEnum) -> bool:
         ``True`` for the ``PERIOD`` unit and ``False`` for every other.
     """
     return unit is RecurrenceUnitEnum.PERIOD
+
+
+def follows_card_due_dates(unit: RecurrenceUnitEnum) -> bool:
+    """Return whether *unit*'s occurrences are a credit card's due dates.
+
+    **The one statement of which unit a card's terms date** (plan step
+    credit_card:CC-6, ruling plan#2671), asked for its two consequences:
+
+    * **its dates are the card's**, so only a transfer into a card may repeat
+      by it, and the walk is handed the card's
+      :class:`~app.services.card_statement.DueDateSchedule` by the read pass
+      rather than reading a day off the rule;
+    * **each occurrence is a DEADLINE**, so the cadence admits one reading of
+      the two axes: funded by the paycheck covering the due date (the first
+      paycheck on or after it pays late) and every 1 (every other statement
+      leaves one unpaid).  :func:`authorable_cadences` and
+      :func:`is_authorable` take both from here.
+
+    Args:
+        unit: The cadence unit.
+
+    Returns:
+        ``True`` for the due-date unit and ``False`` for every other.
+    """
+    return unit is RecurrenceUnitEnum.DUE_DATE
 
 
 def authorable_cadences() -> tuple[AuthorableCadence, ...]:
@@ -189,16 +217,23 @@ def authorable_cadences() -> tuple[AuthorableCadence, ...]:
     and the observation is a statement about the cadence rather than about
     exposure.
 
+    **What plan step credit_card:CC-6 WIDENED, and it is one reading**: a
+    card's statement due dates, funded by the paycheck covering each
+    (:func:`follows_card_due_dates`).  Its deferred placement is withheld for
+    a reason of its own rather than :func:`emits_period_starts`': the
+    placement does change the answer, to a payment after the due date.
+
     The INTERVAL is not part of an offer.  Every positive interval is authorable
-    for every unit here, which is what the form's free number box renders and
+    for every unit here but the due dates, which take 1 alone
+    (:func:`is_authorable`); that is what the form's free number box renders and
     what ``ck_recurrence_rules_positive_interval`` is the whole of the domain
     for.
 
     Returns:
         One entry per authorable pair, in
         :class:`~app.enums.RecurrenceUnitEnum` declaration order (paycheck,
-        week, month, year: the order the picker renders) and within a unit in
-        :class:`~app.enums.PeriodPlacementEnum` declaration order.
+        week, month, year, due date: the order the picker renders) and within
+        a unit in :class:`~app.enums.PeriodPlacementEnum` declaration order.
     """
     offered = []
     for unit in RecurrenceUnitEnum:
@@ -214,9 +249,27 @@ def authorable_cadences() -> tuple[AuthorableCadence, ...]:
             # left to the ordering by ``test_recurrence_frequency
             # .test_the_offer_set_is_exactly_these_seven_readings``, which names
             # the pair.
-            if emits_period_starts(unit):
+            if emits_period_starts(unit) or follows_card_due_dates(unit):
                 break
     return tuple(offered)
+
+
+def cadences_without_a_card() -> tuple[AuthorableCadence, ...]:
+    """Return the offer set for a definition with no card behind it.
+
+    :func:`authorable_cadences` less the card's due dates
+    (:func:`follows_card_due_dates`), in that set's order: what a form whose
+    definition cannot pay a card offers, the ruling plan#2591 shape of a form
+    passing the set its own door refuses against.  Narrowed rather than
+    restated, so a placement the package stops offering leaves this set too.
+
+    Returns:
+        The offered ``(unit, placement)`` pairs.
+    """
+    return tuple(
+        cadence for cadence in authorable_cadences()
+        if not follows_card_due_dates(cadence.unit)
+    )
 
 
 def is_authorable(
@@ -238,9 +291,14 @@ def is_authorable(
         placement: Which pay period an occurrence is funded from.
 
     Returns:
-        ``True`` when a rule may be authored on this reading.
+        ``True`` when a rule may be authored on this reading: a positive
+        interval, 1 alone for the card's due dates (every other statement
+        would leave one unpaid, :func:`follows_card_due_dates`), on a pair
+        the offer set holds.
     """
     if interval_n < 1:
+        return False
+    if follows_card_due_dates(unit) and interval_n != 1:
         return False
     return AuthorableCadence(unit=unit, placement=placement) in (
         authorable_cadences()
@@ -285,6 +343,16 @@ def require_authorable_cadence(
     require_positive_interval(interval_n, where)
     if is_authorable(interval_n, unit, placement):
         return
+    if follows_card_due_dates(unit):
+        raise RecurrenceResolutionError(
+            f"a recurrence of every {interval_n} {unit!r} funded "
+            f"{placement!r} is not one this application can author, for "
+            f"{where}.  Each card due date is a deadline: it is paid every "
+            f"statement (every 1) from the paycheck covering it, and any "
+            f"other reading pays a statement late or not at all.  The offer "
+            f"set is ``authorable_cadences``; nothing the picker renders "
+            f"reaches here."
+        )
     raise RecurrenceResolutionError(
         f"a recurrence of every {interval_n} {unit!r} funded {placement!r} is "
         f"not one this application can author, for {where}.  The placement "
@@ -299,8 +367,10 @@ def require_authorable_cadence(
 __all__ = [
     "AuthorableCadence",
     "authorable_cadences",
+    "cadences_without_a_card",
     "emits_period_starts",
     "fires_on_day_of_month",
+    "follows_card_due_dates",
     "is_authorable",
     "require_authorable_cadence",
 ]

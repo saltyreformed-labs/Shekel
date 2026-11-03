@@ -26,6 +26,10 @@ class RecurrenceUnitEnum(enum.Enum):
         month  -- calendar months, month-end clamped (``interval_n`` 1 =
                   Monthly, 3 = Quarterly, 6 = Semi-Annual).
         year   -- calendar years (``interval_n`` 1 = Annual).
+        due_date -- each statement's due date on a credit card, worked out
+                  from the card's dated terms (plan step credit_card:CC-6,
+                  ruling plan#2671); only a transfer into a card repeats by
+                  it, always every 1.
 
     Values match ``ref.recurrence_units.name``; application code resolves
     them via ``ref_cache.recurrence_unit_id`` and compares the integer ID,
@@ -36,6 +40,7 @@ class RecurrenceUnitEnum(enum.Enum):
     WEEK = "week"
     MONTH = "month"
     YEAR = "year"
+    DUE_DATE = "due_date"
 
 
 class PeriodPlacementEnum(enum.Enum):

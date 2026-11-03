@@ -89,17 +89,27 @@ its clamped date falls after the close (closes Sep 5, due Sep 28), the next
 month otherwise (closes Sep 20, due Oct 15).  Issuers state both days and this
 reads them as stated.
 
+**A payment that repeats on each statement's due date** (plan step CC-6,
+ruling plan#2671) walks :class:`DueDateSchedule`: the slice of the dated terms
+the due dates read, held as plain values so the recurrence walk that takes it
+can key a memo on it, and its :meth:`DueDateSchedule.on_or_after`, every due
+date in date order.  Close order is not date order: a short transitional cycle
+can fall due before the long one ahead of it.
+
 All arithmetic is :class:`~decimal.Decimal`; :func:`~app.utils.money.round_money`
 is applied at the one boundary where a fraction of a cent can arise (the
 percentage of the balance), never in between (**R-CC8**'s convention).
 """
 
+import heapq
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.utils.dates import (
+    CALENDAR_DATE_MAX,
     clamped_day,
     grid_month_after,
     grid_month_on_or_before,
@@ -116,6 +126,18 @@ if TYPE_CHECKING:
 # The close instant is the end of the day BEFORE the close date, and the
 # close walks step from a span's end to the day before it by one day.
 _ONE_DAY = timedelta(days=1)
+
+#: The furthest a statement's due date can fall after its close.  The due date
+#: is the first occurrence of the due day strictly after the close
+#: (:func:`due_date_for`): in the close's own month when that day is still
+#: ahead, which is at most 30 days on; otherwise the next month's, which is at
+#: most the close's month length on (a due day at or below the close's day
+#: lands at or below that day next month) or, for a close on its month's last
+#: day, at most the next month's length.  No month is longer than 31 days.
+#: :meth:`DueDateSchedule.on_or_after` starts its walk this far before the
+#: day it is asked from, so no statement falling due on or after that day is
+#: missed.
+_LONGEST_DUE_AFTER_CLOSE = timedelta(days=31)
 
 
 @dataclass(frozen=True)
@@ -416,6 +438,133 @@ def minimum_payment(
             round_money(terms.min_payment_percent * balance)),
         balance,
     )
+
+
+@dataclass(frozen=True)
+class DueDateTerms:
+    """The slice of one terms version a statement's due date reads.
+
+    The three columns :func:`due_date_for` and the close walks ask of a
+    :class:`~app.models.credit_card_params.CreditCardParams` version, held as
+    a plain value: the version is a mutable ORM row compared by identity, and
+    a same-date save rewrites it in place (:func:`app.services.card_terms.set_terms`),
+    so a memo keyed on the row would serve dates the card no longer has.
+
+    Attributes:
+        effective_date: The first day the version governs.
+        statement_close_day: Its nominal close day, 1-31.
+        payment_due_day: Its nominal due day, 1-31.
+    """
+
+    effective_date: date
+    statement_close_day: int
+    payment_due_day: int
+
+
+@dataclass(frozen=True)
+class DueDateSchedule:
+    """A card's statement due dates, as the dated terms that decide them.
+
+    What a repeat on each statement's due date walks (plan step CC-6, ruling
+    plan#2671): the read pass builds one from the card's versions
+    (:meth:`of`) and hands it to the recurrence walk, which never loads terms
+    itself.  Hashable and compared by value, so two reads of unchanged terms
+    are equal and a change of terms is a different value.
+
+    Attributes:
+        terms: The card's versions as :class:`DueDateTerms`, earliest
+            effective date first; never empty (a dormant card has no
+            statements, so it has no schedule).
+    """
+
+    terms: tuple[DueDateTerms, ...]
+
+    def __post_init__(self) -> None:
+        """Refuse an empty schedule: a dormant card has no statement to fall due.
+
+        Raises:
+            ValueError: When *terms* is empty.
+        """
+        if not self.terms:
+            raise ValueError(
+                "A due-date schedule needs at least one terms version: a card "
+                "with none is dormant and has no statement to fall due. Gate "
+                "on app.services.card_terms.load_card_term_versions first."
+            )
+
+    @classmethod
+    def of(cls, versions: "Iterable[CreditCardParams]") -> "DueDateSchedule":
+        """Return the schedule *versions* decide.
+
+        Args:
+            versions: The card's versions
+                (:func:`app.services.card_terms.load_card_term_versions`), in
+                any order; at least one.
+
+        Returns:
+            The :class:`DueDateSchedule`, its terms earliest first.
+
+        Raises:
+            ValueError: When *versions* is empty.
+        """
+        return cls(terms=tuple(sorted(
+            (
+                DueDateTerms(
+                    effective_date=version.effective_date,
+                    statement_close_day=version.statement_close_day,
+                    payment_due_day=version.payment_due_day,
+                )
+                for version in versions
+            ),
+            key=lambda terms: terms.effective_date,
+        )))
+
+    def on_or_after(self, day: date) -> Iterator[date]:
+        """Yield every statement due date on or after *day*, ascending, each once.
+
+        Each statement's due date is :func:`due_date_for`'s, under the version
+        in force at its close, so a change of terms moves the due dates of the
+        statements closing from its day and leaves the rest.
+
+        **In date order, which is not close order.**  A short transitional
+        cycle can fall due before the long one ahead of it: close day 20 and
+        due day 19, then close day 5 and due day 6 from Mar 1, closes Feb 20
+        (due Mar 19) and then Mar 5 (due Mar 6).  So the statements are walked
+        in close order and their due dates held until no statement still to
+        come can fall due before them: every later statement closes after the
+        current close and falls due after its own close, so a held date on or
+        before the current close is final.  **Two statements due on one day
+        are one date**: the later statement's balance holds the earlier one's
+        unpaid balance, so one payment answers both.
+
+        Bounded at :data:`~app.utils.dates.CALENDAR_DATE_MAX`, as every
+        recurrence walk is.
+
+        Args:
+            day: The first day to yield from.
+
+        Yields:
+            The due dates, ascending, none repeated, none after the calendar's
+            last day.
+        """
+        held: list[date] = []
+        last: date | None = None
+        closes = _first_close_after(
+            self.terms, day - _LONGEST_DUE_AFTER_CLOSE - _ONE_DAY,
+        )
+        while closes <= CALENDAR_DATE_MAX:
+            heapq.heappush(held, due_date_for(self.terms, closes))
+            while held and held[0] <= closes:
+                due = heapq.heappop(held)
+                if due >= day and due != last:
+                    last = due
+                    yield due
+            closes = _first_close_after(self.terms, closes)
+        while held and held[0] <= CALENDAR_DATE_MAX:
+            due = heapq.heappop(held)
+            if due >= day and due != last:
+                last = due
+                yield due
 
 
 def grace_kept(prior_balance: Decimal, credited_by_due: Decimal) -> bool:

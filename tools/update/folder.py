@@ -65,6 +65,13 @@ class Change:
         """The branch the change is published on."""
         return PREFIX + self.where
 
+    @property
+    def package(self) -> str | None:
+        """The package a change prepared alone prepares (:func:`alone`); None for the
+        week's lock."""
+        kind, _, package = self.where.partition("/")
+        return package if kind == ALONE else None
+
 
 def alone(package: str) -> str:
     """Where the change preparing ``package`` alone lies under the folder."""

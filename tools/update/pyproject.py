@@ -9,7 +9,9 @@ plan#2450): each entry of ``project.dependencies``, ``project.optional-dependenc
   range.
 - **Moved** (:func:`moved`) to a new release: a range to ``>=new,<next``, the next major by
   the landing check's one reading of a major (:func:`tools.quill.door.ceiling`), and an
-  exact pin to ``==new``; each ``!=`` exclusion kept, so none is dropped unseen.
+  exact pin to ``==new``; each ``!=`` exclusion kept, so none is dropped unseen.  The
+  release a moved requirement names is read back by :func:`release`, the Monday publish's
+  reading of what a held-back change proposes (rulings plan#2774, plan#2776).
 - **Written back** (:func:`rewritten`): only the edited entries' strings change; the rest of
   the file, its comments included, as it was.
 
@@ -139,6 +141,15 @@ def moved(requirement: Requirement, version: str) -> str:
     if requirement.exact or (below := ceiling(version)) is None:
         return _spelled(requirement, [("==", version), *kept])
     return _spelled(requirement, [(">=", version), ("<", below), *kept])
+
+
+def release(requirement: Requirement) -> str | None:
+    """The release a requirement :func:`moved` spelled names: the version of its first
+    clause where that is the ``>=`` or ``==`` ``moved`` puts first; None where it is
+    neither, as no moved requirement's is."""
+    if requirement.clauses and requirement.clauses[0][0] in (">=", "=="):
+        return requirement.clauses[0][1]
+    return None
 
 
 def rewritten(text: str, edits: Mapping[str, str]) -> str:

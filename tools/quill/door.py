@@ -57,7 +57,10 @@ Each name, and who reads it:
   ``lock_moves`` and ``canonical``: ``tools/update.refresh`` again, for what each new major
   it prepares as a change of its own moves, from a lock made with ``pyproject.toml`` edited,
   which ``lock_change`` refuses (ruling plan#2450), and for the package each requirement of
-  ``pyproject.toml`` names, by PEP 503's one reading of a project's name.
+  ``pyproject.toml`` names, by PEP 503's one reading of a project's name.  ``lock_pins``:
+  ``tools/update.publish``, for the release of a package a held-back change proposes in
+  the lock it carries, the change's own and a closed pull request's head's, by the reading
+  ``pinned`` makes of a lock (rulings plan#2774, plan#2776).
 - ``unversioned_between`` and ``Reason``: ``tools/update.queue``, the daily update queue,
   which puts a bot's pull request in the merge queue only when the landing check's own walk
   finds its trial merge moves pinned versions alone, none across a major, over every file it
@@ -117,6 +120,7 @@ from tools.quill._versions import (
     ceiling,
     lock_change,
     lock_moves,
+    lock_pins,
     lock_unversioned,
     pinned,
     pins_versions,
@@ -155,6 +159,7 @@ __all__ = [
     "leaves_below",
     "lock_change",
     "lock_moves",
+    "lock_pins",
     "lock_unversioned",
     "marker_changes",
     "markers_in",

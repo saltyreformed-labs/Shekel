@@ -23,35 +23,79 @@ on that parent is left as it is, so publishing again starts no CI run and drops 
 request from the merge queue.  A branch of the folder's layout (:func:`folder.ours`) that the
 folder no longer names is deleted, which closes its pull request.
 
+**No release the developer closed comes back** (rulings plan#2774, plan#2776: a close means
+"not this release", for a new major and for any other move that needs a card).  For a
+package prepared alone with no pull request open from its branch, the pull requests closed
+from it are read: where the developer closed one unmerged while its head proposed the
+release the change proposes, nothing is committed or opened (:func:`_declined`).  Any other
+release, a close by anyone else (the publish closes one itself by deleting its branch) or a
+merged one publishes the change as before, and reopening one is the developer's way back,
+as an open one is refreshed.  The release a change proposes is read by one reading
+(:func:`_release`) from the files it carries and from those a closed head changed.
+
 Usage, at the root of a checkout of this repository::
 
     UPDATE_TOKEN=<token> GITHUB_REPOSITORY=<owner>/<name> \\
         python -m tools.update.publish <folder> <dev-commit>
 
 It prints a line for each branch, what it did.  Exit status: 0 published; 1 the folder or the
-commit refused, a write GitHub refused (each other branch still tried), or a variable unset,
-saying which.
+commit refused, a read or a write GitHub refused or a change's own lock or ``pyproject.toml``
+that cannot be read (each other branch still tried), or a variable unset, saying which.
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import requests
 
 from tools.ci.gitcmd import FULL_ID
-from tools.quill.door import GitHub, GitHubError, described, reading
+from tools.quill.door import (
+    LOCK,
+    GitHub,
+    GitHubError,
+    NotVersions,
+    described,
+    lock_pins,
+    paged,
+    reading,
+)
 from tools.update import folder
-from tools.update.app import INTO, REPOSITORY_VARIABLE, TOKEN_VARIABLE, unset
+from tools.update.app import DEVELOPER, INTO, REPOSITORY_VARIABLE, TOKEN_VARIABLE, unset
+from tools.update.pyproject import PYPROJECT, RequirementError, release, requirements
 
 #: A regular file's mode in a git tree, each file a change carries.
 _FILE = "100644"
 #: GitHub's compare status when the commit compared from is the other's or in its history.
 _IN_HISTORY = frozenset({"identical", "ahead"})
+#: The files a change's release is read from (:func:`_release`).
+_PROPOSING = (LOCK, PYPROJECT)
+#: A page of the pull requests closed unmerged into ``dev`` from one branch, newest first,
+#: each with its head, whether it came from a fork, and who closed it last
+#: (``timelineItems(last: 1)``: the newest close, with no page of a pull request's events to
+#: walk).  It is read under the token's Pull requests permission, as the queue reads its
+#: pull requests' timelines (:mod:`tools.update.queue`); whether a GraphQL read needs it is
+#: not documented (GitHub's permissions for Apps list REST alone, read 2026-11-03).
+_CLOSED = """query($owner: String!, $name: String!, $branch: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(headRefName: $branch, baseRefName: "%s", states: CLOSED, first: 100,
+                 after: $after, orderBy: {field: CREATED_AT, direction: DESC}) {
+      nodes {
+        number isCrossRepository headRefOid
+        timelineItems(last: 1, itemTypes: [CLOSED_EVENT]) {
+          nodes { ... on ClosedEvent { actor { login } } }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}""" % INTO
 
 
 class Refused(ValueError):
@@ -123,15 +167,102 @@ def _committed(github: GitHub, repository: str, change: folder.Change, base: Bas
     return f"moved from {held[:12]} to {sha[:12]}"
 
 
-def _pulled(github: GitHub, repository: str, change: folder.Change) -> str:
-    """``change``'s pull request into :data:`INTO` opened, or its title and text refreshed:
-    what was done."""
+def _open(github: GitHub, repository: str, change: folder.Change) -> int | None:
+    """The number of the pull request into :data:`INTO` open from ``change``'s branch; None
+    where none is."""
     owner = repository.split("/", 1)[0]
-    with reading(f"the pull requests from {change.branch}"):
+    with reading(f"the open pull requests from {change.branch}"):
         pulls = github.rest("GET", f"/repos/{repository}/pulls?state=open&base={INTO}"
                                    f"&head={owner}:{change.branch}")
-    if pulls:
-        number = pulls[0]["number"]
+    return pulls[0]["number"] if pulls else None
+
+
+def _release(package: str, files: Mapping[str, str]) -> str | None:
+    """The release of ``package`` a change carrying ``files`` (each by name, with its text)
+    proposes: its version in the lock where the change carries one (:func:`lock_pins`),
+    else the release each of its capped requirements in ``pyproject.toml`` was moved to
+    (:func:`release`), each of several joined; None where it proposes none.
+
+    Raises:
+        NotVersions: as :func:`lock_pins` raises it.
+        RequirementError: as :func:`requirements` raises it.
+    """
+    if LOCK in files:
+        found = {pin.version for pin in lock_pins(files[LOCK]) if pin.what == package}
+    elif PYPROJECT in files:
+        found = {moved for entry in requirements(files[PYPROJECT])
+                 if entry.name == package and entry.capped
+                 and (moved := release(entry)) is not None}
+    else:
+        found = set()
+    return ", ".join(sorted(found)) or None
+
+
+def _proposed_at(github: GitHub, repository: str, package: str, sha: str) -> str | None:
+    """The release of ``package`` commit ``sha`` proposes (:func:`_release`), read from each
+    file it reads that the commit changes from its parent: a head the publish made is one
+    commit on the ``dev`` commit it read, so these are the files its change carried.  None
+    where the commit proposes none, as a head someone else pushed onto the branch may not,
+    or holds a file that cannot be read as one (no base64, no UTF-8, no TOML), so the change
+    is published again rather than any later release stopped on it.
+
+    Raises:
+        GitHubError, requests.RequestException: as a read raises them.
+    """
+    with reading(f"the files commit {sha[:12]} changes"):
+        changed = github.rest("GET", f"/repos/{repository}/commits/{sha}")["files"]
+    held = {}
+    for entry in changed:
+        if entry["filename"] in _PROPOSING:
+            with reading(f"{entry['filename']} at {sha[:12]}"):
+                held[entry["filename"]] = github.rest(
+                    "GET", f"/repos/{repository}/git/blobs/{entry['sha']}")["content"]
+    try:
+        return _release(package, {name: base64.b64decode(content).decode("utf-8")
+                                  for name, content in held.items()})
+    except ValueError:
+        return None
+
+
+def _declined(github: GitHub, repository: str, change: folder.Change) -> str | None:
+    """Where ``change`` prepares a package alone: the newest pull request into :data:`INTO`
+    from its branch, of this repository, that the developer closed unmerged while its head
+    proposed the release the change proposes (:func:`_release`, :func:`_proposed_at`), with
+    that release, as a line names them; None where none did, and for the week's lock.  Every
+    release he closed is held so, not only the newest: 14.0.0 closed, then 14.0.1 closed,
+    then 14.0.1 yanked, 14.0.0 stays closed.  The developer is his account, whoever acts
+    as it: a session's close under his ``gh`` counts.  The change's own release is read
+    only once he has closed one, so its files are read as nothing more than text until
+    then.
+
+    Raises:
+        GitHubError, requests.RequestException: as a read raises them.
+        NotVersions, RequirementError: as :func:`_release` raises them for the change's own
+            files.
+    """
+    if change.package is None:
+        return None
+    owner, name = repository.split("/", 1)
+    closed, _ = paged(partial(github.graphql, _CLOSED, owner=owner, name=name,
+                              branch=change.branch),
+                      lambda answer: answer["repository"]["pullRequests"],
+                      f"the pull requests closed from {change.branch}")
+    theirs = [pull for pull in closed if not pull["isCrossRepository"]
+              and (closes := pull["timelineItems"]["nodes"])
+              and (closes[0]["actor"] or {}).get("login") == DEVELOPER]
+    if not theirs or (proposed := _release(change.package, change.files)) is None:
+        return None
+    for pull in theirs:
+        if _proposed_at(github, repository, change.package, pull["headRefOid"]) == proposed:
+            return (f"pull request #{pull['number']}, closed by {DEVELOPER} at "
+                    f"{change.package} {proposed}")
+    return None
+
+
+def _pulled(github: GitHub, repository: str, change: folder.Change, number: int | None) -> str:
+    """``change``'s pull request into :data:`INTO` opened, or the one open from its branch,
+    ``number``, its title and text refreshed: what was done."""
+    if number is not None:
         github.rest("PATCH", f"/repos/{repository}/pulls/{number}",
                     {"title": change.title, "body": change.body})
         return f"pull request #{number} refreshed"
@@ -155,10 +286,16 @@ def run(github: GitHub, repository: str, out: Path, base: str) -> int:
     failed = 0
     for change in changes:
         try:
+            number = _open(github, repository, change)
+            if number is None and (declined := _declined(github, repository, change)):
+                print(f"{change.branch}: left, as its {declined}; its next release is "
+                      "published")
+                continue
             done = _committed(github, repository, change, made_on,
                               branches.get(change.branch))
-            print(f"{change.branch}: {done}; {_pulled(github, repository, change)}")
-        except (GitHubError, requests.RequestException) as error:
+            print(f"{change.branch}: {done}; {_pulled(github, repository, change, number)}")
+        except (GitHubError, requests.RequestException, NotVersions,
+                RequirementError) as error:
             print(f"{change.branch}: failed: {described(error)}", file=sys.stderr)
             failed += 1
     for branch in sorted(branches.keys() - {change.branch for change in changes}):

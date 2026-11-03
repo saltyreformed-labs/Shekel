@@ -804,19 +804,30 @@ def unversioned_between(root: Path, old: str, new: str) -> tuple[Reason, ...]:
     return _reasons(root, differences(tree(root, old), tree(root, new)), "the tree")
 
 
+def lock_pins(text: str) -> frozenset[Pin]:
+    """Every version the lock whose text is ``text`` pins: each package at its version, a
+    package of no version (a project whose version is dynamic) pinning none, and a lock
+    forked by environment pinning each version a name holds.
+
+    Raises:
+        NotVersions: when it is no TOML (:func:`_read`) or holds a package with no name
+            (:func:`_named`).
+    """
+    return frozenset(Pin(package["name"], str(package["version"]))
+                     for package in _named(_read(text)) if "version" in package)
+
+
 def pinned(root: Path, path: str, held: str | None) -> frozenset[Pin]:
     """Every version ``path``, a file that pins versions (:func:`pins_versions`), pins where
     production holds it as ``held`` (its mode and object, as :func:`_production.changed`
     gives them; None where that production holds no such file, which pins none): in the
-    lock each package at its version, a package of no version (a project whose version is
-    dynamic) pinning none; in any other file what each line that pins one (:data:`_LINES`)
-    pins, at its version as the line spells it (:func:`_version`).  It asks nothing of what
-    a change moves, so a lock forked by environment pins each version a name holds.
+    lock what :func:`lock_pins` reads; in any other file what each line that pins one
+    (:data:`_LINES`) pins, at its version as the line spells it (:func:`_version`).  It asks
+    nothing of what a change moves.
 
     Raises:
         NotVersions: when it pins no version, is no file (:func:`_object`), holds bytes
-            that decode to no text (:func:`_text`), or is a lock that is no TOML
-            (:func:`_read`) or holds a package with no name (:func:`_named`).
+            that decode to no text (:func:`_text`), or is a lock :func:`lock_pins` refuses.
         tools.ci.gitcmd.GitError: when git cannot read its object.
     """
     if not pins_versions(path):
@@ -825,7 +836,6 @@ def pinned(root: Path, path: str, held: str | None) -> frozenset[Pin]:
         return frozenset()
     text = _text(root, path, _object(path, held))
     if (rule := _rule(path)) is None:
-        return frozenset(Pin(package["name"], str(package["version"]))
-                         for package in _named(_read(text)) if "version" in package)
+        return lock_pins(text)
     return frozenset(Pin(pin["what"], _version(pin))
                      for pin in map(rule.line.fullmatch, text.split("\n")) if pin is not None)

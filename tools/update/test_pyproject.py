@@ -9,6 +9,7 @@ from tools.update.pyproject import (
     RequirementError,
     lifted,
     moved,
+    release,
     requirements,
     rewritten,
 )
@@ -94,6 +95,24 @@ def test_a_moved_requirement_keeps_its_own_form(text, version, now):
     calendar year included), an exact pin to ``==new``, each exclusion kept; a release of
     zeros, which no next major follows, is pinned as the refresh holds one."""
     assert moved(_one(text), version) == now
+
+
+@pytest.mark.parametrize(("text", "version"), [
+    ("psycopg[c]>=3.3.6,<4.0.0", "4.1.0"),
+    ("rumdl>=0.2.78,<0.3.0,!=0.2.79", "0.3.0"),
+    ("setuptools==83.0.0", "84.2.1"),
+    ("zero>=0.0.0,<0.0.1", "0"),
+])
+def test_a_moved_requirement_names_the_release_it_was_moved_to(text, version):
+    """The release a held-back change proposes is read back from the requirement ``moved``
+    spelled (rulings plan#2774, plan#2776): each of its forms names its release."""
+    assert release(_one(moved(_one(text), version))) == version
+
+
+@pytest.mark.parametrize("text", ["requests", "a<2", "a!=1.5,>=1"])
+def test_a_requirement_moved_never_spelled_names_no_release(text):
+    """No first clause, or one that is neither ``>=`` nor ``==``, names no release."""
+    assert release(_one(text)) is None
 
 
 @pytest.mark.parametrize("text", [

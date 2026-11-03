@@ -97,3 +97,9 @@ def test_a_missing_folder_is_refused(tmp_path):
     """A folder the artifact never held is no folder, never a week with nothing in it."""
     with pytest.raises(FolderError, match="is no folder"):
         folder.read(tmp_path / "out")
+
+
+def test_a_change_names_the_package_it_prepares_alone():
+    """The package of a change prepared alone is read back from where it lies, the inverse of
+    :func:`folder.alone`; the week's lock prepares none."""
+    assert (_PYEE.package, _WEEK.package) == ("pyee", None)

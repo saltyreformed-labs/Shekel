@@ -30,6 +30,7 @@ from app.models.transfer_template import TransferTemplate
 from app.services import balance_at, obligations_aggregator, savings_goal_service
 from app.services.account_category import is_liability_account
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import transfer_template_pricing_load_options
 from app.services.liability_sign import owed, shown_figure
 from app.services.pay_calendar import PayCalendar, PeriodWindow
 from app.services.savings_dashboard_service._tile import (
@@ -291,7 +292,11 @@ def _load_goal_templates(user_id, goals):
     Avoids an N+1 query in the per-goal loop.  The aggregator that
     consumes the result (``obligations_aggregator.committed_monthly``)
     handles per-pattern normalization to monthly equivalents and the
-    shared skip-non-repeating / skip-expired filter.
+    shared skip-non-repeating / skip-expired filter, and prices each
+    template on the pass's day (``obligations_aggregator.todays_price``,
+    ruling plan#2693), so the query loads what pricing reads with the
+    templates: without it the page's statements grew with every template
+    (plan#2733).
 
     Args:
         user_id: Integer ID of the current user.
@@ -305,6 +310,7 @@ def _load_goal_templates(user_id, goals):
     if goal_account_ids:
         to_account_templates = (
             db.session.query(TransferTemplate)
+            .options(*transfer_template_pricing_load_options())
             .filter(
                 TransferTemplate.user_id == user_id,
                 TransferTemplate.to_account_id.in_(goal_account_ids),

@@ -198,7 +198,9 @@ from app.services.row_valuation import settled_amounts_by_key
 from app.utils.amount_relationships import (
     pricing_load_options,
     settlement_load_options,
+    template_pricing_load_options,
     transfer_pricing_load_options,
+    transfer_template_pricing_load_options,
     valuation_load_options,
 )
 # The loan-pricing leaf FIRST, because it is the bottom of this package's
@@ -343,7 +345,9 @@ __all__ = [
     "reject_books_open_on_or_after_movements",
     "pricing_load_options",
     "settlement_load_options",
+    "template_pricing_load_options",
     "transfer_pricing_load_options",
+    "transfer_template_pricing_load_options",
     "valuation_load_options",
     "reject_line_before_books_open",
     "reject_movement_before_books_open",

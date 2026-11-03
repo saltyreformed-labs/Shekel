@@ -7,14 +7,16 @@ from decimal import Decimal
 from html.parser import HTMLParser
 
 from app.extensions import db
-from app.models.ref import TransactionType
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service as tas
-from tests._test_helpers import create_savings_account
 from tests._definition_price import newest_price
 
-from ._helpers import _template_with_history, _transfer_template
+from ._helpers import (
+    _salary_linked_template,
+    _template_with_history,
+    _transfer_template,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -87,23 +89,7 @@ class TestHistoryPanel:
     ):
         """A salary-linked template has no stated price, so there is none to show."""
         with app.app_context():
-            from tests._test_helpers import make_salary_profile
-            expense = db.session.query(TransactionType).filter_by(
-                name="Income",
-            ).one()
-            template = TransactionTemplate(
-                user_id=seed_user["user"].id,
-                account_id=seed_user["account"].id,
-                category_id=seed_user["categories"]["Rent"].id,
-                transaction_type_id=expense.id,
-                name="Data Manager",
-            )
-            db.session.add(template)
-            db.session.flush()
-            profile = make_salary_profile(seed_user, db.session)
-            profile.template_id = template.id
-            profile.is_active = True
-            db.session.commit()
+            template, _profile = _salary_linked_template(seed_user)
 
             resp = auth_client.get(f"/templates/{template.id}/edit")
             body = resp.get_data(as_text=True)
@@ -320,11 +306,7 @@ class TestWithdrawAmountVersion:
     ):
         """The transfer form's control drives the same shared action."""
         with app.app_context():
-            savings = create_savings_account(
-                seed_user, db.session, "Money Market", Decimal("0.00"),
-            )
-            db.session.commit()
-            template = _transfer_template(seed_user, savings, amount="500.00")
+            template = _transfer_template(seed_user, amount="500.00")
             tas.set_amount(
                 template, Decimal("250.00"), effective_on=date(2020, 5, 21),
             )

@@ -896,7 +896,7 @@ class TestTemplateUpdate:
         chooser as ``amount_drives_instances=False`` until plan step X-bp;
         the chooser asks only when the price series changed now, which an
         edit to such a template never does
-        (``test_template_amount_history``'s
+        (``test_template_amount_history/test_the_prompt_and_worked_out_amounts.py``'s
         ``TestTheChooserAsksWhetherThePriceHistoryChanged``).
         """
         with app.app_context():

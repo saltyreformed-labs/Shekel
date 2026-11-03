@@ -17,7 +17,11 @@ from app.services.obligations_aggregator import todays_price
 from tests._test_helpers import cadence_payload, create_savings_account
 from tests._definition_price import newest_price
 
-from ._helpers import _template_with_history, _transfer_template
+from ._helpers import (
+    _salary_linked_template,
+    _template_with_history,
+    _transfer_template,
+)
 
 
 # ── The create doors ─────────────────────────────────────────────────
@@ -103,23 +107,7 @@ class TestEligibilityCanBeGAINED:
         specified to refuse rather than fall back on.
         """
         with app.app_context():
-            from tests._test_helpers import make_salary_profile
-            income = db.session.query(TransactionType).filter_by(
-                name="Income",
-            ).one()
-            template = TransactionTemplate(
-                user_id=seed_user["user"].id,
-                account_id=seed_user["account"].id,
-                category_id=seed_user["categories"]["Rent"].id,
-                transaction_type_id=income.id,
-                name="Data Manager",
-            )
-            db.session.add(template)
-            db.session.flush()
-            profile = make_salary_profile(seed_user, db.session)
-            profile.template_id = template.id
-            profile.is_active = True
-            db.session.commit()
+            template, profile = _salary_linked_template(seed_user)
             tid, pid = template.id, profile.id
 
             assert tas.owns_its_amount(template) is False
@@ -213,17 +201,13 @@ class TestEditRecordsThePrice:
         record two prices.
         """
         with app.app_context():
-            savings = create_savings_account(
-                seed_user, db.session, "Money Market", Decimal("0.00"),
-            )
-            db.session.commit()
-            template = _transfer_template(seed_user, savings, amount="500.00")
+            template = _transfer_template(seed_user, amount="500.00")
 
             resp = auth_client.post(f"/transfers/{template.id}", data={
                 "name": "Money Market Contribution",
                 "amount": "250.00",
                 "from_account_id": seed_user["account"].id,
-                "to_account_id": savings.id,
+                "to_account_id": template.to_account_id,
                 "category_id": seed_user["categories"]["Rent"].id,
                 "effective_from": "2026-05-21",
             }, follow_redirects=True)
@@ -279,11 +263,7 @@ class TestTheOptimisticLockCounter:
     ):
         """The transfer route calls the same door before its own field loop."""
         with app.app_context():
-            savings = create_savings_account(
-                seed_user, db.session, "Money Market", Decimal("0.00"),
-            )
-            db.session.commit()
-            template = _transfer_template(seed_user, savings, amount="500.00")
+            template = _transfer_template(seed_user, amount="500.00")
             tid = template.id
             before = template.version_id
 
@@ -291,7 +271,7 @@ class TestTheOptimisticLockCounter:
                 "name": "Money Market Savings",
                 "amount": "250.00",
                 "from_account_id": seed_user["account"].id,
-                "to_account_id": savings.id,
+                "to_account_id": template.to_account_id,
                 "category_id": seed_user["categories"]["Rent"].id,
                 "version_id": str(before),
             }, follow_redirects=True)

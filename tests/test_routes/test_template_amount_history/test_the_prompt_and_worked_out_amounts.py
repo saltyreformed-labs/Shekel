@@ -192,8 +192,8 @@ class TestTheConflictChooserRoundTrip:
                 (date(2020, 4, 1), Decimal("178.00")),
                 (future, Decimal("200.00")),
             ]
-            # The column still carries the queued price, so the rows that edit
-            # rebuilt are regenerated at it.
+            # The newest price the series states is still December's: the
+            # rename restated and withdrew nothing.
             assert newest_price(template) == Decimal("200.00")
 
 

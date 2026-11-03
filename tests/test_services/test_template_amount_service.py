@@ -742,7 +742,7 @@ class TestDeleteAmountVersion:
         rather than ownership: the caller owner-checks the template, so a
         version id from any other template -- the same user's or anyone else's --
         is simply not found.  The cross-USER refusal is a route concern and is
-        asserted in ``test_template_amount_history.py``.
+        asserted in ``test_template_amount_history/test_the_history_panel.py``.
         """
         with app.app_context():
             mine = _txn_template(seed_user, name="Geico")

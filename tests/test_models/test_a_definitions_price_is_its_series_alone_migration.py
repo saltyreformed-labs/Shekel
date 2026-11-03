@@ -21,8 +21,9 @@ the restored copies are read back by SQL.  Each refusal is a control SHOWN TO
 FIRE, and every restore arm is built so that the predicate it rests on can
 fail: a newest version that is not the newest by id, an archived profile's
 definition beside a Received row it must not read, a deleted Received row
-newer than the one it must read, and a reactivated profile's dormant series
-that must not answer for it.
+newer than the one it must read, a reactivated profile's dormant series that
+must not answer for it, and a tracking payment's dormant series from when it
+was fixed, which must not either.
 """
 from datetime import timedelta
 from decimal import Decimal
@@ -562,4 +563,95 @@ class TestTheDowngradeRefuses:
             message = str(exc.value)
             assert f"refused -x {argument}={value}," in message, message
             assert why in message, message
+            _assert_head_schema()
+
+
+@pytest.fixture(name="tracked_after_fixed")
+def _tracked_after_fixed(app, db, seed_user):
+    """A loan payment priced $500.00 while fixed, then switched to follow its loan.
+
+    The Track door's path (``routes/loan/payment_transfer.track_payment``):
+    the flip writes nothing to the series, so the version stated while the
+    payment was fixed stays, DORMANT, as the record of what was stated then,
+    and amount rule 4 prices the payment.  It is the only world here where
+    the series arm's skip (``_FOLLOWS_ITS_LOAN``) decides anything: the
+    ``Mortgage`` of :func:`_unrestorable` holds no series, so it is refused
+    with or without the skip.
+
+    Returns:
+        The definition's id.
+    """
+    with app.app_context():
+        loan = create_savings_account(
+            seed_user, db.session, "Truck Loan", Decimal("0.00"),
+        )
+        truck = _loan_payment(
+            seed_user, loan, "Truck Payment", derive_from_loan=False,
+            stated="500.00",
+        )
+        truck.settings.derive_from_loan = True
+        db.session.commit()
+        return truck.id
+
+
+def _series_of(transfer_template_id):
+    """Return the amounts a transfer definition's series states, oldest first, by SQL."""
+    return db.session.execute(sa.text(
+        "SELECT amount FROM budget.template_amount_versions "
+        "WHERE transfer_template_id = :d ORDER BY effective_date, id"
+    ), {"d": transfer_template_id}).scalars().all()
+
+
+class TestADormantSeriesDoesNotAnswerForATrackingPayment:
+    """A tracking payment's old price is refused, never handed back (ruling plan#2695)."""
+
+    def test_the_restores_leave_it_without_a_copy(
+        self, app, db, tracked_after_fixed,
+    ):
+        """The probe names it with the loan-payment reason; its copy stays ``NULL``.
+
+        Precondition first: the series holds the $500.00 stated while it was
+        fixed, so a restore that read it would answer $500.00, which the
+        transfer CHECK admits.  Answering it would hand back a price nothing
+        has stated since the payment began to follow its loan.
+        """
+        with app.app_context():
+            assert _series_of(tracked_after_fixed) == [Decimal("500.00")]
+            run_migration_callable(_MIGRATION.readd_columns, db.session)
+            connection = db.session.connection()
+            _MIGRATION.restore_copies(connection)
+
+            assert _copy("transfer_templates", tracked_after_fixed) is None
+            assert [tuple(row) for row in _MIGRATION.unrestored(connection)] == [
+                ("transfer_templates", tracked_after_fixed, "Truck Payment",
+                 "a loan payment that follows its loan"),
+            ]
+            db.session.rollback()
+
+    def test_the_downgrade_refuses_it_by_name_and_changes_nothing(
+        self, app, db, tracked_after_fixed,
+    ):
+        """The whole downgrade refuses it, with the command for its one copy.
+
+        It is the world's only definition without a copy, so the refusal
+        counts one, names it with its reason, and prints its ``-x``; the
+        rollback leaves head.
+        """
+        with app.app_context():
+            assert _series_of(tracked_after_fixed) == [Decimal("500.00")]
+            with pytest.raises(RuntimeError, match="NOTHING has been changed") as exc:
+                step_down_through_the_default_amount_drop(db.session)
+            db.session.rollback()
+
+            message = str(exc.value)
+            assert "X-bp downgrade refused: 1 definition(s)" in message, message
+            assert (
+                f"  transfer_templates {tracked_after_fixed} ('Truck Payment'), "
+                "a loan payment that follows its loan\n"
+            ) in message, message
+            assert message.endswith(
+                "\n  flask db downgrade"
+                f" -x transfer_templates.{tracked_after_fixed}=<figure>"
+                f" {_MIGRATION.down_revision}"
+            ), message
             _assert_head_schema()

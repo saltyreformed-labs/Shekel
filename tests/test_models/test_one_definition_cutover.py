@@ -17,7 +17,11 @@ only writer that can still spell it -- and run ``upgrade()`` or its
 module-level callables against the test connection.  Each such case first
 steps down through ``c956c1d83108`` (the ``below_the_transfer_column_drop``
 fixture): this revision's CHECK and its bare-row predicate name
-``transfer_id``, which head's table no longer has.  Every refusal is a
+``transfer_id``, which head's table no longer has.  Every case that runs
+the mint or the residue re-sync also steps down through ``4d4eb9cd3850``
+(plan step balance:X-bp), after its ORM fixtures: both statements write
+``default_amount``, which that revision dropped, and each case reads the copy
+they wrote back by SQL.  Every refusal is a
 control SHOWN TO FIRE (``docs/plans/verification.md`` standard 4), and every
 figure the cutover moves off a row is read back through the app's one
 resolver to the cent.
@@ -53,7 +57,9 @@ from tests._test_helpers import (
     resolved_amount,
     run_migration_callable,
 )
-from tests._test_helpers import newest_price
+from tests.test_models._default_amount_drop import (
+    step_down_through_the_default_amount_drop,
+)
 
 _MIGRATION = load_migration_module(
     "596408fab6f1_every_plan_item_has_one_definition.py"
@@ -81,6 +87,18 @@ def _constraint(name):
         "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
         "WHERE conrelid = 'budget.transactions'::regclass AND conname = :n"
     ), {"n": name}).scalar()
+
+
+def _copy(template_id):
+    """Return definition *template_id*'s ``default_amount`` copy, read by SQL.
+
+    The column this revision's mint and residue re-sync write, back for the
+    case through :func:`step_down_through_the_default_amount_drop`; the model
+    on this tree does not map it.
+    """
+    return db.session.execute(sa.text(
+        "SELECT default_amount FROM budget.transaction_templates WHERE id = :t"
+    ), {"t": template_id}).scalar_one()
 
 
 def _row_columns():
@@ -224,6 +242,7 @@ class TestTheCutoverMintsADefinitionPerBareRow:
                 also_before=seed_periods[0].start_date,
             )
             db.session.commit()
+            step_down_through_the_default_amount_drop(db.session)
             _run(_MIGRATION.downgrade)
             _assert_pre_cutover_schema()
             period = seed_periods[1]
@@ -283,7 +302,7 @@ class TestTheCutoverMintsADefinitionPerBareRow:
                 definition = row.template
                 assert definition is not None and row.is_placed, key
                 assert definition.recurs is False
-                assert (definition.name, newest_price(definition)) == (
+                assert (definition.name, _copy(definition.id)) == (
                     name, Decimal(plan),
                 ), key
                 assert (definition.is_envelope, definition.companion_visible) == (
@@ -325,6 +344,7 @@ class TestTheCutoverMintsADefinitionPerBareRow:
         migration pairs by row id through its temporary map.
         """
         with app.app_context():
+            step_down_through_the_default_amount_drop(db.session)
             _run(_MIGRATION.downgrade)
             first = _plant_bare(
                 seed_user, seed_periods[1], name="Claude Max", amount="100.00",
@@ -342,7 +362,7 @@ class TestTheCutoverMintsADefinitionPerBareRow:
             assert [resolved_amount(row) for row in rows] == [
                 Decimal("100.00"), Decimal("200.00"),
             ]
-            assert [newest_price(row.template) for row in rows] == [
+            assert [_copy(row.template_id) for row in rows] == [
                 Decimal("100.00"), Decimal("200.00"),
             ]
 
@@ -357,6 +377,7 @@ class TestTheCutoverMintsADefinitionPerBareRow:
         stays paired.
         """
         with app.app_context():
+            step_down_through_the_default_amount_drop(db.session)
             _run(_MIGRATION.downgrade)
             parent = _plant_bare(
                 seed_user, seed_periods[1], name="Cube storage", amount="45.00",
@@ -414,6 +435,7 @@ class TestTheRefusals:
         schema is the pre-cutover one and no definition was minted.
         """
         with app.app_context():
+            step_down_through_the_default_amount_drop(db.session)
             _run(_MIGRATION.downgrade)
             declared = _plant_bare(
                 seed_user, seed_periods[1], name="Declares nothing",
@@ -452,6 +474,7 @@ class TestTheRefusals:
         whole -- the schema is still the pre-cutover one afterwards.
         """
         with app.app_context():
+            step_down_through_the_default_amount_drop(db.session)
             _run(_MIGRATION.downgrade)
             survivor = _plant_bare(
                 seed_user, seed_periods[1], name="Left behind", amount="5.00",
@@ -526,6 +549,7 @@ class TestTheResidueRowsAreReattached:
             row.is_override = True
             db.session.commit()
             assert row.amount_source_id is None and row.is_override
+            step_down_through_the_default_amount_drop(db.session)
 
             assert _MIGRATION.reattach_residue_rows(_conn()) == 1
             db.session.commit()
@@ -536,7 +560,7 @@ class TestTheResidueRowsAreReattached:
             assert row.amount_source_id == ref_cache.amount_source_id(
                 AmountSourceEnum.TEMPLATE,
             )
-            assert newest_price(row.template) == Decimal("170.00")
+            assert _copy(row.template_id) == Decimal("170.00")
             assert [v.amount for v in row.template.amount_versions] == [Decimal("170.00")]
             assert resolved_amount(row) == Decimal("170.00")
 
@@ -548,6 +572,7 @@ class TestTheResidueRowsAreReattached:
             row = _one_off(seed_user, seed_periods[1])
             row.is_override = True
             db.session.commit()
+            step_down_through_the_default_amount_drop(db.session)
 
             assert _MIGRATION.reattach_residue_rows(_conn()) == 1
             db.session.commit()
@@ -555,7 +580,7 @@ class TestTheResidueRowsAreReattached:
             db.session.expire_all()
             row = db.session.get(Transaction, row.id)
             assert row.is_override is False
-            assert newest_price(row.template) == Decimal("162.25")
+            assert _copy(row.template_id) == Decimal("162.25")
             assert resolved_amount(row) == Decimal("162.25")
 
     def test_a_many_row_definitions_own_row_is_left_alone(
@@ -577,6 +602,7 @@ class TestTheResidueRowsAreReattached:
             state_own_amount(sibling, Decimal("120.00"))
             sibling.is_override = True
             db.session.commit()
+            step_down_through_the_default_amount_drop(db.session)
 
             assert _MIGRATION.reattach_residue_rows(_conn()) == 0
             db.session.commit()
@@ -585,7 +611,7 @@ class TestTheResidueRowsAreReattached:
             sibling = db.session.get(Transaction, sibling.id)
             assert sibling.is_override is True
             assert sibling.estimated_amount == Decimal("120.00")
-            assert newest_price(sibling.template) == Decimal("0.00")
+            assert _copy(sibling.template_id) == Decimal("0.00")
             assert resolved_amount(db.session.get(Transaction, first.id)) == Decimal("0.00")
 
 
@@ -617,6 +643,7 @@ class TestTheDowngradeIsSchemaOnly:
         """
         with app.app_context():
             row = _one_off(seed_user, seed_periods[1], is_envelope=True)
+            step_down_through_the_default_amount_drop(db.session)
             before = self._snapshot()
 
             _run(_MIGRATION.downgrade)

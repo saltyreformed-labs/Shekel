@@ -24,9 +24,11 @@ restored, then is made NOT NULL with its CHECK:
   ._resync_scalar`` kept it there);
 * a salary profile's definition (an ACTIVE profile names it) gets back its
   latest non-deleted Received row's recorded figure, the sum of that row's
-  entries -- the paycheck the bank or the owner recorded, which the old code
-  read only on the paycheck's edit page and as the price an archive opened
-  at, and which its next salary save rewrote;
+  entries, ``$0.00`` for none (a settled row's entries are its record, and
+  none is a close of nothing: ruling R-BAL82) -- the paycheck the bank or the
+  owner recorded, which the old code read only on the paycheck's edit page
+  and as the price an archive opened at, and which its next salary save
+  rewrote;
 * a loan payment that follows its loan, and a salary definition no Received
   row records, are REFUSED: no stored fact gives their copy back, and $0.00
   was rejected (the old code skips a $0 definition in the Recurring totals and
@@ -120,12 +122,15 @@ def _newest_version_sql(table: str, owner_column: str, excluded: str) -> str:
 
 
 #: The restore of a salary profile's definition: its latest non-deleted
-#: Received row's recorded figure, the sum of that row's entries (``NULL``
-#: when it records none, which the refusal then names).
+#: Received row's recorded figure, the sum of that row's entries.  A settled
+#: row with no entry records ``$0.00`` (ruling R-BAL82), so ``SUM``'s ``NULL``
+#: over no rows is that figure, not a missing one; a definition no Received
+#: row names keeps ``NULL``, which the refusal names.
 _LATEST_RECEIVED_SQL = (
     "UPDATE budget.transaction_templates tt SET default_amount = r.recorded "
     "FROM (SELECT DISTINCT ON (t.template_id) t.template_id, "
-    "             (SELECT SUM(e.amount) FROM budget.transaction_entries e "
+    "             (SELECT COALESCE(SUM(e.amount), 0) "
+    "                FROM budget.transaction_entries e "
     "               WHERE e.transaction_id = t.id) AS recorded "
     "        FROM budget.transactions t "
     "        JOIN ref.statuses s ON s.id = t.status_id "
@@ -209,6 +214,20 @@ def unrestored(bind) -> list:
     )))
 
 
+def readd_columns() -> None:
+    """Re-add both columns, nullable and empty: the downgrade's first step.
+
+    Module-level so a test of an OLDER revision that reads the column can put
+    it back without :func:`restore_copies`: ``a9d3c15e7f42``'s backfill mines
+    each series against the column, and the series is the restore's input.
+    """
+    for table, _check, _check_sql in _TABLES:
+        op.add_column(
+            table, sa.Column(_COLUMN, sa.Numeric(12, 2), nullable=True),
+            schema='budget',
+        )
+
+
 def upgrade():
     """Drop both copies and their CHECKs; the series keeps both floors."""
     for table, check, _check_sql in _TABLES:
@@ -224,11 +243,7 @@ def downgrade():
             transaction rolls back, so the columns are not re-added.
     """
     bind = op.get_bind()
-    for table, _check, _check_sql in _TABLES:
-        op.add_column(
-            table, sa.Column(_COLUMN, sa.Numeric(12, 2), nullable=True),
-            schema='budget',
-        )
+    readd_columns()
     restore_copies(bind)
     missing = unrestored(bind)
     if missing:

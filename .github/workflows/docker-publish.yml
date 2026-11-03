@@ -173,33 +173,16 @@ jobs:
         # would let a future tag-swap detach the signature from the
         # image bytes it attests to).
         #
-        # No layer cache, read or written: the image signed is built from
-        # this commit and what it pins and downloads, never from layers
-        # another run left (ruling plan#2471; .github/actions/install-lock's
-        # header says why).  No step sets up a builder, so it builds on the
-        # runner's Docker Engine and its own BuildKit, and no BuildKit image
-        # is pulled (ruling plan#2742).
-        #
-        # The provenance record at ``mode=max``, asked for by name (ruling
-        # plan#2746).  Left to buildx's default on the runner's own builder,
-        # the record is the minimal one, or none on an image store that
-        # cannot attach one.  Asked for, it holds the build's definition and
-        # names this run attempt's URL as its builder id, and a store that
-        # cannot attach it refuses the build before the push, so production
-        # keeps its image.  It no longer holds the GitHub Actions fields a
-        # Buildx container builder added (the actor, the push event, the
-        # runner image); the commit, ref, trigger, workflow and run are in
-        # the certificate the signing step below records (both read at the
-        # image of 2026-10-29).  ci.yml's ``image`` job asks for the same
-        # record, so that refusal is met at a pull request first.
+        # The build is .github/actions/build-image's, the one recipe ci.yml's
+        # ``image`` job builds by too (ruling plan#2752); its header says what
+        # the two share and why.
         id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        uses: $/.github/actions/build-image
         with:
-          context: .
           push: true
+          load: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          provenance: mode=max
 
       - name: Sign image with Cosign (keyless OIDC)
         # ``cosign sign`` with no ``--key`` uses the sigstore keyless

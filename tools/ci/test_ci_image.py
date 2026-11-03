@@ -2,11 +2,10 @@
 
 ``docker-publish.yml`` builds the release image only on a push to ``main``, so before task
 plan#2366 a change that broke the build landed in ``dev`` and failed only at the release.  The
-job builds the image on every pull request, queue group and push to ``main``, never pushes it,
-asks for the release's provenance record so a runner that cannot attach one fails it, and
-checks that it runs psycopg's C implementation, holds exactly the lock's runtime set and its
-``server`` group, and holds no pip and no uv; ``lint-and-test`` grades it
-(:mod:`tools.ci.ci_verdict`).
+job builds the image on every pull request, queue group and push to ``main`` by the release's
+own recipe (:mod:`tools.ci.test_build_image_action`), never pushes it, and checks that it runs
+psycopg's C implementation, holds exactly the lock's runtime set and its ``server`` group, and
+holds no pip and no uv; ``lint-and-test`` grades it (:mod:`tools.ci.ci_verdict`).
 """
 from __future__ import annotations
 
@@ -19,6 +18,7 @@ from pathlib import Path
 import yaml
 
 from tools.ci import arcs
+from tools.ci.test_build_image_action import USES as BUILD_IMAGE
 from tools.ci.test_ci_workflow import _jobs, _run_step, _steps, _workflows
 from tools.ci.test_dockerfile_uv_action import USES as DOCKERFILE_UV
 
@@ -35,6 +35,7 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
     """
 
     BUILD = "Build the image"
+    DIGEST = "The build hands back a digest"
     UV = "The Dockerfile's uv"
     IMPL = "The image runs psycopg's C implementation"
     PACKAGES = "The image holds exactly the lock's runtime and server set"
@@ -83,38 +84,47 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         return json.loads((tmp_path / "docker.json").read_text(encoding="utf-8"))
 
     def test_the_image_is_built_as_the_release_builds_it_and_never_pushed(self):
-        """The Dockerfile at the checkout's root, built by the release's own pinned build
-        action, loaded into the runner's docker under :attr:`IMAGE` and never pushed.  The job
-        holds no secret and widens no permission, and its steps run in this order; neither it
-        nor the release's build job uses ``docker/setup-buildx-action``, whose builder pulls a
-        BuildKit image (ruling plan#2742).  Another way of setting up a builder is not read
-        here: review holds that line.  Both builds ask for the provenance record at ``mode=max``
-        by name, the release's in its one build step, the one whose digest cosign signs, so a
-        runner that cannot attach the record fails this job before it fails a release (ruling
-        plan#2746)."""
+        """The image built by the release's own recipe, ``.github/actions/build-image`` by the
+        ``$/`` form (ruling plan#2752; :mod:`tools.ci.test_build_image_action` holds the
+        action and the release's call), loaded into the runner's docker under :attr:`IMAGE`
+        and never pushed.  The job holds no secret and widens no permission, and its steps run
+        in this order; neither it nor the release's build job uses
+        ``docker/setup-buildx-action``, whose builder pulls a BuildKit image (ruling
+        plan#2742).  Another way of setting up a builder is not read here: review holds that
+        line."""
         job = _jobs()["image"]
         assert set(job) == {"runs-on", "timeout-minutes", "env", "steps"}
         assert job["env"] == {"IMAGE": self.IMAGE}
         assert [step["name"] for step in job["steps"]] == [
-            "Checkout code", self.BUILD, self.UV, self.IMPL, self.PACKAGES, self.INSTALLERS,
+            "Checkout code", self.BUILD, self.DIGEST, self.UV, self.IMPL, self.PACKAGES,
+            self.INSTALLERS,
         ]
         steps = _steps("image")
         assert steps["Checkout code"]["with"] == {"persist-credentials": False}
-        assert steps[self.BUILD]["with"] == {
-            "context": ".", "push": False, "load": True, "tags": "${{ env.IMAGE }}",
-            "provenance": "mode=max",
-        }
+        assert steps[self.BUILD] == {"name": self.BUILD, "id": "build", "uses": BUILD_IMAGE,
+                                     "with": {"push": False, "load": True,
+                                              "tags": "${{ env.IMAGE }}"}}
         publish = _workflows()["docker-publish.yml"]["jobs"]["build-and-push"]
         actions = [step["uses"].split("@")[0] for step in publish["steps"] if "uses" in step]
-        uses = steps[self.BUILD]["uses"]
-        assert re.fullmatch(r"docker/build-push-action@[0-9a-f]{40}", uses)
-        builds = [step for step in publish["steps"]
-                  if step.get("uses", "").split("@")[0] == "docker/build-push-action"]
-        assert [step.get("id") for step in builds] == ["build"]
-        assert builds[0]["uses"] == uses
-        assert builds[0]["with"]["provenance"] == "mode=max"
         assert "docker/setup-buildx-action" not in actions
         assert not re.search(r"\bsecrets\b", yaml.safe_dump(job))
+
+    def test_the_digest_check_passes_a_sha256_digest_alone(self):
+        """The digest step, RUN: it reads the digest the build action handed back, the output
+        the release signs (:mod:`tools.ci.test_build_image_action`), and passes a ``sha256``
+        digest alone; none, a short one, an upper-case one or one of another algorithm fails
+        it, saying the release's signing would sign none."""
+        step = _steps("image")[self.DIGEST]
+        assert step["env"] == {"DIGEST": "${{ steps.build.outputs.digest }}"}
+        good = "sha256:" + "0123456789abcdef" * 4
+        for digest, expected in ((good, 0), ("", 1), (good[:-1], 1), (good.upper(), 1),
+                                 ("sha512:" + "0" * 64, 1), (f"{good}\n", 1)):
+            result = _run_step(step["run"], {"DIGEST": digest})
+            assert result.returncode == expected, (digest, result.stderr)
+            if expected:
+                assert "the release's signing would sign none" in result.stderr, digest
+            else:
+                assert result.stdout == f"The build's digest: {good}\n"
 
     def test_uv_is_the_dockerfiles_by_the_one_recipe(self):
         """The job takes uv from the action every job's install takes it from, by the ``$/``

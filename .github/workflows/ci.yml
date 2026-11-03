@@ -568,13 +568,10 @@ jobs:
   # it, loaded into this runner's docker, never pushed; the job holds no
   # secret.
   #
-  # NO CACHE, AND THE RUNNER'S OWN BUILDER, as in the release's build.  The
-  # build reads and writes no layer cache, so it builds from this checkout
-  # and what it pins and downloads, never from bytes another run left (ruling
-  # plan#2471; .github/actions/install-lock's header says why); and no step
-  # sets up a builder, so it runs on the runner's Docker Engine and its own
-  # BuildKit, as every job's uv export does, and no BuildKit image is pulled
-  # (ruling plan#2742).
+  # ONE RECIPE, THE RELEASE'S.  The build is .github/actions/build-image's,
+  # which the release builds by too (ruling plan#2752); its header says what
+  # the two share and why, and which of its refusals is read rather than
+  # measured.  This job runs on the release's runner label.
   #
   # Its time limit has no run of its own to be sized from yet (rulings
   # plan#2328, plan#2330): it is twice the release build's longest
@@ -599,23 +596,31 @@ jobs:
         with:
           persist-credentials: false
 
-      # ``provenance`` is the release build's, here as its check (ruling
-      # plan#2746): the release asks for its provenance record by name, and
-      # a runner whose image store cannot attach one refuses that build
-      # before its push.  Asked for here too, the same refusal fails this job
-      # at a pull request, not first at a release.  The record this build
-      # keeps goes with the runner.  Unlike the checks below, this refusal is
-      # not measured: no daemon here runs the classic store.  It is read in
-      # buildx v0.38.1's build/opt.go, which refuses an attestation on a
-      # ``docker`` driver that cannot store one (2026-11-03).
       - name: Build the image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
+        uses: $/.github/actions/build-image
         with:
-          context: .
           push: false
           load: true
           tags: ${{ env.IMAGE }}
-          provenance: mode=max
+
+      # The digest the build action hands back is the one the release signs.
+      # Read here on every pull request, an action that hands back none fails
+      # a pull request, not first the release's signing.  Measured 2026-11-03
+      # on the rootless daemon: a load's metadata names the loaded image's
+      # digest (``containerimage.digest``), which the action's ``digest``
+      # output reads.
+      - name: The build hands back a digest
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          if [[ "${DIGEST}" =~ ^sha256:[0123456789abcdef]{64}$ ]]; then
+              echo "The build's digest: ${DIGEST}"
+          else
+              echo "The build handed back no digest ('${DIGEST}'): the release's signing would sign none." >&2
+              exit 1
+          fi
 
       # uv for the package check, from the Dockerfile's own uv stage by the
       # one recipe every job's install takes it by: the binary the build ran,

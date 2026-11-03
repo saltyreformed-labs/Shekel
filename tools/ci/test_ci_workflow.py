@@ -161,6 +161,18 @@ def _workflows() -> dict[str, dict]:
             for path in sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")])}
 
 
+def _every_step() -> list[tuple[tuple[str, str | int], dict]]:
+    """Each step of every workflow, keyed by the workflow's file name and the job's name, and
+    of every action of this repository's, keyed by the action's directory name and the step's
+    place in it."""
+    found = [((name, job_name), step) for name, workflow in _workflows().items()
+             for job_name, job in workflow["jobs"].items() for step in job.get("steps", [])]
+    for path in sorted((arcs.REPO / ".github/actions").glob("*/action.y*ml")):
+        steps = yaml.safe_load(path.read_text(encoding="utf-8"))["runs"].get("steps", [])
+        found += [((path.parent.name, at), step) for at, step in enumerate(steps)]
+    return found
+
+
 def _calls_the_install(job: dict) -> bool:
     """Whether a job has a step naming the install action, in any form."""
     return any("install-lock" in step.get("uses", "") for step in job.get("steps", []))

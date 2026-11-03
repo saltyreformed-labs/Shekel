@@ -16,7 +16,7 @@ from pathlib import Path
 import yaml
 
 from tools.ci import arcs
-from tools.ci.test_ci_workflow import _run_step, _workflows
+from tools.ci.test_ci_workflow import _every_step, _run_step
 
 #: The action's directory, and the ``$/`` form GitHub loads it by from the running commit
 #: (ruling plan#2375).
@@ -76,18 +76,10 @@ class TestTheDockerfilesUvIsOneRecipe:
         action's first step and ci.yml's ``image`` job, each by ``$/``, which GitHub loads from
         the running commit, never ``./``, which reads whatever the checkout holds."""
         callers = set()
-        for name, workflow in _workflows().items():
-            for job_name, job in workflow["jobs"].items():
-                for step in job["steps"]:
-                    if "dockerfile-uv" in step.get("uses", ""):
-                        assert step["uses"] == USES, (name, job_name)
-                        callers.add((name, job_name))
-        for path in sorted((arcs.REPO / ".github/actions").glob("*/action.y*ml")):
-            steps = yaml.safe_load(path.read_text(encoding="utf-8"))["runs"].get("steps", [])
-            for at, step in enumerate(steps):
-                if "dockerfile-uv" in step.get("uses", ""):
-                    assert step["uses"] == USES, path
-                    callers.add((path.parent.name, at))
+        for where, step in _every_step():
+            if "dockerfile-uv" in step.get("uses", ""):
+                assert step["uses"] == USES, where
+                callers.add(where)
         assert callers == {("ci.yml", "image"), ("install-lock", 0)}
 
     def _export(self, tmp_path: Path, **env: str):

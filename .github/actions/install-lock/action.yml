@@ -37,11 +37,10 @@
 # uv's cache here is a directory of the job's own under ``RUNNER_TEMP``,
 # which the runner empties as each job starts and ends, and every package
 # the install reads is a download checked against the lock's hash.  The
-# two image builds (ci.yml's ``image`` job and docker-publish.yml's) read
-# no layer cache.  No check is built to refuse a cache coming back: the
-# exact-shape tests of this action and of ci.yml's image build refuse some
-# forms in passing, and of docker-publish.yml's build inputs the tests read
-# only ``provenance`` (ruling plan#2746).  Review holds that line.
+# app image's build, .github/actions/build-image (both image builds' one
+# recipe), reads no layer cache.  No check is built to refuse a cache coming
+# back: the exact-shape tests of this action and of the build action refuse
+# some forms in passing.  Review holds that line.
 
 name: Install the lock
 description: The job's Python from .python-version and its packages from uv.lock, by the Dockerfile's uv.

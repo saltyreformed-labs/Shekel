@@ -35,7 +35,7 @@ from ._helpers import (
     _create_transfer,
     _create_other_user_with_template,
 )
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # ── Template Management ───────────────────────────────────────────

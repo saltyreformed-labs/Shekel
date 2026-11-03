@@ -93,9 +93,9 @@ def _build_derived_loan_transfer(
     case that parts them builds a payment due OFF the contractual day.
 
     Returns ``(loan_account, escrow_version, scenario_id)``.  The
-    transfer's stored default amount is intentionally a stale value so
-    the test can prove the live override, not the stored amount, drives
-    the result.
+    transfer's stated price is intentionally a stale value so the test
+    can prove the live override, not the stated price, drives the
+    result.
 
     The loan is built by the shared :func:`create_loan_account` factory, so it
     carries the genesis posting ledger every production loan-write path opens in

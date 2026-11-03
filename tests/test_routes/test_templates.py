@@ -91,7 +91,7 @@ from tests.oracles.recurrence_baseline import (
     EVERY_N_PERIODS,
     MONTHLY,
 )
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -891,7 +891,7 @@ class TestTemplateUpdate:
         """True iff an active salary profile references the template.
 
         A salary-linked template's instances are paycheck-calculated, so its
-        ``default_amount`` is vestigial and ``owns_its_amount`` refuses it a
+        definition states no price and ``owns_its_amount`` refuses it a
         price series on this answer.  The update route passed it to the
         chooser as ``amount_drives_instances=False`` until plan step X-bp;
         the chooser asks only when the price series changed now, which an

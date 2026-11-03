@@ -23,7 +23,7 @@ from tests._test_helpers import (
     generate_row_of,
     make_income_template,
 )
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 class TestGridInterestAccrual:

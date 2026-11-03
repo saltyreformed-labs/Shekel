@@ -31,7 +31,6 @@ from tests._test_helpers import (
 from app.services.amount_ownership import state_own_amount
 
 from ._helpers import _MONTHLY_DAY, build_rule, _calendar, _matched_periods
-from tests._test_helpers import newest_price
 
 
 class TestRecurrenceGeneration:

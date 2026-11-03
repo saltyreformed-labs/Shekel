@@ -6861,30 +6861,6 @@ def state_template_price(template, amount, *, effective_on=None):
     )
 
 
-def newest_price(template):
-    """Return the NEWEST price *template*'s series states, or ``None`` for none.
-
-    What a template's ``default_amount`` column held -- the write door kept it
-    on the series' newest version -- until plan step X-bp dropped it (rulings
-    R-IY, R-BAL16), so an assertion of the column is re-pointed here with its
-    figure kept.  ``None`` for a definition with no series: a salary profile's
-    or a loan payment that follows its loan, which state no price.
-
-    Args:
-        template: A transaction or transfer template.
-
-    Returns:
-        The newest version's amount as a ``Decimal``, or ``None``.
-    """
-    # Pylint: ``import-outside-toplevel`` -- this module imports no app
-    # symbols at top level (its collection-time-safety convention).
-    # pylint: disable=import-outside-toplevel
-    from app.services import template_amount_service
-
-    versions = template_amount_service.amount_versions(template)
-    return Decimal(str(versions[-1].amount)) if versions else None
-
-
 def bare_expense_template(
     db_session, seed_user, name="Cadence Under Test", *, account=None,
     is_envelope=False,
@@ -7877,9 +7853,9 @@ def make_loan_payment_template(
         seed_user: The ``seed_user`` fixture dict (supplies the owner and the
             checking account the payment leaves from).
         loan_account: The destination loan account.
-        amount: The template's stored ``default_amount``.  In derive mode this
-            is the snapshot a generated row carries and the live derivation
-            supersedes; in manual mode it is the figure the owner stated.
+        amount: The price stated into its series before the settings row is
+            attached.  In derive mode that series is dormant and the live
+            derivation answers; in manual mode it is the figure stated.
         derive_from_loan: The settings row's mode.
         extra_principal: The settings row's standing monthly overpayment.
         cadence: The :class:`~tests.oracles.recurrence_baseline.ShapeCadence`

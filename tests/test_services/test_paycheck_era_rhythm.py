@@ -624,10 +624,10 @@ class TestTheRecurringSalaryRow:
     $52,000.00 paid every 14 days under the made-up FICA-only law installed for
     tax year 2026, a weekly era recorded to take effect after the saved
     record -- with the profile created through the salary form, so its
-    template is the real one (``POST /salary``).  The template's stored
-    ``default_amount`` is then overwritten with a made-up
-    STALE $1.00, which is what a stored copy becomes when a raise date passes
-    between saves: the row must not read it.
+    template is the real one (``POST /salary``).  Its ``default_amount`` copy
+    was then overwritten with a made-up STALE $1.00, what a stored copy became
+    when a raise date passed between saves, until plan step X-bp dropped the
+    column: the row is priced live, as it was then.
     """
 
     @pytest.fixture(autouse=True)
@@ -647,7 +647,7 @@ class TestTheRecurringSalaryRow:
         saved at today's $1,847.00.
         """
         with app.app_context():
-            template = self._seed_with_a_stale_copy(
+            template = self._seed_through_the_salary_form(
                 db, auth_client, seed_user, seed_periods_today,
             )
             view = recurring_view.build_view(
@@ -659,7 +659,7 @@ class TestTheRecurringSalaryRow:
             assert row.equivalent.per_paycheck == Decimal("923.50")
 
     @staticmethod
-    def _seed_with_a_stale_copy(db, auth_client, seed_user, periods):
+    def _seed_through_the_salary_form(db, auth_client, seed_user, periods):
         """The owner above through the salary form.
 
         Its template's ``default_amount`` copy was then made a stale $1.00, so
@@ -700,7 +700,7 @@ class TestTheRecurringSalaryRow:
         loads the Recurring page passing.  This renders it.
         """
         with app.app_context():
-            self._seed_with_a_stale_copy(
+            self._seed_through_the_salary_form(
                 db, auth_client, seed_user, seed_periods_today,
             )
             html = auth_client.get("/templates").get_data(as_text=True)
@@ -733,7 +733,7 @@ class TestTheRecurringSalaryRow:
         1.00 x 52 / 12 = $4.33 here.
         """
         with app.app_context():
-            template = self._seed_with_a_stale_copy(
+            template = self._seed_through_the_salary_form(
                 db, auth_client, seed_user, seed_periods_today,
             )
             user_id = seed_user["user"].id

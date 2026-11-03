@@ -215,8 +215,8 @@ class TestSalaryNegativePaths:
 class TestNetBiweeklyMismatchFixes:
     """Tests for the root causes of net biweekly mismatch (section 3.3).
 
-    Verifies that creating a salary profile sets template default_amount to
-    NET, not GROSS, and that a future year prices on the latest year's law.
+    Verifies that a created salary profile's definition is priced at NET,
+    not GROSS, and that a future year prices on the latest year's law.
     The other two causes -- a state or FICA save that did not regenerate the
     salary rows -- went with those Settings saves at plan step salary:X-at-1,
     which left the tax law nothing in the app can edit.

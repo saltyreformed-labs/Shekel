@@ -20,7 +20,7 @@ from tests.test_services.test_statement_match._builders import a_later_period, a
 from tests._test_helpers import family_journal_filter, last_covered_day, resolved_amount
 
 from ._helpers import _a_deposit, _record
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 class TestTheRowItWrites:

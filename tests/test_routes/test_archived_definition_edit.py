@@ -62,7 +62,7 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────

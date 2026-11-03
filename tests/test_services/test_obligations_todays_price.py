@@ -52,7 +52,6 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.oracles.recurrence_baseline import MONTHLY
-from tests._test_helpers import newest_price
 
 #: The frozen "today", inside ``seed_periods_52``'s schedule (2026-01-02 on).
 _TODAY = date(2026, 7, 1)

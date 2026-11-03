@@ -42,7 +42,7 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY, MONTHLY_FIRST
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 _ONE_DAY = timedelta(days=1)
 

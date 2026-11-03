@@ -25,7 +25,7 @@ from tests._test_helpers import (
     loan_params_for,
 )
 from app.services.obligations_aggregator import todays_price
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 class TestLoanPaymentPipeline:

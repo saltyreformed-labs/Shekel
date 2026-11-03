@@ -74,7 +74,7 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.test_routes._statement_forms import form_fields
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 def _one_off(seed_user, seed_periods_today):

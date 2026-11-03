@@ -13,10 +13,14 @@ from app.enums import StatusEnum
 from app.services import transfer_recurrence
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
-from tests._test_helpers import create_account_of_type, make_cadence_rule
+from tests._test_helpers import (
+    constraint_name_from,
+    create_account_of_type,
+    make_cadence_rule,
+)
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 from tests._test_helpers import state_template_price
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # --- Negative-Path Tests ---------------------------------------------------
@@ -67,19 +71,24 @@ class TestNegativePaths:
     ):
         """Zero-amount transfer template is rejected by the DB CHECK constraint.
 
-        Input: Template with default_amount=0.00.
-        Expected: IntegrityError from ck_transfer_templates_positive_amount.
-        The DB enforces that default_amount > 0 at the schema level.
+        Input: Template stating a price of 0.00.
+        Expected: IntegrityError from
+        ck_template_amount_versions_transfer_positive_amount: the series
+        enforces a transfer's price > 0 at the schema level, as the template's
+        own ck_transfer_templates_positive_amount did until plan step X-bp.
         Why: A zero-amount transfer is financially meaningless. The DB constraint
         catches this before the recurrence engine ever runs.
         """
         from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
         with app.app_context():
-            with pytest.raises(SAIntegrityError):
+            with pytest.raises(SAIntegrityError) as exc:
                 self._make_template_with_rule(
                     seed_user, EVERY_PERIOD, amount=Decimal("0.00")
                 )
+            assert constraint_name_from(exc.value) == (
+                "ck_template_amount_versions_transfer_positive_amount"
+            )
             # Rollback the failed transaction so subsequent tests can use the session.
             db.session.rollback()
 
@@ -186,9 +195,10 @@ class TestNegativePaths:
     ):
         """Negative transfer amount is rejected by the DB CHECK constraint.
 
-        Input: Template with default_amount=-100.00.
-        Expected: IntegrityError from ck_transfer_templates_positive_amount.
-        The DB enforces that default_amount > 0 at the schema level.
+        Input: Template stating a price of -100.00.
+        Expected: IntegrityError from one of the series' two floors, which a
+        negative price fails both of (the template's own
+        ck_transfer_templates_positive_amount until plan step X-bp).
         Why: A negative transfer amount could reverse the direction of money
         flow, causing incorrect account balances. The DB constraint prevents
         it before the service ever runs.
@@ -196,11 +206,15 @@ class TestNegativePaths:
         from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
         with app.app_context():
-            with pytest.raises(SAIntegrityError):
+            with pytest.raises(SAIntegrityError) as exc:
                 self._make_template_with_rule(
                     seed_user, EVERY_PERIOD,
                     amount=Decimal("-100.00"),
                 )
+            assert constraint_name_from(exc.value) in {
+                "ck_template_amount_versions_nonneg_amount",
+                "ck_template_amount_versions_transfer_positive_amount",
+            }
             # Rollback the failed transaction so subsequent tests can use the session.
             db.session.rollback()
 
@@ -209,8 +223,8 @@ class TestNegativePaths:
     ):
         """Commit 32 / MED-07 / PA-25: amounts past Numeric(12,2) max are rejected.
 
-        Input: Template with default_amount=10_000_000_000.00 (11 integer
-        digits, exceeds the column's Numeric(12,2) capacity of
+        Input: Template stating a price of 10_000_000_000.00 (11 integer
+        digits, exceeds the series amount's Numeric(12,2) capacity of
         9,999,999,999.99).
         Expected: DataError (NumericValueOutOfRange) -- the column cannot
         represent the value, so PostgreSQL rejects the INSERT before the
@@ -235,8 +249,8 @@ class TestNegativePaths:
     ):
         """Commit 32 / MED-07 / PA-25: Numeric(12,2) max is accepted.
 
-        Input: Template with default_amount=9_999_999_999.99 (the largest
-        value the column can store -- 10 integer digits + 2 decimal
+        Input: Template stating a price of 9_999_999_999.99 (the largest
+        value the series amount can store -- 10 integer digits + 2 decimal
         places).
         Expected: the row inserts and persists the exact Decimal back.
         Pairs with test_max_amount_overflow_rejected_by_db to define the

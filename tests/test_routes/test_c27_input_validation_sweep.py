@@ -62,7 +62,7 @@ from app.services.row_valuation import settled_figure
 from tests._test_helpers import (
     one_off_row_of, open_books_before_the_first_assertion, rhythm_of,
 )
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

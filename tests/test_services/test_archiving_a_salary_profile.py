@@ -8,8 +8,8 @@ that computed it moved nothing.  A declared row is priced by its DEFINITION, and
 once no ACTIVE profile names that definition the salary-linked refinement stops
 applying -- amount rule 3 answers instead, from the single price version
 ``routes/salary/profiles.delete_profile`` opens the template's series at.  That
-version is the ``default_amount`` scalar, which
-``template_amount_service.is_salary_linked_template`` documents as *vestigial*
+version was the ``default_amount`` scalar until plan step X-bp, which
+``template_amount_service.is_salary_linked_template`` documented as *vestigial*
 for exactly this kind of template, and a scalar cannot express a paycheck.
 
 Measured on the 2026-09-02 production clone WITHOUT the freeze: 50 of 59 rows

@@ -23,7 +23,7 @@ from app.models.amount_ownership import AmountOwnership
 from tests._test_helpers import transfer_amount
 
 from ._helpers import _create_savings_account
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # ── One-Time Transfer Tests ────────────────────────────────────────────

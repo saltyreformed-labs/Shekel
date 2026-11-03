@@ -94,7 +94,7 @@ from tests._test_helpers import (
     settlement_if_settling,
     state_template_price,
 )
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -2340,7 +2340,7 @@ class TestTheActualHalfAsksTheAmountModel:
         fall-through reads: ``$321.00`` effective thirty days before the row,
         the version the row's DATE selects, and ``$200.00`` on the owner's
         today (:func:`make_expense_template`'s own statement), the NEWEST
-        price and so the one ``default_amount`` holds.  A fall-through that
+        price and so the one ``default_amount`` held.  A fall-through that
         answered the definition's newest price rather than its price on the
         row's own due date would read ``$200.00``.  Both prices were
         ``$321.00`` when plan step ``balance:X-bi-6-4d-2`` first built this
@@ -2594,7 +2594,7 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
         states the ``$100.00`` price effective TODAY, so a version sixty days
         after a January 2026 row stopped being the newest the day the suite
         ran past March 2026, and a resolver mutated to read the newest
-        version -- ``default_amount``, which ``set_amount`` re-syncs onto it
+        version -- ``default_amount``, which ``set_amount`` re-synced onto it
         -- answered ``$100.00`` and passed.  Tomorrow is newest on every
         clock.  Red with that mutation, green without.
         """

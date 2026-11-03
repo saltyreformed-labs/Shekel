@@ -395,7 +395,7 @@ class TestTransferTemplateCreateSchema:
         assert "_schema" in exc.value.messages
 
     def test_zero_amount_rejected(self):
-        """default_amount=0 fails Range(min=0, min_inclusive=False)."""
+        """amount=0 fails Range(min=0, min_inclusive=False)."""
         with pytest.raises(ValidationError) as exc:
             TransferTemplateCreateSchema().load({
                 "name": "Zero Transfer",

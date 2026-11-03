@@ -50,7 +50,7 @@ from app.services.amount_ownership import state_own_amount
 from app.services.recurrence_engine import unruled_row_fields
 from app.services.template_amount_service import amount_as_of, amount_versions
 from tests._test_helpers import resolved_amount
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 def _spec(seed_user, **overrides):

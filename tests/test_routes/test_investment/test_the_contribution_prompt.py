@@ -19,7 +19,7 @@ from ._helpers import (
     _create_deduction,
     _create_transfer_template,
 )
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 class TestContributionPrompt:

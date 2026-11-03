@@ -229,6 +229,9 @@ mutation                   what it does                                   what f
 ``m6_fixed_period``        rule 2 prices EVERY paycheck from ONE period    ``salary_raise``, 30
 ========================== ============================================== =========================
 
+``m2`` cannot be applied again: plan step balance:X-bp dropped the column it
+reads, so its row is the 2026-09-09 measurement and nothing more.
+
 All eight exit **1** and all eight report *refusals: 0*, so pass 1 sees none of
 them.  Three of them -- ``m1``, ``m5`` and ``m6`` -- are the wrong-INSTANCE
 class, and **each passed an earlier draft of this very file**; ``m6`` fires on
@@ -303,7 +306,6 @@ from app.services.cash_ledger import (
 )
 from app.services.amount_ownership import state_own_amount
 from tests._test_helpers import write_past_the_amount_seam
-from tests._test_helpers import newest_price
 
 # The unit every money perturbation is built from.  It is SCALED by the source
 # row's own id at each use, so two instances of one source kind can never move
@@ -578,9 +580,10 @@ def _apply_newest_transaction_version(_records):
     series together, so a resolver that answered the NEWEST version for every
     row -- ignoring supersession, and mispricing every row whose due date
     predates the latest price change -- moved by exactly the expected amount and
-    passed.  ``set_amount`` keeps ``default_amount`` equal to the newest
-    version, so that is also the defect the ``m2`` negative control was firing
-    on for an incidental reason rather than because the harness could see
+    passed.  ``set_amount`` kept ``default_amount`` equal to the newest
+    version (until plan step balance:X-bp dropped the column), so that was
+    also the defect the ``m2`` negative control was firing on for an
+    incidental reason rather than because the harness could see
     supersession.
 
     Moving the newest version ALONE splits the population on a stored date: a

@@ -35,7 +35,7 @@ from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service as tas
 from tests._test_helpers import create_savings_account, make_salary_profile
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ class TestOwnsItsAmount:
             assert tas.owns_its_amount(_txn_template(seed_user)) is True
 
     def test_salary_linked_template_does_not(self, app, db, seed_user):
-        """A paycheck-calculated template's ``default_amount`` is vestigial.
+        """A paycheck-calculated template states no price of its own.
 
         The recurrence engine prices each of its rows from the paycheck
         calculator, so versioning that column would record a computed figure as
@@ -653,8 +653,8 @@ class TestDeleteAmountVersion:
     ):
         """Withdrawing the newest entry would move what generation writes.
 
-        ``default_amount`` is the price generation puts on every row an edit
-        rebuilds, and this door runs no regeneration and offers no conflict
+        The newest entry prices every row due on or after its date, and
+        this door runs no regeneration and offers no conflict
         chooser -- so a withdrawal that moved it would leave the rows already
         generated disagreeing with the definition, silently.  Cancelling a
         queued rise is a price change and belongs in the Amount field.

@@ -21,7 +21,7 @@ from tests.oracles.recurrence_baseline import MONTHLY
 from ._helpers import _create_loan_account, _payment_template, _create_mortgage
 from app.services.balance_at import BalanceContext
 from app.services.obligations_aggregator import todays_price
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # ── Transfer Prompt Tests (Commit 5.1-3) ─────────────────────────
@@ -351,9 +351,9 @@ class TestTransferPrompt:
     ):
         """Creating a payment with an extra stores it on settings, not the base.
 
-        The standing extra rides the settings row (spec Sec. 6.3); the
-        ``default_amount`` stays the derived base (P&I + escrow), NOT base +
-        extra -- the extra is applied live, never baked in.
+        The standing extra rides the settings row (spec Sec. 6.3); the base
+        is the derived P&I + escrow, priced live and stated nowhere, so the
+        extra is applied live, never baked in.
         """
         from app.models.transfer_template import TransferTemplate  # pylint: disable=import-outside-toplevel
 

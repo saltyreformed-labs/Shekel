@@ -72,7 +72,7 @@ from tests._test_helpers import (
     make_loan_payment_template,
     state_template_price,
 )
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 #: Frozen so "today" cannot drift past the schedule ``seed_periods`` builds.
 _TODAY = date(2026, 3, 1)

@@ -24,7 +24,7 @@ from tests._test_helpers import (
     make_every_period_rule,
     one_off_row_of,
 )
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 def _no_baseline(user_id):
@@ -40,11 +40,11 @@ def _no_baseline(user_id):
     return BalanceContext(user_id=user_id, scenario=None, as_of=date.today())
 
 
-#: What a template's ``default_amount`` says when the graded figure is its
-#: price SERIES.  Distinct from every amount the cases below state, so a
-#: producer reading the scalar instead of the series answers a number no
-#: assertion expects (see :func:`_derived_income_row` for how the scalar is
-#: made to hold it).
+#: The NEWEST price a definition states when the graded figure is its price
+#: on the row's own day: what its ``default_amount`` copy held until plan step
+#: X-bp.  Distinct from every amount the cases below state, so a producer
+#: reading the newest price instead answers a number no assertion expects
+#: (see :func:`_derived_income_row` for how the series is made to hold it).
 _NOT_THE_SERIES = Decimal("7.77")
 
 
@@ -65,7 +65,7 @@ def _derived_income_row(db, seed_user, account, period, amount):
     balance:X-cf), written into the owner's baseline scenario, which is
     what both callers price against.
 
-    **``default_amount`` is deliberately NOT the graded figure.**  An
+    **The newest price is deliberately NOT the graded figure.**  An
     adversarial review of plan step X-au-d found a first version setting both
     to *amount*, which makes the series and the scalar the same number -- and
     ``_stated_amount``'s empty-series refusal is then invisible: replacing that
@@ -74,7 +74,7 @@ def _derived_income_row(db, seed_user, account, period, amount):
     scalar is what makes the series load-bearing.
 
     **Passing ``_NOT_THE_SERIES`` to the constructor did not achieve that, and
-    plan step balance:X-cf-3 measured it.**  ``set_amount`` re-syncs
+    plan step balance:X-cf-3 measured it.**  ``set_amount`` re-synced
     ``default_amount`` onto the NEWEST version it states
     (``template_amount_service._resync_scalar``), so the constructor's
     ``7.77`` was overwritten with *amount* on the next line and the resolver

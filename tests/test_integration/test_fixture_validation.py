@@ -35,7 +35,7 @@ from tests._test_helpers import (
 )
 from tests.conftest import SEED_USER_BOOTSTRAP_START
 from tests.oracles.recurrence_baseline import MONTHLY
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 class TestSeedSecondUser:

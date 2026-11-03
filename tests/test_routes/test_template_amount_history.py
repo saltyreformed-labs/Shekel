@@ -48,7 +48,7 @@ from tests._test_helpers import (
     transfer_repriced_by_the_owner,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -374,8 +374,8 @@ class TestTheConflictChooserRoundTrip:
 
         **The edit's date is FUTURE for the same reason, and a fixed
         ``2026-06-01`` was silently wrong once the opening version moved to
-        today.**  ``default_amount`` means the NEWEST stated price, so a
-        statement dated before an existing version does not move the scalar --
+        today.**  ``default_amount`` meant the NEWEST stated price, so a
+        statement dated before an existing version did not move the scalar --
         and the chooser was gated on the scalar having moved
         (``regenerate_or_conflict_chooser``).  With a back-dated edit the first
         case stopped rendering the chooser at all and returned 302: it was
@@ -1121,7 +1121,7 @@ class TestWithdrawAmountVersion:
         """This door corrects the RECORD; it never moves what is budgeted.
 
         It runs no regeneration and offers no conflict chooser, so a withdrawal
-        that changed ``default_amount`` would leave the rows already generated
+        that changed a price would leave the rows already generated
         disagreeing with the definition, silently.  Refusing keeps the panel a
         safe surface and sends a real price change to the Amount field.
         """

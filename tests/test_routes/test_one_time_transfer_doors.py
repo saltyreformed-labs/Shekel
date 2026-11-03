@@ -92,7 +92,7 @@ from tests._test_helpers import (
 )
 from tests.oracles.recurrence_baseline import MONTHLY_FIRST
 from tests.test_routes._statement_forms import form_fields
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 def _savings(seed_user):

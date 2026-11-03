@@ -372,7 +372,7 @@ class TestEmergencyFundCommittedBaseline:
     def test_emergency_fund_monthly_template_contribution(
         self, app, seed_user,
     ):
-        """A monthly template contributes its exact default_amount as the
+        """A monthly template contributes its exact stated price as the
         monthly equivalent -- NOT multiplied by 26/12.
         """
         with app.app_context():

@@ -17,7 +17,7 @@ from tests._test_helpers import add_escrow_line, make_cadence_rule, state_templa
 from tests.oracles.recurrence_baseline import MONTHLY
 
 from ._helpers import _payment_template, _create_mortgage
-from tests._test_helpers import newest_price
+from tests._definition_price import newest_price
 
 
 def _todays_figure(template, seed_user):
@@ -69,7 +69,7 @@ class TestPaymentDrift:
 
         Mirrors the two real production loans (a payment created before the
         loan_payment_settings feature): an active monthly TransferTemplate with a
-        recurrence rule and a stored ``default_amount``, and no 1:1 settings row --
+        recurrence rule and a stated price, and no 1:1 settings row --
         which every reader treats as manual mode (derive_from_loan False, no extra).
         Its price is STATED, as both production definitions' are (the
         template-amount backfill gave every existing template a version):
@@ -160,12 +160,12 @@ class TestPaymentDrift:
         """A short BASE warns even when a standing extra pushes total cash over contract.
 
         The firing control for ruling D3's ``extra_principal``-cancellation
-        property: the warning compares the extra-free BASE (``default_amount``) to
+        property: the warning compares the extra-free BASE (its stated price) to
         the contractual P&I + escrow, so a manual payment with base = contract-$50
         and a $75 standing extra -- total live cash contract+$25, ABOVE contract --
         must STILL warn, because the base under-covers P&I + escrow.  A regression
-        that added the extra to the compared (stored) side (``stored =
-        default_amount + extra``) would suppress this warning and still pass every
+        that added the extra to the compared (stated) side (``stated =
+        base + extra``) would suppress this warning and still pass every
         other test in the class; this asserts the $50.00 base shortfall renders.
         """
         acct = _create_mortgage(seed_user, db.session)
@@ -213,14 +213,14 @@ class TestPaymentDrift:
     def test_dashboard_no_warning_when_derive_even_after_escrow_rise(
         self, auth_client, seed_user, db, seed_periods,
     ):
-        """A DERIVE payment never warns, even when its stored base is now stale.
+        """A DERIVE payment never warns, even after its contract rises.
 
         The control that proves derive mode is EXCLUDED, not merely free of drift:
-        a derive transfer is created (default_amount = contract at creation), then a
-        $200/mo escrow line is added so the contract rises ABOVE the stored base.
-        The underpayment predicate (stored < contract) is now TRUE -- asserted
-        directly -- yet no warning shows, because a derive payment recomputes its
-        cash to the contract on every read and cannot drift.
+        a derive transfer is created, then a $200/mo escrow line is added so the
+        contract rises ABOVE what it was at creation.  The payment states no base
+        to fall short of it -- asserted directly -- and no warning shows, because
+        a derive payment recomputes its cash to the contract on every read and
+        cannot drift.
         """
         from app.models.transfer_template import TransferTemplate  # pylint: disable=import-outside-toplevel
 
@@ -519,8 +519,8 @@ class TestPaymentDrift:
         """A fixed payment's figure and drift are its NEXT row's price, per the amount model.
 
         The owner states a future price on a fixed payment ($9,999.00 from
-        2028).  ``default_amount`` follows the NEWEST statement
-        (``template_amount_service._resync_scalar``), so the first cut of the
+        2028).  ``default_amount`` followed the NEWEST statement
+        (``_resync_scalar``, until plan step X-bp), so the first cut of the
         card -- and the drift before it -- would have shown $9,999.00 as what
         the loan is paid and judged the drift on it.  The strip prices the
         next occurrence through ``cash_ledger.definition_cash`` (ruling

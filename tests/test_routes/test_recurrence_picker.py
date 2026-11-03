@@ -95,7 +95,8 @@ from tests.oracles.recurrence_baseline import (
     SEMI_ANNUAL,
     ANNUAL,
 )
-from tests._test_helpers import newest_price, state_template_price
+from tests._definition_price import newest_price
+from tests._test_helpers import state_template_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

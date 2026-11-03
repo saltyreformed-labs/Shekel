@@ -142,7 +142,7 @@ class TestNegativePaths:
     ):
         """Zero-amount template generates transactions with amount=0.00.
 
-        Input: Template with default_amount=0.00, every_period pattern.
+        Input: Template stating a price of 0.00, every_period pattern.
         Expected: One transaction per period, each with estimated_amount=0.00.
         The engine does not skip zero-amount templates.
         Why: A template accidentally set to $0 must behave predictably, not crash

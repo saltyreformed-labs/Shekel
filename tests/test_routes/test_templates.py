@@ -92,6 +92,7 @@ from tests.oracles.recurrence_baseline import (
     MONTHLY,
 )
 from tests._definition_price import newest_price
+from tests._repo_root import REPO_ROOT
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -3010,10 +3011,7 @@ class TestRecurrenceCellLock:
 
     def _read_template_source(self, parts):
         """Return the contents of a template file under ``app/templates``."""
-        import pathlib  # pylint: disable=import-outside-toplevel
-
-        path = pathlib.Path(__file__).resolve().parents[2].joinpath(*parts)
-        return path.read_text(encoding="utf-8")
+        return REPO_ROOT.joinpath(*parts).read_text(encoding="utf-8")
 
     def _macro_body(self):
         """Return the ``recurrence_cell`` macro's body, without its comment.

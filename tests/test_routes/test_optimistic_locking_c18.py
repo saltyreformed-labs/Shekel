@@ -26,8 +26,6 @@ F-010 (High) / commit C-18 of the 2026-04-15 security remediation
 plan.
 """
 
-# pylint: disable=too-many-lines
-
 from decimal import Decimal
 
 import pytest

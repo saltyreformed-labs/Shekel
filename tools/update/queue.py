@@ -64,8 +64,11 @@ never judged.
 
 **A trial merge GitHub has not made** reads ``UNKNOWN`` while GitHub makes it in the
 background, which the read itself starts (measured on #626 and #628: a read seconds later held
-it); GitHub's documentation directs a re-read after a wait, made up to :data:`REREADS` times,
-:data:`REREAD_SECONDS` apart.
+it); GitHub's documentation directs a re-read after a wait.  The run waits for every such pull
+request together (:func:`_made`, ruling plan#2764): each still unmade is read again in rounds,
+up to :data:`REREADS` of them :data:`REREAD_SECONDS` apart, so the run sleeps that many times
+at most however many there are, beside one read a round of each still unmade, and each is
+judged once the rounds end, after the others.
 
 Usage, at the root of a checkout whose ``origin`` is this repository, which serves each trial
 merge with no credential, being public::
@@ -111,7 +114,8 @@ APP_VARIABLE = "UPDATE_APP_SLUG"
 DEPENDABOT = "dependabot"
 #: The branch a security update is moved off.
 OFF = MAIN.partition("/")[2]
-#: How many times a trial merge GitHub has not made is read again, and how many seconds apart.
+#: How many rounds the run reads again each trial merge GitHub has not made, and how many
+#: seconds apart.
 REREADS = 6
 REREAD_SECONDS = 10
 
@@ -259,15 +263,34 @@ class Queue:
     sleep: Callable[[float], None]
 
 
-def _made(queue: Queue, pull: Pull) -> Pull:
-    """``pull`` once GitHub has made its trial merge: read again up to :data:`REREADS` times,
-    :data:`REREAD_SECONDS` apart, while it reads :data:`_MAKING`; as last read."""
+def _making(pull: Pull) -> bool:
+    """Whether GitHub was still making ``pull``'s trial merge when it was read."""
+    return pull.mergeable == _MAKING
+
+
+def _made(queue: Queue, pulls: Sequence[Pull]) -> tuple[list[Pull], list[tuple[Pull, str]]]:
+    """``pulls``, each read while GitHub was making its trial merge, waited for together
+    (ruling plan#2764): each still :func:`_making` read again in rounds, up to :data:`REREADS`
+    of them :data:`REREAD_SECONDS` apart, so the run sleeps that many times at most however
+    many there are.  Each as last read, in order; and each whose read failed, read no more,
+    with why."""
+    last: list[Pull] = list(pulls)
+    unread: list[tuple[Pull, str]] = []
     for _ in range(REREADS):
-        if pull.mergeable != _MAKING:
+        if not any(_making(pull) for pull in last):
             break
         queue.sleep(REREAD_SECONDS)
-        pull = _read(queue.github, queue.repository, pull.number)
-    return pull
+        read = []
+        for pull in last:
+            if not _making(pull):
+                read.append(pull)
+                continue
+            try:
+                read.append(_read(queue.github, queue.repository, pull.number))
+            except (GitHubError, requests.RequestException) as error:
+                unread.append((pull, described(error)))
+        last = read
+    return last, unread
 
 
 def _onto(root: Path, pull: Pull) -> str | None:
@@ -380,8 +403,8 @@ def _unready(pull: Pull) -> str | None:
 
 
 def _unmade(pull: Pull) -> str | None:
-    """Why ``pull``, read again while GitHub made its trial merge (:func:`_made`), has none to
-    judge; None when it has one."""
+    """Why ``pull``, as last read (:func:`_made` where GitHub was making its trial merge), has
+    no trial merge to judge; None when it has one."""
     if pull.mergeable == _CONFLICTS:
         return f"it conflicts with {INTO}"
     if pull.mergeable != _MADE or pull.merge is None:
@@ -403,8 +426,14 @@ def _checked(queue: Queue, pull: Pull) -> str:
 
 
 def _judged(queue: Queue, pull: Pull) -> str:
-    """What the run does with ``pull``, read again while GitHub made its trial merge
-    (:func:`_made`), by that trial merge: its line's text."""
+    """What the run does with ``pull``, as last read (:func:`_made` where GitHub was making its
+    trial merge), by that trial merge: its line's text.
+
+    Raises:
+        GitHubError, requests.RequestException: when GitHub refuses a read or a write, or
+            cannot be reached.
+        tools.ci.gitcmd.GitError: as :func:`_onto` and the walk raise it.
+    """
     if why := _unmade(pull):
         return f"left: {why}"
     if (onto := _onto(queue.root, pull)) is None:
@@ -415,9 +444,10 @@ def _judged(queue: Queue, pull: Pull) -> str:
     return _checked(queue, pull)
 
 
-def queued(queue: Queue, pull: Pull) -> str:
+def queued(queue: Queue, pull: Pull) -> str | None:
     """What ``queue`` does with ``pull``, a bot's pull request of its repository: its line's
-    text.
+    text; None where GitHub is still making its trial merge, which the run waits for beside
+    every other such (:func:`_made`) and then judges (:func:`_judged`).
 
     Raises:
         GitHubError, requests.RequestException: when GitHub refuses a read or a write, or
@@ -432,7 +462,53 @@ def queued(queue: Queue, pull: Pull) -> str:
         return f"left: {why}"
     if pull.removed is not None:
         return _removed(queue, pull)
-    return _judged(queue, _made(queue, pull))
+    if _making(pull):
+        return None
+    return _judged(queue, pull)
+
+
+def _line(pull: Pull, said: str) -> None:
+    """Print ``pull``'s line: what the run did with it, and why."""
+    print(f"#{pull.number} ({pull.branch}): {said}")
+
+
+def _failed(pull: Pull, why: str) -> int:
+    """Print that a read or a write of ``pull`` failed, and ``why``: one failure, counted."""
+    print(f"#{pull.number} ({pull.branch}): failed: {why}", file=sys.stderr)
+    return 1
+
+
+def _tried(pull: Pull, act: Callable[[], str | None]) -> int | None:
+    """Do ``act``, what the run does with ``pull``, printing its line: 0 done; 1 where a read or
+    a write failed (:func:`_failed`), each other pull request still tried; None where ``act``
+    says the run waits for its trial merge (:func:`queued`), printing nothing."""
+    try:
+        line = act()
+    except (GitHubError, requests.RequestException, GitError) as error:
+        return _failed(pull, described(error))
+    if line is None:
+        return None
+    _line(pull, line)
+    return 0
+
+
+def _each(queue: Queue, pulls: Sequence[Pull]) -> int:
+    """Do with each of ``pulls`` what :func:`queued` says, printing its line, each whose trial
+    merge GitHub is making waited for beside every other such (:func:`_made`) and judged after
+    them: how many failed, each other still tried."""
+    failed, making = 0, []
+    for pull in pulls:
+        if (done := _tried(pull, partial(queued, queue, pull))) is None:
+            making.append(pull)
+        else:
+            failed += done
+    made, unread = _made(queue, making)
+    for pull, why in unread:
+        failed += _failed(pull, why)
+    for pull in made:
+        # _judged always says what it did, so it never waits: 0 or 1.
+        failed += _tried(pull, partial(_judged, queue, pull)) or 0
+    return failed
 
 
 def run(github: GitHub, repository: str, app: str, root: Path,
@@ -447,17 +523,7 @@ def run(github: GitHub, repository: str, app: str, root: Path,
         return 1
     bots = {DEPENDABOT, app}
     ours = [pull for pull in pulls if pull.bot in bots and not pull.fork]
-    queue = Queue(github, repository, app, root, sleep)
-    failed = 0
-    for pull in ours:
-        try:
-            line = queued(queue, pull)
-        except (GitHubError, requests.RequestException, GitError) as error:
-            print(f"#{pull.number} ({pull.branch}): failed: {described(error)}",
-                  file=sys.stderr)
-            failed += 1
-        else:
-            print(f"#{pull.number} ({pull.branch}): {line}")
+    failed = _each(Queue(github, repository, app, root, sleep), ours)
     print(f"update queue: {len(ours)} of {len(pulls)} open pull requests are by "
           f"{' or '.join(sorted(bots))}; {failed} failed")
     return 1 if failed else 0

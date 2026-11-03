@@ -35,6 +35,8 @@ _REPOSITORY = "owner/shekel"
 _GRAPHQL = "https://api.github.com/graphql"
 #: A commit no repository holds: a fetch of it fails, so a test that reaches git with one fails.
 _NOWHERE = "f" * 40
+#: A read again that GitHub refuses, where a fake's ``rereads`` holds it.
+_REFUSED = {"refused": "Could not resolve to a PullRequest with the number of 7."}
 
 
 def _lock(version):
@@ -74,7 +76,8 @@ class _Response:
 class _GitHub:  # pylint: disable=too-many-instance-attributes
     """GitHub's API as the queue uses it, over recorded pull requests (each a node as
     GraphQL answers :data:`queue._FIELDS`): the open ones ``page`` at a time, each one read
-    again from ``rereads`` (by number, its later states in turn), each one's ``comments``
+    again from ``rereads`` (by number, its later states in turn, :data:`_REFUSED` refused as
+    GitHub refuses a read), each one's ``comments``
     (by number, each a node as GraphQL answers :data:`queue._COMMENTS`; none until a test
     gives some, a comment written here added as the App's) ``page`` at a time too, each
     read of them recorded in ``reads``, and each write in ``writes``, an enqueue or a
@@ -147,8 +150,14 @@ class _GitHub:  # pylint: disable=too-many-instance-attributes
             return _Response(200, {"data": {"repository": {"pullRequests": {
                 "nodes": self.pulls[start:end],
                 "pageInfo": {"hasNextPage": end < len(self.pulls), "endCursor": str(end)}}}}})
-        return _Response(200, {"data": {"repository": {
-            "pullRequest": self.rereads[variables["number"]].pop(0)}}})
+        return self._reread(variables["number"])
+
+    def _reread(self, number):
+        """Pull request ``number`` read again: its next state, or refused at :data:`_REFUSED`."""
+        state = self.rereads[number].pop(0)
+        if state is _REFUSED:
+            return _Response(200, {"errors": [{"message": state["refused"]}]})
+        return _Response(200, {"data": {"repository": {"pullRequest": state}}})
 
 
 def _by(login, kind="Bot"):
@@ -379,6 +388,71 @@ def test_a_trial_merge_never_made_is_left_after_the_rereads(world, capsys):
     assert not fake.writes
     assert (f"left: GitHub had made no trial merge of it after {REREADS} reads "
             f"{REREAD_SECONDS} s apart") in capsys.readouterr().out
+
+
+def test_every_unmade_trial_merge_is_waited_for_together_a_minute_at_most(world, capsys):
+    """Three pull requests whose trial merges GitHub never makes: each read again in every
+    round, and the run waits :data:`REREADS` times in all, not that many for each (ruling
+    plan#2764); each left, nothing written."""
+    making = [_node(number, _NOWHERE, None) for number in (7, 8, 9)]
+    fake = _GitHub(making, rereads={pull["number"]: [pull] * REREADS for pull in making})
+    assert _run(world, fake) == (0, [REREAD_SECONDS] * REREADS)
+    assert fake.rereads == {7: [], 8: [], 9: []}
+    assert not fake.writes
+    out = capsys.readouterr().out
+    for number in (7, 8, 9):
+        assert (f"#{number} (update/{number}): left: GitHub had made no trial merge of it "
+                f"after {REREADS} reads {REREAD_SECONDS} s apart\n") in out
+
+
+def test_each_trial_merge_made_during_the_rounds_is_judged_once_they_end(world, capsys):
+    """#7 is made on the first round, #8 on the third and #9 never: each is read no more once
+    made, the rounds go on while #9 is unmade, and #7 and #8 are queued at their heads once
+    they end, after #6, whose trial merge was made when listed, so it waited for none."""
+    heads = {number: world.pull(number, {LOCK: _lock("12.4.1")}) for number in (6, 7, 8)}
+    nodes = {number: _node(number, *heads[number]) for number in heads}
+    unmade = {number: _node(number, heads[number][0], None) for number in (7, 8)}
+    never = _node(9, _NOWHERE, None)
+    fake = _GitHub([nodes[6], unmade[7], unmade[8], never], rereads={
+        7: [nodes[7]], 8: [unmade[8], unmade[8], nodes[8]], 9: [never] * REREADS})
+    asleep = [("sleep", REREAD_SECONDS)] * REREADS
+    assert _run(world, fake, lambda seconds: fake.writes.append(("sleep", seconds))) == (0, [])
+    assert fake.rereads == {7: [], 8: [], 9: []}
+    enqueued = {number: ("enqueue", f"PR_{number}", heads[number][0]) for number in heads}
+    assert fake.writes == [enqueued[6], *asleep, enqueued[7], enqueued[8]]
+    assert [line.partition(":")[0] for line in capsys.readouterr().out.splitlines()] == [
+        "#6 (update/6)", "#7 (update/7)", "#8 (update/8)", "#9 (update/9)", "update queue"]
+
+
+def test_a_read_github_refuses_during_the_rounds_fails_that_pull_request_alone(world, capsys):
+    """GitHub refuses #7's read on the first round: #7 is read no more, its line says so and
+    the run fails, and #8, made on that round, is still queued, with no second round."""
+    head, merge = world.pull(8, {LOCK: _lock("12.4.1")})
+    fake = _GitHub([_node(7, _NOWHERE, None), _node(8, head, None)],
+                   rereads={7: [_REFUSED], 8: [_node(8, head, merge)]})
+    assert _run(world, fake) == (1, [REREAD_SECONDS])
+    assert fake.writes == [("enqueue", "PR_8", head)]
+    out, err = capsys.readouterr()
+    assert "#7 (update/7): failed: graphql:" in err
+    assert "Could not resolve to a PullRequest" in err
+    assert f"#8 (update/8): queued at {head[:12]}" in out
+    assert out.endswith("1 failed\n")
+
+
+def test_a_write_refused_for_one_made_during_the_rounds_fails_it_alone(world, capsys):
+    """#7 and #8, each made on the first round: GitHub refuses #7's enqueue, so its line says
+    so and the run fails, and #8 is still queued after it."""
+    first, first_merge = world.pull(7, {LOCK: _lock("12.4.1")})
+    second, second_merge = world.pull(8, {LOCK: _lock("12.3.1")})
+    fake = _GitHub([_node(7, first, None), _node(8, second, None)], refuse={7}, rereads={
+        7: [_node(7, first, first_merge)], 8: [_node(8, second, second_merge)]})
+    assert _run(world, fake) == (1, [REREAD_SECONDS])
+    assert fake.writes == [("enqueue", "PR_7", first), ("enqueue", "PR_8", second)]
+    out, err = capsys.readouterr()
+    assert "#7 (update/7): failed: graphql:" in err
+    assert "Pull request is not mergeable" in err
+    assert f"#8 (update/8): queued at {second[:12]}" in out
+    assert out.endswith("1 failed\n")
 
 
 @pytest.mark.parametrize(("node", "said"), [

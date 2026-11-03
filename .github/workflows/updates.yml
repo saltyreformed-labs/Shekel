@@ -100,9 +100,10 @@
 # on the development host 2026-11-03 with no uv cache and no Python, the uv
 # export with BuildKit's cache warm (0.97 s), the landing install (1.47 s)
 # and ``uv lock --upgrade`` (1.04 s).  The queue's own wait is not among
-# them: until task plan#2766 shares it (ruling plan#2764), tools/update/queue.py
-# waits up to a minute for each pull request's trial merge in turn, which five
-# open ones can fill.  The workflow's own runs re-size each limit (plan#2763).
+# them: for the trial merges GitHub has not made, tools/update/queue.py
+# sleeps ``REREADS`` times ``REREAD_SECONDS`` a run at most, however many pull
+# requests it judges, beside one read a round of each still unmade (ruling
+# plan#2764).  The workflow's own runs re-size each limit (plan#2763).
 
 name: Updates
 

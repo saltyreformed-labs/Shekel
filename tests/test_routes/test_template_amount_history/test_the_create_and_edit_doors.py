@@ -1,14 +1,17 @@
-"""Amount-history route tests: creating a definition opens its price series, archiving its salary
-profile gives it one, and an edit records its price at the date it states, refuses a wild date,
-and bumps the version counter once.
+"""Amount-history route tests: creating a definition opens its price series and leaves its version
+counter where its INSERT put it, archiving its salary profile gives it one, and an edit records its
+price at the date it states, refuses a wild date, and bumps the version counter once.
 """
 
 from datetime import date
 from decimal import Decimal
 
+from app import ref_cache
+from app.enums import TxnTypeEnum
 from app.extensions import db
 from app.utils.dates import display_today
 from app.models.ref import TransactionType
+from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service as tas
@@ -27,6 +30,47 @@ from ._helpers import (
 # ── The create doors ─────────────────────────────────────────────────
 
 
+def _geico_create_form(seed_user):
+    """What the Recurring form posts to create Geico at $165.30."""
+    return {
+        "name": "Geico",
+        "amount": "165.30",
+        "category_id": seed_user["categories"]["Rent"].id,
+        "transaction_type_id": db.session.query(TransactionType)
+            .filter_by(name="Expense").one().id,
+        "account_id": seed_user["account"].id,
+        # A transaction template REQUIRES a cadence since plan step
+        # balance:X-bi-7b (R-BAL23); the series is what these grade.
+        **cadence_payload(),
+    }
+
+
+def _money_market_create_form(seed_user, savings, start_period):
+    """What the transfer form posts to create a $250.00 contribution to *savings*."""
+    return {
+        "name": "Money Market Contribution",
+        "amount": "250.00",
+        "from_account_id": seed_user["account"].id,
+        "to_account_id": savings.id,
+        "category_id": seed_user["categories"]["Rent"].id,
+        "start_period_id": start_period.id,
+    }
+
+
+def _updates_recorded_for(table_name, row_id):
+    """Return how many UPDATEs of ``budget.<table_name>`` row *row_id* the audit log holds.
+
+    The audit trigger writes one row per UPDATE statement the database runs,
+    so this counts what was SENT, which a model attribute cannot: the counter
+    an UPDATE carries is whatever the mapper assigned.
+    """
+    return db.session.execute(db.text(
+        "SELECT count(*) FROM system.audit_log"
+        " WHERE table_schema = 'budget' AND table_name = :table_name"
+        " AND row_id = :row_id AND operation = 'UPDATE'"
+    ), {"table_name": table_name, "row_id": row_id}).scalar_one()
+
+
 class TestCreateOpensTheSeries:
     """A definition is born with its price recorded, not just stored."""
 
@@ -39,17 +83,10 @@ class TestCreateOpensTheSeries:
         resolver plan step X-au-b builds would have nothing to answer from.
         """
         with app.app_context():
-            resp = auth_client.post("/templates", data={
-                "name": "Geico",
-                "amount": "165.30",
-                "category_id": seed_user["categories"]["Rent"].id,
-                "transaction_type_id": db.session.query(TransactionType)
-                    .filter_by(name="Expense").one().id,
-                "account_id": seed_user["account"].id,
-                # A transaction template REQUIRES a cadence since plan step
-                # balance:X-bi-7b (R-BAL23); the series is what this grades.
-                **cadence_payload(),
-            }, follow_redirects=True)
+            resp = auth_client.post(
+                "/templates", data=_geico_create_form(seed_user),
+                follow_redirects=True,
+            )
             assert resp.status_code == 200
 
             template = db.session.query(TransactionTemplate).filter_by(
@@ -70,14 +107,13 @@ class TestCreateOpensTheSeries:
             )
             db.session.commit()
 
-            resp = auth_client.post("/transfers", data={
-                "name": "Money Market Contribution",
-                "amount": "250.00",
-                "from_account_id": seed_user["account"].id,
-                "to_account_id": savings.id,
-                "category_id": seed_user["categories"]["Rent"].id,
-                "start_period_id": seed_periods_today[0].id,
-            }, follow_redirects=True)
+            resp = auth_client.post(
+                "/transfers",
+                data=_money_market_create_form(
+                    seed_user, savings, seed_periods_today[0],
+                ),
+                follow_redirects=True,
+            )
             assert resp.status_code == 200
 
             template = db.session.query(TransferTemplate).filter_by(
@@ -87,6 +123,95 @@ class TestCreateOpensTheSeries:
             assert len(versions) == 1
             assert versions[0].amount == Decimal("250.00")
             assert versions[0].effective_date == display_today()
+
+
+class TestOpeningTheSeriesBumpsNoCounter:
+    """A create leaves the definition's counter at 1 and sends no UPDATE of its row.
+
+    The counter guards a price a form was shown, and a series with no version
+    in the database has shown none.  Until plan#2734 the write door bumped it
+    for any definition already INSERTed, and the three doors here flush the
+    definition before they state its price, so each sent an UPDATE taking
+    ``version_id`` from 1 to 2, which the audit log recorded.  (The investment
+    and loan-payment doors state the price before their flush, so they never
+    reached the bump.)
+    """
+
+    def test_the_recurring_transaction_form(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """POST /templates: Geico at $165.30, counter 1, no UPDATE."""
+        with app.app_context():
+            resp = auth_client.post(
+                "/templates", data=_geico_create_form(seed_user),
+                follow_redirects=True,
+            )
+            assert resp.status_code == 200
+
+            db.session.expire_all()
+            template = db.session.query(TransactionTemplate).filter_by(
+                name="Geico",
+            ).one()
+            assert tas.amount_versions(template)[0].amount == Decimal("165.30")
+            assert template.version_id == 1
+            assert _updates_recorded_for("transaction_templates", template.id) == 0
+
+    def test_the_recurring_transfer_form(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """POST /transfers: a $250.00 contribution, counter 1, no UPDATE."""
+        with app.app_context():
+            savings = create_savings_account(
+                seed_user, db.session, "Money Market", Decimal("0.00"),
+            )
+            db.session.commit()
+
+            resp = auth_client.post(
+                "/transfers",
+                data=_money_market_create_form(
+                    seed_user, savings, seed_periods_today[0],
+                ),
+                follow_redirects=True,
+            )
+            assert resp.status_code == 200
+
+            db.session.expire_all()
+            template = db.session.query(TransferTemplate).filter_by(
+                name="Money Market Contribution",
+            ).one()
+            assert tas.amount_versions(template)[0].amount == Decimal("250.00")
+            assert template.version_id == 1
+            assert _updates_recorded_for("transfer_templates", template.id) == 0
+
+    def test_a_one_off_from_the_grid(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """POST /transactions: a $162.25 one-off's definition, counter 1, no UPDATE.
+
+        The modal and the grid cell share ``one_off.place_one_off``, which
+        mints the definition this grades.
+        """
+        with app.app_context():
+            resp = auth_client.post("/transactions", data={
+                "name": "Kayla's Kindle",
+                "estimated_amount": "162.25",
+                "account_id": seed_user["account"].id,
+                "category_id": seed_user["categories"]["Groceries"].id,
+                "pay_period_id": seed_periods_today[4].id,
+                "transaction_type_id": ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
+                "scenario_id": seed_user["scenario"].id,
+            })
+            assert resp.status_code == 201, resp.data[:400]
+
+            db.session.expire_all()
+            definition = db.session.query(Transaction).filter_by(
+                name="Kayla's Kindle",
+            ).one().template
+            assert tas.amount_versions(definition)[0].amount == Decimal("162.25")
+            assert definition.version_id == 1
+            assert _updates_recorded_for(
+                "transaction_templates", definition.id,
+            ) == 0
 
 
 class TestEligibilityCanBeGAINED:

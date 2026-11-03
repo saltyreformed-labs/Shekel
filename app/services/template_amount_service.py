@@ -298,7 +298,7 @@ def _states_something_new(template, amount: Decimal, effective_on: date) -> bool
 
 
 def _series_changed(template) -> None:
-    """Bump *template*'s optimistic-lock counter: its price series changed.
+    """Bump *template*'s optimistic-lock counter: a price it has shown changed.
 
     **The definition's counter guards its PRICE, and its price is rows of
     another table.**  Every stale-form guard on a definition compares the
@@ -317,12 +317,24 @@ def _series_changed(template) -> None:
     the loaded one, so a concurrent writer still raises ``StaleDataError``
     and an edit that also writes a column of the row bumps once.
 
-    A template not yet inserted has no counter to guard: its INSERT opens it.
+    **Opening a series bumps nothing** (plan#2734).  A form can hold the
+    counter only of a price it was shown, and a series with no version in
+    the database has shown none: a definition being created, which every
+    create door prices in the request that INSERTs it, or a salary
+    profile's definition, whose archive opens its series at today's
+    paycheck (its edit form shows no Amount box while the profile prices
+    it, ruling plan#2694).  This skipped only a definition not yet
+    INSERTed until plan#2734, so the three create doors that flush the
+    definition before pricing it (both recurring forms and the one-off
+    producer) sent an UPDATE taking ``version_id`` from 1 to 2, with an
+    audit-log row for it.  The versions are read rather than the template
+    because the one test covers both: a definition not yet INSERTed has
+    no version in the database either.
 
     Args:
         template: The transaction or transfer template whose series changed.
     """
-    if inspect(template).has_identity:
+    if any(inspect(version).has_identity for version in template.amount_versions):
         template.version_id = template.version_id + 1
 
 

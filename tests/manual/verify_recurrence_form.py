@@ -31,8 +31,9 @@ same defect class one control over: a date the user typed and then moved off
 would reach the write door beside a mode that does not name it, and rendered
 HTML cannot tell a hidden input from a disabled one.  The transfer form's
 LOCKED case (a loan payment, whose bound the app derives) is asserted in
-``tests/test_routes/test_templates.py`` instead, because it is a property of
-the SERVER's render rather than of the script.
+``tests/test_routes/test_templates/test_a_loan_payments_recurrence.py``
+instead, because it is a property of the SERVER's render rather than of the
+script.
 
 **Plan step R7b-4 replaced the "First paycheck" ``<select>`` with a "Starts on"
 DATE and gave the surviving ``<select>`` one job**

@@ -421,12 +421,12 @@ class TestPreviewCarryForwardEnvelopeTargetResolution:
         (:func:`definition_firing_twice_in_a_paycheck`), its one row in the
         first paycheck as the source and its two in the second as the target.
         **Which row was chosen is read off the ROW after the mutating call**,
-        not off a figure: both rows are dated on the same due date
-        (``compute_due_date`` reads the paycheck, not the occurrence -- ledger
-        row D18, plan step R5), so the definition's series prices them alike
-        and no preview figure can tell them apart.  The preview grades the
-        ruling (not ambiguous); the execution grades WHICH of the two received
-        the money.
+        not off a figure: each row is due on its own occurrence
+        (``compute_due_date``, ruling R-R94, plan step R5-a), but the
+        definition states one price, so its series prices them alike and no
+        preview figure can tell them apart.  The preview grades the ruling
+        (not ambiguous); the execution grades WHICH of the two received the
+        money.
         """
         with app.app_context():
             template, first_paycheck, target_period = (

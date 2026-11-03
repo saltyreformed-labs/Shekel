@@ -305,16 +305,16 @@ def _resync_scalar(template) -> None:
     Generation used to write the scalar onto every row an edit rebuilt from
     ``effective_from`` forward; since plan steps balance:X-au-e (a
     transaction) and X-au-f-2 (a transfer) generation writes no figure at
-    all, and the column is read rather than copied (``git grep -n
-    default_amount app/`` is the census): carry-forward's generated target
-    among them.  (The Recurring list, its Archived drawer and the savings page's
-    floors read it until plan step X-bp, which prices them as of the read
-    pass's day by the rule that prices the definition's rows instead,
-    ``obligations_aggregator.todays_price``; the conflict chooser's gate
-    read it until the same step, which compares the series before and after
-    the edit instead, :func:`series_image`.)  A
-    scheduled rise still has to reach the column the moment it is stated, or
-    those readers would go on answering the old figure.  Today's price is a
+    all, and plan step X-bp re-pointed every reader of the column: the
+    Recurring list, its Archived drawer and the savings page's floors price a
+    definition as of the read pass's day by the rule that prices its rows
+    (``obligations_aggregator.todays_price``), the conflict chooser's gate
+    compares the series before and after the edit (:func:`series_image`),
+    and carry-forward's generated target prices the row the engine would
+    generate (``carry_forward_service._context._generated_row_price``).  No
+    ``app/`` code reads the column now; it is kept in step until the same
+    step drops it, so the X-au-e and X-au-f cutover migrations' downgrades
+    still find the newest price there.  Today's price is a
     different question, and the edit form asks it separately
     (``routes/_amount_version_actions.edit_form_amount``, which reads
     :func:`amount_as_of` on today; it read a ``current_amount`` here that fell
@@ -363,10 +363,9 @@ def set_amount(template, amount: Decimal, *, effective_on: date) -> None:
     generation writes no figure and the series answers on each row's own due
     date (a generated transfer stored it until X-au-f-2) -- but it did not go
     with either step: plan step X-bp deletes it from both template tables
-    (rulings **R-IY**, **R-BAL16**), and until then it is still READ.  The
-    census of its readers is ``git grep -n default_amount app/``; among them,
-    the carry-forward resolver reads it as a GENERATE target's base, and the
-    X-au-e and X-au-f cutover migrations' downgrades restore from it.
+    (rulings **R-IY**, **R-BAL16**), and it re-pointed every ``app/`` reader
+    first, carry-forward's GENERATE target base last.  Until the column goes,
+    the X-au-e and X-au-f cutover migrations' downgrades restore from it.
 
     Every route that states a template's amount goes through this door: the
     two create forms, the two edit forms, the investment contribution

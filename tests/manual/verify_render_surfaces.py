@@ -14,6 +14,13 @@ never "is the figure right".  A byte count is a coarse instrument on purpose:
 it is a REGRESSION check, and the figures are the other three harnesses' job.
 Two identical byte counts can both be wrong.
 
+**The two statements and the paycheck locks render here too** (plan task
+plan#2773): the Statements pill's two partials, by an HTMX GET, over each
+window kind and once per paycheck, and the pay-periods settings section, whose
+chips show each paycheck's lock.  Their figures are
+``verify_statement_baseline.py``'s; this one sees a statement page that stops
+answering, which that one, calling the producers, cannot.
+
 Run it before a change and after, and diff the two JSON files::
 
     DATABASE_URL=postgresql://.../shekel \\
@@ -48,11 +55,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from app import create_app  # noqa: E402
 from app.extensions import db, login_manager  # noqa: E402
 from app.models.account import Account  # noqa: E402
+from app.models.pay_period import PayPeriod  # noqa: E402
 from app.models.user import User  # noqa: E402
 from app.utils.session_helpers import login_session_stamps  # noqa: E402
 # pylint: enable=wrong-import-position
 
-#: The whole-page and self-refresh surfaces that read a per-period balance.
+#: The whole-page and self-refresh surfaces that read a per-period balance, and
+#: the pay-periods settings section, whose chips render each paycheck's lock.
 ROUTES = [
     "/grid",
     "/grid/balance-row",
@@ -63,7 +72,34 @@ ROUTES = [
     "/accounts",
     "/retirement",
     "/analytics",
+    "/settings?section=pay-periods",
 ]
+
+#: The two statements, requested as the Statements pill requests them: an
+#: HTMX GET, since a plain one answers the analytics shell and renders no
+#: statement (D13).  The income statement's three window kinds at their
+#: defaults (the current paycheck, month and year), and the balance sheet as
+#: of today and as of the route's floor, before any ledger line: its empty
+#: state.
+STATEMENT_ROUTES = [
+    "/analytics/income-statement",
+    "/analytics/income-statement?window=month",
+    "/analytics/income-statement?window=year",
+    "/analytics/balance-sheet",
+    "/analytics/balance-sheet?as_of=2000-01-01",
+]
+
+#: The statements once per paycheck, formatted with each pay period's id and
+#: first day in turn: the income statement over that paycheck, and the balance
+#: sheet as of its first day.
+PERIOD_STATEMENT_ROUTES = [
+    "/analytics/income-statement?window=pay_period&period_id={period_id}",
+    "/analytics/balance-sheet?as_of={start_date}",
+]
+
+#: The header an HTMX request carries, and the prefix its snapshot key takes.
+_HTMX = {"HX-Request": "true"}
+_HTMX_KEY = "HX "
 
 #: The per-account surfaces, formatted with each account id in turn.  A route
 #: that does not apply to an account's kind answers 404 by design.
@@ -82,22 +118,37 @@ ACCOUNT_ROUTES = [
 ]
 
 
-def _probe(client, route):
+def _probe(client, route, headers=None):
     """Return the recorded shape of one GET.
 
     Args:
         client: The Flask test client, already carrying a session.
         route: The path to request.
+        headers: Request headers, or ``None`` for none (:data:`_HTMX` for an
+            HTMX partial).
 
     Returns:
         ``{"status": int, "bytes": int, "location": str | None}``.
     """
-    response = client.get(route, follow_redirects=False)
+    response = client.get(route, headers=headers, follow_redirects=False)
     return {
         "status": response.status_code,
         "bytes": len(response.get_data()),
         "location": response.headers.get("Location"),
     }
+
+
+def _statement_routes(periods):
+    """Return every statement route to request: the fixed ones, then each paycheck's.
+
+    Args:
+        periods: The owner's pay periods, each ``{"period_id": int,
+            "start_date": ISO date}``, by first day.
+    """
+    return STATEMENT_ROUTES + [
+        template.format(**period)
+        for period in periods for template in PERIOD_STATEMENT_ROUTES
+    ]
 
 
 def main(out_path):
@@ -124,6 +175,11 @@ def main(out_path):
             db.session.query(Account).filter_by(user_id=user_id)
             .order_by(Account.id).all()
         ]
+        periods = [
+            {"period_id": row.id, "start_date": row.start_date.isoformat()}
+            for row in db.session.query(PayPeriod).filter_by(user_id=user_id)
+            .order_by(PayPeriod.start_date).all()
+        ]
     client = app.test_client()
     with client.session_transaction() as session:
         session["_user_id"] = str(user_id)
@@ -139,6 +195,8 @@ def main(out_path):
         for template in ACCOUNT_ROUTES:
             route = template.format(account_id)
             snapshot[route] = _probe(client, route)
+    for route in _statement_routes(periods):
+        snapshot[_HTMX_KEY + route] = _probe(client, route, _HTMX)
     with open(out_path, "w", encoding="utf-8") as handle:
         json.dump(snapshot, handle, indent=2, sort_keys=True)
     server_errors = {

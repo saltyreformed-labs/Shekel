@@ -1,9 +1,11 @@
 """Run a script by path with the clock frozen at one instant: one side's baseline read.
 
-``tests/manual/run_deploy_rewrites_on_dump.py`` runs each side's own figure baselines
-(``verify_balance_baseline.py``, ``verify_statement_baseline.py``) from that side's worktree on
-that side's deployed copy through this, so both sides read the one instant every deploy ran
-under, and a run that crossed midnight could not read two days.  The clock is frozen as the
+The production-dump runners (``run_deploy_rewrites_on_dump.py``, ``run_statements_on_dump.py``,
+each by ``_side_runs.run_pinned_on``) run a side's figure baselines and render probe
+(``verify_balance_baseline.py``, ``verify_statement_baseline.py``,
+``verify_render_surfaces.py``) from that side's worktree on that side's deployed copy through
+this, so both sides read the one instant every deploy ran under, and a run that crossed
+midnight could not read two days.  The clock is frozen as the
 release kit's side probes freeze it (``tools/rehearsal/side/deploy.py``: ``time_machine``, no
 tick, before the script's first line runs), and the script runs as ``python <script> <args>``
 has it: as ``__main__``, ``sys.argv`` naming it and its arguments, ``sys.path[0]`` its own

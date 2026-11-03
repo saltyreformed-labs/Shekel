@@ -3,8 +3,9 @@
 ``docker-publish.yml`` builds the release image only on a push to ``main``, so before task
 plan#2366 a change that broke the build landed in ``dev`` and failed only at the release.  The
 job builds the image on every pull request, queue group and push to ``main``, never pushes it,
-and checks that it runs psycopg's C implementation, holds exactly the lock's runtime set and
-its ``server`` group, and holds no pip and no uv; ``lint-and-test`` grades it
+asks for the release's provenance record so a runner that cannot attach one fails it, and
+checks that it runs psycopg's C implementation, holds exactly the lock's runtime set and its
+``server`` group, and holds no pip and no uv; ``lint-and-test`` grades it
 (:mod:`tools.ci.ci_verdict`).
 """
 from __future__ import annotations
@@ -87,7 +88,10 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         holds no secret and widens no permission, and its steps run in this order; neither it
         nor the release's build job uses ``docker/setup-buildx-action``, whose builder pulls a
         BuildKit image (ruling plan#2742).  Another way of setting up a builder is not read
-        here: review holds that line."""
+        here: review holds that line.  Both builds ask for the provenance record at ``mode=max``
+        by name, the release's in its one build step, the one whose digest cosign signs, so a
+        runner that cannot attach the record fails this job before it fails a release (ruling
+        plan#2746)."""
         job = _jobs()["image"]
         assert set(job) == {"runs-on", "timeout-minutes", "env", "steps"}
         assert job["env"] == {"IMAGE": self.IMAGE}
@@ -98,14 +102,18 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         assert steps["Checkout code"]["with"] == {"persist-credentials": False}
         assert steps[self.BUILD]["with"] == {
             "context": ".", "push": False, "load": True, "tags": "${{ env.IMAGE }}",
+            "provenance": "mode=max",
         }
         publish = _workflows()["docker-publish.yml"]["jobs"]["build-and-push"]
-        release = {step["uses"].split("@")[0]: step["uses"] for step in publish["steps"]
-                   if "uses" in step}
+        actions = [step["uses"].split("@")[0] for step in publish["steps"] if "uses" in step]
         uses = steps[self.BUILD]["uses"]
         assert re.fullmatch(r"docker/build-push-action@[0-9a-f]{40}", uses)
-        assert release[uses.split("@")[0]] == uses
-        assert "docker/setup-buildx-action" not in release
+        builds = [step for step in publish["steps"]
+                  if step.get("uses", "").split("@")[0] == "docker/build-push-action"]
+        assert [step.get("id") for step in builds] == ["build"]
+        assert builds[0]["uses"] == uses
+        assert builds[0]["with"]["provenance"] == "mode=max"
+        assert "docker/setup-buildx-action" not in actions
         assert not re.search(r"\bsecrets\b", yaml.safe_dump(job))
 
     def test_uv_is_the_dockerfiles_by_the_one_recipe(self):

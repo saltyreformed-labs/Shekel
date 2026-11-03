@@ -599,6 +599,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # ``provenance`` is the release build's, here as its check (ruling
+      # plan#2746): the release asks for its provenance record by name, and
+      # a runner whose image store cannot attach one refuses that build
+      # before its push.  Asked for here too, the same refusal fails this job
+      # at a pull request, not first at a release.  The record this build
+      # keeps goes with the runner.  Unlike the checks below, this refusal is
+      # not measured: no daemon here runs the classic store.  It is read in
+      # buildx v0.38.1's build/opt.go, which refuses an attestation on a
+      # ``docker`` driver that cannot store one (2026-11-03).
       - name: Build the image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -606,6 +615,7 @@ jobs:
           push: false
           load: true
           tags: ${{ env.IMAGE }}
+          provenance: mode=max
 
       # uv for the package check, from the Dockerfile's own uv stage by the
       # one recipe every job's install takes it by: the binary the build ran,

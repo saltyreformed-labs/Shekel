@@ -19,7 +19,6 @@ import yaml
 
 from tools.ci import arcs
 from tools.ci.test_ci_workflow import _jobs, _run_step, _steps, _workflows
-from tools.ci.test_dockerfile_uv_action import ACTION_FILE as DOCKERFILE_UV_FILE
 from tools.ci.test_dockerfile_uv_action import USES as DOCKERFILE_UV
 
 
@@ -98,7 +97,6 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         assert steps["Checkout code"]["with"] == {"persist-credentials": False}
         assert steps[self.BUILD]["with"] == {
             "context": ".", "push": False, "load": True, "tags": "${{ env.IMAGE }}",
-            "cache-from": "type=gha",
         }
         publish = _workflows()["docker-publish.yml"]["jobs"]["build-and-push"]
         release = {step["uses"].split("@")[0]: step["uses"] for step in publish["steps"]
@@ -108,16 +106,6 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
             assert re.fullmatch(r"docker/[\w.-]+@[0-9a-f]{40}", uses), name
             assert release[uses.split("@")[0]] == uses, name
         assert not re.search(r"\bsecrets\b", yaml.safe_dump(job))
-
-    def test_the_layer_cache_is_read_and_never_written(self):
-        """No step of the job writes a cache, the uv step's action read whole: a pull
-        request's or a queue group's is restorable by its own ref alone, and one a push to
-        ``main`` wrote would sit in the scope the release workflow restores."""
-        for step in _jobs()["image"]["steps"]:
-            text = yaml.safe_dump(step)
-            if step.get("uses") == DOCKERFILE_UV:
-                text += DOCKERFILE_UV_FILE.read_text(encoding="utf-8")
-            assert "cache-to" not in text and "actions/cache@" not in text, step["name"]
 
     def test_uv_is_the_dockerfiles_by_the_one_recipe(self):
         """The job takes uv from the action every job's install takes it from, by the ``$/``

@@ -72,25 +72,24 @@ INSTALL_LOCK = "$/.github/actions/install-lock"
 #: The step that calls it, named alike in every job.
 INSTALL_STEP = "Install the lock"
 
-#: What each job installs from the lock, and whether it keeps uv's cache: every job but the
-#: two that build the app image (ci.yml's ``image`` and the release's), which run no Python on
-#: the runner, and the update alert, which installs nothing so a failed install cannot stop it
-#: (plan#2481).  The landing job and the update's keyed jobs hold a token and the release
-#: publishes, so none restores a cache; the scheduled runs keep none, as they kept no pip cache.
+#: What each job installs from the lock: every job but the two that build the app image
+#: (ci.yml's ``image`` and the release's), which run no Python on the runner, and the update
+#: alert, which installs nothing so a failed install cannot stop it (plan#2481).  None restores
+#: a cache, as no workflow does (ruling plan#2471).
 INSTALLS = {
-    ("ci.yml", "landing"): {"install": "landing", "cache": "false"},
-    ("ci.yml", "tools"): {"install": "all", "cache": "true"},
-    ("ci.yml", "tax-law"): {"install": "runtime", "cache": "true"},
-    ("ci.yml", "lint"): {"install": "all", "cache": "true"},
-    ("ci.yml", "test"): {"install": "all", "cache": "true"},
-    ("ci.yml", "lint-and-test"): {"install": "python", "cache": "false"},
-    ("ci.yml", "polyglot-lint"): {"install": "all", "cache": "true"},
-    ("calendar-sweep.yml", "sweep"): {"install": "all", "cache": "false"},
-    ("tax-law.yml", "watch"): {"install": "runtime", "cache": "false"},
-    ("docker-publish.yml", "tax-law"): {"install": "runtime", "cache": "false"},
-    ("updates.yml", "refresh"): {"install": "landing", "cache": "false"},
-    ("updates.yml", "publish"): {"install": "landing", "cache": "false"},
-    ("updates.yml", "queue"): {"install": "landing", "cache": "false"},
+    ("ci.yml", "landing"): {"install": "landing"},
+    ("ci.yml", "tools"): {"install": "all"},
+    ("ci.yml", "tax-law"): {"install": "runtime"},
+    ("ci.yml", "lint"): {"install": "all"},
+    ("ci.yml", "test"): {"install": "all"},
+    ("ci.yml", "lint-and-test"): {"install": "python"},
+    ("ci.yml", "polyglot-lint"): {"install": "all"},
+    ("calendar-sweep.yml", "sweep"): {"install": "all"},
+    ("tax-law.yml", "watch"): {"install": "runtime"},
+    ("docker-publish.yml", "tax-law"): {"install": "runtime"},
+    ("updates.yml", "refresh"): {"install": "landing"},
+    ("updates.yml", "publish"): {"install": "landing"},
+    ("updates.yml", "queue"): {"install": "landing"},
 }
 
 #: The triggers under which a step's PATH write lets a pull request's code run with the
@@ -660,15 +659,14 @@ class TestTheLandingCheckReadsTheTrackerWithATokenOfItsOwn:
         stand_in.chmod(0o755)
         assert _run(arcs.REPO, {**env, "PATH": f"{tmp_path}:/usr/bin:/bin"}).returncode != 0
 
-    def test_the_install_takes_the_landing_group_alone_and_no_cache(self):
-        """The install step syncs pyproject.toml's ``landing`` group alone, with no cache
-        another run wrote: exactly the two packages the check imports (``requests``, and
-        ``cryptography`` through quill's GitHub client), with the indirect packages they need,
-        at the lock's versions and hashes.  Each is held to its range by its entry in the
-        runtime ``dependencies``, so the group names which packages and never a version."""
+    def test_the_install_takes_the_landing_group_alone(self):
+        """The install step syncs pyproject.toml's ``landing`` group alone: exactly the two
+        packages the check imports (``requests``, and ``cryptography`` through quill's GitHub
+        client), with the indirect packages they need, at the lock's versions and hashes.  Each
+        is held to its range by its entry in the runtime ``dependencies``, so the group names
+        which packages and never a version."""
         assert _steps("landing")[INSTALL_STEP] == {
-            "name": INSTALL_STEP, "uses": INSTALL_LOCK,
-            "with": {"install": "landing", "cache": "false"},
+            "name": INSTALL_STEP, "uses": INSTALL_LOCK, "with": {"install": "landing"},
         }
         project = tomllib.loads((arcs.REPO / "pyproject.toml").read_text(encoding="utf-8"))
         group = project["dependency-groups"]["landing"]
@@ -723,7 +721,7 @@ class TestEveryJobInstallsTheLock:
     def test_each_job_that_runs_python_installs_its_set_right_after_its_checkout(self):
         """Exactly the jobs :data:`INSTALLS` names call the action, each once, as the step
         straight after its checkout (the action reads the checkout's Dockerfile and lock),
-        with its install set and its cache; no other job calls it."""
+        with its install set alone; no other job calls it."""
         calls = {}
         for name, workflow in _workflows().items():
             for job_name, job in workflow["jobs"].items():
@@ -783,9 +781,10 @@ class TestEveryJobInstallsTheLock:
             assert not _runner_python(one_job({"run": run})), run
 
     def test_no_workflow_installs_python_or_packages_any_other_way(self):
-        """No ``setup-python``, no ``python-version``, no cache action of a job's own and no
-        installer run (:data:`INSTALLER_COMMAND`): a second recipe would be a second home of
-        what it installs."""
+        """No ``setup-python``, no ``python-version``, no ``actions/cache`` step (read by that
+        prefix, so its ``restore`` and ``save`` actions pass) and no installer run
+        (:data:`INSTALLER_COMMAND`): a second recipe would be a second home of what it
+        installs."""
         for name, workflow in _workflows().items():
             for job_name, job in workflow["jobs"].items():
                 for step in job["steps"]:

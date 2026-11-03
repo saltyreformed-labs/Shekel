@@ -546,7 +546,7 @@ def test_a_link_where_a_pinning_file_was_is_refused(repo):
 #: A workflow pinning one action by commit, its release beside it, as ci.yml does.
 _WORKFLOW = (f"jobs:\n  test:\n    steps:\n      - uses: actions/checkout@{_SHA} # v7.0.1\n"
              "      - run: pytest\n")
-#: A local action of this repository's own, pinning one action as install-lock does.
+#: A local action of this repository's own, pinning one action by its commit and release.
 _ACTION = (f"runs:\n  using: composite\n  steps:\n"
            f"    - uses: actions/cache@{_SHA} # v6.1.0\n")
 

@@ -65,13 +65,11 @@ jobs:
           persist-credentials: false
 
       # The runtime set only: importing the law imports the ``app`` package,
-      # and the check needs nothing the dev tools add.  No cache: a cache
-      # restored into a release workflow is a way to poison it.
+      # and the check needs nothing the dev tools add.
       - name: Install the lock
         uses: $/.github/actions/install-lock
         with:
           install: runtime
-          cache: "false"
 
       # The real clock, in the display timezone: fails from December 1 while
       # next year is missing (scripts/check_tax_law.py).
@@ -141,8 +139,12 @@ jobs:
           # persist in .git/config (zizmor artipacked hardening).
           persist-credentials: false
 
+      # A runner with no Buildx has the action download it, and by default
+      # restore that download from the Actions cache: ``cache-binary`` off.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          cache-binary: false
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -177,6 +179,11 @@ jobs:
         # We sign by digest (cosign best practice; signing by tag
         # would let a future tag-swap detach the signature from the
         # image bytes it attests to).
+        #
+        # No layer cache, read or written: the image signed is built from
+        # this commit and what it pins and downloads, never from layers
+        # another run left (ruling plan#2471; .github/actions/install-lock's
+        # header says why).
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -184,8 +191,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Sign image with Cosign (keyless OIDC)
         # ``cosign sign`` with no ``--key`` uses the sigstore keyless

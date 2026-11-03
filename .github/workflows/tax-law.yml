@@ -54,7 +54,6 @@ jobs:
         uses: $/.github/actions/install-lock
         with:
           install: runtime
-          cache: "false"
 
       - name: Is next year's tax law in? (fails from November 1)
         run: python scripts/check_tax_law.py notice

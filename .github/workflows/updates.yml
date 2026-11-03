@@ -8,9 +8,10 @@
 #   refresh  Mondays, and on a dispatch from main: checks out dev and runs
 #            the Monday lock refresh (tools/update/refresh.py).  `uv lock`
 #            builds the metadata of the packages the lock holds only as source,
-#            which runs their code, so this job holds no secret and its token
-#            reads only.  What it prepares is uploaded as the run's artifact,
-#            beside the dev commit it read.
+#            which runs their code, so this job holds no secret, its token
+#            reads only, and no workflow restores a cache that code could
+#            write (ruling plan#2471).  What it prepares is uploaded as the
+#            run's artifact, beside the dev commit it read.
 #   publish  after refresh: holds the update App's key and runs main's own
 #            code, installing the landing group alone from main's lock, each
 #            file checked against its hash, and running no other package code
@@ -109,7 +110,6 @@ jobs:
         uses: $/.github/actions/install-lock
         with:
           install: landing
-          cache: "false"
 
       # Its report, summary.md, is written once it has finished, whether or not
       # anything moved, and goes on this run's page too.
@@ -139,7 +139,6 @@ jobs:
         uses: $/.github/actions/install-lock
         with:
           install: landing
-          cache: "false"
 
       - name: Download what the refresh prepared
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -177,7 +176,6 @@ jobs:
         uses: $/.github/actions/install-lock
         with:
           install: landing
-          cache: "false"
 
       - name: Mint the update token
         id: token

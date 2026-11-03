@@ -25,6 +25,24 @@
 # The image runs its base image's Python of the same minor (the Dockerfile's
 # FROM tags, which tests/test_deploy/test_image_supply_chain.py holds to
 # ``.python-version``); the patch releases can differ.
+#
+# NO WORKFLOW RESTORES A CACHE (ruling plan#2471).  Any job on main can
+# write main's Actions cache, whatever its token's permissions, and package
+# code runs there on every push and schedule: CI's jobs and the release's
+# tax-law check on each push to main, and the calendar sweep, the tax-law
+# watch and the dependency update on their schedules, the Monday refresh's
+# ``uv lock`` building source packages (.github/workflows/updates.yml).  A
+# cache restored from that scope would hand the bytes that code left to the
+# run restoring it, a pull request's, a queue group's or the release's.  So
+# uv's cache here is a directory of the job's own under ``RUNNER_TEMP``,
+# which the runner empties as each job starts and ends, and every package
+# the install reads is a download checked against the lock's hash.  The
+# two image builds (ci.yml's ``image`` job and docker-publish.yml's) read
+# no layer cache and take no cached Buildx.  No check is built to refuse a
+# cache coming back: the exact-shape tests of this action and of ci.yml's
+# image build refuse some forms in passing, and none reads the inputs of
+# docker-publish.yml's build or of either Buildx setup.  Review holds that
+# line.
 
 name: Install the lock
 description: The job's Python from .python-version and its packages from uv.lock, by the Dockerfile's uv.
@@ -38,13 +56,6 @@ inputs:
       packages alone, pyproject.toml's ``landing`` group) or ``python``
       (the interpreter and no package).
     required: true
-  cache:
-    description: >-
-      ``true`` keeps uv's cache in the GitHub Actions cache between runs;
-      anything else restores and saves none, as a job holding a token and
-      the release workflow ask, since a cache another run wrote is a way to
-      poison the job that restores it.
-    required: true
 
 runs:
   using: composite
@@ -52,38 +63,6 @@ runs:
     - name: The Dockerfile's uv
       id: uv
       uses: $/.github/actions/dockerfile-uv
-
-    # uv's cache: its directory, which the restore and the install both
-    # read, and the sha256 of the uv binary that writes it, which names uv
-    # in the cache's key.
-    - name: Name uv's cache
-      id: cache
-      shell: bash
-      env:
-        UV: ${{ steps.uv.outputs.bin }}
-      run: |
-        set -euo pipefail
-        sum="$(sha256sum "${UV}")"
-        {
-            echo "dir=${RUNNER_TEMP}/uv-cache"
-            echo "uv=${sum%% *}"
-        } >> "${GITHUB_OUTPUT}"
-
-    # GitHub's own cache action, never a third party's.  The key holds
-    # everything the cache's contents depend on: which packages (the install
-    # set and the lock), which interpreter (``.python-version`` and the uv
-    # that picks its release) and uv's own cache format (the uv binary's
-    # sha256 again).  A saved key is never overwritten, so a key two install
-    # sets shared would hand one of them a cache that lacks its wheels for
-    # good.
-    - name: Restore uv's cache
-      if: inputs.cache == 'true'
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: ${{ steps.cache.outputs.dir }}
-        key: uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.cache.outputs.uv }}-${{ hashFiles('uv.lock', '.python-version') }}
-        restore-keys: |
-          uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.cache.outputs.uv }}-
 
     # pyproject.toml's ``require-build-hashes`` refuses a source build whose
     # build tools no hash covers (its ``build-constraint-dependencies``, which
@@ -103,10 +82,10 @@ runs:
       env:
         UV: ${{ steps.uv.outputs.bin }}
         INSTALL: ${{ inputs.install }}
-        UV_CACHE_DIR: ${{ steps.cache.outputs.dir }}
         UV_PYTHON_PREFERENCE: only-managed
       run: | # zizmor: ignore[github-env]
         set -euo pipefail
+        export UV_CACHE_DIR="${RUNNER_TEMP}/uv-cache"
         sync=("${UV}" sync --locked)
         case "${INSTALL}" in
             all) "${sync[@]}" ;;

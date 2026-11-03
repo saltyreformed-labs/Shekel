@@ -5,7 +5,6 @@ Which jobs call the action, and with what, is ``test_ci_workflow``'s
 """
 from __future__ import annotations
 
-import hashlib
 import re
 
 import yaml
@@ -29,45 +28,25 @@ class TestTheInstallActionInstallsTheLock:
     """The action's own steps, read and RUN with a stand-in for ``uv``."""
 
     UV = "The Dockerfile's uv"
-    NAME = "Name uv's cache"
-    CACHE = "Restore uv's cache"
     INSTALL = "Install from the lock"
 
-    def test_its_inputs_steps_and_pins(self):
-        """Two required inputs; its four steps in order, the first taking uv from the one
-        recipe for it by the ``$/`` form (:mod:`tools.ci.test_dockerfile_uv_action`); every
-        third-party action pinned by sha; GitHub's own cache action, run only when the caller
-        asks for exactly ``true``, keyed on the install set, the uv binary's sha256, the lock
-        and ``.python-version``; and the install step's interpreter uv's own build, never the
-        runner's."""
+    def test_its_input_steps_and_interpreter(self):
+        """One required input, the install set; its two steps in order, unconditional, the
+        first taking uv from the one recipe for it by the ``$/`` form
+        (:mod:`tools.ci.test_dockerfile_uv_action`) and the second a bash step; and the install
+        step's interpreter uv's own build, never the runner's.  No cache is restored (ruling
+        plan#2471)."""
         action = yaml.safe_load(INSTALL_LOCK_FILE.read_text(encoding="utf-8"))
-        assert action["inputs"].keys() == {"install", "cache"}
-        assert all(spec["required"] is True for spec in action["inputs"].values())
+        assert action["inputs"].keys() == {"install"}
+        assert action["inputs"]["install"]["required"] is True
         assert action["runs"]["using"] == "composite"
         steps = _action_steps()
-        assert list(steps) == [self.UV, self.NAME, self.CACHE, self.INSTALL]
+        assert list(steps) == [self.UV, self.INSTALL]
         assert steps[self.UV] == {"name": self.UV, "id": "uv", "uses": DOCKERFILE_UV}
-        for step in steps.values():
-            if "uses" in step and step["uses"] != DOCKERFILE_UV:
-                assert re.fullmatch(r"[\w.-]+/[\w.-]+@[0-9a-f]{40}", step["uses"]), step["name"]
-            elif "uses" not in step:
-                assert step["shell"] == "bash", step["name"]
-        cache = steps[self.CACHE]
-        assert cache["uses"].startswith("actions/cache@")
-        assert cache["if"] == "inputs.cache == 'true'"
-        key = "uv-${{ runner.os }}-${{ inputs.install }}-${{ steps.cache.outputs.uv }}-"
-        assert cache["with"] == {
-            "path": "${{ steps.cache.outputs.dir }}",
-            "key": key + "${{ hashFiles('uv.lock', '.python-version') }}",
-            "restore-keys": key + "\n",
-        }
-        assert all("if" not in steps[name] for name in (self.UV, self.NAME, self.INSTALL))
-        assert steps[self.NAME]["id"] == "cache"
-        assert steps[self.NAME]["env"] == {"UV": "${{ steps.uv.outputs.bin }}"}
+        assert "if" not in steps[self.INSTALL] and steps[self.INSTALL]["shell"] == "bash"
         assert steps[self.INSTALL]["env"] == {
             "UV": "${{ steps.uv.outputs.bin }}",
             "INSTALL": "${{ inputs.install }}",
-            "UV_CACHE_DIR": "${{ steps.cache.outputs.dir }}",
             "UV_PYTHON_PREFERENCE": "only-managed",
         }
 
@@ -87,24 +66,30 @@ class TestTheInstallActionInstallsTheLock:
         names = [line for line in lines[:ignores[0]] if line.startswith("    - name: ")]
         assert names[-1] == f"    - name: {self.INSTALL}"
 
-    def test_the_cache_is_named_for_the_uv_binary_that_writes_it(self, tmp_path):
-        """The naming step, RUN: the cache's directory under the runner's temp directory, and
-        the sha256 of the uv binary the first step handed on, which the key names uv by; a
-        binary it cannot read fails the step, handing nothing on."""
-        run = _action_steps()[self.NAME]["run"]
-        uv, temp, output = tmp_path / "uv", tmp_path / "temp", tmp_path / "github_output"
-        binary = b"a uv binary\n"
-        uv.write_bytes(binary)
-        env = {"RUNNER_TEMP": str(temp), "GITHUB_OUTPUT": str(output)}
-        output.write_text("", encoding="utf-8")
-        result = _run_step(run, {**env, "UV": str(uv)})
-        assert result.returncode == 0, result.stderr
-        assert output.read_text(encoding="utf-8") == (
-            f"dir={temp}/uv-cache\nuv={hashlib.sha256(binary).hexdigest()}\n")
-        output.write_text("", encoding="utf-8")
-        result = _run_step(run, {**env, "UV": str(tmp_path / "missing")})
+    def test_uv_s_cache_is_a_directory_of_the_job_s_own(self, tmp_path):
+        """The install step, RUN: uv's cache is ``uv-cache`` under the runner's temp directory,
+        which the runner empties as each job starts and ends, for every install set and
+        whatever cache directory the job's environment names (ruling plan#2471); with no temp
+        directory the step fails, running no uv and writing no PATH."""
+        uv, log, path = tmp_path / "uv", tmp_path / "uv.log", tmp_path / "github_path"
+        uv.write_text(f'#!/bin/sh\necho "${{UV_CACHE_DIR}}" >> "{log}"\n', encoding="utf-8")
+        uv.chmod(0o755)
+        run = _action_steps()[self.INSTALL]["run"]
+        env = {"UV": str(uv), "GITHUB_PATH": str(path), "GITHUB_WORKSPACE": str(tmp_path / "ws"),
+               "UV_CACHE_DIR": str(tmp_path / "restored")}
+        temp = tmp_path / "temp"
+        for install in ("all", "runtime", "landing", "python"):
+            log.write_text("", encoding="utf-8")
+            result = _run_step(run, {**env, "INSTALL": install, "RUNNER_TEMP": str(temp)})
+            assert result.returncode == 0, (install, result.stderr)
+            assert log.read_text(encoding="utf-8") == f"{temp}/uv-cache\n", install
+        log.write_text("", encoding="utf-8")
+        path.write_text("", encoding="utf-8")
+        result = _run_step(run, {**env, "INSTALL": "all"})
         assert result.returncode != 0
-        assert output.read_text(encoding="utf-8") == ""
+        assert "RUNNER_TEMP" in result.stderr
+        assert log.read_text(encoding="utf-8") == ""
+        assert path.read_text(encoding="utf-8") == ""
 
     def test_each_install_set_runs_its_one_uv_command_then_puts_the_venv_first(self, tmp_path):
         """Each set runs its one uv command, every sync ``--locked`` (its build hashes are
@@ -130,7 +115,8 @@ class TestTheInstallActionInstallsTheLock:
                 path.write_text("", encoding="utf-8")
                 result = _run_step(run, {"UV": str(uv), "INSTALL": install,
                                          "GITHUB_PATH": str(path),
-                                         "GITHUB_WORKSPACE": str(tmp_path / "ws")})
+                                         "GITHUB_WORKSPACE": str(tmp_path / "ws"),
+                                         "RUNNER_TEMP": str(tmp_path / "temp")})
                 assert log.read_text(encoding="utf-8").splitlines() == calls, install
                 if expected == 0 and status == "0":
                     assert result.returncode == 0, (install, result.stderr)

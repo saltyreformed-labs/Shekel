@@ -74,7 +74,6 @@ jobs:
         uses: $/.github/actions/install-lock
         with:
           install: all
-          cache: "false"
 
       # ``server_clock`` is deselected because those tests compare a
       # POSTGRES-stamped timestamp against a Python-derived one, and

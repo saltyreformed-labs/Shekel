@@ -154,8 +154,11 @@ class Outcome:
             whose two nets part beyond its excused source cells.
         unexplained_totals: Every chart account ``(key, stored rows)`` whose
             two totals part beyond them.
-        unexplained_fields: How many statement fields part from the store
-            beyond the expected differences in their window.
+        unexplained_fields: Every statement field that parts from the store
+            beyond the expected differences in its window, ``{(statement
+            title, field): what parts there}``, a statement the store refused
+            being one field, ``REFUSED``
+            (:func:`tests._worked_out_statements.report_statements`).
         expected: Each expected kind's excused source-cell count.
         censused: Each stored entry the census holds, by id: its expected
             kind.
@@ -165,7 +168,7 @@ class Outcome:
     unexplained_sources: set = field(default_factory=set)
     unexplained_cells: set = field(default_factory=set)
     unexplained_totals: set = field(default_factory=set)
-    unexplained_fields: int = 0
+    unexplained_fields: dict = field(default_factory=dict)
     expected: dict = field(default_factory=lambda: defaultdict(int))
     censused: dict = field(default_factory=dict)
 
@@ -174,7 +177,7 @@ class Outcome:
         """Return how many things are UNEXPLAINED, at every grain: any fails the run."""
         return (
             len(self.unexplained_sources) + len(self.unexplained_cells)
-            + len(self.unexplained_totals) + self.unexplained_fields
+            + len(self.unexplained_totals) + len(self.unexplained_fields)
         )
 
 
@@ -695,14 +698,14 @@ def _report_statements(ledger, expected, outcome):
     Args:
         ledger: The :class:`Ledger`.
         expected: Each differing source cell's expected kind, or ``None``.
-        outcome: The :class:`Outcome` to print into and tally.
+        outcome: The :class:`Outcome` to print into and to hold the
+            unexplained fields.
     """
-    lines, unexplained = report_statements(ledger, [
+    lines, outcome.unexplained_fields = report_statements(ledger, [
         c for c in ledger.stored + ledger.worked
         if expected.get(source_cell_of(c)) is not None
     ])
     outcome.lines.extend(lines)
-    outcome.unexplained_fields += unexplained
 
 
 # -- labels -----------------------------------------------------------------

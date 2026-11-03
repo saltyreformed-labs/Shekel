@@ -37,12 +37,20 @@ The rules before review plan#2521 excused four of these (the split residue pair,
 misfiled true-up and both unwalked-row plants); the two general controls, the family not skipped
 and the true-up at another amount sit outside conditions those rules already had.  Each is
 planted in a savepoint -- a read-side plant by patching the read in both its readers -- measured
-and rolled back.  It fires only when every source cell it moved comes out UNEXPLAINED and nothing
-else newly does, the census names its planted entries as the control states (the kind whose rule
-it sits outside of, or no expected kind), and a statement field parts where its plant shows in
-one.  Nothing here grades the INSIDE of a rule: a rule that excuses too little fails loudly, an
-expected difference coming out UNEXPLAINED.  ``tests._worked_out_excuses`` names the one
-condition no plant reaches.
+and rolled back.  It fires only when every source cell it moved comes out UNEXPLAINED and every
+other comes out as it did unplanted, the census names its planted entries as the control states
+(the kind whose rule it sits outside of, or no expected kind), and a statement field its plant
+moved comes out UNEXPLAINED where its plant shows in one.  A control is graded against the run's
+own outcome, never against a count of it, so a run that already parts hides none (plan task
+plan#2747): a field is one the plant moved when the plant changed what parts there, whether or
+not it parted unplanted, and a statement the store refuses with the plant in (its line on a
+movement with no bank day, say) is one field, however many it parted by unplanted.  A statement
+the store refused UNPLANTED is blind, since no plant can show in it: where the run holds one, a
+control's statement condition holds without a field, its line counting the blind statements.
+That run already exits 1, each refusal UNEXPLAINED, so a blind statement never passes a run
+unseen.  Nothing here grades the INSIDE of a rule: a rule that excuses too little fails
+loudly, an expected difference coming out UNEXPLAINED.  ``tests._worked_out_excuses`` names the
+one condition no plant reaches.
 
 **What a clean run does NOT say.**  The read and the writers apply the same target rules (plan
 task plan#2526 moved them into ``app.services.ledger_lines``), so a wrong rule moves both sides
@@ -122,6 +130,7 @@ from tests._worked_out_ledger import (
     movement_parents,
     read_ledger,
 )
+from tests._worked_out_statements import REFUSED
 
 # What each planted control posts: any nonzero cent figure; a distinctive one
 # so a reader can find it in a report.
@@ -468,9 +477,9 @@ def _a_store_only_line_nothing_reversed(bench):
 # A planted control: its title; the expected kind the census must name each
 # entry it plants -- the rule it sits just outside of -- or ``None`` for one
 # that must be no expected kind; how many source cells its plant moves;
-# whether a statement field must part for it; and its plant, a function of
-# the :data:`Bench` that writes its stored entries and returns ``(their ids,
-# a rewrite of the read's lines or None)``.
+# whether a statement field its plant moves must come out UNEXPLAINED; and
+# its plant, a function of the :data:`Bench` that writes its stored entries
+# and returns ``(their ids, a rewrite of the read's lines or None)``.
 Control = namedtuple("Control", "title at cells moves_statements plant")
 
 _CONTROLS = (
@@ -619,10 +628,18 @@ def _run_control(bench, control):
     """Plant one control in a savepoint, measure, and roll it back.
 
     It FIRES when every source cell its plant moved -- as many as the control
-    states -- comes out UNEXPLAINED, no other source cell newly does, the
-    census names each entry it planted as the kind whose rule it sits just
-    outside of (or as none), and, for a control a statement shows, a
-    statement field comes out UNEXPLAINED beyond the run's own.
+    states -- comes out UNEXPLAINED, every other source cell comes out as it
+    did unplanted (newly UNEXPLAINED, or no longer, is a plant reaching past
+    its own cells), the census names each entry it planted as the kind whose
+    rule it sits just outside of (or as none), and, for a control a
+    statement shows, a statement field its plant moved comes out
+    UNEXPLAINED: one whose UNEXPLAINED part the plant changed, which on a
+    run that already parts may be a field that parted unplanted (plan task
+    plan#2747).  Each is graded against the run's own outcome, never a count
+    of it: a plant that makes the store refuse a statement turns its many
+    unexplained fields into one.  Where the store refused a statement
+    unplanted, the statement condition holds without a field: no plant can
+    show in that statement, and the refusal is already UNEXPLAINED.
 
     Args:
         bench: The :data:`Bench`.
@@ -643,26 +660,36 @@ def _run_control(bench, control):
     moved = moved_source_cells(bench.ledger, planted)
     named = moved & outcome.unexplained_sources
     others = (
-        outcome.unexplained_sources - bench.outcome.unexplained_sources - moved
-    )
+        outcome.unexplained_sources ^ bench.outcome.unexplained_sources
+    ) - moved
     censused = [outcome.censused.get(entry_id) for entry_id in planted_ids]
-    fields = outcome.unexplained_fields
+    shown = {
+        name for name, part in outcome.unexplained_fields.items()
+        if bench.outcome.unexplained_fields.get(name) != part
+    }
+    # The statements the store refused unplanted: no plant can show in one,
+    # and the run already fails on each, every refusal UNEXPLAINED.
+    blind = {
+        title for title, name in bench.outcome.unexplained_fields
+        if name == REFUSED
+    }
     ok = (
         len(moved) == control.cells and named == moved and not others
         and all(kind == control.at for kind in censused)
-        and (not control.moves_statements
-             or fields > bench.outcome.unexplained_fields)
+        and (not control.moves_statements or bool(shown or blind))
     )
     return (
         f"(planted entr(y/ies) {planted_ids}"
         f"{' and two read lines' if rewrite else ''}): "
         f"{'FIRED' if ok else 'DID NOT FIRE'}: {len(named)} of the "
         f"{len(moved)} source cell(s) it moved UNEXPLAINED (it moves "
-        f"{control.cells}), {len(others)} other cell(s) newly UNEXPLAINED; "
-        f"census {censused} (its rule's: {control.at}); {fields} unexplained "
-        f"statement field(s) against the run's "
-        f"{bench.outcome.unexplained_fields}"
+        f"{control.cells}), {len(others)} other source cell(s) newly or no "
+        f"longer UNEXPLAINED; census {censused} (its rule's: {control.at}); "
+        f"{len(shown)} statement field(s) it moved UNEXPLAINED, of "
+        f"{len(outcome.unexplained_fields)} unexplained against the run's "
+        f"{len(bench.outcome.unexplained_fields)}"
         f"{'' if control.moves_statements else ' (none required)'}"
+        f"{f'; {len(blind)} statement(s) blind, refused unplanted' if blind else ''}"
     ), ok
 
 
@@ -744,7 +771,7 @@ def _measure_scenario(scenario, skipped, say):
         f"UNEXPLAINED ({len(outcome.unexplained_sources)} source cell(s), "
         f"{len(outcome.unexplained_cells)} cell(s), "
         f"{len(outcome.unexplained_totals)} account total(s), "
-        f"{outcome.unexplained_fields} statement field(s)); excused: "
+        f"{len(outcome.unexplained_fields)} statement field(s)); excused: "
         f"{dict(outcome.expected) or 'none'}")
     if not (scenario.is_baseline and ledger.stored):
         return unexplained, None

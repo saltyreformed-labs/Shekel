@@ -53,6 +53,9 @@ from app.services.ledger_report_service._balance_sheet import (
 )
 
 _ZERO = Decimal("0.00")
+# The field a statement the store refused to produce is tallied under: it has
+# no fields of its own to part.
+REFUSED = "the store REFUSED it"
 
 
 def money(value):
@@ -90,7 +93,7 @@ def nets_by_key(contributions):
 
 
 def report_statements(ledger, explained):
-    """Compare every statement the leaf's spec names; the lines and the tally.
+    """Compare every statement the leaf's spec names; the lines and the unexplained fields.
 
     Args:
         ledger: The owner's ledger in its baseline scenario: ``owner_id``,
@@ -102,15 +105,20 @@ def report_statements(ledger, explained):
             difference is an expected one.
 
     Returns:
-        ``(the report's lines, how many statement fields are UNEXPLAINED)``.
+        ``(the report's lines, every UNEXPLAINED statement field)``, the
+        fields as ``{(statement title, field): what parts there}``
+        (:func:`_unexplained_part`); a statement the store refused is one
+        field, :data:`REFUSED`, holding its refusal.
     """
     lines = []
     statements = _statements(ledger)
     lines.append(f"-- statements: {len(statements)}")
-    unexplained = sum(
-        _report_statement(ledger, explained, statement, lines.append)
-        for statement in statements
-    )
+    unexplained = {}
+    for statement in statements:
+        unexplained.update(
+            ((statement.title, name), part) for name, part in
+            _report_statement(ledger, explained, statement, lines.append).items()
+        )
     return lines, unexplained
 
 
@@ -271,6 +279,26 @@ def _differing_fields(stored, worked):
     )
 
 
+def _unexplained_part(held, made):
+    """Return what parts in one UNEXPLAINED field: what a control's plant moves where it shows.
+
+    A figure's is the stored one less the worked-out one moved by the
+    expected differences, so a plant moves it whether or not the field
+    already parted unplanted (plan task plan#2747); the tie-out's flag, which
+    has no difference, gives its two flags.
+
+    Args:
+        held: The field's stored value.
+        made: Its worked-out value, moved by the expected differences.
+
+    Returns:
+        ``held - made`` for a figure; ``(held, made)`` for the flag.
+    """
+    if isinstance(held, bool):
+        return (held, made)
+    return held - made
+
+
 # One statement to compare: its heading; whether a contribution falls in its
 # window, as the store's reader attributes it; a call reading it from the
 # store; and its two view builders, for nets and for the stored report.
@@ -333,7 +361,7 @@ def _statements(ledger):
 
 
 def _report_statement(ledger, explained, statement, out):
-    """Print one statement on both sides, and tally its unexplained fields.
+    """Print one statement on both sides, and return its unexplained fields.
 
     Args:
         ledger: The owner's ledger, as :func:`report_statements` takes it.
@@ -342,14 +370,14 @@ def _report_statement(ledger, explained, statement, out):
         out: Where each line of the report goes.
 
     Returns:
-        How many of its fields are UNEXPLAINED; one when the store refused
-        to produce it.
+        ``{field: what parts there}`` over its UNEXPLAINED fields; when the
+        store refused to produce it, ``{REFUSED: the refusal}``.
     """
     try:
         stored = statement.stored_view(statement.read(), ledger.key_of)
     except (PostingError, BaselineMissingError) as exc:
-        out(f"!  {statement.title}: the store REFUSED it: {exc}")
-        return 1
+        out(f"!  {statement.title}: {REFUSED}: {exc}")
+        return {REFUSED: str(exc)}
     worked_nets = nets_by_key(
         c for c in ledger.worked if statement.in_window(c)
     )
@@ -361,12 +389,18 @@ def _report_statement(ledger, explained, statement, out):
             sign = 1 if c.entry_id is not None else -1
             adjusted_nets[c.key] += sign * c.amount
     worked = statement.worked_view(worked_nets)
-    unexplained = _differing_fields(stored, statement.worked_view(adjusted_nets))
+    adjusted = statement.worked_view(adjusted_nets)
+    unexplained = {
+        name: _unexplained_part(
+            stored.get(name, _ZERO), adjusted.get(name, _ZERO),
+        )
+        for name in _differing_fields(stored, adjusted)
+    }
     out(f"   {statement.title}: {len(_differing_fields(stored, worked))} "
         f"field(s) part, {len(unexplained)} UNEXPLAINED; each line: stored | "
         "worked-out")
     _print_fields(stored, worked, unexplained, out)
-    return len(unexplained)
+    return unexplained
 
 
 def _print_fields(stored, worked, unexplained, out):

@@ -14,6 +14,10 @@ standard 3): it calls only names present on both trees, and the one producer
 whose signature the step changes -- the installment price, which took a
 ``_LoanCashBasis`` and escrow lines and takes the loan's ``LoanCalendar`` --
 is reached through :func:`_price`, which dispatches on what the tree HAS.  The
+card statement's three functions, which take the card's dated terms SERIES
+since plan#2331 (ruling plan#2333), are reached the same way, through
+:func:`_card_due_date`, :func:`_card_cycle` and :func:`_card_statements`: on a
+one-version series every answer is the bare day's, so the digests stand.  The
 first line names the side; diff from line 2.
 
 **Two halves, because each is blind where the other looks.**
@@ -137,6 +141,45 @@ def _price(origination, payment_day, periods, lines, due, period_start, extra):
     )
 
 
+#: Whether this tree's card statement takes the card's dated terms series
+#: (plan#2331) rather than a bare close or due day.
+_CARD_TAKES_SERIES = (
+    list(inspect.signature(card_statement.cycle_containing).parameters)[0]
+    == "versions"
+)
+
+
+def _card_series(close_day, due_day):
+    """A one-version terms series, which every day before and after reads."""
+    return [SimpleNamespace(
+        effective_date=CALENDAR_DATE_MIN, statement_close_day=close_day,
+        payment_due_day=due_day,
+    )]
+
+
+def _card_due_date(closes, due_day):
+    """``card_statement.due_date_for`` on whichever signature this tree has."""
+    if _CARD_TAKES_SERIES:
+        return card_statement.due_date_for(_card_series(due_day, due_day), closes)
+    return card_statement.due_date_for(closes, due_day)
+
+
+def _card_cycle(close_day, day):
+    """``card_statement.cycle_containing`` on whichever signature this tree has."""
+    if _CARD_TAKES_SERIES:
+        return card_statement.cycle_containing(_card_series(close_day, close_day), day)
+    return card_statement.cycle_containing(close_day, day)
+
+
+def _card_statements(close_day, first, last):
+    """``card_statement.statement_sequence`` on whichever signature this tree has."""
+    if _CARD_TAKES_SERIES:
+        return card_statement.statement_sequence(
+            _card_series(close_day, close_day), first, last,
+        )
+    return card_statement.statement_sequence(close_day, first, last)
+
+
 def _escrow_line(*versions):
     """One escrow line with its versions, as ``(effective_date, annual)`` pairs."""
     return SimpleNamespace(
@@ -166,9 +209,8 @@ def pure_day_by_nominal_day():
                 installment_calendar.monthly_due_date(day, nominal))
             digests["due_in_following_month"].add(
                 installment_calendar.due_in_following_month(day, nominal))
-            digests["card.due_date_for"].add(
-                card_statement.due_date_for(day, nominal))
-            window = card_statement.cycle_containing(nominal, day)
+            digests["card.due_date_for"].add(_card_due_date(day, nominal))
+            window = _card_cycle(nominal, day)
             digests["card.cycle_containing"].add((window.opens, window.closes))
             steps = _grid.cadence_steps_to(anchor, cadence, day)
             digests["grid.monthly_steps_to"].add(steps)
@@ -211,7 +253,7 @@ def pure_sequences():
             for span in (-1, 0, 29, 31, 400):
                 statements.add([
                     (window.opens, window.closes)
-                    for window in card_statement.statement_sequence(
+                    for window in _card_statements(
                         nominal, day, day + timedelta(days=span))
                 ])
     walk = _Digest("recurrence.walk_months")

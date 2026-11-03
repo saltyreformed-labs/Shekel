@@ -17,9 +17,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import time_machine
 
 from app.extensions import db
+from app.models.trusted_device import TrustedDevice
 from app.models.user import User
+from app.services import trusted_device_service
 from app.services.auth_service import hash_password
 from scripts.rotate_sessions import execute_rotation, main, parse_args
 
@@ -123,6 +126,39 @@ class TestExecuteRotation:
 
         user = db.session.get(User, user_id)
         assert user.session_invalidated_at > old_timestamp
+
+    def test_rotate_sessions_forgets_every_trusted_device(
+        self, app, db, seed_user, seed_second_user,
+    ):
+        """Every user's trusted device stops being trusted, with no write to it.
+
+        The module docstring's claim (plan#2173): a device is live only while
+        it was trusted at or after its user's ``session_invalidated_at``, so
+        the bump leaves every device older than it.  Each is trusted an hour
+        back, so the bump is later than the trust whatever the clock's
+        resolution, and found live first, so its loss is the rotation's.
+        The rows stay: the script writes nothing to the table.
+        """
+        an_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        tokens = {}
+        with time_machine.travel(an_hour_ago, tick=False):
+            for user in (seed_user["user"], seed_second_user["user"]):
+                tokens[user.id] = trusted_device_service.trust_device(
+                    user.id, "Firefox",
+                )
+        db.session.commit()
+        for user_id, token in tokens.items():
+            assert trusted_device_service.find_live_device(
+                user_id, token,
+            ) is not None
+
+        execute_rotation(db.session)
+
+        for user_id, token in tokens.items():
+            assert trusted_device_service.find_live_device(
+                user_id, token,
+            ) is None
+        assert db.session.query(TrustedDevice).count() == 2
 
     def test_rotate_sessions_on_empty_db_returns_zero(self, app, db):
         """An empty ``auth.users`` table returns 0 with no error.

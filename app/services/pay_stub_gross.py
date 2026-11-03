@@ -52,6 +52,26 @@ def gross_counts(includes_after_tax: bool) -> str:
     return "earnings, taxable and untaxed," if includes_after_tax else "taxable earnings"
 
 
+def checked_gross(totals: StubTotals, *, includes_after_tax: bool) -> Decimal:
+    """Return the Gross Pay a stub's figures add up to, as the printed-gross check reads it.
+
+    Base pay plus every taxable earning (ruling **R-SAL99**), and on a job whose
+    stub's gross also holds its after-tax earnings, those too (ruling
+    **R-SAL102**): the words :func:`gross_counts` gives.  The ONE spelling of
+    that rule (ruling **R-SAL127**): :func:`gross_refusals` checks a typed stub
+    with it, and the rehearsal of plan step salary:S11-d's old-calibration drop
+    adds up a saved stub's Gross Pay with it.
+
+    Args:
+        totals: What the stub's figures add up to.
+        includes_after_tax: The job's ``stub_gross_includes_after_tax``.
+
+    Returns:
+        The Gross Pay the figures make.
+    """
+    return totals.gross + (totals.after_tax if includes_after_tax else ZERO)
+
+
 #: The refusal key that names the job's setting beside a printed-gross refusal
 #: (rulings R-SAL104 and R-SAL106): the setting's own field name.  Its message
 #: is the opening of the sentence that ends in a link to the setting, which
@@ -160,7 +180,7 @@ def gross_refusals(
         beside it when the wording names the setting; empty when the
         figures make the printed gross.
     """
-    checked = totals.gross + (totals.after_tax if includes_after_tax else ZERO)
+    checked = checked_gross(totals, includes_after_tax=includes_after_tax)
     gross_miss = checked - printed.gross
     if gross_miss == ZERO:
         return {}
@@ -259,6 +279,7 @@ def _amount_miss(
 
 __all__ = [
     "SETTING_KEY",
+    "checked_gross",
     "gross_counts",
     "gross_refusals",
 ]

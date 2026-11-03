@@ -346,8 +346,9 @@ def monthly_or_none(
     **The conversion is one expression**, and the same one for every cadence:
     an amount times how often it happens in a year, over twelve.  Plan step
     R7a-2b replaced a seven-branch switch with it, so ``(2, MONTH)`` and
-    ``(1, WEEK)`` -- the cadences plan step R8 makes authorable -- already
-    total correctly rather than falling to a ``None`` the caller drops.
+    ``(1, WEEK)`` -- cadences the closed set could not name, authorable since
+    plan steps R7c-c and R8-b -- total correctly rather than falling to a
+    ``None`` the caller drops.
 
     Args:
         template: A ``TransactionTemplate`` or ``TransferTemplate`` ORM

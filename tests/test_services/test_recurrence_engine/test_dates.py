@@ -1,6 +1,5 @@
 """Recurrence engine tests: a rule's optional end date, and the due date of a generated row."""
 
-import pytest
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -8,28 +7,45 @@ from app.extensions import db
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
 from app.models.ref import TransactionType
-from app import ref_cache
-from app.enums import RecurrenceUnitEnum
+from app.enums import PeriodPlacementEnum, RecurrenceUnitEnum
 from app.services import recurrence_engine
 from app.services.pay_calendar import DerivedPeriod
-from app.services.recurrence import RecurrenceResolutionError, compute_due_date
+from app.services.recurrence import compute_due_date
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
 from tests.oracles.recurrence_baseline import (
+    ShapeCadence,
     EVERY_PERIOD,
     EVERY_N_PERIODS,
     MONTHLY,
     QUARTERLY,
     SEMI_ANNUAL,
     ANNUAL,
+    WEEKLY,
+    WEEKLY_FIRST,
 )
 from tests._test_helpers import (
     make_cadence_rule,
     rebuild_calendar_from_spans,
+    rows_by_paycheck,
     state_template_price,
+    WEEKLY_FIRST_ON_SEED_PERIODS,
 )
 
 from ._helpers import build_rule, _calendar, _matched_periods, _paycheck_covering
+
+
+#: Every other week by DATE, funded by the paycheck containing each date.
+_EVERY_2_WEEKS = ShapeCadence(
+    2, RecurrenceUnitEnum.WEEK, PeriodPlacementEnum.CONTAINING_DATE,
+)
+
+#: Every other week by DATE, funded from the first paycheck starting on or
+#: after each date.
+_EVERY_2_WEEKS_DEFERRED = ShapeCadence(
+    2, RecurrenceUnitEnum.WEEK,
+    PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
+)
 
 
 class TestEndDate:
@@ -661,28 +677,20 @@ class TestDueDateGeneration:
             )
             assert result == date(2026, 3, 13)
 
-    def test_this_function_is_why_the_WEEK_unit_is_unofferable(self, app, db):
-        """The tie between the offer set's rule and this function's two sources.
+    def test_a_weekly_rule_is_dated_from_its_occurrence_or_its_funding_payday(
+        self, app, db,
+    ):
+        """The WEEK unit's two readings at the pure door (plan step R8-b).
 
-        **``_offer.has_row_date_coordinate`` exists for THIS function**, and
-        until this case nothing but a docstring said so -- which an adversarial
-        review of plan step R8-a named as the coupling's weak point: if a later
-        step gave ``compute_due_date`` a third date source, that predicate
-        would go on withholding the ``WEEK`` unit with every gate green.
+        A weekly occurrence names no day of the month, so until R8-b this
+        function read it as "date from the paycheck" and the unit was withheld
+        from the offer set.  It is dated from its unit and placement now: on
+        the occurrence when the paycheck CONTAINING it funds it (ruling R-R94),
+        on the funding payday when a later paycheck does (ruling R-R95).
 
-        The two sources are all there are, and the assertions below are them:
-        the OCCURRENCE, for a cadence dated from a day of the month (plan step
-        R5-a), and -- for one naming no day -- the funding paycheck's own
-        ``start_date``.  For the ``PERIOD`` unit the second IS the occurrence,
-        so a row dated from it carries the date the cadence named.  For the
-        ``WEEK`` unit it is NOT: a weekly occurrence is a calendar date
-        strictly inside its paycheck, and the unit names no day of the month,
-        so dating from the paycheck discards the authored weekday for the life
-        of the rule.
-
-        That is why the unit is withheld rather than refused at the door.
-        Plan step **R8-b** is what deletes both the predicate and this case,
-        by dating a weekly row from its occurrence too.
+        2026-03-17 is a Tuesday strictly inside the 03-13 - 03-26 paycheck,
+        and the first paycheck on or after it opens 03-27, so each reading's
+        two candidate days differ and a wrong one cannot pass.
         """
         with app.app_context():
             period = DerivedPeriod(
@@ -692,31 +700,176 @@ class TestDueDateGeneration:
                 end_date=date(2026, 3, 26),
                 end_is_projected=False,
             )
-            starts_on = date(2026, 1, 20)
-
-            # A hand-edited or restored row naming the WEEK unit: the one way
-            # to reach this state, since the write door and the picker both
-            # refuse the cadence.
-            weekly = build_rule(
-                cadence=MONTHLY, starts_on=starts_on,
+            later = DerivedPeriod(
+                period_id=2,
+                period_index=6,
+                start_date=date(2026, 3, 27),
+                end_date=date(2026, 4, 9),
+                end_is_projected=False,
             )
-            weekly.unit_id = ref_cache.recurrence_unit_id(
-                RecurrenceUnitEnum.WEEK,
+            containing = build_rule(
+                cadence=_EVERY_2_WEEKS, starts_on=date(2026, 1, 20),
+            )
+            deferring = build_rule(
+                cadence=_EVERY_2_WEEKS_DEFERRED, starts_on=date(2026, 1, 20),
             )
 
-            with pytest.raises(
-                RecurrenceResolutionError, match="generated row",
-            ):
-                compute_due_date(weekly, date(2026, 3, 17), period)
+            # Funded by the paycheck containing it: due ON the occurrence.
+            assert compute_due_date(
+                containing, date(2026, 3, 17), period,
+            ) == date(2026, 3, 17)
+            # Funded from a later paycheck: due on THAT paycheck's payday,
+            # 03-27, the first paycheck on or after the 03-17 occurrence.
+            assert compute_due_date(
+                deferring, date(2026, 3, 17), later,
+            ) == date(2026, 3, 27)
 
-            # And what the refusal is standing in front of: the paycheck's own
-            # start, which is not any date a weekly cadence from ``starts_on``
-            # fires on.  Both facts asserted, because the refusal is only worth
-            # having while the fallback would be WRONG.
-            weekly_occurrences = {
-                starts_on + timedelta(days=7 * step) for step in range(60)
+    def test_every_other_week_rows_carry_their_occurrences(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """``(2, WEEK)`` funded by the containing paycheck: each row due on its date.
+
+        seed_periods: ten 14-day paychecks from 2026-01-02.  The rule fires
+        every 14 days from Tuesday 2026-01-06, four days into the first one,
+        so every occurrence sits at day 4 of a paycheck and each paycheck holds
+        exactly one: due 01-02 + 4 = 01-06, 01-16 + 4 = 01-20, and so on.  A
+        row dated from its paycheck would read the paycheck's own start
+        instead, four days early, which is what every weekly row would have
+        carried before plan step R8-b.
+        """
+        with app.app_context():
+            template = self._make_template_with_rule(
+                seed_user, _EVERY_2_WEEKS, starts_on=date(2026, 1, 6),
+            )
+            created = recurrence_engine.generate_for_template(
+                template, GenerationSchedule.for_period_ids(
+                    BalanceContext.build(template.user_id),
+                    {p.id for p in seed_periods},
+                ), seed_user["scenario"].id,
+            )
+
+            assert rows_by_paycheck(created, seed_periods) == {
+                date(2026, 1, 2): [(date(2026, 1, 6), date(2026, 1, 6))],
+                date(2026, 1, 16): [(date(2026, 1, 20), date(2026, 1, 20))],
+                date(2026, 1, 30): [(date(2026, 2, 3), date(2026, 2, 3))],
+                date(2026, 2, 13): [(date(2026, 2, 17), date(2026, 2, 17))],
+                date(2026, 2, 27): [(date(2026, 3, 3), date(2026, 3, 3))],
+                date(2026, 3, 13): [(date(2026, 3, 17), date(2026, 3, 17))],
+                date(2026, 3, 27): [(date(2026, 3, 31), date(2026, 3, 31))],
+                date(2026, 4, 10): [(date(2026, 4, 14), date(2026, 4, 14))],
+                date(2026, 4, 24): [(date(2026, 4, 28), date(2026, 4, 28))],
+                date(2026, 5, 8): [(date(2026, 5, 12), date(2026, 5, 12))],
             }
-            assert period.start_date not in weekly_occurrences
-            assert weekly_occurrences & {
-                date(2026, 3, 17), date(2026, 3, 24),
-            } == {date(2026, 3, 17), date(2026, 3, 24)}
+
+    def test_every_other_week_funded_from_the_next_paycheck_is_due_on_its_payday(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """``(2, WEEK)`` funded from the next paycheck: each row due on THAT payday.
+
+        Same rule and schedule as the case above, funded from the first
+        paycheck starting on or after each date (ruling R-R95).  01-06 defers
+        to the 01-16 paycheck and is due 01-16, 01-20 to 01-30, and so on; the
+        first paycheck funds nothing, and 05-12 defers to 05-22, past the ten
+        saved paychecks, so nine rows.  The row keeps the date it answers on
+        ``occurs_on`` while its due day moves to the payday.
+        """
+        with app.app_context():
+            template = self._make_template_with_rule(
+                seed_user, _EVERY_2_WEEKS_DEFERRED,
+                starts_on=date(2026, 1, 6),
+            )
+            created = recurrence_engine.generate_for_template(
+                template, GenerationSchedule.for_period_ids(
+                    BalanceContext.build(template.user_id),
+                    {p.id for p in seed_periods},
+                ), seed_user["scenario"].id,
+            )
+
+            assert rows_by_paycheck(created, seed_periods) == {
+                date(2026, 1, 16): [(date(2026, 1, 6), date(2026, 1, 16))],
+                date(2026, 1, 30): [(date(2026, 1, 20), date(2026, 1, 30))],
+                date(2026, 2, 13): [(date(2026, 2, 3), date(2026, 2, 13))],
+                date(2026, 2, 27): [(date(2026, 2, 17), date(2026, 2, 27))],
+                date(2026, 3, 13): [(date(2026, 3, 3), date(2026, 3, 13))],
+                date(2026, 3, 27): [(date(2026, 3, 17), date(2026, 3, 27))],
+                date(2026, 4, 10): [(date(2026, 3, 31), date(2026, 4, 10))],
+                date(2026, 4, 24): [(date(2026, 4, 14), date(2026, 4, 24))],
+                date(2026, 5, 8): [(date(2026, 4, 28), date(2026, 5, 8))],
+            }
+
+    def test_two_weekly_rows_in_one_paycheck_each_carry_their_own_date(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """``(1, WEEK)``: two occurrences in one biweekly paycheck, two dates.
+
+        Every 7 days from Tuesday 2026-01-06 puts two occurrences in each
+        14-day paycheck, at days 4 and 11: 01-06 and 01-13 in the 01-02
+        paycheck, 01-20 and 01-27 in the 01-16 one.  Plan step R17 keyed the
+        generation index on the occurrence, so both rows store; dated from the
+        paycheck, both would read 01-02 and the budget would show one day
+        holding two weeks' bills.  Twenty rows in all, 01-06 + 7k for
+        k = 0..19, the last 05-19 inside the 05-08 - 05-21 paycheck.
+        """
+        with app.app_context():
+            template = self._make_template_with_rule(
+                seed_user, WEEKLY, starts_on=date(2026, 1, 6),
+            )
+            created = recurrence_engine.generate_for_template(
+                template, GenerationSchedule.for_period_ids(
+                    BalanceContext.build(template.user_id),
+                    {p.id for p in seed_periods},
+                ), seed_user["scenario"].id,
+            )
+
+            by_paycheck = rows_by_paycheck(created, seed_periods)
+            assert by_paycheck[date(2026, 1, 2)] == [
+                (date(2026, 1, 6), date(2026, 1, 6)),
+                (date(2026, 1, 13), date(2026, 1, 13)),
+            ]
+            assert by_paycheck[date(2026, 1, 16)] == [
+                (date(2026, 1, 20), date(2026, 1, 20)),
+                (date(2026, 1, 27), date(2026, 1, 27)),
+            ]
+            assert sorted(txn.due_date for txn in created) == [
+                date(2026, 1, 6) + timedelta(days=7 * week)
+                for week in range(20)
+            ]
+            assert all(len(rows) == 2 for rows in by_paycheck.values())
+
+    def test_two_weekly_rows_funded_from_the_next_paycheck_share_its_payday(
+        self, app, seed_user, seed_periods,
+    ):
+        """``(1, WEEK)`` from the next paycheck: two rows due one payday, two dates kept.
+
+        The same every-7-days rule from Tuesday 2026-01-06, funded from the
+        first paycheck starting on or after each date (ruling R-R95).  Both of
+        a paycheck's weeks defer to the NEXT payday and are due on it: 01-06
+        and 01-13 to the 01-16 paycheck, 01-20 and 01-27 to 01-30, and so on,
+        eighteen rows in nine paychecks.  The expected value, with its
+        arithmetic, is ``WEEKLY_FIRST_ON_SEED_PERIODS``, which the transfer
+        engine's twin asserts too.
+
+        **The two rows of a paycheck differ ONLY in ``occurs_on``** -- same
+        definition, scenario, paycheck and due day -- so this is the one shape
+        where ``idx_transactions_template_scenario_occurrence`` (plan step R17)
+        is all that tells them apart, and the case reads them back from the
+        database rather than off the objects the pass returned.
+        """
+        with app.app_context():
+            template = self._make_template_with_rule(
+                seed_user, WEEKLY_FIRST, starts_on=date(2026, 1, 6),
+            )
+            recurrence_engine.generate_for_template(
+                template, GenerationSchedule.for_period_ids(
+                    BalanceContext.build(template.user_id),
+                    {p.id for p in seed_periods},
+                ), seed_user["scenario"].id,
+            )
+            db.session.expire_all()
+            stored = db.session.query(Transaction).filter_by(
+                template_id=template.id,
+            ).all()
+
+            assert rows_by_paycheck(
+                stored, seed_periods,
+            ) == WEEKLY_FIRST_ON_SEED_PERIODS

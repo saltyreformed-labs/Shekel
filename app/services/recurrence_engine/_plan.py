@@ -77,7 +77,8 @@ class PlannedOccurrence(NamedTuple):
             ``budget.pay_periods.id``), and never ``None``.  The write loops
             read BOTH since plan step R5-a: the period is where the row is
             funded, and ``compute_due_date`` dates the row from *occurrence*
-            (or from this period's payday, for a cadence naming no day) --
+            (or from this period's payday, for a paycheck cadence or one
+            funded from a later paycheck) --
             it read this alone until then, which is plan ledger row D18.
     """
 

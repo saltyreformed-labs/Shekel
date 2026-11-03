@@ -28,7 +28,13 @@ from sqlalchemy import exc as sa_exc
 
 from app.enums import BusinessDayShiftEnum, FilingStatusEnum, TaxTypeEnum
 from app.models.amount_ownership import AmountOwnership
-from app.services import pay_era_write, pay_rhythm, pay_schedule_service
+from app.models.user import MfaConfig
+from app.services import (
+    mfa_service,
+    pay_era_write,
+    pay_rhythm,
+    pay_schedule_service,
+)
 from app.tax_law import (
     FederalRules,
     FicaRules,
@@ -2904,6 +2910,33 @@ def load_migration_module(filename):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def enable_mfa(db_session, user_id, backup_codes=()):
+    """Turn two-factor on for *user_id* with a fresh secret, and commit.
+
+    A FRESH secret per call, so two users (or two tests) never share a
+    replay-prevention step.  Nine files carried a private copy of this before
+    plan#2173 wrote it here; they still do.
+
+    Args:
+        db_session: The test ``db.session``.
+        user_id: The ``auth.users.id`` to enrol.
+        backup_codes: Plaintext backup codes to store hashed; none by default.
+
+    Returns:
+        The plaintext base32 secret, for ``pyotp.TOTP(secret)`` codes.
+    """
+    secret = mfa_service.generate_totp_secret()
+    db_session.add(MfaConfig(
+        user_id=user_id,
+        is_enabled=True,
+        totp_secret_encrypted=mfa_service.encrypt_secret(secret),
+        backup_codes=mfa_service.hash_backup_codes(list(backup_codes), rounds=4),
+        confirmed_at=_real_datetime.now(_real_timezone.utc),
+    ))
+    db_session.commit()
+    return secret
 
 
 def step_down_through_the_journal_link_drop(db_session):
@@ -7343,6 +7376,85 @@ def make_cadence_rule(owner, cadence, **kwargs):
         calendar,
         owner,
     )
+
+
+def rows_by_paycheck(rows, periods):
+    """Group generated rows by their paycheck's payday, as ``(occurs_on, due_date)``.
+
+    Each paycheck's pairs are sorted, so a case can write the exact list a
+    paycheck holds.  Keyed on the payday rather than the period id so the
+    expected value reads as the schedule does.  Both engines' rows carry the
+    three columns it reads, so the weekly cases of the transaction engine and
+    the transfer engine state their expectations in one shape (plan step
+    R8-b).
+
+    Args:
+        rows: The ``Transaction`` or ``Transfer`` rows a generation wrote,
+            as it returned them or as re-read from the database.
+        periods: The saved pay periods the rows were generated into.
+
+    Returns:
+        dict: payday -> sorted list of ``(occurs_on, due_date)``.
+    """
+    payday_by_id = {period.id: period.start_date for period in periods}
+    grouped = {}
+    for row in rows:
+        grouped.setdefault(payday_by_id[row.pay_period_id], []).append(
+            (row.occurs_on, row.due_date),
+        )
+    return {payday: sorted(pairs) for payday, pairs in grouped.items()}
+
+
+#: What :func:`rows_by_paycheck` reads for ``WEEKLY_FIRST`` -- every 7 days
+#: from Tuesday 2026-01-06, funded from the first paycheck starting on or after
+#: each date (ruling R-R95) -- over ``seed_periods``, ten 14-day paychecks from
+#: Friday 2026-01-02.  Both of a paycheck's weeks defer to the NEXT payday and
+#: are due on it: 01-06 and 01-13 to 01-16, 01-20 and 01-27 to 01-30, and so on.
+#: The first paycheck funds nothing, and 05-12 and 05-19 defer to 05-22, past
+#: the ten saved paychecks: eighteen rows in nine paychecks.
+#:
+#: ONE statement for both engines, because both take their placements from the
+#: one shared preamble (``recurrence_engine.resolve_generation_plan``) and their
+#: due days from ``compute_due_date``: the transaction case and the transfer
+#: case grade the same answer through two writes.
+WEEKLY_FIRST_ON_SEED_PERIODS = {
+    _real_date(2026, 1, 16): [
+        (_real_date(2026, 1, 6), _real_date(2026, 1, 16)),
+        (_real_date(2026, 1, 13), _real_date(2026, 1, 16)),
+    ],
+    _real_date(2026, 1, 30): [
+        (_real_date(2026, 1, 20), _real_date(2026, 1, 30)),
+        (_real_date(2026, 1, 27), _real_date(2026, 1, 30)),
+    ],
+    _real_date(2026, 2, 13): [
+        (_real_date(2026, 2, 3), _real_date(2026, 2, 13)),
+        (_real_date(2026, 2, 10), _real_date(2026, 2, 13)),
+    ],
+    _real_date(2026, 2, 27): [
+        (_real_date(2026, 2, 17), _real_date(2026, 2, 27)),
+        (_real_date(2026, 2, 24), _real_date(2026, 2, 27)),
+    ],
+    _real_date(2026, 3, 13): [
+        (_real_date(2026, 3, 3), _real_date(2026, 3, 13)),
+        (_real_date(2026, 3, 10), _real_date(2026, 3, 13)),
+    ],
+    _real_date(2026, 3, 27): [
+        (_real_date(2026, 3, 17), _real_date(2026, 3, 27)),
+        (_real_date(2026, 3, 24), _real_date(2026, 3, 27)),
+    ],
+    _real_date(2026, 4, 10): [
+        (_real_date(2026, 3, 31), _real_date(2026, 4, 10)),
+        (_real_date(2026, 4, 7), _real_date(2026, 4, 10)),
+    ],
+    _real_date(2026, 4, 24): [
+        (_real_date(2026, 4, 14), _real_date(2026, 4, 24)),
+        (_real_date(2026, 4, 21), _real_date(2026, 4, 24)),
+    ],
+    _real_date(2026, 5, 8): [
+        (_real_date(2026, 4, 28), _real_date(2026, 5, 8)),
+        (_real_date(2026, 5, 5), _real_date(2026, 5, 8)),
+    ],
+}
 
 
 def make_expense_template(

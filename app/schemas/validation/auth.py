@@ -181,10 +181,9 @@ class LoginSchema(_AuthFormSchema):
     accepting it would let an attacker pay no cost while the server
     paid the bcrypt cost on a hash they can never reproduce.
 
-    The ``remember`` field accepts the HTML-form ``"on"`` value
-    submitted by the login form's "Remember me" checkbox, plus the
-    Marshmallow defaults (``true`` / ``1``) for parity with API
-    callers; missing or unchecked deserializes to ``False``.
+    There is no "Remember me" field: plan#2173 deleted the checkbox and
+    the cookie it asked for (ruling plan#2406), and ``BaseSchema``'s
+    ``EXCLUDE`` drops a ``remember`` a stale cached form still posts.
 
     The ``next`` parameter is intentionally NOT in this schema -- it
     is a query-string argument validated through ``_is_safe_redirect``
@@ -195,17 +194,6 @@ class LoginSchema(_AuthFormSchema):
     password = fields.String(
         required=True,
         validate=validate.Length(min=1, max=_AUTH_PASSWORD_MAX_CHARS),
-    )
-    # ``True``/``1`` and ``False``/``0`` collide as set members in
-    # Python (``hash(True) == hash(1)``) so listing both would trip
-    # the ``duplicate-value`` Pylint check; the ``True``/``False``
-    # entries cover the bool inputs that an API caller might submit
-    # natively, while the integer/string variants cover the form-
-    # encoded paths that arrive over HTTP.
-    remember = fields.Boolean(
-        load_default=False,
-        truthy={"on", "true", "True", "TRUE", "1", "t", "T", True},
-        falsy={"off", "false", "False", "FALSE", "0", "f", "F", False, ""},
     )
 
 
@@ -391,6 +379,11 @@ class MfaVerifySchema(BaseSchema):
     sized backup code from reaching bcrypt verification.  The route
     layer handles the "neither field present" case (renders "Invalid
     verification code.").
+
+    ``trust_device`` is the code form's "Trust this device" box (plan#2173,
+    ruling plan#2406), false when unticked.  The route honours it only on
+    an authenticator-code success: a backup-code success never trusts a
+    device, whatever the form posts.
     """
 
     totp_code = fields.String(
@@ -401,6 +394,7 @@ class MfaVerifySchema(BaseSchema):
         load_default="",
         validate=validate.Length(max=_BACKUP_CODE_MAX_LENGTH),
     )
+    trust_device = fields.Boolean(load_default=False)
 
     @pre_load
     def strip_codes(self, data, **kwargs):

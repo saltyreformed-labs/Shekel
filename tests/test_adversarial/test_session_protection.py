@@ -56,42 +56,6 @@ _OTHER_FORWARDED_ADDR = "198.51.100.7"
 _OTHER_USER_AGENT = "Mozilla/5.0 (TestProbe/1.0)"
 
 
-def _extract_remember_token(set_cookies: list[str]) -> str:
-    """Return the single ``remember_token=...`` directive from
-    ``set_cookies`` and fail loudly if zero or more than one match.
-
-    Set-Cookie headers serialize to a single string per directive
-    that begins with ``<name>=<value>;`` and continues with optional
-    attributes.  Tests in this file consistently want exactly one
-    ``remember_token`` directive (either the freshly-emitted login
-    cookie or the post-drift clear), so wrapping the lookup in a
-    helper produces a single ``assert`` per call site instead of two
-    (presence + uniqueness) and reduces the number of intermediate
-    locals each test has to track.
-    """
-    matches = [c for c in set_cookies if c.startswith("remember_token=")]
-    assert len(matches) == 1, (
-        "Expected exactly one remember_token Set-Cookie directive; "
-        f"got {set_cookies!r}"
-    )
-    return matches[0]
-
-
-def _remember_token_value(set_cookie_header: str) -> str:
-    """Return the value portion of a ``remember_token=...`` Set-Cookie
-    string.
-
-    A Werkzeug-emitted ``Set-Cookie`` for the remember-me cookie has
-    the shape ``remember_token=<value>; Expires=...; Path=/; ...``.
-    A clear directive sets ``<value>`` to the empty string and adds
-    an ``Expires`` in the past; a fresh login emits a non-empty
-    encoded value with a future ``Expires``.  The helper extracts the
-    value so tests can assert presence/absence without duplicating
-    the parse logic.
-    """
-    return set_cookie_header.split(";", 1)[0].split("=", 1)[1]
-
-
 class TestStrongSessionProtection:
     """End-to-end behaviour of ``login_manager.session_protection``.
 
@@ -322,96 +286,6 @@ class TestStrongSessionProtection:
                 "Strong mode must remove _id from the session "
                 f"on drift; saw {sess.get('_id')!r}"
             )
-
-    def test_strong_mode_clears_remember_cookie_on_drift(
-        self, app, client, db, seed_user
-    ):
-        """When drift fires while a remember-me cookie is present,
-        the response must instruct the browser to clear it.
-
-        Strong mode sets ``session["_remember"] = "clear"`` on drift
-        (see ``_session_protection_failed``).  Flask-Login's
-        ``_update_remember_cookie`` after-request hook then issues a
-        ``Set-Cookie: remember_token=`` with an expiry in the past,
-        deleting the cookie from the browser.
-
-        Without this clear step, the next request -- now without a
-        valid session -- would re-authenticate the user from the
-        remember-me cookie, completely defeating the
-        session-protection intent.  The cookie clear is what makes
-        ``"strong"`` actually strong.
-        """
-        # pylint: disable=unused-argument  # seed_user creates the user.
-
-        # Apply ProdConfig's remember-cookie flags so Flask-Login
-        # treats the test client's request as production-equivalent.
-        # Without the override, the cookie is still emitted but the
-        # absence of Secure/HttpOnly/SameSite could mask future
-        # regressions in the production-only code path.
-        original = {
-            key: app.config.get(key)
-            for key in (
-                "REMEMBER_COOKIE_SECURE",
-                "REMEMBER_COOKIE_HTTPONLY",
-                "REMEMBER_COOKIE_SAMESITE",
-            )
-        }
-        try:
-            app.config["REMEMBER_COOKIE_SECURE"] = True
-            app.config["REMEMBER_COOKIE_HTTPONLY"] = True
-            app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
-
-            login_resp = client.post(
-                "/login",
-                data={
-                    "email": "test@shekel.local",
-                    "password": "testpass",
-                    "remember": "on",
-                },
-            )
-            assert login_resp.status_code == 302, (
-                f"Login failed with status {login_resp.status_code}"
-            )
-
-            # Setup sanity: login emitted a non-empty remember_token.
-            login_directive = _extract_remember_token(
-                login_resp.headers.getlist("Set-Cookie")
-            )
-            assert _remember_token_value(login_directive), (
-                "Setup failed: login emitted an empty remember_token "
-                f"value: {login_directive!r}"
-            )
-
-            # Drift REMOTE_ADDR.  Strong mode should pop the session
-            # AND schedule remember_token for clearing, so the
-            # response must Set-Cookie remember_token to an empty /
-            # past-expiry value.
-            drift = client.get(
-                "/dashboard",
-                environ_overrides={"REMOTE_ADDR": _OTHER_REMOTE_ADDR},
-                follow_redirects=False,
-            )
-            drift_directive = _extract_remember_token(
-                drift.headers.getlist("Set-Cookie")
-            )
-            # The clear directive uses an empty value plus an Expires
-            # in the past (Werkzeug's delete_cookie convention).
-            assert _remember_token_value(drift_directive) == "", (
-                "Strong mode's remember_token clear must send an "
-                "empty value to overwrite the cookie; got "
-                f"{drift_directive!r}"
-            )
-            assert "Expires=" in drift_directive, (
-                "Strong mode's remember_token clear must include a "
-                "past Expires attribute so the browser deletes the "
-                f"cookie; got {drift_directive!r}"
-            )
-        finally:
-            for key, value in original.items():
-                if value is None:
-                    app.config.pop(key, None)
-                else:
-                    app.config[key] = value
 
 
 class TestSessionProtectionAttributeIsConfigured:

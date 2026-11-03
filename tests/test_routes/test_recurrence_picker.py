@@ -77,6 +77,7 @@ from app.services.recurrence import (
     EndsAfterOccurrences,
     EndsOnDate,
     NeverEnds,
+    authorable_cadences,
     cadence_options,
     end_bound_options,
     is_authorable,
@@ -344,7 +345,7 @@ class TestNothingOfferedIsUnauthorable:
         producers that merely agreed until plan step R7b-2.
         """
         with app.app_context():
-            options = cadence_options()
+            options = cadence_options(authorable_cadences())
 
             assert options, "the offer set is empty"
             for option in options:
@@ -366,24 +367,25 @@ class TestNothingOfferedIsUnauthorable:
         """The premise the sweep above rests on, stated as a measurement.
 
         Without this the sweep passes against an ``is_authorable`` that says
-        yes to everything.  The ``WEEK`` unit is the reading the offer set
-        withholds from plan step **R8-a**: a weekly occurrence is neither a
-        payday nor a day of the month, so
-        ``recurrence.compute_due_date`` has nothing to date its rows
-        from and every one would carry the funding payday instead.  Plan step
-        **R5** gives a row its own ``occurs_on`` and the unit becomes
-        authorable with that deletion.
+        yes to everything.  The one reading still refused is a pay-period
+        cadence funded from a LATER paycheck: its placement is inert, because
+        both placements carry a payday back to its own paycheck, so offering
+        it would store a choice the edit form cannot preselect.
 
-        **The case MOVED here at R8-a and the pair it replaced is now
-        authorable.**  It was ``(1, YEAR, first paycheck)``, refused because
-        ``anchor_family`` had no first-occurrence derivation for it -- a
-        derivation ruling **R-R16** deleted at plan step R7c-b, leaving the
-        refusal behind.  Swept over both placements, because the withholding is
-        a property of the UNIT and a case pinning one placement would go green
-        against a rule that had started admitting the other.
+        **The refused reading has MOVED THREE TIMES, each move closing a real
+        gap.**  It was ``(1, YEAR, first paycheck)`` until plan step R8-a, whose
+        refusal named a first-occurrence derivation ruling **R-R16** had
+        deleted; then the ``WEEK`` unit until plan step **R8-b**, which dates a
+        weekly row from its occurrence.  Every other unit is authorable at
+        BOTH placements, swept here because a rule admitting one placement and
+        not the other would pass a case that pinned only one.
         """
         with app.app_context():
-            assert not is_authorable(1, RecurrenceUnitEnum.WEEK, placement)
+            assert not is_authorable(
+                1, RecurrenceUnitEnum.PERIOD,
+                PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
+            )
+            assert is_authorable(1, RecurrenceUnitEnum.WEEK, placement)
             assert is_authorable(1, RecurrenceUnitEnum.YEAR, placement)
             assert is_authorable(1, RecurrenceUnitEnum.MONTH, placement)
 
@@ -399,7 +401,7 @@ class TestNothingOfferedIsUnauthorable:
         with app.app_context():
             month_id = ref_cache.recurrence_unit_id(RecurrenceUnitEnum.MONTH)
             month_placements = {
-                option.placement_id for option in cadence_options()
+                option.placement_id for option in cadence_options(authorable_cadences())
                 if option.unit_id == month_id
             }
 
@@ -407,6 +409,34 @@ class TestNothingOfferedIsUnauthorable:
                 ref_cache.period_placement_id(member)
                 for member in PeriodPlacementEnum
             }
+
+    def test_the_week_unit_is_offered_worded_and_wired(self, app):
+        """Plan step R8-b: weeks are offered at both placements, with their own copy.
+
+        Both placements, because a weekly date can fall strictly inside a
+        paycheck, where the two fund it differently.  "week" after a 1 and
+        "weeks" after any other count.  The wire says there is no day of the
+        month to ask about, so the script keeps the "repeating on" control
+        hidden, and that two occurrences can share a month, so it offers the
+        per-month ceiling.
+        """
+        with app.app_context():
+            week_id = ref_cache.recurrence_unit_id(RecurrenceUnitEnum.WEEK)
+            weekly = [
+                option for option in cadence_options(authorable_cadences())
+                if option.unit_id == week_id
+            ]
+
+            assert {option.placement_id for option in weekly} == {
+                ref_cache.period_placement_id(member)
+                for member in PeriodPlacementEnum
+            }
+            for option in weekly:
+                assert (option.unit_label_one, option.unit_label_many) == (
+                    "week", "weeks",
+                )
+                assert option.wire.has_day_of_month_coordinate is False
+                assert option.wire.can_repeat_within_month is True
 
 
 # ── The rendered controls ────────────────────────────────────────────
@@ -495,7 +525,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
         )
 
         with app.app_context():
-            emitted = json.loads(picker_model().options_json)
+            emitted = json.loads(picker_model(authorable_cadences()).options_json)
 
             assert emitted, "the serialized offer set is empty"
             for entry in emitted:
@@ -516,7 +546,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
         select is one the script has no entry for.
         """
         with app.app_context():
-            model = picker_model()
+            model = picker_model(authorable_cadences())
             emitted = json.loads(model.options_json)
             serialized_keys = {
                 (entry["unit_id"], entry["placement_id"])
@@ -532,7 +562,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
     def test_the_projections_are_subsets_of_the_offer_set(self, app):
         """Each control's list is drawn FROM the offer set, not beside it."""
         with app.app_context():
-            model = picker_model()
+            model = picker_model(authorable_cadences())
 
             for projection in (model.units, model.placements):
                 assert set(projection) <= set(model.options)
@@ -548,7 +578,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
         outlived the control that exposed it.
         """
         with app.app_context():
-            model = picker_model()
+            model = picker_model(authorable_cadences())
 
             units = [option.unit_id for option in model.units]
             placements = [option.placement_id for option in model.placements]
@@ -579,7 +609,7 @@ class TestBothFormsRenderTheSameControls:
         assert seed_periods_today
         with app.app_context():
             expected = []
-            for option in cadence_options():
+            for option in cadence_options(authorable_cadences()):
                 if str(option.unit_id) not in expected:
                     expected.append(str(option.unit_id))
 
@@ -1014,20 +1044,19 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
     replaced it, so a route that accepted the triple and 500'd at the flush
     would have passed the whole suite.
 
-    ``(1, WEEK, ...)`` is the case since plan step **R8-a**: a weekly
-    occurrence is neither a payday nor a day of the month, so
-    ``recurrence.compute_due_date`` has nothing to date its generated
-    rows from and :func:`~app.services.recurrence._frequency
-    .has_row_date_coordinate` keeps the unit out of the offer set.  The picker
-    never renders the WEEK unit, so no click produces it.
+    ``(1, PERIOD, first paycheck on or after)`` is the case since plan step
+    **R8-b**: a pay-period cadence's placement is inert, so the offer set
+    holds only its containing reading and the funding row renders the other
+    disabled.  No click produces it.
 
-    **The case has MOVED TWICE, each time because the gap it named closed.**
-    It was ``(2, MONTH)`` until plan step R7c-c, which freed the interval; then
-    ``(1, YEAR, first paycheck)`` until R8-a, which admitted it -- that refusal
-    named a first-occurrence derivation ruling **R-R16** had already deleted.
-    Plan step **R5** closes this one, and the case then has no successor: the
-    offer set and the write door will admit every reading, and what is left to
-    pin is that they still agree.
+    **The case has MOVED THREE TIMES, each time because the gap it named
+    closed.**  It was ``(2, MONTH)`` until plan step R7c-c, which freed the
+    interval; then ``(1, YEAR, first paycheck)`` until R8-a, which admitted it
+    -- that refusal named a first-occurrence derivation ruling **R-R16** had
+    already deleted; then ``(1, WEEK)`` until R8-b, which dates a weekly row
+    from its occurrence.  The inert placement is a refusal of a different
+    kind -- a control the engine would ignore, not a cadence it cannot run --
+    and it is what is left for a hand-assembled POST to meet.
     """
 
     #: The verbatim copy the routes flash.  Pinned because the message names
@@ -1054,7 +1083,10 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
                 "category_id": str(seed_user["categories"]["Rent"].id),
                 "transaction_type_id": str(_expense_type_id()),
                 "account_id": str(seed_user["account"].id),
-                **cadence_payload(unit=RecurrenceUnitEnum.WEEK),
+                **cadence_payload(
+                    unit=RecurrenceUnitEnum.PERIOD,
+                    placement=PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
+                ),
             }, follow_redirects=True)
 
             assert resp.status_code == 200
@@ -1083,7 +1115,10 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "category_id": str(seed_user["categories"]["Rent"].id),
-                **cadence_payload(unit=RecurrenceUnitEnum.WEEK),
+                **cadence_payload(
+                    unit=RecurrenceUnitEnum.PERIOD,
+                    placement=PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
+                ),
             }, follow_redirects=True)
 
             assert resp.status_code == 200
@@ -1113,7 +1148,10 @@ class TestTheWriteDoorsRefuseAnUnstorableCadence:
             resp = auth_client.post(f"/templates/{template_id}", data={
                 "name": "Rent",
                 "default_amount": "1200.00",
-                **cadence_payload(unit=RecurrenceUnitEnum.WEEK),
+                **cadence_payload(
+                    unit=RecurrenceUnitEnum.PERIOD,
+                    placement=PeriodPlacementEnum.PERIOD_STARTING_ON_OR_AFTER,
+                ),
             }, follow_redirects=True)
 
             assert resp.status_code == 200
@@ -1304,7 +1342,7 @@ class TestTheCopyTheUserActuallyReads:
         body = auth_client.get("/templates/new").data.decode()
 
         assert _option_labels(body, "recurrence_unit") == [
-            "Choose how it repeats", "paychecks", "months", "years",
+            "Choose how it repeats", "paychecks", "weeks", "months", "years",
         ]
 
     def test_the_transfer_form_still_offers_does_not_repeat(
@@ -1315,7 +1353,7 @@ class TestTheCopyTheUserActuallyReads:
         body = auth_client.get("/transfers/new").data.decode()
 
         assert _option_labels(body, "recurrence_unit") == [
-            "Does not repeat", "paychecks", "months", "years",
+            "Does not repeat", "paychecks", "weeks", "months", "years",
         ]
 
     # ``test_the_interval_options_agree_with_their_own_counts`` was here until
@@ -1488,4 +1526,4 @@ class TestTheEndBoundOfferSet:
 
     def test_the_picker_model_carries_them(self):
         """One producer call per render, for every control on the form."""
-        assert picker_model().end_bounds == end_bound_options()
+        assert picker_model(authorable_cadences()).end_bounds == end_bound_options()

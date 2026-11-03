@@ -28,8 +28,10 @@ def make_template_with_rule(seed_user, cadence, **rule_kwargs):
 
     Args:
         seed_user: The `seed_user` fixture's mapping.
-        cadence: The `RecurrenceUnitEnum` the rule fires on.
-        **rule_kwargs: `interval_n`, `day_of_month`, `month_of_year`.
+        cadence: The `ShapeCadence` the rule is authored with.
+        **rule_kwargs: `interval_n`, `day_of_month`, `month_of_year`, and
+            `starts_on`, the rule's first occurrence, for a cadence whose
+            subject is a date rather than a day of the month (a weekly one).
 
     Returns:
         The refreshed `TransferTemplate`.
@@ -53,6 +55,7 @@ def make_template_with_rule(seed_user, cadence, **rule_kwargs):
     make_cadence_rule(
         template, cadence,
         interval_n=rule_kwargs.get("interval_n", 1),
+        starts_on=rule_kwargs.get("starts_on"),
         fires_on_day=rule_kwargs.get("day_of_month"),
         fires_in_month=rule_kwargs.get("month_of_year"),
     )

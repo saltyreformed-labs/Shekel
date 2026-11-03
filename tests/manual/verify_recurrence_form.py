@@ -56,6 +56,16 @@ edited, and a definition pinned to its loan (ruling R-R76) renders its
 destination control disabled -- a disabled control posts nothing, which only a
 real ``FormData`` can say.
 
+**Plan step R8-b made the WEEK unit authorable**, and each control it reaches
+is graded by the drive that owns that control: the week option is offered and
+selectable, its interval box and BOTH funding choices enable and the preview
+re-fetches for each reading and lists its occurrences (:func:`_drive_visibility`);
+the per-month ceiling row shows
+for it (:func:`_drive_month_ceiling`); and the "repeating on" day control
+stays hidden beside it on a date that opens that question for a monthly
+cadence (:func:`_drive_nominal_day`).  The two WEEK refusal cases went with
+the refusal (:func:`_drive_refusals` says what replaced them).
+
 **It writes nothing.**  Every check reads the form's own DOM; the crafted POSTs
 in the refusal pass are all expected to be REFUSED, and the pass asserts that
 no template and no recurrence rule was persisted by any of them.  Run it
@@ -81,6 +91,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
@@ -298,6 +309,31 @@ def _posted_bound(page) -> dict[str, list[str]]:
     )
 
 
+def _selectable_unit(page, units: dict[str, str], label: str) -> str | None:
+    """Return the id of the unit offered as *label*, or None unless a user can choose it.
+
+    SELECTABLE, not merely present: an option the server renders and the page
+    hides or disables reads the same as a live one in rendered HTML, and
+    Playwright's ``select_option`` waits on a disabled option until its
+    timeout and then raises, which would end the run rather than report it.
+
+    Args:
+        page: The Playwright page.
+        units: The offered units, as :func:`_unit_ids` read them.
+        label: The unit's plural label, e.g. ``"weeks"``.
+
+    Returns:
+        The unit's ref id, or ``None`` when no live option carries it.
+    """
+    if label not in units:
+        return None
+    live = page.evaluate(
+        """(id) => Array.from(document.getElementById('recurrence_unit').options)
+              .some(o => o.value === id && !o.hidden && !o.disabled)""",
+        units[label])
+    return units[label] if live else None
+
+
 def _posted_opening(page) -> dict[str, list[str]]:
     """Return the opening-bound keys the form would actually submit.
 
@@ -472,6 +508,30 @@ def _drive_nominal_day(page, kind: str, url: str) -> None:
            _posted_opening(page)["nominal_day"] == [],
            str(_posted_opening(page)["nominal_day"]))
 
+    # --- weeks (plan step R8-b): a unit with no day of the month ---------
+    # The question is re-opened on the MONTHLY cadence first, a day chosen,
+    # so that "hidden for weeks" below is a change the script made rather
+    # than a control that was never shown.
+    weeks = _selectable_unit(page, units, "weeks")
+    if weeks is None:
+        print("   SKIPPED (weeks arm): no live weeks option; the visibility pass fails it")
+        return
+    page.fill("#starts_on", "2026-04-30")
+    _settle(page)
+    page.select_option("#nominal_day", "31")
+    _settle(page)
+    _check(f"{kind} N: precondition -- months on Apr 30 shows repeating-on, 31 posting",
+           _visible(page, "field-nominal-day")
+           and _posted_opening(page)["nominal_day"] == ["31"],
+           str(_posted_opening(page)["nominal_day"]))
+    page.locator("#recurrence_unit").select_option(weeks)
+    _settle(page)
+    _check(f"{kind} N: repeating-on is hidden for weeks on the same date",
+           not _visible(page, "field-nominal-day"), "visible")
+    _check(f"{kind} N: the day chosen for months posts NOTHING for weeks",
+           _posted_opening(page)["nominal_day"] == [],
+           str(_posted_opening(page)["nominal_day"]))
+
 
 def _posted_ceiling(page) -> list[str]:
     """Return the ``max_per_month`` values the form would actually submit.
@@ -501,7 +561,8 @@ def _drive_month_ceiling(page, kind: str, url: str) -> None:
 
     **Plan step salary:R15-a's control, and this file's whole defect class one
     field over.**  The per-month ceiling is meaningful only on a unit whose
-    occurrences can repeat within a month (paychecks today), so
+    occurrences can repeat within a month (paychecks, and weeks since plan
+    step R8-b), so
     ``recurrence_form.js`` reveals the row for that unit and hides AND
     DISABLES it for a monthly or yearly one; rendered HTML cannot tell a
     hidden input from a disabled one, and only a real ``FormData`` says which
@@ -583,6 +644,26 @@ def _drive_month_ceiling(page, kind: str, url: str) -> None:
            _visible(page, "field-max-per-month"), "hidden")
     _check(f"{kind} C: the typed ceiling survived the monthly detour",
            _posted_ceiling(page) == ["2"], str(_posted_ceiling(page)))
+
+    # --- weeks (plan step R8-b): a weekly cadence can fire more than once in
+    # a month, so the ceiling is the user's here too -----------------------
+    weeks = _selectable_unit(page, units, "weeks")
+    if weeks is None:
+        print("   SKIPPED (weeks arm): no live weeks option; the visibility pass fails it")
+        return
+    previews.clear()
+    page.locator("#recurrence_unit").select_option(weeks)
+    _settle(page)
+    _check(f"{kind} C: the ceiling row is SHOWN for weeks",
+           _visible(page, "field-max-per-month"), "hidden")
+    _check(f"{kind} C: the typed ceiling carries over to weeks and posts once",
+           _posted_ceiling(page) == ["2"], str(_posted_ceiling(page)))
+    _check(f"{kind} C: the weekly preview carries the ceiling",
+           bool(previews) and "max_per_month=2" in previews[-1],
+           previews[-1] if previews else "no preview request was made")
+    _check(f"{kind} C: the preview survived the weekly ceiling",
+           "Could not load preview" not in page.inner_text("#recurrence-preview"),
+           page.inner_text("#recurrence-preview"))
 
 
 def _drive_loan_destination_lock(page) -> None:
@@ -1107,6 +1188,179 @@ def _drive_end_bound(page, kind: str, url: str) -> None:
            "preview broke")
 
 
+def _one_interval(page, kind: str, label: str) -> list[str]:
+    """Check exactly one interval control submits, and return what it posts.
+
+    Args:
+        page: The Playwright page.
+        kind: "transaction" or "transfer", for the labels.
+        label: The case letter.
+
+    Returns:
+        Every value the form would post under ``interval_n``.
+    """
+    posted = _posted_intervals(page)
+    _check(f"{kind} {label}: exactly one interval_n posts",
+           len(posted) <= 1, f"posted={posted}")
+    return posted
+
+
+def _placement_help(page, kind: str, label: str, fixed: bool) -> None:
+    """Check the funding row is SHOWN and says which state the user is in.
+
+    Plan ledger row **D32**, developer ruling 2026-08-16.  The row used to
+    hide itself whenever the cadence admitted one placement, which is how a
+    bill's funding rule came to change with nothing on screen saying so.
+    Rendered HTML cannot tell a row a script left visible from one it hid,
+    which is why this check is here rather than in the suite.
+
+    Args:
+        page: The Playwright page.
+        kind: "transaction" or "transfer", for the labels.
+        label: The case letter.
+        fixed: Whether this cadence admits exactly one placement.
+    """
+    _check(f"{kind} {label}: funding row VISIBLE",
+           _visible(page, "field-placement"),
+           "the Funded-from row is hidden, so a funding change is silent")
+    shown_text = page.locator("#placement-help").inner_text().strip()
+    expected = (
+        "This cadence has one funding rule" if fixed
+        else "Which paycheck pays for each occurrence"
+    )
+    _check(f"{kind} {label}: funding help says "
+           f"{'FIXED' if fixed else 'a choice'}",
+           expected in shown_text, shown_text)
+
+
+def _choose_placement(page, index: int) -> None:
+    """Choose the funding placement at *index* and let the script re-link.
+
+    By INDEX, in the order the picker renders the placements: 0 is the
+    paycheck containing the occurrence, 1 the first paycheck on or after it.
+
+    Args:
+        page: The Playwright page.
+        index: The option's position in ``#recurrence_placement``.
+    """
+    page.evaluate(
+        """(index) => { const s = document.getElementById('recurrence_placement');
+                        s.selectedIndex = index;
+                        s.dispatchEvent(new Event('change', {bubbles: true})); }""",
+        index,
+    )
+    _settle(page)
+
+
+def _check_week_preview(page, kind: str, previews: list[str],
+                        reading: dict[str, str]) -> None:
+    """Check the act just taken re-fetched the preview for *reading*, and it answered.
+
+    The request is the evidence, not the fragment.  On a 14-day schedule every
+    other week previews exactly the paychecks every paycheck does (measured
+    2026-11-02; it is why the suite's weekly preview case uses three weeks),
+    so the text left from the paychecks step reads the same whether or not a
+    weekly fetch happened; and
+    :func:`_settle` is a fixed wait, which cannot say one did.  The last
+    request since the caller cleared *previews* must carry every key of
+    *reading* exactly, parsed rather than matched as a substring, since
+    ``recurrence_unit=5`` is a substring of ``recurrence_unit=50``.
+
+    Args:
+        page: The Playwright page.
+        kind: "transaction" or "transfer", for the labels.
+        previews: The preview URLs requested since the caller's last act.
+        reading: The query keys the request must carry, each to one value.
+    """
+    query = parse_qs(urlsplit(previews[-1]).query) if previews else {}
+    named = ", ".join(f"{key}={value}" for key, value in reading.items())
+    _check(f"{kind} W: the preview re-fetched for {named}",
+           all(query.get(key) == [value] for key, value in reading.items()),
+           previews[-1] if previews else "no preview request was made")
+    shown = page.inner_text("#recurrence-preview")
+    _check(f"{kind} W: that preview lists occurrences",
+           "occurrences:" in shown, shown)
+
+
+def _drive_week_visibility(page, kind: str, units: dict[str, str]) -> None:
+    """Check the WEEK unit's controls, on one form kind (plan step R8-b).
+
+    The unit the closed pattern set could never express, offered on both
+    forms since a weekly row is dated from its occurrence, so the option must
+    be SELECTABLE (:func:`_selectable_unit`), not merely present.  A weekly
+    occurrence is neither a payday nor a day of the month, so BOTH
+    placements change which paycheck funds it, and both must enable and post.
+    The cadence is left at every other week, funded by the paycheck
+    containing each occurrence.
+
+    **Each preview check reads the REQUEST the act fired**
+    (:func:`_check_week_preview`), as :func:`_drive_month_ceiling` does: clear
+    the captured URLs, act, then require a fetch naming the week unit and,
+    for the second, the deferring placement.  Both checks read only that
+    "occurrences:" was on screen until the adversarial review of R8-b, and the
+    paychecks preview left there passed both whether or not a fetch happened.
+
+    Args:
+        page: The Playwright page, on the create form, a cadence chosen.
+        kind: "transaction" or "transfer", for the labels.
+        units: The offered units, as :func:`_unit_ids` read them.
+    """
+    weeks = _selectable_unit(page, units, "weeks")
+    _check(f"{kind} W: the weeks option is offered and selectable", weeks is not None,
+           f"offered units: {sorted(units)}")
+    if weeks is None:
+        return
+    previews: list[str] = []
+
+    def capture(request) -> None:
+        if "preview-recurrence" in request.url:
+            previews.append(request.url)
+
+    page.on("request", capture)
+    page.locator("#recurrence_unit").select_option(weeks)
+    _settle(page)
+    _check(f"{kind} W: interval box enabled",
+           page.evaluate("() => !document.getElementById('interval_n').disabled"),
+           "disabled")
+    placements = page.evaluate(
+        """() => Array.from(document.getElementById('recurrence_placement').options)
+                 .map(o => o.value)"""
+    )
+    # Cleared BEFORE the act: the fetch fires on the change event itself (the
+    # ordering ``_drive_month_ceiling`` measured).
+    previews.clear()
+    _set_interval(page, 2)
+    _check(f"{kind} W: every other week posts its own interval",
+           _one_interval(page, kind, "W") == ["2"], "the box lost the typed interval")
+    _placement_help(page, kind, "W", fixed=False)
+    offered_placements = page.evaluate(
+        """() => Array.from(document.getElementById('recurrence_placement').options)
+                 .filter(o => !o.hidden && !o.disabled).length"""
+    )
+    _check(f"{kind} W: both funding choices are enabled for weeks",
+           offered_placements == 2, f"{offered_placements} enabled")
+    _check_week_preview(page, kind, previews, {
+        "recurrence_unit": weeks, "interval_n": "2",
+        "recurrence_placement": placements[0],
+    })
+    previews.clear()
+    _choose_placement(page, 1)
+    _check(f"{kind} W: a weekly cadence funded from a later paycheck posts that choice",
+           page.evaluate(
+               """() => {
+                   const s = document.getElementById('recurrence_placement');
+                   const posted = new FormData(s.form).getAll('recurrence_placement');
+                   return posted.length === 1 && posted[0] === s.options[1].value;
+               }"""),
+           "the deferring placement does not post on the WEEK unit")
+    _check_week_preview(page, kind, previews, {
+        "recurrence_unit": weeks, "interval_n": "2",
+        "recurrence_placement": placements[1],
+    })
+    _choose_placement(page, 0)
+    page.remove_listener("request", capture)
+
+
 def _drive_visibility(page, kind: str, url: str) -> None:
     """Check which controls each cadence shows, on one form kind.
 
@@ -1146,38 +1400,6 @@ def _drive_visibility(page, kind: str, url: str) -> None:
            page.locator("[name='due_day_of_month'], #field-due-dom").count() == 0,
            "a due-day control is rendered")
 
-    def one_interval(label: str) -> list[str]:
-        """Exactly one interval control submits, in every state."""
-        posted = _posted_intervals(page)
-        _check(f"{kind} {label}: exactly one interval_n posts",
-               len(posted) <= 1, f"posted={posted}")
-        return posted
-
-    def placement_help(label: str, fixed: bool) -> None:
-        """The funding row is SHOWN and says which state the user is in.
-
-        Plan ledger row **D32**, developer ruling 2026-08-16.  The row used to
-        hide itself whenever the cadence admitted one placement, which is how a
-        bill's funding rule came to change with nothing on screen saying so.
-        Rendered HTML cannot tell a row a script left visible from one it hid,
-        which is why this check is here rather than in the suite.
-
-        Args:
-            label: The case letter.
-            fixed: Whether this cadence admits exactly one placement.
-        """
-        _check(f"{kind} {label}: funding row VISIBLE",
-               _visible(page, "field-placement"),
-               "the Funded-from row is hidden, so a funding change is silent")
-        shown_text = page.locator("#placement-help").inner_text().strip()
-        expected = (
-            "This cadence has one funding rule" if fixed
-            else "Which paycheck pays for each occurrence"
-        )
-        _check(f"{kind} {label}: funding help says "
-               f"{'FIXED' if fixed else 'a choice'}",
-               expected in shown_text, shown_text)
-
     # Does not repeat: the form's own empty option, not a cadence.
     unit.select_option("")
     _settle(page)
@@ -1186,7 +1408,7 @@ def _drive_visibility(page, kind: str, url: str) -> None:
     _check(f"{kind} A: interval box disabled",
            page.evaluate("() => document.getElementById('interval_n').disabled"),
            "enabled beside no unit, so half a cadence can post")
-    one_interval("A")
+    _one_interval(page, kind, "A")
 
     # Paychecks: the placement is INERT here, so the row explains itself.
     unit.select_option(units["paychecks"])
@@ -1194,47 +1416,42 @@ def _drive_visibility(page, kind: str, url: str) -> None:
     _check(f"{kind} B: interval box enabled",
            page.evaluate("() => !document.getElementById('interval_n').disabled"),
            "disabled")
-    placement_help("B", fixed=True)
-    one_interval("B")
+    _placement_help(page, kind, "B", fixed=True)
+    _one_interval(page, kind, "B")
+
+    _drive_week_visibility(page, kind, units)
 
     # Months at 1: anchors on the calendar.
     unit.select_option(units["months"])
     _settle(page)
     _set_interval(page, 1)
-    placement_help("C", fixed=False)
-    one_interval("C")
+    _placement_help(page, kind, "C", fixed=False)
+    _one_interval(page, kind, "C")
 
     # Months at 1, funded from the month's FIRST paycheck: anchors on a
     # paycheck, so it reads no day of the month.
-    page.evaluate(
-        """() => { const s = document.getElementById('recurrence_placement');
-                   s.selectedIndex = 1;
-                   s.dispatchEvent(new Event('change', {bubbles: true})); }""")
-    _settle(page)
+    _choose_placement(page, 1)
 
     # Months at 3, still funded from the month's first paycheck.  **This is
     # plan ledger row D32's defect ceasing to exist**: the closed set had no
     # quarterly first-paycheck twin, so raising the interval used to reassign
     # the placement and HIDE the row.  The choice must survive.
     _set_interval(page, 3)
-    placement_help("E", fixed=False)
+    _placement_help(page, kind, "E", fixed=False)
     _check(f"{kind} E: the first-paycheck funding SURVIVED the interval change",
            page.evaluate(
                "() => document.getElementById('recurrence_placement')"
                ".selectedIndex") == 1,
            "the funding choice was silently reassigned")
-    one_interval("E")
+    _one_interval(page, kind, "E")
 
     # Months at 2 -- the cadence the closed pattern set could never name, and
     # the whole point of plan step R7c-c.  Typed rather than chosen, because
     # there is no <select> left to choose it from.
-    page.evaluate(
-        """() => { const s = document.getElementById('recurrence_placement');
-                   s.selectedIndex = 0;
-                   s.dispatchEvent(new Event('change', {bubbles: true})); }""")
+    _choose_placement(page, 0)
     _set_interval(page, 2)
     _check(f"{kind} F: every-other-month posts its own interval",
-           one_interval("F") == ["2"], "the free box lost the typed interval")
+           _one_interval(page, kind, "F") == ["2"], "the free box lost the typed interval")
 
     # Years: the interval box carries over, so it is typed back to 1.
     #
@@ -1247,25 +1464,22 @@ def _drive_visibility(page, kind: str, url: str) -> None:
     unit.select_option(units["years"])
     _settle(page)
     _set_interval(page, 1)
-    placement_help("G", fixed=False)
-    _check(f"{kind} G: posts interval 1", one_interval("G") == ["1"], "wrong interval")
+    _placement_help(page, kind, "G", fixed=False)
+    _check(f"{kind} G: posts interval 1",
+           _one_interval(page, kind, "G") == ["1"], "wrong interval")
 
     # A year-scale cadence funded from the month's FIRST paycheck: the reading
     # plan step R8-a admitted, driven end to end because a placement the server
     # OFFERS and the script leaves disabled is invisible to the suite -- and
     # because this pair was a REFUSAL case in ``_drive_refusals`` until this
     # step, which is as wrong as it sounds in the other direction.
-    page.evaluate(
-        """() => { const s = document.getElementById('recurrence_placement');
-                   s.selectedIndex = 1;
-                   s.dispatchEvent(new Event('change', {bubbles: true})); }""")
-    _settle(page)
+    _choose_placement(page, 1)
     _check(f"{kind} H: a yearly cadence CAN be funded from a later paycheck",
            page.evaluate(
                "() => document.getElementById('recurrence_placement')"
                ".selectedIndex") == 1,
            "the deferring placement is still not selectable on the YEAR unit")
-    placement_help("H", fixed=False)
+    _placement_help(page, kind, "H", fixed=False)
 
     preview = page.locator("#recurrence-preview").inner_text().strip()
     _check(f"{kind}: the live preview answered",
@@ -1300,10 +1514,6 @@ def _drive_refusals(context, page) -> None:
             "SELECT id FROM ref.recurrence_units WHERE name = 'month'")[0],
         "period": _sql(
             "SELECT id FROM ref.recurrence_units WHERE name = 'period'")[0],
-        "week": _sql(
-            "SELECT id FROM ref.recurrence_units WHERE name = 'week'")[0],
-        "year": _sql(
-            "SELECT id FROM ref.recurrence_units WHERE name = 'year'")[0],
         "covering": _sql("SELECT id FROM ref.period_placements "
                          "WHERE name = 'containing_date'")[0],
         "first_pay": _sql("SELECT id FROM ref.period_placements "
@@ -1324,34 +1534,34 @@ def _drive_refusals(context, page) -> None:
     rules_before = _sql("SELECT count(*) FROM budget.recurrence_rules")[0]
 
     cases = [
-        # **The unauthorable SET has MOVED TWICE, and this list is where that
-        # shows.**  It was every month or year INTERVAL the closed pattern set
-        # could not name -- "every other month", "quarterly funded from the
-        # first paycheck" -- because STORAGE was the binding constraint, and
-        # freeing the interval at R7c-c is what this arc exists for.  It was
-        # then the two ``(unit, placement)`` pairs ``anchor_family`` had no
-        # first-occurrence derivation for, and plan step **R8-a** measured one
-        # of those STALE: ruling R-R16 made the first occurrence AUTHORED at
-        # R7c-b and deleted the derivation the refusal cited, so a year-scale
-        # cadence funded from a later paycheck SAVES now.
+        # **The unauthorable SET has MOVED THREE TIMES, and this list is
+        # where that shows.**  It was every month or year INTERVAL the closed
+        # pattern set could not name -- "every other month", "quarterly funded
+        # from the first paycheck" -- because STORAGE was the binding
+        # constraint, and freeing the interval at R7c-c is what this arc exists
+        # for.  It was then the two ``(unit, placement)`` pairs
+        # ``anchor_family`` had no first-occurrence derivation for, and plan
+        # step **R8-a** measured one of those STALE: ruling R-R16 made the
+        # first occurrence AUTHORED at R7c-b and deleted the derivation the
+        # refusal cited, so a year-scale cadence funded from a later paycheck
+        # SAVES now.  R8-a replaced that case with the WEEK unit's other
+        # placement, beside the one already here: both withheld because a
+        # weekly row had no date to carry.  Plan step **R8-b** dates a row
+        # from its occurrence and offers weeks at both placements, so those
+        # two cases went too.
         #
-        # **Leaving that case here would not have been harmless.**  These
-        # payloads carry the whole ``base_form``, and ``POST /templates``
-        # GENERATES on create -- so an accepted "refusal" writes a template, a
-        # rule and its projected rows into whatever database this is pointed
-        # at, and then trips the two persistence checks at the end of this
-        # pass, which is how a real regression comes to be read as "the known
-        # year failure".  It is replaced by the WEEK unit's OTHER placement:
-        # the withholding is a property of the unit
-        # (``_offer.has_row_date_coordinate``), so both readings must be
-        # refused and a list pinning one would pass against a rule that had
-        # started admitting the other.
-        ("the WEEK unit names no date a generated row can carry",
-         {"recurrence_unit": ids["week"], "interval_n": "1",
-          "recurrence_placement": ids["covering"]},
-         "That repeat schedule cannot be saved yet"),
-        ("the WEEK unit is refused under the DEFERRING placement too",
-         {"recurrence_unit": ids["week"], "interval_n": "2",
+        # **Leaving a stale case here is not harmless.**  These payloads carry
+        # the whole ``base_form``, and ``POST /templates`` GENERATES on create
+        # -- so an accepted "refusal" writes a template, a rule and its
+        # projected rows into whatever database this is pointed at, and then
+        # trips the two persistence checks at the end of this pass, which is
+        # how a real regression comes to be read as "the known week failure".
+        # What ``authorable_cadences`` withholds now is ONE reading: a
+        # pay-period cadence funded from a LATER paycheck.  Its placement is
+        # inert -- a payday is carried back to its own paycheck either way --
+        # so storing the choice would store a control the engine ignores.
+        ("a pay-period cadence funded from a later paycheck (an inert placement)",
+         {"recurrence_unit": ids["period"], "interval_n": "1",
           "recurrence_placement": ids["first_pay"]},
          "That repeat schedule cannot be saved yet"),
         # The interval box is a free number input from R7c-c, so a CLEARED one

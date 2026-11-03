@@ -34,6 +34,7 @@ from app.models.ref import (
 
 # Authentication
 from app.models.user import MfaConfig, User, UserSettings
+from app.models.trusted_device import TrustedDevice
 
 # Budget domain
 from app.models.pay_period import PayPeriod
@@ -99,7 +100,6 @@ from app.models.salary_raise import SalaryRaise
 from app.models.salary_pay_entry import SalaryPayEntry
 from app.models.paycheck_line import PaycheckLine
 from app.models.pension_profile import PensionProfile
-from app.models.calibration_override import CalibrationOverride
 from app.models.pay_stub import (
     PayStub,
     PayStubLineAmount,
@@ -146,6 +146,7 @@ __all__ = [
     "WithholdingKind",
     # Authentication
     "MfaConfig",
+    "TrustedDevice",
     "User",
     "UserSettings",
     # Budget domain
@@ -199,7 +200,6 @@ __all__ = [
     "SalaryPayEntry",
     "PaycheckLine",
     "PensionProfile",
-    "CalibrationOverride",
     "PayStub",
     "PayStubLineAmount",
     "PayStubOneOff",

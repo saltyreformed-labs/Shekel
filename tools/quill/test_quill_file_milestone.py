@@ -235,9 +235,9 @@ def test_sync_after_a_person_closes_a_leaf_still_being_filed_gives_its_milestone
 
 
 @pytest.mark.parametrize("argv", [
-    ("file", "step", "--arc", "balance", "--title", "Top"),
-    ("file", "finding", "--arc", "balance", "--title", "Twice", "--owner", "plan#1",
-     "--text", "The report counts a refund twice."),
+    ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Top"),
+    ("file", "finding", "--effort", "1", "--arc", "balance", "--title", "Twice",
+     "--owner", "plan#1", "--text", "The report counts a refund twice."),
 ])
 def test_a_filing_that_is_no_leaf_reads_no_milestone(code, tmp_path, argv):
     """Only a leaf's filing reads milestones: a top-level step's and a finding's never ask."""

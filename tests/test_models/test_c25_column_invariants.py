@@ -57,7 +57,6 @@ F_068_LOCKED_COLUMNS = [
     ("budget", "transactions", "is_deleted", "false"),
     ("budget", "transfer_templates", "is_active", "true"),
     ("budget", "transfer_templates", "sort_order", "0"),
-    ("salary", "calibration_overrides", "is_active", "true"),
     ("salary", "paycheck_lines", "inflation_enabled", "false"),
     ("salary", "paycheck_lines", "is_active", "true"),
     ("salary", "paycheck_lines", "sort_order", "0"),

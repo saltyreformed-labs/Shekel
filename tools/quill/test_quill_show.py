@@ -208,3 +208,15 @@ def test_show_fails_on_a_link_no_read_by_number_holds(code, capsys, monkeypatch,
     assert run(tracker, code, "show", "plan#1") == 2
     assert ("failed: plan#2 is linked below plan#1, blocks it or is blocked by it, but a read "
             "by its number does not hold it: run show again") in capsys.readouterr().err
+
+
+def test_show_prints_a_cards_priority_and_effort_and_none_for_one_it_lacks(code, capsys):
+    """plan#2491: ``show`` prints a card's Priority and its Effort in sessions, each read from
+    the card, and ``none`` for one it does not hold."""
+    tracker = FakeTracker()
+    tracker.add(1, priority="Urgent", effort="5+")
+    tracker.add(2, "question", priority="Low")
+    assert run(tracker, code, "show", "plan#1") == 0
+    assert "\n  priority: Urgent\n  effort (sessions): 5+\n" in capsys.readouterr().out
+    assert run(tracker, code, "show", "plan#2") == 0
+    assert "\n  priority: Low\n  effort (sessions): none\n" in capsys.readouterr().out

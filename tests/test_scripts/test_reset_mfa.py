@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.extensions import db
-from app.models.user import MfaConfig
+from app.models.user import MfaConfig, User
 from app.services import mfa_service
 from scripts.reset_mfa import parse_args, reset_mfa
 
@@ -51,6 +51,29 @@ class TestResetMfa:
             # be a subtle source of legitimate-code rejections.  See
             # commit C-09.
             assert config.last_totp_timestep is None
+
+    def test_reset_mfa_ends_sessions_and_forgets_devices(
+        self, app, db, seed_user,
+    ):
+        """The reset bumps ``session_invalidated_at`` to the moment it ran.
+
+        That bump is what ends the user's sessions and forgets every trusted
+        device (plan#2173, ruling plan#2406), as ``/mfa/disable``'s does.
+        """
+        with app.app_context():
+            user_id = seed_user["user"].id
+            self._enable_mfa(user_id)
+            assert db.session.get(User, user_id).session_invalidated_at is None
+            before = datetime.now(timezone.utc)
+
+            reset_mfa(seed_user["user"].email)
+
+            after = datetime.now(timezone.utc)
+            bumped = db.session.query(User.session_invalidated_at).filter_by(
+                id=user_id,
+            ).scalar()
+            assert bumped is not None
+            assert before <= bumped <= after
 
     def test_reset_mfa_user_not_found(self, app, db, capsys):
         """reset_mfa() prints error and exits for unknown email."""

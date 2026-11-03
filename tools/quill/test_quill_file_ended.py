@@ -172,7 +172,8 @@ def test_a_card_dropped_while_its_command_ran_is_never_filed_over(code, tmp_path
     restore it."""
     spec = tmp_path / "spec.md"
     spec.write_text("Build it.")
-    args = ("file", "step", "--arc", "balance", "--title", "Alone", "--body-file", str(spec))
+    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Alone",
+            "--body-file", str(spec))
     tracker = FakeTracker()
     FailOnce(tracker.board, "add")
     assert run(tracker, code, *args) == 2
@@ -370,7 +371,8 @@ def test_a_card_dropped_while_marked_is_refused_whatever_the_listings_show(code,
     current listing filed a second card, and a second leaf beside the closed one."""
     spec = tmp_path / "spec.md"
     spec.write_text("Build it.")
-    args = ("file", "step", "--arc", "balance", "--title", "Alone", "--body-file", str(spec))
+    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Alone",
+            "--body-file", str(spec))
     tracker = FakeTracker()
     FailOnce(tracker.board, "add")
     assert run(tracker, code, *args) == 2
@@ -413,8 +415,8 @@ def test_a_finding_closed_after_its_filing_finished_is_filed_anew(code):
     """The boundary ``_same_filing`` states (review LOW 4, P6): only a card still marked,
     or a ruling blocked by its owner (R-BAL395), is looked for among closed cards; a
     finding dropped after its filing finished is not, and the same command files another."""
-    args = ("file", "finding", "--arc", "balance", "--title", "Twice", "--owner", "plan#1",
-            "--text", "The report counts a refund twice.")
+    args = ("file", "finding", "--effort", "1", "--arc", "balance", "--title", "Twice",
+            "--owner", "plan#1", "--text", "The report counts a refund twice.")
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, *args) == 0
@@ -477,7 +479,8 @@ def test_shipped_work_closed_while_marked_is_never_refused_nor_filed_again(code,
     it shipped."""
     spec = tmp_path / "spec.md"
     spec.write_text("Build it.")
-    args = ("file", "step", "--arc", "balance", "--title", "Alone", "--body-file", str(spec))
+    args = ("file", "step", "--effort", "2", "--arc", "balance", "--title", "Alone",
+            "--body-file", str(spec))
     tracker = FakeTracker()
     FailOnce(tracker, "unmark")
     assert run(tracker, code, *args) == 2
@@ -552,8 +555,8 @@ def test_a_lagging_listing_turns_a_new_filing_into_filed_already(code, monkeypat
     """Delta LOW 3 (D5), the boundary ``_same_filing`` states: a finding closed after its
     filing finished is not looked for, but a listing that lags its close still shows it
     open; read closed by its number, it is filed already and nothing is written."""
-    args = ("file", "finding", "--arc", "balance", "--title", "Twice", "--owner", "plan#1",
-            "--text", "The report counts a refund twice.")
+    args = ("file", "finding", "--effort", "1", "--arc", "balance", "--title", "Twice",
+            "--owner", "plan#1", "--text", "The report counts a refund twice.")
     tracker = FakeTracker()
     tracker.add(1)
     assert run(tracker, code, *args) == 0

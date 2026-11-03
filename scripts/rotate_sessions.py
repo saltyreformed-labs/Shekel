@@ -5,7 +5,7 @@ One-shot operations utility that bumps ``users.session_invalidated_at``
 to ``now()`` for every row in ``auth.users``.  Run it after rotating
 ``SECRET_KEY``, after a git history rewrite that excised a leaked key,
 or after any other event that compromises previously-issued session
-cookies and remember-me tokens.
+cookies.
 
 The application's ``load_user`` callback (``app/__init__.py``) compares
 ``users.session_invalidated_at`` against the per-session
@@ -13,6 +13,24 @@ The application's ``load_user`` callback (``app/__init__.py``) compares
 runs, every existing session becomes older than the new
 ``session_invalidated_at`` and is rejected on the next request,
 forcing every active user to log in again.
+
+It also forgets every trusted device, of every user.  A device is
+trusted only while it was trusted at or after its user's
+``session_invalidated_at`` (``app.services.trusted_device_service``,
+plan#2173), so the bump leaves every device older than it, and the
+next sign-in on each one asks for the two-factor code again.  The
+script writes nothing to ``auth.trusted_devices``: the rows stay
+until their user's next trust purges them, trusted by nothing.
+
+This docstring once said the script also revokes remember-me tokens.  It
+never did: Flask-Login's remember-me restore loads the cookie's user on
+whatever session the request carries, an empty one with no
+``_session_created_at`` (which the comparison above skipped) or another
+user's, stamps and all.  Since plan#2173 ``load_user`` refuses any session
+whose stamps no sign-in of the loaded user wrote
+(``app.utils.session_helpers.sign_in_created_at``), so every remember-me
+cookie ever issued is refused whatever this script does, and the app
+issues none (ruling plan#2406).
 
 Usage:
     python scripts/rotate_sessions.py --confirm

@@ -12,7 +12,7 @@ from flask import abort
 from app.models.account import Account
 from app.routes._redirect_target import RedirectTarget
 from app.services.account_projection import is_revolving
-from app.services.card_terms import load_card_terms
+from app.services.card_terms import load_card_term_versions
 from app.utils.auth_helpers import get_or_404
 
 
@@ -47,14 +47,14 @@ def load_configured_card_or_404(account_id: int) -> Account:
     """Load the current user's card *account_id*, which must have terms, or 404.
 
     :func:`load_card_or_404`'s three refusals plus a fourth: a card with no
-    terms row is a DORMANT plain liability and every card feature gates on
-    the row (design 3.4; the terms door alone ends the dormancy).  A door
+    terms version is a DORMANT plain liability and every card feature gates
+    on its terms (design 3.4; the terms door alone ends the dormancy).  A door
     behind this gate serves a form the page renders only once terms exist
     (developer ruling **R-CC28** for the APR), so a request reaching it for
     a dormant card is a forged or stale one and gets the same answer a wrong
-    kind does.  The row itself is not returned: no door behind this gate
-    reads it yet, and one that does will load it through
-    :func:`~app.services.card_terms.load_card_terms` as this does.
+    kind does.  The versions are not returned: no door behind this gate
+    reads them yet, and one that does will load them through
+    :func:`~app.services.card_terms.load_card_term_versions` as this does.
 
     Args:
         account_id: The URL's account id.
@@ -64,7 +64,7 @@ def load_configured_card_or_404(account_id: int) -> Account:
         revolving, with its terms stated.
     """
     account = load_card_or_404(account_id)
-    if load_card_terms(account.id) is None:
+    if not load_card_term_versions(account.id):
         abort(404)
     return account
 
@@ -72,9 +72,9 @@ def load_configured_card_or_404(account_id: int) -> Account:
 def back_to_card(account_id: int) -> RedirectTarget:
     """The cash detail page every card door returns to, as a redirect target.
 
-    One spelling for the terms door and the two APR doors (developer rulings
-    **R-CC25** and **R-CC28**: the page that hosts every card form until
-    CC-11's cockpit).
+    One spelling for the two terms doors and the two APR doors (developer
+    rulings **R-CC25** and **R-CC28**: the page that hosts every card form
+    until CC-11's cockpit).
 
     Args:
         account_id: The card's id.

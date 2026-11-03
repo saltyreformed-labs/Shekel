@@ -167,15 +167,16 @@ def delete_payback_on_credit_revert(
     deleted_payback_id = None
     if payback:
         deleted_payback_id = payback.id
-        # Reverse the payback's own ledger postings before it is deleted
-        # (Build-Order Step 3 reverse-before-delete): a payback that was settled
-        # -- and therefore posted -- before its source's Credit status is
-        # reverted must not leave its double-entry legs stranded on the ledger.
-        # Its WHOLE family at once, one anchor re-check.  Idempotent no-op for
-        # the usual still-Projected payback.
-        posting_service.reverse_postings_before_delete(payback)
         # Its movements off the books through the ONE act (plan step
-        # ``credit_card:CC-5-4a-3``, ruling **R-CC54**): a payback a bank line
+        # ``credit_card:CC-5-4a-3``, ruling **R-CC54**), which reverses their
+        # postings before it deletes them (Build-Order Step 3
+        # reverse-before-delete: a payback settled -- and therefore posted --
+        # before its source's Credit status is reverted must not leave its
+        # legs stranded) and re-checks the anchor corrections once they are
+        # gone (ruling **plan#2564**; this reversed the payback's family
+        # itself, re-checking while its movements stood, until plan task
+        # plan#2557).  A no-op for the usual still-Projected payback, whose
+        # movements never posted.  A payback a bank line
         # was matched to stops existing here, so an act it was the last app row
         # of is withdrawn and that line is unexplained again (developer ruling
         # 2026-08-25, plan step ``bank_import:X-gb``).  Measured on the
@@ -255,6 +256,14 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
     ``ondelete="RESTRICT"`` since plan step ``balance:X-bi-7d-2`` (finding
     **CC-352**).
 
+    **It reverses no posting, because none is left to reverse**: the one
+    caller's removal act reversed every level's movements, deleted them and
+    re-checked the anchors before this runs (ruling **plan#2564**), and a
+    level still holding a movement could not be deleted here at all -- the
+    movement's key is NO ACTION (ruling **R-CC64**).  It called
+    ``posting_service.reverse_postings_before_delete`` per level, a no-op
+    for a row holding nothing, until plan task plan#2557 deleted that door.
+
     Keyed on :func:`get_active_payback` rather than Credit status
     because entry-level credit sources carry a live payback while their
     own ``status_id`` is NOT Credit -- a status guard would miss them.
@@ -303,10 +312,6 @@ def delete_payback_on_source_delete(txn: Transaction, user_id: int) -> None:
     for depth in range(len(chain) - 1, -1, -1):
         payback = chain[depth]
         parent = txn if depth == 0 else chain[depth - 1]
-        # Reverse this level's postings before the row goes.  Idempotent: a
-        # no-op for a still-Projected payback, and for one whose family the
-        # caller already reversed before taking its movements off.
-        posting_service.reverse_postings_before_delete(payback)
         db.session.delete(payback)
 
         log_event(

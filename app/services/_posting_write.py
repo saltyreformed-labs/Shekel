@@ -2,11 +2,16 @@
 
 The pieces every ledger WRITER composes -- the leg record
 (:class:`_PostingLeg`), the single balanced-write path
-(:func:`_emit_balanced_entry`), the description width, and since plan step
-``balance:X-bi-3b`` the two derivations a source's TYPE decides
-(:func:`ledger_class_of`, :func:`posting_kind_of`) -- in a LEAF module
-below every writer, so the correction packages can import them without
-importing :mod:`app.services.posting_service` itself.  It also held the entry's
+(:func:`_emit_balanced_entry`), the description width, and since plan task
+plan#2524 the one step that turns a target's chart keys into the stored rows
+its legs carry (:func:`resolve_chart_targets`) -- in a LEAF module below every
+writer, so the correction packages can import them without importing
+:mod:`app.services.posting_service` itself.  The CLASS a source's type
+decides (``ledger_class_of``) lived here too, until plan task plan#2523 moved it
+into the worked-out chart (:mod:`app.services.ledger_lines`), which outlives
+this writer; the leg KIND a source's type decides (``posting_kind_of``) and
+the shape dispatch beside it (``is_transfer_leg``) followed at plan task
+plan#2526, with the rest of the movement rule.  It also held the entry's
 civil-date rule as ``_utc_civil_date`` until ruling R-DH (2026-07-31) moved that
 day to the USER's timezone.  The day is a stored column since plan step X-f1
 (ruling R-EC), and a ROW's is read through
@@ -39,15 +44,30 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import TypeVar
 
 from app import ref_cache
-from app.enums import LedgerAccountClassEnum, PostingKindEnum, PostingSourceEnum
+from app.enums import LedgerAccountKindEnum, PostingSourceEnum
 from app.extensions import db
 from app.models.journal_entry import JournalEntry, Posting
-from app.services.posting_reads import PostingError
-from app.services.transfer_legs import TransferLeg
+from app.models.ledger_account import LedgerAccount
+from app.services import ledger_account_service
+from app.services.ledger_lines import (
+    ACCOUNT_COUNTER_KINDS,
+    LOAN_KINDS,
+    ChartKey,
+    posting_kind_of,
+)
+from app.services.posting_reads import PostingError, _ledger_account_for
 
 logger = logging.getLogger(__name__)
+
+# The two shapes :func:`resolve_chart_targets` maps over: a target's outer key
+# (a movement's ``(pay period, entry date)``, a correction's
+# ``(source kind, pay period, entry date)``) and the leg each chart key carries
+# (a movement's signed amount, a correction's ``(amount, posting kind)``).
+_TargetKey = TypeVar("_TargetKey")
+_Leg = TypeVar("_Leg")
 
 # A double-entry journal entry has at least two legs (one debit, one credit).
 # Mirrors the ``COUNT(*) >= 2`` half of the deferred balanced-journal trigger
@@ -60,96 +80,6 @@ _MIN_POSTING_LEGS = 2
 # so the go-forward and backfilled entries carry identically-shaped
 # descriptions.
 _MAX_DESCRIPTION_LENGTH = 200
-
-def is_transfer_leg(parent) -> bool:
-    """Return whether *parent* is one leg of a transfer.
-
-    The ONE spelling of the writer's shape dispatch (plan step
-    ``balance:X-bi-6-3``, ruling **R-BAL101**): a transfer's movement books
-    against the owner's transit account under the ``transfer_movement``
-    source with the ``transfer`` leg kind, and the sites that decide that --
-    the counter leg, the source kind, the leg kind, whether it posts -- ask
-    this rather than each testing the shape for themselves (the leaf's
-    adversarial review counted three spellings).
-
-    **It asks what the parent IS, not a shadow's column** (leaf
-    ``X-bi-6-4a``, ruling **R-BAL106**): every door hands the writer the
-    parent :func:`app.services.transfer_legs.movement_parent` resolved, a
-    plan row or a :class:`~app.services.transfer_legs.TransferLeg`, so no
-    door of this writer reaches a movement's parent through
-    ``transaction.transfer_id``.  One reader of the column remained beside
-    it: the deploy resync's row selector kept shadow rows out of its ROW arm
-    (the fold's ``_movements_of`` twin) until plan step ``X-bi-6-5`` deleted
-    that exclusion and then the column.
-    The loan ledger's stale-movement probe (``loan_posting_service._sync``)
-    was a second until leaf ``X-bi-6-4b``, which gave it
-    :func:`~app.services.transfer_legs.movement_parent`, and spelled that
-    function's shadow chain as its own loader options until leaf
-    ``X-bi-6-4d-1`` (ledger row **BAL-579**).  Through ``X-bi-6-3`` this was
-    ``txn.transfer_id is not None`` over the shadow row itself.
-
-    Args:
-        parent: A movement's parent: a plan row or a transfer leg.
-
-    Returns:
-        ``True`` for a transfer leg.
-    """
-    return isinstance(parent, TransferLeg)
-
-
-def ledger_class_of(txn) -> LedgerAccountClassEnum:
-    """Return the chart class *txn*'s counter leg books to, by its TYPE.
-
-    An income row's counter account is an INCOME-class category account and
-    an expense row's an EXPENSE-class one -- the one mapping the movement
-    writer (``_posting_purchases._purchase_target``) reads, shared with the
-    row's own writer from plan step ``balance:X-bi-3b`` (when a movement's
-    class became its PARENT's, ruling **R-BAL35**) until ``balance:X-bi-4a``
-    deleted that writer, so the second would otherwise have spelled the
-    mapping again.  ``transaction_type_id`` is immutable, so the class is
-    stable across the row's life.
-
-    Args:
-        txn: The transaction, income or expense.
-
-    Returns:
-        :attr:`LedgerAccountClassEnum.INCOME` or ``.EXPENSE``.
-    """
-    return (
-        LedgerAccountClassEnum.INCOME if txn.is_income
-        else LedgerAccountClassEnum.EXPENSE
-    )
-
-
-def posting_kind_of(parent) -> int:
-    """Return the ``ref.posting_kinds`` id every leg of *parent*'s money carries.
-
-    Both legs of an ordinary-transaction entry carry the same kind, by the
-    transaction type; no Step-3 reader differentiates per-leg kind.  A
-    MOVEMENT's legs carry its PARENT's kind (plan step ``balance:X-bi-3b``): a
-    purchase against an envelope is an ``expense`` posting and a paycheck's
-    covering movement an ``income`` one, for the one reason
-    :func:`ledger_class_of` gives -- and a transfer leg's covering movement
-    a ``transfer`` one (plan step ``balance:X-bi-6-3``, ruling **R-BAL101**),
-    because a transfer between the owner's own accounts is neither income nor
-    expense, which is why its counter leg is the transit account and not a
-    category (ruling **R-BAL45**).  The kind the one-entry transfer shape
-    carried is the kind its two per-movement entries carry.
-
-    Args:
-        parent: An income or expense transaction, or a transfer leg
-            (:func:`is_transfer_leg`).
-
-    Returns:
-        The stored id of :attr:`PostingKindEnum.TRANSFER` for a leg's
-        money, else of :attr:`PostingKindEnum.INCOME` or ``.EXPENSE``.
-    """
-    if is_transfer_leg(parent):
-        return ref_cache.posting_kind_id(PostingKindEnum.TRANSFER)
-    return ref_cache.posting_kind_id(
-        PostingKindEnum.INCOME if parent.is_income else PostingKindEnum.EXPENSE
-    )
-
 
 @dataclass(frozen=True)
 class _PostingLeg:
@@ -173,6 +103,118 @@ class _PostingLeg:
     ledger_account_id: int
     amount: Decimal
     posting_kind_id: int
+
+
+def ledger_row_for(user_id: int, key: ChartKey) -> LedgerAccount:
+    """Return the stored chart row *key* names, minting it when it is absent.
+
+    The ONE place a writer turns a worked-out
+    :class:`~app.services.ledger_lines.ChartKey` into the
+    ``budget.ledger_accounts`` row a posting leg must carry (ruling plan#2518,
+    plan task plan#2524).  The target rules name what a leg is booked on by
+    its key and touch no stored row, so the worked-out ledger can read the
+    very targets the writer posts; this is where the writer, and only the
+    writer, meets the store.
+
+    A real account's own row is FOUND, never created: it is paired when the
+    account is created (``ledger_account_service.create_ledger_account_for_account``),
+    and a missing one is a broken pairing that fails loud
+    (:func:`app.services.posting_reads._ledger_account_for`).  Every other kind
+    is got or created, as the target rules did as they went until plan#2524,
+    through its family's own resolver, which validates the record on first
+    creation and handles a lost creation race.
+
+    Args:
+        user_id: The owner the row belongs to: the parent's for a movement,
+            the account's for a correction.
+        key: The key a target leg is booked on, built by one of the chart's
+            constructors.
+
+    Returns:
+        The :class:`~app.models.ledger_account.LedgerAccount` for the key.
+
+    Raises:
+        PostingError: If *key* is an account's own line and the account has
+            no linked row.
+        ValueError: From the family resolver, if the key's record is not the
+            owner's or is of the wrong shape (a counter on a loan, a loan
+            component on a non-loan); or if *key* is of a kind no target rule
+            books on (an ``orphan``, which no constructor builds).
+    """
+    kind = key.kind
+    if kind is LedgerAccountKindEnum.LINKED:
+        return _ledger_account_for(key.record_id)
+    if kind in (LedgerAccountKindEnum.CATEGORY, LedgerAccountKindEnum.FALLBACK):
+        # The category door hands a category-less key (the fallback bucket's,
+        # whose record is None) to the owner-bucket family itself.
+        return ledger_account_service.get_or_create_category_ledger_account(
+            user_id, key.record_id, key.ledger_class,
+        )
+    if kind is LedgerAccountKindEnum.TRANSIT:
+        return ledger_account_service.get_or_create_transit_ledger_account(
+            user_id,
+        )
+    if kind in ACCOUNT_COUNTER_KINDS:
+        return ledger_account_service.get_or_create_account_counter_account(
+            user_id, key.record_id, kind,
+        )
+    if kind in LOAN_KINDS:
+        return ledger_account_service.get_or_create_loan_ledger_account(
+            user_id, key.record_id, kind,
+        )
+    raise ValueError(
+        f"no target rule books on the chart key {key!r}, so the writer has no "
+        f"stored row to resolve it to"
+    )
+
+
+def resolve_chart_targets(
+    user_id: int,
+    targets: "dict[_TargetKey, dict[ChartKey, _Leg]]",
+) -> "dict[_TargetKey, dict[int, _Leg]]":
+    """Return *targets* with each chart key replaced by its stored row's id.
+
+    The writer's emit step (plan task plan#2524): a target rule answers what
+    the ledger should hold keyed by :class:`~app.services.ledger_lines.ChartKey`,
+    and the reconcile compares it against posted legs read back by stored row,
+    so this maps the one onto the other just before the comparison.  Each key
+    is resolved once per call (:func:`ledger_row_for` issues a query, and an
+    account's corrections repeat one counter key across many targets).
+
+    **Every key a target holds is resolved, a leg that nets to zero
+    included**, because that is the minting the rules did when they resolved
+    as they built: a correction's counter row was minted for each correction
+    whose own delta was non-zero, BEFORE two same-key corrections merged, so
+    two same-day true-ups that cancel still minted it.  A merged zero leg
+    writes no posting (the reconcile drops a zero delta), exactly as before.
+    Keys are resolved in the order the targets name them, which is the order
+    the rules minted them in.
+
+    Args:
+        user_id: The owner every key's row belongs to.
+        targets: The target per outer key -- a movement's ``(pay period,
+            entry date)`` or a correction's ``(source kind, pay period, entry
+            date)`` -- each mapping a chart key to its leg.
+
+    Returns:
+        The same targets, each mapping a ``ledger_account_id`` to the same
+        leg.
+
+    Raises:
+        PostingError: From :func:`ledger_row_for`, for an account with no
+            linked row.
+        ValueError: From :func:`ledger_row_for`, for a record its family
+            resolver refuses.
+    """
+    rows: dict[ChartKey, int] = {}
+    resolved: "dict[_TargetKey, dict[int, _Leg]]" = {}
+    for target_key, legs in targets.items():
+        resolved_legs = resolved.setdefault(target_key, {})
+        for chart_key, leg in legs.items():
+            if chart_key not in rows:
+                rows[chart_key] = ledger_row_for(user_id, chart_key).id
+            resolved_legs[rows[chart_key]] = leg
+    return resolved
 
 
 def _emit_balanced_entry(
@@ -452,7 +494,7 @@ def emit_typed_source_deltas(
     parent,
     movement,
     *,
-    targets: "dict[tuple[int, date], dict[int, Decimal]]",
+    targets: "dict[tuple[int, date], dict[ChartKey, Decimal]]",
     source: PostingSourceEnum,
     log_label: str,
 ) -> "list[JournalEntry]":
@@ -461,7 +503,8 @@ def emit_typed_source_deltas(
     :func:`emit_source_deltas` for a source a parent types -- each MOVEMENT
     (``_posting_purchases.emit_purchase_deltas``), and a row's OWN cash leg
     from plan step ``balance:X-bi-3b``, when a movement's legs took its
-    parent's kind (:func:`posting_kind_of`) and the two emits came to differ
+    parent's kind (:func:`~app.services.ledger_lines.posting_kind_of`) and
+    the two emits came to differ
     in nothing but WHICH source they named, until plan step
     ``balance:X-bi-6-5``'s second leaf (card plan#1845) deleted the row's
     with its ``transaction_id`` link.  Everything the parent decides --
@@ -470,18 +513,24 @@ def emit_typed_source_deltas(
     the scenario -- is read off *parent* here; everything the source decides
     arrives by argument.
 
+    **The target arrives keyed by chart key and is resolved HERE** (plan task
+    plan#2524): the owner the rows belong to is the parent's, which this is
+    the one place the movement writer reads, and the resolve runs before the
+    posted side is read, the order the rule's own resolves ran in.
+
     Args:
         parent: What the legs are typed by -- their kind, owner and
             scenario: a transaction, or a transfer LEG (leaf ``X-bi-6-4a``;
             its movement's legs carry the ``transfer`` kind,
-            :func:`posting_kind_of`).
+            :func:`~app.services.ledger_lines.posting_kind_of`).
         movement: The movement (a ``transaction_entries`` row) whose legs
             these are.  Its id is both the entry header's link and, with
             *source*, the filter that reads the source's posted legs back, so
             the two cannot name different rows; its description, truncated
             here to :data:`_MAX_DESCRIPTION_LENGTH`, is the header's label.
         targets: What the ledger should net to, per ``(pay period, entry
-            date)``; EMPTY to reverse the source to zero.
+            date)``, each leg keyed by the chart key it is booked on; EMPTY to
+            reverse the source to zero.
         source: The ``ref.posting_sources`` kind this source posts under.  It
             is stamped on the header AND filtered on when the posted side is
             read back, so two sources that ever share one link (the loan
@@ -492,10 +541,16 @@ def emit_typed_source_deltas(
 
     Returns:
         The emitted delta entries; ``[]`` when the ledger is already at target.
+
+    Raises:
+        PostingError: From :func:`resolve_chart_targets`, if the movement's
+            account has no linked row.
+        ValueError: From :func:`resolve_chart_targets`, if the parent's
+            category is not its owner's.
     """
     source_kind_id = ref_cache.posting_source_id(source)
     return emit_source_deltas(
-        targets=targets,
+        targets=resolve_chart_targets(parent.user_id, targets),
         source_filter=db.and_(
             JournalEntry.transaction_entry_id == movement.id,
             JournalEntry.source_kind_id == source_kind_id,

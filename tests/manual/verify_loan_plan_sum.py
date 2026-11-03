@@ -20,7 +20,9 @@ the walk implies -- what the next deploy's ``backfill_all_loan_postings``
 reconciles the ledger to -- then the plan's payments, the trajectory's
 projected splits, the payoff, a balance grid, the what-if lever and the
 projected interest.  It reads only producers present on both sides of
-R16-c-2, so the one file runs on both trees.
+R16-c-2, so the one file runs on both trees.  *Since plan task plan#2524 the
+two target builders take the loan and key each leg by its chart key rather
+than a stored ledger row, so the file runs only on trees holding that task.*
 
 **The BASELINE and the TODAY read are expected byte-identical after
 recurrence:R23** (a loan with no unpaid installment after its latest
@@ -103,7 +105,8 @@ Nothing it prints carries an id a door's own write assigned, for the reason
 ``verify_generation_pass.py`` states: PostgreSQL does not roll a sequence
 back, so an id-bearing dump reads as a difference between two runs of
 identical code.  The posting targets name rows the clone already holds (a
-pay period, a ledger account, a reference kind), which no run re-assigns.
+pay period, the loan a chart key names, a reference kind), which no run
+re-assigns.
 
 **Each door runs alone, and a refused door ends nothing** (finding
 plan#1859).  Each opens a savepoint and ``Session.rollback()`` afterwards
@@ -158,21 +161,13 @@ from app.services.balance_at._loan_stream import loan_timeline  # pylint: disabl
 # Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
 # plan's payments, an intermediate the balance seam does not publish.
 from app.services.balance_at._plan import loan_plan  # pylint: disable=shekel-private-module-import
+from app.services.ledger_lines import (
+    anchor_correction_targets,
+    payment_split_targets,
+)
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.loan_loaders import load_escrow_lines, load_loan_params
 from app.services.loan_posting_service import confirmed_loan_payment_history
-# Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
-# posting targets an anchor correction implies (what the next deploy's backfill
-# reconciles to), which the posting package does not publish.
-from app.services.loan_posting_service._anchors import (  # pylint: disable=shekel-private-module-import
-    anchor_correction_targets,
-)
-# Pylint: ``shekel-private-module-import`` -- a white-box harness: it prints the
-# posting targets a payment split implies (what the next deploy's backfill
-# reconciles to), which the posting package does not publish.
-from app.services.loan_posting_service._payments import (  # pylint: disable=shekel-private-module-import
-    payment_split_targets,
-)
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import RecurrenceSpec, author_rule
 from app.services.scenario_resolver import get_baseline_scenario
@@ -209,12 +204,19 @@ def _outcome_line(label, kind, account, outcome):
 
 
 def _target_lines(label, kind, account, targets):
-    """Print a posting target map with its keys and legs in a stable order."""
+    """Print a posting target map with its keys and legs in a stable order.
+
+    Each leg is keyed by its chart key (plan task plan#2524), printed as its
+    kind and the record it names.
+    """
     for key in sorted(targets, key=lambda k: (k[2], k[0], k[1])):
         legs = targets[key]
         rendered = ",".join(
-            f"{ledger}:{amount}/{kind_id}"
-            for ledger, (amount, kind_id) in sorted(legs.items())
+            f"{chart.kind.value}:{chart.record_id}:{amount}/{kind_id}"
+            for chart, (amount, kind_id) in sorted(
+                legs.items(),
+                key=lambda leg: (leg[0].kind.value, leg[0].record_id),
+            )
         )
         print(
             f"{label}\t{kind}\taccount={account.id}\tsource={key[0]}"
@@ -242,12 +244,13 @@ def _ledger_lines(label, account):
             f"\tstated={correction.anchor.anchor_balance}"
         )
     _target_lines(
-        label, "POST-PAY", account, payment_split_targets(walk.settled_splits),
+        label, "POST-PAY", account,
+        payment_split_targets(walk.settled_splits, account),
     )
     _target_lines(
         label, "POST-ANCHOR", account,
         anchor_correction_targets(
-            walk.anchor_corrections, USER_ID, calendar_for(USER_ID),
+            walk.anchor_corrections, account, calendar_for(USER_ID),
         ),
     )
 

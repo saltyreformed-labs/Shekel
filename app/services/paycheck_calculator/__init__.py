@@ -48,8 +48,10 @@ about where its payday SITS among this owner's other paydays:
   the occurrence walk by ``PayrollBasis.line_applies_on``);
 * whether it is the FIRST, which was likewise the only payday a 12-per-year
   deduction was taken on;
-* the gross this owner has already been paid this calendar year, which drives
-  the FICA Social Security wage-base cap; and
+* the Social Security and Medicare wages this owner has already been paid
+  this calendar year -- the gross less the all-payroll-taxes lines, since
+  plan step salary:S11-e -- which drive the Social Security wage-base cap and
+  the Medicare surtax threshold; and
 * how much of a capped deduction has already been taken this calendar year.
 
 **All four are answered from the owner's** :class:`~app.services.pay_calendar.PayCalendar`,
@@ -207,8 +209,10 @@ from ._breakdown import (
     PeriodInfo,
     PricedLine,
     TaxLines,
+    waterfall_fica_wages,
     waterfall_gross,
     waterfall_net,
+    waterfall_taxable,
 )
 from ._pricing import calculate_paycheck, project_salary
 from ._stubs import StubTotals, one_offs_change_taxes, stub_totals, tax_years_for
@@ -226,6 +230,8 @@ __all__ = [
     "one_offs_change_taxes",
     "stub_totals",
     "tax_years_for",
+    "waterfall_fica_wages",
     "waterfall_gross",
     "waterfall_net",
+    "waterfall_taxable",
 ]

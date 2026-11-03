@@ -176,8 +176,12 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # is a METHOD on ``ReconciledThrough`` rather than a free function, so
     # that a raw ``<=`` against the boundary is a TypeError instead of a
     # fifth answer.  The read fold, the posting walk and the entry
-    # reservation all reach this one implementation -- they had three, in
-    # three different units, and one of them cost production ``$4,001.42``.
+    # reservation all reached this one implementation -- they had three, in
+    # three different units, and one of them cost production ``$4,001.42``
+    # -- until plan step X-f3a-1 moved the cash side onto ``StatementCoverage``
+    # (``_clearing`` below); the posting walk is the read fold's own replay
+    # since plan task plan#2525.  The asset replay's contribution tier and
+    # the anchor self-heal still ask it.
     # It answers nothing about how much an account HOLDS; it answers
     # whether one event precedes one assertion.
     "covers",
@@ -264,9 +268,11 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # ``cash_anchor_facts`` and ``settled_cash_facts`` are LOADERS of stored
     # assertions and per-row signed effects.  The stream ORDERING that
     # ``merge_anchor_and_cash_events`` used to return as a third list is
-    # gone: both walks now advance their own sources against
-    # ``ReconciledThrough.covers``, so the order is applied where the
-    # replay happens rather than published as a fact of its own.
+    # gone: the walks advanced their own sources against
+    # ``ReconciledThrough.covers``, so the order was applied where the
+    # replay happened rather than published as a fact of its own; the one
+    # replay asks ``StatementCoverage`` per source since plan step X-f3a-1,
+    # for the fold and, since plan task plan#2525, the posted ledger.
     # ``observed_on`` and ``delta`` LEFT this set at plan step X-f3c-1 with
     # the class that carried them: ``CashAnchorCorrection`` is
     # ``balance_at._assertions``' now, because its ``balance_before`` is a
@@ -289,6 +295,21 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # per-movement leg.  Where one lands and what the plan holds at time T
     # are ``balance_at._cash_fold``'s, exactly as for ``planned_cash_rows``.
     "in_flight_movements",
+    # ``owner_cash_records`` (plan task plan#2648, ruling plan#2623) -- the
+    # dated movements ``settled_cash_facts`` loads, over every account one
+    # owner holds, each returned as the movement and its parent, beside each
+    # walked account's ``walk_cash_ledger`` built from the same load: a
+    # LOADER of stored records under the fold's own clause set
+    # (``_movement_scope``).  Its walks VALUE each movement -- each source
+    # fact carries its per-row signed effect, ``settled_cash_facts``' ground
+    # above -- and it SUMS nothing: no running balance, no assertion
+    # applied.  Ruled on the grounds of the names it joins:
+    # ``owner_dated_movements`` (plan task plan#2526, the bare pairs it
+    # replaces, its one reader moved onto this), ``settled_cash_facts`` and
+    # ``walk_cash_ledger`` (``_walk`` below).  What the worked-out ledger
+    # books from each movement is ``ledger_lines``' movement rule, and a
+    # balance at T is no part of it.
+    "owner_cash_records",
     # (``movements_with_parents``, ruled here from plan step
     # ``balance:X-bi-6-3`` because the posting writer's transfer-family
     # loader shared the fold's join, was folded into the fold's

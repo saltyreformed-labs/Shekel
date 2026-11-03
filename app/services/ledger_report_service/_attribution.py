@@ -47,8 +47,9 @@ derivation this replaced did:
   to lose.
 
 The movement link is the ONE concrete source FK an entry can carry, so the
-buckets are a PARTITION of the live ledger by construction, and the same one
-as the write-side walk's: an entry with the link is the movement bucket's, and
+buckets are a PARTITION of the live ledger by construction (the write-side
+account walk partitioned it the same way until plan task plan#2525 moved that
+walk onto the records): an entry with the link is the movement bucket's, and
 one without is a correction's by its kind or residue.  It was three FKs until
 plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845), which deleted
 the transaction-linked bucket (a row's own leg, legacy since plan step
@@ -56,21 +57,21 @@ the transaction-linked bucket (a row's own leg, legacy since plan step
 ``transfer`` pairs; its migration deletes every entry either source posted,
 all reversed to zero on their own keys, and both columns (ruling plan#1867).
 
-**One civil date, shared, since ruling R-DH.**  This reader and the write-side
-walk both attribute a movement to its stored ``settled_on`` -- the same day,
-read off the same column (the ``settled_day`` accessor both read a row's own
-leg through went with that bucket at plan#1845).  They were
-deliberately different until 2026-07-31: the walk partitioned by UTC INSTANT
-against each anchor's ``created_at`` while this side used the display-timezone
-civil date for calendar windows, and the paragraph here justified an
-independent restatement of the attribution rule on exactly that difference.
-The difference is gone (the instant partition cost production ``$4,001.42``),
-so what survives is a weaker and narrower reason: this package restates the
-write side's LOADERS rather than importing a write-package internal, keeping
-the reader decoupled from the writer the way the reconciliation oracles rely
-on.  **That is a stance about package boundaries, not about the rule** -- the
-DAY itself is one stored column on both sides, and plan step 3's one-predicate
-sweep is where the two loaders stop being two.
+**One civil date, shared, since ruling R-DH.**  This reader and the
+write-side account walk both attribute a movement to its stored
+``settled_on`` -- the same day, read off the same column (the ``settled_day``
+accessor both read a row's own leg through went with that bucket at
+plan#1845).  They were deliberately different until 2026-07-31: the walk
+partitioned by UTC INSTANT against each anchor's ``created_at`` while this
+side used the display-timezone civil date for calendar windows, and the
+paragraph here justified an independent restatement of the attribution rule on
+exactly that difference.  The difference is gone (the instant partition cost
+production ``$4,001.42``).  **So are the write side's loaders this module
+restated** (plan task plan#2525): the account walk reads the records'
+dated movements (``cash_ledger.settled_cash_facts``) rather than its own
+postings, which leaves this the one reader that dates a STORED posting by its
+movement -- and the stored ledger it reads is what the X-ew arc (plan#2023)
+replaces with lines worked out from the records.
 
 **Flask-isolated** and read-only: plain ids in, plain data out; no writes.
 """
@@ -371,7 +372,8 @@ def _purchase_dated_nets(
     """Return movement-linked nets, each dated by the movement's own posting day.
 
     The movement-linked bucket (module docstring; the reader's twin of the
-    walk's ``_purchase_source_days``): entries carrying
+    account walk's ``_purchase_source_days`` until plan task plan#2525 moved
+    that walk onto the records): entries carrying
     ``transaction_entry_id`` -- the ``purchase`` source (a purchase, a bill's
     or a paycheck's covering movement) and the ``transfer_movement`` source
     (each side of a settled transfer, plan step ``balance:X-bi-6-3``) --
@@ -380,7 +382,7 @@ def _purchase_dated_nets(
     reversed-before-delete movement nets to zero and needs no date), so
     dates are resolved only for live sources; the ``(user_id, scenario_id)``
     filter uses ``idx_journal_entries_user_scenario_period``.  A movement's
-    legs are NOT grouped under its PARENT, for the reason the walk states:
+    legs are NOT grouped under its PARENT, because
     that would date them at the parent's settle day, which a still-projected
     envelope does not have, and the day money left the bank is its own fact.
 
@@ -431,7 +433,7 @@ def _purchase_attribution_dates(entry_ids: set[int]) -> dict[int, date]:
     """Return each purchase's stored posting day, keyed by id.
 
     One batched load of ``(id, settled_on)``.  No shared ``settled_day``
-    accessor here, for the reason the walk gives: that one refuses a settled
+    accessor here, because that one refuses a settled
     TRANSACTION with no day, while a purchase with no day is an ordinary
     outstanding purchase that simply posts nothing -- so a nonzero net against
     a dayless purchase is the broken state, refused below with the missing-
@@ -500,9 +502,10 @@ def _correction_dated_nets(
     be added here or its (real, non-zero) legs are silently dropped -- an
     understated balance, not a broken tie-out (a dropped whole entry still sums
     to zero).  A future ROW-LINKED kind needs no change here (its residue is
-    correctly dropped).  The write-side walk's residue loader uses the inverse
-    (negative) list because it is per-non-loan-account and never sees loan
-    corrections; this reader spans the whole ledger, so it lists all five.
+    correctly dropped).  The write-side account walk's residue loader used the
+    inverse (negative) list, being per-non-loan-account, until plan task
+    plan#2525 deleted it with that walk's other reads of stored postings; this
+    reader spans the whole ledger, so it lists all five.
 
     Args:
         user_id: The owner whose ledger to read.

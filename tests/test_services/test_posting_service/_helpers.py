@@ -4,20 +4,31 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
+from app.enums import SettledDayBasisEnum
 from app.extensions import db as _db
+from app.models.account import AccountAnchorHistory
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.transaction_entry import TransactionEntry
-from app.services import ledger_account_service
+from app.services import ledger_account_service, transaction_service
+from app.services.settle_day import SettleDay
 from tests._test_helpers import (
     family_journal_filter,
     transfer_family_journal_filter,
     transfer_side_record,
     transit_ledger_account,
     figure_source_columns,
+    generate_row_of,
     linked_ledger_account,
+    make_expense_template,
 )
+
+# Inside seed_periods' last paycheck, so every day a case names is a day the
+# owner's calendar files; each new account opens the day before.  A module
+# whose cases open accounts pins it (``freeze_today``) in an autouse fixture.
+_TODAY = date(2026, 5, 15)
 
 
 # ---------------------------------------------------------------------------
@@ -203,3 +214,52 @@ def _resolve_category_ledger(seed_user, category_key, ledger_class):
     return ledger_account_service.get_or_create_category_ledger_account(
         seed_user["user"].id, category_id, ledger_class,
     )
+
+
+def _opening_day(account) -> date:
+    """Return the day *account*'s one balance assertion, its opening, observes."""
+    return (
+        _db.session.query(AccountAnchorHistory.observed_on)
+        .filter_by(account_id=account.id)
+        .one()
+        .observed_on
+    )
+
+
+def _bill(seed_user, period, *, account=None):
+    """Return a Projected $120.00 bill in *period*, committed.
+
+    Its own account is *account*, the seed's Checking when ``None``.
+    """
+    template = make_expense_template(
+        _db.session, seed_user, amount="120.00", name="Hotel",
+        category_key="Rent", account=account,
+    )
+    row = generate_row_of(template, period)
+    _db.session.commit()
+    return row
+
+
+def _settle_paid_from(row, tender, day) -> None:
+    """Settle *row* from *tender* on *day*, committing nothing.
+
+    A payment may be paid from its row's own account, the owner's checking
+    account or a credit card.
+    """
+    transaction_service.settle_transaction(
+        row,
+        settle_day=SettleDay(day=day, basis=SettledDayBasisEnum.ENTERED),
+        tender_account_id=tender.id,
+    )
+
+
+def _settled_bill_paid_from(seed_user, period, tender, day, *, account=None):
+    """Return a $120.00 bill settled from *tender* on *day*, committed.
+
+    The bill's own account is *account*, the seed's Checking when ``None``
+    (:func:`_bill`, :func:`_settle_paid_from`).
+    """
+    row = _bill(seed_user, period, account=account)
+    _settle_paid_from(row, tender, day)
+    _db.session.commit()
+    return row

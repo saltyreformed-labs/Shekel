@@ -101,7 +101,7 @@ class PayStubLineSchema(PayStubFigureSchema):
     Ruling **R-SAL58**, "Stub records its kind": the kind the stub prints the
     line under, which the entry form pre-sets to the paycheck line's own and
     the owner changes only where the stub prints it under another heading.
-    Whether the id names one of the four kinds is the service's NOT-FOUND, as
+    Whether the id names one of the five kinds is the service's NOT-FOUND, as
     a one-off's is.
     """
 
@@ -109,7 +109,7 @@ class PayStubLineSchema(PayStubFigureSchema):
 
 
 class PayStubOneOffSchema(PayStubFigureSchema):
-    """Validates one one-off row: a name, one of the four kinds, an amount.
+    """Validates one one-off row: a name, one of the five kinds, an amount.
 
     Fork 8b, "Keep it as a one-off".  The name is stored trimmed; a blank one
     is refused here as the table refuses it (``ck_pay_stub_one_offs_name_not_blank``).

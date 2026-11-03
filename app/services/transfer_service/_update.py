@@ -613,8 +613,7 @@ def _apply_transfer_updates(transfer_id, user_id, updates, *, settle_only=False,
     # what decides whether the ledger needs re-deriving, and a settle's
     # ``status_id`` is precisely the field that says it does.
     _reconcile_postings_after_update(
-        transfer, updates, endpoints.vacated,
-        endpoints.vacated_destination_id,
+        transfer, updates, endpoints.vacated_destination_id,
     )
 
     log_event(

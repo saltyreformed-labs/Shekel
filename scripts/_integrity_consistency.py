@@ -211,7 +211,7 @@ def check_data_consistency(session):
 
     # DC-10: An UN-DATED movement holding a live journal leg (critical).
     #
-    # ``_posting_purchases.purchase_posts`` is the write side's one statement
+    # ``ledger_lines.purchase_posts`` is the write side's one statement
     # of "this movement is in the ledger": a contributing parent, a debit, a
     # RECORDED posting day, and for a transfer leg its record.  So a movement
     # with no ``settled_on`` owes the ledger nothing, and a non-zero net of

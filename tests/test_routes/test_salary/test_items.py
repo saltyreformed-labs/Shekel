@@ -18,7 +18,7 @@ from app.enums import PaycheckLineKindEnum, PeriodPlacementEnum, RecurrenceUnitE
 import pytest
 from app.services.balance_at import BalanceContext
 
-from tests._test_helpers import make_line_cadence_rule
+from tests._test_helpers import make_flat_paycheck_line, make_line_cadence_rule
 
 from ._helpers import _create_profile, _create_other_user_profile, _cadence_payload, _line_form
 
@@ -566,18 +566,23 @@ class TestEarningLinesThroughTheDoor:
     The engine's arithmetic for the two earning kinds is graded in
     ``tests/test_services/test_paycheck_calculator/test_the_gross.py``
     (``TestEarningLines``); what is graded HERE
-    is the door: that the section offers the four kinds under the
-    vocabulary's labels, that a taxable earning added through the form
+    is the door: that the section offers the five kinds under the
+    vocabulary's labels and marks the two pre-tax kinds' chips, that a
+    taxable earning added through the form
     reaches the regeneration and raises the paycheck template's amount (the
     one stored figure, ``balance:X-au-e``), and that the one rule which
     differs by side -- a target account -- is refused for an earning and
     nothing is written.
     """
 
-    def test_the_section_offers_the_four_kinds_under_their_labels(
+    def test_the_section_offers_the_five_kinds_under_their_labels(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """The kind select renders every kind in waterfall order, labelled by the vocabulary."""
+        """The kind select renders every kind in waterfall order, labelled by the vocabulary.
+
+        Five since plan step salary:S11-e split the pre-tax kind in two, under
+        ruling plan#2639's own labels.
+        """
         with app.app_context():
             profile = _create_profile(seed_user)
             html = auth_client.get(f"/salary/{profile.id}/edit").data.decode()
@@ -586,13 +591,53 @@ class TestEarningLinesThroughTheDoor:
             ).group(0)
             options = re.findall(r'<option value="(\d+)">([^<]+)</option>', select)
             assert [label for _id, label in options] == [
-                "Taxable earning", "Pre-tax deduction",
-                "Post-tax deduction", "After-tax earning",
+                "Taxable earning", "Pre-tax, all payroll taxes",
+                "Pre-tax, income tax only", "Post-tax deduction", "After-tax earning",
             ]
             assert [int(kind_id) for kind_id, _label in options] == [
                 ref_cache.paycheck_line_kind_id(member) for member in PaycheckLineKindEnum
             ]
             assert "Payroll lines" in html and "Deductions</h6>" not in html
+
+    def test_the_row_chip_marks_both_pre_tax_kinds_and_no_other(
+        self, app, auth_client, seed_user, seed_periods,
+    ):
+        """A line of each kind: the two pre-tax chips wear the accent, the other three the neutral.
+
+        The template reads which kinds are pre-tax from the kind vocabulary
+        (``pre_tax_kind_ids``, from ``PRE_TAX_KINDS``) rather than listing
+        them itself (task plan#2715), so a pre-tax kind left out of the set
+        would show its chip neutral, and a kind put in by mistake would
+        show its chip accented.
+        """
+        with app.app_context():
+            profile = _create_profile(seed_user)
+            names = {
+                PaycheckLineKindEnum.TAXABLE_EARNING: "Phone",
+                PaycheckLineKindEnum.PRE_FICA_DEDUCTION: "Health",
+                PaycheckLineKindEnum.PRE_TAX_DEDUCTION: "Retirement",
+                PaycheckLineKindEnum.POST_TAX_DEDUCTION: "Union",
+                PaycheckLineKindEnum.AFTER_TAX_EARNING: "Mileage",
+            }
+            for kind, name in names.items():
+                make_flat_paycheck_line(profile, name, "10.00", kind)
+            db.session.commit()
+
+            html = auth_client.get(f"/salary/{profile.id}/edit").data.decode()
+            chips = {
+                name: (variant, label)
+                for name, variant, label in re.findall(
+                    r'<td>(\w+)</td>\s*<td>.*?<span class="flag-chip ?([^"]*)">\s*([^<]+?)\s*</span>',
+                    html, re.S,
+                )
+            }
+            assert chips == {
+                "Phone": ("flag-chip--neutral", "Taxable earning"),
+                "Health": ("", "Pre-tax, all payroll taxes"),
+                "Retirement": ("", "Pre-tax, income tax only"),
+                "Union": ("flag-chip--neutral", "Post-tax deduction"),
+                "Mileage": ("flag-chip--neutral", "After-tax earning"),
+            }
 
     def test_a_taxable_earning_added_by_the_form_raises_todays_paycheck(
         self, app, auth_client, seed_user, seed_periods,

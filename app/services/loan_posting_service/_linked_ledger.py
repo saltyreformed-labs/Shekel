@@ -39,7 +39,7 @@ def _has_opening_posting(linked_ledger_id: int, scenario_id: int) -> bool:
     exactly one OPENING-kind leg on its linked ledger per scenario -- the
     origination anchor correction, whose ``owed_before`` is zero and whose
     linked leg is ``-original_principal`` (always non-zero for a real loan, so
-    always posted; :func:`._anchors._loan_anchor_correction_target`).  Its
+    always posted; ``ledger_lines._loan_anchors._loan_anchor_correction_target``).  Its
     absence means the loan is not configured in this scenario (no
     :class:`~app.models.loan_params.LoanParams`, or a what-if the opening was
     never posted into), which the reader reports as ``None`` -- routing the

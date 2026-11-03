@@ -18,6 +18,7 @@ from pylint.testutils import CheckerTestCase, MessageTest
 from shekel_checkers import (
     _CASH_LEDGER_MODULES,
     _FENCED_MODULE_RULINGS,
+    _LEDGER_LINES_MODULES,
     _LOAN_PAYMENT_SEAM_MODULES,
     _SEAM_PRIVATE_CONTEXT_MODULES,
     _LEDGER_LEAF_MODULE_NAMES,
@@ -824,6 +825,9 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
           no ``__init__`` edit, and W9910 cannot see attribute access -- and,
           since ruling R-BAL146, ``balance_at._recurrence_memos``, the mixin
           it inherits three of those methods from)
+        * ``_LEDGER_LINES_MODULES`` (``ledger_lines``, plan task plan#2526 --
+          the worked-out ledger, which took every ledger target rule, two of
+          them ruled under ``loan_posting_service``, and the read beside them)
 
         For those, a set-equality guard would be SELF-ATTESTING: delete the
         registry entry and empty the constant -- two adjacent edits in one
@@ -848,6 +852,7 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
             "app.services.recurring_transfer_query",
             "app.services.balance_at._context",
             "app.services.balance_at._recurrence_memos",
+            "app.services.ledger_lines",
         ):
             node = self._function_def(
                 "def balance_on(account, target):\n    return None\n",
@@ -941,6 +946,7 @@ class TestShekelBalanceSeamChecker(CheckerTestCase):
             | _KIND_CLASSIFIER_MODULES
             | _ROW_VALUATION_MODULES
             | _RECURRING_DEFINITION_MODULES
+            | _LEDGER_LINES_MODULES
         )
         assert set(_FENCED_MODULE_RULINGS) == expected
 
@@ -1922,14 +1928,14 @@ class TestShekelLedgerModelFenceChecker(CheckerTestCase):
         """A submodule of an allowlisted PACKAGE stays inside the fence (prefix match).
 
         The loan / account posting packages and the report package are
-        allowlisted by prefix, so their real submodules (``_walk`` /
+        allowlisted by prefix, so their real submodules (``_sync`` /
         ``_linked_ledger`` / ``_attribution``) that legitimately query the
         ledger must remain
         exempt -- the package-prefix arm of :func:`_module_in_allowlist`.
         """
         for module_name in (
             "app.services.loan_posting_service._linked_ledger",
-            "app.services.account_posting_service._walk",
+            "app.services.account_posting_service._sync",
             "app.services.ledger_report_service._attribution",
         ):
             node = self._importfrom_node(

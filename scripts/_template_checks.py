@@ -76,7 +76,8 @@ def _trigger_family_check(module: str, attribute: str) -> tuple[str, int]:
     ``app.sighting_infrastructure.SIGHTING_TRIGGERS`` (plan step ``bank_import:X-f6b-1``),
     ``app.pay_stub_infrastructure.PAY_STUB_TRIGGERS`` (plan step ``salary:S11-a``) and
     ``app.deleted_row_infrastructure.DELETED_ROW_TRIGGERS`` (plan step ``credit_card:CC-5-4a-4``)
-    and ``app.side_band_infrastructure.SIDE_BAND_TRIGGERS`` (plan step ``balance:X-bi-6-4d-2``).
+    and ``app.side_band_infrastructure.SIDE_BAND_TRIGGERS`` (plan step ``balance:X-bi-6-4d-2``)
+    and ``app.card_payment_infrastructure.CARD_PAYMENT_TRIGGERS`` (plan step ``credit_card:CC-6``).
     BOTH halves come from that one constant -- the names the query looks for and the number it must
     find -- so the check cannot count a trigger the module renamed, nor accept a template missing
     one.
@@ -170,4 +171,6 @@ def template_checks() -> tuple[tuple[str, str, int], ...]:
          *_trigger_family_check("app.deleted_row_infrastructure", "DELETED_ROW_TRIGGERS")),
         ("side-record band triggers",
          *_trigger_family_check("app.side_band_infrastructure", "SIDE_BAND_TRIGGERS")),
+        ("card-payment card triggers",
+         *_trigger_family_check("app.card_payment_infrastructure", "CARD_PAYMENT_TRIGGERS")),
     )

@@ -227,3 +227,33 @@ class CompoundingFrequencyEnum(enum.Enum):
     DAILY = "daily"
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
+
+
+class CardPaymentModeEnum(enum.Enum):
+    """WHICH AMOUNT a card works out for its payment (plan step **credit_card:CC-6**).
+
+    Values match ``ref.card_payment_modes.name``, the catalogue behind
+    ``budget.card_payment_settings.mode_id``.  Each member names an amount the
+    card works out fresh on every read and never stores (ruling plan#2667)::
+
+        CARD_BALANCE       -- what the card owed at the end of the day before
+                              the payment ("everything on the card")
+        STATEMENT_BALANCE  -- the balance of the statement the payment pays
+        MINIMUM_PAYMENT    -- that statement's minimum
+
+    **Three members, and no ``fixed``** (ruling plan#2666, amending R-CC18): a
+    fixed payment is a plain recurring transfer into the card, priced by its
+    own series, so a fourth member would be a second way to say "pay $500".
+    **No member names a date**: when a payment falls is its repeat's (ruling
+    plan#2671), which is why the design's ``every_paycheck`` is
+    ``CARD_BALANCE`` here -- the member says how much, never when.
+
+    Application code resolves these via ``ref_cache.card_payment_mode_id`` and
+    compares against the integer ID -- never the string ``name`` -- matching the
+    project-wide ``ref-table: IDs for logic, strings for display only``
+    invariant.
+    """
+
+    CARD_BALANCE = "card_balance"
+    STATEMENT_BALANCE = "statement_balance"
+    MINIMUM_PAYMENT = "minimum_payment"

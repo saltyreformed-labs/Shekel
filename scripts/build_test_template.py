@@ -174,6 +174,7 @@ from app.audit_infrastructure import (
     EXPECTED_TRIGGER_COUNT,
     apply_audit_infrastructure,
 )
+from app.card_payment_infrastructure import apply_card_payment_infrastructure
 from app.level_infrastructure import apply_level_infrastructure
 from app.migration_runner import upgrade_to_head
 from app.sighting_infrastructure import apply_sighting_infrastructure
@@ -369,7 +370,9 @@ def _populate_template(app) -> None:
         (plan step credit_card:CC-5-4a-4), and
         ``apply_side_band_infrastructure``: a transfer side's record is dated
         exactly while its transfer is settled (plan step
-        balance:X-bi-6-4d-2), the same contract.  Steps 4-10 are each a rule
+        balance:X-bi-6-4d-2), and ``apply_card_payment_infrastructure``: a
+        card payment's card is a credit card (plan step credit_card:CC-6),
+        the same contract.  Steps 4-10 are each a rule
         a FIXTURE can trip -- steps 4-7, 9 and 10 refuse a write, step 8
         deletes the line its last sighting leaves behind -- so the suite runs
         against the rules the app has.
@@ -495,6 +498,14 @@ def _populate_template(app) -> None:
         apply_side_band_infrastructure(
             lambda statement: db.session.execute(db.text(statement)),
             arms=SIDE_BAND_ARMS,
+        )
+        db.session.commit()
+
+        # A card payment's card is a credit card (plan step
+        # credit_card:CC-6): the same contract, and a refusal a FIXTURE can
+        # trip -- one that writes a payment's settings onto a non-card.
+        apply_card_payment_infrastructure(
+            lambda statement: db.session.execute(db.text(statement))
         )
         db.session.commit()
 

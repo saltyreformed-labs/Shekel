@@ -26,6 +26,7 @@ from app.enums import (
     AmountSourceEnum,
     BusinessDayShiftEnum,
     CalcMethodEnum,
+    CardPaymentModeEnum,
     CompoundingFrequencyEnum,
     FilingStatusEnum,
     PaycheckLineKindEnum,
@@ -913,3 +914,27 @@ def statement_balance_evidence_id(member):
     """
     require_init()
     return cache().enum_ids[StatementBalanceEvidenceEnum][member]
+
+
+def card_payment_mode_id(member):
+    """Return the integer primary key for a CardPaymentModeEnum member.
+
+    WHICH AMOUNT a card works out for its payment (plan step
+    **credit_card:CC-6**), stamped on ``budget.card_payment_settings.mode_id``
+    -- always via the integer ID, never the string ``name``.  What the members
+    mean, and why there are three, is :class:`app.enums.CardPaymentModeEnum`'s
+    to say.
+
+    Args:
+        member: A ``CardPaymentModeEnum`` member
+                (e.g. ``CardPaymentModeEnum.STATEMENT_BALANCE``).
+
+    Returns:
+        int -- the ``ref.card_payment_modes.id`` value.
+
+    Raises:
+        RuntimeError: If the cache has not been initialized.
+        KeyError: If *member* is not a valid CardPaymentModeEnum member.
+    """
+    require_init()
+    return cache().enum_ids[CardPaymentModeEnum][member]

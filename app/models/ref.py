@@ -952,3 +952,27 @@ class WithholdingKind(db.Model):
 
     def __repr__(self):
         return f"<WithholdingKind {self.name}>"
+
+
+class CardPaymentMode(db.Model):
+    """WHICH AMOUNT a card works out for its payment (**credit_card:CC-6**).
+
+    The catalogue behind ``budget.card_payment_settings.mode_id``: what the
+    card owed at the end of the day before the payment, the statement
+    balance, or the statement's minimum.  :class:`app.enums.CardPaymentModeEnum`
+    carries why there are three and why none names a date.
+
+    Application code resolves these via ``ref_cache.card_payment_mode_id`` and
+    compares against the integer ID -- never the string ``name`` -- matching the
+    project-wide ``ref-table: IDs for logic, strings for display only``
+    invariant.
+    """
+
+    __tablename__ = "card_payment_modes"
+    __table_args__ = {"schema": "ref"}
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(20), unique=True, nullable=False)
+
+    def __repr__(self):
+        return f"<CardPaymentMode {self.name}>"

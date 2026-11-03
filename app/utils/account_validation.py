@@ -32,7 +32,8 @@ The helpers fall into two groups:
   also refuse moving an account between savings and debt while an active
   savings goal is on it, or between a loan type and a card-style debt (plan
   step credit_card:CC-5-5d, rulings R-CC87 and R-CC91):
-  ``_refuse_goal_crossing``.
+  ``_refuse_goal_crossing``.  A re-type also keeps a card that a worked-out
+  card payment names a card (plan step credit_card:CC-6).
 
 The Marshmallow schema singletons (``_anchor_schema``,
 ``_create_schema``, ``_update_schema``, ``_type_create_schema``,
@@ -53,6 +54,7 @@ from app import ref_cache
 from app.enums import AcctCategoryEnum
 from app.extensions import db
 from app.models.account import Account
+from app.models.card_payment_settings import CardPaymentSettings
 from app.models.ref import AccountType
 from app.models.savings_goal import SavingsGoal
 from app.schemas.validation import (
@@ -94,6 +96,18 @@ _opening_schema = OpeningRestatementSchema()
 #: at all before this validator is reached (plan step X-ae), and two spellings
 #: of one answer is how the two paths would come to differ.
 INVALID_COLLATERAL_LINK = ("Invalid linked account.", "danger")
+
+#: The refusal of a re-type that would leave a worked-out card payment on an
+#: account that is not a card (plan step credit_card:CC-6): only a credit
+#: card's balance, statement and minimum exist to work its payment out from.
+#: Formatted with the card's name and the payment's.  The way out it names is
+#: always open: deleting the payment can be refused for history (it is then
+#: archived, and its settings stay), but a new account never is.
+CARD_PAYMENT_KEEPS_ITS_CARD = (
+    "'{card}' has a card payment, '{payment}', that works out what to pay "
+    "from the card's balance, so it must stay a credit card. To use another "
+    "type, create a new account of that type."
+)
 
 
 def _visible_account_types(user_id):
@@ -326,6 +340,13 @@ def _validate_account_type_change(account, new_type_id):
     route then re-classes the empty linked row and re-syncs the
     corrections.
 
+    **A re-type to a type that is not revolving is refused while a worked-out
+    card payment names the account** (:data:`CARD_PAYMENT_KEEPS_ITS_CARD`, plan
+    step credit_card:CC-6): the payment's amount is the card's to work out, so
+    the account must stay a card, the rule
+    :mod:`app.card_payment_infrastructure` backstops.  Asked of the target
+    type alone, so a move between two revolving types passes.
+
     **A change of what a goal on the account IS -- savings to debt, or a loan
     type to a card-style debt -- is refused FIRST while an active goal is on
     it** (:func:`_refuse_goal_crossing`, rulings R-CC87 and R-CC91), posted
@@ -356,6 +377,15 @@ def _validate_account_type_change(account, new_type_id):
     )
     if goal_refusal is not None:
         return goal_refusal
+    if not new_type.has_revolving_credit:
+        payment = _card_payment_on(account.id)
+        if payment is not None:
+            return (
+                CARD_PAYMENT_KEEPS_ITS_CARD.format(
+                    card=account.name, payment=payment.template.name,
+                ),
+                "warning",
+            )
     if not _crosses_posting_boundary(
         account.account_type, new_type.has_amortization, new_type.category_id,
     ):
@@ -369,6 +399,26 @@ def _validate_account_type_change(account, new_type_id):
             "warning",
         )
     return None
+
+
+def _card_payment_on(account_id):
+    """Return the worked-out card payment settings naming *account_id*, or None.
+
+    At most one row can (``uq_card_payment_settings_card_account_id``).
+
+    Args:
+        account_id: ``budget.accounts.id`` of the account being re-typed,
+            owner-checked by the route.
+
+    Returns:
+        The :class:`~app.models.card_payment_settings.CardPaymentSettings` row,
+        or ``None`` when no payment names the account.
+    """
+    return (
+        db.session.query(CardPaymentSettings)
+        .filter_by(card_account_id=account_id)
+        .one_or_none()
+    )
 
 
 def _validate_account_type_boundary_edit(account_type, data):

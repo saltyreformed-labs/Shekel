@@ -39,6 +39,7 @@ from app.enums import (
     StatementBalanceEvidenceEnum,
     BusinessDayShiftEnum,
     CalcMethodEnum,
+    CardPaymentModeEnum,
     CompoundingFrequencyEnum,
     FilingStatusEnum,
     PaycheckLineKindEnum,
@@ -251,6 +252,7 @@ def _build_ref_specs(ref_models) -> list[_RefSpec]:
         _RefSpec(StatementBalanceEvidenceEnum, ref_models.StatementBalanceEvidence),
         _RefSpec(WithholdingKindEnum, ref_models.WithholdingKind),
         _RefSpec(FilingStatusEnum, ref_models.FilingStatus),
+        _RefSpec(CardPaymentModeEnum, ref_models.CardPaymentMode),
     ]
 
 

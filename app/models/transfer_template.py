@@ -44,6 +44,14 @@ class TransferTemplate(
             name="ck_transfer_templates_version_id_positive",
         ),
         db.UniqueConstraint("user_id", "name", name="uq_transfer_templates_user_name"),
+        # Unique by construction (``id`` is the key): the superkey a composite
+        # foreign key needs as its target, so a settings row can name the
+        # account its definition pays without a second copy of that fact
+        # (``fk_card_payment_settings_payment``, plan step credit_card:CC-6;
+        # plan#2311 plans the same key for the loan's settings).
+        db.UniqueConstraint(
+            "id", "to_account_id", name="uq_transfer_templates_id_to_account",
+        ),
         {"schema": "budget"},
     )
 
@@ -105,6 +113,15 @@ class TransferTemplate(
     # the row with the template (the DB FK is ON DELETE CASCADE too).
     settings = db.relationship(
         "LoanPaymentSettings", uselist=False, back_populates="template",
+        cascade="all, delete-orphan",
+    )
+    # 1:1 card-payment settings (plan step credit_card:CC-6): present only for
+    # a card's worked-out payment, holding which amount the card works out.
+    # ``None`` for every other transfer, a fixed payment into a card included
+    # (ruling plan#2666).  ``delete-orphan`` disposes the row with the
+    # template (the DB key is ON DELETE CASCADE too).
+    card_payment_settings = db.relationship(
+        "CardPaymentSettings", uselist=False, back_populates="template",
         cascade="all, delete-orphan",
     )
     # The effective-dated history of the definition's price (plan step

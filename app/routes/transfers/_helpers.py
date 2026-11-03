@@ -41,6 +41,18 @@ _create_schema = TransferTemplateCreateSchema()
 _update_schema = TransferTemplateUpdateSchema()
 _xfer_create_schema = TransferCreateSchema()
 _xfer_update_schema = TransferUpdateSchema()
+#: The refusal of an edit that points a worked-out card payment at another
+#: account (plan step credit_card:CC-6), the card twin of
+#: ``LOAN_PAYMENT_CANNOT_CHANGE_DESTINATION``: its amount is the card's to work
+#: out, so it pays the card it was set up for, and the database holds its
+#: settings to that card (``fk_card_payment_settings_payment``).  Formatted
+#: with the payment's name.
+CARD_PAYMENT_CANNOT_CHANGE_DESTINATION = (
+    "'{payment}' works out what to pay from its card's balance, so it pays "
+    "that card only. Archive it to stop paying the card, or set up a new "
+    "transfer to pay another account."
+)
+
 # Mark Paid's one parameter: the bank lines the popover's captions named (plan
 # step ``credit_card:CC-5-4a-5``, ruling **R-CC127**); absent from the grid
 # leg's one-click, which is silent by ruling **R-CC56**.
@@ -137,12 +149,16 @@ def _first_unowned_template_fk(data):
 def _first_template_fk_refusal(template, data):
     """Return the flash for the first unusable account reference in *data*, else None.
 
-    The two rules the transfer-template update route asks of its account
+    The three rules the transfer-template update route asks of its account
     keys, in the one order they can be asked: OWNERSHIP first
     (:func:`_first_unowned_template_fk`; an unowned id must be refused before
-    anything reads it), then the pair the write would LEAVE -- source and
-    destination, each the submitted value where present and the stored one
-    where absent -- may not be one account.
+    anything reads it), then a worked-out card payment's destination may not
+    move (:data:`CARD_PAYMENT_CANNOT_CHANGE_DESTINATION`, plan step
+    credit_card:CC-6: refused here with a sentence, before
+    ``fk_card_payment_settings_payment`` would refuse the flush), then the
+    pair the write would LEAVE -- source and destination, each the submitted
+    value where present and the stored one where absent -- may not be one
+    account.
 
     **The second rule grades the EFFECTIVE pair because the schema cannot**
     (plan step R7d-f-5).  ``_reject_same_account_transfer`` runs only when a
@@ -163,14 +179,22 @@ def _first_template_fk_refusal(template, data):
 
     Returns:
         ``"Invalid <label>."`` for the first unowned reference,
-        :data:`SAME_ACCOUNT_TRANSFER_MESSAGE` when the effective pair is one
-        account, else ``None``.
+        :data:`CARD_PAYMENT_CANNOT_CHANGE_DESTINATION` when a card payment's
+        destination would move, :data:`SAME_ACCOUNT_TRANSFER_MESSAGE` when the
+        effective pair is one account, else ``None``.
     """
     unowned = _first_unowned_template_fk(data)
     if unowned is not None:
         return f"Invalid {unowned}."
     source = data.get("from_account_id", template.from_account_id)
     destination = data.get("to_account_id", template.to_account_id)
+    if (
+        template.card_payment_settings is not None
+        and destination != template.to_account_id
+    ):
+        return CARD_PAYMENT_CANNOT_CHANGE_DESTINATION.format(
+            payment=template.name,
+        )
     if source == destination:
         return SAME_ACCOUNT_TRANSFER_MESSAGE
     return None

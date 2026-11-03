@@ -360,6 +360,19 @@ _REF_TABLE_SEEDS = (
         "WithholdingKind",
         ["federal_income", "state_income", "social_security", "medicare"],
     ),
+    # WHICH AMOUNT a card works out for its payment (credit_card arc, plan
+    # step CC-6, rulings plan#2666 and plan#2671): what the card owed at the
+    # end of the day before the payment, the statement balance, the
+    # statement's minimum.  No ``fixed`` row: a fixed payment is a plain
+    # recurring transfer -- see :class:`app.enums.CardPaymentModeEnum`.  The
+    # migration that creates ``ref.card_payment_modes`` inline-seeds the
+    # identical rows so a freshly upgraded DB resolves the enum before this
+    # idempotent reseed runs -- the same dual-seed pattern every ref above
+    # uses.  Names match the enum ``.value`` strings in ``app/enums/`` exactly.
+    (
+        "CardPaymentMode",
+        ["card_balance", "statement_balance", "minimum_payment"],
+    ),
 )
 # pylint: enable=line-too-long
 # fmt: on

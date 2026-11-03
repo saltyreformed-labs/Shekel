@@ -12,6 +12,7 @@ from app.models.ref import (
     AmountSource,
     BusinessDayShift,
     CalcMethod,
+    CardPaymentMode,
     PaycheckLineKind,
     FilingStatus,
     GoalMode,
@@ -66,6 +67,7 @@ from app.models.transfer_template import TransferTemplate
 from app.models.transfer import Transfer
 from app.models.template_amount_version import TemplateAmountVersion
 from app.models.loan_payment_settings import LoanPaymentSettings
+from app.models.card_payment_settings import CardPaymentSettings
 from app.models.ledger_account import LedgerAccount
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.savings_goal import SavingsGoal
@@ -126,6 +128,7 @@ __all__ = [
     "AmountSource",
     "BusinessDayShift",
     "CalcMethod",
+    "CardPaymentMode",
     "PaycheckLineKind",
     "FilingStatus",
     "GoalMode",
@@ -171,6 +174,7 @@ __all__ = [
     "Transfer",
     "TemplateAmountVersion",
     "LoanPaymentSettings",
+    "CardPaymentSettings",
     "LedgerAccount",
     "JournalEntry",
     "Posting",

@@ -101,6 +101,7 @@ from app.audit_infrastructure import (
     apply_audit_infrastructure,
     require_audit_triggers,
 )
+from app.card_payment_infrastructure import apply_card_payment_infrastructure
 from app.deleted_row_infrastructure import (
     ALL_ARMS as DELETED_ROW_ARMS,
     apply_deleted_row_infrastructure,
@@ -293,6 +294,16 @@ def init_fresh_database(connection):
         lambda sql: db.session.execute(db.text(sql)), arms=SIDE_BAND_ARMS,
     )
     print("Side-record band rule ready.")
+
+    # A card payment's card is a credit card (plan step credit_card:CC-6).
+    # Same fresh-DB reason, same three-caller contract: ``create_all`` made
+    # the settings table and the stamp below marks d1f4a7c2b8e5 applied
+    # without running it.
+    print("Applying card-payment rule (a payment's card revolves)...")
+    apply_card_payment_infrastructure(
+        lambda sql: db.session.execute(db.text(sql))
+    )
+    print("Card-payment rule ready.")
 
     # Ledger append-only posture (review M1/R4).  On the fresh-DB path the
     # tables were just created AFTER init_db_role.sql ran (its table-guarded

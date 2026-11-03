@@ -42,25 +42,25 @@ it.
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
 from app import ref_cache
 from app.enums import StatusEnum, TxnTypeEnum
 from app.extensions import db
-from app.models.account import Account
 from app.models.category import Category
-from app.models.pay_period import PayPeriod
+from app.models.scenario import Scenario
 from app.models.transfer import Transfer
 from app.models.transfer_template import TransferTemplate
 from app.models.ref import AccountType
+from app.models.user import User, UserSettings
 from app.services import pay_period_write, transfer_service
 from app.services import account_service
+from app.services.auth_service import hash_password
 from app.utils.error_fragments import DESIGNED_FRAGMENT_HEADER
 from app.models.amount_ownership import AmountOwnership
 from app.services.grid_view_service import leg_dom_id
 from app.services.row_valuation import settled_figure
 from tests._test_helpers import (
     one_off_row_of, open_books_before_the_first_assertion, rhythm_of,
+    state_template_price,
 )
 from tests._definition_price import newest_price
 
@@ -126,6 +126,12 @@ def _create_transfer(seed_user, period, savings):
     return xfer
 
 
+def _flashes(auth_client):
+    """Return the unconsumed flash messages left by an unfollowed redirect."""
+    with auth_client.session_transaction() as sess:
+        return [message for _category, message in sess.get("_flashes", [])]
+
+
 def _seed_second_user_transfer_assets():
     """Seed a second user, their period, scenario, and a category.
 
@@ -133,10 +139,6 @@ def _seed_second_user_transfer_assets():
     scenario, category.  Used to source cross-user FKs the
     authenticated user must NOT be allowed to reference.
     """
-    from app.models.user import User, UserSettings  # pylint: disable=import-outside-toplevel
-    from app.models.scenario import Scenario  # pylint: disable=import-outside-toplevel
-    from app.services.auth_service import hash_password  # pylint: disable=import-outside-toplevel
-
     other = User(
         email="cross-c27@shekel.local",
         password_hash=hash_password("crossc27pass"),
@@ -678,14 +680,28 @@ class TestUpdateTransferTemplateFkOwnership:
     """``transfers.update_transfer_template`` rejects cross-user FKs.
 
     The update path is partial: only fields actually submitted run
-    through the ownership probe.  Each test verifies the per-FK
-    rejection and asserts the template's row was not mutated.
+    through the ownership probe.  Each test asserts the per-FK refusal
+    by its flash and that the template's row was not mutated.
+
+    **The flash is what grades the ownership check**, because every refusal
+    before it answers the same way: the update schema's refusal of the
+    payload redirects to the same edit form and writes nothing either.  Until
+    plan step X-bp's review (plan#2738) these cases asserted only the 302 and
+    the unchanged column, and X-bp's column drop left ``_create_template``
+    stating no price, so the posted Amount was the string ``"None"``, the
+    schema refused it, and both cases passed with the ownership refusal
+    deleted.
     """
 
     def _create_template(self, seed_user, savings):
-        """Make a saved template owned by the seeded user."""
-        from app.models.transfer_template import TransferTemplate as TplModel  # pylint: disable=import-outside-toplevel
-        tpl = TplModel(
+        """Make a saved template owned by the seeded user, priced $80.00.
+
+        The price is stated through the series' write door, as
+        ``transfers.create_transfer_template`` does: the edit form posts a
+        definition's price, and a payload with no valid Amount is refused by
+        the schema before the ownership check runs.
+        """
+        tpl = TransferTemplate(
             user_id=seed_user["user"].id,
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
@@ -693,6 +709,8 @@ class TestUpdateTransferTemplateFkOwnership:
             name="C-27 Template To Update",
         )
         db.session.add(tpl)
+        db.session.flush()
+        state_template_price(tpl, Decimal("80.00"))
         db.session.commit()
         return tpl
 
@@ -718,6 +736,7 @@ class TestUpdateTransferTemplateFkOwnership:
                 follow_redirects=False,
             )
             assert resp.status_code == 302
+            assert _flashes(auth_client) == ["Invalid source account."]
 
             db.session.expire_all()
             db.session.refresh(tpl)
@@ -745,6 +764,7 @@ class TestUpdateTransferTemplateFkOwnership:
                 follow_redirects=False,
             )
             assert resp.status_code == 302
+            assert _flashes(auth_client) == ["Invalid category."]
 
             db.session.expire_all()
             db.session.refresh(tpl)

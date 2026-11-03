@@ -754,9 +754,11 @@ _FENCED_MODULE_RULINGS = {
         # R-PC85, R-PC89): the same resolution with the definition's BOOKS
         # FLOOR -- the latest ``opened_on`` among the accounts it moves money
         # in -- and its envelope flag attached, which ``resolved_recurrence_of``
-        # calls and the form preview's unsaved definition calls directly.  A
-        # NON-producer on the same ground: a cadence, a first occurrence, a
-        # bound, one more DATE and a flag, no money anywhere in the value.
+        # calls and the form preview's unsaved definition calls directly --
+        # and, for a repeat on each statement's due date, its card's due
+        # dates (plan step credit_card:CC-6, plan#2787).  A NON-producer on
+        # the same ground: a cadence, a first occurrence, a bound, one more
+        # DATE, a flag and a card's due DATES, no money anywhere in the value.
         "resolved_for",
         # The read pass's OCCURRENCE-WALK memo (plan step recurrence:R7d-f-2,
         # ledger row N-513's remedy): every occurrence a resolved recurrence

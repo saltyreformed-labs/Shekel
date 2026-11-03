@@ -339,11 +339,14 @@ class ResolvedRecurrence:  # pylint: disable=too-many-instance-attributes
             the walk yields from (plan step credit_card:CC-6, ruling
             plan#2671); ``None`` for every other unit.  **:func:`resolve`
             leaves it ``None``** for the reason it leaves the books floor:
-            the dates are the card's terms, read from the database by the
-            read pass that attaches them, so the pure package never loads
-            them.  A due-date repeat walked without them is refused by the
-            walk (``_occurrence``) rather than answered with no dates, which
-            would read as a payment that never falls due.
+            the dates are the card's terms, read from the database
+            (``balance_at.definition_due_dates``) and attached beside the
+            books floor by the same composition
+            (``balance_at.resolved_with_books``, plan#2787), so the pure
+            package never loads them.  A due-date repeat walked without them
+            is refused by the walk (``_occurrence``) rather than answered
+            with no dates, which would read as a payment that never falls
+            due.
     """
 
     offset_periods: int

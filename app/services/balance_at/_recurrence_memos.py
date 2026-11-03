@@ -29,13 +29,15 @@ from app.services.recurrence import (
 )
 
 from ._definition_books import definition_books, resolved_with_books
+from ._definition_due_dates import definition_due_dates
 
 
 class RecurrenceMemosMixin:
     """A rule's resolution and a resolved recurrence's walk, memoized per pass.
 
     Methods only: the state they fill is the host dataclass's --
-    ``_recurrences``, ``_placements`` and ``_books_opened_on`` -- and they
+    ``_recurrences``, ``_placements``, ``_books_opened_on`` and
+    ``_card_due_dates`` -- and they
     derive from its :meth:`~app.services.balance_at._context.BalanceContext
     .calendar`.  Each field's contract is in ``BalanceContext``'s Attributes.
     """
@@ -131,7 +133,7 @@ class RecurrenceMemosMixin:
     def resolved_for(
         self, spec: RecurrenceSpec, definition: object | None,
     ) -> "ResolvedRecurrence | None":
-        """Return what *spec* MEANS for *definition*, its books floor attached.
+        """Return what *spec* MEANS for *definition*, its books floor and due dates attached.
 
         **The ONE composition of a definition's resolved value with where its
         books open** (plan step ``pay_calendar:C18-a``, rulings **R-PC85**,
@@ -139,16 +141,30 @@ class RecurrenceMemosMixin:
         reader of its occurrences takes the floor from one call: the composed
         door and the loan estimate's walk through
         :meth:`resolved_recurrence_of`, and the form preview's unsaved
-        definition (``recurring_definition.resolved_submission``).
+        definition (``recurring_definition.resolved_submission``).  **And
+        with the card's due dates a repeat on each statement's due date
+        walks** (plan step ``credit_card:CC-6``, plan#2787; the argument is
+        :mod:`._definition_due_dates`'), so generation, the Recurring page,
+        the preview and every other reader of such a repeat walk the dates
+        its card's terms decide on this pass, each card's terms read once.
 
-        Memoised by ``(spec, books)``: two definitions stating one spec
-        over accounts that open on one day, both envelopes or neither, share
-        one value (so repeated reads are the SAME object, which the walk
-        memo keys by); over different openings, or an envelope beside a bill
-        (ruling **R-PC89**), they mean different occurrences and walk apart.
-        The floor is read first -- a memo hit per account -- so a foreign
-        spec costs one opening read (memoised) before the resolver refuses
-        it; no resolution is stored for it, and the refusal names the rule.
+        Memoised by ``(spec, books, due_dates)``: two definitions stating
+        one spec over accounts that open on one day, both envelopes or
+        neither, paying one card or none, share one value (so repeated reads
+        are the SAME object, which the walk memo keys by); over different
+        openings, an envelope beside a bill (ruling **R-PC89**), or two cards
+        whose terms differ, they mean different occurrences and walk apart.
+        The key is what is attached rather than which card it came from, so
+        a pass that read a card's terms before a change and one that reads
+        them after cannot share a resolution even were one memo to outlive
+        its pass.  The floor and the dates are read first -- a memo hit per
+        account and per card -- so a foreign spec costs one opening read
+        (memoised), and a foreign due-date repeat one terms read, before the
+        resolver refuses it; no resolution is stored for it, and the refusal
+        names the rule.  A due-date repeat whose destination is not a
+        configured card is refused by the dates' read, ahead of the
+        resolver: both refusals are ``RecurrenceResolutionError``, and that
+        state is one no write door leaves (plan#2788).
 
         Args:
             spec: The authored recurrence.
@@ -157,18 +173,22 @@ class RecurrenceMemosMixin:
                 line's rule, which creates no row of its own).
 
         Returns:
-            The resolved value with ``books_opened_on`` and ``is_envelope``
-            set, or ``None`` when the owner has no pay periods.
+            The resolved value with ``books_opened_on``, ``is_envelope`` and
+            ``due_dates`` set, or ``None`` when the owner has no pay periods.
 
         Raises:
             RecurrenceResolutionError: See
-                :func:`~app.services.recurrence.resolved_spec`.
+                :func:`~app.services.recurrence.resolved_spec`; or a repeat
+                on each statement's due date whose destination is not a
+                configured card (:func:`~._definition_due_dates
+                .definition_due_dates`).
         """
         books = definition_books(definition, self._books_opened_on)
-        key = (spec, books)
+        due_dates = definition_due_dates(spec, definition, self._card_due_dates)
+        key = (spec, books, due_dates)
         if key not in self._recurrences:
             self._recurrences[key] = resolved_with_books(
-                spec, self.calendar(), books,
+                spec, self.calendar(), books, due_dates,
             )
         return self._recurrences[key]
 

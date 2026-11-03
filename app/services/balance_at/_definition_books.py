@@ -44,6 +44,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import date
 
+from app.services.card_statement import DueDateSchedule
 from app.services.cash_ledger import governing_account_opening
 from app.services.pay_calendar import PayCalendar
 from app.services.recurrence import (
@@ -90,29 +91,40 @@ class DefinitionBooks:
 
 def resolved_with_books(
     spec: RecurrenceSpec, calendar: PayCalendar, books: DefinitionBooks,
+    due_dates: DueDateSchedule | None,
 ) -> ResolvedRecurrence | None:
-    """Return what *spec* MEANS on *calendar*, with *books* attached.
+    """Return what *spec* MEANS on *calendar*, with *books* and *due_dates* attached.
 
-    **The ONE composition of a recurrence with where its definition's books
-    open** (plan step ``pay_calendar:C18-a``): the pure resolution
-    (:func:`~app.services.recurrence.resolved_spec`) with the floor and the
-    envelope flag laid on it.  Two callers, one body:
+    **The ONE composition of a recurrence with what its DEFINITION decides**
+    (plan step ``pay_calendar:C18-a``): the pure resolution
+    (:func:`~app.services.recurrence.resolved_spec`) with the books floor and
+    the envelope flag laid on it, and since plan step ``credit_card:CC-6``
+    (plan#2787) the card's due dates a repeat on each statement's due date
+    walks (:func:`~._definition_due_dates.definition_due_dates`).  Two
+    callers, one body:
     :meth:`~app.services.balance_at.BalanceContext.resolved_for` memoises it
     for every reader of a definition's occurrences, keyed by exactly these
-    inputs; and the opening restatement (ruling **R-PC88**,
-    ``planned_rows_books.first_row_an_opening_strands``) asks it of the books
-    the account WOULD have -- a :class:`DefinitionBooks` read with the
-    candidate day standing in for the account's own opening -- which no pass
-    memo holds, because no account opens there yet.
+    inputs; and ``planned_rows_books`` asks it outside a pass -- the opening
+    restatement (ruling **R-PC88**, ``first_row_an_opening_strands``) of the
+    books the account WOULD have, a :class:`DefinitionBooks` read with the
+    candidate day standing in for the account's own opening, which no pass
+    memo holds because no account opens there yet, and the revert refusal
+    (ruling **R-PC97**) of the books as they stand.  Each hands the due
+    dates the same producer reads, so a due-date repeat is walked with its
+    dates on every path; one composed with ``None`` is refused by the walk
+    (``recurrence._occurrence``), never walked as no dates.
 
     Args:
         spec: The authored recurrence.
         calendar: The owner's pay calendar.
         books: The definition's :class:`DefinitionBooks`.
+        due_dates: The destination card's due dates for a repeat on each
+            statement's due date, ``None`` for every other unit
+            (:func:`~._definition_due_dates.definition_due_dates`'s answer).
 
     Returns:
-        The resolved value with ``books_opened_on`` and ``is_envelope`` set,
-        or ``None`` when the owner has no pay periods.
+        The resolved value with ``books_opened_on``, ``is_envelope`` and
+        ``due_dates`` set, or ``None`` when the owner has no pay periods.
 
     Raises:
         RecurrenceResolutionError: See
@@ -123,7 +135,7 @@ def resolved_with_books(
         return None
     return replace(
         resolved, books_opened_on=books.opened_on,
-        is_envelope=books.is_envelope,
+        is_envelope=books.is_envelope, due_dates=due_dates,
     )
 
 

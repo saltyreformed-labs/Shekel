@@ -219,13 +219,17 @@ resolution (plan step E1d-b); ``_confirmed_view`` imports ``_context`` and
 ``_fold``, so that sub-chain is a DAG too.  ``_resolution`` also holds the
 loan-payment IDENTITY and ruling R-R56's arm since R16-b-2 (``_plan`` reads
 them and ``_loan_figures`` sits above ``_plan``).  ``_memoize`` sits at the
-floor, with ``_assertions``, ``_asset_contributions``, ``_fold`` and
-``_plan_records`` -- the five modules that import no sibling at runtime (an
-AST census of 2026-09-12; the sentence read "three" and named ``_context``
-among them until recurrence:R7d-f-2, wrong on both counts since ``_assertions``
-and ``_plan_records`` joined); ``_context`` imports ``_memoize``,
-``_definition_books`` and ``_recurrence_memos`` (its mixin, ruling R-BAL146,
-which imports ``_definition_books``) and nothing else of the package.
+floor, with ``_assertions``, ``_asset_contributions``, ``_definition_books``,
+``_definition_due_dates``, ``_fold`` and ``_plan_records`` -- the seven
+modules that import no sibling at runtime (an AST census of 2026-11-03; the
+sentence read "three" and named ``_context`` among them until
+recurrence:R7d-f-2, wrong on both counts since ``_assertions`` and
+``_plan_records`` joined, and "five" from 2026-09-12 until credit_card:CC-6,
+missing ``_definition_books`` since pay_calendar:C18-a added it);
+``_context`` imports ``_memoize``, ``_definition_books`` and
+``_recurrence_memos`` (its mixin, ruling R-BAL146, which imports
+``_definition_books`` and ``_definition_due_dates``) and nothing else of the
+package.
 ``_plan``'s ``LoanForwardPlan``, ``_resolution``'s
 ``ResolvedLoan`` and ``_cash_fold``'s ``AssembledCashFold`` are all type-only
 edges typing the caches the seam FILLS, so the arrow from the fourteen modules
@@ -277,6 +281,7 @@ from ._definition_books import (
     resolved_with_books,
     row_books_opened_on,
 )
+from ._definition_due_dates import definition_due_dates
 from ._memoize import require_scenario
 from ._grid import (
     GridBalanceView,
@@ -401,6 +406,7 @@ __all__ = [
     "cash_outstanding_difference",
     "confirmed_view",
     "definition_books",
+    "definition_due_dates",
     "definition_money_accounts",
     "empty_grid_view",
     "grid_balance_view",

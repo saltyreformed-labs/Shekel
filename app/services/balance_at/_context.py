@@ -61,6 +61,7 @@ from typing import TYPE_CHECKING
 from app.exceptions import ForeignAccountError
 from app.models.account import Account
 from app.models.scenario import Scenario
+from app.services.card_statement import DueDateSchedule
 from app.services.cash_ledger import AmountBasis, amount_basis
 from app.services.income_service import PaycheckPricing, paycheck_pricing
 from app.services.loan_ledger import (
@@ -95,9 +96,9 @@ if TYPE_CHECKING:
 class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance-attributes
     """One read pass's pinned as-of, scenario, and memoized derivations.
 
-    Pylint: ``too-many-instance-attributes`` (16/7) -- suppressed because the
-    sixteen ARE one read pass's state and there is no smaller cohesive object
-    inside them: three PINS (``user_id`` / ``scenario`` / ``as_of``) and thirteen
+    Pylint: ``too-many-instance-attributes`` (17/7) -- suppressed because the
+    seventeen ARE one read pass's state and there is no smaller cohesive object
+    inside them: three PINS (``user_id`` / ``scenario`` / ``as_of``) and fourteen
     MEMOS, each keyed by the thing it is a derivation of.  Bundling the memos
     behind a nested record would put an access level in front of state the
     seam fills from five different modules while creating a second object with
@@ -108,8 +109,9 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
     recurrence:**R16-b-2** (a rule's resolution), 13 at
     recurrence:**R7d-f-2** (a resolved recurrence's occurrence walk), 14 at
     recurrence:**R16-c-1** (the loan's timeline), 15 at
-    pay_calendar:**C18-a** (each account's books floor) and 16 at
-    recurrence:**R25** (the loan calendars its walk and its pricer share);
+    pay_calendar:**C18-a** (each account's books floor), 16 at
+    recurrence:**R25** (the loan calendars its walk and its pricer share) and
+    17 at credit_card:**CC-6** (each card's due dates, plan#2787);
     plan step
     **X-i1** raises it further, because that step's remaining inputs (the contribution feed, the
     standing extra, the contractual schedule) are memos of exactly this kind.
@@ -306,9 +308,11 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
             exactly as :meth:`calendar` and :meth:`amounts` are for the two
             memos above.
         _recurrences: The pass's rule-resolution memo, keyed by the rule's
-            SPEC and its definition's BOOKS (what it authors, where its
-            accounts' books open and whether it is an envelope, not which row
-            it is; :meth:`resolved_for`).  Private
+            SPEC, its definition's BOOKS and the DUE DATES of the card it
+            pays (what it authors, where its accounts' books open, whether it
+            is an envelope, and for a repeat on each statement's due date the
+            dates its card's terms decide -- not which row it is;
+            :meth:`resolved_for`).  Private
             because this class owns the derivation (its mixin's module imports
             the pure resolver, a leaf below the
             seam), and a ``None`` value is a MEMOIZED "the owner has no pay
@@ -325,6 +329,12 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
             "no opening record".  Keyed by rows, so stale after a restatement
             inside the pass -- the convention :meth:`resolved_recurrence_of`
             states for its row-keyed siblings.
+        _card_due_dates: ``card account id -> DueDateSchedule`` (plan step
+            ``credit_card:CC-6``, plan#2787): the due dates
+            :meth:`resolved_for` attaches to a repeat on each statement's due
+            date, the card's terms read once per card per pass.  A refusal
+            (no configured card) is not memoised.  Keyed by rows, so stale
+            after a terms change inside the pass, under the same convention.
     """
 
     user_id: int
@@ -358,7 +368,8 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         default_factory=LoanCalendars, repr=False, compare=False,
     )
     _recurrences: (
-        "dict[tuple[RecurrenceSpec, DefinitionBooks], ResolvedRecurrence | None]"
+        "dict[tuple[RecurrenceSpec, DefinitionBooks, DueDateSchedule | None], "
+        "ResolvedRecurrence | None]"
     ) = field(default_factory=dict, repr=False, compare=False)
     _placements: "dict[ResolvedRecurrence, BooksWalk]" = field(
         default_factory=dict, repr=False, compare=False,
@@ -367,6 +378,9 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         default_factory=dict, repr=False, compare=False,
     )
     _books_opened_on: "dict[int, date | None]" = field(
+        default_factory=dict, repr=False, compare=False,
+    )
+    _card_due_dates: "dict[int, DueDateSchedule]" = field(
         default_factory=dict, repr=False, compare=False,
     )
 

@@ -124,6 +124,7 @@ from app.models.transfer_template import TransferTemplate
 from app.services.balance_at import (
     BalanceContext,
     definition_books,
+    definition_due_dates,
     definition_money_accounts,
     money_account_columns,
     resolved_with_books,
@@ -515,7 +516,9 @@ def first_row_an_opening_strands(
     definition's OTHER accounts' governing openings
     (:func:`~app.services.balance_at.definition_books`, the candidate
     standing in for this account's own), composed by the ONE composition
-    (:func:`~app.services.balance_at.resolved_with_books`).  That walk is
+    (:func:`~app.services.balance_at.resolved_with_books`) -- with, for a
+    repeat on each statement's due date, its card's due dates
+    (:func:`~app.services.balance_at.definition_due_dates`).  That walk is
     asked after the definition's OWN rows, wherever they sit.  And every row
     SITTING ON the account is asked whether the candidate books hold its own
     day (ruling **R-PC99**), a definition that moved off it included: its
@@ -545,17 +548,16 @@ def first_row_an_opening_strands(
     # ONE memo for every definition and every row, holding the candidate:
     # the other accounts are read once each, as they stand, and this one as
     # it would.  A second holds every account as it stands, for the rows an
-    # archived definition's unarchive would restore.
+    # archived definition's unarchive would restore.  A card's due dates do
+    # not move with any books, so one memo of them serves both.
     memo = {account_id: opened_on}
     standing_memo: dict = {}
+    due_dates: dict = {}
     walks = []
     for definition, moves_money_in in _recurring_definitions_bounding(account_id):
         resolved = None
         if moves_money_in:
-            resolved = resolved_with_books(
-                recurrence_spec(definition.recurrence_rule), calendar,
-                definition_books(definition, memo),
-            )
+            resolved = _resolved_over(definition, calendar, memo, due_dates)
             if resolved is None:
                 continue
         restorable = None
@@ -564,16 +566,48 @@ def first_row_an_opening_strands(
                 definition,
                 lambda held=definition: unarchive_scope(
                     held,
-                    resolved_with_books(
-                        recurrence_spec(held.recurrence_rule), calendar,
-                        definition_books(held, standing_memo),
-                    ),
+                    _resolved_over(held, calendar, standing_memo, due_dates),
                     calendar,
                 ),
             )
         walks.append(DefinitionWalk(resolved, definition, restorable))
     return first_row_below_the_books(
         calendar, walks, books_memo=memo, sitting_on=account_id,
+    )
+
+
+def _resolved_over(
+    definition, calendar: PayCalendar, books_memo: dict, due_dates: dict,
+) -> ResolvedRecurrence | None:
+    """Return *definition*'s stored rule resolved over the books *books_memo* holds.
+
+    The ONE composition (:func:`~app.services.balance_at.resolved_with_books`)
+    of the rule's spec, read once, with the definition's books
+    (:func:`~app.services.balance_at.definition_books`) and, for a repeat on
+    each statement's due date, its card's due dates
+    (:func:`~app.services.balance_at.definition_due_dates`): the restatement
+    asks it of the candidate books and, for an archived definition's scope,
+    of the books as they stand -- the two memos it is handed.
+
+    Args:
+        definition: The transaction or transfer template, carrying a rule.
+        calendar: The owner's pay calendar.
+        books_memo: The ``account_id -> opened_on`` memo the books are read
+            through.
+        due_dates: The ``card account id -> schedule`` memo the due dates
+            are read through.
+
+    Returns:
+        The resolved value, or ``None`` when the owner has no pay periods.
+
+    Raises:
+        RecurrenceResolutionError: The stored rule cannot be resolved, or it
+            repeats on a card's due dates and pays no configured card.
+    """
+    spec = recurrence_spec(definition.recurrence_rule)
+    return resolved_with_books(
+        spec, calendar, definition_books(definition, books_memo),
+        definition_due_dates(spec, definition, due_dates),
     )
 
 
@@ -646,7 +680,8 @@ def reject_revert_below_the_books(row, new_status_id: int) -> None:
     matched to its occurrence by ``occurs_on`` -- over the walk as it
     stands, composed by the ONE composition the opening door takes
     (:func:`~app.services.balance_at.resolved_with_books` over
-    :func:`~app.services.balance_at.definition_books`).  The refusal names
+    :func:`~app.services.balance_at.definition_books` and
+    :func:`~app.services.balance_at.definition_due_dates`).  The refusal names
     the books that hold it: the account it sits on, or its definition's.
 
     **Its known cost, stated rather than rounded off**: a settled row's
@@ -725,8 +760,9 @@ def _revert_refusal(row) -> str | None:
     if books.opened_on is None:
         return None
     try:
+        spec = recurrence_spec(definition.recurrence_rule)
         resolved = resolved_with_books(
-            recurrence_spec(definition.recurrence_rule), calendar, books,
+            spec, calendar, books, definition_due_dates(spec, definition, {}),
         )
         reading = books_reading(resolved, calendar)
     except (RecurrenceResolutionError, RecurrenceGenerationError):

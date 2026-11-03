@@ -37,6 +37,10 @@ from app.services.recurrence import (
 from app.services.recurrence import _describe, _months
 from app.services.recurrence._month_coordinate import (
     LAST_WEEK_EVERY_MONTH_HOLDS,
+    WEEKDAY_READING_WINDOWS,
+    WeekdayReadingWindow,
+    week_of_month,
+    weekday_shape,
 )
 from app.services.recurrence._row_day import cadence_scheduled_day
 from app.utils.dates import month_ordinal
@@ -234,6 +238,122 @@ class TestTheCoordinateIsReadFromTheDate:
             RecurrenceResolutionError, match="has no month coordinate",
         ):
             month_coordinate(_MONTH, _THIRD_TUESDAY, None, "every blue moon")
+
+
+def _same_weekdays_counted(day: date, step: int) -> int:
+    """Return how many of *day*'s weekday its month holds on one side of *day*.
+
+    The calendar as the oracle rather than the module's arithmetic: step a
+    week at a time from *day* and count the dates still in *day*'s month,
+    *day* included.
+
+    Args:
+        day: Any date.
+        step: ``-7`` to count back to the month's start (its week from the
+            start), ``7`` to count on to its end (its week from the end).
+
+    Returns:
+        The count, 1-5.
+    """
+    count = 0
+    probe = day
+    while probe.month == day.month:
+        count += 1
+        probe += timedelta(days=step)
+    return count
+
+
+class TestTheWindowsAndTheWeek:
+    """The one table of which dates each reading reads, and the week it counts."""
+
+    def test_the_window_table_is_total_over_the_readings(self):
+        """Every reading has a window, from-start first, and only those two.
+
+        A member added to ``WeekdayReading`` without a window would be refused
+        at the walk (``_unshaped``) rather than offered; this is what says the
+        table and the set are the same size today, and what each window is:
+        the 1st-4th counted from the start (no fifth, plan#2670) and the 1st
+        counted back from the end.
+        """
+        assert list(WEEKDAY_READING_WINDOWS) == [_FROM_START, _FROM_END]
+        assert set(WEEKDAY_READING_WINDOWS) == set(WeekdayReading)
+        assert WEEKDAY_READING_WINDOWS == {
+            _FROM_START: WeekdayReadingWindow(
+                counts_from_end=False, last_week=4,
+            ),
+            _FROM_END: WeekdayReadingWindow(counts_from_end=True, last_week=1),
+        }
+
+    def test_the_week_against_the_calendar_from_both_ends(self):
+        """Every date of three years: its week counted forward and back.
+
+        Spot-checked by hand first: Tue 2026-11-17 is the third Tuesday (3,
+        10, 17) and the second from the end (24); Mon 2026-11-30 the fifth
+        Monday and the last; Sun 2027-02-28 the fourth Sunday of a 28-day
+        February and its last.
+        """
+        assert week_of_month(_THIRD_TUESDAY, counts_from_end=False) == 3
+        assert week_of_month(_THIRD_TUESDAY, counts_from_end=True) == 2
+        assert week_of_month(date(2026, 11, 30), counts_from_end=False) == 5
+        assert week_of_month(date(2026, 11, 30), counts_from_end=True) == 1
+        assert week_of_month(date(2027, 2, 28), counts_from_end=False) == 4
+        assert week_of_month(date(2027, 2, 28), counts_from_end=True) == 1
+        for day in _days(date(2026, 1, 1), date(2028, 12, 31)):
+            assert week_of_month(day, counts_from_end=False) == (
+                _same_weekdays_counted(day, -7)
+            ), day
+            assert week_of_month(day, counts_from_end=True) == (
+                _same_weekdays_counted(day, 7)
+            ), day
+
+    @pytest.mark.parametrize("weekday", range(7))
+    @pytest.mark.parametrize("week", range(1, LAST_WEEK_EVERY_MONTH_HOLDS + 1))
+    def test_from_the_start_names_the_nth_weekday(self, week, weekday):
+        """The week and the weekday, verbatim, for every one the window reads."""
+        assert weekday_shape(_FROM_START, week, weekday) == NthWeekday(
+            nth=week, weekday=weekday,
+        )
+
+    @pytest.mark.parametrize("weekday", range(7))
+    @pytest.mark.parametrize("week", range(1, 6))
+    def test_from_the_end_names_the_last_weekday_whatever_the_week(
+        self, week, weekday,
+    ):
+        """The last Friday has no week number: it is the first counted back."""
+        assert weekday_shape(_FROM_END, week, weekday) == LastWeekday(
+            weekday=weekday,
+        )
+
+    def test_a_fifth_from_the_start_is_refused_by_the_shape(self):
+        """The window ends at the 4th, and the shape refuses past it (plan#2670)."""
+        with pytest.raises(RecurrenceResolutionError, match="got 5"):
+            weekday_shape(_FROM_START, 5, calendar.FRIDAY)
+
+    def test_a_reading_with_no_shape_is_refused_by_the_shape(self):
+        """``weekday_shape``'s own refusal, the sentence ``_unshaped`` writes."""
+        with pytest.raises(
+            RecurrenceResolutionError,
+            match="'every blue moon' has no month coordinate",
+        ):
+            weekday_shape("every blue moon", 1, calendar.MONDAY)
+
+    def test_a_reading_with_no_window_is_refused_not_read_by_its_day(
+        self, monkeypatch,
+    ):
+        """A member whose window went missing is refused, never read as the 29th.
+
+        ``month_coordinate`` asks the window before the shape, so with the
+        from-end window removed the last Friday is refused with the sentence
+        ``_unshaped`` writes rather than falling through to the date's day.
+        """
+        monkeypatch.delitem(WEEKDAY_READING_WINDOWS, _FROM_END)
+
+        with pytest.raises(
+            RecurrenceResolutionError,
+            match=r"weekday reading <WeekdayReading\.FROM_END: 'from_end'> "
+                  r"has no month coordinate",
+        ):
+            month_coordinate(_MONTH, _LAST_FRIDAY, None, _FROM_END)
 
 
 class TestTheWalk:
@@ -544,6 +664,22 @@ class TestTheWords:
             "Monthly (first paycheck)",
             "Monthly (first Monday, first paycheck)",
         ]
+
+    @pytest.mark.parametrize(
+        ("coordinate", "words"),
+        [
+            (NthWeekday(nth=1, weekday=calendar.MONDAY), "first Monday"),
+            (NthWeekday(nth=2, weekday=calendar.WEDNESDAY), "second Wednesday"),
+            (NthWeekday(nth=3, weekday=calendar.TUESDAY), "third Tuesday"),
+            (NthWeekday(nth=4, weekday=calendar.SUNDAY), "fourth Sunday"),
+            (LastWeekday(weekday=calendar.FRIDAY), "last Friday"),
+            (LastWeekday(weekday=calendar.SATURDAY), "last Saturday"),
+        ],
+        ids=["1st", "2nd", "3rd", "4th", "last-friday", "last-saturday"],
+    )
+    def test_each_weekday_shape_has_its_own_words(self, coordinate, words):
+        """The one producer the describer and the form's options both ask."""
+        assert _describe.weekday_words(coordinate) == words
 
     def test_every_shape_has_wording(self):
         """The phrase table is total over the shapes, and the week words over the weeks."""

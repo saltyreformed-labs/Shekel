@@ -33,7 +33,6 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
     on the job, and is graded on every run by the job itself.
     """
 
-    BUILDX = "Set up Docker Buildx"
     BUILD = "Build the image"
     UV = "The Dockerfile's uv"
     IMPL = "The image runs psycopg's C implementation"
@@ -83,15 +82,17 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         return json.loads((tmp_path / "docker.json").read_text(encoding="utf-8"))
 
     def test_the_image_is_built_as_the_release_builds_it_and_never_pushed(self):
-        """The Dockerfile at the checkout's root, built by the release's own two pinned docker
-        actions, loaded into the runner's docker under :attr:`IMAGE` and never pushed.  The
-        job holds no secret and widens no permission, and its steps run in this order."""
+        """The Dockerfile at the checkout's root, built by the release's own pinned build
+        action, loaded into the runner's docker under :attr:`IMAGE` and never pushed.  The job
+        holds no secret and widens no permission, and its steps run in this order; neither it
+        nor the release's build job uses ``docker/setup-buildx-action``, whose builder pulls a
+        BuildKit image (ruling plan#2742).  Another way of setting up a builder is not read
+        here: review holds that line."""
         job = _jobs()["image"]
         assert set(job) == {"runs-on", "timeout-minutes", "env", "steps"}
         assert job["env"] == {"IMAGE": self.IMAGE}
         assert [step["name"] for step in job["steps"]] == [
-            "Checkout code", self.BUILDX, self.BUILD, self.UV, self.IMPL, self.PACKAGES,
-            self.INSTALLERS,
+            "Checkout code", self.BUILD, self.UV, self.IMPL, self.PACKAGES, self.INSTALLERS,
         ]
         steps = _steps("image")
         assert steps["Checkout code"]["with"] == {"persist-credentials": False}
@@ -101,10 +102,10 @@ class TestTheImageIsBuiltAndCheckedBeforeAMerge:
         publish = _workflows()["docker-publish.yml"]["jobs"]["build-and-push"]
         release = {step["uses"].split("@")[0]: step["uses"] for step in publish["steps"]
                    if "uses" in step}
-        for name in (self.BUILDX, self.BUILD):
-            uses = steps[name]["uses"]
-            assert re.fullmatch(r"docker/[\w.-]+@[0-9a-f]{40}", uses), name
-            assert release[uses.split("@")[0]] == uses, name
+        uses = steps[self.BUILD]["uses"]
+        assert re.fullmatch(r"docker/build-push-action@[0-9a-f]{40}", uses)
+        assert release[uses.split("@")[0]] == uses
+        assert "docker/setup-buildx-action" not in release
         assert not re.search(r"\bsecrets\b", yaml.safe_dump(job))
 
     def test_uv_is_the_dockerfiles_by_the_one_recipe(self):

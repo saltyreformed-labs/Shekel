@@ -25,9 +25,9 @@ runs:
   using: composite
   steps:
     # ``--target uv`` builds that stage alone, from the checkout's
-    # Dockerfile, and ``type=local`` writes its files to the runner.  A job
-    # that sets up no builder of its own builds it with the runner's docker;
-    # ci.yml's ``image`` job, with the builder it set up for the image.
+    # Dockerfile, and ``type=local`` writes its files to the runner, with the
+    # runner's Docker Engine and its own BuildKit: no job sets up a builder
+    # of its own (ruling plan#2742).
     - name: Export the Dockerfile's uv stage
       id: export
       shell: bash

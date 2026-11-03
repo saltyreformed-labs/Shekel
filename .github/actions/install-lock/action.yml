@@ -38,11 +38,10 @@
 # which the runner empties as each job starts and ends, and every package
 # the install reads is a download checked against the lock's hash.  The
 # two image builds (ci.yml's ``image`` job and docker-publish.yml's) read
-# no layer cache and take no cached Buildx.  No check is built to refuse a
-# cache coming back: the exact-shape tests of this action and of ci.yml's
-# image build refuse some forms in passing, and none reads the inputs of
-# docker-publish.yml's build or of either Buildx setup.  Review holds that
-# line.
+# no layer cache.  No check is built to refuse a cache coming back: the
+# exact-shape tests of this action and of ci.yml's image build refuse some
+# forms in passing, and none reads the inputs of docker-publish.yml's build.
+# Review holds that line.
 
 name: Install the lock
 description: The job's Python from .python-version and its packages from uv.lock, by the Dockerfile's uv.

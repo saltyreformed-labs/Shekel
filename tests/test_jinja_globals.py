@@ -15,8 +15,7 @@ import re
 
 from app import ref_cache
 from app.enums import (
-    BusinessDayShiftEnum, CalcMethodEnum, PaycheckLineKindEnum, GoalModeEnum,
-    IncomeUnitEnum,
+    BusinessDayShiftEnum, CalcMethodEnum, GoalModeEnum, IncomeUnitEnum,
 )
 from app.jinja_globals import _REF_ID_GLOBALS, register_ref_id_globals
 
@@ -59,20 +58,17 @@ def _rec_globals_referenced_by_templates() -> set[str]:
 
 
 def test_register_ref_id_globals_populates_previously_missing_entries(app):
-    """All eight C-28-era missing constants are present after registration.
+    """The C-28-era missing constants still registered are present after registration.
 
-    The conftest list pre-Commit-6 omitted these; templates that
-    referenced any of them at test time raised UndefinedError.
+    The conftest list pre-Commit-6 omitted eight; templates that
+    referenced any of them at test time raised UndefinedError.  Six remain:
+    ``LINE_KIND_PRE_TAX_DEDUCTION`` and ``LINE_KIND_POST_TAX_DEDUCTION``
+    were deleted by task plan#2715 on the developer's word (2026-11-02),
+    because no template read either one.
     """
     with app.app_context():
         register_ref_id_globals(app)
 
-        assert app.jinja_env.globals["LINE_KIND_PRE_TAX_DEDUCTION"] == (
-            ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.PRE_TAX_DEDUCTION)
-        )
-        assert app.jinja_env.globals["LINE_KIND_POST_TAX_DEDUCTION"] == (
-            ref_cache.paycheck_line_kind_id(PaycheckLineKindEnum.POST_TAX_DEDUCTION)
-        )
         assert app.jinja_env.globals["CALC_PERCENTAGE"] == (
             ref_cache.calc_method_id(CalcMethodEnum.PERCENTAGE)
         )
@@ -146,8 +142,13 @@ def test_register_ref_id_globals_is_idempotent(app):
         # 41 until plan step **balance:X-am**, which deleted ``STATUS_SETTLED``
         # along with the status it named.  That global had ZERO template readers
         # for its whole life and the arm below could not see it: the
-        # registered-vs-read check is scoped to ``REC_*``.
-        assert len(registered_keys) == 40, (
+        # registered-vs-read check is scoped to ``REC_*``.  38 since task
+        # plan#2715 (plan step salary:S11-e) deleted ``LINE_KIND_PRE_TAX_DEDUCTION``
+        # and ``LINE_KIND_POST_TAX_DEDUCTION`` on the developer's word: the
+        # salary page's kind chip, the one template that read the first, reads
+        # the kind vocabulary's pre-tax ids instead, and the second never had a
+        # reader.
+        assert len(registered_keys) == 38, (
             "the ID-derived globals changed count -- update this number "
             "deliberately, and check the template that reads the new or "
             "removed constant"

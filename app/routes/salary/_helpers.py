@@ -253,11 +253,14 @@ def _line_cadence_context(
     step salary:R15-c, ruling **R-SAL31**), and since plan step salary:R18-b
     (ruling **R-SAL38**) the kind vocabulary rides with it:
 
-    * ``kind_options`` -- the four kinds as ``(id, label)`` in waterfall
+    * ``kind_options`` -- the five kinds as ``(id, label)`` in waterfall
       order, the form's select; ``kind_labels`` -- ``{id: label}``, the row
-      chip's words.  Both from :mod:`app.services.paycheck_line_kinds`, the
-      one producer of a kind's label, so the ref row's NAME is never worded
-      by a template;
+      chip's words; ``pre_tax_kind_ids`` -- the ids of the two pre-tax
+      kinds, which the row chip marks (plan step salary:S11-e).  All three
+      from :mod:`app.services.paycheck_line_kinds`, the one producer of a
+      kind's label and of which kinds are pre-tax, so the ref row's NAME is
+      never worded by a template and the pre-tax kinds are never listed in
+      one;
 
     * ``cadence_phrases`` -- the Frequency cell's words, R15-b's;
     * ``recurrence_picker`` -- the offer set the shared cadence controls
@@ -290,13 +293,14 @@ def _line_cadence_context(
             carries a rule (:func:`_line_cadence_phrases`).
 
     Returns:
-        The nine context keys.
+        The eleven context keys.
     """
     options = paycheck_line_kinds.kind_options()
     picker = picker_model(payroll_line_cadence.line_cadences())
     return {
         "kind_options": options,
         "kind_labels": dict(options),
+        "pre_tax_kind_ids": paycheck_line_kinds.pre_tax_kind_ids(),
         "cadence_phrases": _line_cadence_phrases(profile, calendar_source),
         "recurrence_picker": picker,
         "selected_cadences": {

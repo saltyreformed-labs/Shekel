@@ -127,12 +127,12 @@ _REF_TABLE_SEEDS = (
     # waterfall (ruling R-SAL38), in waterfall order.  ``ref.deduction_
     # timings`` (``pre_tax`` / ``post_tax``) until plan step salary:R18-a,
     # whose migration renamed the table and those two rows; R18-b's
-    # migration inline-seeds the two earning kinds (the dual-seed pattern),
-    # so a freshly upgraded database resolves the enum before this
-    # idempotent reseed runs.
+    # migration inline-seeds the two earning kinds and S11-e's the
+    # all-payroll-taxes pre-tax kind (the dual-seed pattern), so a freshly
+    # upgraded database resolves the enum before this idempotent reseed runs.
     ("PaycheckLineKind", [
-        "taxable_earning", "pre_tax_deduction", "post_tax_deduction",
-        "after_tax_earning",
+        "taxable_earning", "pre_fica_deduction", "pre_tax_deduction",
+        "post_tax_deduction", "after_tax_earning",
     ]),
     ("CalcMethod", ["flat", "percentage"]),
     ("TaxType", ["flat", "none", "bracket"]),

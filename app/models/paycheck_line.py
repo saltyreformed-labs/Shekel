@@ -9,10 +9,11 @@ which the paycheck engine prices into every paycheck the profile pays.
 **R-SAL38**): a paycheck is base pay plus a list of lines, and the table that
 held only the deduction side is renamed for the earning side R18-b adds to
 it -- a taxable earning joining gross and an after-tax earning joining net.
-The two kinds this tree holds are the deduction side, ``pre_tax_deduction``
-and ``post_tax_deduction`` (:class:`~app.enums.PaycheckLineKindEnum`), and
-every row is still a deduction: the rename is a change of NAME, not of
-figure, graded byte-identical over the developer's saved paychecks.
+The two kinds R18-a's tree held were the deduction side, ``pre_tax_deduction``
+and ``post_tax_deduction``, and every row was still a deduction: the rename
+was a change of NAME, not of figure, graded byte-identical over the
+developer's saved paychecks.  :class:`~app.enums.PaycheckLineKindEnum`
+holds five kinds since plan step salary:S11-e split the pre-tax kind in two.
 """
 
 from app.extensions import db

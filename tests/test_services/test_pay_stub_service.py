@@ -585,6 +585,48 @@ class TestTheReport:
         assert report.disagreements == 4
         assert report.totals.net == _NET
 
+    def test_health_printed_under_either_pre_tax_kind_records_and_the_other_is_listed(
+        self, world,
+    ):
+        """Plan step salary:S11-e: both pre-tax kinds net alike; the report tells them apart.
+
+        Health Insurance's LINE is "Pre-tax, income tax only".  A stub that
+        prints its $280.00 under "Pre-tax, all payroll taxes" (what an employer
+        exempting it prints) nets the same: both kinds leave the deposit, so
+        the pre-tax total stays 315.00 (280.00 + 35.00 Dental) and the net
+        2,999.62 - 315.00 - 472.00 - 110.00 = 2,102.62, and the printed-net
+        check passes.  The stub's all-payroll-taxes total is the 280.00.  The
+        report lists the kind that differs from the line's; re-kinding the
+        line to the stub's kind makes the row agree.
+        """
+        figures = _printed_under(
+            world, _figures(world), health=PaycheckLineKindEnum.PRE_FICA_DEDUCTION,
+        )
+        totals = pay_stub_service.totals_of(world["profile"], figures)
+        assert (totals.pre_tax, totals.pre_fica, totals.net) == (
+            Decimal("315.00"), Decimal("280.00"), _NET,
+        )
+        stub = _record(world, figures)
+        report = pay_stub_service.stub_report(world["profile"], stub, _ctx(world))
+        health = {row.name: row for row in report.lines}["Health Insurance"]
+        assert (health.on_stub, health.in_app) == (Decimal("280.00"), Decimal("280.00"))
+        assert (health.stub_kind, health.kind) == (
+            PaycheckLineKindEnum.PRE_FICA_DEDUCTION, PaycheckLineKindEnum.PRE_TAX_DEDUCTION,
+        )
+        assert (health.stub_kind_label, health.kind_label) == (
+            "Pre-tax, all payroll taxes", "Pre-tax, income tax only",
+        )
+        assert health.kind_agrees is False
+
+        world["lines"]["health"].paycheck_line_kind_id = _kind(
+            PaycheckLineKindEnum.PRE_FICA_DEDUCTION,
+        )
+        db.session.commit()
+        report = pay_stub_service.stub_report(world["profile"], stub, _ctx(world))
+        health = {row.name: row for row in report.lines}["Health Insurance"]
+        assert health.kind_agrees is True
+        assert health.agrees is True
+
     def test_a_line_the_stub_does_not_print_has_no_kind_to_disagree(self, world):
         """Vision is not on the stub: its row has no stub kind and fails on its figure alone."""
         stub = _record(world)

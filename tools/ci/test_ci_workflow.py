@@ -175,6 +175,14 @@ def _every_step() -> list[tuple[tuple[str, str | int], dict]]:
     return found
 
 
+def _is_a_limit(value: object) -> bool:
+    """Whether ``value`` is a ``timeout-minutes`` that limits: a whole number of minutes above
+    none and under :data:`GITHUB_DEFAULT_TIMEOUT_MINUTES`, as a limit of 360 or more is no
+    limit.  ``True`` is an ``int`` to Python but no number of minutes to GitHub."""
+    return (isinstance(value, int) and not isinstance(value, bool)
+            and 0 < value < GITHUB_DEFAULT_TIMEOUT_MINUTES)
+
+
 def _calls_the_install(job: dict) -> bool:
     """Whether a job has a step naming the install action, in any form."""
     return any("install-lock" in step.get("uses", "") for step in job.get("steps", []))
@@ -245,13 +253,11 @@ class TestTheWorkflowIsWiredToTheAnswer:
 
         Every job here holds a merge: the six graders through the aggregate, and the
         aggregate and the polyglot linters as the required checks.  One with no limit waits
-        out GitHub's 360 minutes behind a stalled runner, and a limit of 360 or more is no
-        limit.  ``True`` is an ``int`` to Python but no number of minutes to GitHub.
+        out GitHub's 360 minutes behind a stalled runner (:func:`_is_a_limit`).
         """
         for name, job in _jobs().items():
             limit = job.get("timeout-minutes")
-            assert isinstance(limit, int) and not isinstance(limit, bool), (name, limit)
-            assert 0 < limit < GITHUB_DEFAULT_TIMEOUT_MINUTES, (name, limit)
+            assert _is_a_limit(limit), (name, limit)
 
     def test_the_code_graders_keep_their_steps(self):
         """The lint job and the test job each still hold every grading step they run."""

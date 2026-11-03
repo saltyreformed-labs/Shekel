@@ -46,7 +46,8 @@
 #
 # THE TIME LIMITS (rulings plan#2328, plan#2330).  Every job carries a
 # ``timeout-minutes`` of twice its longest successful run, rounded up to a
-# whole five minutes, so a stalled runner fails its job rather than holding a
+# whole five minutes, so GitHub cancels a stalled job (the verdict reads a
+# cancelled grader as red, tools/ci/ci_verdict.py) rather than it holding a
 # pull request's check, which its enqueue waits on, for GitHub's default of
 # 360 minutes (run 38541852835, 2026-10-14: a shard still crawling when it was
 # cancelled by hand at 37.9 min).  The merge queue already drops a group

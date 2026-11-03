@@ -1,5 +1,6 @@
 """Controls for ``updates.yml``, the weekly dependency update (rulings plan#2448-plan#2450):
-which job holds the update App's key, whose code each runs, and when each runs.
+which job holds the update App's key, whose code each runs, when each runs, and how long each
+job and step may run (rulings plan#2761, plan#2762, plan#2765).
 """
 from __future__ import annotations
 
@@ -7,7 +8,8 @@ import re
 
 import yaml
 
-from tools.ci.test_ci_workflow import _workflows
+from tools.ci import arcs
+from tools.ci.test_ci_workflow import _is_a_limit, _workflows
 
 
 #: The update workflow (rulings plan#2448-plan#2450), its jobs that hold the App's key, and the
@@ -16,6 +18,25 @@ UPDATES = "updates.yml"
 KEYED = {"publish": "tools.update.publish", "queue": "tools.update.queue"}
 #: GitHub's own action that mints an App's installation token.
 MINT = "actions/create-github-app-token@"
+#: What each update job's limit adds to all its steps' limits, for GitHub's setting the job up
+#: (ruling plan#2762).
+JOB_LIMIT_MARGIN = 5
+#: The one job whose steps carry no limit of their own: the alert, as nothing reports a
+#: stalled report (ruling plan#2761).
+NO_STEP_LIMITS = "alert"
+#: How a ``uses:`` names an action of this repository's own, which GitHub loads from the
+#: workflow's commit (``$/``) or the checkout (``./``).
+LOCAL_ACTION = ("$/", "./")
+
+
+def _runs_no_outside_action(uses: str) -> bool:
+    """Whether the action of this repository's that ``uses`` names is composite and runs no
+    action of another repository, in its own steps or in its own actions': so no post step."""
+    folder = arcs.REPO / uses.removeprefix("$/").removeprefix("./")
+    runs = yaml.safe_load(next(folder.glob("action.y*ml")).read_text(encoding="utf-8"))["runs"]
+    return runs["using"] == "composite" and all(
+        step["uses"].startswith(LOCAL_ACTION) and _runs_no_outside_action(step["uses"])
+        for step in runs["steps"] if "uses" in step)
 
 
 class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
@@ -75,8 +96,8 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
         assert {name: job["environment"] for name, job in jobs.items()
                 if "environment" in job} == dict.fromkeys(KEYED, "update")
         assert {name: set(jobs[name]) for name in KEYED} == {
-            "publish": {"needs", "runs-on", "environment", "steps"},
-            "queue": {"if", "runs-on", "environment", "steps"}}
+            "publish": {"needs", "runs-on", "timeout-minutes", "environment", "steps"},
+            "queue": {"if", "runs-on", "timeout-minutes", "environment", "steps"}}
         for name, module in KEYED.items():
             steps = jobs[name]["steps"]
             assert steps[0]["uses"].startswith("actions/checkout@")
@@ -134,3 +155,54 @@ class TestTheUpdateWorkflowKeepsItsKeyFromPackageCode:
             "${{ needs.refresh.outputs.base }}")
         assert jobs["refresh"]["outputs"] == {"base": "${{ steps.checkout.outputs.commit }}"}
         assert jobs["refresh"]["steps"][0]["id"] == "checkout"
+
+
+class TestAStalledUpdateRunFailsLoudly:
+    """``updates.yml``'s time limits (rulings plan#2761, plan#2762, plan#2765): a stalled step
+    fails its job, which the alert reports, before its job's own limit could cancel it in
+    silence."""
+
+    def test_each_step_s_limit_cuts_it_off_before_its_job_s_limit_could(self):
+        """Every job carries a limit (:func:`tools.ci.test_ci_workflow._is_a_limit`), and every
+        step of each job but :data:`NO_STEP_LIMITS` one of its own, whose steps carry none; the
+        job's limit is its steps' total, a step using another repository's action counted
+        twice, plus :data:`JOB_LIMIT_MARGIN`.
+
+        A step cut off by its own limit fails, so its job fails and the alert, which runs on
+        ``failure()``, opens its issue; a job cut off by its own limit is cancelled, which
+        ``failure()`` never sees.  An action's post step, if it has one, runs under its step's
+        limit (actions/runner's ActionRunner.cs), so a job's limit no longer than all of these
+        could cut a stalled step off before the step's own did, ending the run in silence.  How
+        long each step's limit is, re-sized from the workflow's own runs by plan#2763, is not
+        graded here.
+        """
+        jobs = _workflows()[UPDATES]["jobs"]
+        assert NO_STEP_LIMITS in jobs
+        for name, job in jobs.items():
+            limit = job.get("timeout-minutes")
+            assert _is_a_limit(limit), (name, limit)
+            limits = [step.get("timeout-minutes") for step in job["steps"]]
+            if name == NO_STEP_LIMITS:
+                assert limits == [None] * len(limits), (name, limits)
+                continue
+            assert all(_is_a_limit(step) for step in limits), (name, limits)
+            posts = [step["timeout-minutes"] for step in job["steps"]
+                     if "uses" in step and not step["uses"].startswith(LOCAL_ACTION)]
+            assert limit == sum(limits) + sum(posts) + JOB_LIMIT_MARGIN, (name, limit, limits)
+
+    def test_a_step_using_this_repository_s_action_has_no_post_step(self):
+        """Each action of this repository's that an update step uses is composite and runs no
+        action of another repository (:func:`_runs_no_outside_action`), so GitHub runs no post
+        step for it: such a step counts once in its job's limit (ruling plan#2765)."""
+        for name, job in _workflows()[UPDATES]["jobs"].items():
+            for step in job["steps"]:
+                if step.get("uses", "").startswith(LOCAL_ACTION):
+                    assert _runs_no_outside_action(step["uses"]), (name, step["name"])
+
+    def test_no_update_job_or_step_may_fail_without_failing(self):
+        """``continue-on-error`` would leave a job green after a step cut off by its own limit,
+        so the alert would never run (ruling plan#2761)."""
+        for name, job in _workflows()[UPDATES]["jobs"].items():
+            assert "continue-on-error" not in job, name
+            for step in job["steps"]:
+                assert "continue-on-error" not in step, (name, step["name"])

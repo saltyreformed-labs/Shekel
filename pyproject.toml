@@ -23,7 +23,7 @@
 # image's own Python to it, as uv there fetches no other interpreter.
 #
 # Install:  uv sync --locked              (the local venv: runtime + dev)
-# Image:    the Dockerfile installs ``--no-dev --group server``.
+# Image:    the Dockerfile installs ``--no-default-groups --group server``.
 # No new package without the developer's approval (CLAUDE.md, Architecture).
 
 [project]

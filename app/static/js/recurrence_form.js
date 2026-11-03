@@ -686,10 +686,10 @@ function initRecurrenceForm() {
 
   // Listen for changes.  The unit re-links everything below it; the interval
   // re-links the placements, because which are authorable depends on the unit.
-  // The PLACEMENT re-links too, and it is not decoration: a monthly cadence
-  // funded from the month's first paycheck anchors on that paycheck and reads
-  // no day of the month, so switching the funding choice adds or removes the
-  // Day of Month row.  Setting a <select>'s value from script fires no change
+  // The PLACEMENT re-links too, because the preview it fetches depends on
+  // which paycheck funds each occurrence.  (It once also showed or hid a
+  // day-of-month row; neither form has one now.)
+  // Setting a <select>'s value from script fires no change
   // event, so syncPlacements' own corrections cannot re-enter this.
   unitSelect.addEventListener('change', toggleFields);
   interval.addEventListener('change', toggleFields);

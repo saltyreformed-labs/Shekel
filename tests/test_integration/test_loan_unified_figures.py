@@ -584,7 +584,6 @@ def _add_recurring_payment_with_extra(seed_user, loan_account, extra):
         from_account_id=seed_user["account"].id,
         to_account_id=loan_account.id,
         name="Mortgage Payment",
-        default_amount=Decimal("1.00"),
     )
     template.settings = LoanPaymentSettings(
         derive_from_loan=True, extra_principal=extra,

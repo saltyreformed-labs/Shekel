@@ -344,7 +344,7 @@ def movement_cash_leg(txn: Transaction, entry) -> Decimal:
 
     It does NOT read ``settled_on``: whether a movement has POSTED is a
     question about the event stream and the ledger (``_events.
-    settled_cash_facts``, ``_posting_purchases.purchase_posts``), while the
+    settled_cash_facts``, ``ledger_lines.purchase_posts``), while the
     plan holds an UNPOSTED one in flight at the same figure
     (``_events.in_flight_movements``) and the statement matcher prices it at
     what the bank would show for it.  The one figure all three want is this.

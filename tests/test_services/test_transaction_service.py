@@ -98,7 +98,7 @@ def _make_entry(txn_id, user_id, amount, description, *,
 
 
 def _make_template(
-    seed_user, *, income=False, default_amount="500.00", is_envelope=True,
+    seed_user, *, income=False, amount="500.00", is_envelope=True,
 ):
     """Create a PRICED, every-paycheck definition of the requested kind.
 
@@ -116,12 +116,12 @@ def _make_template(
             Phase 2 rejects ``is_envelope=True`` on income at the schema
             layer, and the helper under test must stay correct for a row
             that reached that state by direct write.
-        default_amount: The definition's stated price.
+        amount: The definition's stated price.
         is_envelope: Whether its rows track purchases.
     """
     builder = make_income_template if income else make_expense_template
     return builder(
-        db.session, seed_user, amount=default_amount,
+        db.session, seed_user, amount=amount,
         name=f"Tracked {'Income' if income else 'Expense'}",
         category_key="Groceries", is_envelope=is_envelope,
     )
@@ -214,7 +214,7 @@ class TestSettleFromEntriesExpense:
         to roll into the next period's canonical row.
         """
         with app.app_context():
-            template = _make_template(seed_user, default_amount="100.00")
+            template = _make_template(seed_user, amount="100.00")
             txn = generate_row_of(template, seed_periods[0])
 
             transaction_service.settle_from_entries(txn)
@@ -244,7 +244,7 @@ class TestSettleFromEntriesExpense:
         """
         with app.app_context():
             template = _make_template(
-                seed_user, default_amount="100.00",
+                seed_user, amount="100.00",
             )
             txn = generate_row_of(template, seed_periods[0])
             user_id = seed_user["user"].id
@@ -283,7 +283,7 @@ class TestSettleFromEntriesIncome:
         """Income + entries: status=RECEIVED, actual=sum, day recorded."""
         with app.app_context():
             template = _make_template(
-                seed_user, income=True, default_amount="2500.00",
+                seed_user, income=True, amount="2500.00",
             )
             txn = generate_row_of(template, seed_periods[0])
             user_id = seed_user["user"].id
@@ -1119,7 +1119,7 @@ class TestApplyRequestedStatusTheDoorVerb:
         the figure is stated on the definition, which is what prices the row.
         """
         template = _make_template(
-            seed_user, default_amount="100.00", is_envelope=False,
+            seed_user, amount="100.00", is_envelope=False,
         )
         return generate_row_of(template, period)
 
@@ -1649,7 +1649,7 @@ class TestTheDoorAppliesTheStatusANDTheCorrection:
         The engine's row of a $100.00 definition (plan step balance:X-cf-3b).
         """
         template = _make_template(
-            seed_user, default_amount="100.00", is_envelope=False,
+            seed_user, amount="100.00", is_envelope=False,
         )
         txn = generate_row_of(template, period)
         transaction_service.apply_requested_status(
@@ -1790,7 +1790,7 @@ class TestTheRetainedMapAnswersOnlyARetainedCORRECTION:
         under a sentence that is false for this row.
         """
         with app.app_context():
-            template = _make_template(seed_user, default_amount="400.00")
+            template = _make_template(seed_user, amount="400.00")
             txn = generate_row_of(template, seed_periods[0])
             _make_entry(txn.id, seed_user["user"].id, "25.00", "Milk")
             db.session.flush()

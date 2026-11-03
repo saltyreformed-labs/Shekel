@@ -35,6 +35,7 @@ from ._helpers import (
     _create_transfer,
     _create_other_user_with_template,
 )
+from tests._definition_price import newest_price
 
 
 # ── Template Management ───────────────────────────────────────────
@@ -71,7 +72,7 @@ class TestTemplateList:
             response = auth_client.get("/transfers/new")
 
             assert response.status_code == 200
-            assert b'name="default_amount"' in response.data
+            assert b'name="amount"' in response.data
             assert b'name="from_account_id"' in response.data
             assert b"New Recurring Transfer" in response.data
 
@@ -263,7 +264,7 @@ class TestTemplateCreate:
             savings = _create_savings_account(seed_user)
             response = auth_client.post("/transfers", data={
                 "name": "Weekly Savings",
-                "default_amount": "150.00",
+                "amount": "150.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 **cadence_payload(),
@@ -278,7 +279,7 @@ class TestTemplateCreate:
                 .filter_by(user_id=seed_user["user"].id, name="Weekly Savings")
                 .one()
             )
-            assert tmpl.default_amount == Decimal("150.00")
+            assert newest_price(tmpl) == Decimal("150.00")
             assert tmpl.recurrence_rule is not None
 
     def test_create_template_validation_error(self, app, auth_client, seed_user):
@@ -298,7 +299,7 @@ class TestTemplateCreate:
 
             response = auth_client.post("/transfers", data={
                 "name": "Self Transfer",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": acct_id,
                 "to_account_id": acct_id,
                 "category_id": str(seed_user["categories"]["Rent"].id),
@@ -330,7 +331,7 @@ class TestTemplateCreate:
             db.session.commit()
             response = auth_client.post("/transfers", data={
                 "name": "Drain The Mortgage",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(loan.id),        # loan as SOURCE
                 "to_account_id": str(seed_user["account"].id),
                 **cadence_payload(),
@@ -366,7 +367,7 @@ class TestTemplateCreate:
             db.session.commit()
             response = auth_client.post("/transfers", data={
                 "name": "Cash Advance",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(card.id),        # card as SOURCE
                 "to_account_id": str(seed_user["account"].id),
                 **cadence_payload(),
@@ -390,7 +391,7 @@ class TestTemplateCreate:
             savings = _create_savings_account(seed_user)
             form_data = {
                 "name": "Duplicate Transfer",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 **cadence_payload(),
@@ -408,7 +409,7 @@ class TestTemplateCreate:
                 user_id=seed_user["user"].id,
                 name="Duplicate Transfer",
             ).one()
-            assert template.default_amount == Decimal("100.00")
+            assert newest_price(template) == Decimal("100.00")
 
             # Record how many transfers were generated.
             first_submit_transfer_count = db.session.query(Transfer).filter_by(
@@ -496,7 +497,7 @@ class TestTemplateUpdate:
             template = _create_template(seed_user, savings)
             response = auth_client.post(f"/transfers/{template.id}", data={
                 "name": "Updated Savings",
-                "default_amount": "300.00",
+                "amount": "300.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 **cadence_payload(),
@@ -506,7 +507,7 @@ class TestTemplateUpdate:
             assert b"updated" in response.data
 
             db.session.refresh(template)
-            assert template.default_amount == Decimal("300.00")
+            assert newest_price(template) == Decimal("300.00")
 
     def test_a_retained_transfer_is_reported_and_the_edit_still_commits(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -514,7 +515,8 @@ class TestTemplateUpdate:
         """A row the pass declined to change is TOLD, not put to the owner.
 
         Plan step R10-b's route half, and the transfer twin of
-        ``test_templates.py``'s transaction case.  A retained row has no
+        ``tests/test_routes/test_templates/test_the_edit_form_the_chooser_and_renames.py``'s
+        transaction case.  A retained row has no
         keep-vs-use question -- the pass already took the only safe outcome --
         so ``regenerate_or_conflict_chooser`` must NOT render the chooser over
         it, must flash the notice, and must let the edit commit.  Rendering the
@@ -565,13 +567,14 @@ class TestTemplateUpdate:
             elsewhere_id = elsewhere.id
 
             # The amount MOVES (200 -> 275), which is what arms the chooser
-            # branch at all: it is gated on ``template.default_amount !=
-            # before.amount``.  An adversarial review of R10-b found the first
+            # branch at all: it is gated on the edit changing the price
+            # history (``series_image(template) != before.series`` since plan
+            # step X-bp).  An adversarial review of R10-b found the first
             # version posting the unchanged 200.00, so the "no chooser"
             # assertion below was dead however the branch behaved.
             resp = auth_client.post(f"/transfers/{tid}", data={
                 "name": "Monthly Savings",
-                "default_amount": "275.00",
+                "amount": "275.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(elsewhere_id),
                 **cadence_payload(),
@@ -586,7 +589,7 @@ class TestTemplateUpdate:
             assert reloaded.to_account_id == elsewhere_id, (
                 "the edit was rolled back by a conflict that asked nothing"
             )
-            assert reloaded.default_amount == Decimal("275.00")
+            assert newest_price(reloaded) == Decimal("275.00")
             held = db.session.get(Transfer, noted_id)
             assert held.to_account_id == savings.id, (
                 "the retained row must be exactly as the pass found it"
@@ -636,7 +639,7 @@ class TestTemplateUpdate:
             tid = template.id
             resp = auth_client.post(f"/transfers/{tid}", data={
                 "name": "Monthly Savings",
-                "default_amount": "250.00",
+                "amount": "250.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 **cadence_payload(),
@@ -646,9 +649,9 @@ class TestTemplateUpdate:
             assert b"Keep" in resp.data and b"Use" in resp.data
             # Rolled back: the template keeps its pre-edit amount.
             db.session.expire_all()
-            assert db.session.get(
+            assert newest_price(db.session.get(
                 TransferTemplate, tid,
-            ).default_amount == Decimal("200.00")
+            )) == Decimal("200.00")
 
     def test_transfer_chooser_apply_use_realigns_the_transfer(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -688,7 +691,7 @@ class TestTemplateUpdate:
             tid, xfer_id = template.id, xfer.id
             resp = auth_client.post(f"/transfers/{tid}", data={
                 "name": "Monthly Savings",
-                "default_amount": "250.00",
+                "amount": "250.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 **cadence_payload(),

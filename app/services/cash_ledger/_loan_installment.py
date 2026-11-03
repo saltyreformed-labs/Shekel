@@ -87,9 +87,11 @@ after it.  The terms used to be resolved through
 :func:`app.services.loan_payment_service.load_loan_context` -- and therefore
 the loan's own payment history -- only to read
 ``resolve_loan(...).monthly_payment`` back out, a cycle plan step X-au-g-1
-deleted; the terms' one loader since plan step recurrence:R25 is
-:func:`app.services.loan_ledger.build_loan_calendar`, and
-``test_loan_payment_service.test_the_contractual_payment
+deleted; the terms' one loader since plan step recurrence:R25 is the pass's
+memo, :meth:`app.services.loan_ledger.LoanCalendars.loan_calendar_of`, which
+loads the rate history and escrow lines and builds the calendar from them
+(``loan_ledger._calendars.build_loan_calendar``, pure since plan task
+plan#2649), and ``test_loan_payment_service.test_the_contractual_payment
 .TestALoansPriceDoesNotReadItsOwnPayments`` grades that it issues no statement
 against the payment rows.
 

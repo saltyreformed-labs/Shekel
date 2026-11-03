@@ -27,6 +27,10 @@ from app.models.user import UserSettings
 from app.routes.templates._bp import templates_bp
 from app.services import recurring_view
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import (
+    template_pricing_load_options,
+    transfer_template_pricing_load_options,
+)
 from app.utils.auth_helpers import require_owner
 
 logger = logging.getLogger(__name__)
@@ -41,10 +45,23 @@ _UNIT_PER_PAYCHECK = "per_paycheck"
 def _load_active_transaction_templates(user_id):
     """Load the user's active RECURRING income and expense templates, partitioned.
 
-    One query (relationships are ``lazy="joined"`` on the model, so no
-    N+1), split by transaction type so the producer receives the income
-    and expense sections separately.  ``sort_order, name`` fixes the
-    tie-break order the producer then re-sorts by monthly cost.
+    One query for the definitions, split by transaction type so the producer
+    receives the income and expense sections separately.  ``sort_order,
+    name`` fixes the tie-break order the producer then re-sorts by monthly
+    cost.
+
+    **What the producer reads of each definition comes with it, so the
+    page's statements do not grow per definition.**  The account, the
+    category, the rule and the type are ``lazy="joined"`` on the model and
+    ride on that one query.  The price history and the salary link are
+    ``lazy="select"``, and since plan step X-bp the producer prices every
+    definition on the read pass's day from them
+    (``obligations_aggregator.todays_price``, ruling plan#2693), so they are
+    selected in with the definitions -- a ``SELECT ... IN`` per relationship
+    for each 500 definitions (SQLAlchemy's batch), not one per definition --
+    by :func:`~app.utils.amount_relationships.template_pricing_load_options`
+    (plan#2733: without it the page ran two statements per definition).
+    Every loader on this page takes the same options for its kind.
 
     **Definitions WITH a rule only, since plan step ``balance:X-bi-7b``**
     (ruling **R-BAL23**: *the Recurring list shows definitions with a rule*).
@@ -63,6 +80,7 @@ def _load_active_transaction_templates(user_id):
     templates = [
         template for template in (
             db.session.query(TransactionTemplate)
+            .options(*template_pricing_load_options())
             .filter(
                 TransactionTemplate.user_id == user_id,
                 TransactionTemplate.is_active.is_(True),
@@ -78,9 +96,14 @@ def _load_active_transaction_templates(user_id):
 
 
 def _load_active_transfer_templates(user_id):
-    """Load the user's active transfer templates, ordered for display."""
+    """Load the user's active transfer templates, ordered for display.
+
+    With what pricing each reads, for the reason
+    :func:`_load_active_transaction_templates` gives.
+    """
     return (
         db.session.query(TransferTemplate)
+        .options(*transfer_template_pricing_load_options())
         .filter(
             TransferTemplate.user_id == user_id,
             TransferTemplate.is_active.is_(True),
@@ -109,8 +132,11 @@ def _load_archived_rows(user_id, ctx):
             and building a second pass for the drawer would be a second
             resolution point in one request.
     """
+    # Each drawer row shows today's price (``todays_price``), so each query
+    # loads what pricing reads, as the active sections' do.
     archived_transactions = (
         db.session.query(TransactionTemplate)
+        .options(*template_pricing_load_options())
         .filter(
             TransactionTemplate.user_id == user_id,
             TransactionTemplate.is_active.is_(False),
@@ -120,6 +146,7 @@ def _load_archived_rows(user_id, ctx):
     )
     archived_transfers = (
         db.session.query(TransferTemplate)
+        .options(*transfer_template_pricing_load_options())
         .filter(
             TransferTemplate.user_id == user_id,
             TransferTemplate.is_active.is_(False),

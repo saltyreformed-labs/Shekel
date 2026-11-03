@@ -144,8 +144,14 @@ def _drive_add_form(page, profile_id: int) -> None:
     page.wait_for_selector("#recurrence_unit", state="attached")
     _open_add_form(page)
     units = _unit_ids(page)
-    _check("A: the form offers paychecks, months AND years (R-SAL37)",
-           {"paychecks", "months", "years"} <= set(units), str(sorted(units)))
+    # The EXACT set since ruling plan#2591, which amends R-SAL37's "the whole
+    # set" to "the cadences that pick paychecks": a payroll line's rule picks
+    # WHICH paychecks take it, and a weekly item is a per-paycheck amount, so
+    # weeks stay off this form.  The subset check this replaces passed with
+    # weeks offered -- it asked only that the three be present.
+    _check("A: the form offers paychecks, months and years, and NOT weeks "
+           "(R-SAL37 as plan#2591 amends it)",
+           set(units) == {"paychecks", "months", "years"}, str(sorted(units)))
     _check("A: the #recurrence-fields container holds the span rows (R18-c)",
            page.evaluate(
                """() => ['recurrence-fields', 'starts_on', 'recurrence_end_mode',
@@ -443,7 +449,8 @@ def _drive_write_pass(page, profile_id: int) -> None:
         "JOIN salary.paycheck_lines d ON d.id = r.paycheck_line_id "
         f"WHERE d.name = '{MARK}'",
     )
-    _check("W: the SAME rule now carries a start on or before Oct 1, the stop, no count, ceiling 2",
+    _check("W: the SAME rule now carries a start on or before Oct 1, the stop, no count, "
+           "ceiling 2",
            len(stored) == 1 and stored[0].split("|")[0] <= "2026-10-01"
            and stored[0].split("|")[0] >= "2026-09-01"
            and stored[0].endswith("|2026-11-30||2"), str(stored))
@@ -590,9 +597,13 @@ def main() -> int:
         browser.close()
 
     print("\n" + "=" * 62)
-    if shared._failures:  # pylint: disable=protected-access
-        print(f"FAILURES ({len(shared._failures)}):")  # pylint: disable=protected-access
-        for failure in shared._failures:  # pylint: disable=protected-access
+    # Pylint: ``protected-access`` -- the failures are the sibling drive's own
+    # record, which every ``_check`` imported from it appends to; reading it
+    # here is this drive reporting the checks it ran through that module.
+    failures = shared._failures  # pylint: disable=protected-access
+    if failures:
+        print(f"FAILURES ({len(failures)}):")
+        for failure in failures:
             print(f"  - {failure}")
         return 1
     print("ALL CHECKS PASSED")

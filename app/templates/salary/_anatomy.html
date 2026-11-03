@@ -149,8 +149,9 @@
 </div>
 
 {# The paycheck's LINES, grouped in waterfall order (plan step salary:R18-b):
-   taxable earnings, pre-tax deductions, post-tax deductions, after-tax
-   earnings.  The group label is the kind vocabulary's own words and the
+   taxable earnings, the two pre-tax kinds (plan step salary:S11-e), post-tax
+   deductions, after-tax earnings.  The group label is the kind vocabulary's
+   own heading (``GROUP_LABELS``) and the
    bar's class suffix is the kind's enum value, generated -- never compared
    -- in Jinja; an earning bar wears the settled-money tone, a deduction the
    accent or the neutral, so the side reads from the color AND the label. #}
@@ -162,7 +163,7 @@
     {% if line_rows %}
     {% for row in line_rows %}
     {% if loop.first or line_rows[loop.index0 - 1].kind != row.kind %}
-    <div class="sal-grp-label">{{ row.kind_label }}s</div>
+    <div class="sal-grp-label">{{ row.group_label }}</div>
     {% endif %}
     <div class="sal-ded-row">
       <span class="sal-ded-name">{{ row.name }}</span>

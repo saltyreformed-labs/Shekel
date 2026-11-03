@@ -241,20 +241,18 @@ def _loan_with_three_definitions(seed_user):
         from_account_id=seed_user["account"].id,
         to_account_id=loan.id,
         name="Second transfer",
-        default_amount=Decimal("50.00"),
     )
     archived = TransferTemplate(
         user_id=seed_user["user"].id,
         from_account_id=seed_user["account"].id,
         to_account_id=loan.id,
         name="Archived payment",
-        default_amount=Decimal("500.00"),
         is_active=False,
     )
     db.session.add_all([second, archived])
     db.session.flush()
-    state_template_price(second)
-    state_template_price(archived)
+    state_template_price(second, Decimal("50.00"))
+    state_template_price(archived, Decimal("500.00"))
     make_cadence_rule(second, MONTHLY, fires_on_day=1)
     make_cadence_rule(archived, MONTHLY, fires_on_day=1)
     db.session.commit()

@@ -34,24 +34,26 @@ door's own precondition, asked before the sequence starts.
    dialog sends back the purchases it named, and a row holding others is
    refused before anything is written, its popover redrawn under ruling
    **R-CC128**.
-1. **Reverse the postings** (``posting_service``), while
-   ``journal_entries.transaction_entry_id`` still links them to their
-   movements.  It is ``ON DELETE SET NULL`` and step 2 deletes the movements:
-   reversing afterwards is impossible and the original legs would be stranded
-   on their ledger accounts with nothing to offset them.  (The row's own
-   ``journal_entries.transaction_id`` link went with plan step
-   ``balance:X-bi-6-5``'s second leaf, card plan#1845.)  Each row's WHOLE
-   family at once -- the row's, and
-   each live CC payback's in its chain -- so the anchor is re-checked once per
-   row rather than once per movement (the churn ruling **R-BAL103** removed
-   from the deploy resync); FIRST since plan step ``credit_card:CC-5-4a-3``,
-   so step 2 finds every leaving movement's legs already at zero.  The row is
-   reversed on the soft arm too: a tombstone contributes to no balance.
+1. **Reverse the postings**, while ``journal_entries.transaction_entry_id``
+   still links them to their movements.  It is ``ON DELETE SET NULL`` and the
+   movements are deleted next: reversing afterwards is impossible and the
+   original legs would be stranded on their ledger accounts with nothing to
+   offset them.  (The row's own ``journal_entries.transaction_id`` link went
+   with plan step ``balance:X-bi-6-5``'s second leaf, card plan#1845.)
+   **This door reverses nothing itself since plan task plan#2557** (ruling
+   **plan#2564**): the one removal act of step 2 reverses every movement it
+   is handed, the row's and its live CC-payback chain's, then deletes them and
+   re-checks the anchor corrections ONCE, after the records are gone.  Until
+   then this door reversed each row's family first, one anchor re-check per
+   row, and that re-check walked records still holding every movement the
+   act was about to delete.  The row is reversed on the soft arm too: a
+   tombstone contributes to no balance.
 2. **Take the movements off the books through the ONE act**
    (:mod:`app.services.movement_removal`, plan step ``credit_card:CC-5-4a-3``,
    ruling **R-CC54**) -- the row's purchases and payment AND those of its live
-   CC-payback chain, because all of them go in this one commit.  The act takes
-   them out of every match, withdrawing one left naming no app row
+   CC-payback chain, because all of them go in this one commit.  The act
+   reverses them (step 1), takes them out of every match, withdrawing one left
+   naming no app row
    (developer ruling 2026-08-25): a match asserts that a bank line IS these
    rows, and when the last of them stops existing the line is unexplained
    again.  Over the WHOLE set in one call, so the dialog's figure and the
@@ -124,7 +126,6 @@ from app.services import (
     definition_delete,
     match_withdrawal,
     movement_removal,
-    posting_service,
 )
 from app.services.match_press import Press
 from app.services.match_withdrawal import MatchWithdrawal
@@ -436,10 +437,10 @@ def delete_transaction(
     # relationship may not be loaded yet, and a lazy load on an instance the
     # session has already deleted is not a read this door may rely on.
     definition = txn.template if last_row_of_definition else None
-    for row in rows:
-        posting_service.reverse_postings_before_delete(row)
     # Over every row, on both arms (rulings R-CC75, R-CC84): a tombstone keeps
-    # its place in the table and nothing it held, and counts as gone.
+    # its place in the table and nothing it held, and counts as gone.  The act
+    # reverses each movement first and re-checks the anchors after deleting
+    # them (ruling plan#2564; the module docstring's step 1).
     withdrawn = movement_removal.remove_movements(
         [movement for row in rows for movement in row.entries],
         owner_id, because=match_withdrawal.LEFT_THE_BOOKS, press=press,

@@ -206,7 +206,7 @@ def settled_transfer_effect(account_id: int, scenario_id: int) -> Decimal:
     nothing (ruling **R-BAL82**).
 
     **The narrowings are the writer's posting rule, restated** (leaf
-    ``X-bi-6-4a``): ``_posting_purchases.purchase_posts`` books a movement
+    ``X-bi-6-4a``): ``ledger_lines.purchase_posts`` books a movement
     iff it is dated, a debit, and its parent contributes, whatever the
     parent's status (ruling **R-BAL101**) -- and, for a transfer leg, iff it
     is the leg's RECORD, which the join this reads returns alone.  Through
@@ -316,7 +316,7 @@ def posted_purchase_effect(account_id: int, scenario_id: int) -> Decimal:
     **The narrowings and the sign are the write side's, restated in SQL
     rather than shared with it** -- the deliberate independence every oracle
     here keeps.  An oracle that imported
-    ``_posting_purchases.purchase_posts`` or ``cash_ledger.movement_cash_leg``
+    ``ledger_lines.purchase_posts`` or ``cash_ledger.movement_cash_leg``
     could not grade them.
 
     Args:

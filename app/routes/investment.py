@@ -325,14 +325,13 @@ def create_contribution_transfer(account_id):
         source_account=source_account,
         dest_account=account,
         name=template_name,
-        default_amount=transfer_amount,
     )
 
-    # Open the amount's dated series at today (plan step X-au-a).  A
-    # contribution carries no loan-payment settings row, so nothing re-derives
-    # its amount afterwards and the write door records it as stated; the builder
-    # above also sets the column because it is NOT NULL, and plan step X-bp
-    # removes that redundancy.  **The FIGURE above was computed** -- an annual
+    # Open the amount's dated series at today (plan step X-au-a), the
+    # definition's only price since plan step X-bp.  A contribution carries no
+    # loan-payment settings row, so nothing re-derives its amount afterwards
+    # and the write door records it as stated.  **The FIGURE above was
+    # computed** -- an annual
     # limit over the pay cadence, or the suggested default -- which is one of
     # the twelve stored-derived values finding **N-243** censuses (owned by
     # X-au-b); what makes recording it honest here is that no mechanism ever

@@ -391,16 +391,17 @@ def _apply_maintain_work(work, derived, template, scenario_id, projected_id):
         db.session.add(txn)
         created.append(txn)
 
-    # Reverse before deleting: a retired row can hold ledger legs, because a
-    # PROJECTED envelope does once one of its purchases carries a recorded bank
-    # posting day (plan step X-f3b, ruling **R-FM**), and
-    # ``journal_entries.transaction_entry_id`` is ON DELETE SET NULL -- so
-    # deleting without reversing strands both legs with nothing to offset them.
     # **This is now the ONLY path here that deletes**, and it is reached only
     # when the rule stopped naming the row's OCCURRENCE (plan step R17; it was
-    # the row's PERIOD) AND the row carries nothing of the owner's.
+    # the row's PERIOD) AND the row carries nothing of the owner's -- no entry
+    # at all (:func:`_rows_holding_owner_records`), so it has no posted leg to
+    # reverse: a row's legs are its movements' since plan step
+    # ``balance:X-bi-4a``, and a row still holding one could not be deleted
+    # here, its key being NO ACTION (ruling **R-CC64**).  It reversed the
+    # row's family first, a no-op for a row holding nothing, until plan task
+    # plan#2557 deleted that door (ruling **plan#2564**: a movement's postings
+    # are reversed by the one removal act that deletes it).
     for row in work.retire:
-        posting_service.reverse_postings_before_delete(row)
         db.session.delete(row)
 
     db.session.flush()

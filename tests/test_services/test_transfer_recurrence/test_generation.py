@@ -23,8 +23,15 @@ from tests._test_helpers import (
     create_account_of_type,
     last_covered_day,
     make_cadence_rule,
+    rows_by_paycheck,
+    WEEKLY_FIRST_ON_SEED_PERIODS,
 )
-from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY
+from tests.oracles.recurrence_baseline import (
+    EVERY_PERIOD,
+    MONTHLY,
+    WEEKLY,
+    WEEKLY_FIRST,
+)
 from app.services.amount_ownership import state_own_amount
 from tests._test_helpers import state_template_price
 from tests._test_helpers import transfer_amount
@@ -109,11 +116,10 @@ class TestTransferGeneration:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="No Rule Transfer",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(template)
             db.session.flush()
-            state_template_price(template)
+            state_template_price(template, Decimal("50.00"))
             db.session.refresh(template)
 
             created = transfer_recurrence.generate_for_template(
@@ -373,6 +379,144 @@ class TestTransferGenerationSharesTheOccurrencePairs:
             ] == []
 
 
+class TestAWeeklyTransfer:
+    """A weekly transfer, through ``transfer_recurrence`` and ``transfer_service``.
+
+    Plan step R8-b made the ``WEEK`` unit authorable on the transfer form, and
+    the transaction engine's weekly cases
+    (``test_recurrence_engine/test_dates.py``) do not reach this engine's own
+    write: ``_create_from_definition`` hands ``transfer_service`` the
+    occurrence and the due date ``compute_due_date`` derived, under
+    ``idx_transfers_template_scenario_occurrence``.  Every 7 days on a 14-day
+    schedule puts two transfers of ONE definition in each paycheck -- an
+    ordinary schedule doing what the monthly case above needs a 90-day paycheck
+    for -- and funded from the next paycheck, two due on the SAME day.  Each
+    case reads the transfers back from the database, so a value the write path
+    changed on its way to the row cannot pass on the objects the pass returned.
+
+    seed_periods: ten 14-day paychecks from Friday 2026-01-02.  The rule fires
+    every 7 days from Tuesday 2026-01-06, at days 4 and 11 of each paycheck.
+    """
+
+    def _stored(self, template, seed_user, seed_periods):
+        """Generate *template* over the ten paychecks and re-read what was stored.
+
+        Args:
+            template: The weekly ``TransferTemplate`` to generate from.
+            seed_user: The `seed_user` fixture's mapping, for its scenario.
+            seed_periods: The ten saved paychecks the pass may write into.
+
+        Returns:
+            list[Transfer]: The definition's transfers, as the database holds
+            them after the pass's own flush.
+        """
+        transfer_recurrence.generate_for_template(
+            template, GenerationSchedule.for_period_ids(
+                BalanceContext.build(template.user_id),
+                {p.id for p in seed_periods},
+            ), seed_user["scenario"].id,
+        )
+        db.session.expire_all()
+        return db.session.query(Transfer).filter_by(
+            transfer_template_id=template.id,
+            scenario_id=seed_user["scenario"].id,
+        ).all()
+
+    def test_two_weekly_transfers_in_one_paycheck_each_carry_their_own_date(
+        self, app, seed_user, seed_periods,
+    ):
+        """``(1, WEEK)``, funded by the containing paycheck: each due on its occurrence.
+
+        01-06 and 01-13 fall in the 01-02 - 01-15 paycheck, 01-20 and 01-27
+        in 01-16 - 01-29, and so on to 05-12 and 05-19 in 05-08 - 05-21:
+        01-06 + 7k for k = 0..19, twenty transfers, two per paycheck.  A
+        calendar cadence funded by the paycheck containing its date is due ON
+        the date (ruling R-R94); dated from the paycheck, both of a pair would
+        read its payday, four and eleven days early.
+        """
+        with app.app_context():
+            template = make_template_with_rule(
+                seed_user, WEEKLY, starts_on=date(2026, 1, 6),
+            )
+
+            stored = self._stored(template, seed_user, seed_periods)
+
+            assert rows_by_paycheck(stored, seed_periods) == {
+                date(2026, 1, 2): [
+                    (date(2026, 1, 6), date(2026, 1, 6)),
+                    (date(2026, 1, 13), date(2026, 1, 13)),
+                ],
+                date(2026, 1, 16): [
+                    (date(2026, 1, 20), date(2026, 1, 20)),
+                    (date(2026, 1, 27), date(2026, 1, 27)),
+                ],
+                date(2026, 1, 30): [
+                    (date(2026, 2, 3), date(2026, 2, 3)),
+                    (date(2026, 2, 10), date(2026, 2, 10)),
+                ],
+                date(2026, 2, 13): [
+                    (date(2026, 2, 17), date(2026, 2, 17)),
+                    (date(2026, 2, 24), date(2026, 2, 24)),
+                ],
+                date(2026, 2, 27): [
+                    (date(2026, 3, 3), date(2026, 3, 3)),
+                    (date(2026, 3, 10), date(2026, 3, 10)),
+                ],
+                date(2026, 3, 13): [
+                    (date(2026, 3, 17), date(2026, 3, 17)),
+                    (date(2026, 3, 24), date(2026, 3, 24)),
+                ],
+                date(2026, 3, 27): [
+                    (date(2026, 3, 31), date(2026, 3, 31)),
+                    (date(2026, 4, 7), date(2026, 4, 7)),
+                ],
+                date(2026, 4, 10): [
+                    (date(2026, 4, 14), date(2026, 4, 14)),
+                    (date(2026, 4, 21), date(2026, 4, 21)),
+                ],
+                date(2026, 4, 24): [
+                    (date(2026, 4, 28), date(2026, 4, 28)),
+                    (date(2026, 5, 5), date(2026, 5, 5)),
+                ],
+                date(2026, 5, 8): [
+                    (date(2026, 5, 12), date(2026, 5, 12)),
+                    (date(2026, 5, 19), date(2026, 5, 19)),
+                ],
+            }
+
+    def test_two_weekly_transfers_from_the_next_paycheck_share_its_payday(
+        self, app, seed_user, seed_periods,
+    ):
+        """``(1, WEEK)``, funded from the next paycheck: two due one payday, two dates kept.
+
+        The same rule funded from the first paycheck starting on or after each
+        date (ruling R-R95): 01-06 and 01-13 both defer to the 01-16 paycheck
+        and are both due 01-16, 01-20 and 01-27 to 01-30, and so on, eighteen
+        transfers in nine paychecks.  The expected value, with its arithmetic,
+        is ``WEEKLY_FIRST_ON_SEED_PERIODS``, which the transaction engine's
+        twin asserts too.
+
+        **The two transfers of a paycheck differ ONLY in ``occurs_on``** --
+        same definition, scenario, paycheck and due day -- so this is the shape
+        in which ``idx_transfers_template_scenario_occurrence`` is the only key
+        that holds them apart: an index keyed on the paycheck, as the one plan
+        step R17 replaced was, or on the due day, refuses the second of each
+        pair.  Measured with each added beside the live one: both refuse this
+        case, and the due-day key stores the case above, whose two transfers
+        are due on different days.
+        """
+        with app.app_context():
+            template = make_template_with_rule(
+                seed_user, WEEKLY_FIRST, starts_on=date(2026, 1, 6),
+            )
+
+            stored = self._stored(template, seed_user, seed_periods)
+
+            assert rows_by_paycheck(
+                stored, seed_periods,
+            ) == WEEKLY_FIRST_ON_SEED_PERIODS
+
+
 # ── Generated Transfer Tests ──────────────────────────────────────
 
 
@@ -398,12 +542,11 @@ class TestAGeneratedTransfersCategoryAndKeptRows:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Shadow Test Transfer",
-            default_amount=Decimal("150.00"),
             category_id=category_id,
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("150.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence,
@@ -477,7 +620,6 @@ class TestAGeneratedTransfersCategoryAndKeptRows:
             old_ids = [xfer.id for xfer in created]
 
             # Change amount and regenerate.
-            template.default_amount = Decimal("300.00")
             state_template_price(template, Decimal("300.00"))
             db.session.flush()
             transfer_recurrence.regenerate_for_template(
@@ -530,11 +672,10 @@ class TestATransferRecordsItsOccurrence:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Occurrence Transfer",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         make_cadence_rule(template, cadence, interval_n=1)
         db.session.refresh(template)
         return template

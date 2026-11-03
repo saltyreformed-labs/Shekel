@@ -445,7 +445,7 @@ def add_line(profile_id):
 
     ``add_deduction`` on ``/salary/<id>/deductions`` until plan step
     salary:R18-b (ruling **R-SAL38**): the one door authors a line of any of
-    the four kinds, and the schema refuses the one field that differs by
+    the five kinds, and the schema refuses the one field that differs by
     side (a target account on an earning).
 
     **The line's cadence is a recurrence rule authored onto it** (plan step
@@ -498,14 +498,15 @@ def add_line(profile_id):
         data["inflation_rate"] = Decimal(str(data["inflation_rate"])) / Decimal("100")
 
     # Through the RELATIONSHIP, not the FK column (plan step salary:R15-c):
-    # the regeneration below prices ``profile.lines``, and a line added
-    # by id joins that collection only if nothing has loaded it yet in this
-    # session, while a line added through the relationship joins it either
-    # way.  The write door's owner check reads ``deduction.user_id`` through
-    # the same relationship, so it answers before any flush.  Measured by
-    # this leaf's regeneration test, which prices the paycheck BEFORE the
-    # add in the session the request shares: by id, the regeneration
-    # re-stated the net WITHOUT the line.
+    # a line added by id joins ``profile.lines`` only if nothing has loaded
+    # that collection yet in this session, while a line added through the
+    # relationship joins it either way, so anything in this request that
+    # prices the profile sees it.  The write door's owner check reads
+    # ``deduction.user_id`` through the same relationship, so it answers
+    # before any flush.  The regeneration below priced the paycheck to
+    # re-state the template's amount until plan step X-bp, and that was the
+    # reader this was measured against: by id, it re-stated the net WITHOUT
+    # the line.
     deduction = PaycheckLine(salary_profile=profile, **data)
     db.session.add(deduction)
 

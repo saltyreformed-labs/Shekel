@@ -252,6 +252,11 @@ def downgrade():
     148 timestamps and silently change which rows the timeliness analytics
     consider knowable (it gates on ``paid_at IS NOT NULL``, and 8 rows carry a
     day that came from their pay-period start rather than from any instant).
+
+    The revision the recovery SQL re-stamps to is :data:`down_revision` itself
+    rather than a literal, so it cannot name a parent this revision no longer
+    has: migration ``b6d41f0a9c27``'s literal did, after a merge re-pointed it
+    (finding plan#1902).
     """
     raise NotImplementedError(
         "Cannot downgrade a3f7c8e21b64: budget.transactions.settled_on holds a "
@@ -271,7 +276,7 @@ def downgrade():
         "  WHERE s.id = t.status_id AND s.is_settled\n"
         "    AND t.settled_on IS NOT NULL;\n"
         "  ALTER TABLE budget.transactions DROP COLUMN settled_on;\n"
-        "  UPDATE alembic_version SET version_num = 'd7c1f4a9e603';\n"
+        f"  UPDATE alembic_version SET version_num = '{down_revision}';\n"
         "\n"
         "Noon is chosen so the restored instant round-trips to the same civil "
         "day in America/New_York on both sides of every DST transition.  Rows "

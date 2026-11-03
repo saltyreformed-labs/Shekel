@@ -169,7 +169,6 @@ class TestDataConsistency:
             category_id=category.id,
             transaction_type_id=txn_type.id,
             name="Active Template",
-            default_amount=Decimal("100.00"),
             is_active=True,
         )
         db.session.add(template)

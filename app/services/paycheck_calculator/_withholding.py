@@ -4,8 +4,10 @@ Shekel Budget App -- Paycheck engine: the tax FORMULAS, the four withholding lin
 The per-paycheck wage figures the formulas read (:class:`_WageBasis`) and the
 formulas themselves, :func:`_bracket_tax_lines`: IRS Pub 15-T federal
 withholding (:func:`_bracket_federal`) plus the annualised state tax
-(:func:`_bracket_state`) plus FICA, the Social Security wage-base cap enforced
-from the year-to-date cumulative the wage figures carry (CRIT-03 / F-037).
+(:func:`_bracket_state`) plus FICA, charged on the Social Security and Medicare
+wages (the gross less the all-payroll-taxes lines, since plan step
+salary:S11-e) with the wage-base cap enforced from the year-to-date
+cumulative the wage figures carry (CRIT-03 / F-037).
 
 **Since plan step salary:S11-c-2c the formulas are one path, and a pay stub is
 the other** (rulings **R-SAL42**, **R-SAL54**, **R-SAL55**): :mod:`._stubs`
@@ -32,10 +34,12 @@ from ._breakdown import TaxLines
 class _WageBasis:
     """The per-paycheck wage figures withholding is computed from.
 
-    The three wage figures travel together through the formulas: the period
-    gross, the period taxable amount (gross less pre-tax deductions, floored
-    at zero), and the year-to-date cumulative gross that drives the FICA
-    Social Security wage-base cap.  The fourth field is the count the
+    The four wage figures travel together through the formulas: the period
+    gross, the period Social Security and Medicare wages (gross less the
+    all-payroll-taxes deductions, since plan step **salary:S11-e**), the
+    period taxable amount (gross less every pre-tax deduction, floored at
+    zero), and the year-to-date cumulative of the second that drives the
+    FICA Social Security wage-base cap.  The fifth field is the count the
     formulas annualise them by, which is a fact of the same paycheck.  Since
     plan step **salary:S11-c-2c** a pay stub's own paycheck is one of these
     too (:mod:`._stubs`): the stub's gross and taxable by the kinds it
@@ -43,10 +47,15 @@ class _WageBasis:
 
     Attributes:
         gross_biweekly: The period gross.
-        taxable_biweekly: The period gross less the pre-tax deductions,
-            floored at zero.
-        cumulative_wages: The gross already paid this calendar year, before
-            this paycheck.
+        fica_wages: The period Social Security and Medicare wages: the gross
+            less the "Pre-tax, all payroll taxes" lines, floored at zero
+            (:func:`~._breakdown.waterfall_fica_wages`; ruling **plan#2639**,
+            ledger row **SAL-566**).  The two payroll taxes are charged on it;
+            until S11-e they were charged on the gross.
+        taxable_biweekly: The period gross less the pre-tax deductions of
+            both kinds, floored at zero.
+        cumulative_wages: The Social Security and Medicare wages already paid
+            this calendar year, before this paycheck.
         periods_per_year: How many paychecks a year the rhythm in force on
             the payday pays -- the full-year count IRS Pub 15-T annualises a
             period's wages by, and the state tax is annualised and divided
@@ -60,6 +69,7 @@ class _WageBasis:
             rhythm it is paid at and the annualiser cannot part.
     """
     gross_biweekly: Decimal
+    fica_wages: Decimal
     taxable_biweekly: Decimal
     cumulative_wages: Decimal
     periods_per_year: Decimal
@@ -68,16 +78,18 @@ class _WageBasis:
 def _bracket_tax_lines(basis, wages, total_pre_tax, tax_configs):
     """Compute the four withholding lines from IRS Pub 15-T brackets plus FICA.
 
-    The cumulative YTD gross on ``wages`` feeds the FICA SS wage-base cap
-    (CRIT-03 / F-037), so a paycheck past the cap is charged no Social
-    Security, and neither is a stub's paycheck priced past it.
+    Social Security and Medicare are charged on ``wages.fica_wages`` (plan
+    step salary:S11-e), and its year-to-date cumulative feeds the SS
+    wage-base cap (CRIT-03 / F-037), so a paycheck past the cap is charged no
+    Social Security, and neither is a stub's paycheck priced past it.
 
     Args:
         basis: The :class:`~app.services.payroll_basis.PayrollBasis` -- read
             for the W-4 federal inputs.
-        wages: The per-paycheck :class:`_WageBasis` (gross, taxable, the
-            cumulative YTD gross that drives the SS wage-base cap, and the
-            count Pub 15-T annualises the period's wages by).
+        wages: The per-paycheck :class:`_WageBasis` (gross, Social Security
+            and Medicare wages, taxable, the cumulative YTD of the second that
+            drives the SS wage-base cap, and the count Pub 15-T annualises the
+            period's wages by).
         total_pre_tax: Per-period pre-tax deduction total (annualised for
             the bracket federal calculation).
         tax_configs: dict with bracket_set, state_config, fica_config.
@@ -100,7 +112,7 @@ def _bracket_tax_lines(basis, wages, total_pre_tax, tax_configs):
         wages.taxable_biweekly, pay_periods_per_year, tax_configs.get("state_config")
     )
     fica = tax_calculator.calculate_fica(
-        wages.gross_biweekly, tax_configs.get("fica_config"), wages.cumulative_wages
+        wages.fica_wages, tax_configs.get("fica_config"), wages.cumulative_wages
     )
     return TaxLines(
         federal=federal,

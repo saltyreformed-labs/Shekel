@@ -157,7 +157,7 @@ class MerchantRule(AccountScopedMixin, UserScopedMixin, TimestampMixin,
             this merchant is**, not where its spending goes, which is why it
             is a column of its own beside ``category_id`` rather than a second
             reading of it.  Categories carry no income/expense class of their
-            own -- ``_posting_purchases._purchase_target`` takes the class from the
+            own -- ``ledger_lines.purchase_target`` takes the class from the
             parent's transaction TYPE -- so nothing here can refuse a category the owner
             usually spends under, and nothing should: what makes the row income
             is that the bank line is money arriving.

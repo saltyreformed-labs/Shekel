@@ -139,7 +139,7 @@ def _create_template(seed_user, name="Recurring Bill",
 
 def _create_envelope_template(
     seed_user, *, name="Spending Money",
-    default_amount="100.00", category_key="Groceries",
+    amount="100.00", category_key="Groceries",
 ):
     """Create a PRICED, every-paycheck envelope definition.
 
@@ -155,7 +155,7 @@ def _create_envelope_template(
     (:func:`_fires_in_no_seed_paycheck`).
     """
     return make_expense_template(
-        db.session, seed_user, amount=default_amount,
+        db.session, seed_user, amount=amount,
         name=name, category_key=category_key, is_envelope=True,
     )
 

@@ -690,7 +690,8 @@ class TestTheCheckedGross:
 
     #: Base pay 2884.62 + taxable 115.00 = gross 2999.62; after-tax 20.00.
     _TOTALS = StubTotals(
-        gross=Decimal("2999.62"), pre_tax=Decimal("315.00"), taxes=Decimal("472.00"),
+        gross=Decimal("2999.62"), pre_tax=Decimal("315.00"), pre_fica=Decimal("0.00"),
+        taxes=Decimal("472.00"),
         post_tax=Decimal("110.00"), after_tax=Decimal("20.00"), net=Decimal("2122.62"),
     )
 

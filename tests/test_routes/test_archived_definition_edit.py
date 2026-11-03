@@ -62,6 +62,7 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
+from tests._definition_price import newest_price
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -91,11 +92,10 @@ def _transfer_template_with_rows(seed_user, savings):
         to_account_id=savings.id,
         category_id=seed_user["categories"]["Rent"].id,
         name="Sweep to savings",
-        default_amount=Decimal("200.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("200.00"))
     make_cadence_rule(template, EVERY_PERIOD)
     transfer_recurrence.generate_for_template(
         template,
@@ -118,11 +118,10 @@ def _transaction_template_with_rows(seed_user):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name="Streaming",
-        default_amount=Decimal("15.99"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("15.99"))
     make_cadence_rule(template, EVERY_PERIOD)
     recurrence_engine.generate_for_template(
         template,
@@ -153,11 +152,10 @@ def _archived_transfer_never_generated(seed_user, savings):
         to_account_id=savings.id,
         category_id=seed_user["categories"]["Rent"].id,
         name="Sweep to savings",
-        default_amount=Decimal("200.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("200.00"))
     make_cadence_rule(template, EVERY_PERIOD)
     template.is_active = False
     db.session.commit()
@@ -173,11 +171,10 @@ def _archived_transaction_never_generated(seed_user):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name="Streaming",
-        default_amount=Decimal("15.99"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("15.99"))
     make_cadence_rule(template, EVERY_PERIOD)
     template.is_active = False
     db.session.commit()
@@ -219,7 +216,7 @@ def _transfer_update_payload(template, **overrides):
     """The transfer edit form's fields, the cadence restated, as a browser posts them."""
     payload = {
         "name": template.name,
-        "default_amount": str(template.default_amount),
+        "amount": str(newest_price(template)),
         "from_account_id": str(template.from_account_id),
         "to_account_id": str(template.to_account_id),
         "version_id": str(template.version_id),
@@ -270,7 +267,6 @@ class TestDefinitionRecurs:
                 from_account_id=seed_user["account"].id,
                 to_account_id=_savings_account(seed_user).id,
                 name="One-off",
-                default_amount=Decimal("10.00"),
             )
             db.session.add(template)
             db.session.flush()
@@ -279,7 +275,7 @@ class TestDefinitionRecurs:
     def test_the_carry_forward_prediction_reads_the_same_answer(
         self, app, seed_user,
     ):
-        """``can_generate_in_period`` shares the plan resolver, so it inherits the arm.
+        """``rows_to_generate_in_period`` shares the plan resolver, so it inherits the arm.
 
         The carry-forward's preview and executor ask it whether the engine
         would generate a target row; for an archived envelope the answer is
@@ -292,15 +288,15 @@ class TestDefinitionRecurs:
             schedule = GenerationSchedule.for_pass(ctx)
             period_id = next(iter(schedule.write_period_ids))
             # Live: the engine names this period (a row already answers it,
-            # so the prediction is False for THAT reason; ask the plan).
+            # so the prediction is empty for THAT reason; ask the plan).
             assert recurrence_engine.resolve_generation_plan(
                 template, schedule, ctx.scenario_id, None, block_message="x",
             ) is not None
             template.is_active = False
             db.session.flush()
-            assert recurrence_engine.can_generate_in_period(
+            assert recurrence_engine.rows_to_generate_in_period(
                 template, period_id, ctx.scenario_id, schedule=schedule,
-            ) is False
+            ) == ()
 
     def test_the_plan_resolves_to_nothing_for_an_archived_definition(
         self, app, seed_user,
@@ -402,13 +398,13 @@ class TestAnArchivedTransferTemplatesEdit:
 
             resp = auth_client.post(
                 f"/transfers/{template.id}",
-                data=_transfer_update_payload(template, default_amount="250.00"),
+                data=_transfer_update_payload(template, amount="250.00"),
             )
 
             assert resp.status_code == 302, resp.data
             assert resp.headers["Location"].endswith("/transfers")
             saved = _reload(TransferTemplate, template.id)
-            assert saved.default_amount == Decimal("250.00")
+            assert newest_price(saved) == Decimal("250.00")
             assert saved.is_active is False
             assert _live_transfers(saved.id) == []
 
@@ -441,7 +437,7 @@ class TestAnArchivedTransactionTemplatesEdit:
 
             resp = auth_client.post(f"/templates/{template.id}", data={
                 "name": "Streaming, renamed",
-                "default_amount": str(template.default_amount),
+                "amount": str(newest_price(template)),
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
                 ),
@@ -462,7 +458,7 @@ class TestAnArchivedTransactionTemplatesEdit:
 
             resp = auth_client.post(f"/templates/{template.id}", data={
                 "name": "Streaming, renamed",
-                "default_amount": str(template.default_amount),
+                "amount": str(newest_price(template)),
                 **cadence_payload(
                     unit=RecurrenceUnitEnum.PERIOD, states_a_start=False,
                 ),

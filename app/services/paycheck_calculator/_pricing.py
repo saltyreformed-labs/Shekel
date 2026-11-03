@@ -6,8 +6,8 @@ paycheck by composing the other leaves in the order its own numbered steps
 name -- the payday's base pay off the basis (the per-paycheck rate its pay
 list walks to, and the paychecks a year its rhythm pays), the
 taxable earning lines and the gross they make, the deduction
-passes, the four taxes (from the paycheck's pay stub, or the formulas alone:
-:mod:`._stubs`), the after-tax earning lines, the net -- and
+passes, the after-tax earning lines, the four taxes (from the paycheck's pay
+stub, or the formulas alone: :mod:`._stubs`), the net -- and
 :func:`project_salary`, the batch over a period list that is nothing but a
 loop over the first with the tax configs resolved per period year.
 
@@ -27,6 +27,7 @@ from ._breakdown import (
     Earnings,
     PaycheckBreakdown,
     PeriodInfo,
+    every_priced_line,
     waterfall_net,
     waterfall_taxable,
 )
@@ -135,22 +136,30 @@ def calculate_paycheck(basis: PayrollBasis, period: DerivedPeriod, tax_configs,
     # from the same rule, on this paycheck and on a pricing stub's).
     taxable_biweekly = waterfall_taxable(gross_biweekly, deductions.total_pre_tax)
 
+    # Step 5b: the after-tax earning lines -- untaxed, joining the deposit
+    # after every deduction and withholding (plan step salary:R18-b).  Priced
+    # BEFORE the taxes since plan step salary:S11-e (ledger row SAL-597) so the
+    # stub picker below reads every priced line through the one spelling,
+    # ``every_priced_line``; they read nothing the taxes produce.
+    after_tax_lines = priced_after_tax(line_ctx)
+
     # Steps 6-7: the four taxes, from the latest switched-on pay stub on or
     # before the payday with the same TAXED lines -- the kinds a tax formula
-    # reads, kept by ``_stubs``' one filter off every line priced so far --
-    # else of any lines, else the formulas alone (plan step salary:S11-c-2c;
-    # rulings R-SAL42, R-SAL54).  The year-to-date gross both sides read
-    # feeds the FICA SS wage-base cap (CRIT-03 / F-037).
+    # reads, kept by ``_stubs``' one filter off every line this paycheck
+    # priced -- else of any lines, else the formulas alone (plan step
+    # salary:S11-c-2c; rulings R-SAL42, R-SAL54).  The year's Social Security
+    # and Medicare wages before each side's payday (the gross less the
+    # all-payroll-taxes lines, since plan step salary:S11-e) feed the SS
+    # wage-base cap and the Medicare surtax threshold (CRIT-03 / F-037).
     taxes = priced_taxes(
         basis,
-        Pay(period.start_date, gross_biweekly, deductions.total_pre_tax),
-        (*taxable_lines, *deductions.pre_tax, *deductions.post_tax),
+        Pay(
+            period.start_date, gross_biweekly, deductions.total_pre_tax,
+            deductions.total_pre_fica,
+        ),
+        every_priced_line(taxable_lines, deductions, after_tax_lines),
         Law(tax_configs, period.start_date.year, configs_by_year),
     )
-
-    # Step 8b: the after-tax earning lines -- untaxed, joining the deposit
-    # after every deduction and withholding (plan step salary:R18-b).
-    after_tax_lines = priced_after_tax(line_ctx)
 
     # Step 9: Net pay, through the waterfall a transcribed pay stub shares.
     net_pay = waterfall_net(

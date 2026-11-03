@@ -21,13 +21,15 @@ a change in value, or the equity opening (ruling **R-FO**, plan step X-f3d).
 
 Mirrors :mod:`app.services.loan_posting_service` (split by concern):
 
-* :mod:`._walk` -- the pure DAY-granular walk: replay the account's
-  :class:`~app.models.account.AccountAnchorHistory` rows against the source
-  facts read back from its linked ledger, producing one
-  :class:`AccountAnchorCorrection` per assertion.
-* :mod:`._anchors` -- the opening + true-up reconcile: per-(source kind,
-  pay period, civil date) targets, posted-leg read-back, one balanced delta
-  per key that differs.
+* :mod:`._anchors` -- the opening + true-up reconcile: posted-leg read-back
+  against the worked-out ledger's targets, one balanced delta per key that
+  differs.  The walk that frames each correction
+  (:func:`app.services.ledger_lines.walk_account_ledger`, the read fold's own
+  assertion replay over the account's settled records, plan task plan#2525)
+  and the per-(source kind, pay period, civil date) targets
+  (:func:`app.services.ledger_lines.account_correction_targets`) were this
+  package's ``_walk`` and ``_anchors`` until plan task plan#2526 moved them
+  into the worked-out ledger, which sums the same targets.
 * :mod:`._sync` -- the entry points: per-scenario, all-scenarios (baseline
   UNION scenarios with postings on the linked ledger), and per-user.
 
@@ -45,7 +47,7 @@ rows are minted only via
 whose non-loan guard keeps the loan and account correction families on
 disjoint charts, and WHICH counter row a correction books into is ruling
 **R-FO**'s total dispatch over the account's projection kind
-(:func:`app.services.ledger_account_service.anchor_correction_counter_kind`).
+(:func:`app.services.ledger_lines.anchor_correction_counter_kind`).
 Flask-isolated: plain data in, plain values out; flushes but never commits
 (the caller owns the transaction boundary).
 
@@ -76,18 +78,12 @@ from ._sync import (
     sync_account_anchor_postings,
     sync_account_anchor_postings_all_scenarios,
 )
-from ._walk import (
-    AccountAnchorCorrection,
-    walk_account_ledger,
-)
 
 __all__ = [
-    "AccountAnchorCorrection",
     "backfill_all_account_anchor_postings",
     "reconcile_account_anchor_corrections",
     "resync_user_account_anchor_postings",
     "self_heal_anchor_corrections",
     "sync_account_anchor_postings",
     "sync_account_anchor_postings_all_scenarios",
-    "walk_account_ledger",
 ]

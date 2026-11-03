@@ -438,7 +438,6 @@ class TestAccountHardDelete:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Blocked Transfer",
-                default_amount=Decimal("100.00"),
             )
             db.session.add(xfer_template)
             db.session.commit()
@@ -477,7 +476,6 @@ class TestAccountHardDelete:
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=txn_type.id,
                 name="Blocking Template",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(template)
             db.session.flush()
@@ -682,7 +680,6 @@ class TestAccountHardDelete:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Archived Xfer Template",
-                default_amount=Decimal("100.00"),
                 is_active=False,
             )
             db.session.add(xfer_template)

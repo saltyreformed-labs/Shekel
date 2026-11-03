@@ -23,6 +23,7 @@ from app.models.transfer import Transfer
 from app.services import ledger_account_service
 from app.utils.balance_predicates import balance_excluded_status_ids, settled_status_ids
 from app.services import cash_ledger
+from tests._ledger_parity import assert_ledger_parity
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +203,7 @@ def _independent_movement_effect(account_id: int, scenario_id: int) -> Decimal:
     under UNSETTLED parents -- an oracle that would have stayed green had the
     writer regressed to posting the row's own leg beside its movement.
 
-    Restated in SQL rather than shared with ``_posting_purchases.purchase_posts``
+    Restated in SQL rather than shared with ``ledger_lines.purchase_posts``
     or ``cash_ledger.movement_cash_leg``, for the reason every helper in this
     file is: an oracle that imported the rule it grades could not grade it.
     """
@@ -328,10 +329,10 @@ def _assert_linked_accounts_reconcile(scenario_id: int) -> None:
     time or into a what-if by the effect-time self-heal alongside that
     scenario's first settle -- the latter ONLY because these fixtures
     settle on the same UTC day the accounts were created; not a general
-    guarantee, and R8 owns the residual multi-scenario policy).  Amortizing loans are excluded -- their
-    absolute invariant couples on the amortization split and is the loan
-    oracle's job.  Holds over every such account, not only the ones a given
-    test hand-computes.
+    guarantee, and R8 owns the residual multi-scenario policy).  Amortizing
+    loans are excluded -- their absolute invariant couples on the
+    amortization split and is the loan oracle's job.  Holds over every such
+    account, not only the ones a given test hand-computes.
     """
     scenario_owner_id = (
         _db.session.query(Scenario.user_id)
@@ -594,18 +595,28 @@ def _checked_side_counter_net(counter, record_id: int, net: Decimal) -> Decimal:
     return net
 
 
-def _assert_full_reconciliation(scenario_id: int) -> None:
+def _assert_full_reconciliation(
+    scenario_id: int, known_parity_differences: tuple = (),
+) -> None:
     """Assert the whole ledger reconciles: linked, counter, per-entry, trial.
 
-    The production-wide sweep run after each test's mutations.  Linked and
+    The production-wide sweep a case runs after its mutations; not every
+    case runs it (measured 2026-11-02: 13 of the 16 cash cases do).  Linked and
     counter reconciliation are scenario-scoped; the per-entry balance and trial
     balance are global self-checks (always true for a balanced ledger, asserted
-    cheaply on every sweep).
+    cheaply on every sweep).  Last, the ledger worked out from the records
+    equals this stored one to the cent per (chart row, paycheck, day) (plan
+    task plan#2527): the stored side these oracles have just graded is the
+    second opinion the worked-out read is graded against.  A case whose
+    fixture wrote a record past every writer names the cells that leaves the
+    store behind on in *known_parity_differences*
+    (``tests._ledger_parity.assert_ledger_parity``).
     """
     _assert_linked_accounts_reconcile(scenario_id)
     _assert_counter_accounts_reconcile(scenario_id)
     assert _entries_violating_balance() == []
     assert _trial_balance() == Decimal("0")
+    assert_ledger_parity(_db.session, scenario_id, known_parity_differences)
 
 
 def _counter_ledger_id(

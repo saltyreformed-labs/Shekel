@@ -797,7 +797,8 @@ def _leftover_due_date(template, target_period, occurrences) -> date:
     step recurrence:R5-a): where the definition's rule fires inside the target
     paycheck, the row is dated as the definition's own row answering that
     occurrence is -- ``compute_due_date`` over it, so the occurrence itself
-    for a rule naming a day and the payday for one naming none -- taking the
+    for a calendar cadence funded by the paycheck containing it and the payday
+    otherwise -- taking the
     EARLIEST where it fires there twice, the one
     ``_context._leftover_recipient`` bumps; where it fires nowhere in it, the
     paycheck's payday.  The first arm is
@@ -805,8 +806,9 @@ def _leftover_due_date(template, target_period, occurrences) -> date:
     paycheck", kept wherever its premise holds: the leftover is dated exactly
     as the definition's own row there is, so a hand-back prices it on the
     same day that row prices.  The second is the date ruling **R-BAL22**
-    gives any row answering no occurrence and ruling **R-R95** gives a rule
-    naming no day, stated through R-BAL22's producer
+    gives any row answering no occurrence and ruling **R-R95** gives a
+    paycheck cadence or one funded from a later paycheck, stated through
+    R-BAL22's producer
     (:func:`~app.services.one_off.due_date_for`).  A definition that no longer
     recurs (archived: ``recurrence_engine.definition_recurs``) names no
     occurrence anywhere, so a row of one reaching here -- a settled row

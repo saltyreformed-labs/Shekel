@@ -852,14 +852,13 @@ def _transaction_template(seed_user, name, *, account_id=None, is_envelope=False
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=Decimal("10.00"),
         is_envelope=is_envelope,
     )
     _db.session.add(template)
     _db.session.flush()
     # A generated row stores no figure and is priced by this series on its own
     # due date (plan step balance:X-au-e), so a template must state one.
-    state_template_price(template)
+    state_template_price(template, Decimal("10.00"))
     return template
 
 

@@ -1403,7 +1403,6 @@ class TestOnePaycheckProjectionPerProfilePerRender:
             category_id=next(iter(seed_user["categories"].values())).id,
             transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
             name="Paycheck",
-            default_amount=Decimal("4000.00"),
         )
         db.session.add(template)
         db.session.flush()

@@ -639,8 +639,11 @@ def capped_social_security(gross, cumulative_wages, fica_config):
     always price at the statutory rate.
 
     Args:
-        gross:            Gross pay for this pay period (NOT annualized).
-        cumulative_wages: Year-to-date gross wages BEFORE this period.
+        gross:            The Social Security wages for this pay period
+                          (NOT annualized): the gross less the lines that
+                          leave them (plan step salary:S11-e).
+        cumulative_wages: Year-to-date Social Security wages BEFORE this
+                          period.
         fica_config:      The year's :class:`app.tax_law.FicaRules`, with
                           `ss_rate` and `ss_wage_base`.  When None -- the
                           law resolved no FICA year at all -- returns ZERO,
@@ -673,9 +676,12 @@ def calculate_fica(annual_gross, fica_config, cumulative_wages=ZERO):
     (F-037 / CRIT-03).
 
     Args:
-        annual_gross:     Gross income for this pay period (NOT annualized).
+        annual_gross:     The Social Security and Medicare wages for this pay
+                          period (NOT annualized): the gross less the
+                          lines that leave them (plan step salary:S11-e).
         fica_config:      The year's :class:`app.tax_law.FicaRules` (rates and thresholds).
-        cumulative_wages: Year-to-date gross wages BEFORE this period.
+        cumulative_wages: Year-to-date Social Security and Medicare wages
+                          BEFORE this period.
 
     Returns:
         dict with keys: ss, medicare, total (all Decimal).

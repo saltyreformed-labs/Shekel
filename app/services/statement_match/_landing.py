@@ -82,9 +82,9 @@ class DifferenceLanding:
     rule can justify the destination*, and *being the ONLY act is not what
     R-HS means by justified*.  The app is not without a CANDIDATE here:
     ``salary_profiles.template_id`` names the member whose figure is computed
-    (:meth:`~app.services.income_service.SalaryPricing._breakdown_by_period`
-    returns the paycheck's ``net_pay`` for it and ``template.default_amount``
-    for every other) so *which member rounds* is a stored fact.  What it lacks
+    (:func:`~app.services.income_service.salary_net_for` prices it, and every
+    other member states its own price) so *which member rounds* is a stored
+    fact.  What it lacks
     is a JUSTIFICATION: `salary:N-391` reads *NOT yet attributed*, and none is
     coming -- ``bank_import:X-gj-3b`` was WITHDRAWN (**R-JJ**) and
     ``salary:R18`` dissolves the question: one deposit will name ONE row.

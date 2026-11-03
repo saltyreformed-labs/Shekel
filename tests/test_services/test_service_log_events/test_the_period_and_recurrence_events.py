@@ -175,7 +175,6 @@ class TestRecurrenceEngineLogging:
                 category_id=next(iter(seed_user["categories"].values())).id,
                 transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
                 name="X-au-d logging control",
-                default_amount=Decimal("11.11"),
             )
             db.session.add(template)
             db.session.flush()

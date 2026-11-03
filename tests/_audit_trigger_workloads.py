@@ -159,7 +159,6 @@ def _repeating_template(owner):
         category_id=owner["category"].id,
         transaction_type_id=expense_type.id,
         name="Benchmark Expense",
-        default_amount=Decimal("150.00"),
     )
     db.session.add(template)
     db.session.flush()
@@ -182,11 +181,10 @@ def _rule_less_definition(owner, *, name):
         category_id=owner["category"].id,
         transaction_type_id=expense_type.id,
         name=name,
-        default_amount=Decimal("50.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("50.00"))
     return template
 
 

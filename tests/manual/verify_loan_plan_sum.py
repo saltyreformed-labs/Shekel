@@ -509,7 +509,6 @@ def _door_1():
         from_account_id=mortgage_payment.from_account_id,
         to_account_id=MORTGAGE_ACCOUNT_ID,
         name="Sweep into the Mortgage (planted)",
-        default_amount=Decimal("500.00"),
         is_active=True,
     )
     db.session.add(sweep)

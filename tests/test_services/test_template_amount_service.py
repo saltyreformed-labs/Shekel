@@ -12,7 +12,8 @@ merely unlikely:
      before the earliest version so the resolver is total.
   3. **How an amount is stated** -- one write door, no version when the series
      already answers that amount on that date, correction in place on a
-     same-day restatement.
+     same-day restatement, and a refusal for a definition rule 1 gives no
+     series.
   4. **How a mis-dated version is withdrawn** -- and why the earliest is not.
 
 The figures here are the production history the backfill was designed against
@@ -34,6 +35,7 @@ from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service as tas
 from tests._test_helpers import create_savings_account, make_salary_profile
+from tests._definition_price import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -48,7 +50,6 @@ def _txn_template(seed_user, amount="165.30", name="Geico"):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name=name,
-        default_amount=Decimal(amount),
     )
     db.session.add(template)
     db.session.flush()
@@ -62,7 +63,6 @@ def _xfer_template(seed_user, savings_acct, amount="250.00"):
         from_account_id=seed_user["account"].id,
         to_account_id=savings_acct.id,
         name="Money Market Contribution",
-        default_amount=Decimal(amount),
     )
     db.session.add(template)
     db.session.flush()
@@ -142,7 +142,7 @@ class TestOwnsItsAmount:
             assert tas.owns_its_amount(_txn_template(seed_user)) is True
 
     def test_salary_linked_template_does_not(self, app, db, seed_user):
-        """A paycheck-calculated template's ``default_amount`` is vestigial.
+        """A paycheck-calculated template states no price of its own.
 
         The recurrence engine prices each of its rows from the paycheck
         calculator, so versioning that column would record a computed figure as
@@ -192,10 +192,10 @@ class TestOwnsItsAmount:
 
 
 class TestSetAmount:
-    """The one write door: the scalar and the series move together."""
+    """The one write door: a stated price is a version of the definition's series."""
 
-    def test_opens_the_series_and_moves_the_scalar(self, app, db, seed_user):
-        """A first statement writes both the column and the opening version."""
+    def test_opens_the_series(self, app, db, seed_user):
+        """A first statement writes the opening version, which is then the newest price."""
         with app.app_context():
             template = _txn_template(seed_user, amount="178.00")
 
@@ -204,7 +204,7 @@ class TestSetAmount:
             )
             db.session.flush()
 
-            assert template.default_amount == Decimal("178.00")
+            assert newest_price(template) == Decimal("178.00")
             versions = tas.amount_versions(template)
             assert len(versions) == 1
             assert versions[0].effective_date == date(2026, 4, 1)
@@ -302,8 +302,10 @@ class TestSetAmount:
         The whole path an adversarial review walked: state $200.00 from December
         while the current price is $178.00, then submit the edit form again --
         which prefills today's amount beside a blank date meaning today.  Because
-        the prefill is what the series says TODAY and not the stored column, that
-        save restates $178.00 as of today, which the series already answers, so
+        the prefill is what the series says TODAY (``amount_as_of`` on today, the
+        edit form's read since plan step X-bp deleted the ``current_amount``
+        that fell back to the column) and not the newest price the column
+        held, that save restates $178.00 as of today, which the series already answers, so
         no version is written and the December rise stays in December.
         """
         with app.app_context():
@@ -317,13 +319,14 @@ class TestSetAmount:
             db.session.flush()
 
             today = date(2026, 8, 11)
-            assert tas.current_amount(template, today) == Decimal("178.00")
-            # The column carries the NEWEST stated price, so regeneration still
-            # writes the December figure onto the rows that edit rebuilt.
-            assert template.default_amount == Decimal("200.00")
+            assert tas.amount_as_of(template, today) == Decimal("178.00")
+            # The newest price the series states is December's: the figure a
+            # prefill reading the newest price, as one reading the dropped
+            # column did, would re-save as of today.
+            assert newest_price(template) == Decimal("200.00")
 
             tas.set_amount(
-                template, tas.current_amount(template, today), effective_on=today,
+                template, tas.amount_as_of(template, today), effective_on=today,
             )
             db.session.flush()
 
@@ -337,10 +340,11 @@ class TestSetAmount:
     def test_back_dating_below_a_scheduled_rise_does_not_cancel_it(
         self, app, db, seed_user,
     ):
-        """The column tracks the newest stated price, not the last one typed.
+        """The newest price is the latest-dated version, not the last one typed.
 
         Recording a correction for June must not undo a rise already queued for
-        December -- which assigning the argument to the column did.
+        December -- which assigning the argument to the ``default_amount``
+        column did, before plan step X-bp dropped it.
         """
         with app.app_context():
             template = _txn_template(seed_user, amount="178.00")
@@ -355,18 +359,18 @@ class TestSetAmount:
             )
             db.session.flush()
 
-            assert template.default_amount == Decimal("200.00")
+            assert newest_price(template) == Decimal("200.00")
             assert tas.amount_as_of(template, date(2026, 7, 1)) == Decimal("150.00")
             assert tas.amount_as_of(template, date(2027, 1, 1)) == Decimal("200.00")
 
-    def test_derived_template_gets_the_scalar_and_no_version(
-        self, app, db, seed_user,
-    ):
-        """The salary path reaches this door and must record nothing.
+    def test_a_salary_linked_template_is_refused(self, app, db, seed_user):
+        """A paycheck the engine works out is no price anybody stated (plan step X-bp).
 
-        ``salary_regeneration.regenerate_salary_transactions`` writes the
-        recomputed net pay to the column on every profile edit; a version per edit would be a fake
-        price history of a computed figure.
+        The door set the column and recorded no version for such a template
+        until X-bp, when its one caller -- the salary regeneration's
+        re-statement of today's net on every salary save -- went, so a call
+        now names a caller's defect: it raises, and writes no version (and,
+        until X-bp dropped the column, no copy either).
         """
         with app.app_context():
             template = _txn_template(seed_user, name="Data Manager")
@@ -375,12 +379,38 @@ class TestSetAmount:
             profile.is_active = True
             db.session.flush()
 
-            tas.set_amount(
-                template, Decimal("2473.38"), effective_on=date(2026, 4, 1),
+            with pytest.raises(ValueError, match="does not own its amount"):
+                tas.set_amount(
+                    template, Decimal("2473.38"), effective_on=date(2026, 4, 1),
+                )
+            db.session.flush()
+
+            assert tas.amount_versions(template) == []
+
+    def test_a_derive_mode_loan_payment_is_refused(self, app, db, seed_user):
+        """A payment that tracks its loan states no price either (plan step X-bp).
+
+        Its creation and its Track wrote the loan's P&I plus escrow into the
+        template's ``default_amount`` copy through this door until X-bp;
+        amount rule 4 prices it live, so both callers went with that step's
+        column and the door refuses one, writing nothing.
+        """
+        with app.app_context():
+            savings = create_savings_account(
+                seed_user, db.session, "Money Market", Decimal("0.00"),
+            )
+            template = _xfer_template(seed_user, savings)
+            template.settings = LoanPaymentSettings(
+                derive_from_loan=True, extra_principal=Decimal("0.00"),
             )
             db.session.flush()
 
-            assert template.default_amount == Decimal("2473.38")
+            with pytest.raises(ValueError, match="does not own its amount"):
+                tas.set_amount(
+                    template, Decimal("1910.95"), effective_on=date(2026, 4, 1),
+                )
+            db.session.flush()
+
             assert tas.amount_versions(template) == []
 
 
@@ -410,8 +440,8 @@ class TestRestateInEffect:
             ]
             assert tas.amount_as_of(template, date(2026, 7, 15)) == Decimal("180.00")
             assert tas.amount_as_of(template, date(2026, 5, 1)) == Decimal("178.00")
-            # The scalar is the NEWEST price, untouched by a middle correction.
-            assert template.default_amount == Decimal("165.30")
+            # The newest price stays September's, untouched by a middle correction.
+            assert newest_price(template) == Decimal("165.30")
 
     def test_before_the_earliest_version_the_earliest_is_corrected(
         self, app, seed_user,
@@ -449,15 +479,16 @@ class TestRestateInEffect:
             assert [
                 (v.effective_date, v.amount) for v in tas.amount_versions(template)
             ] == [(date(2026, 5, 7), Decimal("170.00"))]
-            assert template.default_amount == Decimal("170.00")
+            assert newest_price(template) == Decimal("170.00")
             assert tas.amount_as_of(template, date(2026, 5, 7)) == Decimal("170.00")
 
     def test_an_equal_figure_writes_nothing(self, app, seed_user):
         """The no-op arm: the same figure restated emits no UPDATE.
 
-        Graded on the optimistic-lock counter after a COMMIT rather than on
+        Graded on the optimistic-lock counter after a COMMIT, which the door
+        bumps on every change it makes (``_series_changed``), rather than on
         ``session.dirty``, which cannot tell a net-unchanged assignment from
-        a write (``_resync_scalar`` assigns the scalar it re-reads).
+        a write.
         """
         with app.app_context():
             template = _txn_template(seed_user, amount="162.25")
@@ -485,8 +516,12 @@ class TestRestateInEffect:
                     template, Decimal("1.00"), on=date(2026, 5, 7),
                 )
 
-    def test_the_scalar_follows_a_corrected_newest_version(self, app, seed_user):
-        """``_resync_scalar`` runs: correcting the newest version moves the column."""
+    def test_correcting_the_newest_version_moves_the_newest_price(self, app, seed_user):
+        """Correcting the newest version in place moves the newest price.
+
+        ``_resync_scalar`` copied it into the ``default_amount`` column until
+        plan step X-bp dropped the column.
+        """
         with app.app_context():
             template = _txn_template(seed_user)
             _seed_geico_history(template)
@@ -494,7 +529,7 @@ class TestRestateInEffect:
                 template, Decimal("160.00"), on=date(2026, 12, 1),
             )
             db.session.flush()
-            assert template.default_amount == Decimal("160.00")
+            assert newest_price(template) == Decimal("160.00")
 
 
 class TestDeleteAmountVersion:
@@ -625,8 +660,8 @@ class TestDeleteAmountVersion:
     ):
         """Withdrawing the newest entry would move what generation writes.
 
-        ``default_amount`` is the price generation puts on every row an edit
-        rebuilds, and this door runs no regeneration and offers no conflict
+        The newest entry prices every row due on or after its date, and
+        this door runs no regeneration and offers no conflict
         chooser -- so a withdrawal that moved it would leave the rows already
         generated disagreeing with the definition, silently.  Cancelling a
         queued rise is a price change and belongs in the Amount field.
@@ -641,7 +676,7 @@ class TestDeleteAmountVersion:
             db.session.flush()
 
             assert len(tas.amount_versions(template)) == 3
-            assert template.default_amount == Decimal("165.30")
+            assert newest_price(template) == Decimal("165.30")
 
     def test_allows_withdrawing_the_newest_when_the_price_is_unchanged(
         self, app, db, seed_user,
@@ -671,7 +706,7 @@ class TestDeleteAmountVersion:
                 (date(2026, 6, 1), Decimal("178.32")),
                 (date(2026, 8, 1), Decimal("165.30")),
             ]
-            assert template.default_amount == Decimal("165.30")
+            assert newest_price(template) == Decimal("165.30")
 
     def test_the_documented_repair_for_a_mis_dated_earliest_works(
         self, app, db, seed_user,
@@ -714,7 +749,7 @@ class TestDeleteAmountVersion:
         rather than ownership: the caller owner-checks the template, so a
         version id from any other template -- the same user's or anyone else's --
         is simply not found.  The cross-USER refusal is a route concern and is
-        asserted in ``test_template_amount_history.py``.
+        asserted in ``test_template_amount_history/test_the_history_panel.py``.
         """
         with app.app_context():
             mine = _txn_template(seed_user, name="Geico")

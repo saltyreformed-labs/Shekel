@@ -116,11 +116,10 @@ class TestTransferGeneration:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="No Rule Transfer",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(template)
             db.session.flush()
-            state_template_price(template)
+            state_template_price(template, Decimal("50.00"))
             db.session.refresh(template)
 
             created = transfer_recurrence.generate_for_template(
@@ -543,12 +542,11 @@ class TestAGeneratedTransfersCategoryAndKeptRows:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Shadow Test Transfer",
-            default_amount=Decimal("150.00"),
             category_id=category_id,
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("150.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence,
@@ -622,7 +620,6 @@ class TestAGeneratedTransfersCategoryAndKeptRows:
             old_ids = [xfer.id for xfer in created]
 
             # Change amount and regenerate.
-            template.default_amount = Decimal("300.00")
             state_template_price(template, Decimal("300.00"))
             db.session.flush()
             transfer_recurrence.regenerate_for_template(
@@ -675,11 +672,10 @@ class TestATransferRecordsItsOccurrence:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Occurrence Transfer",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         make_cadence_rule(template, cadence, interval_n=1)
         db.session.refresh(template)
         return template

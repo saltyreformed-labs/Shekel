@@ -64,7 +64,7 @@ class TemplateCreateSchema(RecurrenceFormFieldsMixin, BaseSchema):
         return _normalize_empty_inputs(self, data)
 
     name = fields.String(required=True, validate=validate.Length(min=1, max=200))
-    default_amount = fields.Decimal(
+    amount = fields.Decimal(
         required=True, places=2, as_string=True,
         validate=validate.Range(min=0),
     )
@@ -175,7 +175,7 @@ class TemplateUpdateSchema(TemplateCreateSchema):
 
     # Override -- all fields optional for update.
     name = fields.String(validate=validate.Length(min=1, max=200))
-    default_amount = fields.Decimal(places=2, as_string=True, validate=validate.Range(min=0))
+    amount = fields.Decimal(places=2, as_string=True, validate=validate.Range(min=0))
     category_id = RowId()
     transaction_type_id = RowId()
     account_id = RowId()

@@ -93,7 +93,6 @@ class TestTransferTemplateCategoryId:
                 from_account_id=data["account"].id,
                 to_account_id=data["savings_account"].id,
                 name="Categorized Template",
-                default_amount=Decimal("200.00"),
                 category_id=category.id,
             )
             db.session.add(tpl)
@@ -115,7 +114,6 @@ class TestTransferTemplateCategoryId:
                 from_account_id=data["account"].id,
                 to_account_id=data["savings_account"].id,
                 name="No Category Template",
-                default_amount=Decimal("150.00"),
                 category_id=None,
             )
             db.session.add(tpl)

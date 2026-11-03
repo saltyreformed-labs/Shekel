@@ -22,6 +22,8 @@ from app.services import account_service
 from tests._test_helpers import create_account_of_type, create_loan_account, NO_TAX_LAW
 
 from ._helpers import _create_profile, _create_other_user_profile, _respace_paydays
+from app.services.balance_at import BalanceContext
+from app.services.obligations_aggregator import todays_price
 
 
 # ── Profile CRUD ───────────────────────────────────────────────────
@@ -135,8 +137,12 @@ class TestProfileCreate:
                 .filter_by(user_id=seed_user["user"].id, name="Weekly Check")
                 .one()
             )
-            # Typed 1,000.00; gross == net here (no tax law).
-            assert profile.template.default_amount == Decimal("1000.00")
+            # Typed 1,000.00; gross == net here (no tax law).  Today's paycheck
+            # is the definition's figure (the template states no price since
+            # plan step X-bp, where this read its ``default_amount`` copy).
+            assert todays_price(
+                profile.template, BalanceContext.build(seed_user["user"].id),
+            ).amount == Decimal("1000.00")
             rows = pay_list_service.pay_rows(
                 PayrollBasis(profile, calendar_for(seed_user["user"].id)),
             )

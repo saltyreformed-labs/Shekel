@@ -198,11 +198,10 @@ class TestAProjectedRecurringRowBoundsTheRestatement:
                 from_account_id=seed_user["account"].id,
                 to_account_id=account.id,
                 name="Monthly save",
-                default_amount=Decimal("50.00"),
             )
             _db.session.add(template)
             _db.session.flush()
-            state_template_price(template)
+            state_template_price(template, Decimal("50.00"))
             make_cadence_rule(
                 template, EVERY_PERIOD, starts_on=seed_periods[0].start_date,
             )
@@ -555,12 +554,11 @@ def _account_with_projected_rows(seed_user, seed_periods, *, is_envelope=False):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name="Groceries" if is_envelope else "Recurring rent",
-        default_amount=Decimal("10.00"),
         is_envelope=is_envelope,
     )
     _db.session.add(template)
     _db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("10.00"))
     make_cadence_rule(
         template, EVERY_PERIOD, starts_on=seed_periods[0].start_date,
     )

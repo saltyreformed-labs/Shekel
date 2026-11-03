@@ -440,11 +440,10 @@ class TestIsStandingLoanPayment:
                 from_account_id=seed_user["account"].id,
                 to_account_id=loan.id,
                 name="Second Payment Into One Loan",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(second)
             db.session.flush()
-            state_template_price(second)
+            state_template_price(second, Decimal("50.00"))
             # The definition first, then the cadence onto it (plan step R-F6).
             make_every_period_rule(db.session, second)
             db.session.flush()
@@ -930,14 +929,13 @@ class TestLoanPaymentWindowResolver:
                 from_account_id=seed_user["account"].id,
                 to_account_id=loan.id,
                 name="Sweep Into One Loan",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(sweep)
             db.session.flush()
             # Priced, as ``POST /transfers`` prices every definition it
             # creates: the forward plan sums this sweep's occurrences too
             # (plan step R16-b-2) and refuses a series nobody stated.
-            state_template_price(sweep)
+            state_template_price(sweep, Decimal("50.00"))
             # The definition first, then the cadence onto it (plan step R-F6).
             make_every_period_rule(db.session, sweep)
             payment = make_loan_payment_template(db.session, seed_user, loan)
@@ -1358,11 +1356,10 @@ class TestLoanPaymentWindowResolver:
                     from_account_id=seed_user["account"].id,
                     to_account_id=loan.id,
                     name=f"Into One Loan {index}",
-                    default_amount=Decimal("50.00"),
                 )
                 db.session.add(extra)
                 db.session.flush()
-                state_template_price(extra)
+                state_template_price(extra, Decimal("50.00"))
                 make_every_period_rule(db.session, extra)
             db.session.commit()
 

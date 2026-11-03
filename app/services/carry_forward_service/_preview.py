@@ -410,8 +410,9 @@ def _build_envelope_plan(source_txn, target_period, basis, schedule):
     Read-only -- the shared classifier queries the database for target
     rows but never mutates and never invokes
     ``recurrence_engine.generate_for_template`` (which would create rows);
-    it uses ``recurrence_engine.can_generate_in_period`` instead to
-    predict the engine's create-or-skip decision.
+    it uses ``recurrence_engine.rows_to_generate_in_period`` instead to
+    predict the engine's create-or-skip decision and the row it would
+    create.
 
     The destination decision lives in
     ``_resolve_envelope_target_fields`` so this function has a
@@ -475,7 +476,7 @@ def _resolve_envelope_target_fields(source_txn, target_period,
         is a corrupt state the user resolves manually.
       * ``TOP_UP`` / ``GENERATE`` / ``CREATE`` -> actionable.  The
         destination starts at ``resolution.base`` (the existing row's
-        estimate, the template default the engine would generate, or
+        estimate, what the row the engine would generate resolves to, or
         ``Decimal("0")`` for a freshly created row) and the rollover
         bumps it to ``base + leftover``.  ``target_will_be_generated``
         flags the three cases where a new row appears (engine-generated

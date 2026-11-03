@@ -201,7 +201,9 @@ from app.services.row_valuation import settled_amounts_by_key
 from app.utils.amount_relationships import (
     pricing_load_options,
     settlement_load_options,
+    template_pricing_load_options,
     transfer_pricing_load_options,
+    transfer_template_pricing_load_options,
     valuation_load_options,
 )
 # The loan-pricing leaf FIRST, because it is the bottom of this package's
@@ -223,7 +225,7 @@ from ._amount_rule import (
     is_loan_payment_definition,
     transfer_amount_rule,
 )
-from ._definition_cash import DefinitionRow, definition_cash
+from ._definition_cash import DefinitionRow, definition_cash, stated_price
 from ._amount_source import (
     amounts_by_key,
     resolve_amount,
@@ -352,12 +354,15 @@ __all__ = [
     "reject_books_open_on_or_after_movements",
     "pricing_load_options",
     "settlement_load_options",
+    "template_pricing_load_options",
     "transfer_pricing_load_options",
+    "transfer_template_pricing_load_options",
     "valuation_load_options",
     "reject_line_before_books_open",
     "reject_movement_before_books_open",
     "settled_amounts_by_key",
     "settled_cash_facts",
+    "stated_price",
     "statement_coverage",
     "sum_projected",
     "walk_cash_ledger",

@@ -41,7 +41,8 @@ by that count.  :class:`TestTodaysPaycheckBecomesAMonthAtItsOwnRhythm` and
 :class:`TestTheRecurringSalaryRow` grade each surface for an owner paid
 biweekly today with a weekly rhythm recorded to start later (rulings
 **R-SAL71** and **R-SAL73** for the Recurring page's salary row, which reads
-today's priced paycheck rather than the template's stored copy).
+today's priced paycheck rather than the template's stored copy, a copy plan
+step X-bp has since deleted).
 """
 
 from datetime import date, timedelta
@@ -624,10 +625,10 @@ class TestTheRecurringSalaryRow:
     $52,000.00 paid every 14 days under the made-up FICA-only law installed for
     tax year 2026, a weekly era recorded to take effect after the saved
     record -- with the profile created through the salary form, so its
-    template is the real one (``POST /salary``).  The template's stored
-    ``default_amount`` is then overwritten with a made-up
-    STALE $1.00, which is what a stored copy becomes when a raise date passes
-    between saves: the row must not read it.
+    template is the real one (``POST /salary``).  Its ``default_amount`` copy
+    was then overwritten with a made-up STALE $1.00, what a stored copy became
+    when a raise date passed between saves, until plan step X-bp dropped the
+    column: the row is priced live, as it was then.
     """
 
     @pytest.fixture(autouse=True)
@@ -647,7 +648,7 @@ class TestTheRecurringSalaryRow:
         saved at today's $1,847.00.
         """
         with app.app_context():
-            template = self._seed_with_a_stale_copy(
+            template = self._seed_through_the_salary_form(
                 db, auth_client, seed_user, seed_periods_today,
             )
             view = recurring_view.build_view(
@@ -659,8 +660,13 @@ class TestTheRecurringSalaryRow:
             assert row.equivalent.per_paycheck == Decimal("923.50")
 
     @staticmethod
-    def _seed_with_a_stale_copy(db, auth_client, seed_user, periods):
-        """The owner above through the salary form, then its copy made stale."""
+    def _seed_through_the_salary_form(db, auth_client, seed_user, periods):
+        """The owner above through the salary form.
+
+        Its template's ``default_amount`` copy was then made a stale $1.00, so
+        a reader of the copy failed here, until plan step X-bp dropped the
+        column; a reader can no longer reach one.
+        """
         user_id = seed_user["user"].id
         last_payday = max(period.start_date for period in periods)
         pay_era_write.mint_era(
@@ -681,8 +687,6 @@ class TestTheRecurringSalaryRow:
             db.session.query(SalaryProfile)
             .filter_by(user_id=user_id, name="Main Job").one().template
         )
-        template.default_amount = Decimal("1.00")
-        db.session.commit()
         return template
 
     def test_the_rendered_page_shows_the_priced_paycheck(
@@ -691,13 +695,14 @@ class TestTheRecurringSalaryRow:
         """GET /templates: the salary row's Amount cell and sort key read $1,847.00.
 
         Why: the case above grades :attr:`RecurringRow.amount` and never
-        renders the page, so the TEMPLATE could go on reading the stored copy
-        with the suite green -- an adversarial review of this step reverted
-        both template reads to ``default_amount`` and found every test that
-        loads the Recurring page passing.  This renders it.
+        renders the page, so the TEMPLATE could have gone on reading the stored
+        copy with the suite green, until plan step X-bp dropped it -- an
+        adversarial review of this step reverted both template reads to
+        ``default_amount`` and found every test that loads the Recurring page
+        passing.  This renders it.
         """
         with app.app_context():
-            self._seed_with_a_stale_copy(
+            self._seed_through_the_salary_form(
                 db, auth_client, seed_user, seed_periods_today,
             )
             html = auth_client.get("/templates").get_data(as_text=True)
@@ -730,7 +735,7 @@ class TestTheRecurringSalaryRow:
         1.00 x 52 / 12 = $4.33 here.
         """
         with app.app_context():
-            template = self._seed_with_a_stale_copy(
+            template = self._seed_through_the_salary_form(
                 db, auth_client, seed_user, seed_periods_today,
             )
             user_id = seed_user["user"].id

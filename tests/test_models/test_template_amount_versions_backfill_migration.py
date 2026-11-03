@@ -24,6 +24,13 @@ already at HEAD when these run -- the template builder upgraded base->head again
 an empty ``budget.transactions``, so the in-chain backfill was a no-op -- which is
 what leaves the table empty for each test to fill.
 
+**Plan step balance:X-bp dropped the column the backfill reads**, so every case
+first re-adds it through that revision's own first downgrade step
+(``readd_the_default_amount_columns``), nullable and empty, and each fixture
+states its definition's copy there by SQL, the model no longer mapping it.  The
+revision's WHOLE downgrade cannot serve: it restores each copy from the series,
+which is what this backfill builds.
+
 The end-to-end proof is separate and was run against a **production clone**: 44
 eligible templates yielded 47 versions, and the resolver reproduced the stored
 amount of all **625** minable rows with **0** mismatches (see the step's commit
@@ -39,6 +46,7 @@ from app import ref_cache
 from app.enums import StatusEnum
 from app.extensions import db as _db
 from app.models.loan_payment_settings import LoanPaymentSettings
+from app.models.amount_ownership import AmountOwnership
 from app.models.ref import TransactionType
 from app.models.scenario import Scenario
 from app.models.transaction_template import TransactionTemplate
@@ -51,7 +59,9 @@ from tests._test_helpers import (
     make_every_period_rule,
     make_salary_profile,
 )
-from app.models.amount_ownership import AmountOwnership
+from tests.test_models._default_amount_drop import (
+    readd_the_default_amount_columns,
+)
 
 
 _MIGRATION = load_migration_module(
@@ -60,6 +70,32 @@ _MIGRATION = load_migration_module(
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _the_copy_column_is_back(db):
+    """Re-add both templates' ``default_amount``, nullable and empty, for every case.
+
+    Before the case's fixtures, so they need not hold off the DDL's lock: an
+    ORM insert leaves the column ``NULL`` until :func:`_state_copy` fills it.
+    """
+    readd_the_default_amount_columns(db.session)
+
+
+def _state_copy(template, table, amount):
+    """Store *amount* as *template*'s ``default_amount`` copy, the backfill's input.
+
+    By SQL, because the model on this tree does not map the column.
+
+    Args:
+        template: The flushed transaction or transfer template.
+        table: ``transaction_templates`` or ``transfer_templates``.
+        amount: The copy, as a string.
+    """
+    _db.session.execute(_db.text(
+        f"UPDATE budget.{table} SET default_amount = :a WHERE id = :t"
+    ), {"a": Decimal(amount), "t": template.id})
+    _db.session.flush()
 
 
 def _run_backfill():
@@ -77,12 +113,12 @@ def _versions(template, column="transaction_template_id"):
     return [(row.effective_date, row.amount) for row in rows]
 
 def _template(seed_user, name="Geico", amount="165.30"):
-    """Create a plain recurring-expense template (no series yet).
+    """Create a plain recurring-expense template (no series yet) copying *amount*.
 
     It carries the every-paycheck cadence the engine needs to write its rows
-    (:func:`_row`) and NO price series: the series is what the backfill under
-    test must find EMPTY and then build, so the shared priced builders are
-    the wrong fixture here.
+    (:func:`_row`), its ``default_amount`` copy (:func:`_state_copy`) and NO
+    price series: the series is what the backfill under test must find EMPTY
+    and then build, so the shared priced builders are the wrong fixture here.
     """
     expense = _db.session.query(TransactionType).filter_by(name="Expense").one()
     template = TransactionTemplate(
@@ -91,10 +127,10 @@ def _template(seed_user, name="Geico", amount="165.30"):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name=name,
-        default_amount=Decimal(amount),
     )
     _db.session.add(template)
     _db.session.flush()
+    _state_copy(template, "transaction_templates", amount)
     make_every_period_rule(_db.session, template)
     return template
 
@@ -127,20 +163,21 @@ def _row(  # pylint: disable=too-many-arguments
 
 
 def _transfer_template(seed_user, savings, name, amount):
-    """Create a plain recurring transfer template (no series yet).
+    """Create a plain recurring transfer template (no series yet) copying *amount*.
 
     :func:`_template`'s twin: the every-paycheck cadence the transfer engine
-    needs (:func:`_transfer_row`) and NO price series, for the same reason.
+    needs (:func:`_transfer_row`), its copy and NO price series, for the same
+    reason.
     """
     template = TransferTemplate(
         user_id=seed_user["user"].id,
         from_account_id=seed_user["account"].id,
         to_account_id=savings.id,
         name=name,
-        default_amount=Decimal(amount),
     )
     _db.session.add(template)
     _db.session.flush()
+    _state_copy(template, "transfer_templates", amount)
     make_every_period_rule(_db.session, template)
     return template
 
@@ -349,13 +386,13 @@ class TestEligibility:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Mortgage",
-                default_amount=Decimal("1910.95"),
             )
             template.settings = LoanPaymentSettings(
                 derive_from_loan=True, extra_principal=Decimal("0.00"),
             )
             db.session.add(template)
             db.session.flush()
+            _state_copy(template, "transfer_templates", "1910.95")
 
             _run_backfill()
 
@@ -376,13 +413,13 @@ class TestEligibility:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Van Payment",
-                default_amount=Decimal("531.94"),
             )
             template.settings = LoanPaymentSettings(
                 derive_from_loan=False, extra_principal=Decimal("0.00"),
             )
             db.session.add(template)
             db.session.flush()
+            _state_copy(template, "transfer_templates", "531.94")
             _stamp(template, "transfer_templates",
                    created=date(2026, 4, 22), updated=date(2026, 4, 22))
 

@@ -92,7 +92,6 @@ def _create_profile(seed_user):
         category_id=cat.id,
         transaction_type_id=income_type.id,
         name="Day Job",
-        default_amount=Decimal("75000.00") / 26,
         is_active=True,
     )
     db.session.add(template)

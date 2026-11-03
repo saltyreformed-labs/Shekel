@@ -67,7 +67,6 @@ class TestTransferRegeneration:
             assert len(old_ids) == 10
 
             # Change the template amount.
-            template.default_amount = Decimal("200.00")
             state_template_price(template, Decimal("200.00"))
             db.session.flush()
 
@@ -165,7 +164,6 @@ class TestTransferRegeneration:
             )
             db.session.flush()
 
-            template.default_amount = Decimal("200.00")
             state_template_price(template, Decimal("200.00"))
             db.session.flush()
 
@@ -244,7 +242,6 @@ class TestTransferRegeneration:
             db.session.flush()
 
             # Change template amount and regenerate.
-            template.default_amount = Decimal("200.00")
             state_template_price(template, Decimal("200.00"))
             db.session.flush()
 
@@ -283,11 +280,10 @@ class TestRegenerateDeletionRoutedThroughService:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Commit 34 Transfer",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence,

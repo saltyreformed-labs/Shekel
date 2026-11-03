@@ -1180,7 +1180,7 @@ class TestAnUpdateMayNotInvertTheWindow:
 
             outcome = resolve_recurrence_rule_for_update(
                 self._template_with(rule, seed_user["user"].id),
-                {"default_amount": Decimal("10.00")},
+                {"amount": Decimal("10.00")},
                 ctx=self._ctx(None),
                 pass_ctx=BalanceContext.build(seed_user["user"].id),
             )

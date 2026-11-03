@@ -122,13 +122,14 @@ from app.services.balance_at import BalanceContext
 from app.routes.grid._items import build_amount_maps
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import parent_of
+from tests._definition_price import newest_price
 
 
 # The definition's price history, and the row dates that select from it.  TWO
 # versions rather than one, deliberately: a single-version series answers the
 # same figure on every day, so a test built on one cannot tell a resolver that
 # reads DATES from one that ignores them -- nor the series from the
-# ``default_amount`` scalar it replaced, which ``set_amount`` keeps equal to the
+# ``default_amount`` scalar it replaced, which ``set_amount`` kept equal to the
 # NEWEST version.  Production has exactly one multi-version template of each
 # kind, which is why this discrimination lives here rather than in the oracle.
 _OLD_PRICE = Decimal("178.00")
@@ -222,7 +223,6 @@ def _priced_template(
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(txn_type),
         name=name,
-        default_amount=_OLD_PRICE,
     )
     db.session.add(template)
     db.session.flush()
@@ -252,7 +252,6 @@ def _seriesless_template(seed_user, name="Never Stated"):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=Decimal("42.00"),
     )
     db.session.add(template)
     db.session.flush()
@@ -341,7 +340,6 @@ def _generated_transfer(
         from_account_id=seed_user["account"].id,
         to_account_id=to_account.id,
         name="Money Market Contribution",
-        default_amount=series,
     )
     db.session.add(template)
     db.session.flush()
@@ -799,13 +797,13 @@ class TestWhatEachRuleAnswers:
         Due 2026-01-02 -- its paycheck's start -- falls between the 2026-01-01
         version (``$178.00``) and the 2026-03-01 one (``$165.30``), so the
         answer is the older price -- which
-        is also the answer the ``default_amount`` scalar CANNOT give, since
-        ``set_amount`` keeps that column at the newest stated figure.
+        is also the answer the ``default_amount`` scalar COULD NOT give, since
+        ``set_amount`` kept that column at the newest stated figure.
         """
         template = _priced_template(seed_user)
         txn = _template_row(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         assert _PRICE_ROSE_ON <= txn.due_date < _PRICE_FELL_ON
-        assert template.default_amount == _NEW_PRICE
+        assert newest_price(template) == _NEW_PRICE
         assert _resolve(seed_user, txn) == _OLD_PRICE
 
     def test_a_later_row_of_the_same_template_answers_the_later_price(
@@ -1109,7 +1107,7 @@ class TestEveryRefusalFires:
     def test_a_template_row_whose_series_is_empty_is_refused(
         self, app, db, seed_user, seed_periods,
     ):
-        """Nobody ever stated a price, so ``default_amount`` is not an answer.
+        """Nobody ever stated a price, so no scalar copy is an answer.
 
         The scalar carries no time dimension, which is why the refusal is a
         refusal: reading it would price a February row at whatever the template
@@ -1169,7 +1167,6 @@ class TestEveryRefusalFires:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Unstated Contribution",
-            default_amount=Decimal("250.00"),
         )
         db.session.add(template)
         db.session.flush()
@@ -1444,7 +1441,6 @@ class TestTheDefinitionPriceIsTheRowsOwnRule:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Never Stated",
-            default_amount=Decimal("42.00"),
         )
         db.session.add(template)
         db.session.flush()

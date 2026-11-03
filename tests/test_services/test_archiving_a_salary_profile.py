@@ -8,8 +8,8 @@ that computed it moved nothing.  A declared row is priced by its DEFINITION, and
 once no ACTIVE profile names that definition the salary-linked refinement stops
 applying -- amount rule 3 answers instead, from the single price version
 ``routes/salary/profiles.delete_profile`` opens the template's series at.  That
-version is the ``default_amount`` scalar, which
-``template_amount_service.is_salary_linked_template`` documents as *vestigial*
+version was the ``default_amount`` scalar until plan step X-bp, which
+``template_amount_service.is_salary_linked_template`` documented as *vestigial*
 for exactly this kind of template, and a scalar cannot express a paycheck.
 
 Measured on the 2026-09-02 production clone WITHOUT the freeze: 50 of 59 rows
@@ -48,7 +48,10 @@ from tests._test_helpers import (
     make_every_period_rule,
     start_test_pay_list,
 )
+from app.models.salary_pay_entry import SalaryPayEntry
 from app.services import salary_profile_service, status_seam, template_amount_service
+from app.services.balance_at import BalanceContext
+from app.services.obligations_aggregator import todays_price
 from app.services.cash_ledger import (
     derived_amount_basis,
     amounts_by_key,
@@ -56,7 +59,8 @@ from app.services.cash_ledger import (
 )
 from app.utils.dates import display_today
 
-#: The vestigial scalar the archive states as the template's price.  Chosen far
+#: The price the wrong order states as the template's, standing in for the
+#: ``default_amount`` scalar the archive stated until plan step X-bp.  Chosen far
 #: from any paycheck this profile computes so a frozen figure and a fallen-back
 #: one are never the same number by accident -- which is what makes every
 #: assertion below able to fail.
@@ -82,7 +86,6 @@ def _salary_profile(seed_user):
         category_id=next(iter(seed_user["categories"].values())).id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
         name="Paycheck",
-        default_amount=_VESTIGIAL,
     )
     db.session.add(template)
     db.session.flush()
@@ -255,7 +258,7 @@ class TestArchivingFreezesWhatItWasPricing:
             assert between.estimated_amount is None
 
             template_amount_service.set_amount(
-                template, template.default_amount,
+                template, _VESTIGIAL,
                 effective_on=display_today(),
             )
             db.session.flush()
@@ -521,3 +524,66 @@ class TestTheArchiveRouteFreezes:
                 db.session.refresh(row)
                 assert row.estimated_amount == before[row.id]
                 assert row.estimated_amount > _VESTIGIAL
+
+
+class TestTheArchiveOpensTheSeriesAtTodaysPaycheck:
+    """The template's price history opens at TODAY's paycheck (plan step X-bp).
+
+    An edge case decided under R-BAL207.  Archiving makes the template own
+    its amount, so the door opens its series at one price, which every row
+    generated after the archive reads and the Recurring and savings pages
+    show.  That price was the stored ``default_amount`` until X-bp: the
+    paycheck as of the last salary save, which a pay change dated since
+    then is missing from.  It is today's paycheck, priced while the profile
+    still prices it, the figure those pages already show for it
+    (``obligations_aggregator.todays_price``), so the archive moves no
+    figure there.
+    """
+
+    def test_a_raise_dated_since_the_last_save_is_in_the_opening_price(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):  # pylint: disable=unused-argument
+        """$4,000.00 a paycheck, then $4,400.00 from today's payday: the series opens at the second.
+
+        The archive opened at the template's ``default_amount`` copy, today's
+        paycheck as the last salary save priced it, until plan step X-bp
+        dropped the column; the raise is a second pay entry planted on the
+        payday of the period holding today (no door records one yet, plan
+        step salary:X-av-3b), so its date has passed and no save re-priced
+        what the last save priced.  Both nets are the engine's, read through a pass built at
+        each moment, and the raise must move today's paycheck or nothing is
+        graded.
+        """
+        with app.app_context():
+            user_id = seed_user["user"].id
+            profile, template = _salary_profile(seed_user)
+            today = display_today()
+            todays_period = BalanceContext.build(
+                user_id, as_of=today,
+            ).calendar().period_containing(today)
+            last_saved = BalanceContext.build(user_id, as_of=today).paychecks(
+            ).for_profile(profile).at(todays_period).earnings.net_pay
+            profile.pay_entries.append(SalaryPayEntry(
+                payday=todays_period.start_date, amount=Decimal("4400.00"),
+            ))
+            db.session.commit()
+            before = BalanceContext.build(user_id, as_of=today)
+            paycheck = before.paychecks().for_profile(profile).at(
+                todays_period,
+            ).earnings.net_pay
+            assert paycheck > last_saved, "the raise must reach today's paycheck"
+            shown = todays_price(template, before).amount
+            assert shown == paycheck
+
+            assert _archive(auth_client, profile).status_code == 200
+
+            db.session.expire_all()
+            template = db.session.get(TransactionTemplate, template.id)
+            assert template_amount_service.owns_its_amount(template)
+            assert template_amount_service.series_image(template) == (
+                (today, paycheck),
+            )
+            assert todays_price(
+                template, BalanceContext.build(user_id, as_of=today),
+            ).amount == shown, "the archive moved the Recurring page's figure"
+

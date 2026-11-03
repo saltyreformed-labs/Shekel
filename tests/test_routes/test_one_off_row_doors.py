@@ -74,6 +74,7 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.test_routes._statement_forms import form_fields
+from tests._definition_price import newest_price
 
 
 def _one_off(seed_user, seed_periods_today):
@@ -834,7 +835,7 @@ class TestTheOverrideFlip:
             assert [(v.effective_date, v.amount) for v in versions] == [
                 (row.due_date, Decimal("170.00")),
             ]
-            assert row.template.default_amount == Decimal("170.00")
+            assert newest_price(row.template) == Decimal("170.00")
 
 
 class TestTheRestate:
@@ -897,7 +898,7 @@ class TestTheRestate:
             db.session.commit()
             assert row.amount_source_id is None
             assert resolved_amount(row) == Decimal("170.00")
-            assert resolved_amount(row) != row.template.default_amount
+            assert resolved_amount(row) != newest_price(row.template)
 
             resp = _submit(auth_client, row, estimated_amount="180.00")
             assert resp.status_code == 200, resp.data
@@ -905,7 +906,7 @@ class TestTheRestate:
             assert row.estimated_amount is None
             assert row.is_override is False
             assert resolved_amount(row) == Decimal("180.00")
-            assert row.template.default_amount == Decimal("180.00")
+            assert newest_price(row.template) == Decimal("180.00")
             assert len(amount_versions(row.template)) == 1
 
     def test_a_residue_row_re_priced_and_re_categorised_in_one_save_heals_whole(
@@ -975,7 +976,7 @@ class TestTheRestate:
             assert sibling.is_override is True
             assert resolved_amount(sibling) == Decimal("100.00")
             assert resolved_amount(row) == Decimal("0.00")
-            assert row.template.default_amount == Decimal("0.00")
+            assert newest_price(row.template) == Decimal("0.00")
             assert len(amount_versions(row.template)) == 1
 
     def test_a_recurring_rows_typed_figure_still_detaches_it(
@@ -992,7 +993,7 @@ class TestTheRestate:
             assert str(recurring.estimated_amount) == "120.00"
             assert recurring.amount_source_id is None
             assert recurring.is_override is True
-            assert recurring.template.default_amount == Decimal("100.00")
+            assert newest_price(recurring.template) == Decimal("100.00")
 
 
 class TestTheDefinitionsCounterGuardsTheCard:

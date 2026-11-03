@@ -35,10 +35,19 @@ The shared filter applied here, in one place, by every consumer:
      where the cached column agrees with the derived stop on whether the
      payment has ended on the day asked, which is what both live loans do
      on the dev database today.
-  3. Skip if what one occurrence commits is ``None`` or ``0`` -- nothing to
-     contribute.  That is the stored ``default_amount``, except for a salary
-     profile's definition, whose occurrence is its priced paycheck's net
-     (ruling **R-SAL71**, plan step salary:X-av-2).
+  3. Skip if what one occurrence commits is ``0`` -- nothing to contribute.
+     That is the definition's price on the read pass's day, by the rule that
+     prices its rows (:func:`todays_price`, ruling plan#2693, plan step
+     **X-bp**): a salary profile's definition, its priced paycheck's net
+     (ruling **R-SAL71**, plan step salary:X-av-2); a loan payment, amount
+     rule 4 in either mode, its standing extra included; any other
+     definition, rule 3, its price series as of that day.  Until X-bp every
+     definition but a salary one read the stored ``default_amount`` here,
+     which is the NEWEST stated price -- so a rise scheduled for December
+     counted in both totals from the day it was entered, and a payment that
+     tracks its loan counted whatever the contract was when it last pressed
+     Track.  **There is no ``None`` arm any more**: a definition states a
+     price or the rule refuses it, exactly as its rows would be refused.
 
 **There is no fourth rule, and its removal is plan step R7a-2b's.**  The filter
 used to end "skip if the conversion returns ``None`` -- a pattern this
@@ -96,17 +105,25 @@ one takes it.  Only a route builds one (developer ruling 2026-08-16); this
 module TAKES it.
 
 Every function here is a read: ORM template instances (or any object exposing
-the same ``recurrence_rule`` / ``default_amount`` attributes -- duck-typing
-supports the ``types.SimpleNamespace`` mock templates used in tests) and the
-pass in, Decimal results out.  No Flask imports.
+the attributes the pricing rules read -- ``recurrence_rule``, ``id``,
+``settings`` and ``amount_versions``; duck-typing supports the
+``types.SimpleNamespace`` mock templates used in tests) and the pass in,
+Decimal results out.  No Flask imports.
 """
 
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Iterable, Union
 
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import (
+    DefinitionRow,
+    definition_cash,
+    is_loan_payment_definition,
+    stated_price,
+)
 from app.services.recurrence import RuleReading, cadence_of, has_ended
 from app.services.recurring_definition import read_definition
 from app.utils.money import round_money
@@ -115,8 +132,8 @@ if TYPE_CHECKING:  # pragma: no cover -- annotations only
     from app.services.pay_calendar import PayCadence
     from app.services.paycheck_calculator import PaycheckBreakdown
 
-# Either ORM template class exposes ``recurrence_rule`` and
-# ``default_amount`` -- the aggregator reads them via attribute
+# Either ORM template class exposes ``recurrence_rule`` and the attributes
+# its price is read through -- the aggregator reads them via attribute
 # access. Test fixtures that build ``types.SimpleNamespace`` mock
 # templates rely on the same duck-typed contract; the static type
 # hint names the two production classes for IDE / pylint
@@ -149,35 +166,170 @@ def template_rule(template: RecurringTemplate):
     return getattr(template, "recurrence_rule", None)
 
 
-def _committed_amount(template: RecurringTemplate) -> Decimal | None:
-    """Return what *template* commits per occurrence, or ``None``.
+@dataclass(frozen=True)
+class TodaysPrice:
+    """What one occurrence of a definition commits on the read pass's day.
 
-    Filter steps 1 and 3 -- the two that need neither a schedule nor a walk: a
-    definition that does not repeat commits nothing, and so does one with a
-    missing or zero amount.  Held apart from step 2 so both entry points can
-    ask them BEFORE the door is read: step 2 resolves the definition against
-    the owner's schedule, folds its destination and walks its occurrences,
-    which is real work to reach the same ``None`` a zero amount reaches for
-    free.  The three are independent skips, so their order is ours to choose,
-    and this order was plan step R7b-3's for the same reason.
+    The value :func:`todays_price` answers (ruling plan#2693, plan step
+    **X-bp**).  The Recurring page's Amount column and the Archived drawer
+    read :attr:`amount`; a monthly equivalent converts it at
+    :meth:`pay_cadence`.  A value rather than a bare ``Decimal`` because the
+    Recurring page asks two questions of one price -- the row's Amount and
+    its monthly figure -- and pricing twice would run rule 4's derivation or
+    walk the price series twice for one answer.
+
+    Attributes:
+        amount: The price.  Always a ``Decimal``: a definition states one or
+            the rule that prices its rows refuses (:func:`todays_price`).
+        paycheck_cadence: The rhythm the paycheck engine priced *amount* at,
+            for a salary profile's definition
+            (:attr:`~app.services.paycheck_calculator.PeriodInfo.cadence`,
+            ruling **R-SAL71**); ``None`` for every other definition, which
+            converts at the owner's latest rhythm (:meth:`pay_cadence`).
+    """
+
+    amount: Decimal
+    paycheck_cadence: "PayCadence | None"
+
+    @property
+    def commits_nothing(self) -> bool:
+        """Filter step 3: a zero price contributes nothing to a monthly total."""
+        return self.amount == 0
+
+    def pay_cadence(self, ctx: BalanceContext) -> "PayCadence":
+        """The rhythm a monthly equivalent of this price converts at.
+
+        A salary definition's paycheck converts at the rhythm the engine
+        priced it at (ruling **R-SAL71**); every other definition at the
+        owner's latest, the forward-looking count a recurring bill is paid at.
+        Read here, over the pass, rather than filled in when the price is
+        read, because only a MONTHLY figure needs it: the Archived drawer
+        reads the price and converts nothing, and must not read a cadence
+        (``test_recurring_view.TestAnAbsentCadenceIsRefused``).
+
+        Args:
+            ctx: The read pass the price was read in.
+
+        Returns:
+            The :class:`~app.services.pay_calendar.PayCadence`.
+        """
+        if self.paycheck_cadence is not None:
+            return self.paycheck_cadence
+        return ctx.calendar().cadence
+
+
+def todays_price(
+    template: RecurringTemplate, ctx: BalanceContext,
+) -> TodaysPrice:
+    """Return what one occurrence of *template* commits on the read pass's day.
+
+    **The ONE producer of a definition's figure on the Recurring and savings
+    pages** (ruling plan#2693, plan step **X-bp**): the Recurring page's
+    Amount and monthly columns, the Archived drawer's Amount, the
+    emergency-fund floor and each goal's monthly contribution all read it.
+    It prices the definition on ``ctx.as_of`` by THE RULE THAT PRICES ITS
+    ROWS, so a definition's figure and its rows cannot part:
+
+    * a salary profile's definition: today's paycheck
+      (:func:`_todays_paycheck`, rulings **R-SAL71** and **R-SAL79**);
+    * a loan payment: amount rule 4 in either mode, through
+      :func:`~app.services.cash_ledger.definition_cash` -- the contract for a
+      payment that tracks its loan, the stated series otherwise, and the
+      standing extra in both, because that is what leaves checking;
+    * any other definition: rule 3, its price series as of the day.
+
+    **Not the newest stated price**, which is what the stored
+    ``default_amount`` held and what every one of these figures but a salary
+    definition's read until X-bp.  A $15.49 subscription with $17.99 entered
+    from Dec 1 counted $17.99 a month on both pages from the day the rise was
+    entered, while the grid rightly kept $15.49 until December; read here it
+    is $15.49 until Dec 1 and $17.99 from then.  A payment that tracks its
+    loan follows the contract, where the column held the contract as it was
+    when the payment was created or last tracked.
+
+    **A loan payment is priced on the installment today pays**: the
+    occurrence is dated on the pass's day, so rule 4 prices the latest
+    installment due on or before it (ruling **R-R104**).  ``period_start``
+    is :class:`~app.services.cash_ledger.DefinitionRow`'s fallback for a row
+    with no due date and is never read when one is given, so the pass's day
+    stands there too.  The loan page's payment strip prices the NEXT payment,
+    a different question on a different date (``routes/loan/dashboard``).
 
     Args:
-        template: A ``TransactionTemplate`` or ``TransferTemplate`` (or any
-            object exposing ``recurrence_rule`` and ``default_amount``).
+        template: The definition, of either kind.  **Must belong to
+            ``ctx.user_id``**: the caller owns the ownership check.
+        ctx: The read pass: its day; its pricer and calendar for a salary
+            definition; its amount basis for a loan payment.
 
     Returns:
-        The committed amount as a ``Decimal``, or ``None`` when the definition
-        does not repeat or states no positive amount.
+        The :class:`TodaysPrice`.
+
+    Raises:
+        AmountUnresolvable: The rule that prices the definition's rows has no
+            answer -- an empty series on a definition that owns its price, a
+            derive-mode payment whose loan will not resolve, a salary
+            definition no paycheck prices -- exactly where its rows would be
+            refused.  There is no stored copy to fall back to, and no reader
+            ever should have.
+        BaselineMissingError: A loan payment priced for an owner with no
+            baseline scenario (ruling **R-R30**); every other definition is
+            priced without one.
+        UnsupportedStateError: A salary profile in a state the tax law does
+            not list, from the pricer (plan step salary:X-at-3).
     """
-    if template_rule(template) is None:
-        return None
-    amount = template.default_amount
-    if amount is None:
-        return None
-    amount = Decimal(str(amount))
-    if amount == 0:
-        return None
-    return amount
+    paycheck = _todays_paycheck(template, ctx)
+    if paycheck is not None:
+        return TodaysPrice(
+            amount=paycheck.earnings.net_pay,
+            paycheck_cadence=paycheck.period.cadence,
+        )
+    return TodaysPrice(
+        amount=_definition_price(template, ctx), paycheck_cadence=None,
+    )
+
+
+def _definition_price(
+    template: RecurringTemplate, ctx: BalanceContext,
+) -> Decimal:
+    """Rule 4 or rule 3 on the pass's day, for a definition no paycheck prices.
+
+    The two arms :func:`~app.services.cash_ledger.definition_cash` decides
+    between for a row, decided by the same predicate
+    (:func:`~app.services.cash_ledger.is_loan_payment_definition`).  The
+    predicate is asked HERE only to hand a basis to the one arm that needs
+    it: rule 4 reads the loan through the pass's amount basis, building that
+    refuses an owner with no baseline scenario, and ruling **R-R30** allows
+    the refusal only for a definition that pays into a loan.  Rule 3 needs no
+    basis (:func:`~app.services.cash_ledger.stated_price`), so every other
+    definition is still priced for such an owner.
+
+    Args:
+        template: The definition, of either kind.
+        ctx: The read pass.
+
+    Returns:
+        The price on ``ctx.as_of``.
+
+    Raises:
+        AmountUnresolvable: See :func:`todays_price`.
+        BaselineMissingError: See :func:`todays_price`.
+    """
+    subject = (
+        f"{type(template).__name__} {template.id}'s price on "
+        f"{ctx.as_of.isoformat()}"
+    )
+    if is_loan_payment_definition(template):
+        return definition_cash(
+            DefinitionRow(
+                template=template,
+                due_date=ctx.as_of,
+                period_start=ctx.as_of,
+                to_account_id=template.to_account_id,
+            ),
+            ctx.amounts(),
+            subject=subject,
+        )
+    return stated_price(template, ctx.as_of, subject=subject)
 
 
 def _todays_paycheck(
@@ -186,9 +338,10 @@ def _todays_paycheck(
     """TODAY's paycheck when *template* is an active salary profile's, else ``None``.
 
     Ruling **R-SAL71** (plan step salary:X-av-2): a salary definition's
-    ``default_amount`` is a STORED copy of a paycheck the engine priced when
-    the salary was last saved, which records neither which payday it was nor
-    the rhythm that payday was paid at -- so a reader converting it to a
+    ``default_amount`` was a STORED copy of a paycheck the engine priced when
+    the salary was last saved (until plan step X-bp dropped it), which
+    recorded neither which payday it was nor the rhythm that payday was paid
+    at -- so a reader converting it to a
     month has to guess the count, and guessed the LATEST era's.  That was
     right only while the engine divided every payday by that count too.  The
     definition's figure is read from the pricer instead: the pass's
@@ -199,44 +352,47 @@ def _todays_paycheck(
     ``span_containing`` rather than the saved ``period_containing``: it IS
     the savings page's current period wherever the saved schedule covers the
     day, and past the horizon it keeps answering with the projected paycheck,
-    so the row never falls back to the copy there.  **Before the first
+    so the row there is priced at that day's paycheck.  **Before the first
     SAVED payday** (the calendar's ``opening_bound``) **it prices that first
     saved paycheck** (ruling **R-SAL79**): there is no paycheck today to
-    price, and the copy is exactly the figure the ruling retires -- one a
-    salary EDIT made in that window leaves at GROSS pay, because the edit
-    door writes the gross and ``salary_regeneration`` restates the net only
-    once a saved period contains the day.  For an owner who has stated
+    price, and the copy was exactly the figure the ruling retired -- one a
+    salary EDIT made in that window left at GROSS pay when the ruling was
+    made, because the edit door wrote the gross and ``salary_regeneration``
+    re-stated the net only once a saved period contained the day (the gross
+    write went at plan step salary:X-av-3a, the re-statement at X-bp).  For
+    an owner who has stated
     ``history_opens_on`` the backward rhythm may hold earlier paydays, but
     those are counts and never periods, so the first saved paycheck is the
     next one priceable.  The savings page shows no current pay in that
     window; this row shows that paycheck.
 
-    ``None`` -- the definition keeps its stored amount -- for every
-    definition no active profile drives in the pass's scenario, which is
-    every definition but a salary one, and for a transfer or a duck-typed
-    test template (the module docstring's contract).  Two further branches
-    answer ``None`` for a salary definition, and neither is a state the
-    application produces: a pass with NO baseline scenario
-    (``BaselineMissingError``'s docstring: every owner is registered with
-    one and nothing deletes it), where no profile is in scope; and a
-    calendar holding NO saved payday, where for a salary definition the
-    guard only keeps ``periods[0]``'s ``IndexError`` from pre-empting the
-    Recurring page's own refusal of that owner, which comes AFTER this read:
-    :func:`~app.services.recurring_view.described` refuses the section's
-    first repeating row, whichever row that is.  For every OTHER transaction
-    template the same guard carries weight, because it is asked before the
-    pricer says the template is no salary one: it is what lets
+    ``None`` -- the definition is priced by its own rule instead
+    (:func:`_definition_price`) -- for every definition no active profile
+    drives in the pass's scenario, which is every definition but a salary
+    one, and for a transfer or a duck-typed test template (the module
+    docstring's contract).  Two further branches answer ``None`` for a
+    salary definition, and neither is a state the application produces: a
+    pass with NO baseline scenario (``BaselineMissingError``'s docstring:
+    every owner is registered with one and nothing deletes it), where no
+    profile is in scope; and a calendar holding NO saved payday.  **Both
+    REFUSE one tier down since plan step X-bp**, where they showed the
+    stored copy until then: rule 3 refuses a definition whose amount is
+    derived (``cash_ledger.stated_price``), which is the refusal its rows
+    would raise, and there is no copy left to show.  For every OTHER
+    transaction template the guards carry weight, because they are asked
+    before the pricer says the template is no salary one: they are what lets
     :func:`committed_monthly` answer the ``/savings`` floor for such an
     owner, as ``recurrence.has_ended`` intends, and lets a page of rule-less
-    rows render.  **The one place the page
-    still shows a salary definition's stored copy** is the Archived drawer,
-    for a salary template archived while its profile stays active: two doors
-    allow that state -- the archive door, and the hard-delete door's archive
-    fallback for a template with settled history or a standing merchant
-    rule -- and ruling **R-SAL81**
-    makes the door the defect to fix rather than the drawer: finding
-    **SAL-579**, owned by plan step salary:S13, which refuses the archive or
-    archives the profile with it so the state cannot arise.
+    rows render.  **The Archived drawer reads this too since plan step
+    X-bp** (:func:`todays_price`), so a salary template archived while its
+    profile stays active shows today's paycheck there rather than the stored
+    copy, which was the one place the page still showed it.  The state
+    itself is still a defect: two doors allow it -- the archive door, and
+    the hard-delete door's archive fallback for a template with settled
+    history or a standing merchant rule -- and ruling **R-SAL81** makes the
+    door the defect to fix rather than the drawer: finding **SAL-579**,
+    owned by plan step salary:S13, which refuses the archive or archives the
+    profile with it so the state cannot arise.
 
     Args:
         template: The recurring definition.
@@ -261,72 +417,13 @@ def _todays_paycheck(
     return basis.salary.paycheck_on(template.id, today)
 
 
-def _commitment(
-    template: RecurringTemplate, ctx: BalanceContext,
-) -> "tuple[Decimal, PayCadence] | None":
-    """What one occurrence of *template* commits and the rhythm it converts at.
-
-    The pair a monthly equivalent is computed from, answered ONCE for both
-    kinds of definition (ruling **R-SAL71**): a salary profile's definition
-    commits today's priced paycheck at the rhythm the engine priced it at
-    (:attr:`~app.services.paycheck_calculator.PeriodInfo.cadence`); every
-    other definition its stored amount at the owner's latest rhythm, which
-    is the forward-looking count a recurring bill is paid at.  ``None`` when
-    the definition does not repeat or commits nothing -- a salary one by its
-    priced net, so the stored copy decides nothing about it in any state the
-    application produces (:func:`_todays_paycheck`).
-
-    Args:
-        template: The recurring definition.
-        ctx: The read pass.
-
-    Returns:
-        ``(amount, pay cadence)``, or ``None``.
-    """
-    if template_rule(template) is None:
-        return None
-    paycheck = _todays_paycheck(template, ctx)
-    if paycheck is not None:
-        net = paycheck.earnings.net_pay
-        return None if net == 0 else (net, paycheck.period.cadence)
-    amount = _committed_amount(template)
-    return None if amount is None else (amount, ctx.calendar().cadence)
-
-
-def occurrence_amount(
-    template: RecurringTemplate, ctx: BalanceContext,
-) -> Decimal | None:
-    """Return what one occurrence of *template* commits, as the read pass prices it.
-
-    The Recurring surface's Amount column (ruling **R-SAL73**): a salary
-    profile's definition shows TODAY's priced paycheck, or before the first
-    saved payday that first paycheck (**R-SAL79**) -- not the stored copy,
-    which goes stale when a raise date passes until the salary is next
-    saved (:func:`_todays_paycheck` names the one place the page still shows
-    it: the Archived drawer) -- and every other definition its stored
-    amount.  The same
-    :func:`_todays_paycheck` its monthly figure is converted from, so the row
-    cannot show one paycheck and total another; the pricer memoizes the
-    paycheck by payday, so asking twice prices once.
-
-    Args:
-        template: The recurring definition.
-        ctx: The read pass.
-
-    Returns:
-        The amount, or ``None`` when the definition states none.
-    """
-    paycheck = _todays_paycheck(template, ctx)
-    if paycheck is not None:
-        return paycheck.earnings.net_pay
-    amount = getattr(template, "default_amount", None)
-    return None if amount is None else Decimal(str(amount))
-
-
 def monthly_or_none(
-    template: RecurringTemplate, reading: RuleReading, ctx: BalanceContext,
+    template: RecurringTemplate,
+    reading: RuleReading,
+    price: TodaysPrice,
+    ctx: BalanceContext,
 ) -> Decimal | None:
-    """Return the monthly equivalent of a definition already READ, or ``None``.
+    """Return the monthly equivalent of a definition already READ and PRICED, or ``None``.
 
     The layer under :func:`template_monthly_or_none` for a caller that has
     already read the definition through the composed door and holds the
@@ -335,13 +432,17 @@ def monthly_or_none(
     that same reading rather than a second resolution of the rule
     (``CLAUDE.md`` rule 14, ONE WALK -- and the second resolution this deletes
     is the one ``test_a_loan_payment_is_RESOLVED_exactly_once_per_build`` had
-    to scope itself around).
+    to scope itself around).  **It takes the PRICE for the same reason since
+    plan step X-bp**: that surface shows the price in the row's Amount column
+    too, and the price is now a derivation (:func:`todays_price`) rather than
+    a column read, so the caller prices once and hands it here.
 
-    Applies the shared filter (no rule -- which is how a definition says it
-    does not repeat -- expired, missing/zero amount).  The returned Decimal is
-    NOT quantized -- callers that aggregate first then round
-    (``committed_monthly``) need full precision; callers that display a per-row
-    value round at the display boundary with ``round_money``.
+    Applies filter steps 2 and 3 (expired, zero price).  Step 1 -- no rule,
+    which is how a definition says it does not repeat -- is the caller's: a
+    definition with no rule has no *reading* to hand in.  The returned
+    Decimal is NOT quantized -- callers that aggregate first then round
+    (``committed_monthly``) need full precision; callers that display a
+    per-row value round at the display boundary with ``round_money``.
 
     **The conversion is one expression**, and the same one for every cadence:
     an amount times how often it happens in a year, over twelve.  Plan step
@@ -352,9 +453,9 @@ def monthly_or_none(
 
     Args:
         template: A ``TransactionTemplate`` or ``TransferTemplate`` ORM
-            instance (or any object exposing ``recurrence_rule`` and
-            ``default_amount``).  The recurrence rule is read via attribute
-            access; loading is the caller's responsibility
+            instance (or any object exposing ``recurrence_rule``) that
+            repeats.  The recurrence rule is read via attribute access;
+            loading is the caller's responsibility
             (``joinedload(.recurrence_rule)`` in the production routes).
         reading: *template* read through
             :func:`app.services.recurring_definition.read_definition` against
@@ -362,19 +463,21 @@ def monthly_or_none(
             allows, and every occurrence that names.  The expired filter reads
             the composed closing off it and judges it against the walk it
             already holds.
+        price: *template* priced on *ctx*'s day (:func:`todays_price`).
         ctx: The read pass.  Its ``as_of`` is the day the expired filter asks
             about; its ``calendar()`` supplies the cadence the conversion
             needs -- except for a salary profile's definition, converted at
-            the rhythm its paycheck was priced at (ruling **R-SAL71**).  The
-            horizon the filter needs rides on *reading* itself
-            since plan step R7d-f-2 (plan ledger row **N-514**), so the
-            schedule a definition was walked against and the one its stop is
-            judged against are one value rather than two arguments that agree.
+            the rhythm its paycheck was priced at (ruling **R-SAL71**,
+            :meth:`TodaysPrice.pay_cadence`).  The horizon the filter needs
+            rides on *reading* itself since plan step R7d-f-2 (plan ledger
+            row **N-514**), so the schedule a definition was walked against
+            and the one its stop is judged against are one value rather than
+            two arguments that agree.
 
     Returns:
         The full-precision Decimal monthly equivalent, or ``None`` if the
-        template is filtered out by any of the shared-filter rules.  ``None``
-        means "do not include this template in any monthly-equivalent total."
+        template is filtered out by either rule.  ``None`` means "do not
+        include this template in any monthly-equivalent total."
 
     Raises:
         RecurrenceResolutionError: The rule names a cadence this application
@@ -384,8 +487,7 @@ def monthly_or_none(
             this module feeds while the Recurring surface 500'd on the same
             row.
     """
-    commitment = _commitment(template, ctx)
-    if commitment is None:
+    if price.commits_nothing:
         return None
 
     rule = template_rule(template)
@@ -401,8 +503,9 @@ def monthly_or_none(
     # measurement of why neither may round twice.  The pay cadence is the one
     # the amount is paid at (ruling R-SAL71): today's paycheck's own rhythm for
     # a salary definition, the owner's latest for every other.
-    amount, pay_cadence = commitment
-    return cadence_of(rule).monthly_equivalent(amount, pay_cadence)
+    return cadence_of(rule).monthly_equivalent(
+        price.amount, price.pay_cadence(ctx),
+    )
 
 
 def template_monthly_or_none(
@@ -411,28 +514,35 @@ def template_monthly_or_none(
     """Return the monthly equivalent of one recurring template, or ``None``.
 
     :func:`monthly_or_none` for a caller that holds the template and the pass
-    but has not read the definition: this reads it through the composed door
-    (:func:`app.services.recurring_definition.read_definition`) and hands the
-    reading down.  The ``/savings`` emergency-fund floor and the per-goal
+    but has neither read nor priced the definition: this prices it
+    (:func:`todays_price`), reads it through the composed door
+    (:func:`app.services.recurring_definition.read_definition`) and hands
+    both down.  The ``/savings`` emergency-fund floor and the per-goal
     contribution floors take this entry; the Recurring surface, which has
-    already read every definition once, takes the one below it.
+    already read and priced every definition once, takes the one below it.
 
-    The two schedule-free skips are asked FIRST, here as well as there, so a
-    definition that cannot contribute costs no door read.
+    The two skips that need no walk are asked FIRST, so a definition that
+    cannot contribute costs no door read: no rule (filter step 1), then a
+    zero price (step 3).  **The zero skip comes after the PRICE since plan
+    step X-bp**, where it read the stored column before anything else: the
+    price is a derivation on the pass's day now, so it is read here once and
+    the same value is handed down.
 
     Args:
         template: A ``TransactionTemplate`` or ``TransferTemplate`` ORM
-            instance, or any object exposing ``recurrence_rule``,
-            ``default_amount`` and ``to_account_id`` -- the door's own
-            duck-typed contract (:data:`~app.services.recurrence.
-            RecurrenceOwner`).  **Must belong to ``ctx.user_id``**: the caller
-            owns the ownership check, as every seam entry this reaches states.
+            instance, or any object exposing ``recurrence_rule``, ``id``,
+            ``settings``, ``amount_versions`` and ``to_account_id`` -- the
+            door's own duck-typed contract (:data:`~app.services.recurrence.
+            RecurrenceOwner`) and the pricing rules'.  **Must belong to
+            ``ctx.user_id``**: the caller owns the ownership check, as every
+            seam entry this reaches states.
         ctx: The read pass.  See :func:`monthly_or_none`.
 
     Returns:
         See :func:`monthly_or_none`.
 
     Raises:
+        AmountUnresolvable: See :func:`todays_price`.
         RecurrenceResolutionError: See :func:`monthly_or_none`; also raised by
             the door for a rule paired with another owner's pass.
         RecurrenceGenerationError: The resolved value names something the
@@ -445,15 +555,14 @@ def template_monthly_or_none(
             a bound nothing derived.  A definition with no loan behind it
             still resolves for such an owner.
     """
-    # The pre-door skip asks the STORED amount, schedule-free.  This function's
-    # one production caller is ``committed_monthly``, whose two callers (the
-    # emergency-fund floor: expense and transfer definitions; the goal
-    # floors: transfer definitions) pass no income definition, so no salary
-    # definition's stored copy decides anything here (ruling R-SAL71); a
-    # nonzero one would be re-decided from the priced paycheck below anyway.
-    if _committed_amount(template) is None:
+    if template_rule(template) is None:
         return None
-    return monthly_or_none(template, read_definition(template, ctx), ctx)
+    price = todays_price(template, ctx)
+    if price.commits_nothing:
+        return None
+    return monthly_or_none(
+        template, read_definition(template, ctx), price, ctx,
+    )
 
 
 def committed_monthly(
@@ -462,7 +571,8 @@ def committed_monthly(
     """Sum monthly equivalents across a set of recurring templates.
 
     Routes every template through :func:`template_monthly_or_none`, which
-    applies the shared filter (no rule, expired, missing/zero amount).
+    applies the shared filter (no rule, expired, zero price on the pass's
+    day).
     Templates returning ``None`` contribute zero to the total; only non-None
     Decimals are summed.  The final result is rounded once at the boundary with
     ``round_money`` (ROUND_HALF_UP via ``app.utils.money``) -- intermediate
@@ -498,6 +608,8 @@ def committed_monthly(
             callers (the Recurring surface, the emergency-fund floor and the
             per-goal contribution floors) each publish a figure a missing row
             would silently understate.
+        AmountUnresolvable: A template's rule has no price for the pass's
+            day (:func:`todays_price`) -- refused whole for the same reason.
         RecurrenceGenerationError: See :func:`template_monthly_or_none`.
         BaselineMissingError: See :func:`template_monthly_or_none`.
     """

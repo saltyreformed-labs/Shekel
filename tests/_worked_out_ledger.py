@@ -23,18 +23,27 @@ its controls and says what it found.  Per owner and scenario, :func:`compare` re
 * **Every chart account's total** on each side.
 * **The income statement for every paycheck, month and year, and the balance sheet at every
   paycheck end**, from the store and from the lines, field by field
-  (:mod:`tests._worked_out_statements` says how a field is graded).
+  (:mod:`tests._worked_out_statements` says how a field is graded, and what its agreement does
+  NOT prove: every report byte-identical is leaf 2's proof, plan#2515).
 * **The labels** (ruling plan#2518, "statements show current names"): every stored counter
   and loan chart row whose snapshot name is not the worked-out chart's label, counted by
   cause, renamed or clipped at the column's length, as plan#2523's note asks.  Only those rows'
   statement labels can differ: a linked or category row's is already read live.
+
+**Which differences are expected, and the one place one is excused**, is
+:mod:`tests._worked_out_excuses`: an excuse is granted only where a censused stored entry of its
+kind sits, and only by that kind's rule.  **Every grain reaches the exit code**: a source cell, a
+cell, an account total or a statement field that parts beyond the excused source cells is
+UNEXPLAINED (:attr:`Outcome.unexplained`).  Only the source and statement grains can FIND one: a
+cell's or a total's remainder is the sum of its unexcused source cells, so either is UNEXPLAINED
+only where a source cell already is, and is reported for the money each one moves.
 
 It writes nothing; the run's controls plant inside a savepoint of their own.
 
 Underscore-prefixed module name keeps pytest from collecting it.
 """
 
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -64,44 +73,35 @@ from app.services.ledger_lines import (
 )
 from app.utils.balance_predicates import settled_status_ids
 from tests._ledger_parity import ledger_parity_differences, read_parity_chart
-from tests._worked_out_statements import key_text, money, report_statements
+from tests._worked_out_excuses import (
+    CORRECTION,
+    EXPECTED_KINDS,
+    MOVEMENT,
+    RESIDUE,
+    Contribution,
+    account_of,
+    cell_of,
+    classify,
+    correction_kind_ids,
+    nets,
+    paired,
+    source_cell_of,
+    take_census,
+)
+from tests._worked_out_statements import (
+    key_text,
+    mark,
+    money,
+    report_statements,
+)
 
 _ZERO = Decimal("0.00")
 # The stored chart's ``name`` column length, the clip a snapshot label takes.
 _LABEL_LIMIT = LedgerAccount.__table__.c.name.type.length
 
-# The source grains.  A movement-linked stored entry and a worked-out movement
-# line are the movement's; a correction (opening, true-up, loan payment
-# split) is its kind's, since a correction is derived and comes from no row;
-# a stored entry of a movement kind that links nothing is hard-delete residue.
-_MOVEMENT = "movement"
-_CORRECTION = "correction"
-RESIDUE = "residue"
-
-# The expected kinds of difference (the leaf's spec, "The proof", item 2).
-_EXPECTED_RESIDUE = "hard-delete residue"
-_EXPECTED_FILING = "correction filed in another paycheck"
-_EXPECTED_SKIPPED = "transfer family the cash resync skips"
-_EXPECTED_UNWALKED = "row the cash resync does not walk"
-
 
 class HarnessError(RuntimeError):
     """The run cannot grade anything; the message says why (exit 2)."""
-
-
-# One stored posting or one worked-out line, at source grain.  ``source`` is
-# ``(grain, id)``: a movement's id, or a correction's or residue's source kind
-# id.  ``key`` and ``rows`` are its chart account
-# (``tests._ledger_parity.ParityChart``): the stored row it sits on, or the
-# owner's stored row for a worked-out line's key, ``()`` for none.
-# ``attributed_on`` is the day a calendar window or a balance sheet
-# places it on (the store's reader: a movement's bank day, a correction's own
-# day; ``None`` for residue, which it drops); ``entry_id`` is the stored
-# journal entry, ``None`` for a worked-out line.
-Contribution = namedtuple(
-    "Contribution",
-    "source key rows pay_period_id entry_date amount attributed_on entry_id",
-)
 
 
 @dataclass
@@ -118,8 +118,10 @@ class Ledger:  # pylint: disable=too-many-instance-attributes
         is_baseline: Whether the scenario is the owner's baseline, the one
             the statements read.
         calendar: The owner's pay calendar.
-        stored: Every stored posting, as a :data:`Contribution`.
-        worked: Every worked-out line, as a :data:`Contribution`.
+        stored: Every stored posting, as a
+            :data:`~tests._worked_out_excuses.Contribution`.
+        worked: Every worked-out line, as a
+            :data:`~tests._worked_out_excuses.Contribution`.
         chart: The stored chart rows the owner's postings sit on, and the
             owner's whole chart, by id.
         key_of: Each of those rows' chart key, read as stored.
@@ -148,21 +150,38 @@ class Outcome:
         lines: The report's lines for this owner and scenario.
         unexplained_sources: Every source cell ``(source, key, stored rows,
             paycheck, day)`` whose difference is no expected kind.
+        unexplained_cells: Every ``(key, stored rows, paycheck, day)`` cell
+            whose two nets part beyond its excused source cells.
+        unexplained_totals: Every chart account ``(key, stored rows)`` whose
+            two totals part beyond them.
         unexplained_fields: How many statement fields part from the store
             beyond the expected differences in their window.
-        expected: Each expected kind's source-cell count.
+        expected: Each expected kind's excused source-cell count.
+        censused: Each stored entry the census holds, by id: its expected
+            kind.
     """
 
     lines: list = field(default_factory=list)
     unexplained_sources: set = field(default_factory=set)
+    unexplained_cells: set = field(default_factory=set)
+    unexplained_totals: set = field(default_factory=set)
     unexplained_fields: int = 0
     expected: dict = field(default_factory=lambda: defaultdict(int))
+    censused: dict = field(default_factory=dict)
+
+    @property
+    def unexplained(self):
+        """Return how many things are UNEXPLAINED, at every grain: any fails the run."""
+        return (
+            len(self.unexplained_sources) + len(self.unexplained_cells)
+            + len(self.unexplained_totals) + self.unexplained_fields
+        )
 
 
 def _source_text(source):
     """Return a source as a reader names it."""
     grain, ident = source
-    if grain == _MOVEMENT:
+    if grain == MOVEMENT:
         return f"movement {ident}"
     return f"{grain} {_source_kind_names()[ident]}"
 
@@ -172,36 +191,6 @@ def _source_kind_names():
     return {
         ref_cache.posting_source_id(member): member.value
         for member in PostingSourceEnum
-    }
-
-
-def _correction_kind_ids():
-    """Return the source kinds a correction is booked under.
-
-    The five the store's statement reader keeps as sourceless corrections
-    (``ledger_report_service._attribution._correction_dated_nets``).
-    """
-    return {
-        ref_cache.posting_source_id(member)
-        for member in (
-            PostingSourceEnum.LOAN_OPENING,
-            PostingSourceEnum.LOAN_TRUEUP,
-            PostingSourceEnum.LOAN_PAYMENT,
-            PostingSourceEnum.ACCOUNT_OPENING,
-            PostingSourceEnum.ACCOUNT_TRUEUP,
-        )
-    }
-
-
-def _filed_by_day_kind_ids():
-    """Return the correction kinds filed by their day on today's calendar.
-
-    Every correction but a loan payment's split, which is filed in its
-    payment's paycheck (ruling R-BAL102).  These are the kinds whose stored
-    paycheck a calendar change can leave behind (ruling plan#2519).
-    """
-    return _correction_kind_ids() - {
-        ref_cache.posting_source_id(PostingSourceEnum.LOAN_PAYMENT),
     }
 
 
@@ -234,8 +223,8 @@ def read_ledger(scenario, calendar):
         stored=_stored_contributions(posted, chart, movements),
         worked=[
             Contribution(
-                (_MOVEMENT, line.movement_id) if line.movement_id is not None
-                else (_CORRECTION, line.source_kind_id),
+                (MOVEMENT, line.movement_id) if line.movement_id is not None
+                else (CORRECTION, line.source_kind_id),
                 *chart.worked_account(line.key), line.pay_period_id,
                 line.entry_date, line.amount, line.entry_date, None,
             )
@@ -243,10 +232,7 @@ def read_ledger(scenario, calendar):
         ],
         chart=chart.rows,
         key_of=chart.key_of,
-        parent_of={
-            movement_id: parent
-            for movement_id, (_, parent) in movements.items()
-        },
+        parent_of=_parents(movements),
         walked=_walked_parents(scenario.id),
     )
 
@@ -282,7 +268,7 @@ def _postings(owner_id, scenario_id):
 
 
 def _stored_contributions(posted, chart, movements):
-    """Return each stored posting as a :data:`Contribution`.
+    """Return each stored posting as a :data:`~tests._worked_out_excuses.Contribution`.
 
     Its source is its movement when it links one, its kind when that kind
     is a correction's, and residue otherwise; its ``attributed_on`` is the
@@ -295,15 +281,15 @@ def _stored_contributions(posted, chart, movements):
             maps each leg's row by.
         movements: :func:`_movements`' map.
     """
-    correction_kinds = _correction_kind_ids()
+    correction_kinds = correction_kind_ids()
     stored = []
     for entry_id, kind, movement_id, pay_period_id, day, row_id, amount in posted:
         if movement_id is not None:
-            source = (_MOVEMENT, movement_id)
+            source = (MOVEMENT, movement_id)
             settled = movements.get(movement_id)
             attributed_on = None if settled is None else settled[0]
         elif kind in correction_kinds:
-            source, attributed_on = (_CORRECTION, kind), day
+            source, attributed_on = (CORRECTION, kind), day
         else:
             source, attributed_on = (RESIDUE, kind), None
         stored.append(Contribution(
@@ -342,6 +328,26 @@ def _movements(movement_ids):
             parent = ("transfer", expense_side or income_side)
         found[movement_id] = (settled_on, parent)
     return found
+
+
+def movement_parents(movement_ids):
+    """Return each movement's parent, by the rule the comparison reads.
+
+    Args:
+        movement_ids: The ``budget.transaction_entries`` ids to read.
+
+    Returns:
+        ``{id: ("transaction" | "transfer", parent id)}``; an id no row
+        holds is absent.
+    """
+    return _parents(_movements(movement_ids))
+
+
+def _parents(movements):
+    """Return ``{movement id: parent}`` from :func:`_movements`' map."""
+    return {
+        movement_id: parent for movement_id, (_, parent) in movements.items()
+    }
 
 
 def _walked_parents(scenario_id):
@@ -383,41 +389,29 @@ def _walked_parents(scenario_id):
     )
 
 
-def _nets(contributions, grain):
-    """Return each grain cell's net over *contributions*.
+def moved_source_cells(before, after):
+    """Return every source cell whose net moved between two reads, either side.
+
+    What a control's plant changed (``tests/manual/verify_worked_out_ledger``):
+    the cells it must come out UNEXPLAINED at.
 
     Args:
-        contributions: :data:`Contribution` s.
-        grain: A function of one contribution giving its cell.
+        before: The unplanted :class:`Ledger`.
+        after: The same owner's :class:`Ledger` read with the plant in.
 
     Returns:
-        ``{cell: net}``.
+        The source cells, ``(source, key, stored rows, paycheck, day)``.
     """
-    nets = defaultdict(lambda: _ZERO)
-    for contribution in contributions:
-        nets[grain(contribution)] += contribution.amount
-    return nets
-
-
-def _cell_of(contribution):
-    """Return a contribution's (chart key, stored rows, paycheck, day) cell."""
-    return (
-        contribution.key, contribution.rows, contribution.pay_period_id,
-        contribution.entry_date,
-    )
-
-
-def source_cell_of(contribution):
-    """Return a contribution's (source, key, stored rows, paycheck, day) cell."""
-    return (contribution.source,) + _cell_of(contribution)
-
-
-def _paired(stored, worked):
-    """Return ``{cell: (stored net, worked-out net)}`` over both maps' cells."""
-    return {
-        cell: (stored.get(cell, _ZERO), worked.get(cell, _ZERO))
-        for cell in stored.keys() | worked.keys()
-    }
+    moved = set()
+    for old, new in ((before.stored, after.stored),
+                     (before.worked, after.worked)):
+        moved |= {
+            cell for cell, (was, now) in paired(
+                nets(old, source_cell_of), nets(new, source_cell_of),
+            ).items()
+            if was != now
+        }
+    return moved
 
 
 def _cell_order(cell):
@@ -454,16 +448,23 @@ def compare(ledger, skipped):
         f"{' (baseline)' if ledger.is_baseline else ''}")
     out(f"   stored postings {len(ledger.stored)}, worked-out lines "
         f"{len(ledger.worked)}")
-    cells = _paired(
-        _nets(ledger.stored, _cell_of), _nets(ledger.worked, _cell_of),
+    cells = paired(
+        nets(ledger.stored, cell_of), nets(ledger.worked, cell_of),
     )
     _check_against_the_suite(ledger, cells)
-    _report_cells(cells, out)
+    census = take_census(ledger, skipped)
+    outcome.censused = {
+        entry[0].entry_id: kind
+        for kind, entries in census.items() for entry in entries
+    }
     differing = _source_differences(ledger)
-    expected = _classify(ledger, differing, skipped)
+    expected = classify(ledger, differing, skipped, census)
+    outcome.unexplained_cells = _unexplained(ledger, expected, cell_of)
+    outcome.unexplained_totals = _unexplained(ledger, expected, account_of)
+    _report_cells(cells, outcome.unexplained_cells, out)
     _report_sources(differing, expected, outcome)
-    _report_census(ledger, skipped, out)
-    _report_totals(cells, out)
+    _report_census(census, outcome.expected, skipped, out)
+    _report_totals(cells, outcome.unexplained_totals, out)
     if ledger.is_baseline:
         _report_statements(ledger, expected, outcome)
     else:
@@ -484,7 +485,7 @@ def _check_against_the_suite(ledger, cells):
         HarnessError: The two reads name different differing cells.
     """
     mine = {
-        cell + nets for cell, nets in cells.items() if nets[0] != nets[1]
+        cell + pair for cell, pair in cells.items() if pair[0] != pair[1]
     }
     suites = {
         (cell.key, cell.stored_row_ids, cell.pay_period_id, cell.entry_date,
@@ -499,25 +500,62 @@ def _check_against_the_suite(ledger, cells):
         )
 
 
-def _report_cells(cells, out):
-    """Print every cell's two nets, and every cell where they part."""
-    parted = 0
+def _unexplained(ledger, expected, grain):
+    """Return every *grain* cell whose two nets part beyond the expected differences.
+
+    Each side's contributions to an excused source cell are set aside; a
+    cell whose remaining nets still part holds a difference no expected kind
+    explains -- even one whose whole nets agree, an excused difference and an
+    unexplained one cancelling in it.
+
+    Args:
+        ledger: The :class:`Ledger`.
+        expected: Each differing source cell's expected kind, or ``None``.
+        grain: A function of one contribution giving its cell.
+
+    Returns:
+        The cells.
+    """
+
+    def unexcused(side):
+        """Return *side*'s contributions to no excused source cell."""
+        return [
+            c for c in side if expected.get(source_cell_of(c)) is None
+        ]
+
+    return {
+        cell for cell, (stored, worked) in paired(
+            nets(unexcused(ledger.stored), grain),
+            nets(unexcused(ledger.worked), grain),
+        ).items()
+        if stored != worked
+    }
+
+
+def _report_cells(cells, unexplained, out):
+    """Print every cell's two nets, each marked, and how many part.
+
+    Args:
+        cells: ``{cell: (stored, worked out)}``.
+        unexplained: The cells whose difference is UNEXPLAINED.
+        out: Where each line of the report goes.
+    """
     out(f"-- cells: {len(cells)} (chart row, paycheck, day) cells; each "
         "line: stored net | worked-out net")
     for cell in sorted(cells, key=_cell_order):
         stored, worked = cells[cell]
         key, rows, pay_period_id, day = cell
-        mark = "  "
-        if stored != worked:
-            mark, parted = "! ", parted + 1
-        out(f"{mark} {_account_text(key, rows)} "
+        out(f"{mark(cell in unexplained, stored != worked)} "
+            f"{_account_text(key, rows)} "
             f"paycheck {pay_period_id} day {day.isoformat()}: "
             f"{money(stored)} | {money(worked)}")
+    parted = sum(1 for stored, worked in cells.values() if stored != worked)
     zero_only = sum(
         1 for stored, worked in cells.values() if stored == worked == 0
     )
-    out(f"-- cells: {parted} part; {zero_only} net $0.00 on both sides "
-        "(stored entries reversed, or legs cancelling within one day)")
+    out(f"-- cells: {parted} part, {len(unexplained)} UNEXPLAINED; "
+        f"{zero_only} net $0.00 on both sides (stored entries reversed, or "
+        "legs cancelling within one day)")
 
 
 def _source_differences(ledger):
@@ -528,63 +566,12 @@ def _source_differences(ledger):
     """
     return {
         cell: nets
-        for cell, nets in _paired(
-            _nets(ledger.stored, source_cell_of),
-            _nets(ledger.worked, source_cell_of),
+        for cell, nets in paired(
+            nets(ledger.stored, source_cell_of),
+            nets(ledger.worked, source_cell_of),
         ).items()
         if nets[0] != nets[1]
     }
-
-
-def _residue_is_zero_sum(ledger):
-    """Return whether the store's residue nets to $0.00 on every chart account."""
-    residue = _nets(
-        (c for c in ledger.stored if c.source[0] == RESIDUE),
-        lambda c: (c.key, c.rows),
-    )
-    return all(net == 0 for net in residue.values())
-
-
-def _classify(ledger, differing, skipped):
-    """Return each differing source cell's expected kind, or ``None``.
-
-    * residue: expected while the residue nets to zero on every chart
-      account -- a reversal pair -- since the statements drop it whole;
-      residue that does not net to zero is money the records lost;
-    * a movement: expected when its parent is a transfer the resync skips,
-      or a row it does not walk (design report s.9.3);
-    * a correction: expected when its kind, chart account and day net to
-      zero across paychecks -- the same correction, filed in another
-      paycheck.  The worked-out side files it by today's calendar (ruling
-      plan#2519), so the store's is the paycheck the calendar gave when it
-      was written.
-
-    Returns:
-        ``{source cell: kind name | None}``.
-    """
-    zero_sum = _residue_is_zero_sum(ledger)
-    moved = _nets(
-        (
-            Contribution(*cell, amount=stored - worked, attributed_on=None,
-                         entry_id=None)
-            for cell, (stored, worked) in differing.items()
-            if cell[0][0] == _CORRECTION
-        ),
-        lambda c: (c.source, c.key, c.rows, c.entry_date),
-    )
-    kinds = {}
-    for cell in differing:
-        (grain, ident), key, rows, _pay_period_id, day = cell
-        if grain == RESIDUE:
-            kinds[cell] = _EXPECTED_RESIDUE if zero_sum else None
-        elif grain == _MOVEMENT:
-            kinds[cell] = _movement_kind(ledger, ident, skipped)
-        else:
-            kinds[cell] = (
-                _EXPECTED_FILING if moved[((grain, ident), key, rows, day)] == 0
-                else None
-            )
-    return kinds
 
 
 def _report_sources(differing, expected, outcome):
@@ -600,79 +587,55 @@ def _report_sources(differing, expected, outcome):
             outcome.unexplained_sources.add(cell)
         else:
             outcome.expected[kind] += 1
-        out(f"{'~ ' if kind else '! '} {_source_text(source)} "
+        out(f"{mark(kind is None, True)} {_source_text(source)} "
             f"{_account_text(key, rows)} paycheck {pay_period_id} "
             f"day {day.isoformat()}: {money(stored)} | {money(worked)} -- "
             f"{kind or 'UNEXPLAINED'}")
 
 
-def _movement_kind(ledger, movement_id, skipped):
-    """Return the expected kind a movement's difference is, or ``None``.
+def _report_census(census, excused, skipped, out):
+    """Print each expected kind's stored entries and the source cells they excuse.
 
-    A transfer the cash resync skips, or a row it does not walk (design
-    report s.9.3): the store's lines on either rest on a door's own sync.
+    Args:
+        census: :func:`take_census`' entries.
+        excused: Each kind's excused source-cell count.
+        skipped: The transfer ids the cash resync skips.
+        out: Where each line of the report goes.
     """
-    parent = ledger.parent_of.get(movement_id)
-    if parent is None:
-        return None
-    if parent[0] == "transfer" and parent[1] in skipped:
-        return _EXPECTED_SKIPPED
-    if parent not in ledger.walked:
-        return _EXPECTED_UNWALKED
-    return None
-
-
-def _census_kind(ledger, contribution, skipped, filed_by_day):
-    """Return the expected kind a stored entry belongs to, by its first leg.
-
-    Residue; a correction filed outside the paycheck today's calendar files
-    its day in; or a movement of :func:`_movement_kind`'s.  ``None`` for any
-    other entry.
-    """
-    grain, ident = contribution.source
-    if grain == RESIDUE:
-        return _EXPECTED_RESIDUE
-    if grain == _MOVEMENT:
-        return _movement_kind(ledger, ident, skipped)
-    filed = ledger.calendar.filing_period(contribution.entry_date).period_id
-    if ident in filed_by_day and contribution.pay_period_id != filed:
-        return _EXPECTED_FILING
-    return None
-
-
-def _report_census(ledger, skipped, out):
-    """Print each expected kind's stored entries, with count and dollars."""
-    entries = defaultdict(list)
-    for contribution in ledger.stored:
-        entries[contribution.entry_id].append(contribution)
-    filed_by_day = _filed_by_day_kind_ids()
-    held = defaultdict(list)
-    for entry_id in sorted(entries):
-        kind = _census_kind(ledger, entries[entry_id][0], skipped, filed_by_day)
-        if kind is not None:
-            held[kind].append(entries[entry_id])
     out(f"-- census of the expected kinds (transfer families the resync "
         f"skips: {sorted(skipped) or 'none'})")
-    for kind in (_EXPECTED_RESIDUE, _EXPECTED_FILING, _EXPECTED_SKIPPED,
-                 _EXPECTED_UNWALKED):
-        _report_census_kind(kind, held[kind], out)
+    for kind in EXPECTED_KINDS:
+        _report_census_kind(kind, census[kind], excused.get(kind, 0), out)
 
 
-def _report_census_kind(kind, entries, out):
+def _report_census_kind(kind, entries, excused, out):
     """Print one expected kind's stored entries, their dollars and their cells.
 
     Args:
         kind: The kind's name.
         entries: Each of its stored entries, as its list of contributions.
+        excused: How many differing source cells its entries excuse.
         out: Where each line of the report goes.
     """
     legs = [leg for entry in entries for leg in entry]
-    by_cell = _nets(legs, _cell_of)
+    by_cell = nets(legs, cell_of)
     moving = sum(1 for net in by_cell.values() if net != 0)
+    # Per chart account, not overall: every entry is balanced, so its legs
+    # together always net to $0.00 and would say nothing.
+    standing = {
+        account: net for account, net in nets(legs, account_of).items()
+        if net != 0
+    }
     debited = sum((leg.amount for leg in legs if leg.amount > 0), _ZERO)
     out(f"   {kind}: {len(entries)} stored entr(y/ies), {money(debited)} "
-        f"debited, nets {money(sum(by_cell.values(), _ZERO))}; {moving} of "
-        f"its {len(by_cell)} cell(s) net nonzero")
+        f"debited; {len(standing)} chart account(s) net nonzero; {moving} of "
+        f"its {len(by_cell)} cell(s) net nonzero; excuses {excused} source "
+        "cell(s)")
+    for account in sorted(
+        standing, key=lambda account: _cell_order((*account, 0, date.min)),
+    ):
+        out(f"     nets {money(standing[account])} on "
+            f"{_account_text(*account)}")
     for entry in entries:
         first = entry[0]
         shown = ", ".join(
@@ -683,20 +646,27 @@ def _report_census_kind(kind, entries, out):
             f"{first.entry_date.isoformat()}: {shown}")
 
 
-def _report_totals(cells, out):
-    """Print every chart account's total on each side."""
+def _report_totals(cells, unexplained, out):
+    """Print every chart account's total on each side, each marked.
+
+    Args:
+        cells: ``{cell: (stored, worked out)}``.
+        unexplained: The chart accounts whose difference is UNEXPLAINED.
+        out: Where each line of the report goes.
+    """
     totals = defaultdict(lambda: [_ZERO, _ZERO])
     for (key, rows, _pay_period_id, _day), (stored, worked) in cells.items():
         totals[(key, rows)][0] += stored
         totals[(key, rows)][1] += worked
-    out(f"-- account totals: {len(totals)} chart account(s); each line: "
-        "stored | worked-out")
+    out(f"-- account totals: {len(totals)} chart account(s), "
+        f"{len(unexplained)} UNEXPLAINED; each line: stored | worked-out")
     for account in sorted(
         totals, key=lambda account: _cell_order((*account, 0, date.min)),
     ):
         stored, worked = totals[account]
-        out(f"{'! ' if stored != worked else '  '} {_account_text(*account)} "
-            f"{_label_of(account[0])}: {money(stored)} | {money(worked)}")
+        out(f"{mark(account in unexplained, stored != worked)} "
+            f"{_account_text(*account)} {_label_of(account[0])}: "
+            f"{money(stored)} | {money(worked)}")
 
 
 def _label_of(key):

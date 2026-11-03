@@ -20,6 +20,15 @@ The worked-out side is built here from per-key nets in the store's own presentat
 rule (``present_natural``) and its closing lines' labels are the store's, imported rather than
 restated, so the comparison grades the LINES and nothing a copy of the presentation could hide.
 
+**What "every statement field agreed" does NOT say** (review plan#2521, finding C-L1).  The
+worked-out statements are this module's re-implementation of the store's report over the lines,
+not the app's report reading them: every field agreeing grades the lines against the app's
+report over the STORE, and nothing here can see a defect in the report a reader of the lines
+would render.  The proof "every report byte-identical" (``docs/plans/verification.md``; design
+report s.12.2, stage 1) is the app's own report, reading the lines, against itself reading the
+store: leaf 2's (plan step plan#2515), whose spec carries it as
+``tests/manual/verify_statement_baseline.py`` byte-identical before that leaf against after.
+
 Underscore-prefixed module name keeps pytest from collecting it.
 """
 
@@ -54,6 +63,22 @@ def money(value):
 def key_text(key):
     """Return a chart key as ``kind/class/record``."""
     return f"{key.kind.value}/{key.ledger_class.value}/{key.record_id}"
+
+
+def mark(unexplained, parts):
+    """Return the mark a report line opens with, for any grain.
+
+    ``!`` an UNEXPLAINED difference (which may hide inside agreeing figures,
+    an excused difference and an unexplained one cancelling), ``~`` one that
+    parts by an expected difference alone, blank one that agrees.
+
+    Args:
+        unexplained: Whether the line's difference is UNEXPLAINED.
+        parts: Whether its two figures part.
+    """
+    if unexplained:
+        return "! "
+    return "~ " if parts else "  "
 
 
 def nets_by_key(contributions):
@@ -352,10 +377,10 @@ def _print_fields(stored, worked, unexplained, out):
     """
     for name in sorted(stored.keys() | worked.keys(), key=_field_order):
         held, made = stored.get(name, _ZERO), worked.get(name, _ZERO)
-        mark = "! " if name in unexplained else ("~ " if held != made else "  ")
         section, part = name
         shown = part if isinstance(part, str) else key_text(part)
-        out(f"{mark}   {section} {shown}: {_shown(held)} | {_shown(made)}")
+        out(f"{mark(name in unexplained, held != made)}   {section} {shown}: "
+            f"{_shown(held)} | {_shown(made)}")
 
 
 # The order a statement's sections print in, as the store presents them.

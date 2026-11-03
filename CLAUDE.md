@@ -275,7 +275,7 @@ must be public is named in `PUBLIC_ENDPOINTS`. Ownership helpers in `app/utils/a
 Security response rule: 404 for both "not found" and "not yours." Structured logging via
 `log_event()`. Dependencies pinned in `requirements.txt` -- no new packages without approval.
 
-**Reference tables: IDs for logic, strings for display only.** Enums in `app/enums.py`, cached in
+**Reference tables: IDs for logic, strings for display only.** Enums in `app/enums/`, cached in
 `app/ref_cache/`. NEVER compare against string `name` columns in Python or Jinja (gate:
 `shekel-refname-compare` for Python; the template hook for Jinja).
 

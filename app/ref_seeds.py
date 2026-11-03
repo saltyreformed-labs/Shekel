@@ -197,7 +197,7 @@ _REF_TABLE_SEEDS = (
     # the ``interest_income`` / ``unrealized_change`` per-account accounts a
     # modelled account's true-up books into (ruling R-FO, plan step X-f3d;
     # migration ``e6b4a2d8c713`` inline-seeds all three of that step's rows).
-    # Names match the enum ``.value`` strings in ``app/enums.py`` exactly.
+    # Names match the enum ``.value`` strings in ``app/enums/`` exactly.
     ("LedgerAccountClass", [
         {"name": "Asset",      "is_debit_normal": True},
         {"name": "Liability",  "is_debit_normal": False},
@@ -255,7 +255,7 @@ _REF_TABLE_SEEDS = (
     # ``e7a4d95c2b18`` inline-seeds the identical rows so a freshly upgraded
     # DB resolves those enums before this idempotent reseed runs -- the same
     # dual-seed pattern the posting refs use.  Names match the enum
-    # ``.value`` strings in ``app/enums.py`` exactly.
+    # ``.value`` strings in ``app/enums/`` exactly.
     ("RecurrenceUnit", ["period", "week", "month", "year"]),
     ("PeriodPlacement", ["containing_date", "period_starting_on_or_after"]),
     ("BusinessDayShift", ["none", "prior", "next"]),
@@ -270,7 +270,7 @@ _REF_TABLE_SEEDS = (
     # same dual-seed pattern the posting and recurrence refs use -- with
     # ``parent_transfer``, the transfer a shadow belonged to, which migration
     # ``c956c1d83108`` deletes (plan step ``balance:X-bi-6-5``).  Names match
-    # the enum ``.value`` strings in ``app/enums.py`` exactly.
+    # the enum ``.value`` strings in ``app/enums/`` exactly.
     ("AmountSource", ["template"]),
     # WHERE a recorded statement line came from (bank-import arc, plan step
     # X-f6a-1; ruling **R-FP**).  One row per source ADAPTER -- a FORMAT at an
@@ -314,7 +314,7 @@ _REF_TABLE_SEEDS = (
     # inline-seeds the identical rows so a freshly upgraded DB resolves the enum
     # before this idempotent reseed runs -- the same dual-seed pattern the
     # settlement-record, amount-model, posting and recurrence refs use.  Names
-    # match the enum ``.value`` strings in ``app/enums.py`` exactly.
+    # match the enum ``.value`` strings in ``app/enums/`` exactly.
     ("SettledDayBasis", ["observed", "asserted", "entered", "borrowed"]),
     # WHO WROTE a movement's FIGURE (balance arc, plan step X-bi-3a, ruling
     # R-BAL39): ``resolved`` is the settle pricing it from the plan, ``typed``
@@ -323,7 +323,7 @@ _REF_TABLE_SEEDS = (
     # movements.  Every movement carries one (NOT NULL, no default), so there is
     # no absent state to leave unseeded.  The migration ``b5c7e9a1d2f4``
     # inline-seeds the identical rows for the same reason its siblings do.
-    # Names match the enum ``.value`` strings in ``app/enums.py`` exactly.
+    # Names match the enum ``.value`` strings in ``app/enums/`` exactly.
     ("MovementFigureSource", ["resolved", "typed", "observed"]),
     # How strongly an imported statement's balance is EVIDENCED (bank_import
     # arc, plan step X-f6e-1, ruling R-GF): ``file_chain`` is a file stating a
@@ -342,7 +342,7 @@ _REF_TABLE_SEEDS = (
     # migration ``4c1f8b7e2a90`` inline-seeds the identical rows so a freshly
     # upgraded DB resolves the enum before this idempotent reseed runs -- the
     # same dual-seed pattern every ref above uses.  Names match the enum
-    # ``.value`` strings in ``app/enums.py`` exactly.
+    # ``.value`` strings in ``app/enums/`` exactly.
     (
         "StatementBalanceEvidence",
         ["file_chain", "corroborated", "uncorroborated"],
@@ -355,7 +355,7 @@ _REF_TABLE_SEEDS = (
     # ``ref.withholding_kinds`` inline-seeds the identical rows so a freshly
     # upgraded DB resolves the enum before this idempotent reseed runs -- the
     # same dual-seed pattern every ref above uses.  Names match the enum
-    # ``.value`` strings in ``app/enums.py`` exactly.
+    # ``.value`` strings in ``app/enums/`` exactly.
     (
         "WithholdingKind",
         ["federal_income", "state_income", "social_security", "medicare"],

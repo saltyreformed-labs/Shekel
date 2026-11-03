@@ -55,7 +55,7 @@ Financial correctness:
   non-biweekly cadence until `pay_calendar.PayCadence` derived it, so a named
   constant for a value that varies by owner is a defect.
 - Reference data: IDs and enums drive logic; `.name` strings are display only,
-  in Python and in Jinja alike (enums in `app/enums.py`, cached in
+  in Python and in Jinja alike (enums in `app/enums/`, cached in
   `app/ref_cache/`). `shekel-refname-compare` catches the literal Python case and
   the template hook the Jinja one; you catch logic that leans on display labels
   in subtler ways.

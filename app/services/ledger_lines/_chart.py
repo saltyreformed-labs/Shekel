@@ -17,12 +17,12 @@ writer reads them from here for as long as the store lives:
   source row's type (:func:`ledger_class_of`), the class being part of the
   category line's identity because a category is type-agnostic; and every
   counter, loan and bucket kind by the fixed class its kind carries;
-* **the label** (:func:`chart_label`), from the LIVE record: the account's or
-  category's name today, the canonical bucket labels, and the
-  ``"<account> -- <component>"`` form the stored counter and loan rows
-  snapshot.  The ruling's answer is "Statements show current names": a rename
-  relabels past lines, where a stored snapshot kept the name it was minted
-  with.
+* **the label** (:func:`chart_label`), from the LIVE record
+  :func:`chart_record_type` names: the account's or category's name today,
+  the canonical bucket labels, and the ``"<account> -- <component>"`` form
+  the stored counter and loan rows snapshot.  The ruling's answer is
+  "Statements show current names": a rename relabels past lines, where a
+  stored snapshot kept the name it was minted with.
 * **which counter an account's correction books on** (ruling **R-FO**,
   :func:`anchor_correction_counter_kind`): the opening on equity, a true-up on
   what its difference WAS by the account's projection kind.  It was
@@ -434,6 +434,35 @@ def anchor_correction_counter_kind(
     return counter_kind
 
 
+def chart_record_type(key: ChartKey) -> type[Account] | type[Category] | None:
+    """Return the type of the record *key* names, whose name labels its line.
+
+    The one statement of which record is behind which kind: an
+    :class:`Account` for a real account's own line, its correction counters
+    and a loan's components (a loan is an account); a :class:`Category` for
+    a category line; none for an owner bucket.  :func:`chart_label` holds
+    its caller to it, and a reader that loads the records to label its lines
+    asks it which table to load each key's record from (plan task plan#2771),
+    so the two cannot part.
+
+    Args:
+        key: The line's key.
+
+    Returns:
+        :class:`Account`, :class:`Category`, or ``None`` for a bucket.
+
+    Raises:
+        ValueError: If *key* is of a kind no constructor builds.
+    """
+    if (key.kind, key.ledger_class) in _OWNER_BUCKETS:
+        return None
+    if key.kind is LedgerAccountKindEnum.CATEGORY:
+        return Category
+    if key.kind is LedgerAccountKindEnum.LINKED or key.kind in _COMPONENTS:
+        return Account
+    raise ValueError(f"no chart label rule for the key {key!r}")
+
+
 def chart_label(key: ChartKey, record: Account | Category | None) -> str:
     """Return the label a statement shows for *key*, from its LIVE record.
 
@@ -446,9 +475,9 @@ def chart_label(key: ChartKey, record: Account | Category | None) -> str:
 
     Args:
         key: The line's key.
-        record: The record *key* names: the :class:`Account` (the linked,
-            counter and loan kinds), the :class:`Category` (the category
-            kind), or ``None`` for a bucket.
+        record: The record *key* names (:func:`chart_record_type`): the
+            :class:`Account` (the linked, counter and loan kinds), the
+            :class:`Category` (the category kind), or ``None`` for a bucket.
 
     Returns:
         The label.
@@ -458,19 +487,14 @@ def chart_label(key: ChartKey, record: Account | Category | None) -> str:
             type, or another id -- since its name would label the line
             wrongly; or if *key* is of a kind no constructor builds.
     """
-    if (key.kind, key.ledger_class) in _OWNER_BUCKETS:
-        _require_record(key, record, None)
+    _require_record(key, record, chart_record_type(key))
+    if record is None:
         return _OWNER_BUCKETS[(key.kind, key.ledger_class)]
     if key.kind is LedgerAccountKindEnum.CATEGORY:
-        _require_record(key, record, Category)
         return record.display_name
     if key.kind is LedgerAccountKindEnum.LINKED:
-        _require_record(key, record, Account)
         return record.name
-    if key.kind in _COMPONENTS:
-        _require_record(key, record, Account)
-        return f"{record.name} -- {_COMPONENTS[key.kind]}"
-    raise ValueError(f"no chart label rule for the key {key!r}")
+    return f"{record.name} -- {_COMPONENTS[key.kind]}"
 
 
 def _require_record(

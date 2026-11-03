@@ -258,7 +258,7 @@ class TestTheReadBooksEachLoanOffItsOwnWalk:
             scenario_id = seed_user["scenario"].id
             calendar = calendar_for(owner_id)
 
-            lines = worked_out_lines(owner_id, scenario_id)
+            lines = worked_out_lines(owner_id, scenario_id, lambda: calendar)
 
             expected = {
                 loan.id: _target_lines(loan_correction_targets(

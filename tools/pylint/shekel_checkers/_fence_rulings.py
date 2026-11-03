@@ -339,6 +339,9 @@ _FENCED_MODULE_RULINGS = {
         "anchor_correction_counter_kind",
         "category_key",
         "chart_label",
+        # Which record a key names, its label's source (plan task plan#2771):
+        # a model class, never money.
+        "chart_record_type",
         "ledger_class_of",
         "linked_key",
         "linked_ledger_class",

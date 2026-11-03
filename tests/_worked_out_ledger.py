@@ -212,7 +212,7 @@ def read_ledger(scenario, calendar):
         db.session, scenario.user_id,
         {row.ledger_account_id for row in posted},
     )
-    lines = worked_out_lines(scenario.user_id, scenario.id)
+    lines = worked_out_lines(scenario.user_id, scenario.id, lambda: calendar)
     movements = _movements(
         {row.transaction_entry_id for row in posted
          if row.transaction_entry_id is not None}

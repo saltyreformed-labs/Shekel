@@ -42,6 +42,7 @@ Underscore-prefixed module name keeps pytest from collecting it.
 
 from collections import defaultdict, namedtuple
 from decimal import Decimal
+from functools import partial
 
 from sqlalchemy import func, or_
 
@@ -49,6 +50,7 @@ from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
 from app.models.scenario import Scenario
 from app.services.ledger_lines import worked_out_lines
+from app.services.pay_calendar import calendar_for
 from tests._test_helpers import stored_chart_key
 
 _ZERO = Decimal("0.00")
@@ -243,7 +245,9 @@ def _worked_out_nets(owner_id, scenario_id, chart):
         ``{(ChartKey, stored row ids, pay_period_id, entry_date): net}``.
     """
     nets = {}
-    for line in worked_out_lines(owner_id, scenario_id):
+    for line in worked_out_lines(
+        owner_id, scenario_id, partial(calendar_for, owner_id),
+    ):
         cell = (
             *chart.worked_account(line.key), line.pay_period_id,
             line.entry_date,

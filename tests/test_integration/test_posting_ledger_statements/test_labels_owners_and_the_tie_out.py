@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -13,6 +14,7 @@ from app.models.category import Category
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.scenario import Scenario
 from app.services import ledger_report_service
+from app.services.ledger_lines import linked_key, worked_out_lines
 from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 import sqlalchemy as sa
@@ -20,6 +22,7 @@ import sqlalchemy as sa
 from tests._test_helpers import create_settled_cash_transaction, linked_ledger_account
 
 from ._helpers import (
+    _checking_at_its_opening,
     _Y,
     _assert_ledger_self_consistent,
     _find_line,
@@ -30,24 +33,36 @@ from ._helpers import (
 
 
 # ---------------------------------------------------------------------------
-# 8. Display labels branch on kind (live rename, orphan snapshot, equity twin)
+# 8. Labels from the worked-out chart (ruling plan#2518)
 # ---------------------------------------------------------------------------
 
 
 class TestDisplayLabels:
-    """A category line reflects a rename; the equity twin keeps its snapshot."""
+    """Every label is today's name: a category, an account, its equity twin.
 
-    def test_rename_reflected_and_equity_twin_uses_snapshot(
+    A deleted category's lines, which read Uncategorized, are graded once, in
+    the service suite (``test_ledger_report_service``'s ``TestDisplayLabels``).
+    """
+
+    def test_a_rename_relabels_the_category_and_the_equity_twin(
         self, app, db, seed_user,
     ):
-        """A live category rename reflects; the equity twin label stays snapshot.
+        """A category and an account renamed: every line reads the new names.
 
-        A $100.00 Groceries expense posts to the "Family: Groceries" category
-        ledger; renaming the category's item to "Snacks" makes the income line
-        read the LIVE ``category.display_name`` ("Family: Snacks").  Renaming the
-        Checking ACCOUNT does NOT change its equity twin's balance-sheet label,
-        which is the frozen ``"Checking -- Opening"`` snapshot (the twin is not a
-        linked row, so the live-account-name rule does not apply to it).
+        A $100.00 Groceries expense books on the "Family: Groceries" category
+        line; renaming the category's item to "Snacks" makes the income line
+        read "Family: Snacks".  Renaming the Checking ACCOUNT to "Primary
+        Checking" relabels both its lines: its own Asset line and its equity
+        twin, "Primary Checking -- Opening".
+
+        **The twin kept its snapshot until plan task plan#2771**, and this test
+        asserted that it did: the stored chart row was minted as
+        ``"Checking -- Opening"`` and the statement read the row.  Ruling
+        plan#2518 works the chart out from the records ("Statements show
+        current names"), so the twin's label is the live account's name with
+        its component, the one difference that ruling chose.  The figures are
+        unmoved: Checking $1,000.00 - $100.00 = $900.00, its opening
+        $1,000.00.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -64,7 +79,6 @@ class TestDisplayLabels:
                 Category, seed_user["categories"]["Groceries"].id,
             )
             groceries.item_name = "Snacks"
-            # Rename the linked account too; the equity twin must NOT follow it.
             # Re-fetch into the current session -- the fixture reference is
             # attached to the fixture-setup session and would not persist.
             db.session.get(Account, checking.id).name = "Primary Checking"
@@ -76,61 +90,14 @@ class TestDisplayLabels:
             assert _labels(income.expense.lines) == ["Family: Snacks"]
 
             sheet = _reader_bs(user_id)
-            # The linked Asset line follows the live account name...
             assert _find_line(
                 sheet.assets.lines, "Primary Checking",
             ).amount == Decimal("900.00")
-            # ...but the equity twin keeps its frozen origination snapshot.
             assert _find_line(
-                sheet.equity.lines, "Checking -- Opening",
+                sheet.equity.lines, "Primary Checking -- Opening",
             ).amount == Decimal("1000.00")
+            assert "Checking -- Opening" not in _labels(sheet.equity.lines)
             assert sheet.tie_out.in_balance is True
-            _assert_ledger_self_consistent()
-
-    def test_orphaned_category_uses_snapshot_label(self, app, db, seed_user):
-        """A category ledger account whose category is gone keeps its snapshot label.
-
-        A $100.00 Groceries expense posts to the category ledger; when the
-        budget category's key SET-NULLs the account's ``category_id`` (its
-        ``kind_id`` stays ``category``), the line falls back to the account's
-        own "Family: Groceries" snapshot and the amount is untouched.
-
-        **The orphan state is STAGED, not reached through a category delete.**
-        Every plan row names a definition since the family's cutover (plan
-        step ``balance:X-bi-7d-2``) and ``transaction_templates.category_id``
-        is RESTRICT, so a category with a settled one-off under it cannot be
-        deleted at all (the category door archives it; the database refuses
-        the delete).  A LEGACY link-less row reached the state through the
-        delete until then.  Production can still hold the state -- accounts
-        orphaned before the cutover, or a category deleted once every row
-        under it was hard-deleted -- so the reader's fallback is graded on
-        the state itself: the SET NULL the key performs, written here.
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            groceries_id = seed_user["categories"]["Groceries"].id
-            create_settled_cash_transaction(
-                seed_user, db.session, seed_user["bootstrap_period"],
-                Decimal("100.00"),
-                category=seed_user["categories"]["Groceries"],
-                settled_on=date(_Y, 3, 15),
-            )
-            db.session.commit()
-            orphaned = db.session.execute(sa.text(
-                "UPDATE budget.ledger_accounts SET category_id = NULL "
-                "WHERE category_id = :cid"
-            ), {"cid": groceries_id}).rowcount
-            db.session.commit()
-            assert orphaned == 1
-
-            income = ledger_report_service.compute_income_statement(
-                user_id, calendar_for(user_id), StatementWindow("month", month=3, year=_Y),
-            )
-            assert _labels(income.expense.lines) == ["Family: Groceries"]
-            assert income.expense.total == Decimal("100.00")
-            # The orphaned category leaves the ledger balanced (SET NULL touches
-            # only the display FK, never the postings).
-            assert _reader_bs(user_id).tie_out.in_balance is True
             _assert_ledger_self_consistent()
 
 
@@ -169,11 +136,7 @@ class TestScenarioAndOwnerIsolation:
                 user_id, calendar_for(user_id), StatementWindow("year", year=_Y),
             )
             assert not income.expense.lines
-            sheet = _reader_bs(user_id)
-            assert _find_line(
-                sheet.assets.lines, "Checking",
-            ).amount == Decimal("1000.00")
-            assert sheet.tie_out.in_balance is True
+            _checking_at_its_opening(user_id)
             _assert_ledger_self_consistent()
 
     def test_owners_do_not_see_each_other(
@@ -234,31 +197,73 @@ class TestScenarioAndOwnerIsolation:
 
 
 # ---------------------------------------------------------------------------
-# 10. Adversarial: the tie-out is not vacuous
+# 10. Adversarial: the tie-out is not vacuous, and the store is not read
 # ---------------------------------------------------------------------------
 
 
 class TestTieOutIsNotVacuous:
-    """An injected unbalanced leg turns the tie-out red."""
+    """An unbalanced line turns the tie-out red; an unbalanced stored leg does not."""
 
-    def test_injected_leg_flips_in_balance_false(self, app, db, seed_user):
-        """One raw +50 leg on the opening pushes ledger_net off zero, tie-out red.
+    def test_an_unbalanced_line_flips_in_balance_false(
+        self, app, db, seed_user, monkeypatch,
+    ):
+        """One +$50.00 line with no counter leg: ledger net $50.00, tie-out red.
 
-        A balanced book has a green tie-out (ledger_net 0.00, in_balance True).
-        Inserting one unmatched +50.00 leg onto the seeded Checking opening entry
-        (raw SQL, flushed but never committed, so the DEFERRED per-entry trigger
-        never fires) makes the whole-ledger net 50.00: the reader's
-        ``tie_out.ledger_net`` reads 50.00, its Assets no longer equal
-        Liabilities + Equity, and ``in_balance`` flips to False -- so the tie-out
-        is a real check, not one the balanced trigger makes vacuously true.
+        A balanced book has a green tie-out (ledger_net 0.00, in_balance
+        True).  The statements read the worked-out ledger (plan task
+        plan#2771), whose every booking balances by its rule, so the tie-out's
+        double-entry half is a check of those rules.  Planting one unmatched
+        +$50.00 line on Checking into the read's answer (the read patched
+        where the report calls it) makes the ledger net $50.00: Assets
+        $1,000.00 + $50.00 = $1,050.00 against Liabilities + Equity
+        $1,000.00, so ``in_balance`` flips to False -- the tie-out is a real
+        check, not one the rules' construction makes vacuously true.
+        """
+        with app.app_context():
+            user_id = seed_user["user"].id
+            checking = db.session.get(Account, seed_user["account"].id)
+            assert _reader_bs(user_id).tie_out.in_balance is True
+
+            def planted(owner_id, scenario_id, calendar_source):
+                """The read's lines, and one unmatched +$50.00 on Checking."""
+                lines = worked_out_lines(owner_id, scenario_id, calendar_source)
+                opening = next(
+                    line for line in lines if line.key == linked_key(checking)
+                )
+                return [*lines, replace(opening, amount=Decimal("50.00"))]
+
+            monkeypatch.setattr(
+                "app.services.ledger_report_service._attribution"
+                ".worked_out_lines",
+                planted,
+            )
+
+            tampered = _reader_bs(user_id)
+            assert tampered.tie_out.ledger_net == Decimal("50.00")
+            assert tampered.tie_out.assets == Decimal("1050.00")
+            assert tampered.tie_out.liabilities_plus_equity == Decimal("1000.00")
+            assert tampered.tie_out.in_balance is False
+
+    def test_an_unbalanced_stored_leg_moves_no_statement(
+        self, app, db, seed_user,
+    ):
+        """One raw +$50.00 stored leg on the opening entry: the same sheet.
+
+        Inserting one unmatched +$50.00 leg onto the seeded Checking opening
+        entry (raw SQL, flushed but never committed, so the DEFERRED per-entry
+        trigger never fires) unbalanced the store's ledger by $50.00, and the
+        statements read it until plan task plan#2771: this test then asserted
+        the tie-out flipped.  Worked out from the records, the leg is no line,
+        so the sheet is the same report it was, tie-out green.  The CONTROL:
+        the leg is really in the store, its entry's legs netting $50.00.
         Rolled back so the leg never lands.
         """
         with app.app_context():
             user_id = seed_user["user"].id
             scenario_id = seed_user["scenario"].id
             checking = seed_user["account"]
-            # Green before the injection.
-            assert _reader_bs(user_id).tie_out.in_balance is True
+            before = _reader_bs(user_id)
+            assert before.tie_out.in_balance is True
 
             linked = linked_ledger_account(db.session, checking.id)
             opening_source = ref_cache.posting_source_id(
@@ -302,11 +307,14 @@ class TestTieOutIsNotVacuous:
             })
             db.session.flush()
 
-            tampered = _reader_bs(user_id)
-            assert tampered.tie_out.ledger_net == Decimal("50.00")
-            assert tampered.tie_out.assets != (
-                tampered.tie_out.liabilities_plus_equity
+            assert _db.session.query(
+                sa.func.sum(Posting.amount),
+            ).filter(Posting.journal_entry_id == entry_id).scalar() == (
+                Decimal("50.00")
             )
-            assert tampered.tie_out.in_balance is False
+
+            after = _reader_bs(user_id)
+            assert after == before
+            assert after.tie_out.in_balance is True
 
             db.session.rollback()

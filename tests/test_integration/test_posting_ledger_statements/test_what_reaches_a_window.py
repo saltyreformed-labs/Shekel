@@ -22,6 +22,7 @@ from tests._test_helpers import (
 )
 
 from ._helpers import (
+    _checking_at_its_opening,
     _Y,
     _assert_ledger_self_consistent,
     _find_line,
@@ -44,10 +45,10 @@ class TestRevertAndResidueDropped:
         """Settling then reverting a $400 expense removes it from both statements.
 
         A $400.00 Groceries expense settled in 2099 posts, then is reverted via
-        the real ``sync_transaction_postings(settled=False)`` path -- the source
-        nets to zero, so ``_grouped_source_nets`` drops it whole.  The income
-        statement shows no Groceries line and the balance sheet's Checking is
-        back on its $1000.00 opening, tie-out green.
+        the real ``sync_transaction_postings(settled=False)`` path -- a
+        projected row books no line, so the worked-out ledger holds none for
+        it.  The income statement shows no Groceries line and the balance
+        sheet's Checking is back on its $1000.00 opening, tie-out green.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -78,28 +79,26 @@ class TestRevertAndResidueDropped:
             )
             assert not after.expense.lines
             assert after.net_income == Decimal("0.00")
-            sheet = _reader_bs(user_id)
-            assert _find_line(
-                sheet.assets.lines, "Checking",
-            ).amount == Decimal("1000.00")
-            assert sheet.tie_out.in_balance is True
+            sheet = _checking_at_its_opening(user_id)
             _assert_reader_matches_independent(user_id, scenario_id, sheet)
             _assert_ledger_self_consistent()
 
     def test_cross_year_residue_dropped_from_every_window(
         self, app, db, seed_user,
     ):
-        """Residue split across two years nets to zero and is dropped from both.
+        """Residue split across two years reaches neither year, nor the sheet.
 
         A hard delete SET-NULLs ``journal_entries.transaction_entry_id`` after
         reversing the postings, leaving residue: purchase-source entries with
         their movement link NULL.  Here the ORIGINAL residue lands in 2098 and its
         REVERSAL in 2099 -- different calendar years, netting to zero per account
-        (the reverse-before-delete discipline).  Because the reader keeps only
-        correction sources in the sourceless bucket, BOTH years' income
-        statements and the balance sheet exclude the residue whole, so neither
-        year sees a half-entry and the tie-out stays closed -- the exact
-        cross-year rationale the residue drop protects.
+        (the reverse-before-delete discipline).  A reader that took either half
+        would show a $100.00 line in one year and its opposite in the other.
+        The store's reader dropped residue by a rule; the statements read the
+        ledger worked out from the records since plan task plan#2771, and no
+        record books these entries, so they are planted stored entries that
+        move no statement: BOTH years' income statements are empty and the
+        balance sheet ties out at the $1,000.00 opening.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -129,11 +128,7 @@ class TestRevertAndResidueDropped:
                 assert not statement.expense.lines, year
                 assert statement.net_income == Decimal("0.00"), year
 
-            sheet = _reader_bs(user_id)
-            assert _find_line(
-                sheet.assets.lines, "Checking",
-            ).amount == Decimal("1000.00")
-            assert sheet.tie_out.in_balance is True
+            sheet = _checking_at_its_opening(user_id)
             _assert_reader_matches_independent(user_id, scenario_id, sheet)
             # The residue is real postings that net to zero: the raw trial
             # balance is still exactly zero (whole-entry, self-cancelling).
@@ -351,7 +346,8 @@ class TestAttributionEdgeCases:
             # The pay-period window (its period start is 2100) still sees it,
             # because a pay-period window keys on the entry's period, not a date.
             by_period = ledger_report_service.compute_income_statement(
-                user_id, calendar_for(user_id), StatementWindow("pay_period", period_id=future_period.id),
+                user_id, calendar_for(user_id),
+                StatementWindow("pay_period", period_id=future_period.id),
             )
             assert by_period.expense.total == Decimal("250.00")
             # The 2100 calendar window does NOT (the paid date is 2099).

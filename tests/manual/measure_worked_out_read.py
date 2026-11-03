@@ -48,6 +48,7 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime
 from decimal import Decimal
+from functools import partial
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so ``app`` and ``tests`` are not importable without this; the
@@ -89,7 +90,9 @@ def _read_statements(owner_id, scenario_id):
     """Run the read once from an expired session; its lines and statement texts."""
     db.session.expire_all()
     lines, statements = capture_sql_statements(
-        lambda: worked_out_lines(owner_id, scenario_id),
+        lambda: worked_out_lines(
+            owner_id, scenario_id, partial(calendar_for, owner_id),
+        ),
     )
     return lines, [text for text, _params in statements]
 

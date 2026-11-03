@@ -29,13 +29,17 @@ report s.12.2, stage 1) is the app's own report, reading the lines, against itse
 store: leaf 2's (plan step plan#2515), whose spec carries it as
 ``tests/manual/verify_statement_baseline.py`` byte-identical before that leaf against after.
 
+**Since plan task plan#2771 its "from the store" side reads the LINES**: the app's report
+moved onto the worked-out ledger, so the comparison below is lines against lines, moved by the
+stored-side expected differences, and grades nothing against the store.  It is kept compiling
+and no more; re-grounding it or deleting it is plan task plan#2791.
+
 Underscore-prefixed module name keeps pytest from collecting it.
 """
 
 from collections import defaultdict, namedtuple
 from decimal import Decimal
 
-from app import ref_cache
 from app.enums import LedgerAccountClassEnum
 from app.exceptions import BaselineMissingError
 from app.services import ledger_report_service
@@ -97,8 +101,7 @@ def report_statements(ledger, explained):
 
     Args:
         ledger: The owner's ledger in its baseline scenario: ``owner_id``,
-            ``calendar``, ``key_of`` (each stored chart row's key), and the
-            ``stored`` and ``worked`` contributions, each carrying ``key``,
+            ``calendar``, and the ``stored`` and ``worked`` contributions, each carrying ``key``,
             ``pay_period_id``, ``amount``, ``attributed_on`` and
             ``entry_id`` (``None`` on a worked-out line).
         explained: The contributions, both sides', of every source cell whose
@@ -217,33 +220,32 @@ def _balance_view(nets):
 
 def _section_into(view, section, member, nets):
     """Write one class's natural-signed lines into *view*; their total."""
-    class_id = ref_cache.ledger_account_class_id(member)
     total = _ZERO
     for key, net in nets.items():
         if key.ledger_class is member and net != 0:
-            view[(section, key)] = present_natural(class_id, net)
+            view[(section, key)] = present_natural(member, net)
             total += view[(section, key)]
     return total
 
 
-def _stored_income_view(report, key_of):
+def _stored_income_view(report):
     """Return a stored income statement as ``{field: amount}``."""
     view = {}
     for section in ("income", "expense", "unrealized"):
         part = getattr(report, section)
-        _stored_lines_into(view, section, part.lines, key_of)
+        _stored_lines_into(view, section, part.lines)
         view[(section, "total")] = part.total
     view[("result", "net income")] = report.net_income
     view[("result", "comprehensive income")] = report.comprehensive_income
     return view
 
 
-def _stored_balance_view(report, key_of):
+def _stored_balance_view(report):
     """Return a stored balance sheet as ``{field: amount}``."""
     view = {}
     for section in ("assets", "liabilities", "equity"):
         part = getattr(report, section)
-        _stored_lines_into(view, section, part.lines, key_of)
+        _stored_lines_into(view, section, part.lines)
         view[(section, "total")] = part.total
     view.update({
         ("tie-out", "liabilities plus equity"):
@@ -254,17 +256,18 @@ def _stored_balance_view(report, key_of):
     return view
 
 
-def _stored_lines_into(view, section, lines, key_of):
-    """Write a stored section's lines into *view*, keyed as the read keys them.
+def _stored_lines_into(view, section, lines):
+    """Write a report section's lines into *view*, keyed as the read keys them.
 
-    A posted line by its row's chart key (two rows of one key summed); a
-    closing line, which no row posts, by its label.
+    A line by its chart key (a ``StatementLine`` names it since plan task
+    plan#2771, where it named a stored row); a closing line, which no key is
+    booked on, by its label.
     """
     for line in lines:
-        if line.ledger_account_id is None:
+        if line.key is None:
             view[(section, line.label)] = line.amount
             continue
-        cell = (section, key_of[line.ledger_account_id])
+        cell = (section, line.key)
         view[cell] = view.get(cell, _ZERO) + line.amount
 
 
@@ -374,7 +377,7 @@ def _report_statement(ledger, explained, statement, out):
         store refused to produce it, ``{REFUSED: the refusal}``.
     """
     try:
-        stored = statement.stored_view(statement.read(), ledger.key_of)
+        stored = statement.stored_view(statement.read())
     except (PostingError, BaselineMissingError) as exc:
         out(f"!  {statement.title}: {REFUSED}: {exc}")
         return {REFUSED: str(exc)}

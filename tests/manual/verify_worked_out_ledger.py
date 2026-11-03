@@ -306,9 +306,9 @@ def _reading(rewrite):
         yield
         return
 
-    def planted(owner_id, scenario_id):
+    def planted(owner_id, scenario_id, calendar_source):
         """Return the worked-out read, rewritten by the plant."""
-        return rewrite(worked_out_lines(owner_id, scenario_id))
+        return rewrite(worked_out_lines(owner_id, scenario_id, calendar_source))
 
     with mock.patch.object(_worked_out_ledger, "worked_out_lines", planted), \
             mock.patch.object(_ledger_parity, "worked_out_lines", planted):

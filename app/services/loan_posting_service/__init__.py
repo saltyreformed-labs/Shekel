@@ -108,9 +108,9 @@ the write that caused it.
 that once pointed at them is retired: the balance seam folds a loan's past from
 SOURCE events (steps C3b1 / C3b3) and its confirmed rows from the walk (step
 E1d-b), so a cold or stale posting cache is a repairable inconsistency, never a
-read outage.  What DOES read them is the general ledger's own presentation --
-the balance sheet and statements (:mod:`app.services.ledger_report_service`) and
-this package's per-payment attribution (:mod:`._display`).
+read outage.  What DOES read them is this package's per-payment attribution
+(:mod:`._display`); the balance sheet and statements did too until plan task
+plan#2771 moved them onto the worked-out ledger.
 """
 
 from ._display import (

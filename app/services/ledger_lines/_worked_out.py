@@ -59,6 +59,7 @@ twin), while this read answers whichever scenario it is asked for.  Today
 every owner holds only a baseline.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -73,7 +74,7 @@ from app.services.account_projection import (
 )
 from app.services.cash_ledger import owner_cash_records
 from app.services.loan_ledger import LoanLedgerWalk, walk_loan_ledgers
-from app.services.pay_calendar import PayCalendar, calendar_for
+from app.services.pay_calendar import PayCalendar
 from app.services.transfer_legs import PlanItem
 
 from ._account_anchors import account_correction_targets
@@ -126,7 +127,11 @@ class LedgerLine:
     movement_id: int | None
 
 
-def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
+def worked_out_lines(
+    owner_id: int,
+    scenario_id: int,
+    calendar_source: Callable[[], PayCalendar],
+) -> list[LedgerLine]:
     """Return every line of *owner_id*'s ledger in *scenario_id*, worked out.
 
     The movement lines first, ascending by movement id, then each account's
@@ -147,20 +152,33 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
     (:func:`app.services.loan_ledger.walk_loan_ledgers`), the loans' terms
     in one statement by their ids.
 
-    **The owner's pay calendar is loaded only when a correction is to be
-    filed**, as the writers load it (``account_posting_service``'s
-    ``reconcile_account_anchor_corrections`` returns before it on an empty
-    corrections list, ``loan_posting_service``'s
-    ``reconcile_loan_corrections`` on an empty walk, which each loan here
-    answers by the same
+    **The owner's pay calendar is asked of *calendar_source* only when a
+    correction is to be filed**, as the writers load it
+    (``account_posting_service``'s ``reconcile_account_anchor_corrections``
+    returns before it on an empty corrections list,
+    ``loan_posting_service``'s ``reconcile_loan_corrections`` on an empty
+    walk, which each loan here answers by the same
     :attr:`~app.services.loan_ledger.LoanLedgerWalk.is_empty`): an owner
     with no correction to file asks it nothing, so one holding neither a pay
     schedule (which :func:`~app.services.pay_calendar.calendar_for` refuses)
     nor a correction reads its ledger rather than that refusal.
 
+    **It takes a SOURCE rather than deriving its own** (plan task plan#2771),
+    the shape :func:`~app.services.income_service.paycheck_pricing` takes
+    for the same reason: the income statement's route derives the owner's
+    calendar for its own selector, so a read deriving another was a second
+    derivation of one schedule on one render
+    (``tests/test_arch/test_one_read_pass_per_render.py``).  A caller that
+    holds a calendar hands it; one that holds none hands
+    :func:`~app.services.pay_calendar.calendar_for` bound to the owner,
+    still asked only when a correction is to be filed.
+
     Args:
         owner_id: The owner whose ledger to read.
         scenario_id: The budget scenario to read it in.
+        calendar_source: A zero-argument callable answering *owner_id*'s
+            :class:`~app.services.pay_calendar.PayCalendar`, which files each
+            correction by its day; called at most once.
 
     Returns:
         The :class:`LedgerLine` list, no line of ``$0.00`` in it; empty for an
@@ -168,12 +186,15 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
 
     Raises:
         PayCalendarError: A correction is to be filed and the owner holds no
-            pay schedule (from :func:`app.services.pay_calendar.calendar_for`),
-            or a correction has no materialised paycheck to file in (from
+            pay schedule (from :func:`app.services.pay_calendar.calendar_for`
+            behind *calendar_source*), or a correction has no materialised
+            paycheck to file in (from
             :meth:`~app.services.pay_calendar.PayCalendar.filing_period`) --
             the refusals the writers raise for the same states.
-        ValueError: An account whose projection kind has no true-up counter
-            rule (:func:`._chart.anchor_correction_counter_kind`).
+        ValueError: *calendar_source* answered another owner's calendar,
+            whose paychecks would file this owner's corrections; or an
+            account whose projection kind has no true-up counter rule
+            (:func:`._chart.anchor_correction_counter_kind`).
     """
     accounts = (
         db.session.query(Account)
@@ -195,7 +216,13 @@ def worked_out_lines(owner_id: int, scenario_id: int) -> list[LedgerLine]:
     if any(corrections.values()) or not all(
         walk.is_empty for walk in loan_walks.values()
     ):
-        calendar = calendar_for(owner_id)
+        calendar = calendar_source()
+        if calendar.user_id != owner_id:
+            raise ValueError(
+                f"the worked-out read of user {owner_id}'s ledger was handed "
+                f"user {calendar.user_id}'s pay calendar: a correction is "
+                f"filed in its owner's own paychecks"
+            )
         for account in accounts:
             lines.extend(_correction_lines(
                 _correction_targets(account, calendar, corrections, loan_walks),

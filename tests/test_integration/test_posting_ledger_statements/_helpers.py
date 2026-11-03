@@ -373,6 +373,22 @@ def _reader_bs(user_id, as_of=_ALL_ACTIVITY):
     return ledger_report_service.compute_balance_sheet(user_id, as_of)
 
 
+def _checking_at_its_opening(user_id):
+    """Return the full balance sheet, asserting Checking holds its $1,000.00 opening.
+
+    The seeded Checking's opening, and nothing on top of it, with the sheet
+    tied out: what a fixture whose only activity nets to zero, or never
+    reaches the baseline, leaves.  One spelling for the three cases that ask
+    it, which the split of this package exposed as pylint R0801.
+    """
+    sheet = _reader_bs(user_id)
+    assert _find_line(
+        sheet.assets.lines, "Checking",
+    ).amount == Decimal("1000.00")
+    assert sheet.tie_out.in_balance is True
+    return sheet
+
+
 def _assert_reader_matches_independent(user_id, scenario_id, sheet, through=None):
     """Assert the reader's sheet equals the independent re-derivation.
 

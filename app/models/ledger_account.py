@@ -168,10 +168,10 @@ own snapshot.  **The COALESCE rule is the LINKED-row rule only**: an
 per-account COUNTER row also carries ``account_id`` (so the COALESCE would
 wrongly resolve to the bare account name), so readers rendering chart
 entries branch on ``kind_id`` and use the ``name`` snapshot for those rows
--- the sole writer always stamps one.  Readers do that with a DEFAULT arm
-rather than an enumeration, which is why R-FO's two new kinds needed no
-edit in ``ledger_report_service._attribution.ledger_account_label``.  The
-``ck_ledger_accounts_name_present`` CHECK guarantees at least one of the
+-- the sole writer always stamps one.  No reader renders these rows since
+plan task plan#2771: the statements label each line from the worked-out
+chart, by its live record (``ledger_lines.chart_label``, ruling plan#2518).
+The ``ck_ledger_accounts_name_present`` CHECK guarantees at least one of the
 two is present so the display rule can never resolve to NULL -- and because
 a non-account-linked row has ``account_id`` NULL, that CHECK forces it to
 carry a ``name``.

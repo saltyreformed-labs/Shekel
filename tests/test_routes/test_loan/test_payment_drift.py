@@ -17,6 +17,7 @@ from tests._test_helpers import add_escrow_line, make_cadence_rule, state_templa
 from tests.oracles.recurrence_baseline import MONTHLY
 
 from ._helpers import _payment_template, _create_mortgage
+from tests._test_helpers import newest_price
 
 
 def _todays_figure(template, seed_user):
@@ -83,12 +84,11 @@ class TestPaymentDrift:
             from_account_id=seed_user["account"].id,
             to_account_id=acct.id,
             name="Legacy Mortgage Payment",
-            default_amount=amount,
             is_active=True,
         )
         db_session.add(tpl)
         db_session.commit()
-        state_template_price(tpl)
+        state_template_price(tpl, amount)
         db_session.commit()
         # The definition first, then the cadence onto it (plan step R-F6),
         # then COMMITTED (plan step X-i3) -- every caller of this helper goes
@@ -240,8 +240,11 @@ class TestPaymentDrift:
             .first()
         )
         new_contract = self._contract(acct, seed_user["user"].id)
-        # The control: the stored base is now below contract (would warn if manual).
-        assert tpl.default_amount < new_contract
+        # The control: it states no base to fall below the contract (it stored
+        # one, created at the old contract, until plan step X-bp dropped the
+        # template's ``default_amount``), so a derive payment cannot warn.
+        assert newest_price(tpl) is None
+        assert new_contract > 0
         assert tpl.settings.derive_from_loan is True
 
         resp = auth_client.get(f"/accounts/{acct.id}/loan")
@@ -404,7 +407,7 @@ class TestPaymentDrift:
         assert payment.settings.derive_from_loan is True
         assert _todays_figure(payment, seed_user) == contract
         assert sweep.settings is None
-        assert sweep.default_amount == Decimal("50.00")
+        assert newest_price(sweep) == Decimal("50.00")
 
     def test_track_payment_refuses_another_loans_template(
         self, auth_client, seed_user, db, seed_periods,
@@ -428,7 +431,7 @@ class TestPaymentDrift:
         assert resp.status_code == 404
         db.session.expire(other_tpl)
         assert other_tpl.settings is None
-        assert other_tpl.default_amount == contract - Decimal("50.00")
+        assert newest_price(other_tpl) == contract - Decimal("50.00")
 
     def test_the_card_renders_one_strip_per_definition_with_its_own_controls(
         self, auth_client, seed_user, db, seed_periods,
@@ -533,7 +536,7 @@ class TestPaymentDrift:
         )
         db.session.commit()
         db.session.expire(tpl)
-        assert tpl.default_amount == Decimal("9999.00"), (
+        assert newest_price(tpl) == Decimal("9999.00"), (
             "precondition: the scalar follows the newest statement"
         )
 
@@ -589,7 +592,7 @@ class TestPaymentDrift:
         assert "cannot track it too" in page
         db.session.expire_all()
         assert sweep.settings is None
-        assert sweep.default_amount == Decimal("50.00")
+        assert newest_price(sweep) == Decimal("50.00")
 
         # The tracker's own door is not refused by its own tracking.
         resp = auth_client.post(
@@ -622,4 +625,4 @@ class TestPaymentDrift:
         assert resp.status_code == 404
         db.session.expire(tpl)
         assert tpl.settings is None
-        assert tpl.default_amount == contract - Decimal("50.00")
+        assert newest_price(tpl) == contract - Decimal("50.00")

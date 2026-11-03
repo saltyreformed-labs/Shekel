@@ -451,7 +451,6 @@ def place_one_off(
         category_id=spec.category_id,
         transaction_type_id=spec.transaction_type_id,
         name=spec.name,
-        default_amount=spec.amount,
         is_envelope=spec.is_envelope,
         companion_visible=spec.companion_visible,
     )

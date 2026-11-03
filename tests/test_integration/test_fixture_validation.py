@@ -35,6 +35,7 @@ from tests._test_helpers import (
 )
 from tests.conftest import SEED_USER_BOOTSTRAP_START
 from tests.oracles.recurrence_baseline import MONTHLY
+from tests._test_helpers import newest_price
 
 
 class TestSeedSecondUser:
@@ -236,7 +237,7 @@ class TestSeedFullUserData:
         every derived row.
         """
         data = seed_full_user_data
-        assert isinstance(data["template"].default_amount, Decimal)
+        assert isinstance(newest_price(data["template"]), Decimal)
         assert isinstance(
             cash_ledger.resolve_transaction_amount(
                 data["transaction"],
@@ -245,7 +246,7 @@ class TestSeedFullUserData:
             Decimal,
         )
         assert isinstance(data["savings_goal"].target_amount, Decimal)
-        assert isinstance(data["transfer_template"].default_amount, Decimal)
+        assert isinstance(newest_price(data["transfer_template"]), Decimal)
         # The salary's stored figure is its pay entry's amount since plan
         # step salary:X-av-3a (``annual_salary`` was dropped).
         assert isinstance(data["salary_profile"].pay_entries[0].amount, Decimal)
@@ -316,7 +317,7 @@ class TestSeedFullSecondUserData:
         a = seed_full_user_data
         b = seed_full_second_user_data
 
-        assert a["template"].default_amount != b["template"].default_amount
+        assert newest_price(a["template"]) != newest_price(b["template"])
         assert cash_ledger.resolve_transaction_amount(
             a["transaction"],
             cash_ledger.derived_amount_basis(a["user"].id, a["scenario"].id),

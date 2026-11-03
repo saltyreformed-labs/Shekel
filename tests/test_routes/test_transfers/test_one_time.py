@@ -23,6 +23,7 @@ from app.models.amount_ownership import AmountOwnership
 from tests._test_helpers import transfer_amount
 
 from ._helpers import _create_savings_account
+from tests._test_helpers import newest_price
 
 
 # ── One-Time Transfer Tests ────────────────────────────────────────────
@@ -599,9 +600,9 @@ class TestOneTimeTransfer:
             }, follow_redirects=True)
 
             db.session.expire_all()
-            assert db.session.get(
+            assert newest_price(db.session.get(
                 TransferTemplate, tmpl.id,
-            ).default_amount == Decimal("900.00")
+            )) == Decimal("900.00")
             # The PLAN follows the definition ...
             assert transfer_amount(
                 db.session.get(Transfer, xfer_id),

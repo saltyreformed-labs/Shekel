@@ -232,11 +232,10 @@ def _monthly_bill_from(seed_user, starts_on):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name="Rent",
-        default_amount=Decimal("1200.00"),
     )
     _db.session.add(template)
     _db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("1200.00"))
     make_cadence_rule(template, MONTHLY, starts_on=starts_on)
     return template
 

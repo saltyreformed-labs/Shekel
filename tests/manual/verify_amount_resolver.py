@@ -303,6 +303,7 @@ from app.services.cash_ledger import (
 )
 from app.services.amount_ownership import state_own_amount
 from tests._test_helpers import write_past_the_amount_seam
+from tests._test_helpers import newest_price
 
 # The unit every money perturbation is built from.  It is SCALED by the source
 # row's own id at each use, so two instances of one source kind can never move

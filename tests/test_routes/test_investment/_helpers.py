@@ -243,7 +243,6 @@ def _create_transfer_template(db_session, user_id, from_id, to_id,
         from_account_id=from_id,
         to_account_id=to_id,
         name=f"Contribution {from_id}->{to_id}",
-        default_amount=Decimal("200.00"),
         is_active=is_active,
     )
     db_session.add(tpl)

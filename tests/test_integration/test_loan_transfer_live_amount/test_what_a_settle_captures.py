@@ -353,12 +353,11 @@ def test_settling_manual_payment_with_extra_captures_base_plus_extra(
         template.settings.derive_from_loan = False
         template.settings.extra_principal = Decimal("100.00")
         # The manual BASE is a STATED amount, so its definition holds it in the
-        # SERIES (plan step X-au-a) rather than in the ``default_amount``
-        # scalar.  Setting only the scalar priced this payment at the fixture's
-        # $1.00 + the extra once the parent started reading its definition --
-        # $101.00 against the $1,599.10 below, which is the figure this case
-        # has always asserted and which is unchanged.
-        template.default_amount = Decimal("1499.10")
+        # SERIES (plan step X-au-a), the definition's only price since X-bp.
+        # Unstated, this payment priced at the fixture's $1.00 + the extra
+        # once the parent started reading its definition -- $101.00 against
+        # the $1,599.10 below, which is the figure this case has always
+        # asserted and which is unchanged.
         _state_price(template, Decimal("1499.10"))
         transfer_recurrence.generate_for_template(
             template, GenerationSchedule.for_period_ids(

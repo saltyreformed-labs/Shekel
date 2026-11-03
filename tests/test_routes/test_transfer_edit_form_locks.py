@@ -72,6 +72,7 @@ from tests._test_helpers import (
     make_loan_payment_template,
     state_template_price,
 )
+from tests._test_helpers import newest_price
 
 #: Frozen so "today" cannot drift past the schedule ``seed_periods`` builds.
 _TODAY = date(2026, 3, 1)
@@ -121,11 +122,10 @@ def _template_into(seed_user, account, name, *, repeats, starts_on=None):
         from_account_id=seed_user["account"].id,
         to_account_id=account.id,
         name=name,
-        default_amount=Decimal("200.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("200.00"))
     if repeats:
         rule = make_every_period_rule(db.session, template)
         if starts_on is not None:
@@ -625,7 +625,7 @@ class TestWhatTheArchivedFormPosts:
 
             resp = auth_client.post(f"/transfers/{archived.id}", data={
                 "name": "Archived, renamed",
-                "amount": str(archived.default_amount),
+                "amount": str(newest_price(archived)),
                 "from_account_id": str(archived.from_account_id),
                 "version_id": str(archived.version_id),
                 **cadence_payload(unit=RecurrenceUnitEnum.PERIOD, states_a_start=False),
@@ -670,7 +670,7 @@ class TestWhatTheArchivedFormPosts:
 
             resp = auth_client.post(f"/transfers/{archived.id}", data={
                 "name": archived.name,
-                "amount": str(archived.default_amount),
+                "amount": str(newest_price(archived)),
                 "from_account_id": str(archived.from_account_id),
                 "version_id": str(archived.version_id),
                 **cadence_payload(unit=RecurrenceUnitEnum.PERIOD, states_a_start=False),

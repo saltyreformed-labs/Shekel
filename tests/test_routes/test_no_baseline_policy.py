@@ -393,7 +393,6 @@ def _build_baseline_less_owner(db):
         from_account_id=seed_user["account"].id,
         to_account_id=hysa.id,
         name="Policy Transfer Definition",
-        default_amount=Decimal("200.00"),
     )
     db.session.add(xfer_template)
     # A transcribed pay stub (plan step salary:S11-b), for
@@ -455,7 +454,7 @@ def _build_baseline_less_owner(db):
     # The transfer definition's price, through the one write door as its
     # create route states it: ``/templates`` prices a definition by its series
     # since plan step X-bp, and rule 3 needs no baseline to do it.
-    state_template_price(xfer_template)
+    state_template_price(xfer_template, Decimal("200.00"))
 
     scenario = db.session.get(Scenario, seed_user["scenario"].id)
     scenario.is_baseline = False

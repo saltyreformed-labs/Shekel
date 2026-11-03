@@ -24,6 +24,7 @@ from tests._test_helpers import (
     make_every_period_rule,
     one_off_row_of,
 )
+from tests._test_helpers import newest_price
 
 
 def _no_baseline(user_id):
@@ -100,7 +101,6 @@ def _derived_income_row(db, seed_user, account, period, amount):
         category_id=next(iter(seed_user["categories"].values())).id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
         name="Priced income",
-        default_amount=_NOT_THE_SERIES,
     )
     db.session.add(template)
     db.session.flush()
@@ -111,7 +111,7 @@ def _derived_income_row(db, seed_user, account, period, amount):
         template, _NOT_THE_SERIES,
         effective_on=period.start_date + timedelta(days=1),
     )
-    assert template.default_amount == _NOT_THE_SERIES
+    assert newest_price(template) == _NOT_THE_SERIES
     # The definition first, then the cadence onto it (plan step R-F6).
     make_every_period_rule(db.session, template)
     return generate_row_of(template, period)

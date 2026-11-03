@@ -20,6 +20,7 @@ from tests.test_services.test_statement_match._builders import a_later_period, a
 from tests._test_helpers import family_journal_filter, last_covered_day, resolved_amount
 
 from ._helpers import _a_deposit, _record
+from tests._test_helpers import newest_price
 
 
 class TestTheRowItWrites:
@@ -42,7 +43,7 @@ class TestTheRowItWrites:
         # definition the door mints since plan step balance:X-bi-7b
         # (R-BAL21), so the column it used to store the figure in is empty.
         assert resolved_amount(row) == Decimal("0.15")
-        assert row.template.default_amount == Decimal("0.15")
+        assert newest_price(row.template) == Decimal("0.15")
 
     def test_it_carries_NO_category(self, app, db, seed_user):
         """R-FN's clause: the app does not know what this money was."""

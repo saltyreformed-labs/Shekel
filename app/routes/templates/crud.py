@@ -189,12 +189,10 @@ def create_template():
 
     # Create the template.  The form's Amount is ``amount`` since plan step
     # X-bp, which is not a column: it is the price the series opens at below,
-    # and the stored copy (still NOT NULL until that step drops it) is handed
-    # the same figure.
+    # the definition's only price.
     amount = data.pop("amount")
     template = TransactionTemplate(
         user_id=current_user.id,
-        default_amount=amount,
         **data,
     )
     db.session.add(template)
@@ -211,16 +209,11 @@ def create_template():
     if isinstance(rule, Response):
         return rule
 
-    # Open the amount's dated series at today (plan step X-au-a).  The
-    # constructor above also carries the figure because the column is NOT NULL;
-    # this call is what makes the SERIES exist, and after plan step X-au-e the
-    # series is the only thing that prices this definition's rows -- generation
-    # writes no figure, so a template whose series never opened generates rows
-    # ``_stated_amount`` REFUSES.  *An earlier version of this comment said
-    # X-au-e "removes the redundancy by removing the column"; it does not.
-    # Plan step X-bp deletes ``default_amount`` from both template tables
-    # (rulings **R-IY**, **R-BAL16**); until then
-    # ``template_amount_service.set_amount`` says what still reads it.*  A
+    # Open the amount's dated series at today (plan step X-au-a).  The series
+    # is the only thing that prices this definition's rows -- generation
+    # writes no figure since plan step X-au-e, and plan step X-bp dropped the
+    # ``default_amount`` copy (rulings **R-IY**, **R-BAL16**) -- so a template
+    # whose series never opened generates rows ``_stated_amount`` REFUSES.  A
     # template created today generates rows into historical pay periods too,
     # and those resolve by the series holding flat before its earliest version
     # (``template_amount_service.amount_as_of``).
@@ -450,8 +443,8 @@ def update_template(template_id):
     if invalid is not None:
         return invalid
 
-    # State the amount through its one write door, which moves the scalar and
-    # the dated series together (plan step X-au-a).  ``effective_from`` is the
+    # State the amount through its one write door, the dated series' (plan
+    # step X-au-a).  ``effective_from`` is the
     # form's "Amount effective from" date, which also bounds the regeneration
     # below -- ONE value, though the two apply it with different predicates: the
     # series answers by a row's own DUE date and the sweep selects by its pay

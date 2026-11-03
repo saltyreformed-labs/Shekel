@@ -51,7 +51,6 @@ def _linked_profile(seed_user, db_session):
         category_id=next(iter(seed_user["categories"].values())).id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
         name="Paycheck",
-        default_amount=Decimal("11.11"),
     )
     db_session.add(template)
     db_session.flush()
@@ -122,10 +121,10 @@ class TestTheServiceTakesThePassAndReturnsWhatItKept:
 
         It re-stated the template's ``default_amount`` at today's net until
         X-bp, a copy nothing read once the Recurring and savings pages, the
-        edit page and the archive priced today's paycheck themselves.  So the
-        pass's pricer is never asked for, the copy keeps the ``$11.11`` it
-        was born at, and no price version is written: a salary profile's
-        template states no amount.
+        edit page and the archive priced today's paycheck themselves, and the
+        same step dropped the column.  So the pass's pricer is never asked
+        for and no price version is written: a salary profile's template
+        states no amount.
         """
         with app.app_context():
             profile = _linked_profile(seed_user, db.session)
@@ -139,7 +138,6 @@ class TestTheServiceTakesThePassAndReturnsWhatItKept:
 
             assert salary_regeneration.regenerate_salary_transactions(ctx, profile) == []
             db.session.flush()
-            assert profile.template.default_amount == Decimal("11.11")
             assert template_amount_service.amount_versions(profile.template) == []
 
     def test_a_profile_with_no_template_is_left_alone(

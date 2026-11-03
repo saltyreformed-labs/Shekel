@@ -192,7 +192,7 @@ def _salary_category(user_id: int) -> Category:
 
 
 def _paycheck_template(
-    data: dict, *, net_pay, account_id: int, category_id: int, calendar,
+    data: dict, *, account_id: int, category_id: int, calendar,
 ) -> TransactionTemplate:
     """Create and flush the every-paycheck template a salary profile files through.
 
@@ -206,13 +206,14 @@ def _paycheck_template(
     salary profile fans its paychecks across every pay period the owner has,
     closed ones included.  Plan ledger row **D34** carries whether it should.
 
-    **The template is born at the NET paycheck the engine prices** (plan step
-    salary:X-av-3a).  It was born at the GROSS -- the annual salary over the
-    owner's paycheck count -- and re-stated at the net a few lines later in
-    the same request, so the column held two quantities in one unit of work
-    and kept the gross whenever no reference period was found (half of
-    finding **N-446**'s "two quantities").  The profile is priced first and
-    the template takes that figure once.
+    **The template states no price** (plan step X-bp, rulings R-IY and
+    R-BAL16): the paycheck calculator prices each of its rows live, and a
+    salary-linked definition owns no price series
+    (``template_amount_service.owns_its_amount``).  It was born carrying a
+    ``default_amount`` copy: the gross paycheck re-stated at the net a few
+    lines later until plan step salary:X-av-3a, the net paycheck at a
+    reference period from then until X-bp dropped the column (finding
+    **N-446**).
 
     **The calendar is TAKEN rather than derived here** (pay-calendar plan step
     C2-f3c).  ``create_profile`` derives one anyway for the paycheck it then
@@ -222,9 +223,6 @@ def _paycheck_template(
 
     Args:
         data: The validated create payload; read for the name.
-        net_pay: The new profile's net paycheck at the reference period
-            :func:`create_profile` prices -- the figure the amount model's
-            fallback reads.
         account_id: The deposit account the paychecks land in -- neither a
             loan nor a credit card (the picker in :func:`create_profile`).
         category_id: This owner's ``Income: Salary`` category.
@@ -241,7 +239,6 @@ def _paycheck_template(
         category_id=category_id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
         name=data["name"],
-        default_amount=net_pay,
         is_active=True,
     )
     db.session.add(template)
@@ -322,16 +319,16 @@ def create_profile():
     # session (PendingRollbackError) rather than yield the id.
     user_id = current_user.id
 
-    # The template's opening bound, the first pay entry's payday check, the
-    # net paycheck the template is born at, and the generate pass all read the
-    # pass's own derivation of it (pay-calendar plan step C2-f3c; plan step
-    # R7d-c-1 moved it onto the pass).
+    # The template's opening bound, the first pay entry's payday check and the
+    # generate pass all read the pass's own derivation of it (pay-calendar
+    # plan step C2-f3c; plan step R7d-c-1 moved it onto the pass).
     calendar = ctx.calendar()
 
     try:
-        # The profile FIRST, with its pay list, and priced before its template
-        # exists (plan step salary:X-av-3a): the template is born at the net
-        # paycheck rather than at a gross re-stated a few lines later.
+        # The profile FIRST, with its pay list (plan step salary:X-av-3a,
+        # where it was priced before its template existed so the template
+        # was born at the net paycheck; the template states no price since
+        # plan step X-bp, so nothing prices it here).
         profile = SalaryProfile(
             user_id=current_user.id,
             scenario_id=ctx.scenario_id,
@@ -356,26 +353,8 @@ def create_profile():
             display_today(),
         )
 
-        # The reference period: the one holding the pass's pinned day -- the
-        # one read of "today" (ledger row SAL-572) -- else the first saved,
-        # else the first entry's own, which ``start_pay_list`` has just
-        # proven is a payday the calendar holds or projects.  The pass's
-        # pricer (plan step salary:C12, ledger row P62): the tax configs
-        # resolve for the period's own year, as for every other paycheck
-        # this profile prices.
-        periods = calendar.saved()
-        ref_period = (
-            calendar.period_containing(ctx.as_of)
-            or (periods[0] if periods else None)
-            or calendar.span_containing(data["pay_payday"])
-        )
-        net_pay = ctx.paychecks().for_profile(profile).at(
-            ref_period,
-        ).earnings.net_pay
-
         template = _paycheck_template(
             data,
-            net_pay=net_pay,
             account_id=account.id,
             category_id=salary_category.id,
             calendar=calendar,

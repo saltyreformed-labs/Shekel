@@ -91,6 +91,7 @@ from tests.oracles.recurrence_baseline import (
     EVERY_N_PERIODS,
     MONTHLY,
 )
+from tests._test_helpers import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -130,11 +131,10 @@ def _create_template(seed_user, name="Rent", amount="1200.00",
         category_id=category.id,
         transaction_type_id=txn_type_obj.id,
         name=name,
-        default_amount=Decimal(amount),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal(amount))
     if cadence:
         # Authored through the write door, which is what plan step R7c-b made
         # the only way to make a rule: ``unit_id``, ``placement_id``,
@@ -228,7 +228,6 @@ def _create_other_user_with_template():
         category_id=category.id,
         transaction_type_id=txn_type.id,
         name="Other Rent",
-        default_amount=Decimal("900.00"),
     )
     db.session.add(template)
     db.session.commit()
@@ -625,7 +624,7 @@ class TestTemplateUpdate:
 
             db.session.refresh(template)
             assert template.name == "Updated Rent"
-            assert template.default_amount == Decimal("1300.00")
+            assert newest_price(template) == Decimal("1300.00")
 
     def test_update_template_cannot_flip_is_active_or_sort_order(
         self, app, auth_client, seed_user,
@@ -736,9 +735,9 @@ class TestTemplateUpdate:
             assert b"Keep" in resp.data and b"Use" in resp.data
             # Rolled back: the template keeps its pre-edit amount.
             db.session.expire_all()
-            assert db.session.get(
+            assert newest_price(db.session.get(
                 TransactionTemplate, tid,
-            ).default_amount == Decimal("1200.00")
+            )) == Decimal("1200.00")
 
     # **``test_the_chooser_names_the_DERIVED_paycheck`` was deleted at plan step
     # ``pay_calendar:C4-c``.**  It asserted that the override chooser named the
@@ -785,9 +784,9 @@ class TestTemplateUpdate:
             reloaded = db.session.get(Transaction, txn_id)
             assert resolved_amount(reloaded) == Decimal("1400.00")
             assert reloaded.is_override is False
-            assert db.session.get(
+            assert newest_price(db.session.get(
                 TransactionTemplate, tid,
-            ).default_amount == Decimal("1400.00")
+            )) == Decimal("1400.00")
 
     def test_the_chooser_PAGE_offers_no_figure_for_a_transaction(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -855,9 +854,9 @@ class TestTemplateUpdate:
             reloaded = db.session.get(Transaction, txn_id)
             assert reloaded.estimated_amount == Decimal("1500.00")
             assert reloaded.is_override is True
-            assert db.session.get(
+            assert newest_price(db.session.get(
                 TransactionTemplate, tid,
-            ).default_amount == Decimal("1400.00")
+            )) == Decimal("1400.00")
 
     def test_name_only_edit_with_override_skips_chooser(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -1054,7 +1053,7 @@ class TestTemplateUpdate:
 
             db.session.expire_all()
             reloaded = db.session.get(TransactionTemplate, tid)
-            assert reloaded.default_amount == Decimal("650.00"), (
+            assert newest_price(reloaded) == Decimal("650.00"), (
                 "the edit was rolled back by a conflict that asked nothing"
             )
 
@@ -2940,7 +2939,6 @@ class TestEnvelopeIncomeRejection:
                 category_id=category.id,
                 transaction_type_id=income_type.id,
                 name="Phase2 Income Template",
-                default_amount=Decimal("250.00"),
                 is_envelope=False,
             )
             db.session.add(template)
@@ -3469,11 +3467,10 @@ def _template_with_starts_on(seed_user, txn_type, starts_on):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=txn_type.id,
         name="Bounded Expense",
-        default_amount=Decimal("42.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("42.00"))
     # The definition first, then the cadence onto it (plan step R-F6).
     make_cadence_rule(
         template, EVERY_PERIOD, starts_on=starts_on,
@@ -3509,7 +3506,6 @@ def _loan_payment_template(seed_user):
         from_account_id=seed_user["account"].id,
         to_account_id=loan_account.id,
         name="Loan Payment",
-        default_amount=Decimal("500.00"),
         is_active=True,
     )
     db.session.add(template)
@@ -3518,7 +3514,7 @@ def _loan_payment_template(seed_user):
     # takes, as every real manual payment is: the loan page's plan sums this
     # definition's occurrences since plan step R16-b-2 and refuses a series
     # nobody stated.
-    state_template_price(template)
+    state_template_price(template, Decimal("500.00"))
     template.settings = LoanPaymentSettings(derive_from_loan=False)
     db.session.commit()
     # The definition first, then the cadence onto it (plan step R-F6).
@@ -4108,7 +4104,7 @@ class TestAnEditStatesTheOpeningBoundOrSaysNothing:
             db.session.expire_all()
             stored = db.session.get(TransactionTemplate, template.id)
             assert stored.recurrence_rule.starts_on == before
-            assert stored.default_amount == Decimal("42.00"), (
+            assert newest_price(stored) == Decimal("42.00"), (
                 "the rest of the edit must still have landed"
             )
 

@@ -338,10 +338,10 @@ def _todays_paycheck(
     """TODAY's paycheck when *template* is an active salary profile's, else ``None``.
 
     Ruling **R-SAL71** (plan step salary:X-av-2): a salary definition's
-    ``default_amount`` is a STORED copy of a paycheck the engine priced when
-    the salary was last saved (when the profile was created, since plan step
-    X-bp deleted the re-statement), which records neither which payday it was nor
-    the rhythm that payday was paid at -- so a reader converting it to a
+    ``default_amount`` was a STORED copy of a paycheck the engine priced when
+    the salary was last saved (until plan step X-bp dropped it), which
+    recorded neither which payday it was nor the rhythm that payday was paid
+    at -- so a reader converting it to a
     month has to guess the count, and guessed the LATEST era's.  That was
     right only while the engine divided every payday by that count too.  The
     definition's figure is read from the pricer instead: the pass's

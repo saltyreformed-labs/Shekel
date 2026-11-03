@@ -38,11 +38,10 @@ class TestCrossUserIsolation:
             category_id=seed_user["categories"]['Car Payment'].id,
             transaction_type_id=expense_type.id,
             name='Test Recurring',
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence, **rule_kwargs,
@@ -103,7 +102,7 @@ class TestNegativePaths:
 
     def _make_template_with_rule(
         self, seed_user, cadence,
-        default_amount=Decimal("100.00"), **rule_kwargs,
+        amount=Decimal("100.00"), **rule_kwargs,
     ):
         """Create a template whose rule is AUTHORED, not hand-built.
 
@@ -125,11 +124,10 @@ class TestNegativePaths:
             category_id=seed_user["categories"]['Car Payment'].id,
             transaction_type_id=expense_type.id,
             name='Test Recurring NP',
-            default_amount=default_amount,
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, amount)
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence, **rule_kwargs,
@@ -152,7 +150,7 @@ class TestNegativePaths:
         """
         with app.app_context():
             template = self._make_template_with_rule(
-                seed_user, EVERY_PERIOD, default_amount=Decimal("0.00")
+                seed_user, EVERY_PERIOD, amount=Decimal("0.00")
             )
             created = recurrence_engine.generate_for_template(
                 template, GenerationSchedule.for_period_ids(
@@ -187,11 +185,10 @@ class TestNegativePaths:
                 category_id=seed_user["categories"]["Car Payment"].id,
                 transaction_type_id=expense_type.id,
                 name="No Rule Template",
-                default_amount=Decimal("100.00"),
             )
             db.session.add(template)
             db.session.flush()
-            state_template_price(template)
+            state_template_price(template, Decimal("100.00"))
             db.session.refresh(template)
 
             created = recurrence_engine.generate_for_template(

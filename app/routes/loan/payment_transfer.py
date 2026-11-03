@@ -171,14 +171,14 @@ def create_payment_transfer(account_id):
     # user-supplied amount is respected verbatim; the computed default
     # opts into live derivation so the projected cash debit tracks the
     # loan's monthly payment after an escrow or rate change instead of
-    # staying frozen at default_amount.
+    # staying frozen at the figure computed here.
     transfer_amount, derive_from_loan = _resolve_transfer_amount(
         account, data,
     )
     # The standing overpayment (spec Sec. 6): stored on the settings row and
-    # added live to every payment, in BOTH modes -- NOT baked into
-    # ``default_amount``, which stays the base P&I + escrow (derive) or typed
-    # base (manual).  Schema default 0.00 when the field is blank.
+    # added live to every payment, in BOTH modes -- NOT baked into the base,
+    # which is the loan's P&I + escrow (derive) or the typed price (manual).
+    # Schema default 0.00 when the field is blank.
     extra_principal = data["extra_principal"]
 
     # Create the monthly recurrence rule, ALREADY bounded by the loan's own
@@ -199,7 +199,6 @@ def create_payment_transfer(account_id):
         source_account=source_account,
         dest_account=account,
         name=template_name,
-        default_amount=transfer_amount,
     )
     # Loan-payment transfers carry their loan-payment settings in a 1:1
     # ``loan_payment_settings`` row (decision B) rather than a column on the
@@ -218,8 +217,9 @@ def create_payment_transfer(account_id):
     # payment states no price: its base is the loan's P&I + escrow, which
     # amount rule 4 prices live and the Recurring and savings pages read the
     # same way (``obligations_aggregator.todays_price``), so the door refuses
-    # one (plan step X-bp, where this wrote that snapshot into
-    # ``default_amount`` a second time, beside the builder's).
+    # one (plan step X-bp, where this wrote that snapshot into the template's
+    # ``default_amount`` copy a second time, beside the builder's, until the
+    # same step dropped the column).
     if not derive_from_loan:
         template_amount_service.set_amount(
             template, transfer_amount, effective_on=display_today(),

@@ -158,7 +158,6 @@ def _make_salary_template(seed_user, profile, *, name="Paycheck", account=None):
         category_id=category.id,
         transaction_type_id=income_type.id,
         name=name,
-        default_amount=Decimal("4000.00"),
     )
     db.session.add(template)
     db.session.flush()
@@ -397,7 +396,6 @@ class TestSalaryNetFor:
                 category_id=category.id,
                 transaction_type_id=income_type.id,
                 name="Non-salary income",
-                default_amount=Decimal("50.00"),
             )
             db.session.add(other_template)
             db.session.flush()
@@ -464,7 +462,6 @@ class TestSalaryNetFor:
                 category_id=category.id,
                 transaction_type_id=income_type.id,
                 name="Unlinked income",
-                default_amount=Decimal("100.00"),
             )
             db.session.add(unlinked)
             db.session.flush()

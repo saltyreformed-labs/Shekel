@@ -1093,7 +1093,6 @@ class TestHardDeleteTemplateIsNotStepUpGated:
             transaction_type_id=db.session.query(TransactionType)
             .filter_by(name="Expense").one().id,
             name="Step-Up Test Template",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.commit()
@@ -1181,7 +1180,6 @@ class TestHardDeleteTransferTemplateIsNotStepUpGated:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Step-Up Test Transfer",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.commit()

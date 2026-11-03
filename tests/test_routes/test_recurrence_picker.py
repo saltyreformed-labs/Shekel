@@ -95,6 +95,7 @@ from tests.oracles.recurrence_baseline import (
     SEMI_ANNUAL,
     ANNUAL,
 )
+from tests._test_helpers import newest_price, state_template_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -297,13 +298,13 @@ def _template_with_cadence(
     template = TransactionTemplate(
         user_id=seed_user["user"].id,
         name="Rent",
-        default_amount=Decimal("1200.00"),
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=_expense_type_id(),
         account_id=seed_user["account"].id,
     )
     db.session.add(template)
     db.session.flush()
+    state_template_price(template, Decimal("1200.00"))
     # The definition first, then the cadence onto it (plan step R-F6).
     _rule_on_cadence(template, cadence, interval_n, unit_id)
     db.session.commit()
@@ -317,13 +318,13 @@ def _transfer_template_with_cadence(
     template = TransferTemplate(
         user_id=seed_user["user"].id,
         name="To Savings",
-        default_amount=Decimal("50.00"),
         from_account_id=seed_user["account"].id,
         to_account_id=destination.id,
         category_id=seed_user["categories"]["Rent"].id,
     )
     db.session.add(template)
     db.session.flush()
+    state_template_price(template, Decimal("50.00"))
     # The definition first, then the cadence onto it (plan step R-F6).
     _rule_on_cadence(template, cadence, unit_id=unit_id)
     db.session.commit()
@@ -951,7 +952,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
                 "the rule row was DELETED by a save the form promised to refuse"
             )
             # The refused edit committed nothing, amount included.
-            assert reloaded.default_amount == Decimal("1200.00")
+            assert newest_price(reloaded) == Decimal("1200.00")
 
     def test_the_transfer_door_refuses_it_too(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -988,7 +989,7 @@ class TestAnUnreadableRuleCannotBeDestroyedBySavingIt:
             reloaded = db.session.get(TransferTemplate, template_id)
             assert reloaded.recurrence_rule.id == rule_id
             assert db.session.get(RecurrenceRule, rule_id) is not None
-            assert reloaded.default_amount == Decimal("50.00")
+            assert newest_price(reloaded) == Decimal("50.00")
 
     def test_choosing_a_cadence_repairs_the_rule(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -1308,7 +1309,7 @@ class TestAClearedIntervalBoxCannotReCadenceARule:
             assert resp.status_code == 200
             db.session.expire_all()
             reloaded = db.session.get(TransactionTemplate, template_id)
-            assert reloaded.default_amount == Decimal("1300.00")
+            assert newest_price(reloaded) == Decimal("1300.00")
             assert reloaded.recurrence_rule.id == rule_id
             assert reloaded.recurrence_rule.interval_n == 3
 
@@ -1442,7 +1443,7 @@ class TestADeliberateClearIsRefusedOnATransactionTemplate:
             assert reloaded.recurrence_rule is not None
             assert reloaded.recurrence_rule.id == rule_id
             assert db.session.get(RecurrenceRule, rule_id) is not None
-            assert reloaded.default_amount == Decimal("1200.00")
+            assert newest_price(reloaded) == Decimal("1200.00")
 
     def test_a_modelled_rule_can_be_re_pointed(
         self, app, auth_client, seed_user, seed_periods_today,

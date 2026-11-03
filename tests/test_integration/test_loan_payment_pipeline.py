@@ -24,6 +24,8 @@ from tests._test_helpers import (
     create_loan_account,
     loan_params_for,
 )
+from app.services.obligations_aggregator import todays_price
+from tests._test_helpers import newest_price
 
 
 class TestLoanPaymentPipeline:
@@ -105,7 +107,12 @@ class TestLoanPaymentPipeline:
             assert template is not None, "Transfer template was not created"
             assert template.is_active is True
             assert template.from_account_id == checking.id
-            assert template.default_amount > 0
+            # It follows its loan, so it states no price; its figure is the
+            # loan's, priced live (plan step X-bp).
+            assert newest_price(template) is None
+            assert todays_price(
+                template, BalanceContext.build(seed_user["user"].id),
+            ).amount > 0
 
             # Step 4: Verify the template's transfers were generated, each
             # from checking to the mortgage.  Ordered by id, the order the

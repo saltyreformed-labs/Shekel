@@ -601,14 +601,13 @@ class TestGoalTrajectoryDashboard:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Monthly Savings",
-                default_amount=Decimal("500.00"),
                 is_active=True,
             )
             db.session.add(template)
             db.session.flush()
             # Its price through the one write door: the goal's contribution
             # reads the series since plan step X-bp.
-            state_template_price(template)
+            state_template_price(template, Decimal("500.00"))
             # Authored through the write door (plan step R7c-b): the
             # two-axis columns are NOT NULL, so a rule naming only a pattern
             # cannot be stored.  Onto the definition, which plan step R-F6

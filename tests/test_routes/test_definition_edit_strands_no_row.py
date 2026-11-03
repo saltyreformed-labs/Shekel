@@ -42,6 +42,7 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY, MONTHLY_FIRST
+from tests._test_helpers import newest_price
 
 _ONE_DAY = timedelta(days=1)
 
@@ -490,12 +491,11 @@ def _transaction_template_with_rows(
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name=name,
-        default_amount=Decimal("100.00"),
         is_envelope=is_envelope,
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("100.00"))
     make_cadence_rule(template, cadence, **rule_kwargs)
     recurrence_engine.generate_for_template(
         template, _schedule(template.user_id), seed_user["scenario"].id,
@@ -512,11 +512,10 @@ def _transfer_template_with_rows(seed_user, savings):
         to_account_id=savings.id,
         category_id=seed_user["categories"]["Rent"].id,
         name="Sweep to savings",
-        default_amount=Decimal("200.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("200.00"))
     make_cadence_rule(template, EVERY_PERIOD)
     transfer_recurrence.generate_for_template(
         template, _schedule(template.user_id), seed_user["scenario"].id,
@@ -571,7 +570,7 @@ def _transaction_update_payload(
     """
     payload = {
         "name": template.name,
-        "amount": str(template.default_amount),
+        "amount": str(newest_price(template)),
         "account_id": str(template.account_id),
         "category_id": str(template.category_id),
         "transaction_type_id": str(template.transaction_type_id),
@@ -592,7 +591,7 @@ def _transfer_update_payload(template, **overrides):
     """The transfer edit form's fields, the cadence restated, as a browser posts them."""
     payload = {
         "name": template.name,
-        "amount": str(template.default_amount),
+        "amount": str(newest_price(template)),
         "from_account_id": str(template.from_account_id),
         "to_account_id": str(template.to_account_id),
         "category_id": str(template.category_id),

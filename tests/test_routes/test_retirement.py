@@ -70,7 +70,6 @@ def _create_salary_profile(seed_user, db_session, name="Main Job"):
         category_id=cat.id,
         transaction_type_id=income_type.id,
         name=name,
-        default_amount=Decimal("80000.00") / 26,
         is_active=True,
     )
     db_session.add(template)

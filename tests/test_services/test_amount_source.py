@@ -122,6 +122,7 @@ from app.services.balance_at import BalanceContext
 from app.routes.grid._items import build_amount_maps
 from app.services.row_valuation import settled_contribution
 from app.services.transfer_legs import parent_of
+from tests._test_helpers import newest_price
 
 
 # The definition's price history, and the row dates that select from it.  TWO
@@ -222,7 +223,6 @@ def _priced_template(
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(txn_type),
         name=name,
-        default_amount=_OLD_PRICE,
     )
     db.session.add(template)
     db.session.flush()
@@ -252,7 +252,6 @@ def _seriesless_template(seed_user, name="Never Stated"):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=Decimal("42.00"),
     )
     db.session.add(template)
     db.session.flush()
@@ -341,7 +340,6 @@ def _generated_transfer(
         from_account_id=seed_user["account"].id,
         to_account_id=to_account.id,
         name="Money Market Contribution",
-        default_amount=series,
     )
     db.session.add(template)
     db.session.flush()
@@ -805,7 +803,7 @@ class TestWhatEachRuleAnswers:
         template = _priced_template(seed_user)
         txn = _template_row(seed_periods[_PAYCHECK_UNDER_OLD_PRICE], template)
         assert _PRICE_ROSE_ON <= txn.due_date < _PRICE_FELL_ON
-        assert template.default_amount == _NEW_PRICE
+        assert newest_price(template) == _NEW_PRICE
         assert _resolve(seed_user, txn) == _OLD_PRICE
 
     def test_a_later_row_of_the_same_template_answers_the_later_price(
@@ -1169,7 +1167,6 @@ class TestEveryRefusalFires:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Unstated Contribution",
-            default_amount=Decimal("250.00"),
         )
         db.session.add(template)
         db.session.flush()
@@ -1444,7 +1441,6 @@ class TestTheDefinitionPriceIsTheRowsOwnRule:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Never Stated",
-            default_amount=Decimal("42.00"),
         )
         db.session.add(template)
         db.session.flush()

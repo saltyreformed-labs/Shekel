@@ -19,6 +19,7 @@ from ._helpers import (
     _create_deduction,
     _create_transfer_template,
 )
+from tests._test_helpers import newest_price
 
 
 class TestContributionPrompt:
@@ -189,7 +190,7 @@ class TestContributionPrompt:
         assert tpl is not None
         assert tpl.is_active is True
         assert tpl.from_account_id == checking.id
-        assert tpl.default_amount == Decimal("269.23")
+        assert newest_price(tpl) == Decimal("269.23")
         assert tpl.recurrence_rule is not None
 
         # Reached through the OWNING relationship (plan step R-F6); a
@@ -529,4 +530,4 @@ class TestContributionPrompt:
             .first()
         )
         assert tpl is not None
-        assert tpl.default_amount == Decimal("1000.00")
+        assert newest_price(tpl) == Decimal("1000.00")

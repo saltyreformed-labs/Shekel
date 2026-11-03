@@ -870,11 +870,10 @@ def _monthly_save_into(seed_user, seed_periods, savings):
         from_account_id=seed_user["account"].id,
         to_account_id=savings.id,
         name="Monthly save",
-        default_amount=Decimal("50.00"),
     )
     _db.session.add(template)
     _db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("50.00"))
     make_cadence_rule(
         template, EVERY_PERIOD, starts_on=seed_periods[0].start_date,
     )

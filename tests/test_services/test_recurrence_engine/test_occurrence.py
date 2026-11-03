@@ -55,11 +55,10 @@ class TestARowRecordsItsOccurrence:
             category_id=seed_user["categories"]['Car Payment'].id,
             transaction_type_id=expense_type.id,
             name='Occurrence Recorder',
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         make_cadence_rule(template, cadence, **rule_kwargs)
         db.session.flush()
         db.session.refresh(template)
@@ -167,9 +166,10 @@ class TestARowRecordsItsOccurrence:
             before = {row.id: row.occurs_on for row in created}
             assert before, "no rows to maintain -- the fixture proves nothing"
 
-            # Every derived column moves; the cadence does not.
+            # A derived column moves; the cadence does not.  (The price is
+            # the series', which no row stores since plan step X-au-e; it
+            # moved a ``default_amount`` copy here until X-bp dropped it.)
             template.name = "Renamed"
-            template.default_amount = template.default_amount + 1
             db.session.flush()
 
             recurrence_engine.regenerate_for_template(

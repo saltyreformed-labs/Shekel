@@ -112,7 +112,6 @@ def _make_template(user_id, account_id, category_id):
         category_id=category_id,
         transaction_type_id=expense_type.id,
         name="Optimistic-Lock Test",
-        default_amount=Decimal("100.00"),
         is_active=True,
     )
     db.session.add(template)
@@ -306,7 +305,6 @@ def _make_transfer_template(user_id, from_acct_id, to_acct_id, category_id):
         to_account_id=to_acct_id,
         category_id=category_id,
         name="Monthly Savings",
-        default_amount=Decimal("500.00"),
         is_active=True,
     )
     db.session.add(tmpl)
@@ -522,8 +520,10 @@ def test_concurrent_update_raises_stale_data_error(
                 "budget", "transaction_templates", TransactionTemplate,
             )
 
+            # A column of the row itself: the price it mutated went with plan
+            # step X-bp, and lives in the series, a row of another table.
             def mutate(o):
-                o.default_amount = Decimal("999.99")
+                o.name = "Concurrently Renamed"
         elif factory_fn == "xfer_template":
             savings = _make_savings_account(seed_user["user"].id)
             cat = seed_user["categories"]["Groceries"]
@@ -537,8 +537,9 @@ def test_concurrent_update_raises_stale_data_error(
                 "budget", "transfer_templates", TransferTemplate,
             )
 
+            # A column of the row itself (see the transaction twin above).
             def mutate(o):
-                o.default_amount = Decimal("999.99")
+                o.name = "Concurrently Renamed"
         elif factory_fn == "savings_goal":
             savings = _make_savings_account(seed_user["user"].id)
             obj = _make_savings_goal(seed_user["user"].id, savings.id)

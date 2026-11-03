@@ -91,7 +91,6 @@ def _template(seed_user, name="Geico", amount="165.30"):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name=name,
-        default_amount=Decimal(amount),
     )
     _db.session.add(template)
     _db.session.flush()
@@ -137,7 +136,6 @@ def _transfer_template(seed_user, savings, name, amount):
         from_account_id=seed_user["account"].id,
         to_account_id=savings.id,
         name=name,
-        default_amount=Decimal(amount),
     )
     _db.session.add(template)
     _db.session.flush()
@@ -349,7 +347,6 @@ class TestEligibility:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Mortgage",
-                default_amount=Decimal("1910.95"),
             )
             template.settings = LoanPaymentSettings(
                 derive_from_loan=True, extra_principal=Decimal("0.00"),
@@ -376,7 +373,6 @@ class TestEligibility:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Van Payment",
-                default_amount=Decimal("531.94"),
             )
             template.settings = LoanPaymentSettings(
                 derive_from_loan=False, extra_principal=Decimal("0.00"),

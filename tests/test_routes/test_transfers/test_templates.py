@@ -35,6 +35,7 @@ from ._helpers import (
     _create_transfer,
     _create_other_user_with_template,
 )
+from tests._test_helpers import newest_price
 
 
 # ── Template Management ───────────────────────────────────────────
@@ -278,7 +279,7 @@ class TestTemplateCreate:
                 .filter_by(user_id=seed_user["user"].id, name="Weekly Savings")
                 .one()
             )
-            assert tmpl.default_amount == Decimal("150.00")
+            assert newest_price(tmpl) == Decimal("150.00")
             assert tmpl.recurrence_rule is not None
 
     def test_create_template_validation_error(self, app, auth_client, seed_user):
@@ -408,7 +409,7 @@ class TestTemplateCreate:
                 user_id=seed_user["user"].id,
                 name="Duplicate Transfer",
             ).one()
-            assert template.default_amount == Decimal("100.00")
+            assert newest_price(template) == Decimal("100.00")
 
             # Record how many transfers were generated.
             first_submit_transfer_count = db.session.query(Transfer).filter_by(
@@ -506,7 +507,7 @@ class TestTemplateUpdate:
             assert b"updated" in response.data
 
             db.session.refresh(template)
-            assert template.default_amount == Decimal("300.00")
+            assert newest_price(template) == Decimal("300.00")
 
     def test_a_retained_transfer_is_reported_and_the_edit_still_commits(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -587,7 +588,7 @@ class TestTemplateUpdate:
             assert reloaded.to_account_id == elsewhere_id, (
                 "the edit was rolled back by a conflict that asked nothing"
             )
-            assert reloaded.default_amount == Decimal("275.00")
+            assert newest_price(reloaded) == Decimal("275.00")
             held = db.session.get(Transfer, noted_id)
             assert held.to_account_id == savings.id, (
                 "the retained row must be exactly as the pass found it"
@@ -647,9 +648,9 @@ class TestTemplateUpdate:
             assert b"Keep" in resp.data and b"Use" in resp.data
             # Rolled back: the template keeps its pre-edit amount.
             db.session.expire_all()
-            assert db.session.get(
+            assert newest_price(db.session.get(
                 TransferTemplate, tid,
-            ).default_amount == Decimal("200.00")
+            )) == Decimal("200.00")
 
     def test_transfer_chooser_apply_use_realigns_the_transfer(
         self, app, auth_client, seed_user, seed_periods_today,

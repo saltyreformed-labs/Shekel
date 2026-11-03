@@ -593,7 +593,6 @@ class TestReferentialIntegrity:
                 from_account_id=checking_id,
                 to_account_id=savings.id,
                 name="Monthly Savings",
-                default_amount=Decimal("200.00"),
                 is_active=True,
             )
             db.session.add(template)
@@ -1273,7 +1272,6 @@ class TestCrossResourceIDOR:
                 from_account_id=second_user["account"].id,
                 to_account_id=savings_acct2.id,
                 name="Other Savings Transfer",
-                default_amount=Decimal("100.00"),
             )
             db.session.add(template2)
             db.session.commit()

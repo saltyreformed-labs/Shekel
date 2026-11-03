@@ -64,7 +64,7 @@ from tests._test_helpers import (
 
 
 def _make_envelope_template(
-    seed_user, *, name="Envelope Spending", default_amount="100.00",
+    seed_user, *, name="Envelope Spending", amount="100.00",
     category_key="Groceries",
 ):
     """Create a priced envelope expense definition on an every-paycheck rule.
@@ -73,7 +73,7 @@ def _make_envelope_template(
     balance:X-cf-4), which is what the preview under test walks.
     """
     return make_expense_template(
-        db.session, seed_user, amount=default_amount, name=name,
+        db.session, seed_user, amount=amount, name=name,
         category_key=category_key, is_envelope=True,
     )
 

@@ -52,6 +52,7 @@ from tests._test_helpers import (
     state_template_price,
 )
 from tests.oracles.recurrence_baseline import MONTHLY
+from tests._test_helpers import newest_price
 
 #: The frozen "today", inside ``seed_periods_52``'s schedule (2026-01-02 on).
 _TODAY = date(2026, 7, 1)
@@ -116,7 +117,6 @@ def _subscription(seed_user, *, is_active=True) -> TransactionTemplate:
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name="Streaming",
-        default_amount=_NEW_PRICE,
         is_active=is_active,
     )
     db.session.add(template)
@@ -236,7 +236,6 @@ class TestAScheduledPriceCountsFromItsDay:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="To Goal",
-                default_amount=Decimal("150.00"),
             )
             db.session.add(transfer)
             db.session.flush()

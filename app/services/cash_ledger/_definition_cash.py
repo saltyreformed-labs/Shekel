@@ -188,9 +188,9 @@ def _stated_amount(template, on_date: date, subject: str) -> Decimal:
             "-- its price series is EMPTY. Either its amount is derived rather "
             "than stated (template_amount_service.owns_its_amount is False), "
             "or it was created without going through set_amount, the one write "
-            "door. There is deliberately no fallback to default_amount: that "
-            "scalar has no time dimension, so reading it here would price a "
-            "March row at June's figure."
+            "door. There is deliberately no fallback: a single figure has no "
+            "time dimension, so reading one here would price a March row at "
+            "June's figure."
         )
     return stated
 

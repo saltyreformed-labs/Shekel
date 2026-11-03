@@ -153,7 +153,7 @@ class TestTheCreateDoor:
             (saved,) = _stored_profiles(seed_user["user"].id)
             assert saved.state_code == "NC"
             # 3,000.00 gross, 150.00 NC (5%), $0.00 federal and FICA.
-            assert saved.template.default_amount == Decimal("2850.00")
+            assert _todays_figure(saved) == Decimal("2850.00")
 
     @pytest.mark.parametrize("state_code", ["QQ", "nc"])
     def test_a_state_the_law_does_not_list_is_refused(
@@ -177,7 +177,7 @@ class TestTheUpdateDoor:
     """POST /salary/<id> saves a listed state and refuses any other.
 
     Every profile here is created through the create door, so it has a
-    template, born at the net the create door priced.  What an update moves
+    template, which states no price (plan step X-bp).  What an update moves
     is today's paycheck, priced live under the state it saved
     (:func:`_todays_figure`); the update door's regeneration re-stated the
     template's ``default_amount`` at it until plan step X-bp, and these cases
@@ -189,7 +189,7 @@ class TestTheUpdateDoor:
         """An NC profile created through the create door: $3,000.00 gross, $2,850.00 net."""
         assert auth_client.post("/salary", data=_create_form("NC")).status_code == 302
         (profile,) = _stored_profiles(seed_user["user"].id)
-        assert profile.template.default_amount == Decimal("2850.00")
+        assert _todays_figure(profile) == Decimal("2850.00")
         return profile
 
     def test_moving_to_the_untaxed_state_is_saved_and_reprices_at_zero(
@@ -227,7 +227,7 @@ class TestTheUpdateDoor:
             (stored,) = _stored_profiles(seed_user["user"].id)
             assert stored.state_code == "NC"
             assert stored.version_id == int(form["version_id"])
-            assert stored.template.default_amount == Decimal("2850.00")
+            assert _todays_figure(stored) == Decimal("2850.00")
 
     def test_an_unlisted_stored_state_is_fixed_on_the_edit_page(
         self, app, auth_client, seed_user, seed_periods, law,

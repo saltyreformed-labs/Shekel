@@ -6809,7 +6809,7 @@ def resolved_amount(txn):
     )
 
 
-def state_template_price(template, amount=None, *, effective_on=None):
+def state_template_price(template, amount, *, effective_on=None):
     """State *template*'s price through the app's ONE write door.
 
     **A fixture that constructs a template and stops has built a definition the
@@ -6823,7 +6823,7 @@ def state_template_price(template, amount=None, *, effective_on=None):
     real definition has a price SERIES.  A generated row stores no figure now
     and is priced by that series on its own due date, and
     ``cash_ledger._amount_source._stated_amount`` REFUSES a row whose series is
-    empty rather than falling back to ``default_amount`` -- which is X-au-a's
+    empty rather than falling back to a scalar -- which is X-au-a's
     ruling, not an oversight: the scalar has no time dimension, so reading it
     would price a March row at June's figure.
 
@@ -6838,8 +6838,8 @@ def state_template_price(template, amount=None, *, effective_on=None):
 
     Args:
         template: The flushed transaction or transfer template.
-        amount: The price to state; ``template.default_amount`` when omitted,
-            which is what both create doors pass.
+        amount: The price to state.  Required since plan step X-bp dropped
+            ``default_amount``, which it defaulted to.
         effective_on: The date it takes effect; the owner's today when omitted,
             as both doors pass.  One version is enough for any due date --
             ``amount_as_of`` holds FLAT before the earliest -- so a fixture
@@ -6856,9 +6856,33 @@ def state_template_price(template, amount=None, *, effective_on=None):
 
     template_amount_service.set_amount(
         template,
-        template.default_amount if amount is None else amount,
+        amount,
         effective_on=display_today() if effective_on is None else effective_on,
     )
+
+
+def newest_price(template):
+    """Return the NEWEST price *template*'s series states, or ``None`` for none.
+
+    What a template's ``default_amount`` column held -- the write door kept it
+    on the series' newest version -- until plan step X-bp dropped it (rulings
+    R-IY, R-BAL16), so an assertion of the column is re-pointed here with its
+    figure kept.  ``None`` for a definition with no series: a salary profile's
+    or a loan payment that follows its loan, which state no price.
+
+    Args:
+        template: A transaction or transfer template.
+
+    Returns:
+        The newest version's amount as a ``Decimal``, or ``None``.
+    """
+    # Pylint: ``import-outside-toplevel`` -- this module imports no app
+    # symbols at top level (its collection-time-safety convention).
+    # pylint: disable=import-outside-toplevel
+    from app.services import template_amount_service
+
+    versions = template_amount_service.amount_versions(template)
+    return Decimal(str(versions[-1].amount)) if versions else None
 
 
 def bare_expense_template(
@@ -6924,12 +6948,11 @@ def bare_expense_template(
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=Decimal("100.00"),
         is_envelope=is_envelope,
     )
     db_session.add(template)
     db_session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("100.00"))
     return template
 
 
@@ -7678,14 +7701,13 @@ def _priced_repeating_template(
         ).id,
         transaction_type_id=ref_cache.txn_type_id(txn_type),
         name=name,
-        default_amount=Decimal(amount),
         is_active=is_active,
         is_envelope=is_envelope,
         companion_visible=companion_visible,
     )
     db_session.add(template)
     db_session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal(amount))
     # The definition first, then the cadence onto it (plan step R-F6).
     make_every_period_rule(db_session, template)
     return template
@@ -7740,7 +7762,6 @@ def make_transfer_template(db_session, seed_user, to_account, amount="200.00"):
         from_account_id=seed_user["account"].id,
         to_account_id=to_account.id,
         name="To Savings",
-        default_amount=Decimal(amount),
     )
     db_session.add(template)
     db_session.flush()
@@ -7748,7 +7769,7 @@ def make_transfer_template(db_session, seed_user, to_account, amount="200.00"):
     # does on every create.  Since plan step X-au-f a generated TRANSFER stores
     # no figure either, so a bare-constructed transfer template generates rows
     # nothing can price -- the transaction twin's obligation, one table over.
-    state_template_price(template)
+    state_template_price(template, Decimal(amount))
     # The definition first, then the cadence onto it (plan step R-F6).
     make_every_period_rule(db_session, template)
     return template
@@ -7894,7 +7915,6 @@ def make_loan_payment_template(
         from_account_id=seed_user["account"].id,
         to_account_id=loan_account.id,
         name=f"Loan Payment {loan_account.id}",
-        default_amount=Decimal(amount),
     )
     db_session.add(template)
     db_session.flush()
@@ -7904,7 +7924,7 @@ def make_loan_payment_template(
     # version stated after the flip -- and the versions a template already holds
     # stay as the record of what was stated while it was manual, which is what
     # a MANUAL payment's base is read from since plan step X-au-f.
-    state_template_price(template)
+    state_template_price(template, Decimal(amount))
     # Attached through the relationship so it flushes with the template, the
     # way the route attaches it.
     template.settings = LoanPaymentSettings(

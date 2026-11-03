@@ -270,7 +270,6 @@ class TestTemplateFlagsDefault:
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=expense_type.id,
                 name="Default Template",
-                default_amount=Decimal("100.00"),
             )
             db.session.add(template)
             db.session.commit()
@@ -293,7 +292,6 @@ class TestTemplateFlagsDefault:
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=expense_type.id,
                 name="Tracking Template",
-                default_amount=Decimal("200.00"),
                 is_envelope=True,
                 companion_visible=True,
             )

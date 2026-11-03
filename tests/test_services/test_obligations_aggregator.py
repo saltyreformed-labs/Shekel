@@ -216,14 +216,13 @@ def _create_expense(seed_user, cadence, amount, *, name="Expense",
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=amount,
         is_active=True,
     )
     db.session.add(tmpl)
     db.session.flush()
     # Its price, stated through the one write door as the create route states
     # it: the aggregator reads the series since plan step X-bp.
-    state_template_price(tmpl)
+    state_template_price(tmpl, amount)
     if cadence is not None:
         make_cadence_rule(
             tmpl, cadence, interval_n=interval_n, end_date=end_date,

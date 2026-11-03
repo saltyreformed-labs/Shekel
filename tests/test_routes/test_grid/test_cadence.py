@@ -23,6 +23,7 @@ from tests._test_helpers import (
     generate_row_of,
     make_income_template,
 )
+from tests._test_helpers import newest_price
 
 
 class TestGridInterestAccrual:
@@ -186,7 +187,7 @@ class TestGridInterestAccrual:
         income = generate_row_of(template, period)
         db.session.commit()
         assert income.estimated_amount is None
-        assert template.default_amount == Decimal("7.77"), (
+        assert newest_price(template) == Decimal("7.77"), (
             "the scalar must still disagree with the series on the row's day, "
             "or the control cannot see a producer reading the scalar"
         )

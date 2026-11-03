@@ -62,6 +62,7 @@ from app.services.row_valuation import settled_figure
 from tests._test_helpers import (
     one_off_row_of, open_books_before_the_first_assertion, rhythm_of,
 )
+from tests._test_helpers import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -690,7 +691,6 @@ class TestUpdateTransferTemplateFkOwnership:
             to_account_id=savings.id,
             category_id=seed_user["categories"]["Rent"].id,
             name="C-27 Template To Update",
-            default_amount=Decimal("80.00"),
         )
         db.session.add(tpl)
         db.session.commit()
@@ -710,7 +710,7 @@ class TestUpdateTransferTemplateFkOwnership:
                 f"/transfers/{tpl.id}",
                 data={
                     "name": tpl.name,
-                    "amount": str(tpl.default_amount),
+                    "amount": str(newest_price(tpl)),
                     "from_account_id": other["account"].id,
                     "to_account_id": tpl.to_account_id,
                     "category_id": str(tpl.category_id),
@@ -737,7 +737,7 @@ class TestUpdateTransferTemplateFkOwnership:
                 f"/transfers/{tpl.id}",
                 data={
                     "name": tpl.name,
-                    "amount": str(tpl.default_amount),
+                    "amount": str(newest_price(tpl)),
                     "from_account_id": tpl.from_account_id,
                     "to_account_id": tpl.to_account_id,
                     "category_id": str(other["category"].id),

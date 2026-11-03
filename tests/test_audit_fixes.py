@@ -307,7 +307,6 @@ class TestTransferAccountOwnership:
             from_account_id=seed_user["account"].id,
             to_account_id=savings_acct.id,
             name="My Transfer",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.commit()
@@ -349,7 +348,6 @@ class TestTransferAccountOwnership:
             from_account_id=seed_user["account"].id,
             to_account_id=savings_acct.id,
             name="My Transfer 2",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.commit()
@@ -656,7 +654,6 @@ class TestUniqueConstraints:
             from_account_id=seed_user["account"].id,
             to_account_id=savings_acct.id,
             name="Monthly Savings",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(t1)
         db.session.commit()
@@ -666,7 +663,6 @@ class TestUniqueConstraints:
             from_account_id=seed_user["account"].id,
             to_account_id=savings_acct.id,
             name="Monthly Savings",
-            default_amount=Decimal("200.00"),
         )
         db.session.add(t2)
         with pytest.raises(IntegrityError, match="uq_transfer_templates_user_name"):

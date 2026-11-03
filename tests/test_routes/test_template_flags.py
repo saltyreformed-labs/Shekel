@@ -57,7 +57,6 @@ def _make_template(seed_user, name="Test Template",
         category_id=category.id,
         transaction_type_id=txn_type_obj.id,
         name=name,
-        default_amount=Decimal("100.00"),
         is_envelope=track,
         companion_visible=companion,
     )
@@ -66,7 +65,7 @@ def _make_template(seed_user, name="Test Template",
     # Its price, through the one write door as the create route states it:
     # the Recurring page prices a definition by its series since plan step
     # X-bp.
-    state_template_price(template)
+    state_template_price(template, Decimal("100.00"))
     if recurs:
         make_cadence_rule(template, EVERY_PERIOD)
     db.session.commit()

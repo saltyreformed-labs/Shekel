@@ -16,6 +16,7 @@ from app.services.generation_schedule import GenerationSchedule
 from tests._test_helpers import create_account_of_type, make_cadence_rule
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 from tests._test_helpers import state_template_price
+from tests._test_helpers import newest_price
 
 
 # --- Negative-Path Tests ---------------------------------------------------
@@ -29,7 +30,7 @@ class TestNegativePaths:
     """
 
     def _make_template_with_rule(self, seed_user, cadence,
-                                  default_amount=Decimal("100.00"),
+                                  amount=Decimal("100.00"),
                                   from_account_id=None, to_account_id=None,
                                   **rule_kwargs):
         """Helper: create rule + template with configurable amount and accounts."""
@@ -47,11 +48,10 @@ class TestNegativePaths:
             from_account_id=from_account_id or seed_user["account"].id,
             to_account_id=to_account_id,
             name="Test Transfer NP",
-            default_amount=default_amount,
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, amount)
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence,
@@ -78,7 +78,7 @@ class TestNegativePaths:
         with app.app_context():
             with pytest.raises(SAIntegrityError):
                 self._make_template_with_rule(
-                    seed_user, EVERY_PERIOD, default_amount=Decimal("0.00")
+                    seed_user, EVERY_PERIOD, amount=Decimal("0.00")
                 )
             # Rollback the failed transaction so subsequent tests can use the session.
             db.session.rollback()
@@ -162,7 +162,6 @@ class TestNegativePaths:
             db.session.flush()
 
             # Change template amount and regenerate.
-            template.default_amount = Decimal("200.00")
             state_template_price(template, Decimal("200.00"))
             db.session.flush()
 
@@ -200,7 +199,7 @@ class TestNegativePaths:
             with pytest.raises(SAIntegrityError):
                 self._make_template_with_rule(
                     seed_user, EVERY_PERIOD,
-                    default_amount=Decimal("-100.00"),
+                    amount=Decimal("-100.00"),
                 )
             # Rollback the failed transaction so subsequent tests can use the session.
             db.session.rollback()
@@ -227,7 +226,7 @@ class TestNegativePaths:
             with pytest.raises(SADataError):
                 self._make_template_with_rule(
                     seed_user, EVERY_PERIOD,
-                    default_amount=Decimal("10000000000.00"),
+                    amount=Decimal("10000000000.00"),
                 )
             db.session.rollback()
 
@@ -246,10 +245,10 @@ class TestNegativePaths:
         with app.app_context():
             template = self._make_template_with_rule(
                 seed_user, EVERY_PERIOD,
-                default_amount=Decimal("9999999999.99"),
+                amount=Decimal("9999999999.99"),
             )
             db.session.flush()
             db.session.refresh(template)
-            assert template.default_amount == Decimal("9999999999.99"), (
-                f"Expected 9999999999.99, got {template.default_amount}"
+            assert newest_price(template) == Decimal("9999999999.99"), (
+                f"Expected 9999999999.99, got {newest_price(template)}"
             )

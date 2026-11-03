@@ -53,6 +53,7 @@ from tests._test_helpers import (
     resolved_amount,
     run_migration_callable,
 )
+from tests._test_helpers import newest_price
 
 _MIGRATION = load_migration_module(
     "596408fab6f1_every_plan_item_has_one_definition.py"
@@ -282,7 +283,7 @@ class TestTheCutoverMintsADefinitionPerBareRow:
                 definition = row.template
                 assert definition is not None and row.is_placed, key
                 assert definition.recurs is False
-                assert (definition.name, definition.default_amount) == (
+                assert (definition.name, newest_price(definition)) == (
                     name, Decimal(plan),
                 ), key
                 assert (definition.is_envelope, definition.companion_visible) == (
@@ -341,7 +342,7 @@ class TestTheCutoverMintsADefinitionPerBareRow:
             assert [resolved_amount(row) for row in rows] == [
                 Decimal("100.00"), Decimal("200.00"),
             ]
-            assert [row.template.default_amount for row in rows] == [
+            assert [newest_price(row.template) for row in rows] == [
                 Decimal("100.00"), Decimal("200.00"),
             ]
 
@@ -535,7 +536,7 @@ class TestTheResidueRowsAreReattached:
             assert row.amount_source_id == ref_cache.amount_source_id(
                 AmountSourceEnum.TEMPLATE,
             )
-            assert row.template.default_amount == Decimal("170.00")
+            assert newest_price(row.template) == Decimal("170.00")
             assert [v.amount for v in row.template.amount_versions] == [Decimal("170.00")]
             assert resolved_amount(row) == Decimal("170.00")
 
@@ -554,7 +555,7 @@ class TestTheResidueRowsAreReattached:
             db.session.expire_all()
             row = db.session.get(Transaction, row.id)
             assert row.is_override is False
-            assert row.template.default_amount == Decimal("162.25")
+            assert newest_price(row.template) == Decimal("162.25")
             assert resolved_amount(row) == Decimal("162.25")
 
     def test_a_many_row_definitions_own_row_is_left_alone(
@@ -584,7 +585,7 @@ class TestTheResidueRowsAreReattached:
             sibling = db.session.get(Transaction, sibling.id)
             assert sibling.is_override is True
             assert sibling.estimated_amount == Decimal("120.00")
-            assert sibling.template.default_amount == Decimal("0.00")
+            assert newest_price(sibling.template) == Decimal("0.00")
             assert resolved_amount(db.session.get(Transaction, first.id)) == Decimal("0.00")
 
 

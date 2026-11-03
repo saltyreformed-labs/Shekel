@@ -22,6 +22,7 @@ from app.services.generation_schedule import GenerationSchedule
 from tests._test_helpers import add_test_pay_stub, all_periods, NO_TAX_LAW, state_and_fica_law
 
 from ._helpers import _create_profile, _create_second_user_salary_profile, _capture_render
+from app.services.obligations_aggregator import todays_price
 
 
 # ── Negative Paths ────────────────────────────────────────────────
@@ -221,15 +222,17 @@ class TestNetBiweeklyMismatchFixes:
     which left the tax law nothing in the app can edit.
     """
 
-    def test_create_profile_sets_template_default_to_net(
+    def test_a_created_profiles_figure_is_the_net_paycheck(
         self, app, auth_client, seed_user, seed_periods, tax_law
     ):
-        """Creating a salary profile sets template.default_amount to NET pay.
+        """A created salary profile's definition shows the NET paycheck.
 
-        Before the fix, default_amount was set to GROSS (annual / 26).
-        After the fix, it should be NET (after taxes and deductions).
-        Without tax configs, NET equals GROSS (no taxes to deduct), so
-        we seed tax configs to produce a meaningful difference.
+        It was the template's ``default_amount`` copy: GROSS (annual / 26)
+        before a fix, NET after it, until plan step X-bp dropped the column
+        and the definition's figure became today's paycheck, priced live
+        (``obligations_aggregator.todays_price``).  Without tax configs, NET
+        equals GROSS (no taxes to deduct), so we seed tax configs to produce
+        a meaningful difference.
         """
         with app.app_context():
             user = seed_user["user"]
@@ -258,17 +261,16 @@ class TestNetBiweeklyMismatchFixes:
             gross_biweekly = Decimal("75000.00") / 26
 
             # With taxes configured, net pay is less than gross.
-            # The template default_amount should reflect NET, not GROSS.
-            assert template.default_amount < gross_biweekly, (
-                f"template.default_amount ({template.default_amount}) should "
-                f"be less than gross biweekly ({gross_biweekly}) when taxes "
-                f"are configured"
+            figure = todays_price(template, BalanceContext.build(user.id)).amount
+            assert figure < gross_biweekly, (
+                f"the definition's figure ({figure}) should be less than "
+                f"gross biweekly ({gross_biweekly}) when taxes are configured"
             )
 
     def test_create_profile_without_tax_configs_uses_gross_as_fallback(
         self, app, auth_client, seed_user, seed_periods, tax_law
     ):
-        """Without tax configs, default_amount equals GROSS (no taxes to subtract).
+        """Without tax configs, the definition's figure equals GROSS (no taxes to subtract).
 
         This is correct behavior -- the installed law's federal rules and
         FICA price $0, and its North Carolina has no income tax, so state tax
@@ -304,8 +306,11 @@ class TestNetBiweeklyMismatchFixes:
             expected = gross_biweekly.quantize(Decimal("0.01"))
 
             # No taxes configured, so NET == GROSS.
-            assert template.default_amount == expected, (
-                f"Without tax configs, default_amount ({template.default_amount}) "
+            figure = todays_price(
+                template, BalanceContext.build(seed_user["user"].id),
+            ).amount
+            assert figure == expected, (
+                f"Without tax configs, the definition's figure ({figure}) "
                 f"should equal gross biweekly ({expected})"
             )
 

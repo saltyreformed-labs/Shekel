@@ -55,14 +55,13 @@ def _create_expense_template(seed_user, cadence, amount, name="Test Expense",
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=amount,
         is_active=is_active,
     )
     db.session.add(tmpl)
     db.session.flush()
     # Its price, through the one write door as the create route states it:
     # the floor prices a definition by its series since plan step X-bp.
-    state_template_price(tmpl)
+    state_template_price(tmpl, amount)
     if cadence is not None:
         make_cadence_rule(tmpl, cadence, interval_n=interval_n)
     return tmpl
@@ -91,12 +90,11 @@ def _create_test_transfer_template(seed_user, to_account, cadence, amount,
         from_account_id=seed_user["account"].id,
         to_account_id=to_account.id,
         name=name,
-        default_amount=amount,
         is_active=is_active,
     )
     db.session.add(tmpl)
     db.session.flush()
-    state_template_price(tmpl)
+    state_template_price(tmpl, amount)
     make_cadence_rule(tmpl, cadence)
     return tmpl
 

@@ -145,11 +145,10 @@ def _one_off_into(seed_user, account, name="R7d-f-4 one-off"):
         from_account_id=seed_user["account"].id,
         to_account_id=account.id,
         name=name,
-        default_amount=Decimal("200.00"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("200.00"))
     db.session.commit()
     return template
 

@@ -430,14 +430,12 @@ class TestTransferTemplateHardDelete:
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Active Transfer",
-                default_amount=Decimal("100.00"),
             )
             archived = TransferTemplate(
                 user_id=seed_user["user"].id,
                 from_account_id=seed_user["account"].id,
                 to_account_id=savings.id,
                 name="Archived Transfer",
-                default_amount=Decimal("50.00"),
                 is_active=False,
             )
             db.session.add_all([active, archived])
@@ -445,8 +443,8 @@ class TestTransferTemplateHardDelete:
             # Their prices, through the one write door as the create route
             # states them: the page prices a definition, archived or not, by
             # its series since plan step X-bp.
-            state_template_price(active)
-            state_template_price(archived)
+            state_template_price(active, Decimal("100.00"))
+            state_template_price(archived, Decimal("50.00"))
             db.session.commit()
 
             resp = auth_client.get("/transfers", follow_redirects=True)

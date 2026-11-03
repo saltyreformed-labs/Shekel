@@ -183,14 +183,13 @@ def _create_txn_template(seed_user, cadence, amount, *, type_enum, name,
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=ref_cache.txn_type_id(type_enum),
         name=name,
-        default_amount=amount,
         is_active=True,
     )
     db.session.add(tmpl)
     db.session.flush()
     # Its price, through the one write door as the create route states it:
     # the surface prices a definition by its series since plan step X-bp.
-    state_template_price(tmpl)
+    state_template_price(tmpl, amount)
     if cadence is not None:
         _author_cadence(tmpl, cadence, **rule_kwargs)
     return tmpl
@@ -238,12 +237,11 @@ def _create_transfer(seed_user, cadence, amount, to_account, *,
         from_account_id=seed_user["account"].id,
         to_account_id=to_account.id,
         name=name,
-        default_amount=amount,
         is_active=True,
     )
     db.session.add(tmpl)
     db.session.flush()
-    state_template_price(tmpl)
+    state_template_price(tmpl, amount)
     _author_cadence(tmpl, cadence, **rule_kwargs)
     return tmpl
 

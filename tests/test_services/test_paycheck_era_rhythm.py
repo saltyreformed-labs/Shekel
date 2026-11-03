@@ -660,7 +660,12 @@ class TestTheRecurringSalaryRow:
 
     @staticmethod
     def _seed_with_a_stale_copy(db, auth_client, seed_user, periods):
-        """The owner above through the salary form, then its copy made stale."""
+        """The owner above through the salary form.
+
+        Its template's ``default_amount`` copy was then made a stale $1.00, so
+        a reader of the copy failed here, until plan step X-bp dropped the
+        column; a reader can no longer reach one.
+        """
         user_id = seed_user["user"].id
         last_payday = max(period.start_date for period in periods)
         pay_era_write.mint_era(
@@ -681,8 +686,6 @@ class TestTheRecurringSalaryRow:
             db.session.query(SalaryProfile)
             .filter_by(user_id=user_id, name="Main Job").one().template
         )
-        template.default_amount = Decimal("1.00")
-        db.session.commit()
         return template
 
     def test_the_rendered_page_shows_the_priced_paycheck(

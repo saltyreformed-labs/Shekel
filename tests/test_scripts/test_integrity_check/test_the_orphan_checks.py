@@ -141,7 +141,6 @@ class TestOrphanDetection:
             category_id=category.id,
             transaction_type_id=txn_type.id,
             name="Orphaned Template",
-            default_amount=Decimal("50.00"),
         )
         db.session.add(orphan_template)
         db.session.flush()

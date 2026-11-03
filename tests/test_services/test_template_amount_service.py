@@ -35,6 +35,7 @@ from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service as tas
 from tests._test_helpers import create_savings_account, make_salary_profile
+from tests._test_helpers import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -49,7 +50,6 @@ def _txn_template(seed_user, amount="165.30", name="Geico"):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name=name,
-        default_amount=Decimal(amount),
     )
     db.session.add(template)
     db.session.flush()
@@ -63,7 +63,6 @@ def _xfer_template(seed_user, savings_acct, amount="250.00"):
         from_account_id=seed_user["account"].id,
         to_account_id=savings_acct.id,
         name="Money Market Contribution",
-        default_amount=Decimal(amount),
     )
     db.session.add(template)
     db.session.flush()
@@ -205,7 +204,7 @@ class TestSetAmount:
             )
             db.session.flush()
 
-            assert template.default_amount == Decimal("178.00")
+            assert newest_price(template) == Decimal("178.00")
             versions = tas.amount_versions(template)
             assert len(versions) == 1
             assert versions[0].effective_date == date(2026, 4, 1)
@@ -323,7 +322,7 @@ class TestSetAmount:
             assert tas.amount_as_of(template, today) == Decimal("178.00")
             # The column carries the NEWEST stated price, so regeneration still
             # writes the December figure onto the rows that edit rebuilt.
-            assert template.default_amount == Decimal("200.00")
+            assert newest_price(template) == Decimal("200.00")
 
             tas.set_amount(
                 template, tas.amount_as_of(template, today), effective_on=today,
@@ -358,7 +357,7 @@ class TestSetAmount:
             )
             db.session.flush()
 
-            assert template.default_amount == Decimal("200.00")
+            assert newest_price(template) == Decimal("200.00")
             assert tas.amount_as_of(template, date(2026, 7, 1)) == Decimal("150.00")
             assert tas.amount_as_of(template, date(2027, 1, 1)) == Decimal("200.00")
 
@@ -368,8 +367,8 @@ class TestSetAmount:
         The door set the column and recorded no version for such a template
         until X-bp, when its one caller -- the salary regeneration's
         re-statement of today's net on every salary save -- went, so a call
-        now names a caller's defect: it raises, and writes neither the series
-        nor the column.
+        now names a caller's defect: it raises, and writes no version (and,
+        until X-bp dropped the column, no copy either).
         """
         with app.app_context():
             template = _txn_template(seed_user, name="Data Manager")
@@ -384,15 +383,15 @@ class TestSetAmount:
                 )
             db.session.flush()
 
-            assert template.default_amount == Decimal("165.30")
             assert tas.amount_versions(template) == []
 
     def test_a_derive_mode_loan_payment_is_refused(self, app, db, seed_user):
         """A payment that tracks its loan states no price either (plan step X-bp).
 
         Its creation and its Track wrote the loan's P&I plus escrow into the
-        column through this door until X-bp; amount rule 4 prices it live, so
-        both callers went and the door refuses one, writing nothing.
+        template's ``default_amount`` copy through this door until X-bp;
+        amount rule 4 prices it live, so both callers went with that step's
+        column and the door refuses one, writing nothing.
         """
         with app.app_context():
             savings = create_savings_account(
@@ -410,7 +409,6 @@ class TestSetAmount:
                 )
             db.session.flush()
 
-            assert template.default_amount == Decimal("250.00")
             assert tas.amount_versions(template) == []
 
 
@@ -441,7 +439,7 @@ class TestRestateInEffect:
             assert tas.amount_as_of(template, date(2026, 7, 15)) == Decimal("180.00")
             assert tas.amount_as_of(template, date(2026, 5, 1)) == Decimal("178.00")
             # The scalar is the NEWEST price, untouched by a middle correction.
-            assert template.default_amount == Decimal("165.30")
+            assert newest_price(template) == Decimal("165.30")
 
     def test_before_the_earliest_version_the_earliest_is_corrected(
         self, app, seed_user,
@@ -479,7 +477,7 @@ class TestRestateInEffect:
             assert [
                 (v.effective_date, v.amount) for v in tas.amount_versions(template)
             ] == [(date(2026, 5, 7), Decimal("170.00"))]
-            assert template.default_amount == Decimal("170.00")
+            assert newest_price(template) == Decimal("170.00")
             assert tas.amount_as_of(template, date(2026, 5, 7)) == Decimal("170.00")
 
     def test_an_equal_figure_writes_nothing(self, app, seed_user):
@@ -524,7 +522,7 @@ class TestRestateInEffect:
                 template, Decimal("160.00"), on=date(2026, 12, 1),
             )
             db.session.flush()
-            assert template.default_amount == Decimal("160.00")
+            assert newest_price(template) == Decimal("160.00")
 
 
 class TestDeleteAmountVersion:
@@ -671,7 +669,7 @@ class TestDeleteAmountVersion:
             db.session.flush()
 
             assert len(tas.amount_versions(template)) == 3
-            assert template.default_amount == Decimal("165.30")
+            assert newest_price(template) == Decimal("165.30")
 
     def test_allows_withdrawing_the_newest_when_the_price_is_unchanged(
         self, app, db, seed_user,
@@ -701,7 +699,7 @@ class TestDeleteAmountVersion:
                 (date(2026, 6, 1), Decimal("178.32")),
                 (date(2026, 8, 1), Decimal("165.30")),
             ]
-            assert template.default_amount == Decimal("165.30")
+            assert newest_price(template) == Decimal("165.30")
 
     def test_the_documented_repair_for_a_mis_dated_earliest_works(
         self, app, db, seed_user,

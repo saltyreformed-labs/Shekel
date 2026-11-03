@@ -94,6 +94,7 @@ from tests._test_helpers import (
     settlement_if_settling,
     state_template_price,
 )
+from tests._test_helpers import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -2364,7 +2365,7 @@ class TestTheActualHalfAsksTheAmountModel:
         db.session.flush()
         row = generate_row_of(template, period)
         db.session.commit()
-        assert template.default_amount == Decimal("200.00"), (
+        assert newest_price(template) == Decimal("200.00"), (
             "the newest price must differ from the one the row's date "
             "selects, or a fall-through reading default_amount passes"
         )
@@ -2612,7 +2613,7 @@ class TestASettledRowWhosePlanIsDerivedIsPriced:
                 effective_on=display_today() + timedelta(days=1),
             )
             db.session.flush()
-            assert template.default_amount == Decimal("200.00"), (
+            assert newest_price(template) == Decimal("200.00"), (
                 "the newest version must be the one the row's date does NOT "
                 "select, or the mutation this case guards against passes"
             )

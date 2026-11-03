@@ -13,9 +13,8 @@ its DEFINITION, and once no active profile names that definition the
 salary-linked refinement stops applying: amount rule 3 answers instead, from the
 one price version ``routes/salary/profiles.delete_profile`` opens the template's
 series at -- today's paycheck since plan step X-bp, and until then the
-``default_amount`` scalar, which
-``template_amount_service.is_salary_linked_template`` documents as *vestigial*
-for exactly this kind of template.  One figure cannot express a paycheck per
+template's ``default_amount`` scalar, a copy of the paycheck as of the last
+salary save that the same step dropped.  One figure cannot express a paycheck per
 period: measured on the 2026-09-02 production clone, when that version was the
 scalar, archiving re-priced 50 of 59 rows and moved the projected balance by
 **-$9,677.24**, because those rows range from ``$2,483.19`` to ``$3,328.41``

@@ -1119,7 +1119,6 @@ class TestAnArchivedItemsRowSaysArchived:
                 category_id=next(iter(seed_user["categories"].values())).id,
                 transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
                 name="Day Job",
-                default_amount=Decimal("11.11"),
             )
             db.session.add(template)
             db.session.flush()

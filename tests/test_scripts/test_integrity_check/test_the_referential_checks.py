@@ -112,8 +112,8 @@ class TestReferentialIntegrity:
         db.session.execute(db.text("""
             INSERT INTO budget.transaction_templates
                 (user_id, account_id, category_id, transaction_type_id,
-                 name, default_amount)
-            VALUES (:uid, :aid, 99999, :ttid, 'Bad Template', 25.00)
+                 name)
+            VALUES (:uid, :aid, 99999, :ttid, 'Bad Template')
         """), {
             "uid": seed_user["user"].id,
             "aid": seed_user["account"].id,
@@ -148,7 +148,6 @@ class TestReferentialIntegrity:
             category_id=None,
             transaction_type_id=txn_type.id,
             name="Dividend Earned",
-            default_amount=Decimal("4.12"),
         ))
         db.session.flush()
 

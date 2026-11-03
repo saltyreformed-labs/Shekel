@@ -92,6 +92,7 @@ from tests._test_helpers import (
 )
 from tests.oracles.recurrence_baseline import MONTHLY_FIRST
 from tests.test_routes._statement_forms import form_fields
+from tests._test_helpers import newest_price
 
 
 def _savings(seed_user):
@@ -189,7 +190,7 @@ def _rename_definition(auth_client, xfer, name):
     template = xfer.template
     return auth_client.post(f"/transfers/{template.id}", data={
         "name": name,
-        "amount": str(template.default_amount),
+        "amount": str(newest_price(template)),
         "from_account_id": str(template.from_account_id),
         "to_account_id": str(template.to_account_id),
         "recurrence_unit": "",
@@ -361,7 +362,7 @@ class TestTheOverrideFlip:
             assert xfer.is_override is True
             assert xfer.amount_source_id is None
             assert xfer.amount == Decimal("525.00")
-            assert xfer.template.default_amount == Decimal("200.00")
+            assert newest_price(xfer.template) == Decimal("200.00")
 
 
 class TestAPeriodMoveRePlaces:
@@ -481,7 +482,7 @@ class TestTheRestate:
             assert [v.amount for v in amount_versions(xfer.template)] == [
                 Decimal("525.00"),
             ]
-            assert xfer.template.default_amount == Decimal("525.00")
+            assert newest_price(xfer.template) == Decimal("525.00")
 
     def test_a_transfer_the_old_flip_detached_is_re_attached_by_its_next_figure(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -502,7 +503,7 @@ class TestTheRestate:
             assert xfer.amount is None
             assert xfer.is_override is False
             assert transfer_amount(xfer) == Decimal("2100.00")
-            assert xfer.template.default_amount == Decimal("2100.00")
+            assert newest_price(xfer.template) == Decimal("2100.00")
 
     def test_the_definitions_rename_reaches_the_transfer_after_a_typed_figure(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -555,7 +556,7 @@ class TestTheRestate:
             xfer = db.session.get(Transfer, xfer.id)
             assert xfer.status_id == ref_cache.status_id(StatusEnum.DONE)
             assert transfer_amount(xfer) == Decimal("525.00")
-            assert xfer.template.default_amount == Decimal("525.00")
+            assert newest_price(xfer.template) == Decimal("525.00")
             assert xfer.is_override is False
             assert [
                 transfer_side_figure(db.session, xfer.id, account_id)
@@ -722,11 +723,10 @@ class TestTheOccurrenceFollowsOnlyAMovedDate:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="First of month",
-            default_amount=Decimal("200.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("200.00"))
         make_cadence_rule(template, MONTHLY_FIRST, starts_on=date(2026, 2, 1))
         xfer = generate_transfer_of(template, seed_periods[3])
         template.recurrence_rule = None

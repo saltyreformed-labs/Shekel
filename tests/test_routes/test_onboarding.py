@@ -53,7 +53,6 @@ def _add_template(owner):
         category_id=owner["categories"]["Salary"].id,
         transaction_type_id=income_type.id,
         name="Paycheck",
-        default_amount=Decimal("2000"),
     ))
     db.session.commit()
 

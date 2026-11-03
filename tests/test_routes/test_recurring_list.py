@@ -70,13 +70,12 @@ def _txn(user, account, category, cadence, amount, *, type_enum, name,
         category_id=category.id,
         transaction_type_id=ref_cache.txn_type_id(type_enum),
         name=name,
-        default_amount=Decimal(amount),
     )
     db.session.add(tmpl)
     db.session.flush()
     # Its price, through the one write door as the create route states it:
     # the page prices a definition by its series since plan step X-bp.
-    state_template_price(tmpl)
+    state_template_price(tmpl, Decimal(amount))
     if cadence is not None:
         _rule(tmpl, cadence, **rule_kwargs)
     return tmpl
@@ -105,11 +104,10 @@ def _transfer(user, from_account, to_account, cadence, amount, *, name,
         from_account_id=from_account.id,
         to_account_id=to_account.id,
         name=name,
-        default_amount=Decimal(amount),
     )
     db.session.add(tmpl)
     db.session.flush()
-    state_template_price(tmpl)
+    state_template_price(tmpl, Decimal(amount))
     _rule(tmpl, cadence, **rule_kwargs)
     return tmpl
 

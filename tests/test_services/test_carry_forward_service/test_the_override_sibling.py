@@ -195,7 +195,6 @@ class TestCarryForwardOverrideSibling:
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=expense_type.id,
                 name="Recurring with rule",
-                default_amount=Decimal("400.00"),
             )
             db.session.add(template)
             db.session.flush()
@@ -323,7 +322,6 @@ class TestCarryForwardOverrideSiblingTransfers:
                 to_account_id=savings.id,
                 category_id=seed_user["categories"]["Rent"].id,
                 name="Recurring Transfer with rule",
-                default_amount=Decimal("300.00"),
             )
             db.session.add(template)
             db.session.flush()

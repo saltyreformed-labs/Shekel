@@ -128,8 +128,6 @@ def _build_derived_loan_transfer(
         from_account_id=checking.id,
         to_account_id=loan.id,
         name="Live Mortgage Payment",
-        # Deliberately stale stored amount -- the live override must win.
-        default_amount=Decimal("1.00"),
     )
     db.session.add(template)
     db.session.flush()
@@ -139,14 +137,14 @@ def _build_derived_loan_transfer(
     # what a fixture had not needed to until plan step X-au-f.  A generated
     # transfer stored its own figure before that step, so a MANUAL payment's
     # base was read off the row's column and the series was never asked; the
-    # parent reads its definition now, and a template carrying a
-    # ``default_amount`` and no version states no price at all -- amount rule 3
-    # REFUSES it rather than falling back to that scalar (plan step X-au-a).
+    # parent reads its definition now, and a template with no version states
+    # no price at all -- amount rule 3 REFUSES it (plan step X-au-a).  The
+    # figure is deliberately stale ($1.00): the live derivation must win.
     # Stated BEFORE the derive-mode settings are attached, because
     # ``owns_its_amount`` is False for a derive-mode template and the write door
     # reads the mode: that is the same order ``track_payment`` takes, and the
     # versions stay as the record of what was stated while it was manual.
-    _state_price(template, template.default_amount)
+    _state_price(template, Decimal("1.00"))
     # derive_from_loan moved off transfer_templates into the 1:1
     # loan_payment_settings row (decision B); attach it via the relationship.
     # AFTER the price above, for the reason stated there.

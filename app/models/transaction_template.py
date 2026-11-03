@@ -28,7 +28,7 @@ class TransactionTemplate(
     ``version_id_col`` for the row, narrowing every ORM UPDATE/DELETE
     with ``WHERE id = ? AND version_id = ?`` and atomically
     incrementing the counter.  Concurrent template edits (e.g. two
-    tabs both adjusting ``default_amount``) race for the bump; the
+    tabs both renaming it) race for the bump; the
     loser raises :class:`sqlalchemy.orm.exc.StaleDataError`, which
     the route converts into a flash + redirect.  See commit C-18 of
     the 2026-04-15 security remediation plan.
@@ -50,7 +50,6 @@ class TransactionTemplate(
             "id", "account_id", name="uq_transaction_templates_id_account",
         ),
         db.Index("idx_templates_user_type", "user_id", "transaction_type_id"),
-        db.CheckConstraint("default_amount >= 0", name="ck_transaction_templates_nonneg_amount"),
         db.CheckConstraint(
             "version_id > 0",
             name="ck_transaction_templates_version_id_positive",
@@ -87,7 +86,10 @@ class TransactionTemplate(
         nullable=False,
     )
     name = db.Column(db.String(200), nullable=False)
-    default_amount = db.Column(db.Numeric(12, 2), nullable=False)
+    # No price column: a definition's price is its dated series
+    # (``amount_versions``), or a computation for a salary profile's
+    # definition.  ``default_amount`` stored a copy of the newest version
+    # until plan step X-bp dropped it (rulings R-IY, R-BAL16).
     # Whether the rows this definition generates take PURCHASE ENTRIES -- the
     # "envelope" mode, where a row accumulates per-purchase line items rather
     # than settling as one figure.  This is the DEFINITION's setting and the
@@ -144,7 +146,8 @@ class TransactionTemplate(
     transactions = db.relationship(
         "Transaction", back_populates="template", lazy="select"
     )
-    # The effective-dated history of ``default_amount`` (plan step X-au-a).  A
+    # The effective-dated history of the definition's price (plan step
+    # X-au-a), its only price since X-bp.  A
     # salary-linked template has NONE and must not: the paycheck calculator
     # prices its rows, so a version here would record a figure nobody stated.
     # :mod:`app.services.template_amount_service` owns both the predicate and
@@ -186,4 +189,4 @@ class TransactionTemplate(
         return self.recurrence_rule is not None
 
     def __repr__(self):
-        return f"<TransactionTemplate '{self.name}' ${self.default_amount}>"
+        return f"<TransactionTemplate {self.id} '{self.name}'>"

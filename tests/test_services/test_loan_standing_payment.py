@@ -65,6 +65,7 @@ from tests._test_helpers import (
     make_cadence_rule,
 )
 from tests.oracles.recurrence_baseline import MONTHLY
+from tests._test_helpers import newest_price
 
 # A short amortizing loan whose whole contractual schedule is enumerable:
 # $12,000 at 6% over 6 months, originated 2026-01-01, due on the 1st.  Read at
@@ -123,7 +124,6 @@ def _recurring_payment(seed_user, loan, base, *, derive=None, extra=None,
         from_account_id=seed_user["account"].id,
         to_account_id=loan.id,
         name=name,
-        default_amount=base,
     )
     if derive is not None or extra is not None:
         template.settings = LoanPaymentSettings(
@@ -271,7 +271,6 @@ class TestEveryDefinitionIntoAnAccount:
             from_account_id=seed_user["account"].id,
             to_account_id=account.id,
             name="One-off",
-            default_amount=Decimal("500.00"),
         )
         db.session.add(unruled)
         db.session.flush()
@@ -392,7 +391,7 @@ class TestEstimatedTierPricing:
         )
         db.session.flush()
         # The scalar has moved to the NEWEST price; the series has not.
-        assert template.default_amount == Decimal("700.00")
+        assert newest_price(template) == Decimal("700.00")
 
         plan = loan_plan(account, ctx)
 

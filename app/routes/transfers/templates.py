@@ -99,10 +99,9 @@ logger = logging.getLogger(__name__)
 # form fields may be written back to the template via setattr.
 #
 # The amount (the form's ``amount``, ``default_amount`` until plan step X-bp)
-# is deliberately absent since plan step X-au-a: the amount
-# is a dated SERIES as well as a column, and
-# ``template_amount_service.set_amount`` is the one door that moves both
-# together.  A setattr here would move one without the other.
+# is deliberately absent since plan step X-au-a: the amount is a dated SERIES,
+# a definition's only price since X-bp dropped the column, and
+# ``template_amount_service.set_amount`` is its one write door.
 #
 # ``is_active`` is deliberately absent since plan step R7d-g-3 (plan ledger
 # row **REC-525**), for the reason the transaction twin
@@ -350,12 +349,11 @@ def create_transfer_template():
     )
 
     # The form's Amount is ``amount`` since plan step X-bp, which is not a
-    # column: it is the price the series opens at below, and the stored copy
-    # (still NOT NULL until that step drops it) is handed the same figure.
+    # column: it is the price the series opens at below, the definition's
+    # only price.
     amount = data.pop("amount")
     template = TransferTemplate(
         user_id=current_user.id,
-        default_amount=amount,
         **data,
     )
     db.session.add(template)
@@ -613,8 +611,8 @@ def update_transfer_template(template_id):
 
     _apply_update_fields(template, data)
 
-    # State the amount through its one write door, which moves the scalar and
-    # the dated series together (plan step X-au-a).  ``effective_from`` is the
+    # State the amount through its one write door, the dated series' (plan
+    # step X-au-a).  ``effective_from`` is the
     # form's "Amount effective from" date, which also bounds the regeneration
     # below -- ONE value, applied by two different predicates (the series reads
     # a transfer's DUE date, the sweep its pay PERIOD's end).  Finding

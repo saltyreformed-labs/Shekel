@@ -48,6 +48,7 @@ from tests._test_helpers import (
     transfer_repriced_by_the_owner,
 )
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
+from tests._test_helpers import newest_price
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -92,7 +93,6 @@ def _template_with_history(seed_user, amounts, name="Geico"):
         category_id=seed_user["categories"]["Rent"].id,
         transaction_type_id=expense.id,
         name=name,
-        default_amount=Decimal(amounts[-1][1]),
     )
     db.session.add(template)
     db.session.flush()
@@ -111,7 +111,6 @@ def _transfer_template(seed_user, savings_acct, amount="250.00"):
         from_account_id=seed_user["account"].id,
         to_account_id=savings_acct.id,
         name="Money Market Contribution",
-        default_amount=Decimal(amount),
     )
     db.session.add(template)
     db.session.flush()
@@ -193,11 +192,12 @@ class TestEligibilityCanBeGAINED:
     def test_archiving_a_salary_profile_opens_its_template_series(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """The paycheck stops pricing the rows, so the column becomes the price.
+        """The paycheck stops pricing the rows, so today's paycheck becomes the price.
 
-        With no ACTIVE profile the recurrence engine falls back to
-        ``default_amount`` (``recurrence_engine._generated_amount_ownership``), so
-        the template starts owning its amount at exactly that moment.  Found by
+        With no ACTIVE profile the template starts owning its amount at exactly
+        that moment, so the archive opens its series at today's paycheck, as a
+        pass priced it while the profile still did (plan step X-bp; it opened
+        at the template's ``default_amount`` copy until then).  Found by
         adversarial review: before this, archiving the profile left an eligible
         template holding ZERO versions -- 58 rows on production's one salary
         template -- which is the empty-series gap plan step X-au-b's resolver is
@@ -214,7 +214,6 @@ class TestEligibilityCanBeGAINED:
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=income.id,
                 name="Data Manager",
-                default_amount=Decimal("2473.38"),
             )
             db.session.add(template)
             db.session.flush()
@@ -226,6 +225,9 @@ class TestEligibilityCanBeGAINED:
 
             assert tas.owns_its_amount(template) is False
             assert tas.amount_versions(template) == []
+            paycheck = todays_price(
+                template, BalanceContext.build(seed_user["user"].id),
+            ).amount
 
             resp = auth_client.post(
                 f"/salary/{pid}/delete", follow_redirects=True,
@@ -237,8 +239,8 @@ class TestEligibilityCanBeGAINED:
             assert tas.owns_its_amount(template) is True
             versions = tas.amount_versions(template)
             assert len(versions) == 1
-            assert versions[0].amount == Decimal("2473.38")
-            assert tas.amount_as_of(template, date(2026, 4, 1)) == Decimal("2473.38")
+            assert versions[0].amount == paycheck
+            assert tas.amount_as_of(template, date(2026, 4, 1)) == paycheck
 
 
 # ── The edit door ────────────────────────────────────────────────────
@@ -415,7 +417,7 @@ class TestTheConflictChooserRoundTrip:
 
             db.session.expire_all()
             template = db.session.get(TransactionTemplate, tid)
-            assert template.default_amount == Decimal("1200.00")
+            assert newest_price(template) == Decimal("1200.00")
             # Nothing recorded and nothing withdrawn: the rollback took the
             # whole pending edit, price included.
             assert self._series(template) == before
@@ -498,7 +500,7 @@ class TestTheConflictChooserRoundTrip:
             ]
             # The column still carries the queued price, so the rows that edit
             # rebuilt are regenerated at it.
-            assert template.default_amount == Decimal("200.00")
+            assert newest_price(template) == Decimal("200.00")
 
 
 class TestTheChooserAsksWhetherThePriceHistoryChanged:
@@ -862,7 +864,7 @@ class TestTheOptimisticLockCounter:
             template = db.session.get(TransactionTemplate, tid)
             assert template.version_id == before + 1
             assert template.name == "Geico Auto"
-            assert template.default_amount == Decimal("165.30")
+            assert newest_price(template) == Decimal("165.30")
 
     def test_a_transfer_rename_plus_amount_submit_bumps_once_too(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -890,7 +892,7 @@ class TestTheOptimisticLockCounter:
             db.session.expire_all()
             template = db.session.get(TransferTemplate, tid)
             assert template.version_id == before + 1
-            assert template.default_amount == Decimal("250.00")
+            assert newest_price(template) == Decimal("250.00")
 
 
     def test_a_wild_effective_date_is_rejected_by_the_form(
@@ -920,7 +922,7 @@ class TestTheOptimisticLockCounter:
             assert [
                 (v.effective_date, v.amount) for v in tas.amount_versions(template)
             ] == [(date(2020, 4, 1), Decimal("178.00"))]
-            assert template.default_amount == Decimal("178.00")
+            assert newest_price(template) == Decimal("178.00")
 
 
 # ── The panel ────────────────────────────────────────────────────────
@@ -975,7 +977,6 @@ class TestHistoryPanel:
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=expense.id,
                 name="Data Manager",
-                default_amount=Decimal("2473.38"),
             )
             db.session.add(template)
             db.session.flush()
@@ -1085,7 +1086,7 @@ class TestWithdrawAmountVersion:
             # the whole licence for allowing it.
             assert tas.amount_as_of(template, date(2020, 7, 1)) == Decimal("178.32")
             assert tas.amount_as_of(template, date(2020, 4, 15)) == Decimal("178.00")
-            assert template.default_amount == Decimal("165.30")
+            assert newest_price(template) == Decimal("165.30")
 
     def test_withdrawing_the_earliest_is_refused_with_the_repair(
         self, app, auth_client, seed_user, seed_periods_today,
@@ -1141,7 +1142,7 @@ class TestWithdrawAmountVersion:
 
             db.session.expire_all()
             template = db.session.get(TransactionTemplate, tid)
-            assert template.default_amount == Decimal("165.30")
+            assert newest_price(template) == Decimal("165.30")
             assert len(tas.amount_versions(template)) == 2
 
     def test_another_users_template_is_404(
@@ -1237,4 +1238,4 @@ class TestWithdrawAmountVersion:
                 (date(2020, 4, 9), Decimal("500.00")),
                 (date(2020, 6, 4), Decimal("300.00")),
             ]
-            assert template.default_amount == Decimal("300.00")
+            assert newest_price(template) == Decimal("300.00")

@@ -59,7 +59,8 @@ from app.services.cash_ledger import (
 )
 from app.utils.dates import display_today
 
-#: The vestigial scalar the archive states as the template's price.  Chosen far
+#: The price the wrong order states as the template's, standing in for the
+#: ``default_amount`` scalar the archive stated until plan step X-bp.  Chosen far
 #: from any paycheck this profile computes so a frozen figure and a fallen-back
 #: one are never the same number by accident -- which is what makes every
 #: assertion below able to fail.
@@ -85,7 +86,6 @@ def _salary_profile(seed_user):
         category_id=next(iter(seed_user["categories"].values())).id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
         name="Paycheck",
-        default_amount=_VESTIGIAL,
     )
     db.session.add(template)
     db.session.flush()
@@ -258,7 +258,7 @@ class TestArchivingFreezesWhatItWasPricing:
             assert between.estimated_amount is None
 
             template_amount_service.set_amount(
-                template, template.default_amount,
+                template, _VESTIGIAL,
                 effective_on=display_today(),
             )
             db.session.flush()
@@ -545,11 +545,12 @@ class TestTheArchiveOpensTheSeriesAtTodaysPaycheck:
     ):  # pylint: disable=unused-argument
         """$4,000.00 a paycheck, then $4,400.00 from today's payday: the series opens at the second.
 
-        The copy holds today's paycheck as the last salary save priced it,
-        before the raise; the raise is a second pay entry planted on the
+        The archive opened at the template's ``default_amount`` copy, today's
+        paycheck as the last salary save priced it, until plan step X-bp
+        dropped the column; the raise is a second pay entry planted on the
         payday of the period holding today (no door records one yet, plan
         step salary:X-av-3b), so its date has passed and no save re-priced
-        the copy.  Both nets are the engine's, read through a pass built at
+        what the last save priced.  Both nets are the engine's, read through a pass built at
         each moment, and the raise must move today's paycheck or nothing is
         graded.
         """
@@ -562,7 +563,6 @@ class TestTheArchiveOpensTheSeriesAtTodaysPaycheck:
             ).calendar().period_containing(today)
             last_saved = BalanceContext.build(user_id, as_of=today).paychecks(
             ).for_profile(profile).at(todays_period).earnings.net_pay
-            template.default_amount = last_saved
             profile.pay_entries.append(SalaryPayEntry(
                 payday=todays_period.start_date, amount=Decimal("4400.00"),
             ))

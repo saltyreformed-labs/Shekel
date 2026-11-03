@@ -4,8 +4,9 @@ The drives ``verify_recurrence_form.py`` runs once per form kind (the
 transaction and the transfer create forms): the unit, interval and funding
 rows (:func:`_drive_visibility`, the week unit's own arm in
 :func:`_drive_week_visibility`), the "Starts on" swap
-(:func:`_drive_opening_bound`), the "repeating on" day
-(:func:`_drive_nominal_day`), the per-month ceiling
+(:func:`_drive_opening_bound`), the "repeating on" control's day options
+(:func:`_drive_nominal_day`; its weekday readings are
+``_recurrence_form_weekday.py``'s), the per-month ceiling
 (:func:`_drive_month_ceiling`) and the "Ends" control
 (:func:`_drive_end_bound`).  The module docstring of
 ``verify_recurrence_form.py`` says why a browser grades them.
@@ -26,6 +27,7 @@ from _recurrence_form_kit import (
     _settle,
     _unit_ids,
     _visible,
+    _watch_previews,
 )
 
 
@@ -105,23 +107,56 @@ def _drive_opening_bound(page, kind: str, url: str) -> None:
            page.inner_text("#recurrence-preview"))
 
 
+def _offered_days(page) -> list[str]:
+    """Return the nominal days the "repeating on" control offers, as the tokens they post.
+
+    Offered means neither hidden nor disabled: ``syncRepeatsOn`` sets the two
+    together, and a check on one would pass an option the script left half
+    on.  Only the DAY options (``data-day``) are read; the weekday readings
+    beside them are :func:`_recurrence_form_weekday._offered`'s.
+
+    Args:
+        page: The Playwright page.
+
+    Returns:
+        The offered days' tokens, in the control's order.
+    """
+    return page.evaluate(
+        """() => Array.from(document.getElementById('repeats_on').options)
+              .filter(o => o.hasAttribute('data-day') && !o.hidden && !o.disabled)
+              .map(o => o.value)"""
+    )
+
+
 def _drive_nominal_day(page, kind: str, url: str) -> None:
-    """Check the "repeating on" control appears and posts only where it means.
+    """Check the "repeating on" control's DAY options appear and post only where they mean.
 
-    **Plan step R7c-b's new control, and the same defect class one field
-    over.**  ``nominal_day`` records the day a rule MEANS when its first
+    **Plan step R7c-b's control, and the same defect class one field
+    over.**  A nominal day records the day a rule MEANS when its first
     occurrence's own month was too short to hold it -- 2026-04-30 is "the 30th"
-    or "the 31st", and those are different cadences from May on.  The control
-    therefore renders ONLY where the chosen date leaves that question open, and
-    it must be DISABLED as well as hidden everywhere else: a hidden select
-    still submits, and a stale day beside a date that never clamped is exactly
-    what ``ck_recurrence_rules_nominal_day`` refuses.  A rendered-HTML
-    assertion cannot tell "hidden" from "hidden and still submitting".
+    or "the last day of the month", and those are different cadences from May
+    on.  So a day option is offered ONLY where the chosen date leaves that
+    question open, and it must be DISABLED as well as hidden everywhere else:
+    a stale day beside a date that never clamped is exactly what
+    ``ck_recurrence_rules_nominal_day`` refuses, and a rendered-HTML
+    assertion cannot tell "hidden" from "hidden and still submitting".  Only
+    the days ABOVE the chosen one are meaningful, so 2026-04-30 must offer the
+    31st and not the 30th, and moving to a month that holds them all must
+    clear the selection rather than leave it stating a day the rule no longer
+    fires on.
 
-    The per-OPTION half matters too and pytest cannot see it either: only the
-    days ABOVE the chosen one are meaningful, so choosing 2026-04-30 must offer
-    31 and not 30, and moving to a month that holds them all must clear the
-    selection rather than leave it stating a day the rule no longer fires on.
+    **Plan step recurrence:R8-c changed what this drive can say about the
+    ROW.**  The control became one ``<select>`` (``repeats_on``) offering the
+    weekday readings beside the day (rulings plan#2668, plan#2670), and every
+    month or year date has one -- the 1st-28th counted from the month's
+    start, the last seven days from its end -- so the row is shown for every
+    date on those units and posts the same day of the month (``""``) where no
+    day is open.  Until R8-c this drive asserted the row HIDDEN, posting
+    nothing, on 2026-04-15 and 2026-05-31; those two checks now read the day
+    options instead, and the row's own visibility per unit is
+    :func:`_recurrence_form_weekday._drive_weekday_reading`'s.  A unit with no
+    day of a month still hides AND disables the whole control, so a day
+    chosen for months posts nothing for weeks.
 
     Args:
         page: The Playwright page.
@@ -133,47 +168,42 @@ def _drive_nominal_day(page, kind: str, url: str) -> None:
     page.wait_for_selector("#recurrence_unit")
     units = _unit_ids(page)
 
-    # A MONTHLY cadence, which is the only family with a day-of-month
+    # A MONTHLY cadence, one of the two units with a day-of-month
     # coordinate at all.
     page.locator("#recurrence_unit").select_option(units["months"])
     _settle(page)
 
-    # --- a date its month CAN hold: nothing to ask -----------------------
+    # --- a date its month CAN hold: no day to ask ------------------------
     page.fill("#starts_on", "2026-04-15")
     _settle(page)
-    _check(f"{kind} N: repeating-on is hidden for a mid-month date",
-           not _visible(page, "field-nominal-day"), "visible")
-    _check(f"{kind} N: repeating-on posts NOTHING for a mid-month date",
-           _posted_opening(page)["nominal_day"] == [],
-           str(_posted_opening(page)["nominal_day"]))
+    _check(f"{kind} N: no nominal day is offered for a mid-month date",
+           _offered_days(page) == [], str(_offered_days(page)))
+    _check(f"{kind} N: a mid-month date posts the same day of the month",
+           _posted_opening(page)["repeats_on"] == [""],
+           str(_posted_opening(page)["repeats_on"]))
 
     # --- a month's LAST day in a short month: the question is open -------
     page.fill("#starts_on", "2026-04-30")
     _settle(page)
     _check(f"{kind} N: repeating-on is SHOWN on a short month's last day",
-           _visible(page, "field-nominal-day"), "hidden")
-    enabled = page.evaluate(
-        """() => Array.from(document.getElementById('nominal_day').options)
-              .filter(o => o.value !== '' && !o.disabled)
-              .map(o => o.value)"""
-    )
+           _visible(page, "field-repeats-on"), "hidden")
     _check(f"{kind} N: only the days ABOVE the 30th are offered",
-           enabled == ["31"], str(enabled))
+           _offered_days(page) == ["31"], str(_offered_days(page)))
 
-    page.select_option("#nominal_day", "31")
+    page.select_option("#repeats_on", "31")
     _settle(page)
     _check(f"{kind} N: a chosen nominal day posts exactly once",
-           _posted_opening(page)["nominal_day"] == ["31"],
-           str(_posted_opening(page)["nominal_day"]))
+           _posted_opening(page)["repeats_on"] == ["31"],
+           str(_posted_opening(page)["repeats_on"]))
 
     # --- back to a month that holds every day: the choice must GO --------
     page.fill("#starts_on", "2026-05-31")
     _settle(page)
-    _check(f"{kind} N: repeating-on is hidden again on a 31-day month's end",
-           not _visible(page, "field-nominal-day"), "visible")
-    _check(f"{kind} N: the stale nominal day posts nothing after the move",
-           _posted_opening(page)["nominal_day"] == [],
-           str(_posted_opening(page)["nominal_day"]))
+    _check(f"{kind} N: no nominal day is offered on a 31-day month's end",
+           _offered_days(page) == [], str(_offered_days(page)))
+    _check(f"{kind} N: the stale nominal day resets to the same day after the move",
+           _posted_opening(page)["repeats_on"] == [""],
+           str(_posted_opening(page)["repeats_on"]))
 
     # --- weeks (plan step R8-b): a unit with no day of the month ---------
     # The question is re-opened on the MONTHLY cadence first, a day chosen,
@@ -185,19 +215,19 @@ def _drive_nominal_day(page, kind: str, url: str) -> None:
         return
     page.fill("#starts_on", "2026-04-30")
     _settle(page)
-    page.select_option("#nominal_day", "31")
+    page.select_option("#repeats_on", "31")
     _settle(page)
     _check(f"{kind} N: precondition -- months on Apr 30 shows repeating-on, 31 posting",
-           _visible(page, "field-nominal-day")
-           and _posted_opening(page)["nominal_day"] == ["31"],
-           str(_posted_opening(page)["nominal_day"]))
+           _visible(page, "field-repeats-on")
+           and _posted_opening(page)["repeats_on"] == ["31"],
+           str(_posted_opening(page)["repeats_on"]))
     page.locator("#recurrence_unit").select_option(weeks)
     _settle(page)
     _check(f"{kind} N: repeating-on is hidden for weeks on the same date",
-           not _visible(page, "field-nominal-day"), "visible")
+           not _visible(page, "field-repeats-on"), "visible")
     _check(f"{kind} N: the day chosen for months posts NOTHING for weeks",
-           _posted_opening(page)["nominal_day"] == [],
-           str(_posted_opening(page)["nominal_day"]))
+           _posted_opening(page)["repeats_on"] == [],
+           str(_posted_opening(page)["repeats_on"]))
 
 
 def _posted_ceiling(page) -> list[str]:
@@ -536,13 +566,7 @@ def _drive_week_visibility(page, kind: str, units: dict[str, str]) -> None:
            f"offered units: {sorted(units)}")
     if weeks is None:
         return
-    previews: list[str] = []
-
-    def capture(request) -> None:
-        if "preview-recurrence" in request.url:
-            previews.append(request.url)
-
-    page.on("request", capture)
+    previews, stop_watching = _watch_previews(page)
     page.locator("#recurrence_unit").select_option(weeks)
     _settle(page)
     _check(f"{kind} W: interval box enabled",
@@ -584,7 +608,7 @@ def _drive_week_visibility(page, kind: str, units: dict[str, str]) -> None:
         "recurrence_placement": placements[1],
     })
     _choose_placement(page, 0)
-    page.remove_listener("request", capture)
+    stop_watching()
 
 
 def _drive_visibility(page, kind: str, url: str) -> None:
@@ -600,8 +624,10 @@ def _drive_visibility(page, kind: str, url: str) -> None:
 
     The day question they asked is now answered in two places and both have
     their own driver: ``starts_on`` (always shown --
-    :func:`_drive_opening_bound`) and ``nominal_day`` (conditionally shown --
-    :func:`_drive_nominal_day`).  What is left cadence-dependent, and what this
+    :func:`_drive_opening_bound`) and ``repeats_on`` (shown for a month or
+    year unit -- :func:`_drive_nominal_day` for its days, and
+    ``_recurrence_form_weekday.py`` for its weekday readings since plan step
+    recurrence:R8-c).  What is left cadence-dependent, and what this
     function was about until plan step recurrence:R5-a, was ``field-due-dom``:
     the bill's separate REAL due day.  That step dropped the control with its
     column (ruling R-R96: a rule's own day is the day its rows are due), so

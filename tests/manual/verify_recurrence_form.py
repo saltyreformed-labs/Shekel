@@ -66,10 +66,22 @@ stays hidden beside it on a date that opens that question for a monthly
 cadence (:func:`_drive_nominal_day`).  The two WEEK refusal cases went with
 the refusal (:func:`_drive_refusals` says what replaced them).
 
-**It writes nothing.**  Every check reads the form's own DOM; the crafted POSTs
-in the refusal pass are all expected to be REFUSED, and the pass asserts that
-no template and no recurrence rule was persisted by any of them.  Run it
-against a clone all the same.
+**Plan step recurrence:R8-c gave the "repeating on" control its weekday
+readings** ("the third Tuesday", "the last Tuesday"), worded by the script for
+the date being typed, and ``_recurrence_form_weekday.py`` grades them on both
+forms: which readings each date offers and in which words, a choice kept or
+reset as the date moves, the units that show the control, and the preview's
+request and paychecks (:func:`_drive_weekday_reading`).
+
+**By default it writes nothing.**  Every check reads the form's own DOM; the
+crafted POSTs in the refusal pass are all expected to be REFUSED, and the pass
+asserts that no template and no recurrence rule was persisted by any of them.
+**``VERIFY_WRITE=1`` adds one pass that writes** (plan#2680): a third-Tuesday
+definition saved through each real form and read back from the rule, its
+rows, the Recurring page and the edit form, then deleted through the app's own
+permanent-delete doors (:func:`_drive_weekday_round_trip`).  It is refused
+against the shared ``shekel``, as the line form's write pass is.  Run against a
+clone either way.
 
 Preconditions:
   * the containerized dev app is up and answering on ``DEV_BASE_URL``
@@ -81,6 +93,7 @@ Preconditions:
 
 Usage:
     python tests/manual/verify_recurrence_form.py
+    VERIFY_WRITE=1 VERIFY_DEV_DATABASE=<clone> python tests/manual/verify_recurrence_form.py
 
 Exit code 0 when every check passes, 1 on a failure, 2 when the preconditions
 are not met.  It is paced: the dev app runs the real Redis limiter (30/minute
@@ -115,6 +128,7 @@ from _recurrence_form_kit import (
     _sql,
 )
 from _recurrence_form_loans import _drive_edit_form_locks, _drive_loan_destination_lock
+from _recurrence_form_weekday import _drive_weekday_reading, _drive_weekday_round_trip
 
 
 def _drive_refusals(context, page) -> None:
@@ -283,6 +297,7 @@ def main() -> int:
             _drive_visibility(page, kind, url)
             _drive_opening_bound(page, kind, url)
             _drive_nominal_day(page, kind, url)
+            _drive_weekday_reading(page, kind, url)
             _drive_month_ceiling(page, kind, url)
             _drive_end_bound(page, kind, url)
         # Transfer-only: the transaction form has no destination account, so
@@ -290,6 +305,9 @@ def main() -> int:
         _drive_loan_destination_lock(page)
         _drive_edit_form_locks(page)
         _drive_refusals(context, page)
+        # After the refusals: their pass counts every recurrence rule, and
+        # this one makes rules (and deletes them).
+        _drive_weekday_round_trip(context, page)
 
         # A blocked inline style is a console error and nothing else, which is
         # how defect 2 shipped past a green suite.

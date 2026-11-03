@@ -12,6 +12,7 @@ drive finds the reason each reader exists beside it.
 """
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 #: Where the dev app answers.  The bridge-gateway bind, matching
@@ -57,6 +58,17 @@ MARK = "ZZVERIFY-RECURRENCE"
 #: and the run then met nine 429s -- all of them preview fetches, all reported
 #: as console errors, none of them a product defect.  Loosening the limiter
 #: would have hidden a class of defect the console check exists to catch.
+#:
+#: **The limit is also 200 an HOUR per route** (``RATELIMIT_DEFAULT``,
+#: ``app/config.py``), a moving window this pacing cannot reach: it bounds
+#: how often a whole run can happen, not how fast one goes.  Measured
+#: 2026-11-02 at plan#2680, which added the weekday drives: one whole run
+#: (``VERIFY_WRITE=1``) makes 136 preview fetches; a run started within the
+#: hour after other runs met 132 preview 429s through every preview check,
+#: and the same code passed every check in a fresh window.  Run it once an
+#: hour; the preview route's counter is
+#: ``LIMITS:LIMITER/<ip>/templates.preview_recurrence/200/1/hour`` in the
+#: dev Redis, its length the fetches still in the window.
 FIELD_SPACING_MS = 2500
 
 #: How long to wait between crafted POSTs.  See the module docstring.
@@ -262,6 +274,10 @@ def _posted_opening(page) -> dict[str, list[str]]:
     exactly that for the pay-period ``<select>``, which must post its value
     when the definition does NOT repeat and nothing at all when it does.
 
+    ``repeats_on`` is the "repeating on" choice, the key plan step
+    recurrence:R8-c gave the control when it began offering the weekday
+    readings beside the day (the key was ``nominal_day`` until then).
+
     Args:
         page: The Playwright page.
 
@@ -274,11 +290,38 @@ def _posted_opening(page) -> dict[str, list[str]]:
             const data = new FormData(form);
             return {
                 starts_on: data.getAll('starts_on'),
-                nominal_day: data.getAll('nominal_day'),
+                repeats_on: data.getAll('repeats_on'),
                 start_period_id: data.getAll('start_period_id'),
             };
         }"""
     )
+
+
+def _watch_previews(page) -> tuple[list[str], Callable[[], None]]:
+    """Start recording the live preview's requests; return the record and its stop.
+
+    The REQUEST is the evidence that an act re-fetched the preview, where
+    the text left on screen is not: it reads the same whether or not a fetch
+    happened.  The stop removes the listener, so a later drive on the same
+    page records into no list nobody reads.  One recorder for the week
+    unit's drive and the weekday reading's (plan#2680), which had each
+    spelled it.
+
+    Args:
+        page: The Playwright page.
+
+    Returns:
+        The preview URLs requested from now on, appended as each is made, and
+        the function that stops recording.
+    """
+    previews: list[str] = []
+
+    def capture(request) -> None:
+        if "preview-recurrence" in request.url:
+            previews.append(request.url)
+
+    page.on("request", capture)
+    return previews, lambda: page.remove_listener("request", capture)
 
 
 def _select_end_mode(page, token: str) -> None:

@@ -485,9 +485,10 @@ class TestRestateInEffect:
     def test_an_equal_figure_writes_nothing(self, app, seed_user):
         """The no-op arm: the same figure restated emits no UPDATE.
 
-        Graded on the optimistic-lock counter after a COMMIT rather than on
+        Graded on the optimistic-lock counter after a COMMIT, which the door
+        bumps on every change it makes (``_series_changed``), rather than on
         ``session.dirty``, which cannot tell a net-unchanged assignment from
-        a write (``_resync_scalar`` assigns the scalar it re-reads).
+        a write.
         """
         with app.app_context():
             template = _txn_template(seed_user, amount="162.25")

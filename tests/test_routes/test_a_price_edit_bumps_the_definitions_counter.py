@@ -19,6 +19,7 @@ guard for that form, not as a grade of the bump.
 
 from decimal import Decimal
 
+import pytest
 from werkzeug.datastructures import MultiDict
 
 from app.extensions import db
@@ -58,12 +59,11 @@ def _two_tabs(auth_client, edit_url, action):
     return first, second
 
 
+@pytest.mark.usefixtures("seed_periods_today")
 class TestAPriceEditBumpsTheDefinitionsCounter:
     """The second of two tabs saving only a price is refused, on both forms."""
 
-    def test_a_transaction_definition(
-        self, app, auth_client, seed_user, seed_periods_today,
-    ):  # pylint: disable=unused-argument
+    def test_a_transaction_definition(self, app, auth_client, seed_user):
         """$100.00, then $120.00 from one tab and $130.00 from a stale one: $120.00 stands."""
         with app.app_context():
             template = make_expense_template(
@@ -86,9 +86,7 @@ class TestAPriceEditBumpsTheDefinitionsCounter:
                 display_today(),
             ) == Decimal("120.00")
 
-    def test_a_transfer_definition(
-        self, app, auth_client, seed_user, seed_periods_today,
-    ):  # pylint: disable=unused-argument
+    def test_a_transfer_definition(self, app, auth_client, seed_user):
         """The transfer form: $200.00, then $120.00 and a stale $130.00: $120.00 stands."""
         with app.app_context():
             savings = create_savings_account(

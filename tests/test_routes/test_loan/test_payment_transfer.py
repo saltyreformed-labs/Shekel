@@ -149,11 +149,15 @@ class TestTransferPrompt:
         assert tpl.recurrence_rule is not None
         # A payment that follows its loan states no price (plan step X-bp,
         # where this asserted its ``default_amount`` copy); the figure the app
-        # shows for it is the loan's, priced live.
+        # shows for it is the loan's, priced live: the contractual P&I of the
+        # $255,000.00 the helper originates (the $250,000.00 balance plus the
+        # $5,000.00 it paid down) at 6.5% over 360 months, with no escrow,
+        # 255,000 x (0.065 / 12) / (1 - (1 + 0.065 / 12) ** -360)
+        # = 1,381.25 / (1 - 1 / 6.991798) = 1,611.77.
         assert newest_price(tpl) is None
         assert todays_price(
             tpl, BalanceContext.build(seed_user["user"].id),
-        ).amount > 0
+        ).amount == Decimal("1611.77")
         # No "amount" override was posted, so the route defaults to the
         # full monthly payment and opts into live derivation: the loan-only
         # derive_from_loan flag lives in the 1:1 loan_payment_settings row
@@ -380,11 +384,13 @@ class TestTransferPrompt:
         assert tpl.settings.extra_principal == Decimal("100.00")
         # The base is the derived P&I + escrow, priced live, NOT a stated
         # base + extra: the template states no price for the extra to be
-        # baked into, and the figure shown is more than the extra alone.
+        # baked into.  The figure shown is that base with the extra on top:
+        # the $1,611.77 P&I (no escrow; test_create_transfer_success's
+        # arithmetic) + $100.00 = $1,711.77.
         assert newest_price(tpl) is None
         assert todays_price(
             tpl, BalanceContext.build(seed_user["user"].id),
-        ).amount > Decimal("100.00")
+        ).amount == Decimal("1711.77")
 
     def test_update_payment_settings_changes_extra(
         self, auth_client, seed_user, db, seed_periods,

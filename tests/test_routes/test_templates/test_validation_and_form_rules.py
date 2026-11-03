@@ -4,6 +4,7 @@ the recurrence cell's source-level lock, and the per-month ceiling on the cadenc
 
 import re
 from datetime import date
+from decimal import Decimal
 
 from app import ref_cache
 from app.enums import RecurrenceUnitEnum
@@ -11,7 +12,7 @@ from app.extensions import db
 from app.models.ref import TransactionType
 from app.models.transaction_template import TransactionTemplate
 from app.services.recurrence import recurrence_spec
-from tests._test_helpers import cadence_payload, end_bound_payload
+from tests._test_helpers import cadence_payload, end_bound_payload, state_template_price
 from tests.oracles.recurrence_baseline import EVERY_PERIOD, MONTHLY
 from tests._repo_root import REPO_ROOT
 
@@ -364,6 +365,8 @@ class TestEnvelopeIncomeRejection:
                 is_envelope=False,
             )
             db.session.add(template)
+            db.session.commit()
+            state_template_price(template, Decimal("250.00"))
             db.session.commit()
 
             resp = auth_client.post(f"/templates/{template.id}", data={

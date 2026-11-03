@@ -33,6 +33,7 @@ from tests._test_helpers import (
     make_expense_template,
     repriced_by_the_owner,
     start_test_pay_list,
+    state_template_price,
 )
 
 
@@ -74,7 +75,11 @@ def _read_version(model, row_id):
 
 
 def _make_template(user_id, account_id, category_id):
-    """Insert a TransactionTemplate and return it with id populated."""
+    """Insert a TransactionTemplate priced at $100.00 and return it with id populated.
+
+    Its price is stated through the write door, as both create doors do, so
+    its edit form renders the Amount box a real definition's does.
+    """
     expense_type = (
         db.session.query(TransactionType).filter_by(name="Expense").one()
     )
@@ -87,6 +92,8 @@ def _make_template(user_id, account_id, category_id):
         is_active=True,
     )
     db.session.add(template)
+    db.session.commit()
+    state_template_price(template, Decimal("100.00"))
     db.session.commit()
     return template
 
@@ -270,7 +277,7 @@ def _make_transfer(seed_user, period):
 
 
 def _make_transfer_template(user_id, from_acct_id, to_acct_id, category_id):
-    """Insert a TransferTemplate."""
+    """Insert a TransferTemplate priced at $500.00, stated as :func:`_make_template` states its."""
     tmpl = TransferTemplate(
         user_id=user_id,
         from_account_id=from_acct_id,
@@ -280,5 +287,7 @@ def _make_transfer_template(user_id, from_acct_id, to_acct_id, category_id):
         is_active=True,
     )
     db.session.add(tmpl)
+    db.session.commit()
+    state_template_price(tmpl, Decimal("500.00"))
     db.session.commit()
     return tmpl

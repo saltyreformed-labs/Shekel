@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.models.escrow_line import EscrowComponentVersion
 from app.services.balance_at import BalanceContext
 from app.services import balance_at, escrow_calculator, loan_loaders
 from app.services.obligations_aggregator import todays_price
@@ -213,43 +214,63 @@ class TestPaymentDrift:
     def test_dashboard_no_warning_when_derive_even_after_escrow_rise(
         self, auth_client, seed_user, db, seed_periods,
     ):
-        """A DERIVE payment never warns, even after its contract rises.
+        """A DERIVE payment never warns, even while its next row is below today's contract.
 
-        The control that proves derive mode is EXCLUDED, not merely free of drift:
-        a derive transfer is created, then a $200/mo escrow line is added so the
-        contract rises ABOVE what it was at creation.  The payment states no base
-        to fall short of it -- asserted directly -- and no warning shows, because
-        a derive payment recomputes its cash to the contract on every read and
-        cannot drift.
+        The control that proves derive mode is EXCLUDED, not merely free of
+        drift.  A derive transfer is created, then a $200/mo escrow line is
+        added so TODAY's contract rises $200.00 above what it was at creation
+        (both figures asserted), and the line is removed from the next
+        installment's due date on.  Amount rule 4 prices that installment on
+        its own due date, so the payment's next row is the creation-day
+        contract: its base sits $200.00 BELOW today's contract, the shape a
+        fixed payment warns on (:meth:`test_dashboard_warns_when_manual_payment_short`).
+        No warning shows, because the card never asks a payment that tracks
+        the loan for its drift (``routes/loan/dashboard.py``,
+        ``_payment_strips``).  An escrow rise alone cannot grade that: with
+        nothing changing between today and the due date, rule 4 prices the
+        row at today's contract and ``_payment_drift`` answers ``None`` with
+        or without the exclusion, which is how this case stayed green with
+        the exclusion deleted (plan#2686's review).
         """
-        from app.models.transfer_template import TransferTemplate  # pylint: disable=import-outside-toplevel
-
         acct = _create_mortgage(seed_user, db.session)
         checking = seed_user["account"]
+        creation_contract = self._contract(acct, seed_user["user"].id)
         auth_client.post(
             f"/accounts/{acct.id}/loan/create-transfer",
             data={"source_account_id": str(checking.id)},   # derive default
         )
-        # Raise the contract above the stored base by adding escrow AFTER creation.
-        add_escrow_line(db.session, acct.id, "Taxes", Decimal("2400.00"))
+        # Today is 2026-03-20 (this package's conftest) and the mortgage pays
+        # on the 1st, so the next installment is due 2026-04-01.  A $2,400 a
+        # year escrow line in effect since origination raises today's
+        # contract; its removal from that due date on leaves the installment
+        # at the creation-day contract.
+        next_due = date(2026, 4, 1)
+        taxes = add_escrow_line(db.session, acct.id, "Taxes", Decimal("2400.00"))
+        db.session.add(EscrowComponentVersion(
+            line_id=taxes.line.id, effective_date=next_due,
+            annual_amount=Decimal("0.00"), is_removed=True,
+        ))
         db.session.commit()
 
-        tpl = (
-            db.session.query(TransferTemplate)
-            .filter_by(to_account_id=acct.id, user_id=seed_user["user"].id)
-            .first()
-        )
-        new_contract = self._contract(acct, seed_user["user"].id)
-        # The control: it states no base to fall below the contract (it stored
-        # one, created at the old contract, until plan step X-bp dropped the
-        # template's ``default_amount``), so a derive payment cannot warn.
+        tpl = _payment_template(db.session, seed_user, acct)
+        todays_contract = self._contract(acct, seed_user["user"].id)
+        # The contract rose: $2,400.00 / 12 = $200.00 a month of escrow.
+        assert todays_contract == creation_contract + Decimal("200.00")
         assert newest_price(tpl) is None
-        assert new_contract > 0
         assert tpl.settings.derive_from_loan is True
 
         resp = auth_client.get(f"/accounts/{acct.id}/loan")
         assert resp.status_code == 200
-        assert "short of the" not in resp.data.decode()
+        html = resp.data.decode()
+        # The precondition the claim rests on: the strip prices the next
+        # installment at the creation-day contract, $200.00 below today's.
+        assert re.search(
+            rf'loan-payment__figure">\s*\${creation_contract:,.2f}\s*<', html,
+        ), "the derive payment's next row is not priced at the creation-day contract"
+        assert "next payment, Apr 1" in html
+        assert f"${todays_contract:,.2f}" in html   # the loan card's Total Monthly
+        assert "short of the" not in html
+        assert "loan-payment--short" not in html
 
     def test_track_payment_flips_to_derive_and_clears_warning(
         self, auth_client, seed_user, db, seed_periods,

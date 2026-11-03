@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from tests._test_helpers import cadence_payload, one_off_row_of
+from tests._test_helpers import cadence_payload, one_off_row_of, state_template_price
 from app.models.user import User, UserSettings
 from app.models.scenario import Scenario
 from app.models.category import Category
@@ -310,6 +310,8 @@ class TestTransferAccountOwnership:
         )
         db.session.add(template)
         db.session.commit()
+        state_template_price(template, Decimal("100.00"))
+        db.session.commit()
 
         # Snapshot before attack.
         original_from = template.from_account_id
@@ -350,6 +352,8 @@ class TestTransferAccountOwnership:
             name="My Transfer 2",
         )
         db.session.add(template)
+        db.session.commit()
+        state_template_price(template, Decimal("100.00"))
         db.session.commit()
 
         # Snapshot before attack.

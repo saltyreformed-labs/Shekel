@@ -329,10 +329,10 @@ def _assert_linked_accounts_reconcile(scenario_id: int) -> None:
     time or into a what-if by the effect-time self-heal alongside that
     scenario's first settle -- the latter ONLY because these fixtures
     settle on the same UTC day the accounts were created; not a general
-    guarantee, and R8 owns the residual multi-scenario policy).  Amortizing loans are excluded -- their
-    absolute invariant couples on the amortization split and is the loan
-    oracle's job.  Holds over every such account, not only the ones a given
-    test hand-computes.
+    guarantee, and R8 owns the residual multi-scenario policy).  Amortizing
+    loans are excluded -- their absolute invariant couples on the
+    amortization split and is the loan oracle's job.  Holds over every such
+    account, not only the ones a given test hand-computes.
     """
     scenario_owner_id = (
         _db.session.query(Scenario.user_id)
@@ -600,7 +600,8 @@ def _assert_full_reconciliation(
 ) -> None:
     """Assert the whole ledger reconciles: linked, counter, per-entry, trial.
 
-    The production-wide sweep run after each test's mutations.  Linked and
+    The production-wide sweep a case runs after its mutations; not every
+    case runs it (measured 2026-11-02: 13 of the 16 cash cases do).  Linked and
     counter reconciliation are scenario-scoped; the per-entry balance and trial
     balance are global self-checks (always true for a balanced ledger, asserted
     cheaply on every sweep).  Last, the ledger worked out from the records

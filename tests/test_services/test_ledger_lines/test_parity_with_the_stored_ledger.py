@@ -4,15 +4,17 @@ The suite half of X-ew's first leaf's proof (plan step plan#2513;
 ``docs/plans/verification.md``): the ledger
 :func:`app.services.ledger_lines.worked_out_lines` works out from the records
 nets, per (chart row, paycheck, entry day), to what the stored journal holds,
-each worked-out line mapped onto its stored row by the row's
-:class:`~app.services.ledger_lines.ChartKey`
-(``tests._test_helpers.stored_chart_key``).  The comparison is
+each worked-out line mapped onto the owner's stored row for its
+:class:`~app.services.ledger_lines.ChartKey`, each row's key read as stored
+(``tests._ledger_parity.ParityChart``).  The comparison is
 ``tests._ledger_parity.assert_ledger_parity``, and it runs in two places:
 
-* **every world of the posting reconciliation suites**, at each of their
-  sweeps (the cash, account-anchor, loan and Step-2 transfer oracles); two of
-  those worlds write a record past every writer and name the cells that leaves
-  the store behind on;
+* **every sweep the posting reconciliation suites run** (the cash,
+  account-anchor, loan and Step-2 transfer oracles), which is not every case
+  of theirs: measured 2026-11-02, 54 of the 84 cases the four run reach the
+  comparison and the other 30 never do, so it grades only the 54.  Two of
+  the worlds that sweep write a record past every writer and name the cells
+  that leaves the store behind on;
 * **here, a world for each source kind** the store posts under, each built
   so that its writers post it -- through production's doors, or, for the
   loan true-up, by the suite's builder that appends the event and runs the
@@ -23,7 +25,12 @@ each worked-out line mapped onto its stored row by the row's
 hold, a record the store has not caught up with, and a difference a caller
 states that is not there each fail it, with a message naming every cell's
 chart row, paycheck and day -- a failure message is code a green suite never
-runs, so each is forced to run once and read back.
+runs, so each is forced to run once and read back.  A read that drops its
+transit lines parts from the store at both of the transfer world's transit
+cells.
+**Every stored row is a cell of its own**: a leg on another owner's row, and
+each of two orphans netting against the other, fail it at each row's own cell
+(``tests._ledger_parity.ParityChart``).
 
 What a pass does NOT say: the worked-out read and the store's writers apply
 the same target rules (plan task plan#2526 moved them into
@@ -51,11 +58,14 @@ from app.extensions import db as _db
 from app.models.account import AccountAnchorHistory
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
-from app.services import anchor_service, entry_service
+from app.services import anchor_service, entry_service, transfer_service
 from app.services.ledger_lines import (
+    ChartKey,
     account_counter_key,
     category_key,
     linked_key,
+    purchase_target,
+    transit_key,
     worked_out_lines,
 )
 from tests._ledger_parity import (
@@ -65,11 +75,13 @@ from tests._ledger_parity import (
 )
 from tests._test_helpers import (
     an_entered_day,
+    an_observed_day,
     create_account_of_type,
     create_loan_account,
     create_loan_with_trueup,
     create_settled_cash_transaction,
     create_settled_transfer,
+    create_transfer,
     freeze_today,
     generate_row_of,
     make_expense_template,
@@ -79,6 +91,15 @@ from tests._test_helpers import (
 # Inside seed_periods' last paycheck (2026-05-08 - 2026-05-21), after every
 # paycheck a world files a row in.
 _TODAY = date(2026, 5, 15)
+
+# The two bank days the transfer world's sides clear on, a day apart: the
+# money leaves Checking first and reaches Savings the next day.
+_LEAVES_ON = date(2026, 5, 12)
+_ARRIVES_ON = date(2026, 5, 13)
+
+# The day a control plants its entry on: inside the 2026-03-13 - 2026-03-26
+# paycheck, where no world books anything.
+_PLANTED_ON = date(2026, 3, 14)
 
 
 @pytest.fixture(autouse=True)
@@ -187,13 +208,35 @@ def _purchases(seed_user, seed_periods):
 
 
 def _transfer(seed_user, seed_periods):
-    """A $250.00 transfer from Checking to a new Savings, settled."""
+    """A $250.00 transfer from Checking to a new Savings, each side on its own day.
+
+    Checking's statement shows the money leaving on May 12 and Savings' shows
+    it arriving on May 13, so each side's Transfers in transit line books on
+    its own bank day (rulings R-BAL45, R-BAL101), both filed in the
+    transfer's paycheck (2026-01-30 - 2026-02-12, ruling pay_calendar:R-PC53):
+    ``+250.00`` on May 12 and ``-250.00`` on May 13.  Neither transit cell
+    nets to $0.00, which is what makes this world grade the read's transit
+    lines (``test_a_read_that_drops_the_transit_lines``): a transfer whose
+    two sides clear on one day nets $0.00 on transit whether the read books
+    its transit lines or not.  Savings' opening balance is asserted on May 5,
+    before either day, so neither movement falls inside that assertion.
+    """
     savings = create_account_of_type(
         seed_user, _db.session, "Savings", "Parity Savings",
+        observed_on=_TODAY - timedelta(days=10),
     )
-    create_settled_transfer(
+    transfer = create_transfer(
         seed_user, _db.session, seed_user["account"], savings,
         seed_periods[2], amount=Decimal("250.00"),
+    )
+    transfer_service.settle_transfer(
+        transfer.id, seed_user["user"].id,
+        side_days=(
+            transfer_service.SideDay(
+                seed_user["account"].id, an_observed_day(_LEAVES_ON),
+            ),
+            transfer_service.SideDay(savings.id, an_observed_day(_ARRIVES_ON)),
+        ),
     )
 
 
@@ -360,7 +403,7 @@ class TestTheComparisonIsShownToFire:
             scenario_id = _scenario_id(seed_user)
             assert_ledger_parity(_db.session, scenario_id)
 
-            planted_on = date(2026, 3, 14)
+            planted_on = _PLANTED_ON
             paycheck = _paycheck_holding(seed_periods, planted_on)
             checking_row = _stored_row_id(
                 seed_user, account_id=checking.id,
@@ -519,3 +562,205 @@ class TestTheComparisonIsShownToFire:
                 f"2026-05-15: stored 0.00, worked out -40.00"
             ) in message
             assert "no caller expected" not in message
+
+    def test_a_read_that_drops_the_transit_lines(
+        self, app, seed_user, seed_periods, monkeypatch,
+    ):
+        """The transfer world fails at both transit cells once the read drops them.
+
+        The read mutated so each movement books only its cash leg (finding
+        C-M1: while every transfer fixture cleared both sides on one day, all
+        95 parity-path items stayed green under exactly this mutation, since
+        a same-day transfer nets $0.00 on transit either way).  The store
+        holds the world's two transit lines, ``+250.00`` on May 12 and
+        ``-250.00`` on May 13, in the transfer's paycheck; worked out they are
+        ``0.00`` -- and nothing else parts, since both cash legs are still
+        worked out.
+        """
+        with app.app_context():
+            _transfer(seed_user, seed_periods)
+            _db.session.commit()
+            scenario_id = _scenario_id(seed_user)
+            assert_ledger_parity(_db.session, scenario_id)
+            transit_row = _stored_row_id(
+                seed_user, kind_id=_kind_id(LedgerAccountKindEnum.TRANSIT),
+            )
+
+            def without_transit(entry, parent):
+                """Return the movement's legs but its transit one."""
+                return {
+                    key: amount
+                    for key, amount in purchase_target(entry, parent).items()
+                    if key != transit_key()
+                }
+
+            monkeypatch.setattr(
+                "app.services.ledger_lines._worked_out.purchase_target",
+                without_transit,
+            )
+
+            paycheck = seed_periods[2].id
+            assert ledger_parity_differences(_db.session, scenario_id) == [
+                LedgerParityDifference(
+                    key=transit_key(), stored_row_ids=(transit_row,),
+                    pay_period_id=paycheck, entry_date=_LEAVES_ON,
+                    stored=Decimal("250.00"), worked_out=Decimal("0.00"),
+                ),
+                LedgerParityDifference(
+                    key=transit_key(), stored_row_ids=(transit_row,),
+                    pay_period_id=paycheck, entry_date=_ARRIVES_ON,
+                    stored=Decimal("-250.00"), worked_out=Decimal("0.00"),
+                ),
+            ]
+
+
+# ---------------------------------------------------------------------------
+# A stored row no worked-out key lands on is a cell of its own
+# ---------------------------------------------------------------------------
+
+
+def _plant_orphan(seed_user, name):
+    """Plant an Expense-class orphan chart row of the seed owner's; return its id.
+
+    The shape a budget category's delete leaves its category row in (the
+    ``category_id`` SET NULL, the kind, class and snapshot name kept,
+    ``app/models/ledger_account.py``'s row-kind taxonomy), written straight to
+    the chart: no app code writes one, and any number coexist.
+    """
+    row = LedgerAccount(
+        user_id=seed_user["user"].id,
+        kind_id=_kind_id(LedgerAccountKindEnum.CATEGORY),
+        class_id=ref_cache.ledger_account_class_id(
+            LedgerAccountClassEnum.EXPENSE,
+        ),
+        name=name,
+    )
+    _db.session.add(row)
+    _db.session.flush()
+    return row.id
+
+
+class TestARowNoWorkedOutKeyLandsOnStandsApart:
+    """Each stored row the read names no key for nets against no other row."""
+
+    def test_a_leg_on_another_owners_transit_bucket(
+        self, app, seed_user, seed_periods, seed_second_user,
+    ):
+        """An owner's $100.00 moved onto another owner's transit row fails twice.
+
+        Both owners hold a Transfers in transit row, each made by a settled
+        transfer of its own.  A balanced entry of the seed owner's planted on
+        March 14 moves $100.00 of transit from the seed owner's row onto the
+        other owner's: ``-100.00`` on the seed owner's, ``+100.00`` on the
+        other's.  A transit row's key names no owner and no record, so keyed
+        by key alone the two legs net to $0.00 in one cell and the comparison
+        saw nothing (finding C-M3).  Each row is a cell of its own: the seed
+        owner's row stores ``-100.00`` against ``0.00`` worked out, the other
+        owner's ``+100.00`` against ``0.00``, its message naming that row.
+        The other owner's own comparison stays clean: the entry is the seed
+        owner's, and only the seed owner's comparison reads it.
+        """
+        with app.app_context():
+            _transfer(seed_user, seed_periods)
+            other_savings = create_account_of_type(
+                seed_second_user, _db.session, "Savings", "Second Savings",
+            )
+            create_settled_transfer(
+                seed_second_user, _db.session, seed_second_user["account"],
+                other_savings, seed_second_user["bootstrap_period"],
+                amount=Decimal("80.00"),
+            )
+            _db.session.commit()
+            scenario_id = _scenario_id(seed_user)
+            other_scenario_id = seed_second_user["scenario"].id
+            assert_ledger_parity(_db.session, scenario_id)
+            assert_ledger_parity(_db.session, other_scenario_id)
+
+            transit = _kind_id(LedgerAccountKindEnum.TRANSIT)
+            own_row = _stored_row_id(seed_user, kind_id=transit)
+            other_row = _stored_row_id(seed_second_user, kind_id=transit)
+            paycheck = _paycheck_holding(seed_periods, _PLANTED_ON)
+            _plant_entry(seed_user, paycheck, _PLANTED_ON, {
+                own_row: Decimal("-100.00"),
+                other_row: Decimal("100.00"),
+            })
+
+            assert ledger_parity_differences(_db.session, scenario_id) == sorted(
+                [
+                    LedgerParityDifference(
+                        key=transit_key(), stored_row_ids=(own_row,),
+                        pay_period_id=paycheck, entry_date=_PLANTED_ON,
+                        stored=Decimal("-100.00"), worked_out=Decimal("0.00"),
+                    ),
+                    LedgerParityDifference(
+                        key=transit_key(), stored_row_ids=(other_row,),
+                        pay_period_id=paycheck, entry_date=_PLANTED_ON,
+                        stored=Decimal("100.00"), worked_out=Decimal("0.00"),
+                    ),
+                ],
+                key=lambda difference: difference.stored_row_ids,
+            )
+            assert not ledger_parity_differences(_db.session, other_scenario_id)
+            with pytest.raises(AssertionError) as raised:
+                assert_ledger_parity(_db.session, scenario_id)
+
+            assert (
+                f"chart row #{other_row} [transit / Asset / record None], "
+                f"paycheck {paycheck}, day 2026-03-14: stored 100.00, "
+                f"worked out 0.00"
+            ) in str(raised.value)
+
+    def test_two_orphans_that_net_against_each_other(
+        self, app, seed_user, seed_periods,
+    ):
+        """Two orphans' opposite $12.34 legs fail at each orphan's own cell.
+
+        Two Expense-class orphans of the seed owner's (two deleted
+        categories' rows), and a balanced entry planted on March 14 booking
+        ``+12.34`` on one and ``-12.34`` on the other.  Every such row's key
+        is ``(category, Expense, None)``, so keyed by key alone the two legs
+        netted to $0.00 in one cell and the comparison saw nothing (finding
+        B8).  Each row is a cell of its own: ``+12.34`` and ``-12.34``
+        stored, ``0.00`` worked out (the records book nothing on an orphan),
+        each message naming its row.
+        """
+        with app.app_context():
+            scenario_id = _scenario_id(seed_user)
+            first = _plant_orphan(seed_user, "Leisure: Hobbies")
+            second = _plant_orphan(seed_user, "Leisure: Travel")
+            assert_ledger_parity(_db.session, scenario_id)
+
+            paycheck = _paycheck_holding(seed_periods, _PLANTED_ON)
+            _plant_entry(seed_user, paycheck, _PLANTED_ON, {
+                first: Decimal("12.34"),
+                second: Decimal("-12.34"),
+            })
+
+            # Spelled from the orphans' columns: no constructor builds a key
+            # with no category behind it.
+            orphan_key = ChartKey(
+                LedgerAccountKindEnum.CATEGORY, LedgerAccountClassEnum.EXPENSE,
+                None,
+            )
+            assert ledger_parity_differences(_db.session, scenario_id) == [
+                LedgerParityDifference(
+                    key=orphan_key, stored_row_ids=(first,),
+                    pay_period_id=paycheck, entry_date=_PLANTED_ON,
+                    stored=Decimal("12.34"), worked_out=Decimal("0.00"),
+                ),
+                LedgerParityDifference(
+                    key=orphan_key, stored_row_ids=(second,),
+                    pay_period_id=paycheck, entry_date=_PLANTED_ON,
+                    stored=Decimal("-12.34"), worked_out=Decimal("0.00"),
+                ),
+            ]
+            with pytest.raises(AssertionError) as raised:
+                assert_ledger_parity(_db.session, scenario_id)
+
+            message = str(raised.value)
+            for row, stored in ((first, "12.34"), (second, "-12.34")):
+                assert (
+                    f"chart row #{row} [category / Expense / record None], "
+                    f"paycheck {paycheck}, day 2026-03-14: stored {stored}, "
+                    f"worked out 0.00"
+                ) in message

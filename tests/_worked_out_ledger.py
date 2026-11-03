@@ -7,7 +7,11 @@ its controls and says what it found.  Per owner and scenario, :func:`compare` re
 * **Every (chart row, paycheck, day) net on each side**, and every cell where they differ: the
   suite's own comparison (``tests._ledger_parity.ledger_parity_differences``).  The run reads
   both ledgers again at a finer grain, and that read must reproduce the suite's cells exactly or
-  the run stops (:class:`HarnessError`).
+  the run stops (:class:`HarnessError`).  Both map a line onto its chart account by the suite's
+  one rule (``tests._ledger_parity.ParityChart``): a stored leg's is the row it sits on, a
+  worked-out line's the owner's row for its key, so no two stored rows net in one cell.  The
+  statements alone key a line by its chart key, summing two rows of one key; whatever that
+  sums, the cell and source grains have already named apart.
 * **Every difference by SOURCE** -- per movement, per correction kind, and the store's
   sourceless residue -- each classified as one of the differences the leaf's spec expects, or
   UNEXPLAINED.  A source grain sees what a cell cannot: two movements whose stored lines
@@ -59,8 +63,7 @@ from app.services.ledger_lines import (
     worked_out_lines,
 )
 from app.utils.balance_predicates import settled_status_ids
-from tests._ledger_parity import ledger_parity_differences
-from tests._test_helpers import stored_chart_key
+from tests._ledger_parity import ledger_parity_differences, read_parity_chart
 from tests._worked_out_statements import key_text, money, report_statements
 
 _ZERO = Decimal("0.00")
@@ -88,13 +91,16 @@ class HarnessError(RuntimeError):
 
 # One stored posting or one worked-out line, at source grain.  ``source`` is
 # ``(grain, id)``: a movement's id, or a correction's or residue's source kind
-# id.  ``attributed_on`` is the day a calendar window or a balance sheet
+# id.  ``key`` and ``rows`` are its chart account
+# (``tests._ledger_parity.ParityChart``): the stored row it sits on, or the
+# owner's stored row for a worked-out line's key, ``()`` for none.
+# ``attributed_on`` is the day a calendar window or a balance sheet
 # places it on (the store's reader: a movement's bank day, a correction's own
 # day; ``None`` for residue, which it drops); ``entry_id`` is the stored
 # journal entry, ``None`` for a worked-out line.
 Contribution = namedtuple(
     "Contribution",
-    "source key pay_period_id entry_date amount attributed_on entry_id",
+    "source key rows pay_period_id entry_date amount attributed_on entry_id",
 )
 
 
@@ -140,8 +146,8 @@ class Outcome:
 
     Attributes:
         lines: The report's lines for this owner and scenario.
-        unexplained_sources: Every source cell ``(source, key, paycheck,
-            day)`` whose difference is no expected kind.
+        unexplained_sources: Every source cell ``(source, key, stored rows,
+            paycheck, day)`` whose difference is no expected kind.
         unexplained_fields: How many statement fields part from the store
             beyond the expected differences in their window.
         expected: Each expected kind's source-cell count.
@@ -210,14 +216,10 @@ def read_ledger(scenario, calendar):
         The :class:`Ledger`.
     """
     posted = _postings(scenario.user_id, scenario.id)
-    chart = {
-        row.id: row
-        for row in db.session.query(LedgerAccount).filter(or_(
-            LedgerAccount.user_id == scenario.user_id,
-            LedgerAccount.id.in_({row.ledger_account_id for row in posted}),
-        ))
-    }
-    key_of = {row_id: stored_chart_key(row) for row_id, row in chart.items()}
+    chart = read_parity_chart(
+        db.session, scenario.user_id,
+        {row.ledger_account_id for row in posted},
+    )
     lines = worked_out_lines(scenario.user_id, scenario.id)
     movements = _movements(
         {row.transaction_entry_id for row in posted
@@ -229,18 +231,18 @@ def read_ledger(scenario, calendar):
         scenario_id=scenario.id,
         is_baseline=scenario.is_baseline,
         calendar=calendar,
-        stored=_stored_contributions(posted, key_of, movements),
+        stored=_stored_contributions(posted, chart, movements),
         worked=[
             Contribution(
                 (_MOVEMENT, line.movement_id) if line.movement_id is not None
                 else (_CORRECTION, line.source_kind_id),
-                line.key, line.pay_period_id, line.entry_date, line.amount,
-                line.entry_date, None,
+                *chart.worked_account(line.key), line.pay_period_id,
+                line.entry_date, line.amount, line.entry_date, None,
             )
             for line in lines
         ],
-        chart=chart,
-        key_of=key_of,
+        chart=chart.rows,
+        key_of=chart.key_of,
         parent_of={
             movement_id: parent
             for movement_id, (_, parent) in movements.items()
@@ -279,7 +281,7 @@ def _postings(owner_id, scenario_id):
     )
 
 
-def _stored_contributions(posted, key_of, movements):
+def _stored_contributions(posted, chart, movements):
     """Return each stored posting as a :data:`Contribution`.
 
     Its source is its movement when it links one, its kind when that kind
@@ -289,7 +291,8 @@ def _stored_contributions(posted, key_of, movements):
 
     Args:
         posted: :func:`_postings`' rows.
-        key_of: Each stored chart row's key.
+        chart: The :class:`~tests._ledger_parity.ParityChart` the comparison
+            maps each leg's row by.
         movements: :func:`_movements`' map.
     """
     correction_kinds = _correction_kind_ids()
@@ -304,7 +307,7 @@ def _stored_contributions(posted, key_of, movements):
         else:
             source, attributed_on = (RESIDUE, kind), None
         stored.append(Contribution(
-            source, key_of[row_id], pay_period_id, day, amount,
+            source, *chart.stored_account(row_id), pay_period_id, day, amount,
             attributed_on, entry_id,
         ))
     return stored
@@ -397,12 +400,15 @@ def _nets(contributions, grain):
 
 
 def _cell_of(contribution):
-    """Return a contribution's (chart key, paycheck, day) cell."""
-    return (contribution.key, contribution.pay_period_id, contribution.entry_date)
+    """Return a contribution's (chart key, stored rows, paycheck, day) cell."""
+    return (
+        contribution.key, contribution.rows, contribution.pay_period_id,
+        contribution.entry_date,
+    )
 
 
 def source_cell_of(contribution):
-    """Return a contribution's (source, chart key, paycheck, day) cell."""
+    """Return a contribution's (source, key, stored rows, paycheck, day) cell."""
     return (contribution.source,) + _cell_of(contribution)
 
 
@@ -415,12 +421,18 @@ def _paired(stored, worked):
 
 
 def _cell_order(cell):
-    """Return a sort key for a cell whose last three parts are key, paycheck, day."""
-    key, pay_period_id, day = cell[-3:]
+    """Return a sort key for a cell ending in key, stored rows, paycheck, day."""
+    key, rows, pay_period_id, day = cell[-4:]
     return (
         pay_period_id, day, key.kind.value, key.ledger_class.value,
-        -1 if key.record_id is None else key.record_id, str(cell[:-3]),
+        -1 if key.record_id is None else key.record_id, rows, str(cell[:-4]),
     )
+
+
+def _account_text(key, rows):
+    """Return a chart account as a reader names it: its stored rows and key."""
+    shown = ",".join(f"#{row}" for row in rows)
+    return f"row {shown or '(none stored)'} [{key_text(key)}]"
 
 
 def compare(ledger, skipped):
@@ -446,7 +458,7 @@ def compare(ledger, skipped):
         _nets(ledger.stored, _cell_of), _nets(ledger.worked, _cell_of),
     )
     _check_against_the_suite(ledger, cells)
-    _report_cells(ledger, cells, out)
+    _report_cells(cells, out)
     differing = _source_differences(ledger)
     expected = _classify(ledger, differing, skipped)
     _report_sources(differing, expected, outcome)
@@ -472,13 +484,11 @@ def _check_against_the_suite(ledger, cells):
         HarnessError: The two reads name different differing cells.
     """
     mine = {
-        (key, pay_period_id, day, stored, worked)
-        for (key, pay_period_id, day), (stored, worked) in cells.items()
-        if stored != worked
+        cell + nets for cell, nets in cells.items() if nets[0] != nets[1]
     }
     suites = {
-        (cell.key, cell.pay_period_id, cell.entry_date, cell.stored,
-         cell.worked_out)
+        (cell.key, cell.stored_row_ids, cell.pay_period_id, cell.entry_date,
+         cell.stored, cell.worked_out)
         for cell in ledger_parity_differences(db.session, ledger.scenario_id)
     }
     if mine != suites:
@@ -489,23 +499,18 @@ def _check_against_the_suite(ledger, cells):
         )
 
 
-def _report_cells(ledger, cells, out):
+def _report_cells(cells, out):
     """Print every cell's two nets, and every cell where they part."""
-    rows_of = defaultdict(list)
-    for row_id, key in ledger.key_of.items():
-        if ledger.chart[row_id].user_id == ledger.owner_id:
-            rows_of[key].append(row_id)
     parted = 0
     out(f"-- cells: {len(cells)} (chart row, paycheck, day) cells; each "
         "line: stored net | worked-out net")
     for cell in sorted(cells, key=_cell_order):
         stored, worked = cells[cell]
-        key, pay_period_id, day = cell
-        rows = ",".join(f"#{row}" for row in sorted(rows_of.get(key, ())))
+        key, rows, pay_period_id, day = cell
         mark = "  "
         if stored != worked:
             mark, parted = "! ", parted + 1
-        out(f"{mark} row {rows or '(none stored)'} [{key_text(key)}] "
+        out(f"{mark} {_account_text(key, rows)} "
             f"paycheck {pay_period_id} day {day.isoformat()}: "
             f"{money(stored)} | {money(worked)}")
     zero_only = sum(
@@ -532,10 +537,10 @@ def _source_differences(ledger):
 
 
 def _residue_is_zero_sum(ledger):
-    """Return whether the store's residue nets to $0.00 on every chart key."""
+    """Return whether the store's residue nets to $0.00 on every chart account."""
     residue = _nets(
         (c for c in ledger.stored if c.source[0] == RESIDUE),
-        lambda c: c.key,
+        lambda c: (c.key, c.rows),
     )
     return all(net == 0 for net in residue.values())
 
@@ -543,15 +548,16 @@ def _residue_is_zero_sum(ledger):
 def _classify(ledger, differing, skipped):
     """Return each differing source cell's expected kind, or ``None``.
 
-    * residue: expected while the residue nets to zero on every key -- a
-      reversal pair -- since the statements drop it whole; residue that does
-      not net to zero is money the records lost;
+    * residue: expected while the residue nets to zero on every chart
+      account -- a reversal pair -- since the statements drop it whole;
+      residue that does not net to zero is money the records lost;
     * a movement: expected when its parent is a transfer the resync skips,
       or a row it does not walk (design report s.9.3);
-    * a correction: expected when its kind, key and day net to zero across
-      paychecks -- the same correction, filed in another paycheck.  The
-      worked-out side files it by today's calendar (ruling plan#2519), so
-      the store's is the paycheck the calendar gave when it was written.
+    * a correction: expected when its kind, chart account and day net to
+      zero across paychecks -- the same correction, filed in another
+      paycheck.  The worked-out side files it by today's calendar (ruling
+      plan#2519), so the store's is the paycheck the calendar gave when it
+      was written.
 
     Returns:
         ``{source cell: kind name | None}``.
@@ -564,18 +570,18 @@ def _classify(ledger, differing, skipped):
             for cell, (stored, worked) in differing.items()
             if cell[0][0] == _CORRECTION
         ),
-        lambda c: (c.source, c.key, c.entry_date),
+        lambda c: (c.source, c.key, c.rows, c.entry_date),
     )
     kinds = {}
     for cell in differing:
-        (grain, ident), key, _pay_period_id, day = cell
+        (grain, ident), key, rows, _pay_period_id, day = cell
         if grain == RESIDUE:
             kinds[cell] = _EXPECTED_RESIDUE if zero_sum else None
         elif grain == _MOVEMENT:
             kinds[cell] = _movement_kind(ledger, ident, skipped)
         else:
             kinds[cell] = (
-                _EXPECTED_FILING if moved[((grain, ident), key, day)] == 0
+                _EXPECTED_FILING if moved[((grain, ident), key, rows, day)] == 0
                 else None
             )
     return kinds
@@ -588,14 +594,14 @@ def _report_sources(differing, expected, outcome):
         "stored net | worked-out net")
     for cell in sorted(differing, key=_cell_order):
         stored, worked = differing[cell]
-        source, key, pay_period_id, day = cell
+        source, key, rows, pay_period_id, day = cell
         kind = expected[cell]
         if kind is None:
             outcome.unexplained_sources.add(cell)
         else:
             outcome.expected[kind] += 1
         out(f"{'~ ' if kind else '! '} {_source_text(source)} "
-            f"[{key_text(key)}] paycheck {pay_period_id} "
+            f"{_account_text(key, rows)} paycheck {pay_period_id} "
             f"day {day.isoformat()}: {money(stored)} | {money(worked)} -- "
             f"{kind or 'UNEXPLAINED'}")
 
@@ -669,7 +675,9 @@ def _report_census_kind(kind, entries, out):
         f"its {len(by_cell)} cell(s) net nonzero")
     for entry in entries:
         first = entry[0]
-        shown = ", ".join(f"[{key_text(c.key)}] {money(c.amount)}" for c in entry)
+        shown = ", ".join(
+            f"{_account_text(c.key, c.rows)} {money(c.amount)}" for c in entry
+        )
         out(f"     entry {first.entry_id} {_source_text(first.source)} "
             f"paycheck {first.pay_period_id} day "
             f"{first.entry_date.isoformat()}: {shown}")
@@ -678,15 +686,17 @@ def _report_census_kind(kind, entries, out):
 def _report_totals(cells, out):
     """Print every chart account's total on each side."""
     totals = defaultdict(lambda: [_ZERO, _ZERO])
-    for (key, _pay_period_id, _day), (stored, worked) in cells.items():
-        totals[key][0] += stored
-        totals[key][1] += worked
+    for (key, rows, _pay_period_id, _day), (stored, worked) in cells.items():
+        totals[(key, rows)][0] += stored
+        totals[(key, rows)][1] += worked
     out(f"-- account totals: {len(totals)} chart account(s); each line: "
         "stored | worked-out")
-    for key in sorted(totals, key=lambda k: _cell_order((k, 0, date.min))):
-        stored, worked = totals[key]
-        out(f"{'! ' if stored != worked else '  '} [{key_text(key)}] "
-            f"{_label_of(key)}: {money(stored)} | {money(worked)}")
+    for account in sorted(
+        totals, key=lambda account: _cell_order((*account, 0, date.min)),
+    ):
+        stored, worked = totals[account]
+        out(f"{'! ' if stored != worked else '  '} {_account_text(*account)} "
+            f"{_label_of(account[0])}: {money(stored)} | {money(worked)}")
 
 
 def _label_of(key):

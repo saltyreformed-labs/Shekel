@@ -20,7 +20,8 @@ import pytest
 from flask import render_template_string
 from flask_login import login_user
 
-from app import _current_user_is_owner, ref_cache
+from app import ref_cache
+from app.context_processors import _current_user_is_owner
 from app.utils import dates
 from tests._test_helpers import EMPTY_TAX_LAW, made_up_law
 

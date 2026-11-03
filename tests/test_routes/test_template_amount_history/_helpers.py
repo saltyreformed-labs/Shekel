@@ -1,7 +1,8 @@
 """The helpers and constants every part of this package shares: the module-level helpers of
 ``tests/test_routes/test_template_amount_history.py``, which ``tools/split`` moved here, and
 the one builder of a definition with no price of its own (:func:`_bare_template`) and of a
-salary profile's definition (:func:`_salary_linked_template`).
+salary profile's definition (:func:`_salary_linked_template`), and the reader of what an edit
+form posts with its disabled controls left out (:func:`_enabled_form_controls`).
 """
 
 from datetime import date
@@ -14,10 +15,49 @@ from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services import template_amount_service as tas
 from tests._test_helpers import (
+    _FormControls,
     create_savings_account,
     make_every_period_rule,
     make_salary_profile,
 )
+
+
+class _EnabledFormControls(_FormControls):
+    """The shared form reader, leaving out a disabled control as a browser does.
+
+    A browser posts no disabled ``<input>`` or ``<select>``, and the edit form
+    of a loan's standing payment renders seven: the destination (ruling
+    **R-R76**) and the recurrence controls the loan locks.  The shared reader
+    (``tests._test_helpers.rendered_form_controls``) fails on any disabled
+    control rather than model one.  This models those two shapes exactly: the
+    control is not posted, and nor are a disabled select's options.  A disabled
+    ``<fieldset>`` or ``<optgroup>`` still fails, since a browser's rule there
+    has an exception (a fieldset's first legend) these forms do not need.
+    Here rather than in the shared module, which is over the 1,000-line
+    ceiling (ruling R-IR).
+    """
+
+    def handle_starttag(self, tag, attrs):
+        """Skip a disabled input or select in the form; read the rest as the shared one does."""
+        if self._inside and tag in ("input", "select") and "disabled" in dict(attrs):
+            return
+        super().handle_starttag(tag, attrs)
+
+
+def _enabled_form_controls(html, action):
+    """What the form posting to *action* submits, read off *html*, disabled controls left out.
+
+    Args:
+        html: A rendered page.
+        action: The form's ``action``, as the page renders it.
+
+    Returns:
+        ``{name: [value, ...]}``, a repeated name's values in order.
+    """
+    reader = _EnabledFormControls(action)
+    reader.feed(html)
+    assert reader.controls, f"no form posts to {action}"
+    return reader.controls
 
 
 def _bare_template(seed_user, txn_type, name):

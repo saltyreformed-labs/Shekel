@@ -32,7 +32,11 @@ from tests._test_helpers import (
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 from tests._definition_price import newest_price
 
-from ._helpers import _template_with_history, _transfer_template
+from ._helpers import (
+    _enabled_form_controls,
+    _template_with_history,
+    _transfer_template,
+)
 
 
 class TestTheConflictChooserRoundTrip:
@@ -644,3 +648,82 @@ class TestTheBoxIsReadOnTheOwnersDay:
             saved = db.session.get(TransferTemplate, tid)
             assert saved.name == "Money Market Contribution, renamed"
             assert TestTheConflictChooserRoundTrip._series(saved) == before
+
+
+class TestTheBoxLeavesOutAStandingExtra:
+    """A manual loan payment's Amount box is its stated price alone (plan#2740).
+
+    Review B of plan#2686, finding 3.  ``edit_form_amount`` prefills the box
+    from the payment's price history, never with the standing extra
+    (``loan_payment_settings.extra_principal``) added, because saving the box
+    restates it and amount rule 4 adds the extra on top of the stated price
+    to every payment.  A box showing the two together, saved unchanged, would
+    state their sum as the price.  The worked-out line is the other way round
+    (:class:`TestAWorkedOutAmountIsShownNotTyped`): a tracking payment's
+    figure includes the extra, because that is what leaves checking.
+    """
+
+    @staticmethod
+    def _manual_payment(seed_user):
+        """A manual loan payment stating $500.00, with a $100.00 standing extra.
+
+        Returns:
+            ``(template, series)``, committed; *series* is its one stated
+            price, ``[(today, $500.00)]``.
+        """
+        loan = create_loan_account(seed_user, db.session)
+        template = make_loan_payment_template(
+            db.session, seed_user, loan, amount="500.00",
+            derive_from_loan=False, extra_principal="100.00",
+        )
+        db.session.commit()
+        series = TestTheConflictChooserRoundTrip._series(template)
+        assert series == [(display_today(), Decimal("500.00"))], (
+            "precondition: one stated price, $500.00"
+        )
+        return template, series
+
+    def test_the_box_offers_the_stated_price(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """The box offers $500.00, never $500.00 + $100.00."""
+        with app.app_context():
+            template, _series = self._manual_payment(seed_user)
+
+            body = auth_client.get(
+                f"/transfers/{template.id}/edit",
+            ).get_data(as_text=True)
+
+            assert TestTheBoxIsReadOnTheOwnersDay._box_value(body) == "500.00"
+
+    def test_saving_the_form_unchanged_restates_nothing(
+        self, app, auth_client, seed_user, seed_periods_today,
+    ):
+        """The form posted as rendered keeps the history, and $600.00 leaves checking.
+
+        Every control a browser posts, unchanged, so the Amount is the box's
+        own figure.  Regressed, it would state $600.00 from today, and every
+        later payment would then leave checking at $700.00.
+        """
+        with app.app_context():
+            template, before = self._manual_payment(seed_user)
+            tid = template.id
+            body = auth_client.get(f"/transfers/{tid}/edit").get_data(as_text=True)
+
+            resp = auth_client.post(
+                f"/transfers/{tid}",
+                data=_enabled_form_controls(body, f"/transfers/{tid}"),
+            )
+
+            assert resp.status_code == 302
+            assert resp.headers["Location"].endswith("/transfers"), (
+                resp.headers["Location"]
+            )
+            db.session.expire_all()
+            saved = db.session.get(TransferTemplate, tid)
+            assert TestTheConflictChooserRoundTrip._series(saved) == before
+            # Amount rule 4's manual arm: $500.00 stated + $100.00 extra =
+            # $600.00 leaves checking.
+            assert todays_price(
+                saved, BalanceContext.build(saved.user_id),
+            ).amount == Decimal("600.00")

@@ -5710,39 +5710,6 @@ def repriced_by_the_owner(row, figure):
     return row
 
 
-def amount_box_payload(template):
-    """The Amount key a definition's edit form posts, as the browser would.
-
-    Since plan step X-bp (ruling plan#2694) a definition whose amount is
-    WORKED OUT -- a salary profile's, a loan payment that follows its loan --
-    shows a line in place of the Amount box, and its update door refuses a
-    typed amount, so a payload standing in for the browser posts the box only
-    where the form renders one.  Where it does, the box is prefilled with
-    what the price history states TODAY
-    (``routes/_amount_version_actions.edit_form_amount``), which is what an
-    unchanged save posts.
-
-    Args:
-        template: The transaction or transfer template whose form is posted.
-
-    Returns:
-        ``{"amount": "<today's price>"}``, or ``{}`` for a worked-out definition.
-    """
-    # Pylint: ``import-outside-toplevel`` -- this module imports no app
-    # symbols at top level (its collection-time-safety convention).
-    # pylint: disable=import-outside-toplevel
-    from app.services import template_amount_service
-    from app.utils.dates import display_today
-
-    if not template_amount_service.owns_its_amount(template):
-        return {}
-    return {
-        "amount": str(template_amount_service.amount_as_of(
-            template, display_today(),
-        )),
-    }
-
-
 def transfer_repriced_by_the_owner(xfer, figure):
     """Re-price the transfer *xfer* the way the transfer edit door does.
 

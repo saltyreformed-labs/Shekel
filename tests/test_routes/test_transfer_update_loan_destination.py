@@ -55,7 +55,6 @@ from app.services.recurrence import (
     stored_cadence,
 )
 from tests._test_helpers import (
-    amount_box_payload,
     cadence_payload,
     create_account_of_type,
     create_loan_account,
@@ -64,6 +63,7 @@ from tests._test_helpers import (
     make_transfer_template,
     state_template_price,
 )
+from tests._definition_price import amount_box_payload
 
 #: The day every request here is made on, frozen ahead of the loan's
 #: origination and inside the schedule ``seed_periods`` builds.

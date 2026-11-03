@@ -63,7 +63,6 @@ from app.services.balance_at import BalanceContext
 from app.services.pay_calendar import calendar_for
 from app.services.recurrence import reauthor_rule, recurrence_spec
 from tests._test_helpers import (
-    amount_box_payload,
     cadence_payload,
     create_account_of_type,
     create_loan_account,
@@ -72,7 +71,7 @@ from tests._test_helpers import (
     make_loan_payment_template,
     state_template_price,
 )
-from tests._definition_price import newest_price
+from tests._definition_price import amount_box_payload, newest_price
 
 #: Frozen so "today" cannot drift past the schedule ``seed_periods`` builds.
 _TODAY = date(2026, 3, 1)

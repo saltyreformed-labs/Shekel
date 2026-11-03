@@ -95,6 +95,7 @@ from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
 from app.services import posting_service, transfer_service
 from app.utils.balance_predicates import settled_status_ids
+from tests._ledger_parity import assert_ledger_parity
 from tests._test_helpers import (
     create_account_of_type,
     create_settled_transfer,
@@ -270,6 +271,9 @@ def _assert_full_reconciliation(scenario_id: int) -> None:
     settle lands on a later day gets its openings only at the next
     account-global sync; R8 owns the residual multi-scenario policy, and a
     future scenario-clone path must sync the new scenario explicitly.
+
+    Last, the ledger worked out from the records equals this stored one to
+    the cent per (chart row, paycheck, day) (plan task plan#2527).
     """
     scenario_owner_id = (
         _db.session.query(Scenario.user_id)
@@ -311,6 +315,7 @@ def _assert_full_reconciliation(scenario_id: int) -> None:
             f"opening {opening} + settled-shadow effect {effect} in "
             f"scenario {scenario_id}"
         )
+    assert_ledger_parity(_db.session, scenario_id)
 
 
 def _legs_by_account(account_id: int, transfer_id: int) -> dict[int, Decimal]:

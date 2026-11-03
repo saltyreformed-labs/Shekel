@@ -510,7 +510,8 @@ def _unwindowed_contributing_rows(
     through ``X-bi-3e``**, the settled half narrowing it to the settled
     statuses; since plan step ``balance:X-bi-4a`` the settled half reads no
     row at all -- it is every dated MOVEMENT on the account, loaded with its
-    parent in one statement (``_events._movements_of``, ruling **R-BAL80**)
+    parent in one statement (``_movement_scope._movements_of``, ruling
+    **R-BAL80**)
     -- so the four-relationship parent chain this loader's options carry no
     longer costs a fold anything on the settled side (ledger row
     **BAL-501**, closed here).  What partitions the contributing set now is

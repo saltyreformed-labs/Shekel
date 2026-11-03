@@ -23,10 +23,13 @@ three with ONE total fold and they closed together. The modelled-asset form of t
 closed at X-g2b. Both records are in the archive.
 
 **What remains:**
-1. **The write side and the read side are still two statements of one rule.** The posted account
-   ledger is written by its own walk while the projection folds another; they are proven
-   byte-identical, which is a test keeping two implementations in step rather than a structure that
-   cannot drift. Plan step **X-d**.
+1. **The write side and the read side WERE two statements of one rule.** The posted account ledger
+   was written by its own walk while the projection folded another, proven byte-identical by a test
+   keeping two implementations in step rather than a structure that cannot drift. Plan step **X-d**
+   was to make the writer consume the fold's walk and closed unbuilt; plan task plan#2525 did it
+   inside **X-ew** (plan#2023): the writer's anchor corrections frame the fold's own assertion
+   replay over the records. What stays two is the stored ledger beside the records it copies, which
+   X-ew works out from the records (plan#2513), then moves every reader onto, then deletes.
 2. **A derived value is read as a source of truth.** **Its named instance is GONE and the SHAPE is
    not** -- the number is kept because `app/` cites it (`cash_ledger/_walk.py`,
    `status_seam/` x3) and renumbering would break those. `Account.current_anchor_*` was a

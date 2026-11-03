@@ -5,8 +5,10 @@ balance TRUE-UP -- a loan books into the append-only double-entry ledger, so its
 confirmed balance is fully reconstructable as ``-(sum of its linked postings)``
 with no external anchor read (the foundation the read switch and Step-5 reporting
 move onto).  **This module builds the TARGET and nothing else** (plan step
-``balance:X-bi-6-3``, ruling **R-BAL102**): the reconcile -- what is posted, the
-delta, the emission -- is :mod:`._corrections`' one loop over the anchor and the
+``balance:X-bi-6-3``, ruling **R-BAL102**), for the stored ledger's writer and
+the worked-out read alike; it was ``loan_posting_service._anchors`` until plan
+task plan#2526 moved it beside the read: the reconcile -- what is posted, the
+delta, the emission -- is ``loan_posting_service._corrections``' one loop over the anchor and the
 payment-split targets together, which is what keeps a loan's three correction
 kinds on one read and one write per sync.
 
@@ -32,8 +34,10 @@ the loan's own chart rows.  The payment split keys the same way since ruling
 **R-BAL102** (it carried the loan-side shadow's ``transaction_id`` before it,
 the one derivation in the ledger with a row key).  A change to a pre-true-up
 payment moves a true-up's ``owed_before``; re-running the sync re-derives the
-target and posts the balancing delta, so a stale true-up self-heals.  Reads
-the chart (minting the per-loan equity row on first use) but writes no posting.
+target and posts the balancing delta, so a stale true-up self-heals.  Names
+each leg by its chart KEY and touches no stored chart row (plan task
+plan#2524): the reconcile loop resolves the keys, minting the per-loan equity
+row on first use, at its emit step.
 
 **The period entered the key at plan step X-ai-r (finding N-161), and on this
 side it closes a LATENT hole rather than a live one.**  The key was ``(source
@@ -101,16 +105,13 @@ from app.enums import (
     PostingKindEnum,
     PostingSourceEnum,
 )
-from app.services import ledger_account_service
-from app.services._posting_reconcile import (
-    CorrectionKey,
-    LegMap,
-    merge_target_legs,
-)
-from app.services.pay_calendar import PayCalendar
+from app.models.account import Account
 from app.services.loan_ledger import LoanAnchorCorrection
 from app.services.loan_loaders import LoanAnchorFact
-from app.services.posting_service import _ledger_account_for
+from app.services.pay_calendar import PayCalendar
+
+from ._chart import linked_key, loan_key
+from ._targets import ChartLegMap, CorrectionKey, merge_target_legs
 
 
 def _anchor_correction_kinds(
@@ -139,8 +140,8 @@ def _anchor_correction_kinds(
 
 
 def _loan_anchor_correction_target(
-    correction: LoanAnchorCorrection, owner_id: int,
-) -> LegMap:
+    correction: LoanAnchorCorrection, loan: Account,
+) -> ChartLegMap:
     """Build the two-leg target for one anchor correction, or empty when it books nothing.
 
     The loan-linked leg is ``owed_before - anchor_balance`` (tagged ``opening`` or
@@ -151,50 +152,50 @@ def _loan_anchor_correction_target(
     target, so no zero leg is written and no opening-equity account is minted for
     it.
 
-    The per-loan opening-equity account is resolved lazily (created on first use)
-    only when the correction is non-zero, via
-    :func:`app.services.ledger_account_service.get_or_create_loan_ledger_account`.
+    Each leg is named by its :class:`~app.services.ledger_lines.ChartKey` (the
+    loan's own line and its ``equity_opening`` line), and the writer mints the
+    per-loan opening-equity row only for a correction that books
+    (:func:`app.services._posting_write.resolve_chart_targets`, plan task
+    plan#2524; until that task this resolved and minted it as it went, through
+    :func:`app.services.ledger_account_service.get_or_create_loan_ledger_account`).
 
     Args:
         correction: The anchor correction from :func:`walk_loan_ledger`.
-        owner_id: The loan owner's user id (for the per-loan equity account).
+        loan: The loan the walk is of, with ``account_type`` loaded: the
+            account every one of its anchors is asserted for.  It was read off
+            the anchor (``anchor.account_id``), with the owner beside it, until
+            plan task plan#2524, when the loan's own line's key came to need
+            the account's type; the owner is the writer's, at its emit step.
 
     Returns:
-        ``{ledger_account_id: (amount, posting_kind_id)}`` (the two balanced legs,
-        or empty when the correction books nothing).
-
-    Raises:
-        PostingError: If the loan account has no linked ledger account (a broken
-            chart-of-accounts pairing).
+        ``{chart key: (amount, posting_kind_id)}`` (the two balanced legs, or
+        empty when the correction books nothing).
     """
     anchor = correction.anchor
-    loan_account_id = anchor.account_id
     verified = anchor.anchor_balance
     linked_amount = correction.owed_before - verified
     if linked_amount == 0:
         return {}
     _source_enum, posting_kind_enum = _anchor_correction_kinds(anchor)
     posting_kind_id = ref_cache.posting_kind_id(posting_kind_enum)
-    linked = _ledger_account_for(loan_account_id)
-    equity = ledger_account_service.get_or_create_loan_ledger_account(
-        owner_id, loan_account_id, LedgerAccountKindEnum.EQUITY_OPENING,
-    )
     return {
-        linked.id: (linked_amount, posting_kind_id),
-        equity.id: (-linked_amount, posting_kind_id),
+        linked_key(loan): (linked_amount, posting_kind_id),
+        loan_key(LedgerAccountKindEnum.EQUITY_OPENING, loan.id): (
+            -linked_amount, posting_kind_id,
+        ),
     }
 
 
 def anchor_correction_targets(
     corrections: list[LoanAnchorCorrection],
-    owner_id: int,
+    loan: Account,
     calendar: PayCalendar,
-) -> dict[CorrectionKey, LegMap]:
+) -> dict[CorrectionKey, ChartLegMap]:
     """Merge a loan's anchor corrections into per-(source, period, date) targets.
 
     Groups every anchor correction by its ``(source_kind_id, pay_period_id,
     anchor_date)`` key and sums the legs within each group
-    (:func:`app.services._posting_reconcile.merge_target_legs`), so two same-day
+    (:func:`._targets.merge_target_legs`), so two same-day
     same-kind anchors (the unique index permits two true-ups on one day with
     different balances) net to a single balanced target that lands owed on the
     LATER value -- exactly the combined jump they express.  A correction that
@@ -212,9 +213,10 @@ def anchor_correction_targets(
     Args:
         corrections: The loan's anchor corrections from
             :func:`~app.services.loan_ledger.walk_loan_ledger`.
-        owner_id: The loan owner's user id.
+        loan: The loan the walk is of, with ``account_type`` loaded
+            (:func:`_loan_anchor_correction_target`).
         calendar: The owner's whole pay calendar, from
-            :func:`app.services._posting_reconcile.filing_calendar_for`.
+            :func:`app.services.pay_calendar.calendar_for`.
             :meth:`~app.services.pay_calendar.PayCalendar.filing_period` is the
             one place the "is there a period to point at" question is asked and
             refused, so this carries no precondition of its own -- an earlier
@@ -222,10 +224,10 @@ def anchor_correction_targets(
             statement of one predicate and the two had drifted.
 
     Returns:
-        ``{(source_kind_id, pay_period_id, entry_date): {ledger_account_id:
-        (amount, kind_id)}}``.
+        ``{(source_kind_id, pay_period_id, entry_date): {chart key: (amount,
+        kind_id)}}``.
     """
-    target: dict[CorrectionKey, LegMap] = {}
+    target: dict[CorrectionKey, ChartLegMap] = {}
     for correction in corrections:
         source_enum, _posting_kind = _anchor_correction_kinds(correction.anchor)
         anchor_date = correction.anchor.anchor_date
@@ -236,6 +238,6 @@ def anchor_correction_targets(
         )
         bucket = target.setdefault(key, {})
         merge_target_legs(
-            bucket, _loan_anchor_correction_target(correction, owner_id),
+            bucket, _loan_anchor_correction_target(correction, loan),
         )
     return target

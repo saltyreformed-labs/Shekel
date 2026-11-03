@@ -24,7 +24,6 @@ from app.services import (
     match_press,
     match_withdrawal,
     movement_removal,
-    posting_service,
 )
 from app.services.amount_ownership import state_own_amount
 from app.services.row_valuation import settled_figure
@@ -447,17 +446,16 @@ def sync_entry_payback(
         for entry in txn.entries:
             if entry.credit_payback_id == existing_payback.id:
                 entry.credit_payback_id = None
-        # Reverse the payback's own ledger postings before deleting it
-        # (Build-Order Step 3 reverse-before-delete): an entry-level payback that
-        # was settled -- and therefore posted -- before its source's credit
-        # entries were all removed must not leave its double-entry legs stranded.
-        # Its WHOLE family at once, one anchor re-check.  Idempotent no-op for a
-        # still-Projected payback.
-        posting_service.reverse_postings_before_delete(existing_payback)
         # Its movements off the books through the ONE act (plan step
-        # ``credit_card:CC-5-4a-3``, ruling **R-CC54**): a match naming this
-        # payback stops being true when the row goes, so it is withdrawn and
-        # its bank line is unexplained again (developer ruling 2026-08-25, plan
+        # ``credit_card:CC-5-4a-3``, ruling **R-CC54**), which reverses their
+        # postings before it deletes them (Build-Order Step 3
+        # reverse-before-delete) and re-checks the anchor corrections once they
+        # are gone (ruling **plan#2564**; this reversed the payback's family
+        # itself, re-checking while its movements stood, until plan task
+        # plan#2557).  Idempotent for movements that never posted.  A match
+        # naming this payback stops being true when the row goes, so it is
+        # withdrawn and its bank line is unexplained again (developer ruling
+        # 2026-08-25, plan
         # step ``bank_import:X-gb``) -- a reverted payback keeps its payment
         # un-dated, and an act may still name it.  The CC un-tick says so first
         # since plan step ``credit_card:CC-5-4a-5`` (ruling **R-CC80**, closing

@@ -28,7 +28,7 @@ clear.
 period, its visible day)`` and NO row link** (ruling **R-BAL102**, which
 re-ruled **R-BAL100**).  The split is re-computed from scratch by every walk,
 exactly as the loan's opening and true-ups are, so it is reconciled in the
-SAME loop as they are (:mod:`._corrections`) and its entry links no row: not
+SAME loop as they are (``loan_posting_service._corrections``) and its entry links no row: not
 the loan-side shadow (its key through ``balance:X-bi-6-1b``, a row plan step
 ``X-bi-6-4d-2`` deleted), not the shadow's covering movement (R-BAL100's key,
 which a ``$0.00`` payment does not have -- the seam writes no movement for a
@@ -38,16 +38,19 @@ reversal first, no detector hunts payments that "left the confirmed set" (a
 key with no target reverses in the same pass), and no reader maps rows back
 onto payments.  Two payments on one day in one period merge into one entry,
 which is the sum the ledger holds; WHICH payment paid what is the walk's
-answer (:mod:`._display`), never the ledger's.
+answer (``loan_posting_service._display``), never the ledger's.
 
-**This module builds the TARGET and nothing else.**  The reconcile -- what is
-posted, the delta, the emission -- is :mod:`._corrections`' one loop over the
+**This module builds the TARGET and nothing else**, for the stored ledger's
+writer and the worked-out read alike; it was ``loan_posting_service._payments``
+until plan task plan#2526 moved it beside the read.  The reconcile -- what is
+posted, the delta, the emission -- is ``loan_posting_service._corrections``' one loop over the
 anchor and split targets together, on the shared primitives in
 :mod:`app.services._posting_reconcile`.
 
 **Flask-isolated**: plain data in, plain values out; never imports
-``request`` / ``session``.  Reads the chart (minting a per-loan row on first
-use) but writes no posting.
+``request`` / ``session``.  Names each leg by its chart KEY and touches no
+stored chart row (plan task plan#2524): the reconcile loop resolves the keys,
+minting a per-loan row on first use, at its emit step.
 """
 
 from decimal import Decimal
@@ -58,15 +61,11 @@ from app.enums import (
     PostingKindEnum,
     PostingSourceEnum,
 )
-from app.services import ledger_account_service
-from app.services.posting_service import _ledger_account_for
-from app.services._posting_reconcile import (
-    CorrectionKey,
-    LegMap,
-    merge_target_legs,
-)
-
+from app.models.account import Account
 from app.services.loan_ledger import PaymentOutcome
+
+from ._chart import linked_key, loan_key
+from ._targets import ChartLegMap, CorrectionKey, merge_target_legs
 
 
 # The three per-loan correction components, each a tuple of (the per-loan ledger
@@ -84,10 +83,10 @@ _LOAN_CORRECTION_COMPONENTS = (
 )
 
 
-def _loan_payment_target(outcome: PaymentOutcome) -> LegMap:
+def _loan_payment_target(outcome: PaymentOutcome, loan: Account) -> ChartLegMap:
     """Build the target ledger legs for one payment's real-split correction.
 
-    Maps the split to ``{ledger_account_id: (signed amount, posting_kind_id)}``,
+    Maps the split to ``{chart key: (signed amount, posting_kind_id)}``,
     dropping any zero component so no empty per-loan ledger account is minted and
     no zero leg is written:
 
@@ -99,10 +98,12 @@ def _loan_payment_target(outcome: PaymentOutcome) -> LegMap:
     * the per-loan ``loan_escrow`` Expense ledger gets ``+escrow``;
     * the per-loan ``loan_refund`` Asset ledger gets ``+excess``.
 
-    The per-loan ledger accounts are lazily resolved (created on first use,
-    reused after) via
-    :func:`app.services.ledger_account_service.get_or_create_loan_ledger_account`,
-    keyed only when their amount is non-zero.  The legs sum to zero by
+    Each leg is named by its :class:`~app.services.ledger_lines.ChartKey` (the
+    loan's own line, or one of its component lines) and only when its amount
+    is non-zero, so the writer mints a per-loan row only for a component that
+    books (:func:`app.services._posting_write.resolve_chart_targets`, plan task
+    plan#2524; until that task this resolved and minted the rows as it went).
+    The legs sum to zero by
     construction.  An all-principal payment (``interest == escrow == excess ==
     0``) yields an EMPTY target: the loan already nets to principal from the
     cash leg, so no correction is owed.
@@ -113,56 +114,45 @@ def _loan_payment_target(outcome: PaymentOutcome) -> LegMap:
             :class:`~app.services.transfer_legs.TransferLeg` of its settled
             transfer (the walk this writer books from carries no projection:
             :func:`~app.services.loan_ledger.walk_loan_ledger`).
+        loan: The loan the walk is of, with ``account_type`` loaded, which is
+            the account every one of its payments' legs is on.  It was read
+            off each payment's leg (``leg.account_id``) until plan task
+            plan#2524, when the loan's own line's key came to need the
+            account's type, which a leg does not carry.
 
     Returns:
-        ``{ledger_account_id: (amount, posting_kind_id)}`` for the non-zero
-        legs (empty when no correction is owed).
-
-    Raises:
-        PostingError: If the loan account has no linked ledger account (a broken
-            chart-of-accounts pairing).
+        ``{chart key: (amount, posting_kind_id)}`` for the non-zero legs
+        (empty when no correction is owed).
     """
-    leg = outcome.source
-    # The TRANSFER's owner and the leg's account -- the loan -- read through the
-    # leg (plan step balance:X-bi-6-4b).  It read the loan-side shadow's own
-    # owner column from plan step ``pay_calendar:C13-b`` until then, which
-    # stated the parent's owner since ``C13-a``; before C13-b it walked
-    # ``shadow.pay_period.user_id``.
-    owner_id = leg.user_id
-    loan_account_id = leg.account_id
-    target: LegMap = {}
+    target: ChartLegMap = {}
 
     # The loan-linked leg backs the non-principal cash out of the loan; its
     # magnitude mirrors the interest + escrow + refund legs, so the four sum to
     # zero and the loan nets to the real principal.
     loan_leg = -(outcome.interest + outcome.escrow + outcome.excess)
     if loan_leg != 0:
-        loan_linked = _ledger_account_for(loan_account_id)
-        target[loan_linked.id] = (
+        target[linked_key(loan)] = (
             loan_leg, ref_cache.posting_kind_id(PostingKindEnum.PRINCIPAL),
         )
     for ledger_kind, posting_kind, attr in _LOAN_CORRECTION_COMPONENTS:
         amount: Decimal = getattr(outcome, attr)
         if amount != 0:
-            ledger = ledger_account_service.get_or_create_loan_ledger_account(
-                owner_id, loan_account_id, ledger_kind,
-            )
-            target[ledger.id] = (
+            target[loan_key(ledger_kind, loan.id)] = (
                 amount, ref_cache.posting_kind_id(posting_kind),
             )
     return target
 
 
 def payment_split_targets(
-    splits: list[PaymentOutcome],
-) -> dict[CorrectionKey, LegMap]:
+    splits: list[PaymentOutcome], loan: Account,
+) -> dict[CorrectionKey, ChartLegMap]:
     """Merge a loan's payment splits into per-(kind, period, day) targets.
 
     The split half of the loan's correction target (ruling **R-BAL102**): every
     settled outcome's legs (:func:`_loan_payment_target`) summed into the key
     ``(loan_payment source id, the payment's pay_period_id, the payment's
     visible day)`` through
-    :func:`app.services._posting_reconcile.merge_target_legs` -- the same
+    :func:`._targets.merge_target_legs` -- the same
     merge the anchor half applies to two same-day anchors.  The PERIOD is the
     payment's own stored one -- its TRANSFER's, read through the leg since
     plan step balance:X-bi-6-4b (the owner's budgeting choice, ruling
@@ -185,15 +175,17 @@ def payment_split_targets(
         splits: The loan's settled outcomes from
             :func:`~app.services.loan_ledger.walk_loan_ledger`
             (``settled_splits`` -- the WHOLE list: the walk bounds nothing).
+        loan: The loan the walk is of, with ``account_type`` loaded
+            (:func:`_loan_payment_target`).
 
     Returns:
-        ``{(source_kind_id, pay_period_id, entry_date): {ledger_account_id:
-        (amount, kind_id)}}``; empty when the loan has no settled payment.
+        ``{(source_kind_id, pay_period_id, entry_date): {chart key: (amount,
+        kind_id)}}``; empty when the loan has no settled payment.
     """
     source_id = ref_cache.posting_source_id(PostingSourceEnum.LOAN_PAYMENT)
-    target: dict[CorrectionKey, LegMap] = {}
+    target: dict[CorrectionKey, ChartLegMap] = {}
     for outcome in splits:
         key = (source_id, outcome.source.pay_period_id, outcome.visible_on)
         bucket = target.setdefault(key, {})
-        merge_target_legs(bucket, _loan_payment_target(outcome))
+        merge_target_legs(bucket, _loan_payment_target(outcome, loan))
     return target

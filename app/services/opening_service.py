@@ -489,7 +489,7 @@ def apply_opening_restatement(
 
     **The posting re-sync is not optional and it moves more than the amount.**
     ``budget.account_openings`` is read by BOTH the balance fold and the posted
-    ledger (ruling **R-GX**): ``account_posting_service.walk_account_ledger``
+    ledger (ruling **R-GX**): ``ledger_lines.walk_account_ledger``
     books the ``account_opening`` journal entry dated on ``opened_on`` and
     seeds every later correction's ``ledger_before`` from the equity.  Moving
     either therefore re-keys that entry -- ``(source kind, pay period, entry

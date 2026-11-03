@@ -20,6 +20,7 @@ kind = CHARGE      standing += (interest, escrow)    (one per accrual period)
                                                       then the plan's projections)
 
 walk_loan_ledger(loan, scenario) = replay(facts, seeded at 0.00)
+walk_loan_ledgers(loans, scenario) = the same, every loan's facts loaded once
 replay_loan_stream(facts + projections) = the same replay, the whole timeline
 ```
 
@@ -134,6 +135,7 @@ from ._walk import (
     load_loan_stream,
     replay_loan_stream,
     walk_loan_ledger,
+    walk_loan_ledgers,
 )
 from ._charges import AccrualCharge, LoanCalendar
 from ._calendars import LoanCalendars
@@ -178,5 +180,6 @@ __all__ = [
     "replay_loan_events",
     "replay_loan_stream",
     "walk_loan_ledger",
+    "walk_loan_ledgers",
     "with_contract_charges",
 ]

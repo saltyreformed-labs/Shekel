@@ -21,6 +21,7 @@ service owns the RULE (which entry may be withdrawn); this owns the response.
 """
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from logging import Logger
 
@@ -173,13 +174,14 @@ class EditFormAmount:
     into the copy the Recurring page and the savings page then counted.
 
     Attributes:
-        today: What the definition costs on the read pass's day.  For a
-            definition that owns its price, the Amount box's prefill: its
-            history as of today (``template_amount_service.amount_as_of``),
-            the STATED price, never a loan payment's standing extra added
-            to it, because saving the box restates it; ``None`` only for an
-            empty history, which no door writes.  For a worked-out one, the
-            figure its rows are priced at today, the Recurring page's
+        today: What the definition costs today.  For a definition that owns
+            its price, the Amount box's prefill: its history on the owner's
+            day (``template_amount_service.amount_as_of`` at
+            ``display_today()``), the STATED price, never a loan payment's
+            standing extra added to it, because saving the box restates it;
+            ``None`` only for an empty history, which no door writes.  For a
+            worked-out one, the figure its rows are priced at on the read
+            pass's day, the Recurring page's
             (``obligations_aggregator.todays_price``).
         worked_out_by: ``None`` for a definition that owns its price;
             otherwise the line naming what works the amount out, shown with
@@ -190,12 +192,31 @@ class EditFormAmount:
     worked_out_by: str | None
 
 
-def edit_form_amount(template, ctx: BalanceContext) -> EditFormAmount:
+def edit_form_amount(
+    template, ctx: BalanceContext, today: date,
+) -> EditFormAmount:
     """Return what *template*'s edit form shows for its amount.
+
+    **Each branch reads the day its figure answers to, and they are two
+    days.**  The Amount box is read on *today*, the owner's day: a save
+    that leaves "Amount effective from" blank restates the box on that day
+    (both update routes default the date to ``display_today()``), and the
+    history panel beside the box names Current and Scheduled by it.  Read
+    on any other day, a box the owner leaves alone restates a price nobody
+    stated.  It was read on the read pass's day (``BalanceContext.build``'s
+    default, the process clock's ``date.today()``) from plan step X-bp's
+    task plan#2698 until plan#2732: where the process day ran ahead of the
+    owner's (CI at UTC, a process without the ``TZ`` pin), a price
+    scheduled for the owner's tomorrow prefilled the box, and a plain
+    rename restated it as of the owner's today, repricing today's rows.
+    The worked-out line keeps the read pass, because its figure is the
+    Recurring page's (ruling plan#2693), priced by the same pass.
 
     Args:
         template: The owner-checked transaction or transfer template.
-        ctx: The form's read pass; its day is the form's today.
+        ctx: The form's read pass, which prices a worked-out definition.
+        today: The owner's day, ``display_today()``, resolved once by the
+            route for this box and the history panel beside it.
 
     Returns:
         The :class:`EditFormAmount`.
@@ -207,7 +228,7 @@ def edit_form_amount(template, ctx: BalanceContext) -> EditFormAmount:
     """
     if template_amount_service.owns_its_amount(template):
         return EditFormAmount(
-            today=template_amount_service.amount_as_of(template, ctx.as_of),
+            today=template_amount_service.amount_as_of(template, today),
             worked_out_by=None,
         )
     return EditFormAmount(

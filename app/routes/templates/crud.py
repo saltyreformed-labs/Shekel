@@ -253,8 +253,12 @@ def edit_template(template_id):
     accounts = account_service.list_active_accounts(current_user.id)
     txn_types = db.session.query(TransactionType).all()
     # The form's ONE read pass (plan step R7d-f): the recurrence controls'
-    # starting state and today's amount both read it.
+    # starting state and a salary profile's paycheck both read it.
     pass_ctx = BalanceContext.build(current_user.id)
+    # The owner's day, once: the history panel names Current by it, and the
+    # Amount box is read on it because a blank-date save restates the box on
+    # it (plan#2732; ``edit_form_amount`` says why it is not the pass's day).
+    today = display_today()
 
     return render_template(
         "templates/form.html",
@@ -279,12 +283,12 @@ def edit_template(template_id):
         # display rows.  Empty for a salary-linked template, whose amount the
         # paycheck calculator derives, even where it holds a dormant series.
         amount_history_rows=template_amount_service.build_amount_history(
-            template, display_today(),
+            template, today,
         ),
         # The Amount box prefilled with what the history states TODAY, or, for
         # a salary profile's definition, the line naming the profile with
         # today's paycheck and no box (ruling plan#2694).
-        form_amount=edit_form_amount(template, pass_ctx),
+        form_amount=edit_form_amount(template, pass_ctx, today),
         amount_version_delete_endpoint="templates.delete_amount_version",
     )
 

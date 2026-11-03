@@ -409,9 +409,13 @@ def edit_transfer_template(template_id):
 
     accounts = account_service.list_active_accounts(current_user.id)
     categories = category_service.list_active_categories(current_user.id)
-    # The form's ONE read pass (plan step R7d-f); both readers below take the
-    # standing identity off its loan-resolution memo, the second for free.
+    # The form's ONE read pass (plan step R7d-f); the recurrence controls and
+    # the destination locks take the standing identity off its loan-resolution
+    # memo, the second for free, and a loan-tracking payment is priced by it.
     pass_ctx = BalanceContext.build(current_user.id)
+    # The owner's day, once, for the history panel and the Amount box; see
+    # the transaction twin (plan#2732).
+    today = display_today()
 
     return render_template(
         "transfers/form.html",
@@ -437,10 +441,10 @@ def edit_transfer_template(template_id):
         # display rows.  Empty for a DERIVE-mode loan payment, whose amount
         # the loan works out, even where it holds a series from a manual era.
         amount_history_rows=template_amount_service.build_amount_history(
-            template, display_today(),
+            template, today,
         ),
         # The Amount box or the worked-out line; see the transaction twin.
-        form_amount=edit_form_amount(template, pass_ctx),
+        form_amount=edit_form_amount(template, pass_ctx, today),
         amount_version_delete_endpoint="transfers.delete_amount_version",
     )
 

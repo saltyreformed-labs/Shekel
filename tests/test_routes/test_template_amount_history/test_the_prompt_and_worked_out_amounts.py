@@ -4,7 +4,7 @@ one.
 """
 
 import re
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal
 
 from app.enums import RecurrenceUnitEnum
@@ -22,6 +22,7 @@ from tests._test_helpers import (
     all_periods,
     cadence_payload,
     create_loan_account,
+    freeze_today,
     make_loan_payment_template,
     make_salary_profile,
     resolved_amount,
@@ -31,7 +32,7 @@ from tests._test_helpers import (
 from tests.oracles.recurrence_baseline import EVERY_PERIOD
 from tests._definition_price import newest_price
 
-from ._helpers import _template_with_history
+from ._helpers import _template_with_history, _transfer_template
 
 
 class TestTheConflictChooserRoundTrip:
@@ -522,4 +523,124 @@ class TestAWorkedOutAmountIsShownNotTyped:
             db.session.expire_all()
             saved = db.session.get(TransferTemplate, tid)
             assert saved.name == name
+            assert TestTheConflictChooserRoundTrip._series(saved) == before
+
+
+class TestTheBoxIsReadOnTheOwnersDay:
+    """The Amount box is read on the day a save with a blank date restates it.
+
+    Plan#2732 (Review A of plan#2686, finding 1).  A save that leaves "Amount
+    effective from" blank restates the box on the owner's day,
+    ``display_today()``, and the history panel names Current and Scheduled by
+    that day too; the read pass's day is the process clock's
+    (``BalanceContext.build``).  The box was read on the pass's day from
+    plan#2698 until plan#2732, so where the process day ran ahead of the
+    owner's, a rise scheduled for the owner's tomorrow prefilled the box and
+    a plain rename restated it as of the owner's today.
+    :meth:`TestTheConflictChooserRoundTrip.test_a_scheduled_rise_survives_a_rename_end_to_end`
+    walks this path on one clock, which cannot tell the two days apart.
+
+    Each case splits the clocks, schedules a rise on the owner's tomorrow
+    (the process day), and saves what the browser would: the box's own
+    value, with the date left blank.
+    """
+
+    _PRICE = "178.00"
+    _RISE = "200.00"
+
+    @staticmethod
+    def _split_the_clocks(monkeypatch):
+        """Freeze the process day one ahead of the owner's; return the owner's day.
+
+        1:00 UTC on the process day is the previous evening in the owner's
+        timezone (America/New_York, UTC-4 or UTC-5), so ``date.today()``,
+        the read pass's day, answers one day after ``display_today()``.
+        """
+        process_day = date.today()
+        freeze_today(monkeypatch, process_day, at_time=time(1, 0))
+        owners_day = display_today()
+        assert owners_day == process_day - timedelta(days=1), (
+            "precondition: the process day runs one ahead of the owner's"
+        )
+        return owners_day
+
+    @staticmethod
+    def _box_value(body):
+        """The value the edit form's Amount box is prefilled with."""
+        box = re.search(r'<input[^>]*\bname="amount"[^>]*>', body)
+        assert box is not None, "the edit form renders an Amount box"
+        value = re.search(r'\bvalue="([^"]*)"', box.group(0))
+        assert value is not None, box.group(0)
+        return value.group(1)
+
+    def _assert_the_form_offers_todays_price(self, body):
+        """The box offers today's price, and the panel calls the rise Scheduled."""
+        assert self._box_value(body) == self._PRICE
+        # The rise is the one version that can be Scheduled (the other is
+        # dated 2020), and only on a day before the rise's.
+        assert "amount-ver--scheduled" in body, (
+            "the history panel names Current and Scheduled by the owner's day"
+        )
+
+    def test_a_transaction_definitions_rename_restates_nothing(
+        self, app, auth_client, seed_user, seed_periods_today, monkeypatch,
+    ):
+        """$178.00 today, $200.00 from the owner's tomorrow: a rename keeps both as they are."""
+        with app.app_context():
+            owners_day = self._split_the_clocks(monkeypatch)
+            template = _template_with_history(seed_user, [
+                (date(2020, 4, 1), self._PRICE),
+                (owners_day + timedelta(days=1), self._RISE),
+            ])
+            tid = template.id
+            before = TestTheConflictChooserRoundTrip._series(template)
+
+            body = auth_client.get(f"/templates/{tid}/edit").get_data(as_text=True)
+            self._assert_the_form_offers_todays_price(body)
+
+            resp = auth_client.post(f"/templates/{tid}", data={
+                "name": "Geico Auto",
+                "amount": self._box_value(body),
+                "effective_from": "",
+                "version_id": str(template.version_id),
+            }, follow_redirects=True)
+            assert resp.status_code == 200
+
+            db.session.expire_all()
+            saved = db.session.get(TransactionTemplate, tid)
+            assert saved.name == "Geico Auto"
+            assert TestTheConflictChooserRoundTrip._series(saved) == before
+
+    def test_a_transfer_definitions_rename_restates_nothing(
+        self, app, auth_client, seed_user, seed_periods_today, monkeypatch,
+    ):
+        """The transfer twin: the box offers $178.00, and the rename restates nothing."""
+        with app.app_context():
+            owners_day = self._split_the_clocks(monkeypatch)
+            template = _transfer_template(seed_user, amount=self._PRICE)
+            tas.set_amount(
+                template, Decimal(self._RISE),
+                effective_on=owners_day + timedelta(days=1),
+            )
+            db.session.commit()
+            tid = template.id
+            before = TestTheConflictChooserRoundTrip._series(template)
+
+            body = auth_client.get(f"/transfers/{tid}/edit").get_data(as_text=True)
+            self._assert_the_form_offers_todays_price(body)
+
+            resp = auth_client.post(f"/transfers/{tid}", data={
+                "name": "Money Market Contribution, renamed",
+                "amount": self._box_value(body),
+                "effective_from": "",
+                "from_account_id": str(template.from_account_id),
+                "to_account_id": str(template.to_account_id),
+                "category_id": "",
+                "version_id": str(template.version_id),
+            }, follow_redirects=True)
+            assert resp.status_code == 200
+
+            db.session.expire_all()
+            saved = db.session.get(TransferTemplate, tid)
+            assert saved.name == "Money Market Contribution, renamed"
             assert TestTheConflictChooserRoundTrip._series(saved) == before

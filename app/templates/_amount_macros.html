@@ -43,11 +43,13 @@
   <label for="amount" class="form-label">Amount</label>
   <div class="input-group">
     <span class="input-group-text">$</span>
-    {# ``amount.today`` -- what the definition's history states for TODAY --
-       not the stored column, which carries the NEWEST stated price.  The two
-       differ whenever a rise is scheduled, and prefilling the column beside a
-       date input whose blank value means today is what let a rename restate a
-       December rise as having happened today. #}
+    {# ``amount.today`` -- what the definition's history states on the owner's
+       today, the day the date input below means when left blank -- not its
+       NEWEST stated price, which the dropped ``default_amount`` column held.
+       The two differ whenever a rise is scheduled, and prefilling the newest
+       beside that date input is what let a rename restate a December rise as
+       having happened today; ``edit_form_amount`` says why the day is the
+       owner's and not the server's. #}
     <input type="number" step="0.01"
            {% if min_amount %}min="{{ min_amount }}"{% endif %}
            id="amount" name="amount" class="form-control" required

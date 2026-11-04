@@ -127,8 +127,8 @@ class TestAPaycheckIsCoveredInItsOwnDirection:
 
         The counter leg lands in an INCOME-class category account and both
         legs carry the ``income`` kind -- the parent's, read through the one
-        mapping the transaction writer uses (``_posting_write.ledger_class_of``
-        / ``posting_kind_of``).  Measured as a DELTA: the fixture's own
+        mapping the transaction writer uses (``ledger_lines.ledger_class_of``
+        / ``ledger_lines.posting_kind_of``).  Measured as a DELTA: the fixture's own
         opening correction already sits on the cash ledger.
         """
         with app.app_context():

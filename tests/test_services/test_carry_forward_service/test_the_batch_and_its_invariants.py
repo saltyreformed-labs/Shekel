@@ -59,7 +59,7 @@ class TestCarryForwardEnvelopeMixedBatch:
         with app.app_context():
             envelope_template = _create_envelope_template(
                 seed_user, name="Envelope Spending",
-                default_amount="100.00", category_key="Groceries",
+                amount="100.00", category_key="Groceries",
             )
             envelope_source = generate_row_of(envelope_template, seed_periods[0])
             envelope_target = generate_row_of(envelope_template, seed_periods[1])
@@ -150,7 +150,7 @@ class TestCarryForwardEnvelopeMixedBatch:
         with app.app_context():
             envelope_template = _create_envelope_template(
                 seed_user, name="Envelope Spending",
-                default_amount="100.00", category_key="Groceries",
+                amount="100.00", category_key="Groceries",
             )
             envelope_source = generate_row_of(envelope_template, seed_periods[0])
             # An override beside the canonical -> AMBIGUOUS.

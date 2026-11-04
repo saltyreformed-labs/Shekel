@@ -592,7 +592,7 @@ class TestTheTripleMustBeStorable:
         """
         with app.app_context():
             loaded = TemplateUpdateSchema().load(
-                {"default_amount": "10.00"}, partial=True,
+                {"amount": "10.00"}, partial=True,
             )
 
             assert "recurrence_unit" not in loaded

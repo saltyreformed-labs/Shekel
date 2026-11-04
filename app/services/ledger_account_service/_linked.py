@@ -6,10 +6,10 @@ later steps' postings have an account to land in, and re-derives that row's
 accounting class when an UNPOSTED account is re-typed across the
 Asset/Liability boundary.
 
-The class rule itself (:func:`ledger_class_id_for_category`) is public because
-the account-type boundary guards (:mod:`app.utils.account_validation`) must
-apply the SAME rule to a PROPOSED category to decide whether a type change
-would flip an account's linked-ledger class.
+The class rule itself is the worked-out chart's
+(:func:`app.services.ledger_lines.linked_ledger_class`, plan task plan#2523),
+which the account-type boundary guards (:mod:`app.utils.account_validation`)
+also apply to a PROPOSED category; this module stamps a row's class from it.
 
 Flask-isolated and commit-free: plain data in, ORM objects out; the caller owns
 the transaction boundary.
@@ -18,70 +18,15 @@ the transaction boundary.
 import logging
 
 from app import ref_cache
-from app.enums import (
-    AcctCategoryEnum,
-    LedgerAccountClassEnum,
-    LedgerAccountKindEnum,
-)
+from app.enums import LedgerAccountKindEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.ledger_account import LedgerAccount
 from app.models.ref import AccountType
+from app.services.ledger_lines import linked_key, linked_ledger_class
 from app.utils import archive_helpers
 
 logger = logging.getLogger(__name__)
-
-
-def ledger_class_id_for_category(category_id: int) -> int:
-    """Return the linked-ledger class ID an account-type category maps to.
-
-    THE class rule for linked ledger accounts, in one place: the
-    Liability category (credit cards, loans) maps to the **Liability**
-    ledger class; every other category (Asset, Retirement, Investment)
-    maps to the **Asset** ledger class -- a retirement or brokerage
-    balance is an asset on the books, only borrowed money is a liability.
-
-    The branch compares the category INTEGER ID against the cached
-    Liability category ID; it never reads the category's string ``name``
-    (the project-wide IDs-for-logic invariant).  The Step-2 backfill
-    migration reproduces this exact mapping in raw SQL, so the go-forward
-    and historical ledger accounts agree.  Public because the C6
-    account-type boundary guards (:mod:`app.utils.account_validation`)
-    must apply the SAME rule to a proposed category to decide whether a
-    type change would flip an account's linked-ledger class.
-
-    Args:
-        category_id: The ``ref.account_categories.id`` of an account
-            type's category (current or proposed).
-
-    Returns:
-        int -- the ``ref.ledger_account_classes.id`` of the Asset or
-        Liability class.
-    """
-    liability_category_id = ref_cache.acct_category_id(AcctCategoryEnum.LIABILITY)
-    if category_id == liability_category_id:
-        class_member = LedgerAccountClassEnum.LIABILITY
-    else:
-        class_member = LedgerAccountClassEnum.ASSET
-    return ref_cache.ledger_account_class_id(class_member)
-
-
-def _ledger_class_id_for_account(account: Account) -> int:
-    """Return the ledger-account-class ID a real account maps to.
-
-    :func:`ledger_class_id_for_category` applied to the account's
-    current type category (the ``account_type`` relationship,
-    eager-loaded, supplies the ``category_id``).
-
-    Args:
-        account: The real :class:`~app.models.account.Account` being
-            paired or re-classed.
-
-    Returns:
-        int -- the ``ref.ledger_account_classes.id`` of the Asset or
-        Liability class.
-    """
-    return ledger_class_id_for_category(account.account_type.category_id)
 
 
 def find_linked_ledger_account(account_id: int) -> LedgerAccount | None:
@@ -158,7 +103,9 @@ def create_ledger_account_for_account(account: Account) -> LedgerAccount:
 
     ledger_account = LedgerAccount(
         user_id=account.user_id,
-        class_id=_ledger_class_id_for_account(account),
+        class_id=ref_cache.ledger_account_class_id(
+            linked_key(account).ledger_class,
+        ),
         kind_id=ref_cache.ledger_account_kind_id(LedgerAccountKindEnum.LINKED),
         account_id=account.id,
         name=None,
@@ -212,7 +159,9 @@ def sync_linked_ledger_class(account: Account) -> None:
     # until the row expires, and deriving from the stale object would
     # silently skip the re-class.
     account_type = db.session.get(AccountType, account.account_type_id)
-    new_class_id = ledger_class_id_for_category(account_type.category_id)
+    new_class_id = ref_cache.ledger_account_class_id(
+        linked_ledger_class(account_type.category_id),
+    )
     if linked.class_id == new_class_id:
         return
     if archive_helpers.account_has_ledger_postings(account.id):

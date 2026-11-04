@@ -2,9 +2,10 @@
 Shekel Budget App -- Transfer Template Model (budget schema)
 
 A template defines a recurring transfer between accounts (e.g. "Monthly
-savings contribution") along with its recurrence rule and default amount.
-The transfer recurrence engine uses templates to auto-generate Transfer
-rows into future pay periods.
+savings contribution") along with its recurrence rule and its price: a
+dated series (``amount_versions``), or the loan's own payment for a loan
+payment that follows its loan.  The transfer recurrence engine uses
+templates to auto-generate Transfer rows into future pay periods.
 """
 
 from app.extensions import db
@@ -39,10 +40,6 @@ class TransferTemplate(
             name="ck_transfer_templates_different_accounts",
         ),
         db.CheckConstraint(
-            "default_amount > 0",
-            name="ck_transfer_templates_positive_amount",
-        ),
-        db.CheckConstraint(
             "version_id > 0",
             name="ck_transfer_templates_version_id_positive",
         ),
@@ -67,7 +64,10 @@ class TransferTemplate(
         nullable=False,
     )
     name = db.Column(db.String(200), nullable=False)
-    default_amount = db.Column(db.Numeric(12, 2), nullable=False)
+    # No price column: a definition's price is its dated series
+    # (``amount_versions``), or amount rule 4 for a loan payment that follows
+    # its loan.  ``default_amount`` stored a copy until plan step X-bp
+    # dropped it (rulings R-IY, R-BAL16).
     # is_active + sort_order: from IsActiveMixin / SortOrderMixin.
     category_id = db.Column(
         db.Integer, db.ForeignKey("budget.categories.id", ondelete="SET NULL"),
@@ -107,11 +107,12 @@ class TransferTemplate(
         "LoanPaymentSettings", uselist=False, back_populates="template",
         cascade="all, delete-orphan",
     )
-    # The effective-dated history of ``default_amount`` (plan step X-au-a).  A
-    # DERIVE-mode loan payment has NONE and must not: its ``default_amount`` is
-    # a stored snapshot of P&I plus escrow, so a version here would record a
-    # derived quantity as a stated price.  A MANUAL loan payment DOES have one
-    # -- there the operator owns the base cash.
+    # The effective-dated history of the definition's price (plan step
+    # X-au-a), its only price since X-bp.  A DERIVE-mode loan payment has NONE
+    # and must not: amount rule 4 computes its P&I plus escrow from the loan,
+    # so a version here would record a derived quantity as a stated price.  A
+    # MANUAL loan payment DOES have one -- there the operator owns the base
+    # cash.
     # :mod:`app.services.template_amount_service` owns both the predicate and
     # the write door.
     amount_versions = db.relationship(
@@ -149,4 +150,4 @@ class TransferTemplate(
         return self.recurrence_rule is not None
 
     def __repr__(self):
-        return f"<TransferTemplate '{self.name}' ${self.default_amount}>"
+        return f"<TransferTemplate {self.id} '{self.name}'>"

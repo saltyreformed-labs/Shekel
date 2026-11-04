@@ -24,6 +24,8 @@ for periods 4-6:
 from datetime import date
 from decimal import Decimal
 
+from app import ref_cache
+from app.enums import PaycheckLineKindEnum
 from app.services import salary_cockpit_service as svc
 from app.services.pay_calendar import DerivedPeriod, PayCadence
 from app.services.pay_rhythm import FixedDays
@@ -58,6 +60,20 @@ def _fake_period(period_id, start_date, end_date):
 
 #: The rhythm a paycheck here is priced at unless a case says otherwise.
 _BIWEEKLY = PayCadence(FixedDays(14))
+
+
+def _priced(lines, kind):
+    """Return ``(name, amount_str)`` pairs as the priced lines of *kind*.
+
+    A priced line names the kind it was priced as, required since plan step
+    salary:S11-e (ledger row SAL-597), so every fake line here names the kind
+    of the list it is built into.
+    """
+    kind_id = ref_cache.paycheck_line_kind_id(kind)
+    return [
+        PricedLine(name=name, amount=Decimal(amount), paycheck_line_kind_id=kind_id)
+        for name, amount in lines
+    ]
 
 
 def _pair(
@@ -95,8 +111,8 @@ def _pair(
             gross_biweekly=Decimal(gross),
             taxable_income=Decimal(taxable),
             net_pay=Decimal(net),
-            taxable=[PricedLine(name=n, amount=Decimal(a)) for n, a in taxable_lines],
-            after_tax=[PricedLine(name=n, amount=Decimal(a)) for n, a in after_tax],
+            taxable=_priced(taxable_lines, PaycheckLineKindEnum.TAXABLE_EARNING),
+            after_tax=_priced(after_tax, PaycheckLineKindEnum.AFTER_TAX_EARNING),
         ),
         taxes=TaxLines(
             federal=Decimal(federal), state=Decimal(state),
@@ -104,8 +120,8 @@ def _pair(
             stub_payday=stub_payday,
         ),
         deductions=DeductionBreakdown(
-            pre_tax=[PricedLine(name=n, amount=Decimal(a)) for n, a in pre],
-            post_tax=[PricedLine(name=n, amount=Decimal(a)) for n, a in post],
+            pre_tax=_priced(pre, PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
+            post_tax=_priced(post, PaycheckLineKindEnum.POST_TAX_DEDUCTION),
         ),
     )
     return period, breakdown
@@ -499,7 +515,12 @@ class TestBuildComposition:
 
 
 class TestBuildLineRows:
-    """build_line_rows: proportional bars scaled to the largest line, four groups in waterfall order."""
+    """build_line_rows: proportional bars scaled to the largest line, kind groups in waterfall order.
+
+    Each row's ``group_label`` is the heading over its kind's group (plan step
+    salary:S11-e, which split the pre-tax kind and gave the headings a map of
+    their own; ruling plan#2639 names the two pre-tax labels).
+    """
 
     def test_rows_scaled_to_largest(self):
         """401k 200 (largest) -> 100.0; Roth 100 -> 50.0."""
@@ -507,9 +528,9 @@ class TestBuildLineRows:
         rows = svc.build_line_rows(breakdown)
         assert rows == [
             {"name": "401k", "amount": Decimal("200"), "kind": "pre_tax_deduction",
-             "kind_label": "Pre-tax deduction", "bar_pct": Decimal("100.0")},
+             "group_label": "Pre-tax, income tax only", "bar_pct": Decimal("100.0")},
             {"name": "Roth", "amount": Decimal("100"), "kind": "post_tax_deduction",
-             "kind_label": "Post-tax deduction", "bar_pct": Decimal("50.0")},
+             "group_label": "Post-tax deductions", "bar_pct": Decimal("50.0")},
         ]
 
     def test_empty_when_no_lines(self):
@@ -525,11 +546,11 @@ class TestBuildLineRows:
             after_tax=[("Reimbursement", "400")],
         )[1]
         rows = svc.build_line_rows(breakdown)
-        assert [(r["name"], r["kind"], r["kind_label"], r["bar_pct"]) for r in rows] == [
-            ("Phone Allowance", "taxable_earning", "Taxable earning", Decimal("11.3")),
-            ("401k", "pre_tax_deduction", "Pre-tax deduction", Decimal("50.0")),
-            ("Roth", "post_tax_deduction", "Post-tax deduction", Decimal("25.0")),
-            ("Reimbursement", "after_tax_earning", "After-tax earning", Decimal("100.0")),
+        assert [(r["name"], r["kind"], r["group_label"], r["bar_pct"]) for r in rows] == [
+            ("Phone Allowance", "taxable_earning", "Taxable earnings", Decimal("11.3")),
+            ("401k", "pre_tax_deduction", "Pre-tax, income tax only", Decimal("50.0")),
+            ("Roth", "post_tax_deduction", "Post-tax deductions", Decimal("25.0")),
+            ("Reimbursement", "after_tax_earning", "After-tax earnings", Decimal("100.0")),
         ]
 
     def test_rows_sorted_desc_within_kind_groups(self):
@@ -568,6 +589,39 @@ class TestBuildLineRows:
         # Gamma (50) leads; Alpha and Beta tie at 25 and keep their
         # calculator order (sorted() is stable).
         assert [r["name"] for r in rows] == ["Gamma", "Alpha", "Beta"]
+
+    def test_the_two_pre_tax_kinds_are_two_groups_from_one_list(self):
+        """Both pre-tax kinds share the breakdown's ``pre_tax`` list and head two groups.
+
+        The engine's list (all-payroll-taxes lines first, plan step
+        salary:S11-e): Health 200 and FSA 50 of "Pre-tax, all payroll taxes",
+        then 401k 300 of "Pre-tax, income tax only".  Grouped by the kind each
+        line carries, in waterfall order, each group largest-first: Health,
+        FSA, then 401k, each under its own kind's heading.  Grouped by the
+        breakdown's lists instead, 401k would lead the one pre-tax group and
+        Health would sit under the other kind's heading.  bar_pct scales to
+        the largest line, 300:
+          Health 200/300*100 = 66.7   FSA 50/300*100 = 16.7   401k 100.0
+        """
+        breakdown = _pair(
+            1, date(2026, 6, 1), date(2026, 6, 14), "52000", "2000", "1400",
+        )[1]
+        breakdown.deductions = DeductionBreakdown(
+            pre_tax=[
+                *_priced(
+                    [("Health", "200"), ("FSA", "50")],
+                    PaycheckLineKindEnum.PRE_FICA_DEDUCTION,
+                ),
+                *_priced([("401k", "300")], PaycheckLineKindEnum.PRE_TAX_DEDUCTION),
+            ],
+            post_tax=[],
+        )
+        rows = svc.build_line_rows(breakdown)
+        assert [(r["name"], r["kind"], r["group_label"], r["bar_pct"]) for r in rows] == [
+            ("Health", "pre_fica_deduction", "Pre-tax, all payroll taxes", Decimal("66.7")),
+            ("FSA", "pre_fica_deduction", "Pre-tax, all payroll taxes", Decimal("16.7")),
+            ("401k", "pre_tax_deduction", "Pre-tax, income tax only", Decimal("100.0")),
+        ]
 
 
 class TestBuildChartSeries:

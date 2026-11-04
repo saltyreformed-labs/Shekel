@@ -53,11 +53,13 @@ from app.utils.balance_predicates import is_projected_clause
 # soft-delete an edit does not perform -- allowlisting it would invite a
 # future schema field to silently archive a definition without that cleanup.
 #
-# ``default_amount`` is absent for the same shape of reason since plan step
+# The amount (the form's ``amount``) is absent for the same shape of reason since plan step
 # X-au-a: the amount is no longer a bare column but a dated SERIES, and
 # ``template_amount_service`` holds its two write doors (``set_amount``
 # appends a version; ``restate_in_effect`` corrects the one a date reads,
-# **R-BAL29**).  A setattr here would move the scalar without the series.
+# **R-BAL29**).  A setattr here would write an attribute no column holds
+# (plan step X-bp dropped ``default_amount``), so the save would state no
+# price and say nothing.
 EDITABLE_FIELDS = frozenset({
     "name", "category_id", "transaction_type_id",
     "account_id", "is_envelope", "companion_visible",

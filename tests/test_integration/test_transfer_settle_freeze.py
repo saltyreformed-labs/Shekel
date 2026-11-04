@@ -36,7 +36,7 @@ the second is the one that must never change.
     P&I    = amortize(200000, 0.06, 360)  = 1,199.10
     escrow = 3,600.00 / 12                =   300.00
     PITI   = 1,199.10 + 300.00            = 1,499.10
-The template's stored ``default_amount`` is a deliberately stale ``$1.00``, so
+The template's dormant price series states a deliberately stale ``$1.00``, so
 a settle that books ``$1.00`` is a settle that missed the freeze and a settle
 that books ``$1,499.10`` is one that took it.
 
@@ -92,7 +92,7 @@ from tests._test_helpers import rendered_transfer_amount
 
 #: P&I 1,199.10 + escrow 300.00, the figure the freeze captures.
 _LIVE_PITI = Decimal("1499.10")
-#: The template's deliberately stale stored amount.
+#: The deliberately stale price the template's dormant series states.
 _STALE = Decimal("1.00")
 
 
@@ -102,7 +102,7 @@ def _derived_loan_transfer(seed_user, seed_periods):
     Built on the derive-from-loan fixture the live-override integration test
     already owns, so the two grade the same loan with the same arithmetic: a
     $200k / 6% / 360mo mortgage with $3,600/yr escrow behind a recurring
-    transfer whose stored amount is stale.
+    transfer whose stated price is stale.
 
     It returned the transfer AND its expense shadow until plan step
     ``balance:X-bi-6-4d-2``, where a transfer became one row and the shadow

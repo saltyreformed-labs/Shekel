@@ -59,13 +59,15 @@ def account_category(account) -> AcctCategoryEnum | None:
     claim that it was is corrected here** (plan step X-z8, ruling R-CU; both of
     plan step X-z's adversarial reviews found the overclaim independently).  The
     survivor that matters is
-    :func:`app.services.ledger_account_service.ledger_class_id_for_category`,
-    which asks THIS function's asset-vs-liability question a second time on the
-    WRITE path -- it decides which ledger class a real account's paired posting
-    account carries.  The two agree by READING, which is finding N-118's own
-    condition; **finding N-122 owns it and plan step X-ab is where it is
-    merged**, because a re-class moves what an account's postings book against
-    and that is not a refactor's business.  Four more sites classify
+    :func:`app.services.ledger_lines.linked_ledger_class`,
+    which asks THIS function's asset-vs-liability question a second time for the
+    LEDGER -- it decides which class a real account's own ledger line carries,
+    the stored chart row's and the worked-out chart key's alike (it was
+    ``ledger_account_service.ledger_class_id_for_category`` until plan#2523).
+    The two agree by READING, which is finding N-118's own condition;
+    **finding N-122 owns it and plan step X-ab is where it is merged**, because
+    a re-class moves what an account's postings book against and that is not a
+    refactor's business.  Four more sites classify
     RETIREMENT-or-INVESTMENT rather than liability (``account_service``'s
     projection query, the cash-detail route guard, and two templates); they
     answer a different question and are out of this rule's scope.

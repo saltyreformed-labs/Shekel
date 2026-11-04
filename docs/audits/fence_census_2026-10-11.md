@@ -100,7 +100,7 @@ for a fence, the kind is this record's reading.
 | T-35 | `tests/test_arch/test_a_control_rendered_invisible_has_a_rule_that_shows_it.py:119` | a hidden control no stylesheet or script reveals | a Jinja, CSS and JS contract no type spans |
 | T-38 | `tests/test_arch/test_a_request_is_a_query_or_a_command.py:138` | a page load that is not read-only, a command at the wrong isolation (`balance:R-EN`) | it grades the mechanism in `app/db_transaction.py` |
 | T-44 | `tests/test_arch/test_the_confirm_guard_binds_first.py:79` | a destructive act submitted before its confirm dialog exists | a rendered-order lock on a structural fix |
-| T-64 | `tests/test_routes/test_templates.py:2968` (its import half) | a render site re-inlining the shared recurrence macro | a one-spelling lock with no structural form |
+| T-64 | `tests/test_routes/test_templates/test_validation_and_form_rules.py:389` (its import half) | a render site re-inlining the shared recurrence macro | a one-spelling lock with no structural form |
 | T-98 | `tests/test_routes/test_recurrence_picker.py:415` (its property half) | a script reading a property the server stopped sending | a Python and JS contract |
 | T-204 | `tests/test_deploy/test_proxy_trust_and_headers.py:310` and five more sites | trusted-proxy ranges disagreeing across nginx, compose and gunicorn | one network fact in three formats |
 | T-222 | `tests/test_routes/test_url_id_converter.py:53` | an integer route rule that escaped the row-id converter | it grades that the converter reached every rule |

@@ -224,7 +224,7 @@ class TestXSSPrevention:
             # POST the XSS payload as the template name.
             auth_client.post("/templates", data={
                 "name": payload,
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": category.id,
                 "account_id": seed_user["account"].id,
                 "transaction_type_id": expense_type.id,
@@ -362,7 +362,7 @@ class TestXSSPrevention:
             category = seed_user["categories"]["Rent"]
             auth_client.post("/transfers", data={
                 "name": payload,
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings_acct.id,
                 **cadence_payload(),
@@ -634,7 +634,7 @@ class TestXSSPrevention:
 
             auth_client.post("/templates", data={
                 "name": js_payload,
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "category_id": category.id,
                 "account_id": seed_user["account"].id,
                 "transaction_type_id": expense_type.id,

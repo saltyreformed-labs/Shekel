@@ -83,9 +83,9 @@ from app.services.recurrence_engine._conflicts import (
     resolve_conflicts,
 )
 from app.services.recurrence_engine._generate import (
-    can_generate_in_period,
     generate_for_template,
     occurrences_in_period,
+    rows_to_generate_in_period,
 )
 from app.services.recurrence_engine._maintain import (
     preview_regeneration_for_template,
@@ -116,7 +116,6 @@ __all__ = [
     "PassReporting",
     "PlannedOccurrence",
     "RegenerationPreview",
-    "can_generate_in_period",
     "create_for_unclaimed_occurrences",
     "definition_recurs",
     "derived_by_occurrence",
@@ -130,5 +129,6 @@ __all__ = [
     "regenerate_for_template",
     "resolve_conflicts",
     "resolve_generation_plan",
+    "rows_to_generate_in_period",
     "unruled_row_fields",
 ]

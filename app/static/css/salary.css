@@ -252,7 +252,10 @@
    PaycheckLineKindEnum value), generated -- not compared -- in Jinja.
    Post-tax mirrors the spine's neutral (see --sal-post-tint above); an
    EARNING bar (plan step salary:R18-b) wears the settled-money tone, money
-   in rather than out, mixed to the same depth as the pre-tax accent. */
+   in rather than out, mixed to the same depth as the pre-tax accent.  Both
+   pre-tax kinds (plan step salary:S11-e) wear the accent; their group
+   labels tell them apart. */
+.sal-ded-bar--pre_fica_deduction,
 .sal-ded-bar--pre_tax_deduction {
   background: color-mix(in srgb, var(--shekel-accent) 65%, var(--shekel-surface));
 }

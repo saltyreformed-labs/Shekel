@@ -4,27 +4,35 @@ Shekel Budget App -- What a change to a salary profile does to the rows it price
 One act: :func:`regenerate_salary_transactions`.  A salary profile is the
 producer behind every paycheck row its template generated, so any write to the
 profile or its line items -- a raise added, edited, ended or removed, a
-deduction changed, the profile re-priced -- is followed by the SAME two moves:
-the template's per-paycheck amount is re-stated at today's net, and the
+deduction changed, the profile re-priced -- is followed by the SAME move: the
 projected paycheck rows from today are regenerated under the new terms.
 
-**What those two moves keep in step, stated exactly** (an adversarial review of
+**What that move keeps in step, stated exactly** (an adversarial review of
 plan step salary:S3-f-3 corrected a draft that claimed more).  A projected
 paycheck row stores NO figure since plan step balance:X-au-d: the engine writes
 a declaration and the cash ledger's rule 2 prices the row at read time from
 the profile's own rows, so a raise write with no regeneration at all moves
-every projected paycheck the moment it commits.  What the regeneration alone
-keeps current is the template's ``default_amount`` -- vestigial for an ACTIVE
-salary-linked template, but the figure ``routes/salary/profiles.delete_profile``
-opens the template's price series at when the profile is archived, and the
-GENERATE base the carry-forward resolver reads -- and the ROW SET, which a
-cadence or window change redraws.  Two doors that write a raise leave the same
-thing behind, or they are two doors with two outcomes (CLAUDE.md rule 14).
+every projected paycheck the moment it commits.  What the regeneration keeps
+current is the ROW SET, which a cadence or window change redraws.  Two doors
+that write a raise leave the same thing behind, or they are two doors with two
+outcomes (CLAUDE.md rule 14).
+
+**It re-stated the template's ``default_amount`` at today's net too, until
+plan step X-bp**, and by then the copy had one reader left: the profile's
+archive, which opened the template's price series at it, so a raise whose
+date had passed since the last salary save was missing from the series it
+opened.  The archive prices today's paycheck instead since that step
+(``routes/salary/profiles.delete_profile``), as the Recurring and savings
+pages and the template's edit page already did
+(``obligations_aggregator.todays_price``).  A salary profile's template owns
+no stated amount, so the write door now refuses one
+(``template_amount_service.set_amount``).
 
 **It lived in the salary ROUTES package until plan step salary:S3-f-3**
 (``routes/salary/_helpers._regenerate_salary_transactions``; ruling
 **R-SAL24**), and moving it here is a correction rather than a size fix.  It
-prices money and writes money rows, which is the reason
+writes money rows (and priced money too, until plan step X-bp), which is the
+reason
 :mod:`app.services.salary_profile_service` gives for being a service and not
 two lines in a route -- and S3-f-3 gave the ``/retirement`` assumptions rail a
 second door that writes a raise's end year.  A door on another blueprint could
@@ -39,31 +47,18 @@ declined to touch.  This takes the pass the route already opened
 (a producer below the route takes the :class:`~app.services.balance_at
 .BalanceContext` and drops ``user_id``; only a route builds one) and RETURNS
 those row ids, so each route reports them in its own voice --
-``flash_retained_notice`` for both today.  The amount goes through the same
-write door, and every day it reads is the pass's pinned ``as_of`` (ledger row
-**SAL-572**, plan step salary:X-av-3a).  The one reordering:
-the adapter builds the pass BEFORE the template guard below runs, where the
-route-tier original guarded first -- one scenario query for a profile without
-a template, a state ``create_profile`` never produces.
+``flash_retained_notice`` for both today.  The day the regeneration runs from
+is the pass's pinned ``as_of`` (ledger row **SAL-572**, plan step
+salary:X-av-3a).  The one reordering: the adapter builds the pass BEFORE the
+template guard below runs, where the route-tier original guarded first -- one
+scenario query for a profile without a template, a state ``create_profile``
+never produces.
 
-**The paycheck is priced through the pass's own pricer since plan step
-salary:C12** (ledger row **P62**), where it was a direct
-``calculate_paycheck`` call resolving its tax configs through
-``load_tax_configs_for_year`` and passing ``calibration=profile.calibration``.
-That door and the pricer's resolve the configs through one body
-(``tax_config_service._configs_from_series``) and both priced WITH the
-calibration, so the figure written is byte-identical; what changed is that
-there is one fewer place the engine is reached outside
-:class:`~app.services.income_service.PaycheckPricing`.  **What that pricer
-REQUIRES of the caller is that the pass POSTDATES the write it follows**: a
-pricer's memo is filled per payday, so a pass that priced this profile's
-current paycheck before a pay stub or a deduction changed would answer
-the OLD figure here and the template would be re-stated at it.  A raise
-write is safe either way -- the memo is keyed on the raise set, so changed
-terms are a new entry -- but the rule is stated for the writes that are not.
-Every caller today builds its pass after its writes: the salary routes'
-adapter builds one per call, and the ``/retirement`` rail's Save stages its
-end years first.
+**It prices nothing since plan step X-bp**, so the pass is read for its
+owner's schedule, its baseline scenario and its day; the requirement it once
+stated -- that the pass POSTDATE the write it follows, because the pass's
+pricer memoizes per payday and the re-statement read today's paycheck from
+it -- went with the re-statement.
 
 Boundary discipline (``CLAUDE.md`` Architecture): ORM rows and a pass in, plain
 ids out.  Flushes through the engine and does not commit -- the caller owns the
@@ -77,7 +72,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.exceptions import RecurrenceConflict
 from app.models.salary_profile import SalaryProfile
-from app.services import recurrence_engine, template_amount_service
+from app.services import recurrence_engine
 from app.services.balance_at import BalanceContext
 from app.services.generation_schedule import GenerationSchedule
 
@@ -87,23 +82,19 @@ logger = logging.getLogger(__name__)
 def regenerate_salary_transactions(
     ctx: BalanceContext, profile: SalaryProfile,
 ) -> list[int]:
-    """Re-state the template's amount and regenerate the profile's paycheck rows.
+    """Regenerate the profile's paycheck rows from the pass's day.
 
     The one walk every salary write is followed by (module docstring).  The
     pass pins the owner, the day and the baseline scenario, and its calendar
-    serves both the paycheck recompute and the regeneration's own resolution
-    (plan steps R7d-c-1 and R4b-1): the paycheck engine and the recurrence
-    seam both read the CALENDAR (pay-calendar plan steps C2-f2d-3 and
-    C2-f3c), so there is one value and no second read to reconcile it
-    against.
+    is the one the regeneration resolves against (plan steps R7d-c-1 and
+    R4b-1; pay-calendar plan steps C2-f2d-3 and C2-f3c), so there is one value
+    and no second read to reconcile it against.
 
     A profile with no template, or an owner with no baseline scenario, has no
     rows to regenerate and is left alone.
 
     Args:
-        ctx: The request's read pass, built by the route AFTER the write this
-            regeneration follows (module docstring): its pricer is what the
-            template's amount is re-stated from.
+        ctx: The request's read pass.
         profile: The :class:`~app.models.salary_profile.SalaryProfile` whose
             template prices the rows.
 
@@ -123,36 +114,11 @@ def regenerate_salary_transactions(
     if ctx.scenario is None:
         return []
 
-    schedule = GenerationSchedule.for_pass(ctx)
-    calendar = ctx.calendar()
-
-    # Update the template's default_amount to the current net pay.  Every
-    # "today" below is the PASS's pinned day, read once (ledger row SAL-572,
-    # plan step salary:X-av-3a): the period was looked up at the process
-    # clock (``date.today()``) while the amount was dated ``display_today()``
-    # and the regeneration ran from ``date.today()`` again, so wherever the
-    # two clocks name different days (CI's UTC, a bare ``flask run``) the
-    # save priced one day's paycheck and dated it another.
-    current_period = calendar.period_containing(ctx.as_of)
-    if current_period:
-        # The pass's pricer (plan step salary:C12): the tax configs resolve
-        # for the PERIOD's own year and the profile's pay stubs price its
-        # taxes (plan step salary:S11-c-2c), exactly as they do for every
-        # other paycheck this profile prices.
-        pay_breakdown = ctx.paychecks().for_profile(profile).at(current_period)
-        # Through the amount's one write door (plan step X-au-a).  The profile
-        # is salary-linked and active, so the door moves the column and records
-        # NO version: a paycheck-calculated figure is derived, not a price
-        # anybody stated.
-        template_amount_service.set_amount(
-            profile.template, pay_breakdown.earnings.net_pay,
-            effective_on=ctx.as_of,
-        )
-
-    # Regenerate transactions
+    # The regeneration runs from the PASS's pinned day, read once (ledger row
+    # SAL-572, plan step salary:X-av-3a).
     try:
         recurrence_engine.regenerate_for_template(
-            profile.template, schedule, ctx.scenario_id,
+            profile.template, GenerationSchedule.for_pass(ctx), ctx.scenario_id,
             effective_from=ctx.as_of,
         )
     except RecurrenceConflict as e:

@@ -147,11 +147,10 @@ def _make_template(seed_user, cadence, **rule_kwargs):
         category_id=seed_user["categories"]["Car Payment"].id,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name="Phone Allowance",
-        default_amount=Decimal("39.54"),
     )
     db.session.add(template)
     db.session.flush()
-    state_template_price(template)
+    state_template_price(template, Decimal("39.54"))
     # The definition first, then the cadence onto it (plan step R-F6).
     rule = make_cadence_rule(
         template, cadence,
@@ -494,7 +493,11 @@ class TestTheStartPeriodBoundSurvivesTheWindow:
 
 
 class TestThePredictionIsTheGenerationCall:
-    """``can_generate_in_period`` answered from a one-period schedule."""
+    """The engine's prediction once answered from a one-period schedule.
+
+    The prediction is ``rows_to_generate_in_period`` since plan#2735 deleted
+    ``can_generate_in_period``, the bool this class graded until then.
+    """
 
     def test_the_predictor_agrees_with_generation_in_every_period(
         self, app, db, seed_user, seed_periods,
@@ -520,7 +523,7 @@ class TestThePredictionIsTheGenerationCall:
 
             predicted = [
                 period.start_date for period in seed_periods
-                if recurrence_engine.can_generate_in_period(
+                if recurrence_engine.rows_to_generate_in_period(
                     template, period.id, scenario_id, schedule=schedule,
                 )
             ]
@@ -587,7 +590,6 @@ class TestThePaycheckSeesTheWholeSchedule:
             category_id=seed_user["categories"]["Car Payment"].id,
             transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
             name="Day Job",
-            default_amount=Decimal("0.00"),
         )
         db.session.add(template)
         db.session.flush()
@@ -1172,7 +1174,6 @@ class TestTheTransferEngineTakesTheSameSchedule:
             from_account_id=seed_user["account"].id,
             to_account_id=savings.id,
             name="Savings Sweep",
-            default_amount=Decimal("50.00"),
         )
         db.session.add(template)
         db.session.flush()
@@ -1549,7 +1550,7 @@ class TestTheGeneratePassTakesTheReadPass:
 class TestOneScheduleReadServesTheWholeRequest:
     """The N+1 an adversarial review measured, and the gate against its return.
 
-    ``can_generate_in_period`` runs once per envelope row being carried
+    ``rows_to_generate_in_period`` runs once per envelope row being carried
     forward.  Building a ``GenerationSchedule`` inside it cost one schedule
     read AND one full forward occurrence walk per row -- measured at 12 queries
     for the preview and 24 for the execute over 12 envelope rows, against a

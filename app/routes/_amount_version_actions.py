@@ -21,10 +21,14 @@ service owns the RULE (which entry may be withdrawn); this owns the response.
 """
 
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 from logging import Logger
 
 from flask import Response, flash, redirect, url_for
 
+from app.models.transaction_template import TransactionTemplate
+from app.models.transfer_template import TransferTemplate
 from app.routes._commit_helpers import (
     STALE_ACTION_MESSAGE,
     StaleConflictContext,
@@ -32,6 +36,8 @@ from app.routes._commit_helpers import (
 )
 from app.routes._redirect_target import RedirectTarget
 from app.services import template_amount_service
+from app.services.balance_at import BalanceContext
+from app.services.obligations_aggregator import todays_price
 
 
 # Why a withdrawal is refused, stated as the repair rather than as the rule --
@@ -117,7 +123,153 @@ def withdraw_amount_version(
     return redirect(url_for(action.edit_endpoint, template_id=template_id))
 
 
+@dataclass(frozen=True)
+class _WorkedOutWords:
+    """What the app says about one kind of definition whose amount is worked out.
+
+    Attributes:
+        source: The line the edit form shows in place of the Amount box,
+            naming what works the amount out (ruling plan#2694).
+        refusal: The flash for an edit that types an amount anyway.
+    """
+
+    source: str
+    refusal: str
+
+
+#: The words for each kind of worked-out definition, keyed by its model.  A
+#: transaction template that does not own its amount is a salary profile's; a
+#: transfer template that does not is a loan payment in derive mode
+#: (``template_amount_service.owns_its_amount``).
+_WORKED_OUT_WORDS: dict[type, _WorkedOutWords] = {
+    TransactionTemplate: _WorkedOutWords(
+        source="Your salary profile works out this amount.",
+        refusal=(
+            "Your salary profile works out this amount, so it cannot be "
+            "typed here. Change the salary profile to change it."
+        ),
+    ),
+    TransferTemplate: _WorkedOutWords(
+        source="This payment follows the loan.",
+        refusal=(
+            "This payment follows the loan, so its amount cannot be typed "
+            "here. It changes when the loan's payment does."
+        ),
+    ),
+}
+
+
+@dataclass(frozen=True)
+class EditFormAmount:
+    """What a recurring definition's edit form shows for its amount.
+
+    The ONE decision behind both edit forms' Amount row (plan step X-bp,
+    ruling plan#2694, fixing finding plan#2689): a definition that owns its
+    price shows the Amount box, and one whose amount is worked out shows a
+    line naming where it comes from, with no box.  The box was shown for
+    both until then, prefilled for a worked-out one from its stored copy --
+    or, where it had once owned a price (a payment fixed before it tracked
+    its loan, a paycheck whose salary profile was archived and brought
+    back), from that dormant history -- and saving the page wrote the box
+    into the copy the Recurring page and the savings page then counted.
+
+    Attributes:
+        today: What the definition costs today.  For a definition that owns
+            its price, the Amount box's prefill: its history on the owner's
+            day (``template_amount_service.amount_as_of`` at
+            ``display_today()``), the STATED price, never a loan payment's
+            standing extra added to it, because saving the box restates it;
+            ``None`` only for an empty history, which no door writes.  For a
+            worked-out one, the figure its rows are priced at on the read
+            pass's day, the Recurring page's
+            (``obligations_aggregator.todays_price``).
+        worked_out_by: ``None`` for a definition that owns its price;
+            otherwise the line naming what works the amount out, shown with
+            *today* in place of the box.
+    """
+
+    today: Decimal | None
+    worked_out_by: str | None
+
+
+def edit_form_amount(
+    template, ctx: BalanceContext, today: date,
+) -> EditFormAmount:
+    """Return what *template*'s edit form shows for its amount.
+
+    **Each branch reads the day its figure answers to, and they are two
+    days.**  The Amount box is read on *today*, the owner's day: a save
+    that leaves "Amount effective from" blank restates the box on that day
+    (both update routes default the date to ``display_today()``), and the
+    history panel beside the box names Current and Scheduled by it.  Read
+    on any other day, a box the owner leaves alone restates a price nobody
+    stated.  It was read on the read pass's day (``BalanceContext.build``'s
+    default, the process clock's ``date.today()``) from plan step X-bp's
+    task plan#2698 until plan#2732: where the process day ran ahead of the
+    owner's (CI at UTC, a process without the ``TZ`` pin), a price
+    scheduled for the owner's tomorrow prefilled the box, and a plain
+    rename restated it as of the owner's today, repricing today's rows.
+    The worked-out line keeps the read pass, because its figure is the
+    Recurring page's (ruling plan#2693), priced by the same pass.
+
+    Args:
+        template: The owner-checked transaction or transfer template.
+        ctx: The form's read pass, which prices a worked-out definition.
+        today: The owner's day, ``display_today()``, resolved once by the
+            route for this box and the history panel beside it.
+
+    Returns:
+        The :class:`EditFormAmount`.
+
+    Raises:
+        AmountUnresolvable: A worked-out definition its rows' rule cannot
+            price today, from :func:`~app.services.obligations_aggregator.todays_price`,
+            exactly where the Recurring page would refuse it too.
+    """
+    if template_amount_service.owns_its_amount(template):
+        return EditFormAmount(
+            today=template_amount_service.amount_as_of(template, today),
+            worked_out_by=None,
+        )
+    return EditFormAmount(
+        today=todays_price(template, ctx).amount,
+        worked_out_by=_WORKED_OUT_WORDS[type(template)].source,
+    )
+
+
+def refuse_a_typed_worked_out_amount(
+    template, data: dict, back: RedirectTarget,
+) -> Response | None:
+    """Refuse an edit that types an amount for a definition that works one out.
+
+    The edit form shows no Amount box for such a definition
+    (:func:`edit_form_amount`), so only a crafted or stale submission
+    carries one.  Refused rather than ignored: dropping the figure and
+    saving the rest would tell the owner their figure was taken when
+    nothing prices from it.  And refused HERE, ahead of the write door:
+    ``template_amount_service.set_amount`` raises ``ValueError`` for such a
+    definition, which neither update route catches, so a figure reaching it
+    would answer the owner with a server error.
+
+    Args:
+        template: The owner-checked template being edited.
+        data: The validated payload; ``amount`` is the form's Amount box.
+        back: Where the refusal sends the owner (the edit form).
+
+    Returns:
+        ``None`` when the payload states no amount or the definition owns
+        its price; else the redirect, with the reason flashed.
+    """
+    if "amount" not in data or template_amount_service.owns_its_amount(template):
+        return None
+    flash(_WORKED_OUT_WORDS[type(template)].refusal, "danger")
+    return back.to_response()
+
+
 __all__ = [
     "AmountVersionAction",
+    "EditFormAmount",
+    "edit_form_amount",
+    "refuse_a_typed_worked_out_amount",
     "withdraw_amount_version",
 ]

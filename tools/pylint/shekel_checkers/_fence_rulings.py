@@ -231,6 +231,17 @@ _ROW_VALUATION_MODULES = frozenset({
 _RECURRING_DEFINITION_MODULES = frozenset({
     "app.services.recurring_transfer_query",
 })
+# The worked-out ledger (balance:X-ew, plan#2513).  Plan task plan#2526 moved
+# every ledger target rule into it -- among them two loan rules this registry
+# had ruled under ``loan_posting_service`` -- and puts beside them the read
+# that sums the whole ledger, which X-ew's second leaf moves every statement
+# onto.  It is the general ledger's home from here on, so the scope follows
+# the rules rather than letting them leave the fence by changing address (the
+# R7d-a precedent above).  A package key, prefix-matched, so a submodule
+# written later is scoped the day it is written.
+_LEDGER_LINES_MODULES = frozenset({
+    "app.services.ledger_lines",
+})
 
 # Per-module rulings: {module: (producer set, non-producer set)}.  Every PUBLIC
 # top-level function defined in one of these modules must appear in one of its
@@ -316,6 +327,67 @@ _FENCED_MODULE_RULINGS = {
     # EMPTY producer set is the D3 invariant stated as data; that module
     # carries the why.
     "app.services.cash_ledger": (frozenset(), CASH_LEDGER_NON_PRODUCERS),
+    # The worked-out ledger -- why it is scoped is recorded once, at
+    # :data:`_LEDGER_LINES_MODULES`.  EMPTY producer set: every name below
+    # names a chart line or answers one record's legs, and none sums a
+    # balance at a time T.
+    "app.services.ledger_lines": (frozenset(), frozenset({
+        # The chart (ruling plan#2518): constructors of the key a line is
+        # booked on, the class and label rules, and ruling R-FO's counter
+        # dispatch.  Names and classes, never money.
+        "account_counter_key",
+        "anchor_correction_counter_kind",
+        "category_key",
+        "chart_label",
+        "ledger_class_of",
+        "linked_key",
+        "linked_ledger_class",
+        "loan_key",
+        "owner_bucket_key",
+        "transit_key",
+        # The movement rule: a shape test, the leg and source kinds, the
+        # gate, and ONE movement's two legs (its own figure on its account
+        # and its counter line) -- a figure of one record, not a balance.
+        "is_transfer_leg",
+        "posting_kind_of",
+        "purchase_posts",
+        "purchase_source",
+        "purchase_target",
+        # The correction rules: what each opening, true-up or payment split
+        # BOOKS, leg by leg, keyed (kind, period, date) -- the jump a
+        # correction makes, never the balance it lands on -- and the
+        # same-key merge, which returns nothing.
+        "account_correction_targets",
+        "anchor_correction_targets",
+        "loan_correction_targets",
+        "merge_target_legs",
+        "payment_split_targets",
+        # The account walk FRAMES the seam's own published assertion replay
+        # (``balance_at.assertion_corrections``, ruled at the seam's door):
+        # each correction's ``ledger_before`` is that replay's figure carried
+        # through unchanged, at an assertion's moment only.  It adds no reach
+        # the seam's door does not already give, and answers no balance at
+        # an arbitrary T.
+        "walk_account_ledger",
+        # Its framing over a walk the caller holds (plan task plan#2648,
+        # ruling plan#2623), so the worked-out read frames each account's
+        # walk from the owner's one load: ``walk_account_ledger``'s framing
+        # without its load, its missing-account answer or its loan refusal
+        # -- it is kind-blind, and the read's own dispatch walks a loan
+        # elsewhere -- ruled on its grounds: the replay's figure carried
+        # through, at an assertion's moment only.
+        "account_corrections",
+        # The worked-out read (plan task plan#2526): every LINE of one
+        # owner's ledger -- each amount on a chart account, its paycheck and
+        # day, built by the rules above -- and never a sum of them.  The
+        # ground ``cash_ledger.settled_cash_facts`` and
+        # ``loan_ledger.walk_loan_ledger`` are ruled on: a loader of facts,
+        # where folding them to a balance at T is a reader's step, and a
+        # reader that folds them to an account's balance belongs in
+        # ``balance_at`` (X-ew's second leaf, plan#2515, moves the statements
+        # onto these lines).
+        "worked_out_lines",
+    })),
     # The account-KIND classifier -- why it is scoped is recorded once, at
     # :data:`_KIND_CLASSIFIER_MODULES`.  Its ``find_period_containing_date``
     # went to ``loan_ledger._visible`` at D1b (chronology belongs with the rules
@@ -354,10 +426,19 @@ _FENCED_MODULE_RULINGS = {
             # sides take it: the posting writer projects it into corrections, the
             # seam's read pass folds it.
             "walk_loan_ledger",
-            # A loan's CONTRACT TERMS, loaded (plan step recurrence:R25, ruling
+            # The same walk for many loans (plan task plan#2649, ruling
+            # plan#2623): ``walk_loan_ledger``'s answer per loan, every loan's
+            # records loaded once, so the worked-out read walks an owner's
+            # loans in a fixed number of statements.  Ruled on
+            # ``walk_loan_ledger``'s ground, which it adds nothing to -- the
+            # precedent ``owner_cash_records`` set beside ``walk_cash_ledger``
+            # (plan task plan#2648): facts per loan, never a balance at T.
+            "walk_loan_ledgers",
+            # A loan's CONTRACT TERMS (plan step recurrence:R25, ruling
             # R-R105): ``build_loan_calendar`` returns the loan's
             # ``LoanCalendar`` -- its origination, due day, rate periods and
-            # escrow lines -- and ``LoanCalendars`` is the read pass's memo of
+            # escrow lines, built from the rows its caller loaded since plan
+            # task plan#2649 -- and ``LoanCalendars`` is the read pass's memo of
             # it, whose ``loan_params_of`` / ``loan_calendar_of`` methods hand
             # back the loan's ``LoanParams`` row and that same calendar.  Terms, not a
             # balance: nothing in them is a figure owed on any date, and the
@@ -453,11 +534,13 @@ _FENCED_MODULE_RULINGS = {
             #     exposure rather than resisting one.
             "loan_event_stream",
             "replay_loan_events",
-            #   * ``load_loan_stream`` (plan step recurrence:R16-c-1) is
-            #     ``walk_loan_ledger``'s LOAD half: the same rows mapped onto
-            #     the same stream, before any replay -- ``loan_event_stream``'s
-            #     ruling with the loads attached; its ``visible_by`` bound is
+            #   * ``load_loan_stream`` (plan step recurrence:R16-c-1) is the
+            #     seam's per-pass load: a loan's rows mapped onto its stream,
+            #     before any replay -- ``loan_event_stream``'s ruling with the
+            #     loads attached; its ``visible_by`` bound is
             #     ``confirmed_shadows_through``'s, below, applied at the load.
+            #     It was ``walk_loan_ledger``'s load half too, unbounded, until
+            #     plan task plan#2649.
             "load_loan_stream",
             #   * ``replay_loan_stream`` (plan step recurrence:R16-c-1) is that
             #     same replay handed a stream and returning the walk --
@@ -473,10 +556,13 @@ _FENCED_MODULE_RULINGS = {
             "projection_boundary",
             "replay_loan_stream",
             "with_contract_charges",
-            # ``LoanLedgerWalk``'s two views (recurrence:R16-c-1) and
-            # ``PaymentOutcome``'s ten read-through properties.  Not one of them
-            # derives anything: ``settled_splits`` / ``projected_splits`` filter
-            # the walk's own outcome list by its ``is_projected`` flag, and each
+            # ``LoanLedgerWalk``'s two views (recurrence:R16-c-1), its
+            # emptiness test (plan task plan#2615) and ``PaymentOutcome``'s ten
+            # read-through properties.  Not one of them derives anything:
+            # ``settled_splits`` / ``projected_splits`` filter the walk's own
+            # outcome list by its ``is_projected`` flag, ``is_empty`` answers
+            # whether the walk holds any correction or outcome at all (a
+            # ``bool``, which cannot yield a figure), and each
             # property returns a field of the outcome's ``event`` or ``split``
             # under the flat name every reader spells (``outcome.principal`` for
             # ``outcome.split.principal``).  ``balance_after`` is the replay's
@@ -491,6 +577,7 @@ _FENCED_MODULE_RULINGS = {
             "escrow",
             "excess",
             "interest",
+            "is_empty",
             "principal",
             "projected_splits",
             "settled_splits",
@@ -567,12 +654,9 @@ _FENCED_MODULE_RULINGS = {
             # **R-BAL102**): ONE reconcile over the walk, driven by the one
             # sync, and a split keyed by no row to reverse ahead of a delete.
             "reconcile_loan_corrections",
-            # The two TARGET builders that reconcile consumes: each maps the
-            # walk's corrections or splits onto ``{(kind, period, date):
-            # {ledger: (amount, kind)}}`` -- what the ledger SHOULD hold, leg
-            # by leg, never what it does hold or what a loan owes.
-            "anchor_correction_targets",
-            "payment_split_targets",
+            # (The two TARGET builders that reconcile consumes moved into the
+            # worked-out ledger at plan task plan#2526 and are ruled under
+            # ``app.services.ledger_lines`` below.)
             "sync_loan_postings",
             "sync_loan_postings_all_scenarios",
             "sync_all_scenarios_or_duplicate",

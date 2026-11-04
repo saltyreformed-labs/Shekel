@@ -7,8 +7,8 @@ names -- a payday's position among its month's paydays
 cadences read it too until plan step salary:R15-b moved each line's cadence
 onto its own recurrence rule), whether that position is the month's third or
 later (:func:`_is_third_paycheck`), and the
-gross this owner has already been paid this calendar year
-(:func:`_get_cumulative_wages`, the FICA wage-base cumulative).  The fourth
+Social Security and Medicare wages this owner has already been paid this
+calendar year (:func:`_get_cumulative_wages`, the FICA wage-base cumulative).  The fourth
 question, a capped deduction's own year-to-date, is
 :func:`~._lines._cumulative_line_before`, which walks the same
 producer this leaf does and so lives beside the lines it caps.
@@ -25,11 +25,15 @@ Split out of the one-module engine at plan step **salary:C12** (ledger row
 basis module too until plan step salary:X-av-2, when its year-to-date replay
 began reading base pay off the basis it is handed rather than dividing for
 itself -- and, since plan step salary:R18-b, :mod:`._lines` -- whose
-:func:`~._lines.priced_gross` is the one producer of a payday's gross, which
-the wage cumulative here replays; :mod:`._lines` imports nothing of the
-package above :mod:`._breakdown`, so there is no cycle.
+:func:`~._lines.priced_gross` is the one producer of a payday's gross, and
+since plan step salary:S11-e whose :func:`~._lines.priced_kind` is the one
+per-kind pass, which prices the lines that leave its Social Security and
+Medicare wages for the paycheck and for each payday the wage cumulative
+here replays; :mod:`._lines` imports nothing of the package above
+:mod:`._breakdown`, so there is no cycle.
 """
 
+from app.enums import PaycheckLineKindEnum
 from app.services.pay_calendar import (
     PayCalendarError,
     paydays_in_month_through,
@@ -37,7 +41,8 @@ from app.services.pay_calendar import (
 )
 from app.utils.money import ZERO
 
-from ._lines import _LineContext, priced_gross
+from ._breakdown import pre_fica_total, waterfall_fica_wages
+from ._lines import _LineContext, priced_gross, priced_kind
 
 
 def _month_ordinal(calendar, payday):
@@ -142,7 +147,7 @@ def _is_third_paycheck(month_ordinal):
 
 
 def _get_cumulative_wages(basis, payday):
-    """Return the gross this owner has been paid this year before *payday*.
+    """Return the Social Security and Medicare wages paid this year before *payday*.
 
     What the FICA Social Security wage-base cap and the Medicare surtax
     threshold are measured against, for the paycheck priced and, since plan
@@ -185,6 +190,17 @@ def _get_cumulative_wages(basis, payday):
     paycheck reads, so an earlier payday under an earlier rhythm is summed
     at the pay it was paid at rather than at the latest rhythm's divisor.
 
+    **Less its all-payroll-taxes lines, since plan step salary:S11-e** (ruling
+    **plan#2639**; ledger row **SAL-566**): the wage base and the surtax
+    threshold count Social Security and Medicare wages, which a Section 125
+    premium leaves, so each earlier payday adds
+    :func:`~._breakdown.waterfall_fica_wages` of its gross and the
+    :func:`~._breakdown.pre_fica_total` of the all-payroll-taxes lines
+    :func:`~._lines.priced_kind` prices -- the rule, the total and the pass
+    the paycheck's own tax reads.  Until then the total summed the gross,
+    counting those lines toward the base, so it was reached early (one cause
+    of ledger row **SAL-595**, whose rest plan#2637 owns).
+
     Args:
         basis: The :class:`~app.services.payroll_basis.PayrollBasis` -- its
             salary, raise set and lines price each earlier paycheck and its
@@ -193,13 +209,17 @@ def _get_cumulative_wages(basis, payday):
             before it, and its year is the window.
 
     Returns:
-        The summed gross, ``ZERO`` for the year's first paycheck.
+        The summed wages, ``ZERO`` for the year's first paycheck.
     """
     cumulative = ZERO
 
     for earlier in paydays_in_year_before(basis.calendar, payday):
         base = basis.base_pay_on(earlier).per_paycheck
-        _taxable, gross = priced_gross(_LineContext(basis, earlier, base))
-        cumulative += gross
+        ctx = _LineContext(basis, earlier, base)
+        _taxable, gross = priced_gross(ctx)
+        cumulative += waterfall_fica_wages(
+            gross,
+            pre_fica_total(priced_kind(ctx, PaycheckLineKindEnum.PRE_FICA_DEDUCTION)),
+        )
 
     return cumulative

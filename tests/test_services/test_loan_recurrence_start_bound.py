@@ -514,7 +514,7 @@ class TestNoPaymentGeneratesBeforeTheLoan:
             "name": "Manual Mortgage",
             "from_account_id": str(checking.id),
             "to_account_id": str(acct.id),
-            "default_amount": "1200.00",
+            "amount": "1200.00",
             "category_id": str(category.id),
             **monthly,
         })
@@ -564,7 +564,7 @@ class TestNoPaymentGeneratesBeforeTheLoan:
             "name": "To Savings",
             "from_account_id": str(seed_user["account"].id),
             "to_account_id": str(savings.id),
-            "default_amount": "100.00",
+            "amount": "100.00",
             "category_id": str(category.id),
             **monthly,
         })
@@ -672,7 +672,7 @@ class TestTheCreateFormNeverAsksForADateItDiscards:
             "name": f"To {to_account.name}",
             "from_account_id": str(seed_user["account"].id),
             "to_account_id": str(to_account.id),
-            "default_amount": "1200.00",
+            "amount": "1200.00",
             "category_id": str(category.id),
             **monthly,
         })
@@ -952,7 +952,7 @@ class TestALoanCreateMayNotStopBeforeTheDerivedStart:
             "name": f"To {to_account.name} bounded",
             "from_account_id": str(seed_user["account"].id),
             "to_account_id": str(to_account.id),
-            "default_amount": "1200.00",
+            "amount": "1200.00",
             "category_id": str(category.id),
             "recurrence_end_mode": "on_date",
             "end_date": ends_on.isoformat(),

@@ -18,9 +18,11 @@
                          C4-a-5; it was the ORM row's accessor, which reads a
                          stored ``end_date`` no other screen reads.
      template_name    -- the edit's new name.
-     new_amount       -- the template's new amount, the framing sentence's
-                         figure: the definition's price did change, and that
-                         is what this page is asking about.  It is NOT the
+     new_amount       -- the price the edit stated, as of effective_from, the
+                         framing sentence's figure: the definition's price did
+                         change, and that is what this page is asking about.
+                         Not the NEWEST stated price (plan step X-bp), which a
+                         later scheduled price holds.  It is NOT the
                          "Use" side's figure -- "use" hands a row back to its
                          definition, which prices it on the row's OWN due
                          date, so the row need not land on this number at all.

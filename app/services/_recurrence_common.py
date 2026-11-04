@@ -805,7 +805,7 @@ def rows_claiming(selector, placements) -> list:
     these occurrences, or when it answers NO occurrence and holds one of the
     paychecks this pass would write into.  Pushing both arms into SQL is what
     keeps this a bounded read on the carry-forward hot path, where
-    ``can_generate_in_period`` runs once per envelope row being rolled forward
+    ``rows_to_generate_in_period`` runs once per envelope row being rolled forward
     -- an unfiltered "every row of this template" fetch would grow with the
     owner's whole schedule at every one of those calls.
 
@@ -858,9 +858,9 @@ def occurrences_to_write(selector, placements) -> list:
     genuinely about one table: constructing a ``Transaction`` versus routing a
     ``Transfer`` through ``transfer_service`` for shadow atomicity.
 
-    **Sharing it is what makes ``can_generate_in_period`` an exact mirror
+    **Sharing it is what makes ``rows_to_generate_in_period`` an exact mirror
     rather than a second opinion**, which plan step R4b paid for once already:
-    that predicate was a hand-written copy of the engine's gating and it
+    its predecessor hand-copied the engine's gating until then and it
     DISAGREED -- on a production clone it said the engine would generate in 32
     of 61 periods where the real answer was each month's first paycheck only,
     and because the carry-forward executor acts on the prediction and then

@@ -698,7 +698,7 @@ def occurrences(
     paths, ``period_population``'s batch boundary, the preview's display
     choice, and ``recurring_view``'s ``as_of``.  The paths that state NOTHING
     pass ``None`` since plan step R4b-1 -- the template create path,
-    ``generate_transfers_for_all_periods`` and ``can_generate_in_period`` --
+    ``generate_transfers_for_all_periods`` and ``rows_to_generate_in_period`` --
     because the two defaults ``resolve_generation_plan`` used to apply were
     already inside the anchor.  That is a per-call display / regeneration
     boundary rather than a property of the recurrence, and conflating the two

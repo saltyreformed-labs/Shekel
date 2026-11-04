@@ -588,11 +588,10 @@ class TestALegacyScheduleHole:
             category_id=seed_user["categories"]['Car Payment'].id,
             transaction_type_id=expense_type.id,
             name='Gap Bill',
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence, **rule_kwargs,

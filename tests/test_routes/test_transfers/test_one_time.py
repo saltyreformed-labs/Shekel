@@ -23,6 +23,7 @@ from app.models.amount_ownership import AmountOwnership
 from tests._test_helpers import transfer_amount
 
 from ._helpers import _create_savings_account
+from tests._definition_price import newest_price
 
 
 # ── One-Time Transfer Tests ────────────────────────────────────────────
@@ -69,7 +70,7 @@ class TestOneTimeTransfer:
 
             response = auth_client.post("/transfers", data={
                 "name": "Once Payment",
-                "default_amount": "500.00",
+                "amount": "500.00",
                 "from_account_id": seed_user["account"].id,
                 "to_account_id": savings.id,
                 "recurrence_unit": "",
@@ -124,7 +125,7 @@ class TestOneTimeTransfer:
 
             auth_client.post("/transfers", data={
                 "name": "Account Check",
-                "default_amount": "300.00",
+                "amount": "300.00",
                 "from_account_id": str(checking_id),
                 "to_account_id": str(savings.id),
                 "recurrence_unit": "",
@@ -172,7 +173,7 @@ class TestOneTimeTransfer:
 
             auth_client.post("/transfers", data={
                 "name": "Balance Test",
-                "default_amount": "250.00",
+                "amount": "250.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "recurrence_unit": "",
@@ -232,7 +233,7 @@ class TestOneTimeTransfer:
 
             response = auth_client.post("/transfers", data={
                 "name": "IDOR Attempt",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "category_id": str(seed_user["categories"]["Rent"].id),
@@ -271,7 +272,7 @@ class TestOneTimeTransfer:
 
             response = auth_client.post("/transfers", data={
                 "name": "No Pattern Key",
-                "default_amount": "425.00",
+                "amount": "425.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "start_period_id": str(seed_periods_today[1].id),
@@ -309,7 +310,7 @@ class TestOneTimeTransfer:
 
             response = auth_client.post("/transfers", data={
                 "name": "Nowhere To Land",
-                "default_amount": "75.00",
+                "amount": "75.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "category_id": str(seed_user["categories"]["Rent"].id),
@@ -335,7 +336,7 @@ class TestOneTimeTransfer:
         """POST the create form's default (non-repeating) selection."""
         auth_client.post("/transfers", data={
             "name": name,
-            "default_amount": amount,
+            "amount": amount,
             "from_account_id": str(seed_user["account"].id),
             "to_account_id": str(savings.id),
             "recurrence_unit": "",
@@ -390,7 +391,7 @@ class TestOneTimeTransfer:
 
             resp = auth_client.post(f"/transfers/{tmpl.id}", data={
                 "name": "Fixed Accounts",
-                "default_amount": "500.00",
+                "amount": "500.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(other.id),
                 "recurrence_unit": "",
@@ -463,7 +464,7 @@ class TestOneTimeTransfer:
 
             resp = auth_client.post(f"/transfers/{tmpl_id}", data={
                 "name": "Has A Record",
-                "default_amount": "500.00",
+                "amount": "500.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(other_id),
                 "recurrence_unit": "",
@@ -525,7 +526,7 @@ class TestOneTimeTransfer:
 
             resp = auth_client.post(f"/transfers/{tmpl.id}", data={
                 "name": "Repointable",
-                "default_amount": "500.00",
+                "amount": "500.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(other.id),
                 "recurrence_unit": "",
@@ -590,7 +591,7 @@ class TestOneTimeTransfer:
 
             auth_client.post(f"/transfers/{tmpl.id}", data={
                 "name": "Already Paid",
-                "default_amount": "900.00",
+                "amount": "900.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "recurrence_unit": "",
@@ -599,9 +600,9 @@ class TestOneTimeTransfer:
             }, follow_redirects=True)
 
             db.session.expire_all()
-            assert db.session.get(
+            assert newest_price(db.session.get(
                 TransferTemplate, tmpl.id,
-            ).default_amount == Decimal("900.00")
+            )) == Decimal("900.00")
             # The PLAN follows the definition ...
             assert transfer_amount(
                 db.session.get(Transfer, xfer_id),
@@ -641,7 +642,7 @@ class TestOneTimeTransfer:
 
             auth_client.post(f"/transfers/{tmpl.id}", data={
                 "name": "Hand Edited",
-                "default_amount": "900.00",
+                "amount": "900.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "recurrence_unit": "",
@@ -686,7 +687,7 @@ class TestOneTimeTransfer:
 
             auth_client.post("/transfers", data={
                 "name": "Rename Me",
-                "default_amount": "500.00",
+                "amount": "500.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "recurrence_unit": "",
@@ -706,7 +707,7 @@ class TestOneTimeTransfer:
 
             auth_client.post(f"/transfers/{tmpl.id}", data={
                 "name": "Renamed",
-                "default_amount": "650.00",
+                "amount": "650.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "recurrence_unit": "",
@@ -752,7 +753,8 @@ class TestOneTimeTransfer:
         lands in -- and ``create_transfer_template`` owner-checks it before
         anything is written.  The transaction-template twin of this case is
         gone with the surface: that schema no longer declares the field at all
-        (``test_templates.py::test_create_recurring_template_ignores_a_foreign_start_period``).
+        (``test_templates/test_the_recurrence_preview.py::TestPreviewRecurrence``'s
+        ``test_create_recurring_template_ignores_a_foreign_start_period``).
 
         This POST names a RECURRING cadence, which is the shape that matters:
         the recurrence has no use for the period, so the check must still run
@@ -763,7 +765,7 @@ class TestOneTimeTransfer:
             savings = _create_savings_account(seed_user)
             response = auth_client.post("/transfers", data={
                 "name": "Recurring IDOR Attempt",
-                "default_amount": "100.00",
+                "amount": "100.00",
                 "from_account_id": str(seed_user["account"].id),
                 "to_account_id": str(savings.id),
                 "category_id": str(seed_user["categories"]["Rent"].id),

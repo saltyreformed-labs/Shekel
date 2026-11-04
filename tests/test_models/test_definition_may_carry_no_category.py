@@ -67,7 +67,6 @@ def _category_less_definition(seed_user, name="POS DEBIT 4417"):
         category_id=None,
         transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
         name=name,
-        default_amount=Decimal("41.17"),
     )
 
 

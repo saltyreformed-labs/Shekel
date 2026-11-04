@@ -440,23 +440,21 @@ class TestDeductionCadenceForm(_TestDeductionCadenceFormMembers):
                 db.session.get(PaycheckLine, line.id).recurrence_rule,
             ) == before
 
-    def test_a_line_added_by_the_form_regenerates_the_profiles_paychecks(
+    def test_a_line_added_by_the_form_prices_into_todays_paycheck(
         self, app, auth_client, seed_user, seed_periods,
     ):
-        """The line AND its rule are on the profile when the regeneration prices it.
+        """The line AND its rule are saved, so today's paycheck carries the line.
 
-        The route flushes the line, authors the rule and THEN regenerates,
-        and the regeneration's one stored figure -- the paycheck template's
-        amount, re-stated to the CURRENT paycheck's net (today is frozen at
-        2026-03-20 in this module; the paycheck of Mar 13) -- is what grades
-        it: a regeneration that ran before the rule existed, or that priced
-        a ``profile.lines`` collection the new line never joined, would
-        have stated the net WITHOUT the line.  The second is the shape this
-        test measured on the first cut: pricing the paycheck BEFORE the add
-        loads the collection into the session the request shares, and a
-        line constructed by FK id never joins it -- the route constructs it
-        through the relationship now.  The rows themselves carry no figure
-        (balance:X-au-e), so the template's amount is the observable.
+        The CURRENT paycheck (today is frozen at 2026-03-20 in this module;
+        the paycheck of Mar 13), priced by a pass built after the add, takes
+        the line under its ceiling.  **It graded the regeneration's stored
+        figure until plan step X-bp**: the paycheck template's amount,
+        re-stated to that net, which a regeneration that ran before the rule
+        existed, or that priced a ``profile.lines`` collection the new line
+        never joined, stated WITHOUT the line (the second is the shape it
+        measured on its first cut, and the route constructs the line through
+        the relationship since).  X-bp deleted the re-statement, so the
+        regeneration prices nothing and the paycheck is priced live.
         """
         with app.app_context():
             profile = _create_profile(seed_user)
@@ -482,10 +480,6 @@ class TestDeductionCadenceForm(_TestDeductionCadenceFormMembers):
             # Mar 13 is March's first payday: taken under the ceiling of 2.
             assert priced.deductions.total_pre_tax == Decimal("100.00")
             assert priced.earnings.net_pay < net_without
-            assert profile.template.default_amount == priced.earnings.net_pay, (
-                "the regeneration stated a net that did not carry the line: "
-                "it ran before the rule was authored"
-            )
 
     def test_every_twelve_months_survives_an_amount_only_edit_unmoved(
         self, app, auth_client, seed_user, seed_periods,

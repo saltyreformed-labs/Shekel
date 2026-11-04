@@ -21,22 +21,19 @@ remembering it is a rule the next door forgets; one act every door calls is
 not.
 
 **The order, and why each step is where it is** -- the ruling's own: reverse,
-out of every match, delete.
+out of every match, delete; and then, by ruling **plan#2564** (developer
+2026-11-01), re-check the anchors.
 
-1. **Reverse its ledger** (``posting_service.reverse_purchase_postings_before_delete``),
+1. **Reverse its ledger** (``posting_service.reverse_leaving_movements``),
    while ``journal_entries.transaction_entry_id`` still links the legs -- it
    is ``ON DELETE SET NULL``, so reversing afterwards would strand them.
-   **A row door reverses every leaving row's whole family FIRST**, before it
-   calls this, ONE anchor re-check per row -- the delete verb over the row
-   and its CC-payback chain and the payback teardowns over the payback
-   (``posting_service.reverse_postings_before_delete``), the transfer delete
-   over the pair through its own reconcile -- so this finds nothing left
-   there: a movement already at zero emits nothing and re-checks nothing.
-   It is the reversal for the doors that take a movement off a row that
-   STAYS: a purchase, a payment a re-record withdraws.  Reversing a leaving
-   row's movements one by one here instead would re-check the anchor once
-   per movement, the churn ruling **R-BAL103** removed from the deploy
-   resync.
+   **Every movement leaving is reversed HERE, a row's and a transfer's
+   included** (ruling **plan#2564**): the row deletes, the payback
+   teardowns and the transfer delete hand this act every movement their rows
+   hold, and reverse nothing themselves.  Until plan task plan#2557 each
+   reversed its own family first, ONE anchor re-check per row, so this
+   found nothing left there -- and that re-check walked records that still
+   held every movement it was about to delete.
 2. **Out of every match** (:func:`app.services.match_withdrawal.take_out_of_matches`),
    while the movements still exist for their members to be read: an act left
    naming no app row is withdrawn with its freed lines logged, and one keeping
@@ -64,15 +61,30 @@ out of every match, delete.
    SQLAlchemy 2.0.54, delete-then-remove here and remove-then-delete by
    CC-5-4a-4's first review).  The collection itself is read before either,
    so a lazy load's autoflush cannot land the ``DELETE`` under it first.
-   **NOT flushed here**: a door that deletes the row
-   next deletes it through the ORM, whose unit of work orders the
-   movement's ``DELETE`` first; the transfer delete, whose shadows go by the
-   database's cascade, flushes first itself, because a shadow's ``DELETE``
-   landing before its movements' is now refused rather than cascaded; and
-   the status seam runs this inside callers' ``no_autoflush`` blocks (the
-   carry-forward batch), where a flush the old seam never made would write
-   an intermediate state early.  Step 2 flushes only when a match named a
-   movement.
+   **Flushed only when step 1 reversed something**, for step 4: a door that
+   deletes the row next deletes it through the ORM, whose unit of work
+   orders the movement's ``DELETE`` first either way; the transfer delete
+   flushes after this itself, because a transfer's ``DELETE`` landing before
+   its records' is refused rather than cascaded; and the status seam runs
+   this inside callers' ``no_autoflush`` blocks (the carry-forward batch),
+   where a flush the old seam never made would write an intermediate state
+   early.  That last is why the flush is conditional: a reversal's balanced
+   write has already flushed the session, so this flush writes nothing of
+   the caller's that step 1 had not, and a removal that reversed nothing
+   (an un-dated movement, nearly every seam withdrawal) flushes nothing.
+   Step 2 flushes only when a match named a movement.
+4. **Re-check the anchor corrections, ONCE per scenario, after the deletes**
+   (``posting_service.re_check_held_anchor_corrections``, ruling
+   **plan#2564**).  The re-check walks the RECORDS since plan task
+   plan#2525, so it is right only once they no longer hold the movements
+   leaving; asked inside step 1, it re-derived the corrections the delete
+   was about to stale and left them stale (a $200.00 Paid transfer deleted
+   left a Savings account opened at $0.00 reading -$200.00).  HERE, because
+   every movement leaves the books through this act and nothing else
+   (ruling **R-CC64**, step 3), and a hidden row holds none
+   (``ck_hidden_row_holds_nothing``), so the deletes are the one change to
+   the records a teardown makes: no door can forget the re-check, and one
+   per act is the batch shape ruling **R-BAL103** gave the deploy resync.
 
 **What it does NOT do** is anything about the ROW.  Whether the row goes, stays
 as a tombstone, re-derives its figure or re-books its payback is the door's;
@@ -95,8 +107,8 @@ the books by deleting it, or its row, through a door that calls this.
 
 Services-boundary discipline (``CLAUDE.md`` Architecture): ORM rows in, a
 frozen dataclass out, no Flask import.  It MUTATES and does NOT commit -- the
-caller owns the unit of work; it flushes only as step 1's ledger writes and
-step 2's match writes need.
+caller owns the unit of work; it flushes only as step 1's ledger writes, step
+2's match writes and step 4's walk need.
 """
 
 from __future__ import annotations
@@ -113,7 +125,9 @@ def remove_movements(
 ) -> MatchWithdrawal:
     """Take *movements* off the books: reversed, out of their matches, deleted.
 
-    The module docstring carries the order and why each step is where it is.
+    Then the anchor corrections their leaving staled are re-checked, once per
+    scenario.  The module docstring carries the order and why each step is
+    where it is.
     *press* is REQUIRED, a keyword with no default (ruling **R-CC81**): a
     door taking a payment or purchase off the books says what its page named
     before the press, or what lets it stay silent, and step 2 refuses at once
@@ -151,10 +165,11 @@ def remove_movements(
     Raises:
         ValidationError: When step 2 frees a line *press*'s page did not
             name.
+        PostingError: When step 4's re-check owes a correction on an account
+            with no linked ledger to book it on.
     """
     movements = list(movements)
-    for movement in movements:
-        posting_service.reverse_purchase_postings_before_delete(movement)
+    held = posting_service.reverse_leaving_movements(movements)
     withdrawn = match_withdrawal.take_out_of_matches(
         movements, owner_id, because=because, press=press,
         rows_leaving=rows_leaving,
@@ -169,4 +184,10 @@ def remove_movements(
         family = transfer_legs.parent_entries(movement)
         db.session.delete(movement)
         family.remove(movement)
+    if held:
+        # Step 4: the walk is SQL, and under a caller's ``no_autoflush`` it
+        # would still read the staged deletes' rows; step 1's balanced write
+        # has flushed the session already, so this writes only the act's own.
+        db.session.flush()
+        posting_service.re_check_held_anchor_corrections(held)
     return withdrawn

@@ -41,7 +41,6 @@ from app.enums import (
     PostingSourceEnum,
     StatusEnum,
 )
-from app.services.posting_reads import PostingError
 from sqlalchemy import text as sa_text
 
 from app.extensions import db as _db
@@ -57,16 +56,22 @@ from app.services import (
     account_service,
     anchor_service,
     balance_at,
+    ledger_lines,
     loan_posting_service,
     posting_service,
     status_seam,
+    transaction_service,
 )
 from app.services.anchor_service import AnchorTrueUpOutcome
 from app.services.pay_calendar import PayCalendarError
 from app.services.auth_service import hash_password
 from app.utils.dates import display_today, to_display_date
 from tests._test_helpers import (
+    add_entry,
     figure_source_columns,
+    generate_row_of,
+    make_expense_template,
+    typed,
     record_paydays_across_a_hole,
     rhythm_of,
     an_entered_day,
@@ -232,7 +237,7 @@ def _ledger_of_kind(account_id, kind):
 def _period_containing(user_id, day):
     """Return the id of the period a correction observed on ``day`` books in.
 
-    The derivation ``account_posting_service._anchors`` makes
+    The derivation ``ledger_lines._account_anchors`` makes
     (:meth:`app.services.pay_calendar.PayCalendar.filing_period`), asked here
     rather than read off the assertion row.  These tests compared a journal
     entry's ``pay_period_id`` against ``AccountAnchorHistory.pay_period_id``
@@ -357,7 +362,7 @@ class TestWalkAccountLedger:
         """
         with app.app_context():
             account = _make_account(seed_user, "500.00")
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 2
@@ -400,7 +405,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 2
@@ -435,8 +440,9 @@ class TestWalkAccountLedger:
         **It was parametrised over "an hour after" and "an hour before" until
         plan step X-f1, and the pair no longer describes two inputs.**  Its own
         docstring already recorded that the two fed byte-identical values --
-        ``_source_net_days`` aggregates a day's sources to one ``(day, net)``
-        pair before the partition runs -- and once the settle stores a DAY
+        ``_source_net_days`` aggregated a day's sources to one ``(day, net)``
+        pair before the partition ran (the walk reads the records since plan task
+        plan#2525) -- and once the settle stores a DAY
         rather than an instant the two arms are literally the same fixture.
         Collapsed rather than left implying a discrimination the code cannot
         make; the regression insurance it was kept for is now carried by the
@@ -470,7 +476,7 @@ class TestWalkAccountLedger:
             assert to_display_date(pinned) == _PINNED_OPENING_DAY
             assert settle.settled_on == _PINNED_OPENING_DAY
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 2
@@ -501,31 +507,53 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert corrections[1].ledger_before == Decimal("300.00")
 
-    def test_a_posted_movement_with_no_day_is_REFUSED_by_this_walk(
+    def test_a_movement_with_no_day_moves_no_correction_whatever_is_posted(
         self, app, db, seed_user,
     ):
-        """A posted movement whose day is nulled is refused by the posted walk.
+        """A dayless movement is worth nothing to the walk, its posted leg included.
 
-        Plan step **X-bi-3a**: a bill's settle mirrors its figure onto a
-        covering movement, posted at the movement's own day.  A movement
-        whose legs are posted and whose day is then nulled is the broken
-        state -- a leg posted for money never seen to move -- and the walk's
-        purchase arm refuses it by name rather than dating it by any
-        fallback (``_purchase_source_days``).
+        Plan task **plan#2525**: the walk reads the RECORDS, where it read the
+        account's STORED postings.  This is the state that tells the two apart
+        -- a covering movement (plan step **X-bi-3a**) whose legs are posted
+        and whose day is then nulled, a leg posted for money never seen to
+        move.  The postings walk REFUSED it by name (``_purchase_source_days``,
+        deleted with the task, raised ``PostingError``); the records value a
+        dayless movement at nothing -- it is in flight, ruling **R-BAL77** --
+        so no correction is built on the stray leg, and reversing the leg is
+        the source sync's, whose target for a dayless movement is empty.
+
+        Hand-computed, Savings opened at $500.00 with a $200.00 expense settled
+        on the 2024 bootstrap period's first day, before the origination
+        assertion:
+
+            dated     assertion ledger_before = 500.00 - 200.00 = 300.00
+            dayless   assertion ledger_before = 500.00          (in flight)
+
+        The linked ledger still holds the movement's ``-$200.00`` leg in the
+        second state, asserted below: a walk summing stored postings would
+        read 300.00 there (or refuse, as this one did), never 500.00.
         """
         with app.app_context():
             account = _make_account(seed_user, "500.00")
+            scenario_id = seed_user["scenario"].id
             txn = _settle_expense(
                 seed_user, account, "200.00",
                 seed_user["bootstrap_period"].start_date,
             )
             _db.session.commit()
             movement, = txn.covering_movements
+            dated = ledger_lines.walk_account_ledger(
+                account.id, scenario_id,
+            )
+            assert dated[1].ledger_before == Decimal("300.00"), (
+                "CONTROL: dated, the movement is inside the assertion"
+            )
+
             _db.session.query(TransactionEntry).filter(
                 TransactionEntry.id == movement.id,
             ).update(
@@ -533,11 +561,25 @@ class TestWalkAccountLedger:
                 synchronize_session=False,
             )
             _db.session.commit()
-            with pytest.raises(PostingError) as exc:
-                account_posting_service.walk_account_ledger(
-                    account.id, seed_user["scenario"].id,
+            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
+            stray_leg = (
+                _db.session.query(_db.func.sum(Posting.amount))
+                .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
+                .filter(
+                    Posting.ledger_account_id == linked.id,
+                    JournalEntry.scenario_id == scenario_id,
+                    JournalEntry.transaction_entry_id == movement.id,
                 )
-            assert str(movement.id) in str(exc.value)
+                .scalar()
+            )
+            assert stray_leg == Decimal("-200.00"), (
+                "PRECONDITION: the movement's leg is still posted"
+            )
+
+            dayless = ledger_lines.walk_account_ledger(
+                account.id, scenario_id,
+            )
+            assert dayless[1].ledger_before == Decimal("500.00")
 
     def test_a_transfers_clearing_link_is_read_off_THIS_accounts_leg(
         self, app, db, seed_user,
@@ -609,7 +651,7 @@ class TestWalkAccountLedger:
             _db.session.commit()
 
             checking_corrections = (
-                account_posting_service.walk_account_ledger(
+                ledger_lines.walk_account_ledger(
                     checking.id, seed_user["scenario"].id,
                 )
             )
@@ -618,13 +660,16 @@ class TestWalkAccountLedger:
     def test_a_purchases_clearing_link_is_read_off_the_PURCHASE(
         self, app, db, seed_user,
     ):
-        """The posted walk reads a purchase's own link, not its parent's.
+        """The account walk reads a purchase's own link, not its parent's.
 
-        Plan step X-f3b (ruling **R-FM**) gave the walk a FOURTH source loader,
-        and it is the only one whose rows carry a link the parent cannot supply:
-        a still-PROJECTED envelope has no ``reconciled_by_id`` of its own, so a
-        loader reading the parent would answer ``None`` for every purchase and
-        the record would decide nothing here while deciding on the read side.
+        Plan step X-f3b (ruling **R-FM**) gave the posted walk a FOURTH source
+        loader, the only one whose rows carried a link the parent cannot
+        supply: a still-PROJECTED envelope has no ``reconciled_by_id`` of its
+        own, so a loader reading the parent would have answered ``None`` for
+        every purchase and the record would have decided nothing here while
+        deciding on the read side.  The walk reads the records since plan task
+        plan#2525, each purchase as a movement of its own, and this pins that
+        it still reads the purchase's link.
 
         The shape that discriminates it is the one the reconcile panel writes --
         TWO assertions sharing a civil day, where the link picks between them
@@ -670,7 +715,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            control = account_posting_service.walk_account_ledger(
+            control = ledger_lines.walk_account_ledger(
                 checking.id, scenario_id,
             )
             assert [c.ledger_before for c in control[-2:]] == [
@@ -683,7 +728,7 @@ class TestWalkAccountLedger:
             entry.reconciled_by_id = governing.id
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 checking.id, scenario_id,
             )
             assert [c.ledger_before for c in corrections[-2:]] == [
@@ -722,7 +767,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 2
@@ -768,7 +813,7 @@ class TestWalkAccountLedger:
             )
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert len(corrections) == 3
@@ -848,7 +893,7 @@ class TestWalkAccountLedger:
             assert settle.settled_on == day
             assert to_display_date(trueup_at) == day
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             # THREE, not "at least three": a fourth would be an event no line
@@ -892,7 +937,7 @@ class TestWalkAccountLedger:
             _add_assertion(account, "480.00", settle_instant_on(origin + timedelta(days=2)))
             _db.session.commit()
 
-            corrections = account_posting_service.walk_account_ledger(
+            corrections = ledger_lines.walk_account_ledger(
                 account.id, seed_user["scenario"].id,
             )
             assert corrections[1].ledger_before == Decimal("500.00")
@@ -909,14 +954,14 @@ class TestWalkAccountLedger:
             loan = create_loan_account(seed_user, _db.session)
             _db.session.commit()
             with pytest.raises(ValueError, match="amortizing loan"):
-                account_posting_service.walk_account_ledger(
+                ledger_lines.walk_account_ledger(
                     loan.id, seed_user["scenario"].id,
                 )
 
     def test_missing_account_returns_empty(self, app, db, seed_user):
         """A nonexistent account id walks to no corrections."""
         with app.app_context():
-            assert account_posting_service.walk_account_ledger(
+            assert ledger_lines.walk_account_ledger(
                 10**9, seed_user["scenario"].id,
             ) == []
 
@@ -1361,6 +1406,107 @@ class TestSyncAccountAnchorPostings:
             assert ledger_net(
                 _db.session, equity.id, scenario_id,
             ) == Decimal("500.00")
+
+
+class TestASettleDayMoveAcrossAnAssertion:
+    """Finding **N-310** (plan#1310): what a settled row's day move owes the corrections.
+
+    The review that raised it could not say whether moving a settled row's day
+    re-derives the anchor corrections: the TRANSFER path calls
+    ``sync_account_anchor_postings`` for a settled-day edit and says why, and
+    the transaction path has no such call.  Since plan task plan#2525 the walk
+    reads the RECORDS, so what the corrections owe a moved day is what the
+    records now say -- by construction, which the walk's half of the case
+    shows.  The POSTED half is the door's: ``apply_requested_status``
+    reconciles through ``sync_transaction_postings``, whose tail
+    (``self_heal_anchor_corrections``) re-walks the account because the
+    reversal it emits is dated on the OLD day, inside the assertion.
+    """
+
+    def test_a_moved_day_moves_the_crossed_correction_only_both_ways(
+        self, app, db, seed_user,
+    ):
+        """A $150.00 settle moved past a true-up, then back, through the door.
+
+        Savings opened at $500.00 on day T-10 (its origination assertion), a
+        TRUE-UP asserting $350.00 on T-5, and a $150.00 expense settled on T-7,
+        between them.  Hand-computed, with T the owner's today:
+
+            settled T-7   origination ledger_before 500.00, delta   0.00
+                          true-up     ledger_before 500.00 - 150.00 = 350.00,
+                                      delta 0.00
+                          linked total 500.00 - 150.00 = 350.00
+            moved to T-3  origination ledger_before 500.00, delta   0.00
+                          true-up     ledger_before 500.00, delta -150.00
+                          (the expense now rides on top of it)
+                          linked total 500.00 - 150.00 - 150.00 = 200.00
+            back to T-7   as the first state
+
+        The origination's figure is the control: a move that crosses only the
+        true-up must leave every other correction where it was.  The return
+        trip is the second time the producer is asked, after it has posted a
+        correction it must now reverse.
+        """
+        with app.app_context():
+            today = display_today()
+            scenario_id = seed_user["scenario"].id
+            account = _make_account(
+                seed_user, "500.00", observed_on=today - timedelta(days=10),
+            )
+            txn = _settle_expense(
+                seed_user, account, "150.00", today - timedelta(days=7),
+            )
+            trueup_day = today - timedelta(days=5)
+            _add_assertion(account, "350.00", settle_instant_on(trueup_day))
+            account_posting_service.sync_account_anchor_postings(
+                account.id, scenario_id,
+            )
+            _db.session.commit()
+            trueup_period = _period_containing(seed_user["user"].id, trueup_day)
+
+            def read_both():
+                """Return each assertion's ledger_before from the walk, and the posted state."""
+                walked = ledger_lines.walk_account_ledger(
+                    account.id, scenario_id,
+                )
+                return (
+                    [correction.ledger_before for correction in walked[1:]],
+                    _correction_net_in_period(
+                        account.id, scenario_id,
+                        PostingSourceEnum.ACCOUNT_TRUEUP, trueup_period,
+                    ),
+                    posting_service.account_posting_total(
+                        account.id, scenario_id,
+                    ),
+                )
+
+            assert read_both() == (
+                [Decimal("500.00"), Decimal("350.00")],
+                Decimal("0.00"),
+                Decimal("350.00"),
+            ), "CONTROL: settled between the two assertions"
+
+            for moved_to, expected in (
+                (today - timedelta(days=3), (
+                    [Decimal("500.00"), Decimal("500.00")],
+                    Decimal("-150.00"),
+                    Decimal("200.00"),
+                )),
+                (today - timedelta(days=7), (
+                    [Decimal("500.00"), Decimal("350.00")],
+                    Decimal("0.00"),
+                    Decimal("350.00"),
+                )),
+            ):
+                transaction_service.apply_requested_status(
+                    txn, txn.status_id, settle_day=an_entered_day(moved_to),
+                )
+                _db.session.commit()
+                movement, = txn.covering_movements
+                assert movement.settled_on == moved_to, (
+                    "PRECONDITION: the door moved the movement's day"
+                )
+                assert read_both() == expected, f"moved to {moved_to}"
 
 
 class TestCorrectionPeriodAttribution:
@@ -1907,6 +2053,180 @@ class TestSyncEntryPoints:
             assert posting_service.account_posting_total(
                 account2.id, baseline2.id,
             ) == Decimal("100.00")
+
+
+class TestATeardownReChecksTheAnchorsAfterTheRecordsLeave:
+    """A movement leaving the books re-derives the corrections it staled.
+
+    Ruling **plan#2564** (plan task plan#2557): the one removal act reverses
+    each leaving movement, deletes it, then re-checks the anchor corrections
+    ONCE per scenario.  The re-check walks the RECORDS since plan task
+    plan#2525, and every door that took a movement off reversed it first and
+    re-checked while it still stood, so a deleted covered settle left its
+    true-up in place.  Each case below settles money on a day the account's
+    origination assertion covers (the opening absorbs it as a true-up), takes
+    it off through a different door, and reads the account back on its
+    $500.00 anchor.  The route twin, a Paid transfer into a Savings account
+    opened at $0.00, is
+    ``tests/test_routes/test_transfers/test_hard_delete.py``'s
+    ``test_a_deleted_paid_transfer_is_no_history_so_the_template_is_deleted``.
+    """
+
+    def test_a_deleted_row_leaves_the_account_on_its_anchor(
+        self, app, db, seed_user,
+    ):
+        """The row delete's hard arm: a covered $200.00 settle deleted.
+
+        Arithmetic: the $500.00 opening; a -$200.00 settle on the bootstrap
+        period's first day, before the origination assertion of $500.00, so
+        the true-up books 500 - (500 - 200) = +200.00 and the total reads
+        500.00.  The delete reverses the settle (+200.00) and, the records
+        now holding nothing, the true-up's target is 500 - 500 = 0: its delta
+        is -200.00 and the total reads 500.00 again.  Before the ruling the
+        true-up stayed at +200.00 and the total read 700.00.
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            account = _make_account(seed_user, "500.00")
+            txn = _settle_expense(
+                seed_user, account, "200.00",
+                seed_user["bootstrap_period"].start_date,
+            )
+            _db.session.commit()
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+
+            deletion = transaction_service.delete_transaction(
+                txn, seed_user["user"].id,
+            )
+            _db.session.commit()
+
+            assert deletion.soft is False
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
+            trueups = _correction_entries(
+                account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+            )
+            # +200.00 at the settle, -200.00 after the delete.
+            assert sorted(
+                _entry_legs(entry.id)[linked.id][0] for entry in trueups
+            ) == [Decimal("-200.00"), Decimal("200.00")]
+
+    def test_two_purchases_leaving_in_one_act_are_re_checked_once(
+        self, app, db, seed_user,
+    ):
+        """The row delete's soft arm: an envelope's two covered purchases go.
+
+        Arithmetic: the $500.00 opening; a recurring envelope on the account
+        holding two purchases the bank took on the bootstrap period's first
+        day, -$60.00 and -$40.00, before the origination assertion, so the
+        true-up books 500 - (500 - 100) = +100.00 and the total reads 500.00.
+        Deleting the envelope (a tombstone: its definition recurs) takes both
+        off in ONE act: +60.00 and +40.00 reversed, then ONE re-check, whose
+        true-up target is 0 -- one entry of -100.00, not one per purchase --
+        and the total reads 500.00.
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            account = _make_account(seed_user, "500.00")
+            day = seed_user["bootstrap_period"].start_date
+            envelope = generate_row_of(
+                make_expense_template(
+                    _db.session, seed_user, amount="300.00",
+                    name="Groceries", category_key="Groceries",
+                    is_envelope=True, account=account,
+                ),
+                seed_user["bootstrap_period"],
+            )
+            add_entry(
+                _db.session, seed_user, envelope, Decimal("60.00"), day,
+                settled_on=day,
+            )
+            add_entry(
+                _db.session, seed_user, envelope, Decimal("40.00"), day,
+                settled_on=day,
+            )
+            posting_service.sync_transaction_postings(envelope)
+            _db.session.commit()
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
+            before = {
+                entry.id for entry in _correction_entries(
+                    account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+                )
+            }
+
+            deletion = transaction_service.delete_transaction(
+                envelope, seed_user["user"].id,
+                purchases_named=frozenset(
+                    entry.id for entry in envelope.purchases
+                ),
+            )
+            _db.session.commit()
+
+            assert deletion.soft is True
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+            added = [
+                entry for entry in _correction_entries(
+                    account.id, scenario_id, PostingSourceEnum.ACCOUNT_TRUEUP,
+                )
+                if entry.id not in before
+            ]
+            assert [
+                _entry_legs(entry.id)[linked.id][0] for entry in added
+            ] == [Decimal("-100.00")]
+
+    def test_a_zero_record_on_a_row_that_stays_re_checks_too(
+        self, app, db, seed_user,
+    ):
+        """The status seam's withdrawal: a covered Paid row re-recorded at $0.00.
+
+        The row STAYS (Paid, at $0.00) and only its payment leaves, through
+        the same act.  Arithmetic: the $500.00 opening; a -$200.00 settle
+        before the origination assertion, true-up +200.00, total 500.00.
+        Re-recorded at $0.00, the seam withdraws the payment: +200.00
+        reversed, and the re-check's true-up target is 0, so -200.00 and the
+        total reads 500.00.
+        """
+        with app.app_context():
+            scenario_id = seed_user["scenario"].id
+            account = _make_account(seed_user, "500.00")
+            txn = _settle_expense(
+                seed_user, account, "200.00",
+                seed_user["bootstrap_period"].start_date,
+            )
+            _db.session.commit()
+
+            transaction_service.apply_requested_status(
+                txn, txn.status_id,
+                stated=transaction_service.StatedRecord(
+                    figure=typed(Decimal("0.00")),
+                ),
+            )
+            _db.session.commit()
+
+            assert not txn.covering_movements
+            assert posting_service.account_posting_total(
+                account.id, scenario_id,
+            ) == Decimal("500.00")
+            linked = _ledger_of_kind(account.id, LedgerAccountKindEnum.LINKED)
+            assert sum(
+                (
+                    _entry_legs(entry.id)[linked.id][0]
+                    for entry in _correction_entries(
+                        account.id, scenario_id,
+                        PostingSourceEnum.ACCOUNT_TRUEUP,
+                    )
+                ),
+                Decimal("0"),
+            ) == Decimal("0.00")
 
 
 class TestLedgerAgreesWithTheGridOnAssertionPeriods:

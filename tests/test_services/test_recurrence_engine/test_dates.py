@@ -175,11 +175,10 @@ class TestEndDateIntegration:
             category_id=seed_user["categories"]['Car Payment'].id,
             transaction_type_id=expense_type.id,
             name='Test Recurring End Date',
-            default_amount=Decimal("50.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("50.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence, **rule_kwargs,
@@ -286,11 +285,10 @@ class TestDueDateGeneration:
             category_id=seed_user["categories"]['Rent'].id,
             transaction_type_id=expense_type.id,
             name='Test Template',
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence, **rule_kwargs,
@@ -503,14 +501,13 @@ class TestDueDateGeneration:
             template = TransactionTemplate(
                 user_id=seed_user["user"].id,
                 name="No Rule Template",
-                default_amount=Decimal("100.00"),
                 category_id=seed_user["categories"]["Rent"].id,
                 transaction_type_id=expense_type.id,
                 account_id=seed_user["account"].id,
             )
             db.session.add(template)
             db.session.flush()
-            state_template_price(template)
+            state_template_price(template, Decimal("100.00"))
             db.session.refresh(template)
 
             created = recurrence_engine.generate_for_template(

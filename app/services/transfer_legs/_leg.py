@@ -278,7 +278,7 @@ class TransferLeg:  # pylint: disable=too-many-public-methods
 
         The ledger writer's header owner and transit account
         (``_posting_write.emit_typed_source_deltas``,
-        ``_posting_purchases._purchase_target``), read off the transfer, the
+        ``ledger_lines.purchase_target``), read off the transfer, the
         one home a transfer's owner has.
         """
         return self.transfer.user_id

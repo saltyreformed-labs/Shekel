@@ -57,7 +57,6 @@ class TestRecurrenceGeneration:
             category_id=seed_user["categories"]['Car Payment'].id,
             transaction_type_id=expense_type.id,
             name='Test Recurring',
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
@@ -66,7 +65,7 @@ class TestRecurrenceGeneration:
         # generated row stores no figure and is priced by this series on its
         # own due date -- a template without one generates rows
         # ``_stated_amount`` refuses.
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence, **rule_kwargs,
@@ -298,11 +297,10 @@ class TestGenerateForTemplate:
             category_id=seed_user["categories"]['Car Payment'].id,
             transaction_type_id=expense_type.id,
             name='Test Recurring',
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, cadence, **rule_kwargs,
@@ -722,11 +720,10 @@ class TestThePlacedPeriodsBound:
             category_id=seed_user["categories"]["Car Payment"].id,
             transaction_type_id=expense_type.id,
             name="Bounded Bill",
-            default_amount=Decimal("100.00"),
         )
         db.session.add(template)
         db.session.flush()
-        state_template_price(template)
+        state_template_price(template, Decimal("100.00"))
         # The definition first, then the cadence onto it (plan step R-F6).
         rule = make_cadence_rule(
             template, MONTHLY, starts_on=first_fifteenth,
@@ -798,7 +795,6 @@ class TestWhatAGeneratedRowsAmountOWNERSHIPIs:
                 category_id=next(iter(seed_user["categories"].values())).id,
                 transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.INCOME),
                 name="Paycheck",
-                default_amount=Decimal("1500.00"),
             )
             db.session.add(template)
             db.session.flush()
@@ -841,11 +837,10 @@ class TestWhatAGeneratedRowsAmountOWNERSHIPIs:
                 category_id=next(iter(seed_user["categories"].values())).id,
                 transaction_type_id=ref_cache.txn_type_id(TxnTypeEnum.EXPENSE),
                 name="Rent",
-                default_amount=Decimal("500.00"),
             )
             db.session.add(template)
             db.session.flush()
-            state_template_price(template)
+            state_template_price(template, Decimal("500.00"))
 
             row = self._generated_row(db, seed_user, seed_periods, template)
 

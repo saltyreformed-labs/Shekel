@@ -384,7 +384,7 @@ reproducible in a dev shell:
 |---|---|---|
 | `test_c19_credit_payback_unique.py` -- posted `entry_date` | `date.today()` | `display_today()` |
 | `test_c19_credit_payback_unique.py` -- period window | `date.today()` | `display_today()` |
-| `test_optimistic_locking_c18.py::_make_entry` | `date.today()` | `display_today()` |
+| `test_optimistic_locking_c18/_helpers.py::_make_entry` | `date.today()` | `display_today()` |
 | `test_account_anchor_invariant.py` -- signup period | `date.today()` | `display_today()` |
 
 **Do not "fix" this class by pinning CI's timezone.** That hides the coupling instead of removing

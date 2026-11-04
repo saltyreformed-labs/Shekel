@@ -131,9 +131,10 @@ from app.models.recurrence_rule import RecurrenceRule
 from app.services.balance_at import BalanceContext
 from app.services.obligations_aggregator import (
     RecurringTemplate,
+    TodaysPrice,
     monthly_or_none,
-    occurrence_amount,
     template_rule,
+    todays_price,
 )
 from app.services.pay_calendar import DerivedPeriod, PayCadence
 from app.services.recurrence import (
@@ -196,17 +197,18 @@ class RecurringRow:
             its section's committed monthly total, for the share bar; ``None``
             when the row does not contribute (non-recurring) or the section
             total is zero.
-        amount: What one occurrence commits, for the Amount column and its
-            sort key (:func:`~app.services.obligations_aggregator
-            .occurrence_amount`): a salary profile's definition shows TODAY's
-            priced paycheck -- before the first saved payday, that first
-            paycheck (**R-SAL79**) -- and every other definition its stored
-            amount (rulings **R-SAL71** and **R-SAL73**, plan step
-            salary:X-av-2).
-            The template read ``default_amount`` itself until then, and for a
-            salary definition that is a copy of the paycheck saved with the
-            salary, stale once a raise date passes.  ``None`` when the
-            definition states no amount.
+        amount: What one occurrence commits on the read pass's day, for the
+            Amount column and its sort key
+            (:func:`~app.services.obligations_aggregator.todays_price`, ruling
+            plan#2693): a salary profile's definition shows TODAY's priced
+            paycheck -- before the first saved payday, that first paycheck
+            (**R-SAL79**) -- a loan payment amount rule 4's figure, its
+            standing extra included, and every other definition its price
+            series as of the day.  The template read ``default_amount``
+            itself until plan step salary:X-av-2 (rulings **R-SAL71** and
+            **R-SAL73**), and this field read it for every definition but a
+            salary one until plan step X-bp: the NEWEST stated price, so a
+            scheduled rise showed before it took effect.
     """
 
     template: RecurringTemplate
@@ -214,7 +216,7 @@ class RecurringRow:
     recurrence: RecurrenceDescription | None
     next_date: date | None
     share_pct: Decimal | None
-    amount: Decimal | None
+    amount: Decimal
 
 
 @dataclass(frozen=True)
@@ -229,14 +231,22 @@ class ArchivedRow:
     unarchived or permanently deleted.
 
     Attributes:
-        template: The ORM template, carried whole for its name, kind, amount
-            and action links.
+        template: The ORM template, carried whole for its name, kind and
+            action links.
         recurrence: How it repeats, or ``None`` for a non-repeating
             definition.
+        amount: What one occurrence would commit on the read pass's day, by
+            the rule that prices its rows
+            (:func:`~app.services.obligations_aggregator.todays_price`,
+            ruling plan#2693) -- the same figure the active list's Amount
+            column shows, so a definition reads one price on either side of
+            an archive.  The drawer read the stored ``default_amount`` until
+            plan step X-bp.
     """
 
     template: RecurringTemplate
     recurrence: RecurrenceDescription | None
+    amount: Decimal
 
 
 @dataclass(frozen=True)
@@ -414,6 +424,9 @@ class _PreparedRow:
 
     Attributes:
         template: The ORM template.
+        price: What one occurrence commits on the pass's day, read ONCE for
+            both the row's Amount column and its monthly figure (plan step
+            X-bp: the price is a derivation now, not a column).
         monthly_full: Its unquantized monthly equivalent, or ``None`` when it
             is not a recurring commitment.
         rule: Its recurrence rule, or ``None`` when the definition does not
@@ -425,6 +438,7 @@ class _PreparedRow:
     """
 
     template: RecurringTemplate
+    price: TodaysPrice
     monthly_full: Decimal | None
     rule: RecurrenceRule | None
     reading: RuleReading | None
@@ -579,6 +593,13 @@ def _build_section(
     Raises:
         RecurrenceResolutionError: When a rule names a cadence this application
             cannot derive.
+        AmountUnresolvable: When the rule that prices a definition's rows has
+            no answer for the pass's day
+            (:func:`~app.services.obligations_aggregator.todays_price`): an
+            empty series on a definition that owns its price, a derive-mode
+            payment whose loan will not resolve.  The same fail-closed
+            disposition, for the same reason: a row the page cannot price is
+            not rendered beside the others with a figure nobody stated.
         BaselineMissingError: When a definition pays into a configured loan
             and *ctx* has no baseline scenario (ruling **R-R30**): the loan's
             stop is a fold over its forward plan, and a producer that needs a
@@ -604,12 +625,19 @@ def _build_section(
         # monthly figure is then derived from THAT reading, never from a
         # second resolution of the rule (plan step R7d-e).
         reading = None if rule is None else read_definition(template, ctx)
+        # Priced ONCE (plan step X-bp): the Amount column and the monthly
+        # figure are two questions about one price, and for a salary
+        # definition it is the paycheck the monthly figure converts from
+        # (rulings R-SAL71, R-SAL73), so the row cannot show one figure and
+        # total another.
+        price = todays_price(template, ctx)
         monthly_full = (
             None if reading is None
-            else monthly_or_none(template, reading, ctx)
+            else monthly_or_none(template, reading, price, ctx)
         )
         prepared.append(_PreparedRow(
             template=template,
+            price=price,
             monthly_full=monthly_full,
             rule=rule,
             reading=reading,
@@ -627,10 +655,7 @@ def _build_section(
                 else _next_occurrence(item.rule, item.reading, ctx.as_of)
             ),
             share_pct=_share_pct(item.monthly_full, section_total_full),
-            # The paycheck ``monthly_full`` was converted from, for a salary
-            # definition, read again off the pass's pricer, whose memo prices
-            # that payday once for both (rulings R-SAL71, R-SAL73).
-            amount=occurrence_amount(item.template, ctx),
+            amount=item.price.amount,
         )
         for item in prepared
     ]
@@ -722,6 +747,8 @@ def build_view(
         RecurrenceResolutionError: When a rule names a cadence this application
             cannot derive -- the fail-closed read :func:`_build_section`
             documents.
+        AmountUnresolvable: When a definition has no price on the pass's day;
+            see :func:`_build_section`.
         BaselineMissingError: When a loan payment is read for an owner with no
             baseline scenario; see :func:`_build_section`.
     """
@@ -758,8 +785,13 @@ def build_archived_rows(
     schedule, which a template cannot ask -- so the drawer gets a producer like
     the active sections have.
 
-    Only the description is resolved: an archived definition generates nothing,
-    so its occurrences are never walked.  It is the COMPOSED description
+    Only the description is resolved and the price read: an archived
+    definition generates nothing, so its occurrences are never walked.  The
+    price is :func:`~app.services.obligations_aggregator.todays_price`, the
+    one the active list's Amount column reads (ruling plan#2693, plan step
+    X-bp), so a definition shows one figure whichever side of an archive it
+    is on; it converts nothing, so it reads no cadence.  It is the COMPOSED
+    description
     (:func:`~app.services.recurring_definition.resolved_definition`, plan step
     R7d-d), through the same door the active list takes.  Until plan step
     R7d-g an archived loan payment's row here named the cache the
@@ -784,6 +816,9 @@ def build_archived_rows(
             cannot derive -- the same fail-closed disposition the active
             sections have carried since plan step R4a; see
             :func:`_build_section`.
+        AmountUnresolvable: When the rule that prices a definition's rows has
+            no answer for the pass's day
+            (:func:`~app.services.obligations_aggregator.todays_price`).
         BaselineMissingError: When an archived loan payment is read for an
             owner with no baseline scenario; see :func:`_build_section`.
     """
@@ -796,5 +831,6 @@ def build_archived_rows(
         rows.append(ArchivedRow(
             template=template,
             recurrence=described(rule, resolved_definition(template, ctx)),
+            amount=todays_price(template, ctx).amount,
         ))
     return tuple(rows)

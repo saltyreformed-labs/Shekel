@@ -25,6 +25,7 @@ from app.services.cash_ledger import (
     AmountBasis,
     amount_basis,
     resolve_transaction_amount,
+    stated_price,
 )
 from app.services.generation_schedule import GenerationSchedule
 from app.services.loan_ledger import LoanCalendars
@@ -421,7 +422,9 @@ class _TargetResolution:
         base: The destination row's pre-bump amount -- what the existing row's
             amount RESOLVES to for ``TOP_UP`` (plan step X-au-c2b; it was that
             row's ``estimated_amount`` COLUMN, which a derived row does not
-            carry), the template's ``default_amount`` for ``GENERATE``, and
+            carry), what the row the engine would generate there resolves to
+            for ``GENERATE`` (plan step X-bp; it was the template's
+            ``default_amount``, the NEWEST stated price), and
             ``Decimal("0")`` for ``CREATE`` (a fresh row starts empty and the
             caller's bump folds the leftover on top).  ``None`` for
             ``AMBIGUOUS``.
@@ -472,7 +475,7 @@ def _classify_leftover_target(source_txn, target_period, basis, schedule):
         A recurring definition in the same state takes ``CREATE`` because
         its fresh row is an override answering no occurrence.
 
-    Uses ``recurrence_engine.can_generate_in_period`` (a read-only
+    Uses ``recurrence_engine.rows_to_generate_in_period`` (a read-only
     predictor) rather than ``generate_for_template`` (which would create
     rows), so calling this never has a side effect.
 
@@ -516,16 +519,17 @@ def _classify_leftover_target(source_txn, target_period, basis, schedule):
     # ``source_txn.template`` is never ``None`` here: the context routes a row
     # into ``envelope_txns`` only when it names a DEFINITION (recurring or
     # rule-less since ruling R-BAL44; recurring alone from plan step
-    # balance:X-bi-7a).  ``can_generate_in_period`` answers False for a
+    # balance:X-bi-7a).  ``rows_to_generate_in_period`` answers nothing for a
     # rule-less definition (its plan resolves to nothing), so such a
     # definition never takes GENERATE.
-    if (not non_deleted
-            and recurrence_engine.can_generate_in_period(
-                source_txn.template, target_period.period_id,
-                basis.scenario_id, schedule=schedule,
-            )):
+    generated = () if non_deleted else recurrence_engine.rows_to_generate_in_period(
+        source_txn.template, target_period.period_id, basis.scenario_id,
+        schedule=schedule,
+    )
+    if generated:
         return _TargetResolution(
-            _TargetKind.GENERATE, base=source_txn.template.default_amount,
+            _TargetKind.GENERATE,
+            base=_generated_row_price(source_txn.template, generated[0]),
         )
     if not source_txn.recurs and non_deleted:
         return _TargetResolution(_TargetKind.CLOSED, row=non_deleted[0])
@@ -535,3 +539,49 @@ def _classify_leftover_target(source_txn, target_period, basis, schedule):
     ):
         return _TargetResolution(_TargetKind.CLOSED)
     return _TargetResolution(_TargetKind.CREATE, base=Decimal("0"))
+
+
+def _generated_row_price(template, fields) -> Decimal:
+    """Return what the row the engine generates for a rollover resolves to.
+
+    The ``GENERATE`` arm's base (plan step X-bp, plan#2700, an edge case
+    decided under ruling R-BAL207).  The mutating path bumps the FIRST row
+    ``generate_for_template`` creates in the target
+    (``_execute._resolve_or_create_target_row``) to its resolved amount plus
+    the leftover, and *fields* is what that row carries
+    (``recurrence_engine.rows_to_generate_in_period``, the engine's own
+    derivation, in creation order) -- so the preview's "before" and the
+    executed bump name the same figure.  It read the template's
+    ``default_amount`` until then, the NEWEST stated price: a price scheduled
+    after the target paycheck made the preview promise a figure the bump
+    never wrote.
+
+    **Rule 3, the rule that prices that row.**  A generated row declares its
+    definition (``DerivedRowFields.amount_ownership``), and the amount model
+    prices such a row by its definition's series on the row's own due date
+    unless a salary profile names the definition (``cash_ledger.amount_rule``).
+    A salary-linked definition is the one state where the two rules could
+    part, and both refuse there: ``stated_price`` refuses a definition that
+    does not own its amount (``AmountUnresolvable``), and rule 2 refuses an
+    EXPENSE row (``income_service.salary_net_for``), which an envelope's row
+    is because every door refuses an envelope to an income definition.
+
+    Args:
+        template: The envelope's recurring definition.
+        fields: The :class:`~app.services.recurrence_engine.DerivedRowFields`
+            of the row the engine would create first in the target.
+
+    Returns:
+        The definition's stated price on that row's due date.
+
+    Raises:
+        AmountUnresolvable: The definition does not own its amount, or its
+            series is empty (``cash_ledger.stated_price``).
+    """
+    return stated_price(
+        template, fields.due_date,
+        subject=(
+            f"The row TransactionTemplate {template.id} would generate, due "
+            f"{fields.due_date.isoformat()}"
+        ),
+    )

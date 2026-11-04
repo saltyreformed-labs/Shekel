@@ -692,6 +692,14 @@ history, and the next change to this section deletes it.
 
 #### The Valkey switch (plan#1183)
 
+**This ships as its own release**, cut at plan#1183's merge, or at plan#2718's where that step
+landed after it. plan#2718 deletes the source-build deploy, which cannot cross this switch, so it
+lands before or with this release. Nothing that needs a rehearsal kit rides with it: the kit's bench
+refuses a side with no `uv.lock`, which `main` is until this release. So when plan#1183 is queued,
+`dev` holds nothing unreleased that needs a kit. The switch has no rehearsal of its own (ruling
+plan#2473): CI's real-store test, the rehearsal measured below and `verify_prod_deploy.sh`'s
+`GET /login` answer for it.
+
 The release carrying plan#1183 moves the rate limiter's store from Redis to Valkey (R-BAL298). The
 image and the host files must move together, and only the steps below move them back:
 

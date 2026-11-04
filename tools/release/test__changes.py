@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from tools.quill.door import IgnoreFileError, NotVersions
+from tools.ci.scratch import run
+from tools.quill.door import IgnoreFileError, NotVersions, versions_waiting
 from tools.release._changes import Change, Changes, Moved, changes
 from tools.release.conftest import lock, pull_request
 
@@ -217,6 +218,190 @@ def test_a_pinning_file_changed_in_no_pin_moves_no_version(repo):
 def test_a_lock_no_pin_of_which_can_be_named_refuses_the_listing(repo):
     """A cut whose lock is no TOML names no version, never one moved as none."""
     base = pinning(repo)
+    cut = pull_request(repo, base, files={"uv.lock": "[[package\n"})
+    with pytest.raises(NotVersions):
+        changes(repo.root, base, cut)
+
+
+# -- the versions a release moves outside production -----------------------------------------
+
+UPDATES = ".github/workflows/updates.yml"
+DEV_COMPOSE = "docker-compose.dev.yml"
+TOKEN = (f"jobs:\n  mint:\n    steps:\n      - uses: actions/create-github-app-token@{_SHA}"
+         " # v3.0.0\n")
+TOKEN_MOVED = TOKEN.replace(f"{_SHA} # v3.0.0", f"{_LATER} # v3.1.0")
+TOKEN_MOVE = Moved(UPDATES, "actions/create-github-app-token",
+                   (f"{_SHA} # v3.0.0",), (f"{_LATER} # v3.1.0",))
+#: The publish workflow's and a compose file's one pin, each moved.
+PUBLISH_MOVED = PUBLISH.replace(f"{_SHA} # v7.0.1", f"{_LATER} # v7.1.0")
+COMPOSE_MOVED = COMPOSE.replace(f"18-alpine@sha256:{_OLD}", f"18.7-alpine@sha256:{_NEW}")
+
+
+def beside(repo, ignore=IGNORE):
+    """:func:`pinning`'s base with what pins versions outside production beside it: a workflow
+    only it runs, and the development compose file, read by the ignore file ``ignore``."""
+    return repo.commit("base", {".dockerignore": ignore, UPDATES: TOKEN, DEV_COMPOSE: COMPOSE},
+                       parents=(pinning(repo),))
+
+
+def _waiting(repo, main, dev):
+    """What the release-due issue lists with ``main`` and ``dev`` at those commits."""
+    run(repo.root, "update-ref", "refs/remotes/origin/main", main)
+    run(repo.root, "update-ref", "refs/remotes/origin/dev", dev)
+    return versions_waiting(repo.root)
+
+
+def test_a_move_only_outside_production_is_named_apart_with_nothing_of_production(repo):
+    """A week moving only the action that handles the update App's key: production's files
+    change in nothing, so the first list is empty and the move is in the second."""
+    base = beside(repo)
+    cut = pull_request(repo, base, files={UPDATES: TOKEN_MOVED})
+    assert changes(repo.root, base, cut) == Changes(
+        (), (Change(cut, MERGE, ()),), (), (TOKEN_MOVE,))
+
+
+def test_a_move_inside_production_is_named_under_it_alone(repo):
+    """A move in the lock and the publish workflow is production's: the second list is empty,
+    with other files that pin versions beside them unmoved."""
+    base = beside(repo)
+    cut = pull_request(repo, base, files={
+        "uv.lock": lock(("flask", "3.1.1"), ("zeta", "0.6.3")),
+        ".github/workflows/docker-publish.yml": PUBLISH_MOVED})
+    found = changes(repo.root, base, cut)
+    assert found.versions == (
+        Moved(".github/workflows/docker-publish.yml", "actions/checkout",
+              (f"{_SHA} # v7.0.1",), (f"{_LATER} # v7.1.0",)),
+        Moved("uv.lock", "flask", ("3.1.0",), ("3.1.1",)))
+    assert not found.outside
+
+
+def test_a_mixed_release_names_each_move_once_under_its_files_list(repo):
+    """One image at one version moving in the production compose file and the development one
+    is two moves, one in each list, and an action outside production beside them is in the
+    second alone: no move is named in both, and none is dropped."""
+    base = beside(repo)
+    cut = pull_request(repo, base, files={"docker-compose.yml": COMPOSE_MOVED,
+                                          DEV_COMPOSE: COMPOSE_MOVED,
+                                          UPDATES: TOKEN_MOVED})
+    moved = (f"18-alpine@sha256:{_OLD}",), (f"18.7-alpine@sha256:{_NEW}",)
+    found = changes(repo.root, base, cut)
+    assert found.versions == (Moved("docker-compose.yml", "postgres", *moved),)
+    assert found.outside == (TOKEN_MOVE, Moved(DEV_COMPOSE, "postgres", *moved))
+
+
+def test_a_release_moving_no_version_names_none_in_either_list(repo):
+    """A change to the app's code, and to what a pinning file outside production holds beyond
+    its pins: every file that pins versions is still as it was in what it pins."""
+    base = beside(repo)
+    cut = pull_request(repo, base, files={"app.py": "1", UPDATES: TOKEN + "# a comment\n"})
+    found = changes(repo.root, base, cut)
+    assert (found.net, found.versions, found.outside) == (("app.py",), (), ())
+
+
+def test_the_two_lists_together_are_what_the_release_due_issue_names(repo):
+    """The disagreement this list closes: the issue asks of the whole tree and the approval of
+    production and the rest, and over files that stay on their side of production's line they
+    name the same moves, none twice."""
+    base = beside(repo)
+    cut = pull_request(repo, base, files={"docker-compose.yml": COMPOSE_MOVED,
+                                          DEV_COMPOSE: COMPOSE_MOVED,
+                                          UPDATES: TOKEN_MOVED,
+                                          "uv.lock": lock(("flask", "3.1.1"), ("zeta", "0.6.3"))})
+    found = changes(repo.root, base, cut)
+    assert len(found.versions) == 2
+    assert len(found.outside) == 2
+    assert sorted(found.versions + found.outside, key=str) == sorted(_waiting(repo, base, cut),
+                                                                     key=str)
+
+
+def test_a_workflow_added_or_deleted_outside_production_is_named_against_none(repo):
+    """The first release brings the update workflow, and a later one may delete a workflow:
+    each pin of either is named in the second list, against none on the side with no such
+    file."""
+    base = repo.commit("base", {".dockerignore": IGNORE, "app.py": "0"})
+    added = pull_request(repo, base, files={UPDATES: TOKEN})
+    token = "actions/create-github-app-token", f"{_SHA} # v3.0.0"
+    assert changes(repo.root, base, added).outside == (
+        Moved(UPDATES, token[0], (), (token[1],)),)
+    deleted = pull_request(repo, added, files={UPDATES: None})
+    found = changes(repo.root, added, deleted)
+    assert found.outside == (Moved(UPDATES, token[0], (token[1],), ()),)
+    assert not found.net
+
+
+def test_an_action_the_publish_workflow_does_not_load_is_outside_production(repo):
+    """This repository's own action, loaded by no publish step, is no file production runs: a
+    move in it is in the second list."""
+    action = ".github/actions/other/action.yml"
+    base = repo.commit("base", {".dockerignore": IGNORE, "app.py": "0", action: TOKEN})
+    cut = pull_request(repo, base, files={action: TOKEN_MOVED})
+    found = changes(repo.root, base, cut)
+    assert found.outside == (Moved(action, TOKEN_MOVE.what, TOKEN_MOVE.old, TOKEN_MOVE.new),)
+    assert not found.versions
+
+
+#: The development compose file's pin at each side, as a crossing file names it.
+_DEV_OLD, _DEV_NEW = f"18-alpine@sha256:{_OLD}", f"18.7-alpine@sha256:{_NEW}"
+NO_COMPOSE = IGNORE.replace("docker-compose*\n", "")
+
+
+def test_a_file_entering_production_with_its_pin_moved_is_named_on_both_lists(repo):
+    """An ignore-file edit brings the development compose file into the image as its pin moves:
+    the version it leaves is named outside and the version it brings under production."""
+    base = beside(repo)
+    cut = pull_request(repo, base, files={".dockerignore": NO_COMPOSE,
+                                          DEV_COMPOSE: COMPOSE_MOVED})
+    found = changes(repo.root, base, cut)
+    assert found.versions == (Moved(DEV_COMPOSE, "postgres", (), (_DEV_NEW,)),)
+    assert found.outside == (Moved(DEV_COMPOSE, "postgres", (_DEV_OLD,), ()),)
+
+
+def test_a_file_leaving_production_with_its_pin_moved_is_named_on_both_lists(repo):
+    """The reverse: the cut still pins it, at a new version, so that version is named outside
+    and never only ``-> none``, which would read as removed and name the new version nowhere."""
+    base = beside(repo, NO_COMPOSE)
+    cut = pull_request(repo, base, files={".dockerignore": IGNORE, DEV_COMPOSE: COMPOSE_MOVED})
+    found = changes(repo.root, base, cut)
+    assert found.versions == (Moved(DEV_COMPOSE, "postgres", (_DEV_OLD,), ()),)
+    assert found.outside == (Moved(DEV_COMPOSE, "postgres", (), (_DEV_NEW,)),)
+    assert _waiting(repo, base, cut) == (
+        Moved(DEV_COMPOSE, "postgres", (_DEV_OLD,), (_DEV_NEW,)),)
+
+
+def test_an_action_the_publish_workflow_stops_loading_is_named_on_both_lists(repo):
+    """The shape of the repository's own actions, each loaded by more than one workflow: the
+    publish workflow stops loading one that another keeps, as its pin moves.  Which files are
+    production's is each commit's own workflow's to say, with no ignore-file edit."""
+    action = ".github/actions/build/action.yml"
+    loads = PUBLISH + "      - uses: ./.github/actions/build\n"
+    base = repo.commit("base", {".dockerignore": IGNORE, "app.py": "0", action: TOKEN,
+                                ".github/workflows/docker-publish.yml": loads})
+    cut = pull_request(repo, base, files={action: TOKEN_MOVED,
+                                          ".github/workflows/docker-publish.yml": PUBLISH})
+    found = changes(repo.root, base, cut)
+    assert found.versions == (Moved(action, TOKEN_MOVE.what, TOKEN_MOVE.old, ()),)
+    assert found.outside == (Moved(action, TOKEN_MOVE.what, (), TOKEN_MOVE.new),)
+
+
+def test_a_file_crossing_production_with_its_pin_unmoved_is_named_on_both_lists(repo):
+    """No version moved, so the issue names nothing; what production pins and what the rest pins
+    each still differ, and the approval says so, with the one version on both lines."""
+    base = beside(repo)
+    cut = pull_request(repo, base, files={".dockerignore": NO_COMPOSE})
+    found = changes(repo.root, base, cut)
+    assert found.versions == (Moved(DEV_COMPOSE, "postgres", (), (_DEV_OLD,)),)
+    assert found.outside == (Moved(DEV_COMPOSE, "postgres", (_DEV_OLD,), ()),)
+    assert not _waiting(repo, base, cut)
+
+
+def test_a_lock_outside_production_no_pin_of_which_can_be_named_refuses_the_listing(repo):
+    """A pin the listing cannot read refuses it wherever the file sits: never a release moving
+    no version outside production because the one that moved could not be read."""
+    base = repo.commit("base", {".dockerignore": IGNORE + "uv.lock\n", "app.py": "0",
+                                "uv.lock": lock(("flask", "3.1.0"))})
+    readable = pull_request(repo, base, files={"uv.lock": lock(("flask", "3.1.1"))})
+    assert changes(repo.root, base, readable).outside == (
+        Moved("uv.lock", "flask", ("3.1.0",), ("3.1.1",)),)
     cut = pull_request(repo, base, files={"uv.lock": "[[package\n"})
     with pytest.raises(NotVersions):
         changes(repo.root, base, cut)

@@ -237,7 +237,8 @@ First list what the release changes of what production runs: the cut's tree agai
 which is what step 6 releases, read as CI's write rule reads it (`tools/quill/_production.py`: the
 files the image holds, by Docker's own reading of `.dockerignore`, and the files outside it that
 build or run production), with each pull request's own part of it, apart each file no pull request's
-own change made, and each version it moves in the files that pin versions:
+own change made, and each version it moves in the files that pin versions, those outside production
+under a heading of their own:
 
 ```bash
 . ~/projects/shekel-handoffs/releases/current.sh && cd "${W:?}" || exit 1
@@ -262,12 +263,29 @@ Header "Release ok". The question lists, in plain words with each id after its w
   `git diff "$BASE" "$CUT" -- <file>` shows the release does to it: a merge's resolution kept or
   dropped a side there, and a hotfix a resync dropped leaves production. This skill keeps no list
   of production's files: its last one missed `docker-compose.yml`;
-- every version the release moves, each line under `production.txt`'s `versions moved` heading, in
+- every version the release moves, each line under both of `production.txt`'s version headings, in
   plain words: what moves (a package, an image, an action) from which version to which, `none` on a
-  side being one added or removed, and a digest or commit cut to its first 12 characters; past what
-  the question holds (the lock's first release adds every package), say how many of each file and
-  that `production.txt` lists each. A change moving pinned versions alone lands with no card (ruling
-  plan#2351), so no card above names it;
+  side being one added or removed there, and a digest or commit cut to its first 12 characters; past
+  what the question holds (the lock's first release adds every package), say how many of each file
+  and that `production.txt` lists each. A change moving pinned versions alone lands with no card
+  (ruling plan#2351), so no card above names it. Keep the two lists apart and say what each covers
+  (neither heading prints when it has none):
+  - `versions moved`: production's files, which the app runs or is built from;
+  - `versions moved outside production`: the other files `tools/quill/_versions.py` reads for pins
+    (ruling plan#2876). A move here changes no file the app runs. A line of a workflow or of this
+    repository's own action is what `main`'s own workflows run from the merge;
+    `docker-compose.dev.yml`'s is what a development checkout pulls.
+
+  A file under both headings crossed production's line in this release: say that it left or entered
+  what production runs, never that its version was removed.
+
+  A release whose verdict reads `0 of production's files change` still comes to this question,
+  whether or not it moves a version. Say in plain words that no file of this repository's that the
+  app runs changes, and that the run goes on as any other: the merge builds a new image and step 10
+  asks him to log out for its deploy, as step 1 refuses the next release until production's image
+  names `main`'s commit. Say too that the new image is not the old one byte for byte: each build
+  installs Debian's newest system packages (the `Dockerfile`'s `apt-get` lines: OpenSSL, the
+  database client and its library) and compiles the database driver against them;
 - each card the release carries that `docs/runbook.md` 2.6 holds host steps for, in plain words:
   what they change on the host, and that `shekel-deploy`'s own rollback cannot undo them; and each
   host copy in 2.5's table that `production.txt` lists and no such step copies, which the deploy

@@ -23,7 +23,16 @@ from tools.ci.scratch import commit as _commit
 from tools.ci.scratch import commit_files as _files
 from tools.ci.scratch import run as _run
 from tools.quill import _production
-from tools.quill._production import IgnoreFileError, changed, files, ignore_file, kept, rules
+from tools.quill._production import (
+    IgnoreFileError,
+    changed,
+    changed_outside,
+    files,
+    ignore_file,
+    kept,
+    outside,
+    rules,
+)
 
 
 def _kept(text, names):
@@ -412,3 +421,33 @@ def test_each_change_names_the_file_on_each_side(repo):
         "app/a.py": (held(base, "app/a.py"), held(edited, "app/a.py")),
         "app/gone.py": (held(base, "app/gone.py"), None),
         "app/new.py": (None, held(edited, "app/new.py"))}
+
+
+def test_each_file_is_production_s_or_outside_it_at_each_commit(repo):
+    """The two readings split a commit's tree: a file the ignore file leaves out is outside, one
+    it leaves in is production's, and none is both or neither."""
+    sha = _files(repo, _commit(repo, "root"), "base", {".dockerignore": "docs\n",
+                                                       "docs/a.md": "0", "app.py": "0"})
+    held, other = files(repo, sha), outside(repo, sha)
+    assert "docs/a.md" in other
+    assert "app.py" in held
+    assert not held.keys() & other.keys()
+    assert held.keys() | other.keys() == _production.tree(repo, sha).keys()
+
+
+def test_changed_outside_reads_each_side_at_its_own_commit(repo):
+    """An ignore-file edit brings ``docs/a.md`` into the image: it is outside at the old commit
+    and production's at the new, so each reading holds it against None on the side it does not.
+    ``docs/b.md``, edited and outside on both sides, is in the second reading alone."""
+    old = _files(repo, _commit(repo, "root"), "base", {".dockerignore": "docs\n",
+                                                       "docs/a.md": "0", "docs/b.md": "0"})
+    new = _files(repo, old, "edit", {".dockerignore": "docs/b.md\n", "docs/b.md": "1"})
+
+    def held(sha, path):
+        """``path``'s mode and object at ``sha``, as the readings name them."""
+        return f"100644 {_run(repo, 'rev-parse', f'{sha}:{path}')}"
+
+    assert changed(repo, old, new)["docs/a.md"] == (None, held(new, "docs/a.md"))
+    assert changed_outside(repo, old, new) == {
+        "docs/a.md": (held(old, "docs/a.md"), None),
+        "docs/b.md": (held(old, "docs/b.md"), held(new, "docs/b.md"))}

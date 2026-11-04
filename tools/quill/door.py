@@ -50,7 +50,9 @@ Each name, and who reads it:
   TOML, a link) as a listing made of nothing, and its tests; ``tools/update.due`` too, as a
   read it failed.  ``versions_waiting`` and ``Moved``, and ``fetch``, which it reads the two
   tips with first: ``tools/update.due``, for the versions a release of ``dev`` would move, which
-  it lists to the developer (ruling plan#2829).
+  it lists to the developer (ruling plan#2829).  ``changed_outside``:
+  ``tools/release._changes`` again, for the files ``versions_moved`` reads for the versions a
+  release moves outside production (``_production``; ruling plan#2876).
 - ``lock_change``, ``LockChange``, ``lock_unversioned``, ``ceiling``, ``Move`` and ``LOCK``:
   ``tools/update.refresh``, the Monday lock refresh, which holds back each package whose
   move needs a card (a move across a major, below its next major; a move changing what the
@@ -103,7 +105,7 @@ from tools.quill._git import (
     merged_tree,
 )
 from tools.quill._github import CredentialsError, GitHub, GitHubError, paged, reading
-from tools.quill._production import IgnoreFileError, changed
+from tools.quill._production import IgnoreFileError, changed, changed_outside
 from tools.quill._state import (
     OWNED,
     SHIPPABLE,
@@ -157,6 +159,7 @@ __all__ = [
     "card_of",
     "ceiling",
     "changed",
+    "changed_outside",
     "changes",
     "described",
     "dropped",

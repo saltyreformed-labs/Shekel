@@ -59,6 +59,11 @@ after a ``#`` that follows whitespace inside quotes, which it reads as a comment
 ``docker-compose.dev.yml``, ``docker-compose.build.yml``, ``cloudflared/config.yml`` (a
 template the host's copy differs from) and the other workflows, which only test, are none
 of production's, nor an action that only they load or a file that only they name.
+
+**What production does not hold** (:func:`outside`, :func:`changed_outside`) is the rest of
+each commit's tree, each side read at its own commit, so a file that crosses the line between
+two commits is production's on one side and outside on the other.  The release tool lists the
+versions moved there apart (``tools/release/_changes.py``, ruling plan#2876).
 """
 from __future__ import annotations
 
@@ -370,3 +375,28 @@ def changed(root: Path, old: str, new: str) -> dict[str, tuple[str | None, str |
         tools.ci.gitcmd.GitError: when git cannot read either.
     """
     return differences(files(root, old), files(root, new))
+
+
+def outside(root: Path, commit: str) -> dict[str, str]:
+    """Every file ``commit``'s tree holds that is not production's at ``commit`` (:func:`tree`,
+    :func:`files`), by its path, each its mode and object.
+
+    Raises:
+        IgnoreFileError: as :func:`rules` raises it.
+        tools.ci.gitcmd.GitError: when git cannot read ``commit``, or a file it reads.
+    """
+    production = files(root, commit)
+    return {path: what for path, what in tree(root, commit).items() if path not in production}
+
+
+def changed_outside(root: Path, old: str, new: str,
+                    ) -> dict[str, tuple[str | None, str | None]]:
+    """Each path, in order, where the files outside production differ between ``old`` and
+    ``new`` (:func:`outside`, :func:`differences`), as :func:`changed` gives those inside it.  A
+    file that crosses the line is in both, each against None on the side it does not hold it.
+
+    Raises:
+        IgnoreFileError: as :func:`rules` raises it, for either.
+        tools.ci.gitcmd.GitError: when git cannot read either.
+    """
+    return differences(outside(root, old), outside(root, new))

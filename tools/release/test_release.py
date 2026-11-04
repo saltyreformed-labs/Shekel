@@ -211,6 +211,72 @@ def test_production_lists_each_version_the_release_moves(repo, capsys):
         "none (exit 0)"]
 
 
+_WORKFLOW = ".github/workflows/updates.yml"
+#: How the listing names the one move these tests make of the workflow.
+_MOVED = f"  {_WORKFLOW}: acme/mint {'1' * 40} # v3.0.0 -> {'2' * 40} # v3.1.0"
+
+
+def _uses(digit: str, version: str) -> str:
+    """A workflow's text pinning one action at commit ``digit`` x40, at release ``version``."""
+    return f"jobs:\n  a:\n    steps:\n      - uses: acme/mint@{digit * 40} # v{version}\n"
+
+
+def _beside(repo):
+    """A base whose ignore file leaves out a workflow pinning an action: that file pins a version
+    outside production, beside the lock, which is in it."""
+    return repo.commit("base", {".dockerignore": ".dockerignore\n.github\n", "app.py": "0",
+                                "uv.lock": lock(("flask", "3.1.0")),
+                                _WORKFLOW: _uses("1", "3.0.0")})
+
+
+def test_production_lists_a_move_only_outside_production_under_its_own_heading(repo, capsys):
+    """A week moving only a workflow's action: no pull request changes production's files and
+    no ``versions moved`` heading prints, and the move is named under the second heading,
+    above the verdict saying nothing production runs changes."""
+    base = _beside(repo)
+    cut = pull_request(repo, base, files={_WORKFLOW: _uses("2", "3.1.0")})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {cut}",
+        "versions moved outside production (1), from the base's to the cut's:",
+        _MOVED,
+        "verdict: 0 of production's files change; 0 of 1 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
+def test_production_lists_a_mixed_release_under_each_heading_once(repo, capsys):
+    """A move in each: production's under the first heading, the workflow's under the second,
+    neither line in both, and the counts their own."""
+    base = _beside(repo)
+    cut = pull_request(repo, base, files={"uv.lock": lock(("flask", "3.1.1")),
+                                          _WORKFLOW: _uses("2", "3.1.0")})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {cut}",
+        f"{cut} 'Merge pull request' changes 1 of production's files:",
+        "  uv.lock",
+        "versions moved (1), from the base's to the cut's:",
+        "  uv.lock: flask 3.1.0 -> 3.1.1",
+        "versions moved outside production (1), from the base's to the cut's:",
+        _MOVED,
+        "verdict: 1 of production's files change; 1 of 1 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
+def test_production_prints_neither_version_heading_when_none_moves(repo, capsys):
+    """Files that pin versions on both sides, none moved: a change to the app's code alone
+    names no version under either heading."""
+    base = _beside(repo)
+    cut = pull_request(repo, base, files={"app.py": "1"})
+    assert release.main(["production", "--base", base, "--cut", cut], root=repo.root) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"release production: base {base}, cut {cut}",
+        f"{cut} 'Merge pull request' changes 1 of production's files:",
+        "  app.py",
+        "verdict: 1 of production's files change; 1 of 1 pull requests change them, 0 by "
+        "none (exit 0)"]
+
+
 def test_production_exits_2_and_lists_nothing_on_a_lock_no_pin_of_which_can_be_named(
         repo, capsys):
     """A cut whose lock is no TOML is an error, never a release moving no version."""

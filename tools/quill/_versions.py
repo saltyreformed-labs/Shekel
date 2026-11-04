@@ -91,10 +91,11 @@ repository's own) pins none this module reads.
 
 **What a release would move** (:func:`versions_moved`, each :class:`Moved`) is what each side
 pins, compared over the files that differ.  The release tool's listing of a release's versions
-reads production's (``tools/release/_changes.py``), and :func:`versions_waiting`, the question
-the daily job's mention of a release (``tools/update/due.py``) and ``quill next`` both ask of
-``dev`` against ``main`` (rulings plan#2829, plan#2876), reads the whole tree: ``main`` runs its
-own copy of every workflow, so a version only they pin still waits for a release.  A pinning
+reads production's and, apart, the rest of each tree (``tools/release/_changes.py``), and
+:func:`versions_waiting`, the question the daily job's mention of a release
+(``tools/update/due.py``) and ``quill next`` both ask of ``dev`` against ``main`` (rulings
+plan#2829, plan#2876), reads the whole tree: ``main`` runs its own copy of every workflow, so a
+version only they pin still waits for a release.  A pinning
 file one side holds no copy of pins every version against none there, so while ``main`` holds
 no lock (until the first release of plan#1183) every locked package reads as waiting: true, as
 a release would bring them all, and never a list anyone is shown, since the job reaches

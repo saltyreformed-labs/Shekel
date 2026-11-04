@@ -7159,11 +7159,8 @@ def first_occurrence_on_day(user_id, fires_on_day, fires_in_month=None):
     # symbols at top level (its collection-time-safety convention).
     # pylint: disable=import-outside-toplevel
     from app.services.pay_calendar import calendar_for
-    from app.services.recurrence._months import (
-        MONTHS_PER_YEAR,
-        clamped_day,
-        month_ordinal,
-    )
+    from app.services.recurrence._months import clamped_day, month_ordinal
+    from app.utils.dates import MONTHS_PER_YEAR
 
     opening = calendar_for(user_id).opening_bound()
     ordinal = month_ordinal(opening)

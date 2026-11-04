@@ -58,18 +58,16 @@ any later adjustment filed there too.  With the period in the key the stale
 key reverses to zero and the real one posts fresh, which is the same lifecycle
 every other reconcile in this ledger already gets.
 
-*The truncating paths are NOT the mechanism, and two drafts of this note got
-their reason wrong.*  Only a period APPEARING under an existing correction
-reaches this.  A period being DELETED does not, but not for the reason first
-written here (*"they dispose the correction with the period"*): a truncate is
-REFUSED before it deletes anything, because
-``pay_period_admin._period_ids_with_unbalanced_ledger`` hard-locks any
-to-delete period whose per-ledger nets are non-zero -- which is what a posted
-correction makes them.  ``reset_pay_periods`` is the one path that really does
-wipe and re-derive, and it pairs itself with a full resync
+*The truncating paths are NOT the mechanism.*  Only a period APPEARING under an
+existing correction reaches this.  A period being DELETED takes the stored
+correction with it through the ``pay_period_id`` cascade, so no stale key is
+left to reverse and the next reconcile posts the target fresh.
+``reset_pay_periods`` wipes and pairs itself with a full resync
 (``resync_user_loan_postings`` / ``resync_user_account_anchor_postings``);
-``truncate_pay_periods`` and ``regenerate_pay_periods`` run no resync at all,
-which is only safe BECAUSE they refuse.
+``truncate_pay_periods`` and ``regenerate_pay_periods`` run none, so since
+ruling plan#2782 deleted the lock that refused them the stored copy is short
+until that next re-sync, while the worked-out line files by its day on
+whichever paycheck stands.
 
 **Where the period comes from is the SAME on both halves, and this paragraph
 used to say it was not.**  A loan anchor's period is DERIVED from its date

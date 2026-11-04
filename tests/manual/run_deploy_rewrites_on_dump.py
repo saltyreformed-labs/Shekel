@@ -32,8 +32,10 @@ each side's own ``verify_balance_baseline.py`` (every figure the seam answers, f
 of every kind), run from that side's worktree on that side's deployed copy with the clock
 pinned at the deploys' instant (``run_pinned.py``), the pair compared byte for byte
 (:data:`_BASELINE`).  It is the project's exhaustive "did anything move" check over the seam.
-The two statements are not run: they read the stored ledger alone, through code this leaf
-changed in comments only, so with every table row-identical (graded above) they cannot part.
+The two statements are not run: at the leaf this run was built for they read the stored ledger
+alone, through code that leaf changed in comments only, so with every table row-identical
+(graded above) they could not part.  Since plan task plan#2771 they read the worked-out ledger,
+and ``run_statements_on_dump.py`` compares them (plan task plan#2773).
 Not compared: a route's render, the figures outside the seam and the statements (a loan's
 payment history and escrow breakdown among them), and every go-forward writer door this leaf
 changed (the removal act, the held reconcile, the moved-off re-check), which only the suite
@@ -90,12 +92,9 @@ the baseline pair is byte-identical; 1 the journals, a table or the baseline pai
 difference a figure this leaf moves, a question for the developer), a harness run found
 something UNEXPLAINED, or a probe found the read's count moved between two reads; 2 nothing was
 measured: the bench, a deploy, the gate, a control, a harness run, a probe or a baseline failed,
-or the run itself could not write or read a file, each named.
+or the run itself could not write or read a file, each named, or it crashed (``exit_status``).
 """
 
-import argparse
-import difflib
-import os
 import pathlib
 import secrets
 import sys
@@ -108,20 +107,21 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
 # above; there is no import order that resolves ``tools`` before it runs.
 # pylint: disable=wrong-import-position
+from tests.manual import exit_status
+
+exit_status.arm(__name__)
+
 import psycopg
 
-from tests.manual.run_pinned import IMPORTED
+from tests.manual import _dump_runs
 from tools.rehearsal import bench, rows
-from tools.rehearsal.sides import deploy, pinned_instant, side_environment
+from tools.rehearsal.sides import deploy, pinned_instant
 
 #: The harness and the probe, as paths inside head's worktree.
 _HARNESS = pathlib.Path("tests") / "manual" / "verify_worked_out_ledger.py"
 _PROBE = pathlib.Path("tests") / "manual" / "measure_worked_out_read.py"
-#: Each side's balance baseline, as a path inside its worktree, and the runner
-#: that pins its clock, from THIS tree (it imports nothing of either side;
-#: its ``IMPORTED`` is how it names the ``app`` its script imported).
+#: Each side's balance baseline, as a path inside its worktree.
 _BASELINE = pathlib.Path("tests") / "manual" / "verify_balance_baseline.py"
-_PINNED = pathlib.Path(__file__).resolve().parent / "run_pinned.py"
 #: The copies the run reads, beside the bench's two states: base's step run
 #: again (the noise control), the dump as it was, and head's copy with a cent
 #: planted (the planted control).
@@ -497,7 +497,7 @@ def _measured(script, url, name, measuring):
         measuring: The run's :data:`Measuring`.
     """
     head, out = measuring.head, measuring.out
-    environment = _side_environment(head, url, measuring.secret)
+    environment = _dump_runs.side_environment(head, url, measuring.secret)
     with (out / f"{name}_log.txt").open("w", encoding="utf-8") as log:
         done = bench.run(
             [sys.executable, str(head.worktree / script),
@@ -509,34 +509,13 @@ def _measured(script, url, name, measuring):
     return done.returncode
 
 
-def _side_environment(state, url, secret):
-    """Return the environment a measurement from *state*'s tree on *url* runs in.
-
-    The kit's (``sides.side_environment``), but THIS interpreter's directory
-    first on ``PATH``: the suite's helpers need ``pytest``, which a side's
-    production pins do not hold.
-    """
-    return {
-        **side_environment(state, url, secret),
-        "PATH": os.pathsep.join((str(pathlib.Path(sys.executable).parent),
-                                 "/usr/bin", "/bin")),
-    }
-
-
-def _read_its_own(stderr, state):
-    """Whether :data:`_PINNED`'s run imported ``app`` from *state*'s worktree."""
-    named = [line.removeprefix(IMPORTED) for line in stderr.splitlines()
-             if line.startswith(IMPORTED)]
-    return len(named) == 1 and pathlib.Path(named[0]).is_relative_to(
-        state.worktree)
-
-
 def _baseline(sides, measuring, say):
     """Run each side's own balance baseline on its copy and compare the pair; the status.
 
-    Each runs from its side's worktree, under :data:`_PINNED` at the deploys'
-    instant, into ``<out>/verify_balance_baseline_<side>.json``; a pair that
-    parts is written as a unified diff to ``<out>/verify_balance_baseline.diff``.
+    Each runs from its side's worktree at the deploys' instant
+    (:func:`tests.manual._dump_runs.run_pinned_on`), into
+    ``<out>/verify_balance_baseline_<side>.json``; a pair that parts is
+    written as a unified diff to ``<out>/verify_balance_baseline.diff``.
 
     Returns:
         2 when a side's run exited non-zero or read another tree's ``app``,
@@ -546,29 +525,21 @@ def _baseline(sides, measuring, say):
     written = {}
     for state in sides:
         written[state.name] = out / f"{stem}_{state.name}.json"
-        with (out / f"{stem}_{state.name}_log.txt").open(
-                "w", encoding="utf-8") as log:
-            done = bench.run(
-                [sys.executable, str(_PINNED), measuring.moment.isoformat(),
-                 str(state.worktree / _BASELINE), str(written[state.name])],
-                _side_environment(state, state.url, measuring.secret),
-                stdout=log, cwd=state.worktree,
-            )
-            log.write(done.stderr)
-        if done.returncode or not _read_its_own(done.stderr, state):
-            say(f"!  {state.name}'s {_BASELINE.name} exited "
-                f"{done.returncode}, or read another tree's app: "
-                f"{done.stderr.strip().splitlines()[-1:]}")
+        wrong = _dump_runs.run_pinned_on(
+            state.worktree / _BASELINE, state, state.url,
+            _dump_runs.Pinned(measuring.moment, measuring.secret),
+            written[state.name],
+        )
+        if wrong is not None:
+            say(f"!  {state.name}'s {_BASELINE.name} {wrong}")
             return 2
-    texts = [written[state.name].read_text(encoding="utf-8")
-             for state in sides]
-    parted = list(difflib.unified_diff(
-        texts[0].splitlines(), texts[1].splitlines(),
-        *(state.name for state in sides), lineterm=""))
+    parted = _dump_runs.parted(*(written[state.name] for state in sides),
+                               [state.name for state in sides])
     if parted:
-        _write(out / f"{stem}.diff", parted)
+        _dump_runs.write_lines(out / f"{stem}.diff", parted)
     say(f"{_BASELINE.name}, {sides[0].name}'s against {sides[1].name}'s: "
-        + (f"{len(texts[0])} bytes each, byte-identical" if not parted
+        + (f"{written[sides[0].name].stat().st_size} bytes each, "
+           "byte-identical" if not parted
            else f"PARTS, {len(parted)} diff line(s) in {stem}.diff"))
     return 1 if parted else 0
 
@@ -577,18 +548,18 @@ def _measure_copies(urls, measuring, say):
     """Run head's harness on base's and head's copies, and its probe on every copy.
 
     Returns:
-        The highest exit status among them.
+        The highest exit status among them (``exit_status.measurement_status``).
     """
     status = 0
     for label in ("base", "head"):
         measured = _measured(_HARNESS, urls[label], f"harness_on_{label}",
                              measuring)
         say(f"head's harness on {label}'s copy: exit {measured}")
-        status = max(status, measured)
+        status = max(status, exit_status.measurement_status(measured))
     for label, url in urls.items():
         measured = _measured(_PROBE, url, f"read_{label}", measuring)
         say(f"head's probe on the {label} copy: exit {measured}")
-        status = max(status, measured)
+        status = max(status, exit_status.measurement_status(measured))
     return status
 
 
@@ -602,11 +573,6 @@ def _deploy_all(copies, measuring, say):
             + ("exit 0" if refused is None else f"REFUSED, {refused}"))
         deployed = deployed and refused is None
     return deployed
-
-
-def _write(path, lines):
-    """Write *lines* to *path*, one per line."""
-    path.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
 
 
 def _controls(made, journals, copies, measuring, say):
@@ -662,29 +628,16 @@ def _planted_fired(made, journals, head, say):
     return fired
 
 
-def run(dump, out, base_revision, head_revision):
+def _run(dump, out, revisions, say):
     """Bring the bench up on *dump*, deploy, measure into *out*; the exit status.
+
+    Its report lines go to *say* (:func:`tests.manual._dump_runs.main`).
 
     Raises:
         bench.BenchError: The bench could not be made, its teardown left
             something, or a side probe could not be run.
         psycopg.Error: A copy could not be read or cloned.
     """
-    lines = []
-
-    def say(*said):
-        """Record *said* for ``run.txt`` and print it."""
-        lines.extend(said)
-        print("\n".join(said))
-
-    try:
-        return _run(dump, out, (base_revision, head_revision), say)
-    finally:
-        _write(out / "run.txt", lines)
-
-
-def _run(dump, out, revisions, say):
-    """:func:`run`'s body, its report lines going to *say*."""
     with bench.Bench(dump, dict(zip(("base", "head"), revisions))) as made:
         base, head = made.made["base"], made.made["head"]
         again = bench.State(base.name, base.commit, base.worktree, _AGAIN,
@@ -706,7 +659,7 @@ def _run(dump, out, revisions, say):
             return 2
         status = _report_journals(out, journals, say)
         moved = rows.compare(base.url, head.url, measuring.line)
-        _write(out / "tables.txt", rows.report(moved, "base", "head"))
+        _dump_runs.write_lines(out / "tables.txt", rows.report(moved, "base", "head"))
         say(f"every table, base's copy against head's ({len(moved)} row(s) "
             "part, each in tables.txt):", *rows.summary(moved, "base", "head"))
         status = max(status, 1 if moved else 0,
@@ -721,13 +674,13 @@ def _report_journals(out, journals, say):
         1 when base's and head's journals part, else 0.
     """
     rewrites = diff(journals["base"], journals["head"])
-    _write(out / "rewrites.txt",
+    _dump_runs.write_lines(out / "rewrites.txt",
            [parted_text(each, "base", "head") for each in rewrites])
     say("== what head's deploy rewrites, against base's (each key in "
         "rewrites.txt):", *summary(rewrites))
     for label in ("base", "head"):
         appended = diff(journals["undeployed"], journals[label])
-        _write(out / f"appended_{label}.txt",
+        _dump_runs.write_lines(out / f"appended_{label}.txt",
                [parted_text(each, "undeployed", label) for each in appended])
         say(f"-- what {label}'s deploy appended to the dump as it was (each "
             f"key in appended_{label}.txt):", *summary(appended))
@@ -736,25 +689,8 @@ def _report_journals(out, journals, say):
 
 def main(argv=None):
     """Parse the arguments and run; the exit status."""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dump", type=pathlib.Path, required=True,
-                        help="a pg_dump -Fc archive of production")
-    parser.add_argument("--out", type=pathlib.Path, required=True,
-                        help="a directory to create for the run's files")
-    parser.add_argument("--base", required=True,
-                        help="the commit the card was claimed from")
-    parser.add_argument("--head", default="HEAD",
-                        help="the commit to measure (default HEAD)")
-    args = parser.parse_args(argv)
-    args.out.mkdir(parents=True)
-    try:
-        status = run(args.dump, args.out, args.base, args.head)
-    except (bench.BenchError, OSError, psycopg.Error) as exc:
-        # A failure of the run is never exit 1, which says figures part.
-        print(f"[deploy rewrites] {exc}", file=sys.stderr)
-        return 2
-    print(f"[deploy rewrites] exit {status}; the run's files are in {args.out}")
-    return status
+    return _dump_runs.main(_run, "deploy rewrites", __doc__.splitlines()[0],
+                           argv)
 
 
 if __name__ == "__main__":

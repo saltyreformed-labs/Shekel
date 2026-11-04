@@ -38,7 +38,8 @@ folder.  Outside pytest's collection, like its ``verify_*`` siblings.
 
 Exit status: 0 every owner was measured and each read's count held across its reads; 1 a count
 moved between two reads of the same records (named in the report); 2 the read or the calendar
-refused an owner (named in the report), so that owner was not measured.
+refused an owner (named in the report), so that owner was not measured, or the run could not
+start or crashed part way (its traceback on standard error, ``exit_status``).
 """
 
 import argparse
@@ -48,6 +49,7 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime
 from decimal import Decimal
+from functools import partial
 
 # Python puts the SCRIPT's own directory on ``sys.path``, not the working
 # directory, so ``app`` and ``tests`` are not importable without this; the
@@ -57,6 +59,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
 # above; there is no import order that resolves ``app`` before it runs.
 # pylint: disable=wrong-import-position
+from tests.manual import exit_status
+
+exit_status.arm(__name__)
+
 import time_machine
 
 from app import create_app, ref_cache
@@ -73,8 +79,7 @@ from tests._worked_out_excuses import (
     filed_in,
     nets,
 )
-from tests._worked_out_ledger import read_ledger
-from tests._worked_out_statements import key_text, money
+from tests._worked_out_ledger import key_text, money, read_ledger
 
 # Each table a statement names, after FROM or JOIN, schema-qualified as the
 # app's models are.
@@ -89,7 +94,9 @@ def _read_statements(owner_id, scenario_id):
     """Run the read once from an expired session; its lines and statement texts."""
     db.session.expire_all()
     lines, statements = capture_sql_statements(
-        lambda: worked_out_lines(owner_id, scenario_id),
+        lambda: worked_out_lines(
+            owner_id, scenario_id, partial(calendar_for, owner_id),
+        ),
     )
     return lines, [text for text, _params in statements]
 

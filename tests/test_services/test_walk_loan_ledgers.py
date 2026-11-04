@@ -1,9 +1,10 @@
 """Tests for the owner's loan load (plan task plan#2649, ruling plan#2623).
 
 :func:`app.services.loan_ledger.walk_loan_ledgers` walks many loans at once:
-each loan's terms are the ``loan_params`` its account row carries, and every
-kind of record the walks fold -- the standing statements, the rate history,
-the escrow lines and the settled payments -- is loaded ONCE for all of them
+each loan's terms are loaded by the loans' ids in one statement
+(:func:`app.services.loan_loaders.load_loans_params`), and every kind of
+record the walks fold -- the standing statements, the rate history, the escrow
+lines and the settled payments -- is loaded ONCE for all of them
 (:func:`app.services.loan_loaders.load_loan_records`).  What these cases pin:
 
 * **each walk is its loan's own**: equal to
@@ -149,7 +150,9 @@ class TestEachWalkIsItsLoansOwn:
             )
             scenario_id = seed_user["scenario"].id
 
-            walks = walk_loan_ledgers([first, second, unconfigured], scenario_id)
+            walks = walk_loan_ledgers(
+                [first.id, second.id, unconfigured.id], scenario_id,
+            )
 
             assert walks == {
                 loan.id: walk_loan_ledger(loan.id, scenario_id)
@@ -255,7 +258,7 @@ class TestTheReadBooksEachLoanOffItsOwnWalk:
             scenario_id = seed_user["scenario"].id
             calendar = calendar_for(owner_id)
 
-            lines = worked_out_lines(owner_id, scenario_id)
+            lines = worked_out_lines(owner_id, scenario_id, lambda: calendar)
 
             expected = {
                 loan.id: _target_lines(loan_correction_targets(

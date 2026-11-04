@@ -1,7 +1,7 @@
 """What the card's findings require of the worked-out read: a source that left the settled set has
 no line (N-162), a moved settle day is read where it lands (N-310), a transfer's effect has one
-rule (N-164), and a refund, a card purchase, an over-posted envelope and a purchase beside a stated
-close book what moved (N-318).
+rule (N-164), a refund, a card purchase, an over-posted envelope and a purchase beside a stated
+close book what moved (N-318), and a loan's terms written by id mid-session are read (plan#2691).
 """
 
 from datetime import date, timedelta
@@ -10,14 +10,27 @@ from decimal import Decimal
 import pytest
 
 from app import ref_cache
-from app.enums import LedgerAccountClassEnum, PostingKindEnum, PostingSourceEnum, StatusEnum
+from app.enums import (
+    LedgerAccountClassEnum,
+    LedgerAccountKindEnum,
+    PostingKindEnum,
+    PostingSourceEnum,
+    StatusEnum,
+)
 from app.exceptions import ValidationError
 from app.extensions import db as _db
 from app.models.account import AccountAnchorHistory
+from app.models.loan_params import LoanParams
 from app.models.transaction_entry import TransactionEntry
 from app.services import credit_workflow, entry_service, transaction_service, transfer_service
 from app.services.cash_ledger import settled_cash_facts
-from app.services.ledger_lines import LedgerLine, category_key, linked_key, transit_key
+from app.services.ledger_lines import (
+    LedgerLine,
+    category_key,
+    linked_key,
+    loan_key,
+    transit_key,
+)
 from app.services.settle_day import record_settle_day
 from app.services.transfer_legs import transfer_family_movements
 from tests._test_helpers import (
@@ -26,6 +39,7 @@ from tests._test_helpers import (
     create_settled_transfer,
     figure_source_columns,
     generate_row_of,
+    insert_origination_rate,
     make_expense_template,
     typed,
 )
@@ -542,3 +556,55 @@ class TestRefundsCardsAndOverPostedEnvelopes:
                 if line.key == linked_key(checking)
                 and line.source_kind_id == _source(PostingSourceEnum.PURCHASE)
             ) == [Decimal("-367.62"), Decimal("-163.95")]
+
+
+class TestALoansTermsAreReadAsTheyStand:
+    """Finding plan#2691: terms written by id after the read loaded the account are read."""
+
+    def test_terms_written_by_account_id_in_the_session_are_walked(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """A $20,000.00 loan's terms written by id mid-session book its opening.
+
+        The loan setup route's shape (``routes/loan/params.py``): the account
+        exists, its terms are then written as ``LoanParams(account_id=...)``
+        in the session that already loaded the account.  The first read
+        loads it with ``Account.loan_params`` as ``None``, and a loaded
+        relationship is not re-read by a later query; while the read took a
+        loan's terms off it, the second read walked the loan to nothing and
+        dropped its ``-20,000.00`` opening and ``+20,000.00`` opening equity.
+        Read by the loans' ids, the second read is the one a fresh session
+        reads after the commit, the opening in it.
+        """
+        with app.app_context():
+            loan = create_account_of_type(
+                seed_user, _db.session, "Auto Loan", "Van Loan",
+            )
+            _db.session.commit()
+            assert _read(seed_user) is not None
+            assert loan.loan_params is None
+            params = LoanParams(
+                account_id=loan.id, original_principal=Decimal("20000.00"),
+                term_months=60, origination_date=date(2026, 1, 15),
+                payment_day=15,
+            )
+            _db.session.add(params)
+            _db.session.flush()
+            insert_origination_rate(params, Decimal("0.05000"))
+            _db.session.flush()
+
+            in_the_session = _read(seed_user)
+            _db.session.commit()
+            _db.session.expire_all()
+            fresh = _read(seed_user)
+
+            assert in_the_session == fresh
+            opening = [
+                (line.key, line.amount) for line in fresh
+                if line.source_kind_id == _source(PostingSourceEnum.LOAN_OPENING)
+            ]
+            assert opening == [
+                (linked_key(loan), Decimal("-20000.00")),
+                (loan_key(LedgerAccountKindEnum.EQUITY_OPENING, loan.id),
+                 Decimal("20000.00")),
+            ]

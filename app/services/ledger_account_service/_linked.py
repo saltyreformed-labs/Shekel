@@ -3,13 +3,13 @@
 Build-Order Step 2's half of the chart of accounts.  Pairs every
 ``budget.accounts`` row with exactly one ``linked``-kind ledger account so that
 later steps' postings have an account to land in, and re-derives that row's
-accounting class when an UNPOSTED account is re-typed across the
-Asset/Liability boundary.
+accounting class when an account is re-typed across the Asset/Liability
+boundary.
 
 The class rule itself is the worked-out chart's
 (:func:`app.services.ledger_lines.linked_ledger_class`, plan task plan#2523),
-which the account-type boundary guards (:mod:`app.utils.account_validation`)
-also apply to a PROPOSED category; this module stamps a row's class from it.
+which the account-type door (:mod:`app.utils.account_validation`) also applies
+to a PROPOSED category; this module stamps a row's class from it.
 
 Flask-isolated and commit-free: plain data in, ORM objects out; the caller owns
 the transaction boundary.
@@ -24,7 +24,6 @@ from app.models.account import Account
 from app.models.ledger_account import LedgerAccount
 from app.models.ref import AccountType
 from app.services.ledger_lines import linked_key, linked_ledger_class
-from app.utils import archive_helpers
 
 logger = logging.getLogger(__name__)
 
@@ -122,18 +121,15 @@ def create_ledger_account_for_account(account: Account) -> LedgerAccount:
 
 
 def sync_linked_ledger_class(account: Account) -> None:
-    """Re-derive an UNPOSTED account's linked-ledger class after a type change.
+    """Re-derive an account's linked-ledger class after a type change.
 
     The class is snapshotted at pairing time
     (:func:`create_ledger_account_for_account`), so a later account-type
     change that crosses the Asset/Liability boundary leaves the linked row
-    mis-classed -- future postings would land in the wrong balance-sheet
-    section.  Re-snapshotting is exactly as safe as the original pairing
-    while the ledger is empty, so this brings the class back in step for
-    the boundary crossings the C6 validation guards ALLOW (an account with
-    no postings); crossings on a posted account are refused upstream
-    (:mod:`app.utils.account_validation`), because posted legs already
-    carry the old class's economic meaning.
+    mis-classed.  This brings it back in step, history or not: a re-typed
+    account's lines are classed by its current type (ruling plan#2785), as the
+    worked-out chart classes them when it reads them
+    (:func:`app.services.ledger_lines.linked_key`).
 
     A no-op when the account has no linked row (nothing paired yet) or the
     derived class already matches.  Flushes; does not commit.
@@ -141,14 +137,6 @@ def sync_linked_ledger_class(account: Account) -> None:
     Args:
         account: The re-typed :class:`~app.models.account.Account` (its
             ``account_type`` relationship reflects the NEW type).
-
-    Raises:
-        ValueError: If the class would change on an account that HAS
-            ledger postings.  The validation guards make that unreachable
-            from the routes, so reaching it means a caller skipped the
-            guard -- and silently re-classing posted history would
-            mis-state the economic meaning of every prior leg, so it
-            fails loudly instead.
     """
     linked = find_linked_ledger_account(account.id)
     if linked is None:
@@ -164,12 +152,6 @@ def sync_linked_ledger_class(account: Account) -> None:
     )
     if linked.class_id == new_class_id:
         return
-    if archive_helpers.account_has_ledger_postings(account.id):
-        raise ValueError(
-            f"cannot re-class linked ledger account {linked.id}: account "
-            f"id={account.id} has ledger postings, and the validation "
-            f"guards must refuse a class-crossing type change first"
-        )
     linked.class_id = new_class_id
     db.session.flush()
     logger.info(

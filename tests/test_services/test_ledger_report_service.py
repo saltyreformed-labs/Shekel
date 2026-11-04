@@ -8,12 +8,14 @@ so every reconciled figure was posted exactly as production posts it.  The
 expected numbers are the test author's arithmetic over the seeded anchors and
 amounts, owing nothing to the reader under test.
 
-Scope is the reporting SERVICE (``ledger_report_service``): the reader-contract
-attribution rule (whole-source, display-timezone paid date; pay-period windows
-by ``pay_period_id``), the natural-balance presentation and derived retained
-earnings, the two-part balance-sheet tie-out, the kind-branched display labels,
-and the residue drop.  The exhaustive cross-year / loan / articulation oracle is
-Commit 13's ``test_posting_ledger_statements.py``.
+Scope is the reporting SERVICE (``ledger_report_service``), which reads the
+ledger worked out from the records since plan task plan#2771: the reader
+contract over its lines (whole bookings, by their civil day; pay-period
+windows by the paycheck a line is filed in), the natural-balance presentation
+and derived retained earnings, the two-part balance-sheet tie-out, the labels
+of the worked-out chart, and that a planted stored entry moves no statement.
+The exhaustive cross-year / loan / articulation oracle is Commit 13's
+``tests/test_integration/test_posting_ledger_statements/`` package.
 
 Balance-sheet "full position" cases use a far-future ``as_of`` so every posted
 source (including the seed Checking's opening, whose ``entry_date`` is its
@@ -28,12 +30,11 @@ import sqlalchemy as sa
 
 from app.exceptions import BaselineMissingError
 
-from app.enums import PostingKindEnum, PostingSourceEnum
+from app.enums import LedgerAccountKindEnum, PostingKindEnum, PostingSourceEnum
 from app.models.category import Category
 from app.models.pay_period import PayPeriod
 from app.services import ledger_report_service
 from app.services.ledger_report_service import StatementWindow
-from app.services.ledger_report_service._attribution import dated_account_nets
 from app.services.pay_calendar import calendar_for
 from app.utils.dates import pay_period_range_label
 from tests._test_helpers import (
@@ -41,6 +42,7 @@ from tests._test_helpers import (
     create_settled_cash_transaction,
     create_settled_transfer,
     last_covered_day,
+    ledger_account_of_kind,
     linked_ledger_account,
     make_balanced_entry,
 )
@@ -168,7 +170,7 @@ class TestIncomeStatementCalendarWindow:
         Groceries $300 paid 2026-03-15 and Rent $800 paid 2026-04-15.  The
         March 2026 month window totals 300.00 (April excluded); the 2026 year
         window totals 1100.00 (both), proving the calendar bound filters the
-        attribution core by date.
+        lines by their day.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -209,14 +211,14 @@ class TestIncomeStatementCalendarWindow:
 
 
 class TestIncomeStatementPayPeriodWindow:
-    """A pay-period window filters ``pay_period_id`` directly, not by date."""
+    """A pay-period window takes the lines filed in its paycheck, not by date."""
 
     def test_period_window_scopes_to_its_period(self, app, db, seed_user):
         """Groceries $100 in the bootstrap period, Rent $200 in a later period.
 
         The bootstrap-period window sees only the $100 Groceries expense; the
         second period's window sees only the $200 Rent -- the pay-period bound
-        keys on the entry's ``pay_period_id``, independent of any paid date.
+        keys on the paycheck a line is filed in, independent of any paid date.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -238,13 +240,15 @@ class TestIncomeStatementPayPeriodWindow:
             db.session.commit()
 
             first = ledger_report_service.compute_income_statement(
-                user_id, calendar_for(user_id), StatementWindow("pay_period", period_id=period1.id),
+                user_id, calendar_for(user_id),
+                StatementWindow("pay_period", period_id=period1.id),
             )
             assert _labels(first.expense.lines) == ["Family: Groceries"]
             assert first.expense.total == Decimal("100.00")
 
             second = ledger_report_service.compute_income_statement(
-                user_id, calendar_for(user_id), StatementWindow("pay_period", period_id=period2.id),
+                user_id, calendar_for(user_id),
+                StatementWindow("pay_period", period_id=period2.id),
             )
             assert _labels(second.expense.lines) == ["Home: Rent"]
             assert second.expense.total == Decimal("200.00")
@@ -263,11 +267,11 @@ class TestDisplayTimezoneAttribution:
     ):
         """An 8:05pm-ET Dec-31 settle lands in that year, not the UTC Jan-1.
 
-        A $500 Groceries expense paid at 2027-01-01 01:05 UTC -- 2026-12-31
-        8:05pm Eastern (EST, UTC-5).  The display-timezone rule (L9) attributes
-        it to Dec 31, so the 2026 year window includes it (expense 500.00) and
-        the 2027 window is empty, even though the STORED ``entry_date`` is the
-        Jan-1 the instant becomes in UTC.
+        A $500 Groceries expense paid 2026-12-31 8:05pm Eastern (EST,
+        UTC-5), the instant 2027-01-01 01:05 UTC.  Its ``settled_on`` is the
+        owner's civil day, Dec 31 (the L9 rule), and its lines are dated by
+        it, so the 2026 year window includes it (expense 500.00) and the
+        2027 window is empty.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -377,7 +381,8 @@ class TestIncomeStatementValidationAndEmpty:
         with app.app_context():
             with pytest.raises(ValueError, match="Invalid window_type"):
                 ledger_report_service.compute_income_statement(
-                    seed_user["user"].id, calendar_for(seed_user["user"].id), StatementWindow("weekly"),
+                    seed_user["user"].id, calendar_for(seed_user["user"].id),
+                    StatementWindow("weekly"),
                 )
 
     def test_pay_period_without_period_id_raises(self, app, seed_user):
@@ -385,7 +390,8 @@ class TestIncomeStatementValidationAndEmpty:
         with app.app_context():
             with pytest.raises(ValueError, match="period_id is required"):
                 ledger_report_service.compute_income_statement(
-                    seed_user["user"].id, calendar_for(seed_user["user"].id), StatementWindow("pay_period"),
+                    seed_user["user"].id, calendar_for(seed_user["user"].id),
+                    StatementWindow("pay_period"),
                 )
 
     def test_month_without_month_raises(self, app, seed_user):
@@ -393,7 +399,8 @@ class TestIncomeStatementValidationAndEmpty:
         with app.app_context():
             with pytest.raises(ValueError, match="month and year"):
                 ledger_report_service.compute_income_statement(
-                    seed_user["user"].id, calendar_for(seed_user["user"].id), StatementWindow("month", year=2026),
+                    seed_user["user"].id, calendar_for(seed_user["user"].id),
+                    StatementWindow("month", year=2026),
                 )
 
     def test_no_baseline_scenario_refuses_rather_than_zeroing(
@@ -664,12 +671,12 @@ class TestBalanceSheetPosition:
 
 
 # ---------------------------------------------------------------------------
-# 7. Display labels branch on kind (live category, orphan snapshot)
+# 7. Labels from the worked-out chart (ruling plan#2518)
 # ---------------------------------------------------------------------------
 
 
 class TestDisplayLabels:
-    """A category line reflects a live rename; an orphan uses its snapshot."""
+    """A category line reads its category as it is today, or Uncategorized."""
 
     def test_category_rename_reflected_live(self, app, db, seed_user):
         """Renaming a live category updates the line label (renames reflect).
@@ -701,153 +708,132 @@ class TestDisplayLabels:
             assert _labels(report.expense.lines) == ["Family: Snacks"]
             assert report.expense.total == Decimal("100.00")
 
-    def test_orphaned_category_uses_snapshot_label(self, app, db, seed_user):
-        """A category ledger account whose category is gone keeps its snapshot label.
+    def test_a_deleted_categorys_lines_read_uncategorized(
+        self, app, db, seed_user,
+    ):
+        """A $100.00 row under a category that is then deleted: Uncategorized.
 
-        A $100.00 Groceries expense posts to the category ledger; when the
-        budget category's key SET-NULLs the account's ``category_id`` (its
-        ``kind_id`` stays ``category``), the line falls back to the account's
-        own "Family: Groceries" snapshot and the amount is untouched.
+        Ruling plan#2518: the chart is worked out from the records, so a line
+        is booked on its row's category as the row holds it today.  A
+        category's delete SET-NULLs the row's ``category_id``, so the row's
+        line is the owner's Uncategorized Expense bucket's -- where a stored
+        chart row kept the deleted category's name snapshot and this test
+        once asserted that.
 
-        **The orphan state is STAGED, not reached through a category delete.**
-        Every plan row names a definition since the family's cutover (plan
-        step ``balance:X-bi-7d-2``) and ``transaction_templates.category_id``
-        is RESTRICT, so a category with a settled one-off under it cannot be
-        deleted at all (the category door archives it; the database refuses
-        the delete).  A LEGACY link-less row reached the state through the
-        delete until then.  Production can still hold the state -- accounts
-        orphaned before the cutover, or a category deleted once every row
-        under it was hard-deleted -- so the reader's fallback is graded on
-        the state itself: the SET NULL the key performs, written here.
+        **The state is STAGED by a raw delete, as the database performs it.**
+        The category door never hard-deletes a category any transaction uses
+        (``archive_helpers.category_has_usage`` archives it instead), and
+        ``transaction_templates.category_id`` is RESTRICT, so the row is
+        settled under Groceries' definition and then re-pointed to a category
+        of the test's own, which no definition names.  The CONTROL first: the
+        line follows the re-pointed category ("Chart: Doomed", $100.00), so
+        the Uncategorized line after the delete is the delete's, not a line
+        that never read the row's category.
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            groceries_id = seed_user["categories"]["Groceries"].id
-            create_settled_cash_transaction(
+            doomed = Category(
+                user_id=user_id, group_name="Chart", item_name="Doomed",
+            )
+            db.session.add(doomed)
+            db.session.flush()
+            txn = create_settled_cash_transaction(
                 seed_user, db.session, seed_user["bootstrap_period"],
                 Decimal("100.00"),
                 category=seed_user["categories"]["Groceries"],
                 settled_on=date(2026, 3, 15),
             )
+            txn.category_id = doomed.id
             db.session.commit()
-            orphaned = db.session.execute(sa.text(
-                "UPDATE budget.ledger_accounts SET category_id = NULL "
-                "WHERE category_id = :cid"
-            ), {"cid": groceries_id}).rowcount
+            march = StatementWindow("month", month=3, year=2026)
+
+            control = ledger_report_service.compute_income_statement(
+                user_id, calendar_for(user_id), march,
+            )
+            assert _labels(control.expense.lines) == ["Chart: Doomed"]
+
+            deleted = db.session.execute(sa.text(
+                "DELETE FROM budget.categories WHERE id = :cid"
+            ), {"cid": doomed.id}).rowcount
             db.session.commit()
-            assert orphaned == 1
+            db.session.expire_all()
+            assert deleted == 1
 
             report = ledger_report_service.compute_income_statement(
-                user_id, calendar_for(user_id), StatementWindow("month", month=3, year=2026),
+                user_id, calendar_for(user_id), march,
             )
-            assert _labels(report.expense.lines) == ["Family: Groceries"]
+            assert _labels(report.expense.lines) == ["Uncategorized Expense"]
             assert report.expense.total == Decimal("100.00")
+            # The line moved between two Expense keys, so the sheet's
+            # retained earnings, and its tie-out, are untouched.
+            assert ledger_report_service.compute_balance_sheet(
+                user_id, _ALL_ACTIVITY,
+            ).tie_out.in_balance is True
 
 
 # ---------------------------------------------------------------------------
-# 8. Hard-delete residue is dropped whole (reader-contract C-3)
+# 8. The statements read the worked-out ledger, never the stored journal
 # ---------------------------------------------------------------------------
 
 
-class TestResidueDropped:
-    """A source-linked entry whose FK was SET-NULLed is excluded, whole."""
+class TestAPlantedStoredEntryMovesNoStatement:
+    """A journal entry the records do not hold is no line of any statement.
 
-    def test_a_sourceless_loan_payment_split_is_a_correction_not_residue(
-        self, app, db, seed_user,
+    The statements read the ledger worked out from the records (plan task
+    plan#2771), so an entry written into the stored journal by hand -- one
+    no record books -- moves no figure.  These two shapes are the two the
+    store's reader once had rules for: a SOURCELESS entry of a correction
+    kind, which it counted at its ``entry_date``, and a purchase-kind entry
+    whose movement link a hard delete SET-NULLed (residue), which it dropped.
+    """
+
+    @pytest.mark.parametrize("source_kind,posting_kind", [
+        (PostingSourceEnum.LOAN_PAYMENT, PostingKindEnum.PRINCIPAL),
+        (PostingSourceEnum.PURCHASE, PostingKindEnum.EXPENSE),
+    ])
+    def test_the_balance_sheet_is_unmoved(
+        self, app, db, seed_user, source_kind, posting_kind,
     ):
-        """A ``loan_payment`` entry with every link NULL is COUNTED, at its day.
+        """A $100.00 entry, Checking to its opening counter: nothing moves.
 
-        The split is a date-keyed correction since plan step
-        ``balance:X-bi-6-3`` (ruling **R-BAL102**): it links no row by
-        design, so the correction bucket's positive allowlist names it beside
-        the four anchor kinds -- and the residue rule right below this test
-        (a ``purchase``-kind entry with its link SET NULL is dropped) must
-        NOT catch it.  The shape planted here is the split's own: sourceless,
-        ``loan_payment`` kind, dated by ``entry_date``.  With the kind missing
-        from the allowlist the -100 / +100 pair would vanish from both
-        statements as residue; with it present the attribution core places
-        the pair on the planted day and the balance sheet moves.
+        The seeded Checking opens at $1,000.00.  The planted entry's legs
+        are -$100.00 on Checking's stored row and +$100.00 on its opening
+        counter's, which a reader of the store would show as Checking
+        $900.00 (the store's reader did, for the correction kind).  The
+        sheet reads Checking $1,000.00 and is the same report before and
+        after, so the entry reached no figure.  The CONTROL: the entry is
+        really in the store, its two legs netting $0.00.
         """
         with app.app_context():
             user_id = seed_user["user"].id
-            scenario_id = seed_user["scenario"].id
             checking = seed_user["account"]
-            linked = linked_ledger_account(db.session, checking.id)
-            equity = _find_line(
-                ledger_report_service.compute_balance_sheet(
-                    user_id, _ALL_ACTIVITY,
-                ).equity.lines,
-                "Checking -- Opening",
+            before = ledger_report_service.compute_balance_sheet(
+                user_id, _ALL_ACTIVITY,
             )
 
             entry = make_balanced_entry(
                 db.session, seed_user,
-                from_ledger_id=linked.id,
-                to_ledger_id=equity.ledger_account_id,
+                from_ledger_id=linked_ledger_account(
+                    db.session, checking.id,
+                ).id,
+                to_ledger_id=ledger_account_of_kind(
+                    db.session, checking.id,
+                    LedgerAccountKindEnum.ANCHOR_EQUITY,
+                ).id,
                 amount=Decimal("100.00"),
-                source_kind=PostingSourceEnum.LOAN_PAYMENT,
-                posting_kind=PostingKindEnum.PRINCIPAL,
+                source_kind=source_kind,
+                posting_kind=posting_kind,
             )
             assert entry.transaction_entry_id is None
+            assert sorted(leg.amount for leg in entry.postings) == [
+                Decimal("-100.00"), Decimal("100.00"),
+            ]
 
-            nets = dated_account_nets(user_id, scenario_id)
-            assert nets[(linked.id, entry.entry_date)] == Decimal("-100.00")
-            sheet = ledger_report_service.compute_balance_sheet(
+            after = ledger_report_service.compute_balance_sheet(
                 user_id, _ALL_ACTIVITY,
             )
             assert _find_line(
-                sheet.assets.lines, "Checking",
-            ).amount == Decimal("900.00")
-            assert sheet.tie_out.in_balance is True
-
-    def test_residue_shape_excluded_from_reads(self, app, db, seed_user):
-        """A purchase-source entry with a NULL ``transaction_entry_id`` is dropped.
-
-        A hard delete SET-NULLs ``journal_entries.transaction_entry_id`` after
-        reversing the postings, leaving residue: a purchase-source entry with
-        its movement link NULL.  The reader keeps only the correction
-        sources in the sourceless bucket, so this residue is excluded whole --
-        its -100 on the Checking ledger never lands.  Both the attribution core
-        (Checking still nets its 1000 opening) and the balance sheet (Checking
-        still reads 1000) prove the drop.
-        """
-        with app.app_context():
-            user_id = seed_user["user"].id
-            scenario_id = seed_user["scenario"].id
-            checking = seed_user["account"]
-            linked = linked_ledger_account(db.session, checking.id)
-            equity = _find_line(
-                ledger_report_service.compute_balance_sheet(
-                    user_id, _ALL_ACTIVITY,
-                ).equity.lines,
-                "Checking -- Opening",
-            )
-
-            # Residue shape: purchase source, transaction_entry_id NULL, both
-            # legs posted (would move Checking to 900 if the reader counted it).
-            make_balanced_entry(
-                db.session, seed_user,
-                from_ledger_id=linked.id,
-                to_ledger_id=equity.ledger_account_id,
-                amount=Decimal("100.00"),
-                source_kind=PostingSourceEnum.PURCHASE,
-                posting_kind=PostingKindEnum.EXPENSE,
-            )
-
-            # The attribution core ignores the residue: Checking still nets its
-            # 1000 opening, not 900.
-            nets = dated_account_nets(user_id, scenario_id)
-            checking_net = sum(
-                (net for (la_id, _d), net in nets.items() if la_id == linked.id),
-                Decimal("0.00"),
-            )
-            assert checking_net == Decimal("1000.00")
-
-            # End to end: the balance sheet is unmoved by the residue.
-            sheet = ledger_report_service.compute_balance_sheet(
-                user_id, _ALL_ACTIVITY,
-            )
-            assert _find_line(
-                sheet.assets.lines, "Checking",
+                after.assets.lines, "Checking",
             ).amount == Decimal("1000.00")
-            assert sheet.tie_out.in_balance is True
+            assert after == before
+            assert after.tie_out.in_balance is True

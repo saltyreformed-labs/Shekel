@@ -44,6 +44,7 @@ whether it has caught up.
 
 from datetime import date, timedelta
 from decimal import Decimal
+from functools import partial
 
 import pytest
 
@@ -68,6 +69,7 @@ from app.services.ledger_lines import (
     transit_key,
     worked_out_lines,
 )
+from app.services.pay_calendar import calendar_for
 from tests._ledger_parity import (
     LedgerParityDifference,
     assert_ledger_parity,
@@ -318,7 +320,9 @@ def _source_kinds_on_each_side(seed_user):
     }
     worked_out = {
         line.source_kind_id
-        for line in worked_out_lines(owner_id, scenario_id)
+        for line in worked_out_lines(
+            owner_id, scenario_id, partial(calendar_for, owner_id),
+        )
     }
     return stored, worked_out
 

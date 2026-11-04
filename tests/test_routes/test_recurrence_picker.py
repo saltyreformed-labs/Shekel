@@ -282,6 +282,11 @@ def _rule_on_cadence(owner, cadence, interval_n=None, unit_id=None):
             ref_cache.recurrence_unit_id(cadence.unit) if unit_id is None
             else unit_id
         ),
+        unit_has_day_of_month=(
+            ref_cache.recurrence_unit_has_day_of_month(cadence.unit)
+            if unit_id is None
+            else db.session.get(RecurrenceUnit, unit_id).has_day_of_month
+        ),
         placement_id=ref_cache.period_placement_id(cadence.placement),
         shift_id=ref_cache.business_day_shift_id(BusinessDayShiftEnum.NONE),
         starts_on=date(2026, 1, 1),

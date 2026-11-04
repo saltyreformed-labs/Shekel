@@ -104,12 +104,13 @@ _SUBTYPE_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
 #: below binds a TEMPLATE id rather than a user id.  The callers pass one from
 #: ``bare_expense_template``.
 _STORABLE_RULE_COLUMNS = (
-    "transaction_template_id, interval_n, unit_id, placement_id, shift_id, "
-    "starts_on"
+    "transaction_template_id, interval_n, unit_id, unit_has_day_of_month, "
+    "placement_id, shift_id, starts_on"
 )
 _STORABLE_RULE_VALUES = (
     ":u, 1, "
     "(SELECT id FROM ref.recurrence_units WHERE name = 'month'), "
+    "(SELECT has_day_of_month FROM ref.recurrence_units WHERE name = 'month'), "
     "(SELECT id FROM ref.period_placements WHERE name = 'containing_date'), "
     "(SELECT id FROM ref.business_day_shifts WHERE name = 'none'), "
     "DATE '2026-01-15'"

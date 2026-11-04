@@ -16,6 +16,12 @@ from collections.abc import Iterable
 #: The issue field saying how urgent a card's work is, a single select of
 #: ``setup_tracker.ISSUE_FIELDS``' options.
 PRIORITY_FIELD = "Priority"
+#: Priority's options the plan reads: what hands a step out ahead of the board's order (ruling
+#: plan#1831), and what pauses it (ruling plan#1832).
+URGENT, HIGH, ON_HOLD = "Urgent", "High", "On hold"
+#: Priority's options, as the developer set them on the web (On hold on 2026-11-04, read by
+#: GraphQL at 07:49 EST, in this order).  Medium and Low hand a step out as a step holding none.
+PRIORITY_OPTIONS = (URGENT, HIGH, "Medium", "Low", ON_HOLD)
 #: The issue field counting the sessions a card's work takes, a single select of
 #: ``setup_tracker.ISSUE_FIELDS``' options (ruling plan#2508).
 EFFORT_FIELD = "Effort"

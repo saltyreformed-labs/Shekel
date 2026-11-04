@@ -84,7 +84,7 @@ _ACCOUNT_TYPE_ICON_CHOICES = (
 # template renders a precomputed chip instead of branching on the enum.
 # Chip semantics (S11 settings retheme; the raw Bootstrap badges were
 # off-palette, polish audit RC3): Editable is the actionable state and
-# rides the accent chip; Settled / Posted mean hands-off because money
+# rides the accent chip; Settled means hands-off because money
 # moved (the D11 caution role, amber); the remaining lock reasons are
 # informational and stay neutral.  Labels, not color, tell rows apart.
 #
@@ -106,9 +106,6 @@ _PP_LOCK_BADGES = {
     # label is ruling R-CC66's, verbatim).
     pay_period_locks.PeriodLockReason.HOLDS_MOVEMENT: (
         "Holds a recorded payment or purchase", "flag-chip flag-chip--warning",
-    ),
-    pay_period_locks.PeriodLockReason.LEDGER_POSTINGS: (
-        "Posted", "flag-chip flag-chip--warning",
     ),
 }
 _PP_MUTABLE_BADGE = ("Editable", "flag-chip")
@@ -296,8 +293,8 @@ def _load_pay_periods_context(user_id):
         )
         for period in calendar.saved():
             reason = locks[period.period_id]
-            badge_label, badge_class = _PP_LOCK_BADGES.get(
-                reason, _PP_MUTABLE_BADGE,
+            badge_label, badge_class = (
+                _PP_MUTABLE_BADGE if reason is None else _PP_LOCK_BADGES[reason]
             )
             period_rows.append({
                 "period": period,

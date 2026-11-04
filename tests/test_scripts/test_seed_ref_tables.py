@@ -16,45 +16,16 @@ unset) so no other database can be reached.
 """
 from __future__ import annotations
 
-import os
 import pathlib
-import secrets
 import subprocess
 import sys
 
 from sqlalchemy import text
 
+from tests.test_scripts._production_child import production_env
+
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "seed_ref_tables.py"
-
-
-def _production_env(database_url: str) -> dict:
-    """Build the child's environment: the production config, on *database_url*.
-
-    Only what Python needs to run is inherited.  ``ProdConfig`` refuses to
-    start without a SECRET_KEY of real length and its rate-limit store's
-    password; the seed uses neither.
-
-    Args:
-        database_url: The URL of this test's database, password included.
-
-    Returns:
-        The environment mapping for :func:`subprocess.run`.
-    """
-    env = {
-        key: os.environ[key]
-        for key in ("PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "VIRTUAL_ENV",
-                    "LANG", "LC_ALL")
-        if key in os.environ
-    }
-    env.update({
-        "FLASK_ENV": "production",
-        "DATABASE_URL": database_url,
-        "DATABASE_URL_APP": "",
-        "SECRET_KEY": secrets.token_hex(32),
-        "VALKEY_PASSWORD": secrets.token_hex(16),
-    })
-    return env
 
 
 class TestTheRepairToolRepairs:
@@ -75,7 +46,7 @@ class TestTheRepairToolRepairs:
 
         result = subprocess.run(
             [sys.executable, str(_SCRIPT)],
-            env=_production_env(
+            env=production_env(
                 db.engine.url.render_as_string(hide_password=False),
             ),
             cwd=_REPO_ROOT, capture_output=True, text=True, timeout=25,

@@ -1,99 +1,68 @@
 """The shared read core both confirmed-ledger statements consume (Step 5).
 
-Two statements read the append-only posting ledger: an income statement
+Two statements read the owner's ledger: an income statement
 (:mod:`._income_statement`) and a balance sheet (:mod:`._balance_sheet`).  They
-share this module so their attribution -- WHICH source date each posting lands
-on -- is defined ONCE, which is what makes the statements articulate
+share this module so the ledger they read, and how a line is sectioned, signed
+and labelled, are defined ONCE, which is what makes the statements articulate
 automatically (the income net over a window equals the equity delta between the
 bounding balance sheets, with no reconciliation code).
 
-**The attribution rule (reader-contract C-3).**  Every posting is attributed by
-its SOURCE, in whole: a source's per-ledger-account net lands on the source's
-CURRENT settle day -- a movement's stored ``settled_on``, which IS the user's
-wall-clock civil day (the decided L9 rule -- tax-year and calendar figures follow
-that clock, so an 8:05pm-Eastern Dec-31 settle attributes to Dec 31, not the
-Jan 1 it becomes in UTC).  There is no fallback: a movement holding a posted net
-and no day is refused rather than dated from its pay period, which is what the
-derivation this replaced did:
+**The ledger is the one worked out from the records** (balance:X-ew's second
+leaf, plan task plan#2771): every :class:`~app.services.ledger_lines.LedgerLine`
+of the owner's baseline (:func:`app.services.ledger_lines.worked_out_lines`),
+each an amount on a chart account, filed in a paycheck and dated by a civil
+day.  The stored journal (``budget.journal_entries`` and its postings) is still
+written while it lives, and nothing here reads it; X-ew's third leaf deletes it.
 
-* movement-linked entries (``transaction_entry_id`` set): by the MOVEMENT's
-  own ``transaction_entries.settled_on`` -- a purchase
-  (ruling **R-FM**, plan step X-f3b: a purchase whose bank posting day is
-  recorded is a cash movement of its own, posted at its own day), a bill's or
-  a paycheck's covering movement (``balance:X-bi-3b``), and since
-  ``balance:X-bi-6-3`` each side of a settled transfer (the
-  ``transfer_movement`` source, ruling **R-BAL45**: two entries per transfer,
-  each on its own bank day against the owner's Transfers-in-transit account,
-  which nets to zero once both have cleared and never reaches a statement's
-  Income / Expense filter).  **This reader had no bucket for it until plan
-  step X-bi-3a**, so every posted purchase's legs were dropped from both
-  statements -- measured on the developer's 2026-09-06 snapshot at 148
-  journal entries and `$6,224.21` of Expense-class net, a third of the
-  recorded spending -- and the covering movements X-bi-3a writes for every
-  settled bill would have taken the rest with them (finding **BAL-502**);
-* sourceless corrections (``loan_opening`` / ``loan_trueup`` / ``loan_payment``
-  / ``account_opening`` / ``account_trueup``, no movement link): by the
-  stored ``entry_date``.  An anchor correction is a fact dated by the anchor's
-  observed civil day; a loan payment's SPLIT (its cash re-classified into
-  interest / escrow / refund against the loan) is a derivation of the loan
-  walk dated by the payment's visible day, keyed by that day and its period
-  with no row link since ruling **R-BAL102** (it linked the loan-side shadow
-  before, and was read by that link, at the same day, in the bucket the
-  transaction source's legs were read in until plan#1845);
-* hard-delete residue (a ``purchase`` / ``transfer_movement`` source whose
-  movement link was SET-NULLed): DROPPED, as whole entries -- each sums to
-  zero (the reverse-before-delete discipline), so dropping it leaves the trial
-  balance closed.  A ``loan_payment`` entry is never residue: it has no link
-  to lose.
+**The reader contract (M3), restated over lines.**
 
-The movement link is the ONE concrete source FK an entry can carry, so the
-buckets are a PARTITION of the live ledger by construction (the write-side
-account walk partitioned it the same way until plan task plan#2525 moved that
-walk onto the records): an entry with the link is the movement bucket's, and
-one without is a correction's by its kind or residue.  It was three FKs until
-plan step ``balance:X-bi-6-5``'s second leaf (card plan#1845), which deleted
-the transaction-linked bucket (a row's own leg, legacy since plan step
-``balance:X-bi-4a``) and the guards that fenced out the legacy one-entry
-``transfer`` pairs; its migration deletes every entry either source posted,
-all reversed to zero on their own keys, and both columns (ruling plan#1867).
+* **Whole entries in** (C-1): every leg of one booking shares its line's
+  paycheck and its day -- a movement's two legs its parent's paycheck and its
+  own ``settled_on``, a correction's legs the ``(kind, paycheck, day)`` its
+  target is keyed by -- so a window by paycheck or by day takes a booking
+  whole or not at all, and the trial balance closes over every window.
+* **A pay-period window takes the lines filed in that paycheck** (C-2): a
+  movement's its parent's paycheck, a correction's by its day on the owner's
+  calendar as it is read (ruling plan#2519).
+* **A calendar window and an as-of date take the lines by their day** (C-3):
+  a movement's ``settled_on``, which IS the owner's civil day (the decided L9
+  rule -- an 8:05pm-Eastern Dec-31 settle attributes to Dec 31, not the Jan 1
+  it becomes in UTC); an assertion's ``observed_on``; an opening's
+  ``opened_on``; a loan payment split's visible day.
+* **No residue to drop.**  A hard delete's residue, and the refusals for a
+  stored net with no movement or no day, were the store's: a worked-out
+  ledger holds a line only for a record that books one, on the day it holds.
+* **Natural-balance presentation** (C-4, :func:`present_natural`) and the
+  closing lines derived, never booked (C-5, :mod:`._balance_sheet`).
 
-**One civil date, shared, since ruling R-DH.**  This reader and the
-write-side account walk both attribute a movement to its stored
-``settled_on`` -- the same day, read off the same column (the ``settled_day``
-accessor both read a row's own leg through went with that bucket at
-plan#1845).  They were deliberately different until 2026-07-31: the walk
-partitioned by UTC INSTANT against each anchor's ``created_at`` while this
-side used the display-timezone civil date for calendar windows, and the
-paragraph here justified an independent restatement of the attribution rule on
-exactly that difference.  The difference is gone (the instant partition cost
-production ``$4,001.42``).  **So are the write side's loaders this module
-restated** (plan task plan#2525): the account walk reads the records'
-dated movements (``cash_ledger.settled_cash_facts``) rather than its own
-postings, which leaves this the one reader that dates a STORED posting by its
-movement -- and the stored ledger it reads is what the X-ew arc (plan#2023)
-replaces with lines worked out from the records.
+**Sections and labels are the worked-out chart's** (ruling plan#2518): a line's
+class is its key's (:attr:`~app.services.ledger_lines.ChartKey.ledger_class`),
+and its label :func:`app.services.ledger_lines.chart_label` on the live record
+-- so a renamed account relabels its counter and loan lines, and a deleted
+category's lines, whose rows read no category, are the Uncategorized bucket's.
 
 **Flask-isolated** and read-only: plain ids in, plain data out; no writes.
 """
 
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import date
 from decimal import Decimal
 
-from sqlalchemy.orm import joinedload
-
 from app import ref_cache
-from app.enums import (
-    LedgerAccountClassEnum,
-    LedgerAccountKindEnum,
-    PostingSourceEnum,
-)
+from app.enums import LedgerAccountClassEnum
 from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
-from app.models.transaction_entry import TransactionEntry
-from app.services.posting_reads import PostingError
+from app.models.account import Account
+from app.models.category import Category
+from app.services.ledger_lines import (
+    ChartKey,
+    LedgerLine,
+    chart_label,
+    chart_record_type,
+    worked_out_lines,
+)
+from app.services.pay_calendar import PayCalendar
+from app.services.scenario_resolver import require_baseline_scenario
 
 from ._types import StatementLine, StatementSection
 
@@ -101,67 +70,141 @@ _ZERO_MONEY = Decimal("0.00")
 
 
 @dataclass(frozen=True)
-class StatementClassIds:
-    """The accounting-class ref ids the statements section and sign by.
-
-    Resolved once per statement call (:func:`statement_class_ids`) so the
-    readers compare a ledger account's ``class_id`` against integer ids -- the
-    IDs-for-logic invariant -- rather than reading the string class name.  Used
-    to place each account in its section, to derive the Income + Expense set
-    the retained-earnings line closes, and to derive the Unrealized set the
-    accumulated-unrealized line closes.
+class StatementLedger:
+    """The owner's worked-out baseline ledger, as a statement reads it.
 
     Attributes:
-        asset: The Asset class ref id.
-        liability: The Liability class ref id.
-        income: The Income class ref id.
-        expense: The Expense class ref id.
-        equity: The Equity class ref id.
-        unrealized: The Unrealized (other comprehensive income) class ref id
-            (ruling **R-FO**).  Its accounts appear BELOW the net-income line
-            on the income statement and are folded into one derived Equity line
-            on the balance sheet, so a price movement nobody sold into cash is
-            never counted as earnings and the trial balance still closes.
+        lines: Every :class:`~app.services.ledger_lines.LedgerLine` of the
+            owner's baseline scenario.
+        labels: Each chart key a line is booked on, mapped to the label a
+            statement shows for it, from its live record.
     """
 
-    asset: int
-    liability: int
-    income: int
-    expense: int
-    equity: int
-    unrealized: int
+    lines: list[LedgerLine]
+    labels: dict[ChartKey, str]
 
 
-def statement_class_ids() -> StatementClassIds:
-    """Return the accounting-class ref ids as a :class:`StatementClassIds`.
+def read_statement_ledger(
+    user_id: int, calendar_source: Callable[[], PayCalendar],
+) -> StatementLedger:
+    """Return *user_id*'s worked-out baseline ledger and its chart's labels.
 
-    A one-shot resolve of the cached class ids the statements branch on, so
-    each reader resolves them once (not per account) and compares by id.
+    The one read both statements make: the baseline scenario's lines
+    (:func:`app.services.ledger_lines.worked_out_lines`), then one load of the
+    accounts and one of the categories their keys name, each scoped to the
+    owner, to label them (:func:`_chart_labels`).
+
+    Args:
+        user_id: The owner whose ledger to read.
+        calendar_source: Answers the owner's
+            :class:`~app.services.pay_calendar.PayCalendar`, asked by the read
+            only when a correction is to be filed.
 
     Returns:
-        The populated :class:`StatementClassIds`.
+        The :class:`StatementLedger`.
 
     Raises:
-        RuntimeError: If the ref cache is not initialized.
+        BaselineMissingError: The owner has no baseline scenario, so there is
+            no ledger to read (from
+            :func:`app.services.scenario_resolver.require_baseline_scenario`).
+        PayCalendarError: A correction is to be filed and the owner's
+            calendar cannot file it (from the read).
     """
-    return StatementClassIds(
-        asset=ref_cache.ledger_account_class_id(LedgerAccountClassEnum.ASSET),
-        liability=ref_cache.ledger_account_class_id(
-            LedgerAccountClassEnum.LIABILITY,
-        ),
-        income=ref_cache.ledger_account_class_id(LedgerAccountClassEnum.INCOME),
-        expense=ref_cache.ledger_account_class_id(
-            LedgerAccountClassEnum.EXPENSE,
-        ),
-        equity=ref_cache.ledger_account_class_id(LedgerAccountClassEnum.EQUITY),
-        unrealized=ref_cache.ledger_account_class_id(
-            LedgerAccountClassEnum.UNREALIZED,
-        ),
+    scenario = require_baseline_scenario(user_id)
+    lines = worked_out_lines(user_id, scenario.id, calendar_source)
+    return StatementLedger(
+        lines=lines,
+        labels=_chart_labels(user_id, {line.key for line in lines}),
     )
 
 
-def present_natural(class_id: int, debit_net: Decimal) -> Decimal:
-    """Return a debit-positive posting net as its natural-balance value (C-4).
+def _chart_labels(user_id: int, keys: set[ChartKey]) -> dict[ChartKey, str]:
+    """Return each key's label, from the live record behind it.
+
+    The records are loaded in one statement per table the keys name
+    (:func:`app.services.ledger_lines.chart_record_type`), each scoped to the
+    owner, so the count does not grow with the number of lines or keys.  A
+    key whose record the owner does not hold is handed no record, which
+    :func:`app.services.ledger_lines.chart_label` refuses: its line would
+    otherwise be labelled by another owner's name, or by none.
+
+    Args:
+        user_id: The owner whose records name the keys.
+        keys: The chart keys to label.
+
+    Returns:
+        ``{key: label}`` over *keys*.
+
+    Raises:
+        ValueError: A key names a record the owner does not hold (from
+            :func:`app.services.ledger_lines.chart_label`).
+    """
+    record_types = {key: chart_record_type(key) for key in keys}
+    records = {
+        model: _owned_by_id(model, user_id, {
+            key.record_id for key, record_type in record_types.items()
+            if record_type is model
+        })
+        for model in (Account, Category)
+    }
+    return {
+        key: chart_label(
+            key,
+            None if record_type is None
+            else records[record_type].get(key.record_id),
+        )
+        for key, record_type in record_types.items()
+    }
+
+
+def _owned_by_id(
+    model: type[Account] | type[Category], user_id: int, ids: set[int],
+) -> dict[int, Account | Category]:
+    """Return the owner's rows of *model* among *ids*, keyed by id.
+
+    Args:
+        model: :class:`Account` or :class:`Category`, each carrying
+            ``user_id``.
+        user_id: The owner the rows must belong to.
+        ids: The ids to load.
+
+    Returns:
+        ``{id: row}``; empty, with no statement issued, for no ids.
+    """
+    if not ids:
+        return {}
+    rows = (
+        db.session.query(model)
+        .filter(model.user_id == user_id, model.id.in_(ids))
+        .all()
+    )
+    return {row.id: row for row in rows}
+
+
+def nets_by_key(lines: Iterable[LedgerLine]) -> dict[ChartKey, Decimal]:
+    """Return the debit-positive net of *lines* on each chart key.
+
+    A caller hands the lines its window takes (whole bookings, so the nets
+    sum to zero over every window, which is the tie-out's double-entry
+    self-check).  A key whose lines cancel is kept at ``$0.00``; the section
+    builders drop it.
+
+    Args:
+        lines: The lines to net.
+
+    Returns:
+        ``{chart key: net}``.
+    """
+    nets: dict[ChartKey, Decimal] = defaultdict(lambda: _ZERO_MONEY)
+    for line in lines:
+        nets[line.key] += line.amount
+    return dict(nets)
+
+
+def present_natural(
+    ledger_class: LedgerAccountClassEnum, debit_net: Decimal,
+) -> Decimal:
+    """Return a debit-positive net as its natural-balance value (C-4).
 
     The reader-contract C-4 presentation rule: a debit-normal class (Asset,
     Expense) presents its debit-positive net as-is; a credit-normal class
@@ -178,126 +221,62 @@ def present_natural(class_id: int, debit_net: Decimal) -> Decimal:
     ``0.00``, never ``-0.00``.
 
     Args:
-        class_id: The ledger account's ``ref.ledger_account_classes`` id.
-        debit_net: The account's debit-positive posting net.
+        ledger_class: The chart account's class.
+        debit_net: The account's debit-positive net.
 
     Returns:
         The natural-balance value as a ``Decimal``.
 
     Raises:
         RuntimeError: If the ref cache is not initialized.
-        KeyError: If *class_id* is not a known ledger-account-class id.
     """
-    if ref_cache.ledger_class_is_debit_normal(class_id):
+    if ref_cache.ledger_class_is_debit_normal(
+        ref_cache.ledger_account_class_id(ledger_class),
+    ):
         return debit_net
     return _ZERO_MONEY - debit_net
 
 
-def load_chart(user_id: int) -> dict[int, LedgerAccount]:
-    """Return a user's chart of accounts keyed by ledger account id.
-
-    Every :class:`~app.models.ledger_account.LedgerAccount` the user owns, so a
-    reader resolves each net's class / kind / label without a per-account query.
-    ``account`` is eager on the model (the linked-row display reads it);
-    ``category`` is joined here so a live category row's ``display_name``
-    resolves without a lazy load per line.
-
-    Args:
-        user_id: The owner whose chart to load.
-
-    Returns:
-        ``{ledger_account_id: LedgerAccount}`` over the user's whole chart.
-    """
-    rows = (
-        db.session.query(LedgerAccount)
-        .options(joinedload(LedgerAccount.category))
-        .filter(LedgerAccount.user_id == user_id)
-        .all()
-    )
-    return {row.id: row for row in rows}
-
-
-def ledger_account_label(ledger_account: LedgerAccount) -> str:
-    """Return a chart account's display label, branching on ``kind_id``.
-
-    The reader-contract display rule, resolved by KIND (never by which FK is
-    NULL): a linked row reads the live ``account.name``; a category row reads
-    the live ``category.display_name`` (so a rename reflects) while its category
-    exists, falling back to its own ``name`` snapshot once the category is
-    deleted (``category_id`` SET NULL leaves ``kind_id`` unchanged, so a
-    deleted-category row is a category-kind row with no live category); every
-    other kind (fallback, per-loan interest / escrow / refund / opening, and
-    the three per-account counter kinds -- anchor-equity, interest-income,
-    unrealized-change) reads its ``name`` snapshot.  The snapshot -- not
-    ``account.name`` -- is used for a per-account counter row even though it
-    carries an ``account_id``, because the COALESCE display rule is the
-    linked-row rule only.  That is why the fall-through is the DEFAULT arm
-    rather than an enumeration: ruling R-FO's two new kinds needed no edit
-    here, and a future counter kind will need none either.
-
-    Args:
-        ledger_account: The chart row to label (its ``account`` / ``category``
-            relationships are loaded by :func:`load_chart`).
-
-    Returns:
-        The display label string.
-
-    Raises:
-        RuntimeError: If the ref cache is not initialized.
-    """
-    kind_id = ledger_account.kind_id
-    if kind_id == ref_cache.ledger_account_kind_id(LedgerAccountKindEnum.LINKED):
-        return ledger_account.account.name
-    if kind_id == ref_cache.ledger_account_kind_id(
-        LedgerAccountKindEnum.CATEGORY,
-    ):
-        if ledger_account.category is not None:
-            return ledger_account.category.display_name
-        return ledger_account.name
-    return ledger_account.name
-
-
 def section_lines(
-    nets: dict[int, Decimal],
-    chart: dict[int, LedgerAccount],
-    class_id: int,
+    nets: dict[ChartKey, Decimal],
+    labels: dict[ChartKey, str],
+    ledger_class: LedgerAccountClassEnum,
 ) -> list[StatementLine]:
     """Return the natural-signed, label-sorted lines for one accounting class.
 
     The presentation step both statements share (extracted so the income
     statement's sections and the balance sheet's sections cannot drift): for
-    every account of *class_id* with a nonzero net, one :class:`StatementLine`
-    labeled by :func:`ledger_account_label` and signed by
-    :func:`present_natural`, sorted by label.  Zero-net accounts are dropped
-    (an account with no position in the window), so no zero line is emitted.
+    every key of *ledger_class* with a nonzero net, one :class:`StatementLine`
+    labelled from the chart and signed by :func:`present_natural`, sorted by
+    label.  Zero-net keys are dropped (an account with no position in the
+    window), so no zero line is emitted.
 
     Args:
-        nets: ``{ledger_account_id: debit_net}`` (any classes; this filters to
-            *class_id*).
-        chart: The user's chart (:func:`load_chart`), supplying each account's
-            class and label.
-        class_id: The accounting class to build lines for.
+        nets: ``{chart key: debit_net}`` (any classes; this filters to
+            *ledger_class*).
+        labels: The chart's labels (:attr:`StatementLedger.labels`).
+        ledger_class: The accounting class to build lines for.
 
     Returns:
         The class's :class:`StatementLine` list, sorted by label.
     """
     lines = [
         StatementLine(
-            label=ledger_account_label(chart[ledger_account_id]),
-            amount=present_natural(class_id, debit_net),
-            ledger_account_id=ledger_account_id,
+            label=labels[key],
+            amount=present_natural(ledger_class, debit_net),
+            key=key,
         )
-        for ledger_account_id, debit_net in nets.items()
-        if chart[ledger_account_id].class_id == class_id and debit_net != 0
+        for key, debit_net in nets.items()
+        if key.ledger_class is ledger_class and debit_net != 0
     ]
     lines.sort(key=lambda line: line.label)
     return lines
 
 
 def build_section(
-    nets: dict[int, Decimal],
-    chart: dict[int, LedgerAccount],
-    class_id: int,
+    nets: dict[ChartKey, Decimal],
+    labels: dict[ChartKey, str],
+    ledger_class: LedgerAccountClassEnum,
 ) -> StatementSection:
     """Return one accounting class's lines and total as a :class:`StatementSection`.
 
@@ -306,240 +285,19 @@ def build_section(
     together, from the same set, and cannot drift.  The balance sheet's Equity
     section is instead built directly (it appends the derived retained-earnings
     line before totaling), so this covers Assets / Liabilities / Income /
-    Expense.
+    Expense / Unrealized.
 
     Args:
-        nets: ``{ledger_account_id: debit_net}`` (any classes; filtered to
-            *class_id*).
-        chart: The user's chart (:func:`load_chart`).
-        class_id: The accounting class to build the section for.
+        nets: ``{chart key: debit_net}`` (any classes; filtered to
+            *ledger_class*).
+        labels: The chart's labels (:attr:`StatementLedger.labels`).
+        ledger_class: The accounting class to build the section for.
 
     Returns:
         The :class:`StatementSection` (label-sorted lines + total).
     """
-    lines = section_lines(nets, chart, class_id)
+    lines = section_lines(nets, labels, ledger_class)
     return StatementSection(
         lines=lines,
         total=sum((line.amount for line in lines), _ZERO_MONEY),
     )
-
-
-def dated_account_nets(
-    user_id: int, scenario_id: int,
-) -> dict[tuple[int, date], Decimal]:
-    """Return every posting's net keyed by (ledger account, attribution date).
-
-    The shared attribution core: the union of the two source buckets
-    (movement-linked and sourceless corrections; residue dropped), each
-    posting's net placed on its source's attribution date per
-    the module docstring's C-3 rule.  Sources landing on
-    the same (ledger account, date) are summed, so a caller folds the map by a
-    date bound (as-of for the balance sheet, a calendar window for the income
-    statement) with no per-account query.  Every entry's legs share one
-    attribution date (all of a
-    source's legs attribute together), so folding by date always includes whole
-    entries -- the reader-contract C-1 guarantee that keeps the trial balance
-    closed over any window.
-
-    Args:
-        user_id: The owner whose ledger to read.
-        scenario_id: The budget scenario to scope to (postings are
-            scenario-scoped via ``journal_entries.scenario_id``).
-
-    Returns:
-        ``{(ledger_account_id, attribution_date): net Decimal}``; empty when the
-        scenario has no posted sources.  Nets are the signed, debit-positive
-        posting sums.
-
-    Raises:
-        PostingError: If a movement-linked source with a nonzero net cannot
-            resolve its date (a broken SET-NULL linkage that must fail loudly
-            rather than mis-attribute real money).
-    """
-    contributions = (
-        _purchase_dated_nets(user_id, scenario_id)
-        + _correction_dated_nets(user_id, scenario_id)
-    )
-    nets: dict[tuple[int, date], Decimal] = defaultdict(lambda: _ZERO_MONEY)
-    for ledger_account_id, attribution_date, net in contributions:
-        nets[(ledger_account_id, attribution_date)] += net
-    return dict(nets)
-
-
-def _purchase_dated_nets(
-    user_id: int, scenario_id: int,
-) -> list[tuple[int, date, Decimal]]:
-    """Return movement-linked nets, each dated by the movement's own posting day.
-
-    The movement-linked bucket (module docstring; the reader's twin of the
-    account walk's ``_purchase_source_days`` until plan task plan#2525 moved
-    that walk onto the records): entries carrying
-    ``transaction_entry_id`` -- the ``purchase`` source (a purchase, a bill's
-    or a paycheck's covering movement) and the ``transfer_movement`` source
-    (each side of a settled transfer, plan step ``balance:X-bi-6-3``) --
-    grouped by (ledger account, movement) and attributed to the movement's
-    stored ``settled_on``.  Zero-net groups are dropped (a reverted or
-    reversed-before-delete movement nets to zero and needs no date), so
-    dates are resolved only for live sources; the ``(user_id, scenario_id)``
-    filter uses ``idx_journal_entries_user_scenario_period``.  A movement's
-    legs are NOT grouped under its PARENT, because
-    that would date them at the parent's settle day, which a still-projected
-    envelope does not have, and the day money left the bank is its own fact.
-
-    Args:
-        user_id: The owner whose ledger to read.
-        scenario_id: The budget scenario to scope to.
-
-    Returns:
-        ``[(ledger_account_id, attribution_date, net), ...]``; empty when no
-        movement-linked source is posted.
-
-    Raises:
-        PostingError: If a nonzero net's ``transaction_entry_id`` resolves no
-            movement, or one carrying no ``settled_on`` (a leg posted for a
-            movement never seen to move) -- either must fail loudly rather
-            than mis-attribute money.
-    """
-    rows = (
-        db.session.query(
-            Posting.ledger_account_id,
-            JournalEntry.transaction_entry_id,
-            db.func.sum(Posting.amount),
-        )
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            JournalEntry.user_id == user_id,
-            JournalEntry.scenario_id == scenario_id,
-            JournalEntry.transaction_entry_id.isnot(None),
-        )
-        .group_by(Posting.ledger_account_id, JournalEntry.transaction_entry_id)
-        .all()
-    )
-    nets = [
-        (ledger_account_id, entry_id, net)
-        for ledger_account_id, entry_id, net in rows
-        if net != 0
-    ]
-    if not nets:
-        return []
-    dates = _purchase_attribution_dates({entry_id for _, entry_id, _ in nets})
-    return [
-        (ledger_account_id, dates[entry_id], net)
-        for ledger_account_id, entry_id, net in nets
-    ]
-
-
-def _purchase_attribution_dates(entry_ids: set[int]) -> dict[int, date]:
-    """Return each purchase's stored posting day, keyed by id.
-
-    One batched load of ``(id, settled_on)``.  No shared ``settled_day``
-    accessor here, because that one refuses a settled
-    TRANSACTION with no day, while a purchase with no day is an ordinary
-    outstanding purchase that simply posts nothing -- so a nonzero net against
-    a dayless purchase is the broken state, refused below with the missing-
-    linkage case.
-
-    Args:
-        entry_ids: The purchase ids whose posting days to resolve.
-
-    Returns:
-        ``{transaction_entry_id: attribution_date}`` over every id.
-
-    Raises:
-        PostingError: If any id resolves no purchase row, or one with no
-            ``settled_on``.
-    """
-    rows = (
-        db.session.query(TransactionEntry.id, TransactionEntry.settled_on)
-        .filter(TransactionEntry.id.in_(entry_ids))
-        .all()
-    )
-    dates = dict(rows)
-    missing = entry_ids - set(dates)
-    if missing:
-        raise PostingError(
-            f"Ledger holds a nonzero net for purchase ids {sorted(missing)} "
-            f"but no such purchase rows exist; the reverse-before-delete "
-            f"discipline was violated."
-        )
-    dayless = sorted(entry_id for entry_id, day in dates.items() if day is None)
-    if dayless:
-        raise PostingError(
-            f"Ledger holds a nonzero net for purchase ids {dayless} that "
-            f"carry no settled_on; a leg was posted for a purchase never seen "
-            f"to move."
-        )
-    return dates
-
-
-def _correction_dated_nets(
-    user_id: int, scenario_id: int,
-) -> list[tuple[int, date, Decimal]]:
-    """Return sourceless-correction nets, each dated by the entry's ``entry_date``.
-
-    The correction bucket: entries with no movement link and a
-    correction source kind (``loan_opening`` / ``loan_trueup`` /
-    ``loan_payment`` / ``account_opening`` / ``account_trueup``), grouped by
-    (ledger account, ``entry_date``).  A correction is a DERIVATION with no
-    row of its own -- an anchor's fact dated by the anchor's civil day, or a
-    loan payment's split dated by the payment's visible day (ruling
-    **R-BAL102**, plan step ``balance:X-bi-6-3``; the day it was dated by
-    while it linked the loan-side shadow) -- so it is dated by its stored
-    civil ``entry_date``.  The ``source_kind_id`` filter is what DROPS
-    hard-delete residue: a residue entry has no movement link either, but
-    carries a purchase / transfer_movement source kind, so it falls outside
-    this bucket and is excluded whole.  Dropping residue is
-    REQUIRED, not merely tidy: residue nets to zero per account
-    (reverse-before-delete), but its original and reversal entries carry
-    DIFFERENT ``entry_date`` s, so attributing them would land them on
-    different calendar days and a windowed reader could see one without the
-    other -- dropping the whole (zero-sum) pair keeps every window's tie-out
-    closed.
-
-    **Positive allowlist, updated in lock-step.**  This bucket KEEPS only the
-    enumerated sourceless correction kinds; every other sourceless entry is
-    treated as residue and dropped.  So a FUTURE sourceless correction kind must
-    be added here or its (real, non-zero) legs are silently dropped -- an
-    understated balance, not a broken tie-out (a dropped whole entry still sums
-    to zero).  A future ROW-LINKED kind needs no change here (its residue is
-    correctly dropped).  The write-side account walk's residue loader used the
-    inverse (negative) list, being per-non-loan-account, until plan task
-    plan#2525 deleted it with that walk's other reads of stored postings; this
-    reader spans the whole ledger, so it lists all five.
-
-    Args:
-        user_id: The owner whose ledger to read.
-        scenario_id: The budget scenario to scope to.
-
-    Returns:
-        ``[(ledger_account_id, entry_date, net), ...]`` for every nonzero group;
-        empty when no correction is posted.
-    """
-    correction_source_ids = [
-        ref_cache.posting_source_id(PostingSourceEnum.LOAN_OPENING),
-        ref_cache.posting_source_id(PostingSourceEnum.LOAN_TRUEUP),
-        ref_cache.posting_source_id(PostingSourceEnum.LOAN_PAYMENT),
-        ref_cache.posting_source_id(PostingSourceEnum.ACCOUNT_OPENING),
-        ref_cache.posting_source_id(PostingSourceEnum.ACCOUNT_TRUEUP),
-    ]
-    rows = (
-        db.session.query(
-            Posting.ledger_account_id,
-            JournalEntry.entry_date,
-            db.func.sum(Posting.amount),
-        )
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .filter(
-            JournalEntry.user_id == user_id,
-            JournalEntry.scenario_id == scenario_id,
-            JournalEntry.transaction_entry_id.is_(None),
-            JournalEntry.source_kind_id.in_(correction_source_ids),
-        )
-        .group_by(Posting.ledger_account_id, JournalEntry.entry_date)
-        .all()
-    )
-    return [
-        (ledger_account_id, entry_date, net)
-        for ledger_account_id, entry_date, net in rows
-        if net != 0
-    ]

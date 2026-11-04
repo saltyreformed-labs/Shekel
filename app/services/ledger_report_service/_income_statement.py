@@ -1,53 +1,53 @@
 """Confirmed-ledger income statement (Build-Order Step 5).
 
-Revenue and costs drawn from the append-only posting ledger for one window:
+Revenue and costs drawn from the owner's worked-out ledger for one window:
 the Income-class and Expense-class chart accounts' presented natural balances
 over the window, plus the derived net income.  Reads the baseline scenario only
-(the deferred multi-scenario policy is R8's); a user with no baseline yields an
-empty statement.
+(the deferred multi-scenario policy is R8's); a user with no baseline is
+refused.
 
 **Below that line sits the Unrealized section** (ruling **R-FO**, plan step
 X-f3d): a modelled account's balance-assertion true-up books its counter leg
-to a per-account Change in Value chart row, so investment return is
+to a per-account Change in Value chart account, so investment return is
 reported instead of vanishing into equity.  It is a class of its own precisely
 so ``net_income`` cannot count it, and ``comprehensive_income`` is the sum the
 statement states rather than leaves to the reader.
 
-**Two window paths, one honesty rule.**  A ``"pay_period"`` window filters
-``JournalEntry.pay_period_id`` directly (reader-contract C-2): the R2 storage
-rule (a reversal carries the period of the postings it reverses) makes each
-period's nets honest with no reader-side compensation, so residue cancels
-itself.  A ``"month"`` / ``"year"`` window filters the display-timezone
-attribution core by calendar date (C-3), so an early-settled source appears in
-its actual paid month even when its pay period sits elsewhere -- both are honest
+**Two window paths, one honesty rule** (:mod:`._attribution` states the
+reader contract over lines).  A ``"pay_period"`` window takes the lines filed
+in that paycheck (reader-contract C-2): a movement's in its parent's, a
+correction's by its day.  A ``"month"`` / ``"year"`` window takes the lines by
+their civil day (C-3), so an early-settled movement appears in its actual
+paid month even when its parent's paycheck sits elsewhere -- both are honest
 answers to different questions.
 
 Transfers never appear on either path: both a transfer's legs land on linked
-Asset/Liability accounts, outside the Income/Expense filter.  Flask-isolated,
-read-only.
+Asset/Liability accounts and the owner's Transfers in transit, outside the
+Income/Expense filter.  Flask-isolated, read-only.
 """
 
-from collections import defaultdict
-from datetime import date
+from collections.abc import Callable
 from decimal import Decimal
 
-from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
-from app.models.ledger_account import LedgerAccount
+from app.enums import LedgerAccountClassEnum
 from app.services import spending_analysis
+from app.services.ledger_lines import ChartKey, LedgerLine
 from app.services.pay_calendar import PayCalendar
-from app.services.scenario_resolver import require_baseline_scenario
 
-from ._attribution import (
-    StatementClassIds,
-    build_section,
-    dated_account_nets,
-    load_chart,
-    statement_class_ids,
-)
+from ._attribution import build_section, nets_by_key, read_statement_ledger
 from ._types import IncomeStatementReport, StatementWindow
 
-_ZERO_MONEY = Decimal("0.00")
+# The accounting classes the income statement reports on, in presentation
+# order: Income and Expense (the operating result) plus Unrealized (ruling
+# **R-FO**'s other comprehensive income, reported below the net-income line).
+# Stated once so the two window paths select the SAME set: they answer
+# different questions about which lines fall in the window, never different
+# questions about which accounts belong on the statement.
+_REPORTED_CLASSES = frozenset({
+    LedgerAccountClassEnum.INCOME,
+    LedgerAccountClassEnum.EXPENSE,
+    LedgerAccountClassEnum.UNREALIZED,
+})
 
 
 def compute_income_statement(
@@ -56,19 +56,20 @@ def compute_income_statement(
     """Return the confirmed-ledger income statement for a user over a window.
 
     Income (revenue) and Expense (cost) lines from the baseline scenario's
-    posted ledger, each natural-signed (positive = revenue / cost) and sorted by
-    label, plus ``net_income = total_income - total_expense``; then, BELOW that
-    line, the Unrealized section and ``comprehensive_income = net_income +
-    unrealized.total`` (ruling **R-FO**).  A user with no baseline scenario
-    yields an empty statement (zero totals) -- the deferred multi-scenario case
-    is R8's.
+    worked-out ledger, each natural-signed (positive = revenue / cost) and
+    sorted by label, plus ``net_income = total_income - total_expense``; then,
+    BELOW that line, the Unrealized section and ``comprehensive_income =
+    net_income + unrealized.total`` (ruling **R-FO**).
 
     **The window's PERIOD comes from the caller's calendar** (plan step
     C2-f3a), which is a REQUIRED parameter for the reason the contribution
     tier's is (ruling **R-PC19**, "How the CONTRIBUTION tier learns its
     periods"): the route that calls this already derives one for its own
     ``<select>``, so resolving a second here made the heading and the option
-    the reader picked it from two reads of one table on one render.
+    the reader picked it from two reads of one table on one render.  **The
+    read files its corrections on that same calendar** (plan task
+    plan#2771), so the render derives the owner's schedule once
+    (``tests/test_arch/test_one_read_pass_per_render.py``).
 
     **And it closed a hole the route had to guard.**  This was
     ``db.session.get(PayPeriod, window.period_id)`` -- UNSCOPED, so a foreign
@@ -85,10 +86,11 @@ def compute_income_statement(
         user_id: The owner whose statement to compute.
         calendar: That owner's
             :class:`~app.services.pay_calendar.PayCalendar`, derived once by
-            the caller.  Read only to label a ``"pay_period"`` window.
+            the caller: it labels a ``"pay_period"`` window, and the read
+            files each correction on it.
         window: The :class:`StatementWindow` selector (a ``"pay_period"`` window
-            filters the period directly; a ``"month"`` / ``"year"`` window
-            filters the display-timezone attribution core by calendar date).
+            takes the lines filed in its paycheck; a ``"month"`` / ``"year"``
+            window takes them by their civil day).
 
     Returns:
         The :class:`IncomeStatementReport`.
@@ -96,10 +98,14 @@ def compute_income_statement(
     Raises:
         ValueError: If the window is an invalid type or omits a field its type
             requires (via
-            :func:`app.services.spending_analysis.validate_window`).
-        PostingError: If a source with a nonzero net cannot resolve its
-            attribution date (a broken linkage invariant -- from
-            :func:`._attribution.dated_account_nets`).
+            :func:`app.services.spending_analysis.validate_window`); or if
+            *calendar* is another owner's (from the read).
+        BaselineMissingError: The owner has no baseline scenario.  It used to
+            report an all-zero income statement, which reads as "you earned
+            and spent nothing this period" rather than "this ledger cannot be
+            read".
+        PayCalendarError: A correction has no paycheck on *calendar* to file
+            in (from the read).
     """
     spending_analysis.validate_window(
         window.window_type, window.period_id, window.month, window.year,
@@ -111,147 +117,43 @@ def compute_income_statement(
     window_label = spending_analysis.window_label(
         window.window_type, window.month, window.year, period,
     )
-    class_ids = statement_class_ids()
-
-    # Raises for a user with no baseline (see the balance sheet's twin for the
-    # argument): this used to report an all-zero income statement, which reads
-    # as "you earned and spent nothing this period" rather than "this ledger
-    # cannot be read".
-    scenario = require_baseline_scenario(user_id)
-    chart = load_chart(user_id)
-    if window.window_type == "pay_period":
-        nets = _pay_period_statement_nets(
-            user_id, scenario.id, window.period_id, class_ids,
-        )
-    else:
-        nets = _calendar_statement_nets(
-            user_id,
-            scenario.id,
-            spending_analysis.calendar_window_bounds(
-                window.window_type, window.year, window.month,
-            ),
-            chart,
-            class_ids,
-        )
-    return _income_statement_from_nets(nets, chart, class_ids, window_label)
-
-
-def _statement_class_set(class_ids: StatementClassIds) -> tuple[int, ...]:
-    """Return the accounting classes the income statement reports on.
-
-    Income and Expense (the operating result) plus Unrealized (ruling
-    **R-FO**'s other comprehensive income, reported below the net-income
-    line).  Stated once so the two window paths -- the pay-period SQL filter
-    and the calendar fold -- select the SAME set: they answer different
-    questions about which entries fall in the window, never different
-    questions about which accounts belong on the statement.
-
-    Args:
-        class_ids: The resolved accounting-class ids.
-
-    Returns:
-        The class ref ids this statement sections, in presentation order.
-    """
-    return (class_ids.income, class_ids.expense, class_ids.unrealized)
-
-
-def _pay_period_statement_nets(
-    user_id: int, scenario_id: int, period_id: int, class_ids: StatementClassIds,
-) -> dict[int, Decimal]:
-    """Return per-reported-account debit nets for one pay period.
-
-    The reader-contract C-2 path: sum the postings on the user's ledger
-    accounts in the reported classes (:func:`_statement_class_set`) across
-    every journal entry whose ``pay_period_id`` is *period_id* in
-    *scenario_id*, grouped by ledger account.  Whole-entry by construction
-    (the filter is on the entry's period), and R2-honest (a reversal lands in
-    the period it reverses, so residue nets to zero here and drops out).
-
-    Args:
-        user_id: The owner whose ledger to read.
-        scenario_id: The budget scenario to scope to.
-        period_id: The pay period whose entries to sum.
-        class_ids: The resolved accounting-class ids.
-
-    Returns:
-        ``{ledger_account_id: debit_net}`` over the nonzero reported accounts
-        in the period.
-    """
-    rows = (
-        db.session.query(
-            Posting.ledger_account_id, db.func.sum(Posting.amount),
-        )
-        .join(JournalEntry, Posting.journal_entry_id == JournalEntry.id)
-        .join(LedgerAccount, Posting.ledger_account_id == LedgerAccount.id)
-        .filter(
-            JournalEntry.user_id == user_id,
-            JournalEntry.scenario_id == scenario_id,
-            JournalEntry.pay_period_id == period_id,
-            LedgerAccount.class_id.in_(_statement_class_set(class_ids)),
-        )
-        .group_by(Posting.ledger_account_id)
-        .all()
+    ledger = read_statement_ledger(user_id, lambda: calendar)
+    in_window = _window_test(window)
+    nets = nets_by_key(
+        line for line in ledger.lines
+        if in_window(line) and line.key.ledger_class in _REPORTED_CLASSES
     )
-    return {
-        ledger_account_id: net
-        for ledger_account_id, net in rows
-        if net != 0
-    }
+    return _income_statement_from_nets(nets, ledger.labels, window_label)
 
 
-def _calendar_statement_nets(
-    user_id: int,
-    scenario_id: int,
-    bounds: tuple[date, date],
-    chart: dict[int, LedgerAccount],
-    class_ids: StatementClassIds,
-) -> dict[int, Decimal]:
-    """Return per-reported-account debit nets over a calendar window.
+def _window_test(window: StatementWindow) -> Callable[[LedgerLine], bool]:
+    """Return whether a line falls in *window*, by the reader contract.
 
-    The reader-contract C-3 path: fold the display-timezone attribution core
-    (:func:`._attribution.dated_account_nets`) over the dates in *bounds*,
-    keeping only the reported classes (:func:`_statement_class_set`).  Each
-    source's whole net lands on its paid date, so a source settled early
-    appears in its actual paid month -- and an anchor correction lands on the
-    civil day its assertion was true for, which is what puts a value change in
-    the month the balance moved.
+    A ``"pay_period"`` window takes the lines filed in its paycheck (C-2); a
+    ``"month"`` / ``"year"`` window the lines whose civil day falls in its
+    inclusive bounds (C-3).  Either takes a booking whole, its legs sharing
+    their paycheck and their day.
 
     Args:
-        user_id: The owner whose ledger to read.
-        scenario_id: The budget scenario to scope to.
-        bounds: The inclusive ``(first_day, last_day)`` of the calendar window.
-        chart: The user's chart (:func:`._attribution.load_chart`) -- supplies
-            each account's class.
-        class_ids: The resolved accounting-class ids.
+        window: The validated :class:`StatementWindow`.
 
     Returns:
-        ``{ledger_account_id: debit_net}`` over the nonzero reported accounts
-        in the window.
+        A predicate over :class:`~app.services.ledger_lines.LedgerLine`.
     """
-    first_day, last_day = bounds
-    reported = _statement_class_set(class_ids)
-    nets: dict[int, Decimal] = defaultdict(lambda: _ZERO_MONEY)
-    for (ledger_account_id, attribution_date), net in dated_account_nets(
-        user_id, scenario_id,
-    ).items():
-        if not first_day <= attribution_date <= last_day:
-            continue
-        if chart[ledger_account_id].class_id in reported:
-            nets[ledger_account_id] += net
-    return {
-        ledger_account_id: net
-        for ledger_account_id, net in nets.items()
-        if net != 0
-    }
+    if window.window_type == "pay_period":
+        return lambda line: line.pay_period_id == window.period_id
+    first_day, last_day = spending_analysis.calendar_window_bounds(
+        window.window_type, window.year, window.month,
+    )
+    return lambda line: first_day <= line.entry_date <= last_day
 
 
 def _income_statement_from_nets(
-    nets: dict[int, Decimal],
-    chart: dict[int, LedgerAccount],
-    class_ids: StatementClassIds,
+    nets: dict[ChartKey, Decimal],
+    labels: dict[ChartKey, str],
     window_label: str,
 ) -> IncomeStatementReport:
-    """Assemble the report from per-account debit nets.
+    """Assemble the report from per-key debit nets.
 
     Builds the Income, Expense and Unrealized sections (label-sorted,
     natural-signed: revenue / cost / gain positive), derives net income from
@@ -263,17 +165,16 @@ def _income_statement_from_nets(
     earnings.
 
     Args:
-        nets: ``{ledger_account_id: debit_net}`` over the reported accounts.
-        chart: The user's chart (empty for the no-baseline empty report).
-        class_ids: The resolved accounting-class ids.
+        nets: ``{chart key: debit_net}`` over the reported accounts.
+        labels: The chart's labels.
         window_label: The human window label.
 
     Returns:
         The assembled :class:`IncomeStatementReport`.
     """
-    income = build_section(nets, chart, class_ids.income)
-    expense = build_section(nets, chart, class_ids.expense)
-    unrealized = build_section(nets, chart, class_ids.unrealized)
+    income = build_section(nets, labels, LedgerAccountClassEnum.INCOME)
+    expense = build_section(nets, labels, LedgerAccountClassEnum.EXPENSE)
+    unrealized = build_section(nets, labels, LedgerAccountClassEnum.UNREALIZED)
     net_income = income.total - expense.total
     return IncomeStatementReport(
         window_label=window_label,

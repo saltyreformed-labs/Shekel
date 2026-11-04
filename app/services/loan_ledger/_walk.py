@@ -51,7 +51,6 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from app.models.account import Account
 from app.models.loan_params import LoanParams
 from app.services import loan_loaders
 from app.services.loan_loaders import LoanAnchorFact, LoanRecords
@@ -169,8 +168,10 @@ class LoanLedgerWalk:
         ``LoanParams`` walks to (the N1 guard): the loan writers return on it
         before they read what is posted (``loan_posting_service``'s
         ``reconcile_loan_corrections`` and ``_assert_checked_projection``),
-        and the worked-out read asks it of each loan to decide whether the
-        owner's pay calendar is loaded (``ledger_lines.worked_out_lines``).
+        the worked-out read asks it of each loan to decide whether the
+        owner's pay calendar is loaded (``ledger_lines.worked_out_lines``),
+        and the loan page's two measured surfaces hide on it
+        (``loan_posting_service``'s ``_configured_loan_walk``).
         """
         return not self.anchor_corrections and not self.payment_splits
 
@@ -411,40 +412,37 @@ def walk_loan_ledger(
 
 
 def walk_loan_ledgers(
-    loans: list[Account], scenario_id: int,
+    loan_account_ids: list[int], scenario_id: int,
 ) -> dict[int, LoanLedgerWalk]:
-    """Return each loan's ledger walk, every loan's records loaded once.
+    """Return each loan's ledger walk, every loan's terms and records loaded once.
 
     :func:`walk_loan_ledger` for many loans (plan task plan#2649, ruling
-    **plan#2623**): each loan's terms are its account's ``loan_params``, which
-    the caller's account load already joined, and every kind of record the
-    walks fold is loaded once for all of them
+    **plan#2623**): the loans' terms are loaded in one statement
+    (:func:`app.services.loan_loaders.load_loans_params`) and every kind of
+    record the walks fold once for all of them
     (:func:`app.services.loan_loaders.load_loan_records`), so the statements
     do not grow with the number of loans.  Each walk is the one
-    :func:`walk_loan_ledger` answers for its loan, by the same assembly,
-    WHILE each account's ``loan_params`` is its stored terms.
+    :func:`walk_loan_ledger` answers for its loan, by the same assembly.
 
-    **That is the caller's to hold, and the one place this can differ from
-    the door**, which loads the params by id: a relationship already loaded
-    on an account is not reloaded by a later query, so an account whose
-    ``loan_params`` was read as ``None`` before a ``LoanParams`` row naming
-    it was written by its ``account_id`` (``routes/loan/params``' setup
-    does) still says ``None`` in that session, and walks to nothing here.
-    The worked-out read is called over a session that has written no loan
-    terms (its tests and the production harness commit and expire first).
+    **The terms are read by the loans' ids, never off ``Account.loan_params``**
+    (finding plan#2691): a relationship already loaded on an account is not
+    re-read by a later query, so terms written by their ``account_id`` after
+    that load (``routes/loan/params``' setup does) were missed and the loan
+    walked to nothing.  Reading them as the one-loan door reads them leaves
+    no caller anything to hold.
 
     Args:
-        loans: The loan accounts to walk, each a loaded
-            :class:`~app.models.account.Account` row whose ``loan_params``
-            is current.  One carrying no ``LoanParams`` walks to nothing, as
-            :func:`walk_loan_ledger`'s does.
+        loan_account_ids: The loan accounts to walk.  One carrying no
+            ``LoanParams`` walks to nothing, as :func:`walk_loan_ledger`'s does.
         scenario_id: The budget scenario the payments live in.
 
     Returns:
-        ``{loan account id: its LoanLedgerWalk}``, one per account handed in.
+        ``{loan account id: its LoanLedgerWalk}``, one per id handed in.
     """
+    terms = loan_loaders.load_loans_params(loan_account_ids)
     return _ledger_walks(
-        {loan.id: loan.loan_params for loan in loans}, scenario_id,
+        {account_id: terms.get(account_id) for account_id in loan_account_ids},
+        scenario_id,
     )
 
 

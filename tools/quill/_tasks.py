@@ -281,7 +281,7 @@ def off_the_board(cards: Mapping[int, Card]) -> list[Card]:
     """Each task among ``cards``, open or closed, that belongs on the board
     (:func:`_command.on_board`: its step is on it) and is not, in card order; ``cards`` holds
     each card's parent (``_command.with_closure``).  ``quill sync`` reads every open card and
-    every task under each card it reads (``quill._sync_reads``), so every open task is decided
+    every task under each card it reads (:func:`_sync.every_card`), so every open task is decided
     over, and every closed one under a step it reads; not a closed task under a closed step it
     reads no other way, which a view of open cards does not show."""
     return [card for _, card in sorted(cards.items())

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from functools import partial
 
 from tools.ci.gitcmd import DEV, MAIN
 from tools.quill import _git
@@ -106,6 +107,21 @@ def every_card(tracker: Tracker, reads: _git.Reads, ever: frozenset[int]) -> Dec
                            "it (that read has not caught up yet, or the card was deleted or "
                            "moved since): run sync again")
     return decided
+
+
+def behind(tracker: Tracker, reads: _git.Reads, cards: Mapping[int, Card]) -> list[int]:
+    """How far ``quill next`` says ``sync`` is behind (ruling plan#1815), while git says work
+    shipped or a task is done that the tracker still shows open: the cards ``sync`` would close
+    over ``cards``, what ``next`` read, by its one producer (:func:`_state.sync_plan`), so the
+    count clears at the next ``sync``, a schedule that stopped is seen, and a card a PERSON
+    reopened, which ``sync`` reports and never closes, is never counted.  Each card so counted
+    is read again by its number and decided again, as ``sync`` decides (:func:`every_card`):
+    the open listing can still show a card ``sync`` has just closed."""
+    closes = partial(sync_plan, shipped=reads.shipped.cards, claims=reads.claims,
+                     tasks=reads.shipped.tasks)
+    if counted := closes(cards).close:
+        counted = closes({**cards, **tracker.cards(counted)}).close
+    return counted
 
 
 def write_states(tracker: Tracker, decided: Decided, shipped: frozenset[int],

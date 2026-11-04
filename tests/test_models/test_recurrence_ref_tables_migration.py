@@ -159,20 +159,38 @@ class TestMigratedTableShape:
         ``ON CONFLICT (name) DO NOTHING`` needs a unique index on ``name`` to
         have a conflict target at all, and ``ref_cache`` resolves each enum
         member by looking its value up by name.
+
+        **Grouped by INDEX since plan step plan#2302**, which gave
+        ``ref.recurrence_units`` a second unique index: the superkey
+        ``uq_recurrence_units_id_has_day_of_month`` a rule's composite key
+        targets (ruling plan#2748).  A flat list of every unique column read
+        ``['name', 'id', 'has_day_of_month']`` there and could no longer say
+        whether ``name`` had an index of its own, so each table's whole set of
+        unique indexes is pinned instead: ``name`` alone everywhere, and the
+        superkey beside it on the one table that carries it.
         """
+        expected = {
+            "recurrence_units": {("name",), ("id", "has_day_of_month")},
+            "period_placements": {("name",)},
+            "business_day_shifts": {("name",)},
+        }
         with app.app_context():
             for table, _ in _TABLES:
-                unique_cols = db.session.execute(text(
-                    "SELECT a.attname FROM pg_index i "
+                indexes = db.session.execute(text(
+                    "SELECT array_agg(a.attname ORDER BY k.ord) "
+                    "FROM pg_index i "
+                    "CROSS JOIN LATERAL unnest(i.indkey) "
+                    "  WITH ORDINALITY AS k(attnum, ord) "
                     "JOIN pg_attribute a "
-                    "  ON a.attrelid = i.indrelid "
-                    " AND a.attnum = ANY(i.indkey) "
+                    "  ON a.attrelid = i.indrelid AND a.attnum = k.attnum "
                     "WHERE i.indrelid = ('ref.' || :t)::regclass "
-                    "  AND i.indisunique AND NOT i.indisprimary"
+                    "  AND i.indisunique AND NOT i.indisprimary "
+                    "GROUP BY i.indexrelid"
                 ), {"t": table}).scalars().all()
-                assert unique_cols == ["name"], (
-                    f"ref.{table} unique columns are {unique_cols}, expected "
-                    f"['name']"
+                unique_sets = {tuple(columns) for columns in indexes}
+                assert unique_sets == expected[table], (
+                    f"ref.{table} unique indexes are {sorted(unique_sets)}, "
+                    f"expected {sorted(expected[table])}"
                 )
 
 

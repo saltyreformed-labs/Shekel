@@ -732,7 +732,7 @@ class TestTheStatementsReportTheDifference:
             assert income.comprehensive_income == income.net_income
             assert [
                 line.label for line in sheet.equity.lines
-                if line.ledger_account_id is None
+                if line.key is None
             ] == ["Retained Earnings"]
             assert sheet.tie_out.in_balance
 

@@ -77,7 +77,7 @@ def test_versions_waiting_and_none_open_opens_one_issue_mentioning_him(capsys):
     assert gh.run(_MOVED) == 0
     assert gh.written == [(None, {"title": due.TITLE, "body": _OPENED})]
     assert capsys.readouterr().out == (f"update due: wrote {_LINK}\n"
-                                       "update due: 2 versions wait for a release\n")
+                                       "update due: versions waiting for a release: 2\n")
 
 
 def test_versions_waiting_and_one_open_follows_the_list_with_no_new_mention():
@@ -113,7 +113,7 @@ def test_nothing_waiting_and_none_open_writes_nothing(capsys):
     gh = _Gh()
     assert gh.run(()) == 0
     assert not gh.written
-    assert capsys.readouterr().out == "update due: 0 versions wait for a release\n"
+    assert capsys.readouterr().out == "update due: versions waiting for a release: 0\n"
 
 
 @pytest.mark.parametrize("other", [
@@ -243,7 +243,7 @@ def test_a_version_dev_moved_opens_the_issue_end_to_end(code, tmp_path, monkeypa
     assert post["title"] == due.TITLE
     assert post["body"].startswith(f"@{DEVELOPER} A release of `dev` would move these versions")
     assert "- `uv.lock: flask 3.1.0 -> 3.1.1`\n" in post["body"]
-    assert capsys.readouterr().out.endswith("update due: 1 versions wait for a release\n")
+    assert capsys.readouterr().out.endswith("update due: versions waiting for a release: 1\n")
 
 
 def test_nothing_moved_closes_an_open_issue_end_to_end(code, tmp_path, monkeypatch):
@@ -259,13 +259,14 @@ def test_nothing_moved_closes_an_open_issue_end_to_end(code, tmp_path, monkeypat
 
 def test_the_tips_are_read_from_origin_not_as_the_checkout_left_them(
         code, tmp_path, monkeypatch):
-    """A re-run after a release: the checkout pointed ``origin/main`` back at the run's old
-    commit, but ``main`` on ``origin`` holds what ``dev`` holds.  Nothing waits, so no false
-    mention opens."""
+    """A re-run after a release: the checkout wrote ``origin/main`` as the run's old commit and
+    no ``origin/dev`` at all, but ``main`` on ``origin`` holds what ``dev`` holds.  Nothing waits,
+    so no false mention opens."""
     _gh_program(tmp_path, monkeypatch)
     released, moved = _branches(code, {"uv.lock": _lock("3.1.0")}, {"uv.lock": _lock("3.1.1")})
     _scratch(code, "push", "--quiet", "origin", f"{moved}:refs/heads/main")
     point_main(code, released)
+    _scratch(code, "update-ref", "-d", "refs/remotes/origin/dev")
     assert due.main([], root=code) == 0
     assert all(body is None for _, body in _calls(tmp_path))
 

@@ -24,9 +24,9 @@ mention.  What it then writes is :func:`writes`:
 
 Two of its own open (one a person reopened) are each followed or closed alike.  A person
 closing it while versions wait reads as none open, so the next run opens another.  A hotfix on
-``main`` moving a pin reads as a move back until ``dev`` is resynced, as a release of ``dev``
-at that moment would make it (a release takes the cut's own tree): listed so, and off the list
-by the next run after the resync.
+``main`` moving a pin reads as a move back until ``dev`` is resynced, and the issue overstates
+for that while: no release makes that move, as ``/release`` stops at its step 6 on a merge of
+``main`` whose tree is not the cut's.  The next run after the resync takes it off the list.
 
 **It reads the two tips as they are now** (:func:`tools.quill.door.fetch`), never as its
 checkout left them: ``actions/checkout`` writes ``origin/main`` as the run's own commit
@@ -136,7 +136,7 @@ def run(repository: str, versions: Sequence[Moved],
             failed = 1
         else:
             print(f"update due: wrote {done.stdout.strip()}")
-    print(f"update due: {len(versions)} versions wait for a release")
+    print(f"update due: versions waiting for a release: {len(versions)}")
     return failed
 
 

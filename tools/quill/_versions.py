@@ -98,7 +98,7 @@ own copy of every workflow, so a version only they pin still waits for a release
 file one side holds no copy of pins every version against none there, so while ``main`` holds
 no lock (until the first release of plan#1183) every locked package reads as waiting: true, as
 a release would bring them all, and never a list anyone is shown, since the job reaches
-``main`` in that same release.
+``main`` in that same release and :func:`due_line` prints only how many.
 
 **What a lock change does to versions alone** (:func:`lock_moves`) is :func:`lock_change`'s
 reading with no judgment: the Monday refresh's reading of each lock it makes from an edited
@@ -118,6 +118,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from tools.ci.gitcmd import DEV, MAIN, git, tracking
+from tools.quill._exits import described
 from tools.quill._production import DOCKERFILE, differences, tree
 
 #: The lock every install reads (ruling ``balance:R-BAL294``).
@@ -156,8 +157,8 @@ _SEPARATORS = re.compile(r"[-_.]+")
 
 
 class NotVersions(ValueError):
-    """A change to a file production runs that moves more than its pinned versions; its
-    message says what more, as a clause naming the file."""
+    """A change to a file that pins versions that moves more than those versions, or such a
+    file that cannot be read for them; its message says what, as a clause naming the file."""
 
 
 @dataclass(frozen=True)
@@ -188,8 +189,8 @@ class Reason:
 
 @dataclass(frozen=True)
 class Pin:
-    """One version a file production runs pins (:func:`pinned`): ``what`` (a package, an
-    image, an action) at ``version``, a package's as the lock holds it, an image's as its
+    """One version a file pins (:func:`pinned`): ``what`` (a package, an image, an action)
+    at ``version``, a package's as the lock holds it, an image's as its
     line spells its tag's version through its digest, an action's its commit through its
     release."""
 
@@ -308,8 +309,8 @@ def _exact(root: Path, path: str, oid: str) -> list[str]:
 
 
 def _object(path: str, held: str) -> str:
-    """The object of ``path``, held as ``held`` (its mode and object, as
-    :func:`_production.changed` gives them).
+    """The object of ``path``, held as ``held`` (its mode and object, as :func:`differences`
+    gives them).
 
     Raises:
         NotVersions: when it is no file, but a link or a submodule's commit, whose text is
@@ -830,8 +831,8 @@ def lock_pins(text: str) -> frozenset[Pin]:
 
 def pinned(root: Path, path: str, held: str | None) -> frozenset[Pin]:
     """Every version ``path``, a file that pins versions (:func:`pins_versions`), pins where
-    production holds it as ``held`` (its mode and object, as :func:`_production.changed`
-    gives them; None where that production holds no such file, which pins none): in the
+    the side read holds it as ``held`` (its mode and object, as :func:`differences` gives
+    them; None where that side holds no such file, which pins none): in the
     lock what :func:`lock_pins` reads; in any other file what each line that pins one
     (:data:`_LINES`) pins, at its version as the line spells it (:func:`_version`).  It asks
     nothing of what a change moves.
@@ -918,3 +919,23 @@ def versions_waiting(root: Path) -> tuple[Moved, ...]:
     """
     return versions_moved(root, differences(tree(root, tracking(MAIN)),
                                             tree(root, tracking(DEV))))
+
+
+def due_line(root: Path) -> str | None:
+    """The line ``quill next`` prints while a release is due for a version (ruling plan#2829,
+    option D), by :func:`versions_waiting` over the references its read of git just fetched;
+    None while none is.  It says how many and lists none of them, and what it says is for a
+    session to pass on to the developer, never a step to take: a release starts only on his
+    word.  A pin that cannot be read is said so too, and stops none of ``next``'s other lines.
+
+    Raises:
+        tools.ci.gitcmd.GitError: when git cannot read either branch.
+    """
+    try:
+        versions = versions_waiting(root)
+    except NotVersions as error:
+        return f"RELEASE DUE UNKNOWN: a pin on dev or main cannot be read: {described(error)}"
+    if not versions:
+        return None
+    return (f"RELEASE DUE: dev and main pin different versions ({len(versions)}) -- tell the "
+            "developer; only his word starts a release (/release)")

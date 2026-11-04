@@ -147,6 +147,7 @@ from tools.quill import (
     _status,
     _sync,
     _tasks,
+    _versions,
     _watch,
 )
 from tools.quill._arcs import other_labels
@@ -215,7 +216,8 @@ CONNECT = partial(Tracker.connect, PLAN)
 
 def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The first open step in the board's order that is unclaimed, unshipped and unblocked;
-    then how far ``sync`` is behind, what it cannot offer that a person must act on, and last,
+    then how far ``sync`` is behind, what it cannot offer that a person must act on, whether a
+    release is due for a version (:func:`_versions.due_line`, ruling plan#2829), and last,
     after every line no further read can cost, each claimed card, and each task under one,
     holding a comment of the developer's that no answer of quill's has followed (plan#1822,
     ruling plan#1924, :func:`_comments.unanswered_lines`).
@@ -253,6 +255,8 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
         print(f"OUTSIDE LINK: {line}")
     for line in unfinished_reports(cards, shipped):
         print(f"UNFINISHED FILING: {line}")
+    if (due := _versions.due_line(root)) is not None:
+        print(due)
     for line in _comments.unanswered_lines(tracker, reads.claims, cards):
         print(f"UNANSWERED COMMENT: {line}")
     return 0

@@ -28,6 +28,15 @@ A_CADENCE_IS_REQUIRED = (
 )
 
 
+#: The sentence an expense or income definition stated on a card's due dates
+#: meets (plan step ``credit_card:CC-6``): its form never offers them, so this
+#: is what a crafted POST reads.
+ONLY_A_TRANSFER_REPEATS_ON_DUE_DATES = (
+    "Only a transfer into a credit card repeats on each statement's due date. "
+    "Choose another way for this to repeat."
+)
+
+
 class TemplateCreateSchema(RecurrenceFormFieldsMixin, BaseSchema):
     """Validates POST data for creating a transaction template.
 
@@ -98,6 +107,32 @@ class TemplateCreateSchema(RecurrenceFormFieldsMixin, BaseSchema):
         """
         if data.get("recurrence_unit") is None:
             raise ValidationError(A_CADENCE_IS_REQUIRED, "recurrence_unit")
+
+    @validates_schema
+    def validate_no_card_due_dates(self, data, **kwargs):
+        """Refuse an expense or income definition on a card's due dates.
+
+        A due date is a day a card's terms decide, and this definition pays no
+        card, so the read pass would refuse it on every walk
+        (``balance_at._definition_due_dates``).  Both the create and the update
+        schema take this rule: an absent unit states no cadence to refuse.
+
+        Raises:
+            ValidationError: On the ``recurrence_unit`` field, with
+                :data:`ONLY_A_TRANSFER_REPEATS_ON_DUE_DATES`.
+        """
+        # Pylint: ``import-outside-toplevel`` -- this schema module must not
+        # pull the recurrence service package in at import time, the reason
+        # ``_recurrence.RecurrenceUnitField._member_for`` gives.
+        from app.services.recurrence import (  # pylint: disable=import-outside-toplevel
+            follows_card_due_dates,
+        )
+
+        unit = data.get("recurrence_unit")
+        if unit is not None and follows_card_due_dates(unit):
+            raise ValidationError(
+                ONLY_A_TRANSFER_REPEATS_ON_DUE_DATES, "recurrence_unit",
+            )
 
     @validates_schema
     def validate_envelope_only_on_expense(self, data, **kwargs):

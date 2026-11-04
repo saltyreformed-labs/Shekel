@@ -223,6 +223,17 @@ def _posted_bound(page) -> dict[str, list[str]]:
     )
 
 
+def _select_unit_by_id(page, unit_id: str) -> None:
+    """Choose a unit by its ref id and let the script settle.
+
+    Args:
+        page: The Playwright page.
+        unit_id: The unit's ``ref.recurrence_units`` id.
+    """
+    page.select_option("#recurrence_unit", unit_id)
+    _settle(page)
+
+
 def _selectable_unit(page, units: dict[str, str], label: str) -> str | None:
     """Return the id of the unit offered as *label*, or None unless a user can choose it.
 

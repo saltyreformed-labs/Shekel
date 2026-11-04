@@ -40,6 +40,7 @@ from app.routes._recurrence_form_helpers import (
     resolve_recurrence_rule_for_update,
 )
 from app.routes._recurrence_form_render import edit_form_recurrence_state
+from app.services.recurrence import authorable_cadences
 from app.routes._redirect_target import RedirectTarget
 from app.schemas.validation import end_bound_before_start_message
 from app.services import balance_at, recurring_transfer_query
@@ -501,7 +502,7 @@ class TestTheIdentityIsReadOffThePass:
             ctx = _ctx(seed_user)
 
             with app.test_request_context():
-                state = edit_form_recurrence_state(tpl, ctx)
+                state = edit_form_recurrence_state(tpl, ctx, authorable_cadences())
 
             assert state.selected_end.locked and state.selected_start.locked
             assert state.selected_end.stop_phrase == "until Jul 01, 2028"

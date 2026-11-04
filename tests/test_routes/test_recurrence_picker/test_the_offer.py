@@ -175,9 +175,15 @@ class TestTheScriptCanReadWhatTheServerSerialized:
     #: per-month ceiling control shows and enables only beside a unit that
     #: can put two occurrences in a month, and that is a fact the SERVER
     #: states about the offer rather than one the script infers.
+    #:
+    #: ``needs_a_card`` and ``fixed_interval`` JOINED at plan step
+    #: credit_card:CC-6: a repeat on each statement's due date is offered only
+    #: beside a card's option and holds the interval box at 1, and neither is
+    #: the script's to work out.
     _READ_BY_THE_SCRIPT = frozenset({
         "unit_id", "placement_id",
         "has_day_of_month_coordinate", "can_repeat_within_month",
+        "needs_a_card", "fixed_interval",
     })
 
     @staticmethod
@@ -291,24 +297,28 @@ class TestBothFormsRenderTheSameControls:
     """The one producer serves both template kinds."""
 
     @pytest.mark.parametrize(
-        "url", ["/templates/new", "/transfers/new"],
+        ("url", "cadences"),
+        [
+            ("/templates/new", cadences_without_a_card),
+            ("/transfers/new", authorable_cadences),
+        ],
     )
     def test_the_unit_select_offers_each_offered_unit_once(
-        self, app, auth_client, seed_user, seed_periods_today, url,
+        self, app, auth_client, seed_user, seed_periods_today, url, cadences,
     ):
         """One ``<option>`` per unit however many readings it has.
 
         The MONTH unit has two offered readings (both placements) and must
         still render a single entry, or the user is asked to choose between two
-        things called "months".  The set each form renders is the offer set
-        less a card's due dates (``cadences_without_a_card``, plan step
-        credit_card:CC-6): no form offers them until a transfer into a card
-        can take them.
+        things called "months".  The set each form renders is the one its own
+        door refuses against (plan step credit_card:CC-6): the transfer form
+        offers every cadence, and the transaction form all but a card's due
+        dates, which only a transfer into a card may repeat by.
         """
         assert seed_periods_today
         with app.app_context():
             expected = []
-            for option in cadence_options(cadences_without_a_card()):
+            for option in cadence_options(cadences()):
                 if str(option.unit_id) not in expected:
                     expected.append(str(option.unit_id))
 
@@ -325,16 +335,26 @@ class TestBothFormsRenderTheSameControls:
     def test_both_forms_offer_identical_cadences(
         self, app, auth_client, seed_user, seed_periods_today,
     ):
-        """A user meets one vocabulary whichever kind they are creating."""
+        """A user meets one vocabulary whichever kind they are creating.
+
+        Identical but for the one unit only a transfer may repeat by, a card's
+        statement due dates (plan step credit_card:CC-6), which is the transfer
+        form's last entry and the transaction form's nowhere.
+        """
         assert seed_periods_today
         with app.app_context():
             transaction = auth_client.get("/templates/new").data.decode()
             transfer = auth_client.get("/transfers/new").data.decode()
+            due_dates = str(ref_cache.recurrence_unit_id(RecurrenceUnitEnum.DUE_DATE))
 
-        for select_id in ("recurrence_unit", "recurrence_placement"):
-            assert _options(transaction, select_id) == _options(
-                transfer, select_id,
-            ), select_id
+        assert _options(transaction, "recurrence_unit") == [
+            option for option in _options(transfer, "recurrence_unit")
+            if option[0] != due_dates
+        ]
+        assert _options(transfer, "recurrence_unit")[-1][0] == due_dates
+        assert _options(transaction, "recurrence_placement") == _options(
+            transfer, "recurrence_placement",
+        )
 
     @pytest.mark.parametrize(
         "url", ["/templates/new", "/transfers/new"],

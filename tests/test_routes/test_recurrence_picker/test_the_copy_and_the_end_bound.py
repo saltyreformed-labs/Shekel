@@ -71,6 +71,7 @@ class TestTheCopyTheUserActuallyReads:
 
         assert _option_labels(body, "recurrence_unit") == [
             "Does not repeat", "paychecks", "weeks", "months", "years",
+            "statement due dates",
         ]
 
     # ``test_the_interval_options_agree_with_their_own_counts`` was here until
@@ -110,14 +111,16 @@ class TestTheCopyTheUserActuallyReads:
         is the empty one, by ruling (R-BAL23, plan step balance:X-bi-7b): the
         transfer form's "Does not repeat" is a choice and the transaction
         form's "Choose how it repeats" is a placeholder, so it is compared
-        separately above rather than folded into this equality.
+        separately above rather than folded into this equality.  The transfer
+        form's last cadence is its own, a card's statement due dates (plan step
+        credit_card:CC-6), so the transaction form's are compared with the rest.
         """
         assert seed_periods_today
         transaction = auth_client.get("/templates/new").data.decode()
         transfer = auth_client.get("/transfers/new").data.decode()
 
         assert _option_labels(transaction, "recurrence_unit")[1:] == (
-            _option_labels(transfer, "recurrence_unit")[1:]
+            _option_labels(transfer, "recurrence_unit")[1:-1]
         )
         assert _option_labels(transaction, "recurrence_placement") == (
             _option_labels(transfer, "recurrence_placement")

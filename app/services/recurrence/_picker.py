@@ -75,7 +75,11 @@ from app.services.recurrence._frequency import (
     can_repeat_within_month,
     has_day_of_month_coordinate,
 )
-from app.services.recurrence._offer import AuthorableCadence
+from app.services.recurrence._offer import (
+    AuthorableCadence,
+    fixed_interval,
+    follows_card_due_dates,
+)
 
 #: What each cadence UNIT is called on the form, singular and plural.
 #:
@@ -90,8 +94,8 @@ from app.services.recurrence._offer import AuthorableCadence
 #: plan step R8-b, the leaf that made the unit authorable by dating a weekly
 #: row from its occurrence; until then the offer set withheld it and this map
 #: was never asked for it.  The card's due dates joined at plan step
-#: credit_card:CC-6 (ruling plan#2671): authorable every 1 alone, so the
-#: control reads "every 1 statement due date".
+#: credit_card:CC-6 (ruling plan#2671), the transfer form's alone: authorable
+#: every 1 alone, so the box beside it is fixed (:func:`~._offer.fixed_interval`).
 _UNIT_LABELS: dict[RecurrenceUnitEnum, tuple[str, str]] = {
     RecurrenceUnitEnum.PERIOD: ("paycheck", "paychecks"),
     RecurrenceUnitEnum.WEEK: ("week", "weeks"),
@@ -160,12 +164,24 @@ class CadenceWire:
             the door admits cannot disagree -- the ``emits_period_starts``
             shape: a control the engine would ignore is one the form does
             not render.
+        needs_a_card: Whether only a transfer into a configured card may
+            repeat by this unit, which is what decides whether the script
+            offers it beside the chosen destination (plan step
+            credit_card:CC-6): the destination's own option says whether it
+            has due dates, and neither fact is the script's to work out.
+        fixed_interval: The one interval the unit takes, which the script
+            fixes the box at, or ``None`` for a free box
+            (:func:`~app.services.recurrence._offer.fixed_interval`, the same
+            answer :func:`~app.services.recurrence.is_authorable` refuses any
+            other interval with).
     """
 
     unit_id: int
     placement_id: int
     has_day_of_month_coordinate: bool
     can_repeat_within_month: bool
+    needs_a_card: bool
+    fixed_interval: int | None
 
 
 @dataclass(frozen=True)
@@ -223,9 +239,11 @@ def cadence_options(
     payroll lines.
 
     **It takes the offer set rather than reading one** (ruling plan#2591):
-    the template forms offer
-    :func:`~app.services.recurrence.authorable_cadences`, and the salary page
-    offers that set narrowed to the units a payroll line may repeat by
+    the transfer form offers
+    :func:`~app.services.recurrence.authorable_cadences`, the transaction form
+    that set less a card's due dates
+    (:func:`~app.services.recurrence.cadences_without_a_card`), and the salary
+    page that set narrowed to the units a payroll line may repeat by
     (``payroll_line_cadence.line_cadences``), because a line's rule picks
     WHICH paychecks take it, so a weekly amount would be taken once a paycheck
     however many weeks the paycheck holds.  Each caller passes
@@ -262,6 +280,8 @@ def cadence_options(
                     can_repeat_within_month=(
                         can_repeat_within_month(cadence.unit)
                     ),
+                    needs_a_card=follows_card_due_dates(cadence.unit),
+                    fixed_interval=fixed_interval(cadence.unit),
                 ),
                 unit_label_one=label_one,
                 unit_label_many=label_many,

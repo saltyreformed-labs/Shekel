@@ -35,7 +35,9 @@ from app.services import (
     category_service,
     template_amount_service,
 )
+from app.services.card_terms import configured_card_ids
 from app.services.pay_calendar import calendar_for
+from app.services.recurrence import authorable_cadences
 from app.routes._commit_helpers import (
     STALE_EDITING_MESSAGE,
     StaleConflictContext,
@@ -87,6 +89,7 @@ from app.routes.transfers._instances import (
     propagate_to_non_repeating_transfers,
 )
 from app.routes.transfers._helpers import (
+    due_date_repeat_refusal,
     _create_schema,
     _first_template_fk_refusal,
     _update_schema,
@@ -192,8 +195,12 @@ def new_transfer_template():
         # route's (``settle_first_occurrence``), so the locks are affordances
         # rather than the enforcement.  The edit form ships the same value
         # computed for its definition (plan step R7d-f-5).
-        recurrence=create_form_recurrence_state(),
+        recurrence=create_form_recurrence_state(authorable_cadences()),
         loan_locks=loan_destination_locks(current_user.id),
+        # Which destinations have statement due dates to repeat on: the fact
+        # each one's <option> carries for ``recurrence_form.js``, from the
+        # predicate the doors refuse with (plan step credit_card:CC-6).
+        due_date_cards=configured_card_ids(accounts),
         periods=periods,
         current_period=current_period,
         prefill_from=prefill_from,
@@ -218,7 +225,7 @@ def _settle_create_references(data, start_period_id):
     R7c-b's fourth arm pushed it past pylint's ``too-many-return-statements``.
     Decomposing is this project's answer to that count, never a disable.
 
-    Three things, in the one order they can be asked in:
+    Four things, in the one order they can be asked in:
 
     1. **Every user-scoped FK is the owner's** (commit C-27 / F-043).  A
        single-return loop so a future FK adds a row rather than an arm; the
@@ -253,6 +260,11 @@ def _settle_create_references(data, start_period_id):
        or before the loan's origination (ruling **R-R81**).  It runs LAST
        because it reads the destination's loan parameters, which step 1 has
        just proved are the owner's -- reading them first would be an IDOR.
+    4. **A repeat on a card's due dates pays a configured card**
+       (:func:`~app.routes.transfers._helpers.due_date_repeat_refusal`, plan
+       step credit_card:CC-6).  Asked after step 1 for the same reason and
+       just before step 3, which would otherwise read the unit as a cadence
+       a loan's contract can start.
 
     Args:
         data: The validated payload, mutated in place by step 3.
@@ -290,6 +302,13 @@ def _settle_create_references(data, start_period_id):
         if start_period is None:
             flash("Invalid start period.", "danger")
             return None, redirect(url_for("transfers.new_transfer_template"))
+
+    refused = due_date_repeat_refusal(
+        data.get("recurrence_unit"), data["to_account_id"],
+    )
+    if refused is not None:
+        flash(refused, "danger")
+        return None, redirect(url_for("transfers.new_transfer_template"))
 
     return start_period, settle_first_occurrence(
         data, redirect=RedirectTarget("transfers.new_transfer_template"),
@@ -429,12 +448,15 @@ def edit_transfer_template(template_id):
         # repeat" option the transaction form does, and it is FIRST -- so a
         # cadence left unselected would default to the DESTRUCTIVE clear, not
         # to a wrong cadence.  ``edit_form_cadence`` is what selects it.
-        recurrence=edit_form_recurrence_state(template, pass_ctx),
+        recurrence=edit_form_recurrence_state(
+            template, pass_ctx, authorable_cadences(),
+        ),
         # What the script may lock as the destination changes, computed for
         # THIS definition the way ``settle_destination_for_update`` decides it
         # (plan step R7d-f-5, ruling **R-R79**), and whether the destination
         # may change at all (ruling **R-R76**: the disabled control's help).
         loan_locks=loan_destination_locks_for_edit(template, pass_ctx),
+        due_date_cards=configured_card_ids(accounts),
         # A LOAN PAYMENT's stop is the loan's payoff, resolved through the
         # composed door: its control renders disabled and displays that.
         periods=[],

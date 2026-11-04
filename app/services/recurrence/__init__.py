@@ -215,6 +215,7 @@ from app.services.recurrence._offer import (
     cadences_without_a_card,
     emits_period_starts,
     fires_on_day_of_month,
+    fixed_interval,
     follows_card_due_dates,
     is_authorable,
 )
@@ -342,6 +343,7 @@ __all__ = [
     "end_bound_from_token",
     "end_bound_options",
     "fires_on_day_of_month",
+    "fixed_interval",
     "follows_card_due_dates",
     "has_ended",
     "is_authorable",

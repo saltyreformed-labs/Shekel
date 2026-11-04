@@ -13,6 +13,7 @@ paths:
   - "app/templates/salary/form.html"
   - "app/templates/salary/_lines_section.html"
   - "tests/manual/verify_recurrence_form.py"
+  - "tests/manual/_recurrence_form_*.py"
 ---
 
 # Recurrence form rules

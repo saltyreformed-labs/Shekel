@@ -12,7 +12,7 @@ from flask import abort
 from app.models.account import Account
 from app.routes._redirect_target import RedirectTarget
 from app.services.account_projection import is_revolving
-from app.services.card_terms import load_card_term_versions
+from app.services.card_terms import is_configured_card
 from app.utils.auth_helpers import get_or_404
 
 
@@ -54,7 +54,7 @@ def load_configured_card_or_404(account_id: int) -> Account:
     a dormant card is a forged or stale one and gets the same answer a wrong
     kind does.  The versions are not returned: no door behind this gate
     reads them yet, and one that does will load them through
-    :func:`~app.services.card_terms.load_card_term_versions` as this does.
+    :func:`~app.services.card_terms.load_card_term_versions`.
 
     Args:
         account_id: The URL's account id.
@@ -64,7 +64,7 @@ def load_configured_card_or_404(account_id: int) -> Account:
         revolving, with its terms stated.
     """
     account = load_card_or_404(account_id)
-    if not load_card_term_versions(account.id):
+    if not is_configured_card(account):
         abort(404)
     return account
 

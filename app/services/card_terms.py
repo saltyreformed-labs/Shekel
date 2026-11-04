@@ -63,10 +63,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.exceptions import CardTermsRemovalRefused
 from app.extensions import db
+from app.models.account import Account
 from app.models.credit_card_params import (
     CREDIT_CARD_TERMS_UNIQUE_CONSTRAINT,
     CreditCardParams,
 )
+from app.services.account_projection import is_revolving
 
 
 def load_card_term_versions(account_id: int) -> list[CreditCardParams]:
@@ -84,6 +86,46 @@ def load_card_term_versions(account_id: int) -> list[CreditCardParams]:
         .filter_by(account_id=account_id)
         .order_by(CreditCardParams.effective_date)
         .all()
+    )
+
+
+def is_configured_card(account: Account) -> bool:
+    """Return whether *account* is a credit card with its terms stated.
+
+    The ONE statement of "a configured card" (design 3.4): revolving FIRST,
+    because the rows outlive a re-type, then at least one terms version,
+    because a card with none is dormant and has no statement to fall due.
+    Read by the configured-card gate
+    (:func:`app.routes.card._helpers.load_configured_card_or_404`), by every
+    door that refuses a repeat on a card's due dates anywhere else, and by the
+    transfer form's offer of it (:func:`configured_card_ids`), so what the
+    form offers and what the doors accept cannot part.
+
+    Args:
+        account: The account, with its ``account_type`` loaded or loadable.
+
+    Returns:
+        ``True`` for a revolving account holding a terms version.
+    """
+    return is_revolving(account) and bool(load_card_term_versions(account.id))
+
+
+def configured_card_ids(accounts: list[Account]) -> frozenset[int]:
+    """Return the ids of *accounts* that are configured cards.
+
+    One terms read per revolving account, none for any other: the owner's
+    cards are a handful, and this is the price of one spelling
+    (:func:`is_configured_card`), which the loan destination's lock set pays
+    for the same reason.
+
+    Args:
+        accounts: The accounts a form offers.
+
+    Returns:
+        The ids of those :func:`is_configured_card` answers ``True`` for.
+    """
+    return frozenset(
+        account.id for account in accounts if is_configured_card(account)
     )
 
 

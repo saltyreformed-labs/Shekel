@@ -61,6 +61,7 @@ from app.services.cash_ledger import (
     derived_amount_basis,
     resolve_transaction_amount,
 )
+from app.services.recurrence import cadences_without_a_card
 from app.routes._recurrence_conflict_chooser import (
     PreEditTemplateState,
     RecurrenceConflictKind,
@@ -134,7 +135,7 @@ def new_template():
         # form and the transfer form cannot come to disagree about what the
         # same rule means.  A create form opens with no cadence selected, the
         # unbounded closing shape and neither bound locked.
-        recurrence=create_form_recurrence_state(),
+        recurrence=create_form_recurrence_state(cadences_without_a_card()),
         txn_types=txn_types,
         default_txn_type_id=default_txn_type_id,
         # A template that does not exist yet has no amount history; passed so
@@ -274,7 +275,9 @@ def edit_template(template_id):
         # (plan step balance:X-bi-7b) whose save the update schema REFUSES, so
         # an unchanged save can no longer delete the rule (R2e-1's hazard).
         # The pass is the form's one read pass (plan step R7d-f).
-        recurrence=edit_form_recurrence_state(template, pass_ctx),
+        recurrence=edit_form_recurrence_state(
+            template, pass_ctx, cadences_without_a_card(),
+        ),
         txn_types=txn_types,
         # Unused when editing (the form reads the template's own type), but
         # passed so the shared template never references an undefined value.

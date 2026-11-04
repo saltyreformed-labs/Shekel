@@ -79,11 +79,11 @@ from app.services.balance_at import BalanceContext
 from app.services.recurrence import (
     NEVER_ENDS,
     UNREADABLE_CADENCE_MESSAGE,
+    AuthorableCadence,
     EndBound,
     PickerModel,
     ResolvedRecurrence,
     SelectedCadence,
-    cadences_without_a_card,
     describe,
     end_bound_from_columns,
     modelled_unit,
@@ -242,13 +242,12 @@ class RecurrenceFormState:
 
     Attributes:
         picker: The offer sets every control chooses from
-            (:func:`~app.services.recurrence.picker_model` over
-            :func:`~app.services.recurrence.cadences_without_a_card`, the
-            offer set less a card's due dates, which no form offers until a
-            transfer into a card can take them: plan step
-            credit_card:CC-6's doors piece).  Identical for every user and
-            both template forms -- what a definition can be, not what this
-            one is.
+            (:func:`~app.services.recurrence.picker_model` over the set the
+            form passes: all of them on the transfer form, and on the
+            transaction form all but a card's due dates, which only a
+            transfer into a card may repeat by, plan step credit_card:CC-6).
+            Identical for every user of one form -- what a definition can be,
+            not what this one is.
         selected_cadence: Which ``(unit, interval, placement)`` triple the
             three cadence controls preselect, or ``None`` on a create form AND
             for a rule naming a pattern this application no longer models.
@@ -308,7 +307,9 @@ def create_form_default_starts_on() -> date:
     return display_today()
 
 
-def create_form_recurrence_state() -> RecurrenceFormState:
+def create_form_recurrence_state(
+    cadences: tuple[AuthorableCadence, ...],
+) -> RecurrenceFormState:
     """Return the render state a CREATE form's recurrence controls open on.
 
     No cadence selected, neither bound locked, the unbounded CLOSING shape,
@@ -325,11 +326,15 @@ def create_form_recurrence_state() -> RecurrenceFormState:
     the route's (``settle_first_occurrence``, rulings **R-R60** and
     2026-09-12's on what a stated stop is at create).
 
+    Args:
+        cadences: What this form offers: the set its own door refuses against
+            (ruling plan#2591).
+
     Returns:
         The :class:`RecurrenceFormState`.
     """
     return RecurrenceFormState(
-        picker=picker_model(cadences_without_a_card()),
+        picker=picker_model(cadences),
         selected_cadence=None,
         selected_start=RecurrenceStart(
             starts_on=create_form_default_starts_on(), nominal_day=None,
@@ -339,7 +344,7 @@ def create_form_recurrence_state() -> RecurrenceFormState:
 
 
 def edit_form_recurrence_state(
-    template: Any, ctx: BalanceContext,
+    template: Any, ctx: BalanceContext, cadences: tuple[AuthorableCadence, ...],
 ) -> RecurrenceFormState:
     """Return the whole render state for *template*'s recurrence controls.
 
@@ -370,6 +375,10 @@ def edit_form_recurrence_state(
             the identity, its calendar is what the cadence resolves against
             and its scenario scopes the fold behind a loan payment's derived
             stop.
+        cadences: What this form offers, as at create.  It must hold what a
+            definition this door accepted stores: a ``<select>`` whose selected
+            value is absent from its options silently becomes "Does not
+            repeat", which deletes the rule on an unchanged save.
 
     Returns:
         The :class:`RecurrenceFormState`.
@@ -389,7 +398,7 @@ def edit_form_recurrence_state(
         resolved_definition(template, ctx)
         if locked and cadence is not None else None
     )
-    picker = picker_model(cadences_without_a_card())
+    picker = picker_model(cadences)
     return RecurrenceFormState(
         picker=picker,
         selected_cadence=cadence,

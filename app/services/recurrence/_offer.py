@@ -13,13 +13,13 @@ what a rule can DO rather than from a name it can have stays in
 :mod:`._frequency`'s own docstring, which this leaf implements.
 
 What lives here: the predicates the offer set is derived from
-(:func:`emits_period_starts`, :func:`follows_card_due_dates`), the
-day-of-month question asked of a PAIR (:func:`fires_on_day_of_month`), the
-offer itself (:class:`AuthorableCadence`, :func:`authorable_cadences`), the
-set a definition with no card behind it is offered
-(:func:`cadences_without_a_card`) and the two doors that ask it of a
-submission (:func:`is_authorable`, :func:`require_authorable_cadence`).  A second
-predicate, ``has_row_date_coordinate``, and its raising twin
+(:func:`emits_period_starts`, :func:`follows_card_due_dates`,
+:func:`fixed_interval`), the day-of-month question asked of a PAIR
+(:func:`fires_on_day_of_month`), the offer itself (:class:`AuthorableCadence`,
+:func:`authorable_cadences`), the set a definition with no card behind it is
+offered (:func:`cadences_without_a_card`) and the two doors that ask it of a
+submission (:func:`is_authorable`, :func:`require_authorable_cadence`). A
+second predicate, ``has_row_date_coordinate``, and its raising twin
 ``require_row_date_coordinate`` withheld the ``WEEK`` unit from plan step R8-a
 until plan step **R8-b** dated a weekly row from its occurrence
 (``_row_day.date_row``) and deleted both.
@@ -173,6 +173,25 @@ def follows_card_due_dates(unit: RecurrenceUnitEnum) -> bool:
     return unit is RecurrenceUnitEnum.DUE_DATE
 
 
+def fixed_interval(unit: RecurrenceUnitEnum) -> int | None:
+    """Return the one interval *unit* may be authored on, or ``None`` for any.
+
+    **The one statement of it** (plan step credit_card:CC-6), read by
+    :func:`is_authorable`, which refuses any other, and by the picker's wire,
+    which is how the form fixes its interval box without the script knowing
+    which unit takes one or what the number is.
+
+    Args:
+        unit: The cadence unit.
+
+    Returns:
+        ``1`` for a card's due dates (every other statement would leave one
+        unpaid, :func:`follows_card_due_dates`); ``None`` for every other
+        unit, each of which takes any positive interval.
+    """
+    return 1 if follows_card_due_dates(unit) else None
+
+
 def authorable_cadences() -> tuple[AuthorableCadence, ...]:
     """Return every ``(unit, placement)`` pair a rule may be authored on.
 
@@ -298,7 +317,7 @@ def is_authorable(
     """
     if interval_n < 1:
         return False
-    if follows_card_due_dates(unit) and interval_n != 1:
+    if fixed_interval(unit) not in (None, interval_n):
         return False
     return AuthorableCadence(unit=unit, placement=placement) in (
         authorable_cadences()
@@ -370,6 +389,7 @@ __all__ = [
     "cadences_without_a_card",
     "emits_period_starts",
     "fires_on_day_of_month",
+    "fixed_interval",
     "follows_card_due_dates",
     "is_authorable",
     "require_authorable_cadence",

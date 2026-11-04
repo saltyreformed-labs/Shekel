@@ -70,7 +70,9 @@ the refusal (:func:`_drive_refusals` says what replaced them).
 **The drives live beside this file since plan step credit_card:CC-6** (a pure
 move, when it stood at 1,683 lines): ``_recurrence_form_checks`` is what they
 share, and ``_recurrence_form_bound_drives``, ``_recurrence_form_loan_drives``
-and ``_recurrence_form_offer_drives`` hold the drives this docstring names.
+and ``_recurrence_form_offer_drives`` hold the drives this docstring names, and
+``_recurrence_form_due_date_drive`` grades the repeat on each statement's due
+date, which only a transfer into a configured card may take.
 
 **It writes nothing.**  Every check reads the form's own DOM; the crafted POSTs
 in the refusal pass are all expected to be REFUSED, and the pass asserts that
@@ -108,6 +110,7 @@ from _recurrence_form_checks import (
     _check,
     _failures,
 )
+from _recurrence_form_due_date_drive import _drive_due_date_offer
 from _recurrence_form_loan_drives import (
     _drive_edit_form_locks,
     _drive_loan_destination_lock,
@@ -156,6 +159,7 @@ def main() -> int:
         # its definition can never be a loan payment.
         _drive_loan_destination_lock(page)
         _drive_edit_form_locks(page)
+        _drive_due_date_offer(context, page)
         _drive_refusals(context, page)
 
         # A blocked inline style is a console error and nothing else, which is

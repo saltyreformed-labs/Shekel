@@ -64,8 +64,13 @@
              refusal is the rule. #}
           <select id="to_account_id" name="to_account_id" class="form-select" required
                   {% if loan_locks.pinned_reason is not none %}disabled aria-describedby="to-account-help"{% endif %}>
+            {# data-has-due-dates: this destination has statement due dates to
+               repeat on (plan step credit_card:CC-6), so recurrence_form.js
+               offers that unit while it is chosen.  The route's set, from the
+               predicate the doors refuse with; the script decides nothing. #}
             {% for acct in accounts %}
             <option value="{{ acct.id }}"
+              {{ 'data-has-due-dates' if acct.id in due_date_cards else '' }}
               {{ 'selected' if (template and template.to_account_id == acct.id) or (not template and prefill_to == acct.id) else '' }}>
               {{ acct.name }} ({{ acct.account_type.name if acct.account_type else '' }})
             </option>
@@ -93,6 +98,11 @@
       <div class="form-section--accent">
         <h6 class="form-section__title">Recurrence</h6>
         {{ recurrence_cadence_controls(recurrence.picker, recurrence.selected_cadence) }}
+        {# Shown by recurrence_form.js beside a unit the chosen destination cannot
+           take; the save door refuses that pair and writes nothing. #}
+        <div id="unit-needs-a-card" class="form-text text-danger mb-3 d-none">
+          Only a transfer into a credit card with its terms set repeats on statement due dates. Choose another account, or another way for this to repeat.
+        </div>
         {# ``data-loan-account-ids-without-payment`` carries which destinations
            the app derives BOTH bounds for -- the owner's configured loans
            holding no active recurring payment OLDER than this definition

@@ -45,6 +45,13 @@
  * disabled -- the next add would post no interval and be refused.  So the
  * body is a function, run once at load and again after any swap that carries
  * a fresh unit select; the old closure's listeners die with the old nodes.
+ *
+ * **Plan step credit_card:CC-6 added a unit only a transfer into a card takes**:
+ * a repeat on each statement's due date.  The server states both facts this
+ * file acts on -- which offers need a card and fix their interval on the wire
+ * (needs_a_card, fixed_interval), and which destinations have due dates on the
+ * destination's own option (data-has-due-dates) -- so this file decides neither;
+ * the doors refuse whatever it gets wrong.  See syncUnitOffer.
  */
 function initRecurrenceForm() {
   var unitSelect = document.getElementById('recurrence_unit');
@@ -132,6 +139,9 @@ function initRecurrenceForm() {
     'data-loan-account-ids-without-payment'
   );
   var destinationSelect = document.getElementById('to_account_id');
+  // The sentence beside a unit the chosen destination cannot take.  Absent on
+  // the two forms that never offer such a unit.
+  var unitNeedsACardNote = document.getElementById('unit-needs-a-card');
   // The controls naming where the money COMES FROM -- the transaction form's
   // account, the transfer form's source -- read by name so the preview and
   // its change listeners list them once (plan step pay_calendar:C18-a).
@@ -208,8 +218,8 @@ function initRecurrenceForm() {
   // the month, while "months funded from the covering paycheck" does.
   //
   // The INTERVAL left this lookup at plan step R7c-c, with the closed pattern
-  // set: every positive interval is authorable on every offered pair, so it
-  // selects no offer and changing it changes no fact here.
+  // set: which intervals an offer takes is its unit's to say (fixed_interval), so
+  // it selects no offer and changing it changes no fact here.
   function currentOption(id, placementId) {
     var matches = options.filter(function(o) {
       return String(o.unit_id) === String(id) &&
@@ -239,6 +249,68 @@ function initRecurrenceForm() {
       if (found.indexOf(value) === -1) found.push(value);
     });
     return found;
+  }
+
+  // Whether only a transfer into a configured card may repeat by this unit: the
+  // wire's needs_a_card, stated by the SERVER about the offer.
+  function unitNeedsACard(id) {
+    return options.some(function(o) {
+      return String(o.unit_id) === String(id) && o.needs_a_card;
+    });
+  }
+
+  // Whether the destination the user has CHOSEN has statement due dates: a fact
+  // the server put on its <option>, from the predicate the doors refuse with.
+  function destinationHasDueDates() {
+    if (!destinationSelect) return false;
+    var chosenDestination = destinationSelect.options[destinationSelect.selectedIndex];
+    return !!chosenDestination && chosenDestination.hasAttribute('data-has-due-dates');
+  }
+
+  // Offer a unit that needs a card exactly while the chosen destination is one.
+  //
+  // **A unit already CHOSEN stays chosen and on screen when the destination moves
+  // off a card, beside a sentence saying why it cannot be saved.**  Moving the
+  // selection is the alternative, and every place it could go is worse: the first
+  // entry is "Does not repeat", whose save DELETES the rule and sweeps its future
+  // rows, and any other names a cadence nobody chose.  A selected option that was
+  // hidden and disabled would post nothing, and read as "leave the stored cadence
+  // alone" beside a destination it cannot pay.  So nothing here changes what the
+  // user chose: the save door refuses the pair in plain words and writes nothing,
+  // and choosing another unit retires the option like any other.
+  function syncUnitOffer() {
+    var chosenId = unitId();
+    var hasDueDates = destinationHasDueDates();
+    Array.prototype.forEach.call(unitSelect.options, function(opt) {
+      if (!unitNeedsACard(opt.value)) return;
+      var mine = hasDueDates || opt.value === chosenId;
+      opt.hidden = !mine;
+      opt.disabled = !mine;
+    });
+    if (unitNeedsACardNote) {
+      unitNeedsACardNote.classList.toggle(
+        'd-none', hasDueDates || !unitNeedsACard(chosenId)
+      );
+    }
+  }
+
+  // What the box said before a unit fixed it, handed back when that unit is left.
+  var intervalBeforeFixed = null;
+
+  // Hold the interval box at the one interval the chosen offer takes (the wire's
+  // fixed_interval), or hand it back.  READ-ONLY rather than disabled, because a
+  // disabled box posts nothing and the save refuses a cadence with no interval.
+  function syncFixedInterval(fixed) {
+    if (fixed !== null) {
+      if (intervalBeforeFixed === null) intervalBeforeFixed = interval.value;
+      interval.value = String(fixed);
+    } else if (intervalBeforeFixed !== null) {
+      interval.value = intervalBeforeFixed;
+      intervalBeforeFixed = null;
+    }
+    interval.readOnly = fixed !== null;
+    // A read-only box looks like any other in this Bootstrap, so it says so.
+    interval.classList.toggle('bg-body-secondary', fixed !== null);
   }
 
   // Enable the placements this unit admits, keep the selection on one of them,
@@ -394,10 +466,15 @@ function initRecurrenceForm() {
   function syncStartsOnHelp() {
     var help = document.getElementById('starts-on-help');
     if (!help || startsOnLocked) return;
-    var derived = destinationDerivesTheBounds();
-    var text = help.getAttribute(
-      derived ? 'data-locked-text' : 'data-open-text'
-    );
+    var which = 'data-open-text';
+    if (destinationDerivesTheBounds()) {
+      which = 'data-locked-text';
+    } else if (unitNeedsACard(unitId())) {
+      // For this unit the date is the first day the repeat covers, not its first
+      // occurrence, which the card's terms decide.
+      which = 'data-due-date-text';
+    }
+    var text = help.getAttribute(which);
     if (text) help.textContent = text;
   }
 
@@ -487,12 +564,14 @@ function initRecurrenceForm() {
 
   function toggleFields() {
     var id = unitId();
+    syncUnitOffer();
 
     // An EMPTY value is "Does not repeat", the only non-recurring option on
     // either form since plan step R2e-3 retired the ONCE pattern.
     if (!id) {
       intervalWrap.classList.add('d-none');
       placementWrap.classList.add('d-none');
+      syncFixedInterval(null);
       interval.disabled = true;
       // DISABLED with the interval, not merely hidden.  This was the one
       // control in the file that broke the file's own rule -- a hidden control
@@ -531,6 +610,7 @@ function initRecurrenceForm() {
     // true of every cadence offered then, is true of NONE now that every unit
     // uses the free box, and was never the same fact either way.
     var chosen = currentOption(id, placementSelect.value);
+    syncFixedInterval(chosen !== null ? chosen.fixed_interval : null);
     // The "repeating on" control asks whether occurrences land on a day of the
     // month at all -- keyed on the unit; see syncNominalDay.
     var hasDayCoordinate =
@@ -695,24 +775,17 @@ function initRecurrenceForm() {
   interval.addEventListener('change', toggleFields);
   placementSelect.addEventListener('change', toggleFields);
   // The DESTINATION re-links the "Starts on" row, and the "Ends" row for a
-  // loan whose payment this would be, wherever the server shipped a set to
-  // apply (both transfer forms since plan step R7d-f-5): choosing a loan
-  // with no payment yet hands both bounds to the route, so neither control
-  // is the user's to state.  ``toggleFields`` is what applies both, so the
-  // enable/disable rule stays in one function rather than two that agree.
-  //
-  // Where there is no lock to apply -- an owner with no loans, or a
-  // definition pinned to its loan -- the destination still drives the
-  // PREVIEW (plan step R7d-f-2):
-  // the endpoint narrows the walk by the destination's derived stop, so
-  // moving a transfer onto or off a loan changes the dates it lists.
-  // ``toggleFields`` ends in ``fetchPreview``, so the two branches fetch
-  // exactly once each rather than the first fetching twice.
+  // loan whose payment this would be: choosing a loan with no payment yet
+  // hands both bounds to the route, so neither control is the user's to state.
+  // It re-links the unit's offer too, since plan step credit_card:CC-6: which
+  // destinations have due dates decides which units are on offer, so an owner
+  // with no loans needs the re-link as well, and the shortcut to the preview
+  // alone this took for such an owner went with that.  ``toggleFields`` applies
+  // all of them, and ends in ``fetchPreview``: the endpoint narrows the walk by
+  // the destination's derived stop (plan step R7d-f-2), so moving a transfer
+  // onto or off a loan changes the dates it lists.
   if (destinationSelect) {
-    destinationSelect.addEventListener(
-      'change',
-      loansWithoutPayment.length > 0 ? toggleFields : fetchPreview
-    );
+    destinationSelect.addEventListener('change', toggleFields);
   }
   // The source accounts and the envelope box re-preview too (plan step
   // pay_calendar:C18-a): the books floor the endpoint bounds by is theirs,

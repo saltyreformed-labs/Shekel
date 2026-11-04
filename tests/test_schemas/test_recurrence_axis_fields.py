@@ -25,7 +25,7 @@ others cannot:
 
 Layer 3 is what a hand-assembled POST meets.  Nothing a user can assemble by
 clicking reaches it -- the picker's options are derived from the same table
-(``tests/test_routes/test_recurrence_picker.py``) -- and that is exactly why it
+(``tests/test_routes/test_recurrence_picker/``) -- and that is exactly why it
 is tested here rather than trusted: it is the reason the write door's
 ``RecurrenceResolutionError`` stays a broken-invariant 500 rather than becoming
 a user-facing path.

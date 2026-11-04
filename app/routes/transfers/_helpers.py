@@ -25,11 +25,14 @@ from app.schemas.validation import (
     TransferCreateSchema,
     TransferUpdateSchema,
 )
+from app.enums import RecurrenceUnitEnum
 from app.routes._mobile_card import RenderTarget, render_mobile_card
 from app.routes._render_helpers import (
     render_transaction_cell,
     render_transfer_cell,
 )
+from app.services.card_terms import is_configured_card
+from app.services.recurrence import follows_card_due_dates, modelled_unit
 from app.services.transfer_legs import leg_of
 from app.utils.digit_strings import parse_row_id
 from app.utils.error_fragments import designed_error
@@ -51,6 +54,15 @@ CARD_PAYMENT_CANNOT_CHANGE_DESTINATION = (
     "'{payment}' works out what to pay from its card's balance, so it pays "
     "that card only. Archive it to stop paying the card, or set up a new "
     "transfer to pay another account."
+)
+
+#: The refusal of a repeat on each statement's due date into anything but a
+#: configured card (plan step credit_card:CC-6): its dates are the card's terms'.
+#: Formatted with the destination's name.
+A_DUE_DATE_REPEAT_PAYS_A_CARD = (
+    "'{account}' is not a credit card with its terms set, so it has no "
+    "statement due dates to repeat on. Choose a card that has its terms, or "
+    "another way for this to repeat."
 )
 
 # Mark Paid's one parameter: the bank lines the popover's captions named (plan
@@ -146,10 +158,61 @@ def _first_unowned_template_fk(data):
     return None
 
 
+def due_date_repeat_refusal(unit: RecurrenceUnitEnum | None, destination_id: int):
+    """Return the flash when *unit* is a card's due dates and the destination no card.
+
+    The one rule the transfer doors state about a repeat on each statement's
+    due date (plan step credit_card:CC-6), asked of the repeat and the
+    destination a save would LEAVE, ahead of everything that reads either: a
+    loan destination's own settling takes the unit as a cadence the loan's
+    contract can start.  It asks the predicate the form's offer reads
+    (:func:`~app.services.card_terms.is_configured_card`), and the read pass
+    refuses the same two states when it walks one
+    (``balance_at._definition_due_dates``), which is what these doors keep from
+    being reached.
+
+    Args:
+        unit: The repeat the save leaves, or ``None`` when it does not repeat.
+        destination_id: The destination the save leaves, ownership-checked by
+            the caller.
+
+    Returns:
+        :data:`A_DUE_DATE_REPEAT_PAYS_A_CARD` naming the destination, or
+        ``None`` for any other repeat and for a configured card.
+    """
+    if unit is None or not follows_card_due_dates(unit):
+        return None
+    destination = db.session.get(Account, destination_id)
+    if is_configured_card(destination):
+        return None
+    return A_DUE_DATE_REPEAT_PAYS_A_CARD.format(account=destination.name)
+
+
+def _unit_the_edit_leaves(template, data) -> RecurrenceUnitEnum | None:
+    """Return the unit *template* repeats by after this edit, or ``None``.
+
+    The submitted unit where the form stated one (``None`` is "Does not
+    repeat"), else the stored rule's: a partial update leaves it alone.  A
+    stored unit the application does not model answers ``None``, which is the
+    edit form's own repair path and no due date.
+
+    Args:
+        template: The stored :class:`TransferTemplate`.
+        data: The loaded TransferTemplateUpdateSchema output (partial update).
+
+    Returns:
+        The unit, or ``None`` when nothing repeats after the edit.
+    """
+    if "recurrence_unit" in data:
+        return data["recurrence_unit"]
+    rule = template.recurrence_rule
+    return None if rule is None else modelled_unit(rule.unit_id)
+
+
 def _first_template_fk_refusal(template, data):
     """Return the flash for the first unusable account reference in *data*, else None.
 
-    The three rules the transfer-template update route asks of its account
+    The four rules the transfer-template update route asks of its account
     keys, in the one order they can be asked: OWNERSHIP first
     (:func:`_first_unowned_template_fk`; an unowned id must be refused before
     anything reads it), then a worked-out card payment's destination may not
@@ -158,7 +221,9 @@ def _first_template_fk_refusal(template, data):
     ``fk_card_payment_settings_payment`` would refuse the flush), then the
     pair the write would LEAVE -- source and destination, each the submitted
     value where present and the stored one where absent -- may not be one
-    account.
+    account, and last a repeat on a card's due dates the edit leaves must pay
+    a configured card (:func:`due_date_repeat_refusal`): the edit may have
+    moved the destination, changed the repeat, or both.
 
     **The second rule grades the EFFECTIVE pair because the schema cannot**
     (plan step R7d-f-5).  ``_reject_same_account_transfer`` runs only when a
@@ -181,7 +246,9 @@ def _first_template_fk_refusal(template, data):
         ``"Invalid <label>."`` for the first unowned reference,
         :data:`CARD_PAYMENT_CANNOT_CHANGE_DESTINATION` when a card payment's
         destination would move, :data:`SAME_ACCOUNT_TRANSFER_MESSAGE` when the
-        effective pair is one account, else ``None``.
+        effective pair is one account, :data:`A_DUE_DATE_REPEAT_PAYS_A_CARD`
+        when the repeat the edit leaves cannot fall on this destination's due
+        dates, else ``None``.
     """
     unowned = _first_unowned_template_fk(data)
     if unowned is not None:
@@ -197,7 +264,9 @@ def _first_template_fk_refusal(template, data):
         )
     if source == destination:
         return SAME_ACCOUNT_TRANSFER_MESSAGE
-    return None
+    return due_date_repeat_refusal(
+        _unit_the_edit_leaves(template, data), destination,
+    )
 
 
 def _get_owned_transfer(xfer_id):

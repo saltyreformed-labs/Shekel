@@ -483,10 +483,16 @@
        "Set from the loan's first payment, and updated when the loan changes." %}
   {% set starts_on_open_help = open_help if open_help is not none else
        "The first time this happens. It repeats from here, and nothing is generated before it." %}
+  {# A repeat on each statement's due date (plan step credit_card:CC-6) takes its
+     occurrences from the card's terms, so this date is where it starts counting
+     and never a day it falls on.  Only the transfer form can offer that unit. #}
+  {% set starts_on_due_date_help =
+       "The first day this covers. It first happens on the next statement due date on or after this day." %}
   <div id="starts-on-help" class="form-text"
        {% if swappable %}
        data-locked-text="{{ starts_on_locked_help }}"
        data-open-text="{{ starts_on_open_help }}"
+       data-due-date-text="{{ starts_on_due_date_help }}"
        {% endif %}>
     {{- starts_on_locked_help if selected.locked else starts_on_open_help -}}
   </div>

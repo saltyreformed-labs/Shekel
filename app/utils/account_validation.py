@@ -51,12 +51,14 @@ touched -- callers pass the current user id in explicitly.
 """
 
 from app import ref_cache
-from app.enums import AcctCategoryEnum
+from app.enums import AcctCategoryEnum, RecurrenceUnitEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.card_payment_settings import CardPaymentSettings
+from app.models.recurrence_rule import RecurrenceRule
 from app.models.ref import AccountType
 from app.models.savings_goal import SavingsGoal
+from app.models.transfer_template import TransferTemplate
 from app.schemas.validation import (
     AccountCreateSchema,
     AccountTypeCreateSchema,
@@ -107,6 +109,18 @@ CARD_PAYMENT_KEEPS_ITS_CARD = (
     "'{card}' has a card payment, '{payment}', that works out what to pay "
     "from the card's balance, so it must stay a credit card. To use another "
     "type, create a new account of that type."
+)
+
+
+#: The refusal of a re-type that would leave a repeat on a card's due dates
+#: paying no card (plan step credit_card:CC-6).  A plain transfer can use that
+#: repeat and carries no settings row, so
+#: :data:`CARD_PAYMENT_KEEPS_ITS_CARD` does not reach it; its door to change is
+#: the transfer's own form, so the sentence names that first.
+DUE_DATE_REPEAT_KEEPS_ITS_CARD = (
+    "'{payment}' repeats on each statement due date of '{card}', so the "
+    "account must stay a credit card. Change how '{payment}' repeats first, "
+    "or create a new account of the other type."
 )
 
 
@@ -345,7 +359,10 @@ def _validate_account_type_change(account, new_type_id):
     step credit_card:CC-6): the payment's amount is the card's to work out, so
     the account must stay a card, the rule
     :mod:`app.card_payment_infrastructure` backstops.  Asked of the target
-    type alone, so a move between two revolving types passes.
+    type alone, so a move between two revolving types passes.  **The same for a
+    transfer repeating on the account's due dates**
+    (:data:`DUE_DATE_REPEAT_KEEPS_ITS_CARD`): its dates are the card's terms',
+    and the read pass refuses every walk of one paying no card.
 
     **A change of what a goal on the account IS -- savings to debt, or a loan
     type to a card-style debt -- is refused FIRST while an active goal is on
@@ -378,14 +395,9 @@ def _validate_account_type_change(account, new_type_id):
     if goal_refusal is not None:
         return goal_refusal
     if not new_type.has_revolving_credit:
-        payment = _card_payment_on(account.id)
-        if payment is not None:
-            return (
-                CARD_PAYMENT_KEEPS_ITS_CARD.format(
-                    card=account.name, payment=payment.template.name,
-                ),
-                "warning",
-            )
+        card_refusal = _refuse_leaving_the_card_kind(account)
+        if card_refusal is not None:
+            return card_refusal
     if not _crosses_posting_boundary(
         account.account_type, new_type.has_amortization, new_type.category_id,
     ):
@@ -399,6 +411,66 @@ def _validate_account_type_change(account, new_type_id):
             "warning",
         )
     return None
+
+
+def _refuse_leaving_the_card_kind(account):
+    """Return why *account* must stay a credit card, or ``None`` when it need not.
+
+    Args:
+        account: The account being re-typed to a type that is not revolving,
+            owner-checked by the route.
+
+    Returns:
+        ``(message, category)`` when a worked-out card payment or a repeat on
+        its due dates names the account, else ``None``.
+    """
+    payment = _card_payment_on(account.id)
+    if payment is not None:
+        return (
+            CARD_PAYMENT_KEEPS_ITS_CARD.format(
+                card=account.name, payment=payment.template.name,
+            ),
+            "warning",
+        )
+    repeat = _due_date_repeat_into(account.id)
+    if repeat is not None:
+        return (
+            DUE_DATE_REPEAT_KEEPS_ITS_CARD.format(
+                card=account.name, payment=repeat.name,
+            ),
+            "warning",
+        )
+    return None
+
+
+def _due_date_repeat_into(account_id):
+    """Return the first transfer repeating on *account_id*'s due dates, or None.
+
+    An ARCHIVED definition counts: the read pass walks it for the rows its
+    unarchive would restore, and its rule outlives the archive.
+
+    Args:
+        account_id: ``budget.accounts.id`` of the account being re-typed,
+            owner-checked by the route.
+
+    Returns:
+        The oldest such :class:`~app.models.transfer_template.TransferTemplate`,
+        or ``None``.
+    """
+    return (
+        db.session.query(TransferTemplate)
+        .join(
+            RecurrenceRule,
+            RecurrenceRule.transfer_template_id == TransferTemplate.id,
+        )
+        .filter(
+            TransferTemplate.to_account_id == account_id,
+            RecurrenceRule.unit_id
+            == ref_cache.recurrence_unit_id(RecurrenceUnitEnum.DUE_DATE),
+        )
+        .order_by(TransferTemplate.id)
+        .first()
+    )
 
 
 def _card_payment_on(account_id):

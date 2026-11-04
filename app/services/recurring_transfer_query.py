@@ -3,7 +3,7 @@
 A single-responsibility leaf helper for the one query three surfaces share --
 "does an active recurring transfer template pay INTO this account, and if so
 which one?" -- and for the facts read off the template it returns.  It
-imports no service at all -- ``db`` and two models -- so the graph stays
+imports no service at all -- ``db``, the ref cache and three models -- so the graph stays
 acyclic: every consumer of THIS module imports it, and none of them is
 reachable from there.  The loan and investment
 dashboards use the query to decide whether to show the
@@ -51,8 +51,11 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import joinedload
 
+from app import ref_cache
+from app.enums import RecurrenceUnitEnum
 from app.extensions import db
 from app.models.account import Account
+from app.models.recurrence_rule import RecurrenceRule
 from app.models.transfer_template import TransferTemplate
 
 if TYPE_CHECKING:
@@ -186,6 +189,37 @@ def active_recurring_transfer_templates(
         # locks on and the opening-bound sync writes for, and two renders in
         # one session must not disagree about it.  The oldest definition wins,
         # which is stable under later edits.
+        .order_by(TransferTemplate.id)
+        .all()
+    )
+
+
+def due_date_repeats_into(account_id: int) -> list[TransferTemplate]:
+    """Return every transfer repeating on *account_id*'s statement due dates.
+
+    **An ARCHIVED definition counts**, because its rule outlives the archive
+    and the read pass walks it for the rows its unarchive would restore: the
+    account-type door refuses to leave one paying no card
+    (``utils/account_validation``).  A door that regenerates asks each one
+    whether it recurs, as the pass itself does.
+
+    Args:
+        account_id: The destination account, owner-checked by the caller.
+
+    Returns:
+        The definitions, oldest first; ``[]`` when none repeats on its dates.
+    """
+    return (
+        db.session.query(TransferTemplate)
+        .join(
+            RecurrenceRule,
+            RecurrenceRule.transfer_template_id == TransferTemplate.id,
+        )
+        .filter(
+            TransferTemplate.to_account_id == account_id,
+            RecurrenceRule.unit_id
+            == ref_cache.recurrence_unit_id(RecurrenceUnitEnum.DUE_DATE),
+        )
         .order_by(TransferTemplate.id)
         .all()
     )

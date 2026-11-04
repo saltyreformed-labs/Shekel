@@ -69,6 +69,7 @@ from app.models.credit_card_params import (
     CreditCardParams,
 )
 from app.services.account_projection import is_revolving
+from app.services.card_statement import DueDateSchedule
 
 
 def load_card_term_versions(account_id: int) -> list[CreditCardParams]:
@@ -85,8 +86,28 @@ def load_card_term_versions(account_id: int) -> list[CreditCardParams]:
         db.session.query(CreditCardParams)
         .filter_by(account_id=account_id)
         .order_by(CreditCardParams.effective_date)
+        # :func:`set_terms` writes around the ORM, so a version the session
+        # still holds would otherwise answer with the terms a same-date
+        # correction just replaced.  The save door compares the card's due
+        # dates before and after its write, and two equal readings would move
+        # no payment.
+        .populate_existing()
         .all()
     )
+
+
+def due_dates_of(versions: list[CreditCardParams]) -> DueDateSchedule | None:
+    """Return the due dates *versions* decide, or ``None`` for a dormant card.
+
+    Args:
+        versions: The card's versions (:func:`load_card_term_versions`).
+
+    Returns:
+        The :class:`~app.services.card_statement.DueDateSchedule`, or ``None``
+        when *versions* is empty: a card with no terms has no statement to
+        fall due.
+    """
+    return DueDateSchedule.of(versions) if versions else None
 
 
 def is_configured_card(account: Account) -> bool:
@@ -193,7 +214,7 @@ def set_terms(
     )
 
 
-def remove_terms(account_id: int, row_id: int) -> bool:
+def remove_terms(versions: list[CreditCardParams], row_id: int) -> bool:
     """Delete the card's terms version *row_id*, reporting whether it was there.
 
     The version is looked for among the card's OWN versions
@@ -214,8 +235,13 @@ def remove_terms(account_id: int, row_id: int) -> bool:
     refused.  A caller outside a request takes no such lock and owns that
     serialisation itself.
 
+    **It takes the card's versions rather than reading them** (plan step
+    CC-6, plan#2675): the door has read them already, for the due dates its
+    payments follow, so a read here would be the same rows twice in a request.
+
     Args:
-        account_id: The revolving account the door has gated.
+        versions: The versions of the revolving account the door has gated
+            (:func:`load_card_term_versions`), read after the owner's lock.
         row_id: The ``budget.credit_card_params`` row's id, from the URL.
 
     Returns:
@@ -227,7 +253,6 @@ def remove_terms(account_id: int, row_id: int) -> bool:
         CardTermsRemovalRefused: When *row_id* is the card's only version
             (nothing written).
     """
-    versions = load_card_term_versions(account_id)
     doomed = version_with_id(versions, row_id)
     if doomed is None:
         return False

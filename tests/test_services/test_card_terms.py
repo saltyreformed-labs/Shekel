@@ -269,7 +269,7 @@ def _version_on(account, effective_date):
 
 def _remove(account, row_id):
     """Remove *row_id* from *account* and commit, as the door does."""
-    removed = remove_terms(account.id, row_id)
+    removed = remove_terms(load_card_term_versions(account.id), row_id)
     db.session.commit()
     db.session.expire_all()
     return removed
@@ -345,7 +345,7 @@ class TestTheRemove:
             only = _version_on(account, date(2026, 1, 1))
 
             with pytest.raises(CardTermsRemovalRefused) as refused:
-                remove_terms(account.id, only)
+                remove_terms(load_card_term_versions(account.id), only)
             db.session.rollback()
 
             assert refused.value.effective_date == date(2026, 1, 1)
@@ -377,7 +377,7 @@ class TestTheRemove:
 
             assert _remove(account, january) is True
             with pytest.raises(CardTermsRemovalRefused):
-                remove_terms(account.id, march)
+                remove_terms(load_card_term_versions(account.id), march)
             db.session.rollback()
 
             db.session.expire_all()

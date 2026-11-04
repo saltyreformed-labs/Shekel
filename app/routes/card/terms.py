@@ -17,19 +17,26 @@ form from one version, its date included, so a correction states that
 version's own terms rather than the ones in force today (plan#2331's review,
 plan#2576).
 
+A change of terms moves the card's due dates, so both write doors bring the
+unpaid payments that follow them along in the same transaction, asking first
+about any the owner changed (:mod:`app.routes.card._payments_follow`, ruling
+**plan#2671**).  A question rolls the write back, and its Apply posts the same
+door again.
+
 The writes are :mod:`app.services.card_terms`'s; the transaction is this
 module's.
 """
 
 import logging
 
-from flask import Response, abort, flash, render_template, request
+from flask import Response, abort, flash, render_template, request, url_for
 
 from app.exceptions import CardTermsRemovalRefused
 from app.extensions import db
 from app.routes._form_errors import load_form_or_redirect
 from app.routes.card._bp import card_bp
 from app.routes.card._helpers import back_to_card, load_card_or_404
+from app.routes.card._payments_follow import TermsDoor, follow_the_terms_or_ask
 from app.schemas.validation import CreditCardTermsSchema
 from app.services import card_terms
 from app.utils.auth_helpers import require_owner
@@ -71,7 +78,18 @@ def save_terms(account_id):
         return data
 
     effective_date = data.pop("effective_date")
+    due_dates_before = card_terms.due_dates_of(
+        card_terms.load_card_term_versions(account.id),
+    )
     card_terms.set_terms(account.id, account.user_id, effective_date, data)
+    followed = follow_the_terms_or_ask(account, due_dates_before, TermsDoor(
+        f"You changed the terms of {account.name} from "
+        f"{effective_date.strftime('%b %-d, %Y')}.",
+        url_for("card.save_terms", account_id=account.id),
+        back,
+    ))
+    if followed is not None:
+        return followed
     db.session.commit()
     logger.info(
         "Saved card terms for account %d effective %s",
@@ -127,11 +145,11 @@ def remove_terms(account_id, row_id):
 
     Gated by :func:`~app.routes.card._helpers.load_card_or_404` (404 for
     not-found, not-yours and not-a-card alike) and not by the
-    configured-card gate: :func:`~app.services.card_terms.remove_terms` reads
-    the card's versions once, and a dormant card holds none, so its every
-    row answers 404 there -- the configured gate's answer, without its
-    second read of the same versions in one request.  A row of another
-    account answers 404 the same way.
+    configured-card gate: this door reads the card's versions once, and a
+    dormant card holds none, so its every row answers 404 from
+    :func:`~app.services.card_terms.remove_terms` -- the configured gate's
+    answer, without its second read of the same versions in one request.  A
+    row of another account answers 404 the same way.
 
     The card's only version is refused in plain words (developer ruling
     **plan#2587**), not with a 404: the row is the owner's and real, and the
@@ -141,14 +159,23 @@ def remove_terms(account_id, row_id):
     """
     account = load_card_or_404(account_id)
     back = back_to_card(account.id)
+    versions = card_terms.load_card_term_versions(account.id)
+    due_dates_before = card_terms.due_dates_of(versions)
     try:
-        removed = card_terms.remove_terms(account.id, row_id)
+        removed = card_terms.remove_terms(versions, row_id)
     except CardTermsRemovalRefused as refused:
         db.session.rollback()
         flash(str(refused), "danger")
         return back.to_response()
     if not removed:
         abort(404)
+    followed = follow_the_terms_or_ask(account, due_dates_before, TermsDoor(
+        f"You removed a set of terms from {account.name}.",
+        url_for("card.remove_terms", account_id=account.id, row_id=row_id),
+        back,
+    ))
+    if followed is not None:
+        return followed
     db.session.commit()
     logger.info("Removed card terms row %d from account %d", row_id, account.id)
     flash("Card terms removed.", "success")

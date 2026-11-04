@@ -519,6 +519,21 @@ class DueDateSchedule:
             key=lambda terms: terms.effective_date,
         )))
 
+    def falls_due_on(self, day: date) -> bool:
+        """Return whether a statement falls due on *day* under these terms.
+
+        What a terms change asks of a payment's date: it moved only where the
+        terms before the change answered yes and the terms after it answer no
+        (``routes/card/_payments_follow``).
+
+        Args:
+            day: The day asked about.
+
+        Returns:
+            ``True`` when *day* is one of :meth:`on_or_after`'s dates.
+        """
+        return next(self.on_or_after(day), None) == day
+
     def on_or_after(self, day: date) -> Iterator[date]:
         """Yield every statement due date on or after *day*, ascending, each once.
 

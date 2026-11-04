@@ -75,6 +75,9 @@ class ConflictChoice:
             calendar, since pay-calendar plan step C4-a-5.  It was
             ``row.pay_period.label``, the ORM accessor that formats the STORED
             ``end_date``, which no other screen in the application reads.
+        name: The instance's own name.  A page asking about one definition
+            names it once and shows this nowhere; a card's terms change can
+            ask about several payments on one page, and says which each is.
         your_amount: The instance's current (hand-edited) amount -- the
             "Keep" side of the toggle.
         is_deleted_conflict: ``True`` when the conflict is a soft-deleted
@@ -85,6 +88,7 @@ class ConflictChoice:
     row_id: int
     due_date: date | None
     period_label: str
+    name: str
     your_amount: Decimal
     is_deleted_conflict: bool
 
@@ -166,7 +170,7 @@ def flash_retained_notice(retained) -> None:
     )
 
 
-def _build_conflict_choices(
+def build_conflict_choices(
     conflict, kind: "RecurrenceConflictKind", calendar: PayCalendar,
 ) -> list[ConflictChoice]:
     """Load the conflicted rows and shape them for the chooser.
@@ -243,6 +247,7 @@ def _build_conflict_choices(
                 row_id=row_id,
                 due_date=row.due_date,
                 period_label=period.label,
+                name=row.name,
                 your_amount=kind.resolve_amount(row),
                 is_deleted_conflict=is_deleted_conflict,
             ))
@@ -321,7 +326,7 @@ class ConflictChooserContext:
 
     Attributes:
         choices: The conflicted rows, already shaped and ordered
-            (:func:`_build_conflict_choices`).
+            (:func:`build_conflict_choices`).
         template_name: The edited template's new name (framing sentence).
         new_amount: The price the edit stated, as of *effective_from*: the
             framing sentence's figure, because the definition's price did
@@ -352,19 +357,21 @@ class ConflictChooserContext:
     cancel_url: str
 
 
-def render_recurrence_conflict_chooser(ctx: ConflictChooserContext, form) -> str:
-    """Render the full-page conflict chooser for a pending template edit.
+def render_chooser_page(page: str, form, **framing: Any) -> str:
+    """Render a conflict chooser page, echoing the edit it is asking about.
 
     Echoes the submitted edit ``form`` as hidden inputs (minus the CSRF token,
     which the chooser re-issues) so Apply re-runs the identical edit before
     resolving.  Renders and returns HTML only -- no query, no mutation and no
-    commit happen here; the caller loads the rows (:func:`_build_conflict_choices`)
+    commit happen here; the caller loads the rows (:func:`build_conflict_choices`)
     and rolls the pending edit back after this returns.
 
     Args:
-        ctx: The pending-edit conflict context (see
-            :class:`ConflictChooserContext`).
+        page: The template to render: ``recurrence_conflict_chooser.html``,
+            or a page extending it that frames another question.
         form: The submitted edit form, echoed so Apply reproduces it.
+        **framing: What *page* renders besides the form's machinery: the
+            rows, where Apply and Cancel go, and the sentences around them.
 
     Returns:
         The rendered chooser page HTML.
@@ -372,18 +379,36 @@ def render_recurrence_conflict_chooser(ctx: ConflictChooserContext, form) -> str
     echo = form.to_dict(flat=True)
     echo.pop("csrf_token", None)
     return render_template(
-        "recurrence_conflict_chooser.html",
-        choices=ctx.choices,
-        template_name=ctx.template_name,
-        new_amount=ctx.new_amount,
-        effective_from=ctx.effective_from,
+        page,
         echo=echo,
-        action_url=ctx.action_url,
-        cancel_url=ctx.cancel_url,
         apply_marker=_CONFLICT_APPLY_MARKER,
         decision_prefix=_CONFLICT_DECISION_PREFIX,
         decision_keep=_DECISION_KEEP,
         decision_use=_DECISION_USE,
+        **framing,
+    )
+
+
+def render_recurrence_conflict_chooser(ctx: ConflictChooserContext, form) -> str:
+    """Render the full-page conflict chooser for a pending template edit.
+
+    Args:
+        ctx: The pending-edit conflict context (see
+            :class:`ConflictChooserContext`).
+        form: The submitted edit form, echoed so Apply reproduces it.
+
+    Returns:
+        The rendered chooser page HTML (:func:`render_chooser_page`).
+    """
+    return render_chooser_page(
+        "recurrence_conflict_chooser.html",
+        form,
+        choices=ctx.choices,
+        template_name=ctx.template_name,
+        new_amount=ctx.new_amount,
+        effective_from=ctx.effective_from,
+        action_url=ctx.action_url,
+        cancel_url=ctx.cancel_url,
     )
 
 
@@ -640,7 +665,7 @@ def regenerate_or_conflict_chooser(
             # **A conflict is not automatically a QUESTION** (plan step R10-a,
             # adversarial review).  The chooser asks one thing -- keep this
             # instance's amount or move it to the template's -- and
-            # ``_build_conflict_choices`` builds its rows from ``overridden``
+            # ``build_conflict_choices`` builds its rows from ``overridden``
             # and ``deleted`` alone.  A RETAINED row has no such question: the
             # pass already left it untouched.  Without this arm a
             # retained-only conflict rendered the chooser over an EMPTY list
@@ -659,7 +684,7 @@ def regenerate_or_conflict_chooser(
                     # ``kind.regenerate_fn`` just resolved against, never a
                     # second derivation of it (the shape of ledger row
                     # **P68**, closed by C2-f3c; **P69** is its open sibling).
-                    choices=_build_conflict_choices(
+                    choices=build_conflict_choices(
                         conflict, kind, ctx.calendar(),
                     ),
                     template_name=template.name,
@@ -701,8 +726,10 @@ __all__ = [
     "PreEditTemplateState",
     "RecurrenceConflictKind",
     "apply_conflict_decisions",
+    "build_conflict_choices",
     "flash_retained_notice",
     "parse_conflict_decisions",
     "regenerate_or_conflict_chooser",
+    "render_chooser_page",
     "render_recurrence_conflict_chooser",
 ]

@@ -51,14 +51,12 @@ touched -- callers pass the current user id in explicitly.
 """
 
 from app import ref_cache
-from app.enums import AcctCategoryEnum, RecurrenceUnitEnum
+from app.enums import AcctCategoryEnum
 from app.extensions import db
 from app.models.account import Account
 from app.models.card_payment_settings import CardPaymentSettings
-from app.models.recurrence_rule import RecurrenceRule
 from app.models.ref import AccountType
 from app.models.savings_goal import SavingsGoal
-from app.models.transfer_template import TransferTemplate
 from app.schemas.validation import (
     AccountCreateSchema,
     AccountTypeCreateSchema,
@@ -71,6 +69,7 @@ from app.schemas.validation import (
 )
 from app.services.account_category import is_liability_category
 from app.services.ledger_lines import linked_ledger_class
+from app.services.recurring_transfer_query import due_date_repeats_into
 from app.utils import archive_helpers
 
 
@@ -432,45 +431,15 @@ def _refuse_leaving_the_card_kind(account):
             ),
             "warning",
         )
-    repeat = _due_date_repeat_into(account.id)
-    if repeat is not None:
+    repeats = due_date_repeats_into(account.id)
+    if repeats:
         return (
             DUE_DATE_REPEAT_KEEPS_ITS_CARD.format(
-                card=account.name, payment=repeat.name,
+                card=account.name, payment=repeats[0].name,
             ),
             "warning",
         )
     return None
-
-
-def _due_date_repeat_into(account_id):
-    """Return the first transfer repeating on *account_id*'s due dates, or None.
-
-    An ARCHIVED definition counts: the read pass walks it for the rows its
-    unarchive would restore, and its rule outlives the archive.
-
-    Args:
-        account_id: ``budget.accounts.id`` of the account being re-typed,
-            owner-checked by the route.
-
-    Returns:
-        The oldest such :class:`~app.models.transfer_template.TransferTemplate`,
-        or ``None``.
-    """
-    return (
-        db.session.query(TransferTemplate)
-        .join(
-            RecurrenceRule,
-            RecurrenceRule.transfer_template_id == TransferTemplate.id,
-        )
-        .filter(
-            TransferTemplate.to_account_id == account_id,
-            RecurrenceRule.unit_id
-            == ref_cache.recurrence_unit_id(RecurrenceUnitEnum.DUE_DATE),
-        )
-        .order_by(TransferTemplate.id)
-        .first()
-    )
 
 
 def _card_payment_on(account_id):

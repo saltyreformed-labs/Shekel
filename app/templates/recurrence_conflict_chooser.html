@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_money_macros.html" import money %}
-{% block title %}Confirm recurring change -- Shekel{% endblock title %}
+{% block title %}{% block page_title %}Confirm recurring change{% endblock page_title %} -- Shekel{% endblock title %}
 
 {# Recurrence-conflict chooser (Loop B, P3).
 
@@ -37,7 +37,11 @@
      action_url       -- where Apply posts (the update endpoint).
      cancel_url       -- where Cancel returns (the list).
      apply_marker / decision_prefix / decision_keep / decision_use
-                      -- field-name constants, single-sourced from the helper. #}
+                      -- field-name constants, single-sourced from the helper.
+
+   A page asking another question extends this one and overrides the blocks
+   holding its words, so the form's machinery stays in one place
+   (accounts/card_terms_chooser.html, a card's terms change). #}
 
 {% block content %}
 <div class="row justify-content-center">
@@ -45,9 +49,10 @@
     <div class="card" data-conflict-chooser>
       <div class="card-header">
         <h5 class="mb-0"><i class="bi bi-exclamation-triangle text-warning"></i>
-          Some upcoming instances were hand-edited</h5>
+          {% block chooser_heading %}Some upcoming instances were hand-edited{% endblock chooser_heading %}</h5>
       </div>
       <div class="card-body">
+        {% block chooser_lead %}
         <p>
           You changed <strong>{{ template_name }}</strong> to
           <span class="font-mono">{{ money(new_amount) }}</span>,
@@ -56,6 +61,7 @@
           Choose which to keep and which to hand back to this recurring
           definition, which prices each one on its own due date.
         </p>
+        {% endblock chooser_lead %}
 
         <form method="POST" action="{{ action_url }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -65,14 +71,16 @@
           <input type="hidden" name="{{ field }}" value="{{ value }}">
           {% endfor %}
 
+          {% block bulk_actions %}
           <div class="d-flex justify-content-end gap-2 mb-2">
             <button type="button" class="btn btn-sm btn-outline-secondary"
                     data-conflict-bulk="{{ decision_keep }}">Keep all</button>
             <button type="button" class="btn btn-sm btn-outline-primary"
                     data-conflict-bulk="{{ decision_use }}">
-              Follow the template for all
+              {% block follow_all_label %}Follow the template for all{% endblock follow_all_label %}
             </button>
           </div>
+          {% endblock bulk_actions %}
 
           <ul class="list-group mb-3">
             {% for choice in choices %}
@@ -82,10 +90,12 @@
                   {{ choice.due_date.strftime('%b %d, %Y') if choice.due_date else '--' }}
                 </span>
                 <span class="text-muted small">{{ choice.period_label }}</span>
+                {% block choice_name scoped %}{% endblock choice_name %}
                 {% if choice.is_deleted_conflict %}
                 <span class="badge bg-secondary-subtle text-secondary ms-1">you deleted this</span>
                 {% endif %}
               </span>
+              {% block choice_decision scoped %}
               <span class="btn-group btn-group-sm" role="group"
                     aria-label="Decision for {{ choice.due_date.strftime('%b %d, %Y') if choice.due_date else 'this instance' }}">
                 <input type="radio" class="btn-check" autocomplete="off"
@@ -102,13 +112,15 @@
                        name="{{ decision_prefix }}{{ choice.row_id }}"
                        id="use-{{ choice.row_id }}" value="{{ decision_use }}">
                 <label class="btn btn-outline-primary" for="use-{{ choice.row_id }}">
-                  Follow the template
+                  {% block follow_label scoped %}Follow the template{% endblock follow_label %}
                 </label>
               </span>
+              {% endblock choice_decision %}
             </li>
             {% endfor %}
           </ul>
 
+          {% block chooser_note %}
           <p class="text-muted small">
             <i class="bi bi-info-circle"></i>
             Your other upcoming instances already follow this recurring
@@ -116,6 +128,7 @@
             due date. Nothing here changes them.
             Settled history is never touched.
           </p>
+          {% endblock chooser_note %}
 
           <div class="d-flex justify-content-between">
             <a href="{{ cancel_url }}" class="btn btn-outline-secondary">Cancel edit</a>

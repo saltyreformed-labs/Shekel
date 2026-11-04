@@ -813,6 +813,10 @@ _FENCED_MODULE_RULINGS = {
         # oldest of them.  Rows, not figures.
         "active_recurring_transfer_templates",
         "active_recurring_transfer_template",
+        # The definitions repeating on a card's statement due dates (plan step
+        # credit_card:CC-6): the account-type door's refusal and the terms
+        # doors' re-placing of their rows.  Rows, not figures.
+        "due_date_repeats_into",
         # The other direction: which ACCOUNT a definition pays into.  A row off
         # the template's own FK column, moved here from ``loan_recurrence_sync``
         # at plan step R16-b-2 (ruling R-R70) so the balance seam's identity

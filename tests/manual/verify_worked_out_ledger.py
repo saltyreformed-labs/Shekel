@@ -9,12 +9,11 @@ this on it.
 **For every owner and scenario it reports** :func:`tests._worked_out_ledger.compare`: every
 (chart row, paycheck, day) net on each side; every difference by source, each an expected kind
 or UNEXPLAINED; the census of each expected kind with its count and dollars; every chart
-account's total; every paycheck's, month's and year's income statement and the balance sheet
-at every paycheck end, from the store and from the lines; and the labels plan#2523's note asks
-about.  That module's docstring says what each is and how it is graded, and
-``tests._worked_out_excuses``' which differences are expected: an excuse is granted only where
-a censused stored entry of its kind sits, by that kind's rule, and a difference at any grain --
-source cell, cell, account total or statement field -- that no excuse explains fails the run.
+account's total; and the labels plan#2523's note asks about.  That module's docstring says what
+each is and how it is graded, and ``tests._worked_out_excuses``' which differences are expected:
+an excuse is granted only where a censused stored entry of its kind sits, by that kind's rule,
+and a difference at any grain -- source cell, cell or account total -- that no excuse explains
+fails the run.
 
 **First it re-runs the deploy's cash resync and rolls it back**
 (``posting_service.resync_all_cash_postings``): its count says whether the store is at target,
@@ -38,17 +37,10 @@ misfiled true-up and both unwalked-row plants); the two general controls, the fa
 and the true-up at another amount sit outside conditions those rules already had.  Each is
 planted in a savepoint -- a read-side plant by patching the read in both its readers -- measured
 and rolled back.  It fires only when every source cell it moved comes out UNEXPLAINED and every
-other comes out as it did unplanted, the census names its planted entries as the control states
-(the kind whose rule it sits outside of, or no expected kind), and a statement field its plant
-moved comes out UNEXPLAINED where its plant shows in one.  A control is graded against the run's
-own outcome, never against a count of it, so a run that already parts hides none (plan task
-plan#2747): a field is one the plant moved when the plant changed what parts there, whether or
-not it parted unplanted, and a statement the store refuses with the plant in (its line on a
-movement with no bank day, say) is one field, however many it parted by unplanted.  A statement
-the store refused UNPLANTED is blind, since no plant can show in it: where the run holds one, a
-control's statement condition holds without a field, its line counting the blind statements.
-That run already exits 1, each refusal UNEXPLAINED, so a blind statement never passes a run
-unseen.  Nothing here grades the INSIDE of a rule: a rule that excuses too little fails
+other comes out as it did unplanted, and the census names its planted entries as the control
+states (the kind whose rule it sits outside of, or no expected kind).  A control is graded against
+the run's own outcome, never against a count of it, so a run that already parts hides none (plan
+task plan#2747).  Nothing here grades the INSIDE of a rule: a rule that excuses too little fails
 loudly, an expected difference coming out UNEXPLAINED.  ``tests._worked_out_excuses`` names the
 one condition no plant reaches.
 
@@ -56,11 +48,9 @@ one condition no plant reaches.
 task plan#2526 moved them into ``app.services.ledger_lines``), so a wrong rule moves both sides
 alike; the suite pins the rules by hand-computed literals.  This says the store, as
 production's records and this tree's deploy leave it, is the ledger the records work out to.
-**Nor is "every statement field agreed" the proof "every report byte-identical"** (review
-plan#2521, finding C-L1; ``docs/plans/verification.md``; design report s.12.2): the statements it
-works out are its own re-implementation over the lines (``tests._worked_out_statements``), graded
-against the app's report over the store.  The app's report reading the lines, against itself
-reading the store, is leaf 2's proof (plan step plan#2515); the report's header says so too.
+**Nor does it read a statement** (plan task plan#2791): the app's report reading the lines, against
+itself reading the store, is ``run_statements_on_dump.py`` (plan task plan#2773); the report's
+header says so too.
 
 **Usage** (from the repository root, on a copy nothing else uses)::
 
@@ -74,8 +64,8 @@ developer's venv, not a release side's: the suite's helpers need ``pytest``.  Pr
 figures stay out of the repository (ruling R-BAL132): keep the report in the handoff folder.
 
 Exit status: 0 every difference is an expected one and every control fired; 1 a source cell, a
-cell, an account total or a statement field is UNEXPLAINED, each named in the report; 2 the run
-measured nothing (a control did not fire, or the run's own read disagreed with the suite's).
+cell or an account total is UNEXPLAINED, each named in the report; 2 the run measured nothing (a
+control did not fire, or the run's own read disagreed with the suite's).
 Outside pytest's collection, like its ``verify_*`` siblings.
 """
 
@@ -101,7 +91,7 @@ import time_machine
 from sqlalchemy import or_, select
 
 from app import create_app, ref_cache
-from app.enums import LedgerAccountKindEnum, PostingSourceEnum
+from app.enums import PostingSourceEnum
 from app.extensions import db
 from app.models.journal_entry import JournalEntry, Posting
 from app.models.scenario import Scenario
@@ -130,7 +120,6 @@ from tests._worked_out_ledger import (
     movement_parents,
     read_ledger,
 )
-from tests._worked_out_statements import REFUSED
 
 # What each planted control posts: any nonzero cent figure; a distinctive one
 # so a reader can find it in a report.
@@ -142,17 +131,13 @@ _RESYNC_LOGGER = posting_service.logger.name
 _SKIP_WARNING = "Cash posting resync skipped"
 _SKIP_IDS_ARGUMENT = 1
 # What the report says before anything it measured (review plan#2521,
-# finding C-L1): what its statements grade, and what they cannot.
+# finding C-L1): what it cannot say.
 _HEADER = (
     "verify_worked_out_ledger: the worked-out ledger against the stored one "
     "(plan step plan#2513)",
-    "   statements: worked out by tests._worked_out_statements, its own "
-    "re-implementation of the store's report over the lines, graded against "
-    "the app's report over the STORE.  Every field agreeing is NOT 'every "
-    "report byte-identical' (docs/plans/verification.md; design report "
-    "s.12.2): that is the app's report reading the lines, leaf 2's proof "
-    "(plan step plan#2515, verify_statement_baseline.py before against "
-    "after).",
+    "   statements: not read.  The app's report reading the lines against "
+    "itself reading the store is run_statements_on_dump.py (plan task "
+    "plan#2773).",
 )
 
 
@@ -208,11 +193,9 @@ Header = namedtuple(
 )
 
 # What the plants copy (:func:`_templates`): a stored entry on a transaction
-# the resync walks with a leg on a category row, so a plant of it moves an
-# income statement even where nothing dates it; one on a transfer the resync
-# walks and does not skip; an account true-up filed in the paycheck today's
-# calendar files its day in; and ``(movement id, parent)``, a movement on a
-# row the resync does not walk.
+# the resync walks; one on a transfer the resync walks and does not skip; an
+# account true-up filed in the paycheck today's calendar files its day in; and
+# ``(movement id, parent)``, a movement on a row the resync does not walk.
 Templates = namedtuple("Templates", "purchase transfer trueup unwalked")
 
 # What a control runs against: the baseline scenario, its owner's calendar,
@@ -476,31 +459,29 @@ def _a_store_only_line_nothing_reversed(bench):
 
 # A planted control: its title; the expected kind the census must name each
 # entry it plants -- the rule it sits just outside of -- or ``None`` for one
-# that must be no expected kind; how many source cells its plant moves;
-# whether a statement field its plant moves must come out UNEXPLAINED; and
+# that must be no expected kind; how many source cells its plant moves; and
 # its plant, a function of the :data:`Bench` that writes its stored entries
 # and returns ``(their ids, a rewrite of the read's lines or None)``.
-Control = namedtuple("Control", "title at cells moves_statements plant")
+Control = namedtuple("Control", "title at cells plant")
 
 _CONTROLS = (
-    Control("a stored movement line the records do not hold", None, 2, True,
+    Control("a stored movement line the records do not hold", None, 2,
             _a_stored_purchase_line),
-    Control("a stored correction the records do not hold", None, 2, True,
+    Control("a stored correction the records do not hold", None, 2,
             _a_stored_correction),
     Control("residue netting to $0.00 per account, in no cell",
-            EXPECTED_RESIDUE, 4, True, _residue_split_across_paychecks),
+            EXPECTED_RESIDUE, 4, _residue_split_across_paychecks),
     Control("a re-filed correction the read files outside today's paycheck",
-            EXPECTED_FILING, 4, False, _a_correction_the_read_misfiles),
+            EXPECTED_FILING, 4, _a_correction_the_read_misfiles),
     Control("a re-filed correction the read files at another amount",
-            EXPECTED_FILING, 4, False,
+            EXPECTED_FILING, 4,
             _a_refiled_correction_the_read_books_at_another_amount),
     Control("a stored line on a transfer family the resync does not skip",
-            None, 2, True, _a_stored_line_on_a_family_not_skipped),
+            None, 2, _a_stored_line_on_a_family_not_skipped),
     Control("a line the read books on a row the resync does not walk",
-            EXPECTED_UNWALKED, 2, True,
-            _a_line_the_read_books_on_an_unwalked_row),
+            EXPECTED_UNWALKED, 2, _a_line_the_read_books_on_an_unwalked_row),
     Control("a store-only line on a row the resync does not walk, never "
-            "reversed", EXPECTED_UNWALKED, 2, True,
+            "reversed", EXPECTED_UNWALKED, 2,
             _a_store_only_line_nothing_reversed),
 )
 
@@ -541,18 +522,15 @@ def _template_kind(ledger, skipped, entry):
     """Return which of the :data:`Templates` *entry* can be, or ``None``.
 
     Only an entry with legs on two chart rows: a ``purchase`` on a walked
-    transaction, one of them a category row; a ``transfer`` side on a walked
-    family the resync does not skip; or a ``trueup``, an account true-up
-    filed in the paycheck today's calendar files its day in.
+    transaction; a ``transfer`` side on a walked family the resync does not
+    skip; or a ``trueup``, an account true-up filed in the paycheck today's
+    calendar files its day in.
     """
     if len({leg.ledger_account_id for leg in entry.postings}) < 2:
         return None
     parent = ledger.parent_of.get(entry.transaction_entry_id)
     if parent in ledger.walked:
-        if parent[0] == "transaction" and any(
-                ledger.key_of[leg.ledger_account_id].kind
-                is LedgerAccountKindEnum.CATEGORY
-                for leg in _distinct_legs(entry)):
+        if parent[0] == "transaction":
             return "purchase"
         if parent[0] == "transfer" and parent[1] not in skipped:
             return "transfer"
@@ -630,16 +608,9 @@ def _run_control(bench, control):
     It FIRES when every source cell its plant moved -- as many as the control
     states -- comes out UNEXPLAINED, every other source cell comes out as it
     did unplanted (newly UNEXPLAINED, or no longer, is a plant reaching past
-    its own cells), the census names each entry it planted as the kind whose
-    rule it sits just outside of (or as none), and, for a control a
-    statement shows, a statement field its plant moved comes out
-    UNEXPLAINED: one whose UNEXPLAINED part the plant changed, which on a
-    run that already parts may be a field that parted unplanted (plan task
-    plan#2747).  Each is graded against the run's own outcome, never a count
-    of it: a plant that makes the store refuse a statement turns its many
-    unexplained fields into one.  Where the store refused a statement
-    unplanted, the statement condition holds without a field: no plant can
-    show in that statement, and the refusal is already UNEXPLAINED.
+    its own cells), and the census names each entry it planted as the kind
+    whose rule it sits just outside of (or as none).  Each is graded against
+    the run's own outcome, never a count of it (plan task plan#2747).
 
     Args:
         bench: The :data:`Bench`.
@@ -663,20 +634,9 @@ def _run_control(bench, control):
         outcome.unexplained_sources ^ bench.outcome.unexplained_sources
     ) - moved
     censused = [outcome.censused.get(entry_id) for entry_id in planted_ids]
-    shown = {
-        name for name, part in outcome.unexplained_fields.items()
-        if bench.outcome.unexplained_fields.get(name) != part
-    }
-    # The statements the store refused unplanted: no plant can show in one,
-    # and the run already fails on each, every refusal UNEXPLAINED.
-    blind = {
-        title for title, name in bench.outcome.unexplained_fields
-        if name == REFUSED
-    }
     ok = (
         len(moved) == control.cells and named == moved and not others
         and all(kind == control.at for kind in censused)
-        and (not control.moves_statements or bool(shown or blind))
     )
     return (
         f"(planted entr(y/ies) {planted_ids}"
@@ -684,12 +644,7 @@ def _run_control(bench, control):
         f"{'FIRED' if ok else 'DID NOT FIRE'}: {len(named)} of the "
         f"{len(moved)} source cell(s) it moved UNEXPLAINED (it moves "
         f"{control.cells}), {len(others)} other source cell(s) newly or no "
-        f"longer UNEXPLAINED; census {censused} (its rule's: {control.at}); "
-        f"{len(shown)} statement field(s) it moved UNEXPLAINED, of "
-        f"{len(outcome.unexplained_fields)} unexplained against the run's "
-        f"{len(bench.outcome.unexplained_fields)}"
-        f"{'' if control.moves_statements else ' (none required)'}"
-        f"{f'; {len(blind)} statement(s) blind, refused unplanted' if blind else ''}"
+        f"longer UNEXPLAINED; census {censused} (its rule's: {control.at})"
     ), ok
 
 
@@ -770,8 +725,7 @@ def _measure_scenario(scenario, skipped, say):
     say(f"== owner {scenario.user_id}, scenario {scenario.id}: {unexplained} "
         f"UNEXPLAINED ({len(outcome.unexplained_sources)} source cell(s), "
         f"{len(outcome.unexplained_cells)} cell(s), "
-        f"{len(outcome.unexplained_totals)} account total(s), "
-        f"{len(outcome.unexplained_fields)} statement field(s)); excused: "
+        f"{len(outcome.unexplained_totals)} account total(s)); excused: "
         f"{dict(outcome.expected) or 'none'}")
     if not (scenario.is_baseline and ledger.stored):
         return unexplained, None

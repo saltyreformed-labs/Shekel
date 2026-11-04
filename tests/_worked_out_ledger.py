@@ -9,9 +9,7 @@ its controls and says what it found.  Per owner and scenario, :func:`compare` re
   both ledgers again at a finer grain, and that read must reproduce the suite's cells exactly or
   the run stops (:class:`HarnessError`).  Both map a line onto its chart account by the suite's
   one rule (``tests._ledger_parity.ParityChart``): a stored leg's is the row it sits on, a
-  worked-out line's the owner's row for its key, so no two stored rows net in one cell.  The
-  statements alone key a line by its chart key, summing two rows of one key; whatever that
-  sums, the cell and source grains have already named apart.
+  worked-out line's the owner's row for its key, so no two stored rows net in one cell.
 * **Every difference by SOURCE** -- per movement, per correction kind, and the store's
   sourceless residue -- each classified as one of the differences the leaf's spec expects, or
   UNEXPLAINED.  A source grain sees what a cell cannot: two movements whose stored lines
@@ -21,10 +19,6 @@ its controls and says what it found.  Per owner and scenario, :func:`compare` re
   elsewhere, the transfer families the cash resync skips, and the stored lines on rows it
   does not walk (design report s.9.3's list).
 * **Every chart account's total** on each side.
-* **The income statement for every paycheck, month and year, and the balance sheet at every
-  paycheck end**, from the store and from the lines, field by field
-  (:mod:`tests._worked_out_statements` says how a field is graded, and what its agreement does
-  NOT prove: every report byte-identical is leaf 2's proof, plan#2515).
 * **The labels** (ruling plan#2518, "statements show current names"): every stored counter
   and loan chart row whose snapshot name is not the worked-out chart's label, counted by
   cause, renamed or clipped at the column's length, as plan#2523's note asks.  Only those rows'
@@ -33,10 +27,15 @@ its controls and says what it found.  Per owner and scenario, :func:`compare` re
 **Which differences are expected, and the one place one is excused**, is
 :mod:`tests._worked_out_excuses`: an excuse is granted only where a censused stored entry of its
 kind sits, and only by that kind's rule.  **Every grain reaches the exit code**: a source cell, a
-cell, an account total or a statement field that parts beyond the excused source cells is
-UNEXPLAINED (:attr:`Outcome.unexplained`).  Only the source and statement grains can FIND one: a
-cell's or a total's remainder is the sum of its unexcused source cells, so either is UNEXPLAINED
-only where a source cell already is, and is reported for the money each one moves.
+cell or an account total that parts beyond the excused source cells is UNEXPLAINED
+(:attr:`Outcome.unexplained`).  Only the source grain can FIND one: a cell's or a total's
+remainder is the sum of its unexcused source cells, so either is UNEXPLAINED only where a source
+cell already is, and is reported for the money each one moves.
+
+**It reads no statement** (plan task plan#2791).  Its statement half compared the app's report
+over the store with its own over the lines, and lost its stored side when the report moved onto
+the lines (plan task plan#2771).  The two reports are compared by
+``tests/manual/run_statements_on_dump.py`` (plan task plan#2773).
 
 It writes nothing; the run's controls plant inside a savepoint of their own.
 
@@ -88,12 +87,6 @@ from tests._worked_out_excuses import (
     source_cell_of,
     take_census,
 )
-from tests._worked_out_statements import (
-    key_text,
-    mark,
-    money,
-    report_statements,
-)
 
 _ZERO = Decimal("0.00")
 # The stored chart's ``name`` column length, the clip a snapshot label takes.
@@ -102,6 +95,32 @@ _LABEL_LIMIT = LedgerAccount.__table__.c.name.type.length
 
 class HarnessError(RuntimeError):
     """The run cannot grade anything; the message says why (exit 2)."""
+
+
+def money(value):
+    """Return *value* as a two-place string, never a rounded one."""
+    return f"{Decimal(value):.2f}"
+
+
+def key_text(key):
+    """Return a chart key as ``kind/class/record``."""
+    return f"{key.kind.value}/{key.ledger_class.value}/{key.record_id}"
+
+
+def mark(unexplained, parts):
+    """Return the mark a report line opens with, for any grain.
+
+    ``!`` an UNEXPLAINED difference (which may hide inside agreeing figures,
+    an excused difference and an unexplained one cancelling), ``~`` one that
+    parts by an expected difference alone, blank one that agrees.
+
+    Args:
+        unexplained: Whether the line's difference is UNEXPLAINED.
+        parts: Whether its two figures part.
+    """
+    if unexplained:
+        return "! "
+    return "~ " if parts else "  "
 
 
 @dataclass
@@ -115,8 +134,7 @@ class Ledger:  # pylint: disable=too-many-instance-attributes
     Attributes:
         owner_id: The owner.
         scenario_id: The scenario.
-        is_baseline: Whether the scenario is the owner's baseline, the one
-            the statements read.
+        is_baseline: Whether the scenario is the owner's baseline.
         calendar: The owner's pay calendar.
         stored: Every stored posting, as a
             :data:`~tests._worked_out_excuses.Contribution`.
@@ -154,11 +172,6 @@ class Outcome:
             whose two nets part beyond its excused source cells.
         unexplained_totals: Every chart account ``(key, stored rows)`` whose
             two totals part beyond them.
-        unexplained_fields: Every statement field that parts from the store
-            beyond the expected differences in its window, ``{(statement
-            title, field): what parts there}``, a statement the store refused
-            being one field, ``REFUSED``
-            (:func:`tests._worked_out_statements.report_statements`).
         expected: Each expected kind's excused source-cell count.
         censused: Each stored entry the census holds, by id: its expected
             kind.
@@ -168,7 +181,6 @@ class Outcome:
     unexplained_sources: set = field(default_factory=set)
     unexplained_cells: set = field(default_factory=set)
     unexplained_totals: set = field(default_factory=set)
-    unexplained_fields: dict = field(default_factory=dict)
     expected: dict = field(default_factory=lambda: defaultdict(int))
     censused: dict = field(default_factory=dict)
 
@@ -177,7 +189,7 @@ class Outcome:
         """Return how many things are UNEXPLAINED, at every grain: any fails the run."""
         return (
             len(self.unexplained_sources) + len(self.unexplained_cells)
-            + len(self.unexplained_totals) + len(self.unexplained_fields)
+            + len(self.unexplained_totals)
         )
 
 
@@ -213,29 +225,29 @@ def read_ledger(scenario, calendar):
         {row.ledger_account_id for row in posted},
     )
     lines = worked_out_lines(scenario.user_id, scenario.id, lambda: calendar)
-    movements = _movements(
-        {row.transaction_entry_id for row in posted
-         if row.transaction_entry_id is not None}
-        | {line.movement_id for line in lines if line.movement_id is not None},
-    )
     return Ledger(
         owner_id=scenario.user_id,
         scenario_id=scenario.id,
         is_baseline=scenario.is_baseline,
         calendar=calendar,
-        stored=_stored_contributions(posted, chart, movements),
+        stored=_stored_contributions(posted, chart),
         worked=[
             Contribution(
                 (MOVEMENT, line.movement_id) if line.movement_id is not None
                 else (CORRECTION, line.source_kind_id),
                 *chart.worked_account(line.key), line.pay_period_id,
-                line.entry_date, line.amount, line.entry_date, None,
+                line.entry_date, line.amount, None,
             )
             for line in lines
         ],
         chart=chart.rows,
         key_of=chart.key_of,
-        parent_of=_parents(movements),
+        parent_of=movement_parents(
+            {row.transaction_entry_id for row in posted
+             if row.transaction_entry_id is not None}
+            | {line.movement_id for line in lines
+               if line.movement_id is not None},
+        ),
         walked=_walked_parents(scenario.id),
     )
 
@@ -270,67 +282,31 @@ def _postings(owner_id, scenario_id):
     )
 
 
-def _stored_contributions(posted, chart, movements):
+def _stored_contributions(posted, chart):
     """Return each stored posting as a :data:`~tests._worked_out_excuses.Contribution`.
 
     Its source is its movement when it links one, its kind when that kind
-    is a correction's, and residue otherwise; its ``attributed_on`` is the
-    day the store's statements place it on: the movement's bank day, the
-    correction's own day, none for residue (which they drop).
+    is a correction's, and residue otherwise.
 
     Args:
         posted: :func:`_postings`' rows.
         chart: The :class:`~tests._ledger_parity.ParityChart` the comparison
             maps each leg's row by.
-        movements: :func:`_movements`' map.
     """
     correction_kinds = correction_kind_ids()
     stored = []
     for entry_id, kind, movement_id, pay_period_id, day, row_id, amount in posted:
         if movement_id is not None:
             source = (MOVEMENT, movement_id)
-            settled = movements.get(movement_id)
-            attributed_on = None if settled is None else settled[0]
         elif kind in correction_kinds:
-            source, attributed_on = (CORRECTION, kind), day
+            source = (CORRECTION, kind)
         else:
-            source, attributed_on = (RESIDUE, kind), None
+            source = (RESIDUE, kind)
         stored.append(Contribution(
             source, *chart.stored_account(row_id), pay_period_id, day, amount,
-            attributed_on, entry_id,
+            entry_id,
         ))
     return stored
-
-
-def _movements(movement_ids):
-    """Return each movement's bank day and parent.
-
-    Args:
-        movement_ids: The ``budget.transaction_entries`` ids to read.
-
-    Returns:
-        ``{id: (settled_on, ("transaction" | "transfer", parent id))}``; an id
-        no row holds is absent.
-    """
-    rows = (
-        db.session.query(
-            TransactionEntry.id,
-            TransactionEntry.settled_on,
-            TransactionEntry.transaction_id,
-            TransactionEntry.expense_transfer_id,
-            TransactionEntry.income_transfer_id,
-        )
-        .filter(TransactionEntry.id.in_(movement_ids))
-        .all()
-    )
-    found = {}
-    for movement_id, settled_on, txn_id, expense_side, income_side in rows:
-        if txn_id is not None:
-            parent = ("transaction", txn_id)
-        else:
-            parent = ("transfer", expense_side or income_side)
-        found[movement_id] = (settled_on, parent)
-    return found
 
 
 def movement_parents(movement_ids):
@@ -343,14 +319,23 @@ def movement_parents(movement_ids):
         ``{id: ("transaction" | "transfer", parent id)}``; an id no row
         holds is absent.
     """
-    return _parents(_movements(movement_ids))
-
-
-def _parents(movements):
-    """Return ``{movement id: parent}`` from :func:`_movements`' map."""
-    return {
-        movement_id: parent for movement_id, (_, parent) in movements.items()
-    }
+    rows = (
+        db.session.query(
+            TransactionEntry.id,
+            TransactionEntry.transaction_id,
+            TransactionEntry.expense_transfer_id,
+            TransactionEntry.income_transfer_id,
+        )
+        .filter(TransactionEntry.id.in_(movement_ids))
+        .all()
+    )
+    found = {}
+    for movement_id, txn_id, expense_side, income_side in rows:
+        if txn_id is not None:
+            found[movement_id] = ("transaction", txn_id)
+        else:
+            found[movement_id] = ("transfer", expense_side or income_side)
+    return found
 
 
 def _walked_parents(scenario_id):
@@ -468,11 +453,6 @@ def compare(ledger, skipped):
     _report_sources(differing, expected, outcome)
     _report_census(census, outcome.expected, skipped, out)
     _report_totals(cells, outcome.unexplained_totals, out)
-    if ledger.is_baseline:
-        _report_statements(ledger, expected, outcome)
-    else:
-        out("-- statements: not read (the store's statements read the "
-            "baseline only)")
     _report_labels(ledger, out)
     return outcome
 
@@ -684,28 +664,6 @@ def _label_of(key):
     else:
         record = db.session.get(Account, key.record_id)
     return chart_label(key, record)
-
-
-# -- statements -------------------------------------------------------------
-
-def _report_statements(ledger, expected, outcome):
-    """Compare every statement on both sides into *outcome*.
-
-    The comparison is :func:`tests._worked_out_statements.report_statements`,
-    handed the contributions of every source cell whose difference is an
-    expected one.
-
-    Args:
-        ledger: The :class:`Ledger`.
-        expected: Each differing source cell's expected kind, or ``None``.
-        outcome: The :class:`Outcome` to print into and to hold the
-            unexplained fields.
-    """
-    lines, outcome.unexplained_fields = report_statements(ledger, [
-        c for c in ledger.stored + ledger.worked
-        if expected.get(source_cell_of(c)) is not None
-    ])
-    outcome.lines.extend(lines)
 
 
 # -- labels -----------------------------------------------------------------

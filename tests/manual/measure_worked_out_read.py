@@ -74,8 +74,7 @@ from tests._worked_out_excuses import (
     filed_in,
     nets,
 )
-from tests._worked_out_ledger import read_ledger
-from tests._worked_out_statements import key_text, money
+from tests._worked_out_ledger import key_text, money, read_ledger
 
 # Each table a statement names, after FROM or JOIN, schema-qualified as the
 # app's models are.

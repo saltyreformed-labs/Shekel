@@ -404,10 +404,9 @@ def never_offered(card: Card, cards: Mapping[int, Card], shipped: Iterable[int])
     return None
 
 
-def has_turn(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
-             claims: Mapping[int, Claim]) -> bool:
-    """Whether a card is a step someone could start once what it needs is done: open unshipped
-    unclaimed work that nothing holds back (:func:`never_offered`)."""
+def has_turn(card: Card, cards: Mapping[int, Card], shipped: Iterable[int]) -> bool:
+    """Whether a card is a step that takes a turn in ``quill next``'s order (:mod:`_next`): open
+    unshipped work that nothing holds back (:func:`never_offered`), claimed or not."""
     shipped = set(shipped)
     return (
         card.is_open
@@ -415,7 +414,6 @@ def has_turn(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
         and is_work(card, cards, shipped)
         and never_offered(card, cards, shipped) is None
         and card.number not in shipped
-        and card.number not in claims
     )
 
 
@@ -426,10 +424,10 @@ def blockers(card: BareCard, cards: Mapping[int, BareCard]) -> set[int]:
 
 def workable(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
              claims: Mapping[int, Claim]) -> bool:
-    """Whether a card is a step someone could start now: it :func:`has_turn`, and each of its
-    :func:`blockers` is resolved."""
+    """Whether a card is a step someone could start now: it :func:`has_turn`, no one claims it,
+    and each of its :func:`blockers` is resolved."""
     shipped = set(shipped)
-    return has_turn(card, cards, shipped, claims) and all(
+    return has_turn(card, cards, shipped) and card.number not in claims and all(
         resolved(blocker, cards, shipped) for blocker in blockers(card, cards))
 
 

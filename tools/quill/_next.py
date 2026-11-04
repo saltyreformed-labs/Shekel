@@ -6,7 +6,9 @@
 ahead of it: Urgent, then High, then every other step in the board's order; Medium, Low and no
 mark are alike (:func:`_rank`).  A leaf holds the highest mark of itself and the steps above it,
 as it inherits their waits (R-BAL182), so a mark outlives its step's split and nothing is copied.
-Only a step that :func:`_state.has_turn` takes one.
+Only a step that :func:`_state.has_turn` takes one.  A step a session has claimed keeps its turn,
+since a step's prerequisites go just ahead of it whoever holds it: it is never handed out itself,
+but what it needs is, and it is named while it waits on a pause.
 
 **A blocked step's turn hands out what it needs**: the first unfinished step it needs, and so on
 down, whatever that step's own mark (:func:`_needed`).  So the board A #1, B #2, C #3, D #20 where
@@ -135,7 +137,7 @@ def next_step(order: Iterable[int], cards: Mapping[int, Card], shipped: Iterable
 
     first, waiting = None, []
     for number in sorted((number for number in places if number in cards), key=turn):
-        if not has_turn(cards[number], cards, shipped, claims):
+        if not has_turn(cards[number], cards, shipped):
             continue
         needed = list(_needed(cards[number], cards, shipped, turn))
         if held := _held(needed, cards):

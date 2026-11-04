@@ -138,10 +138,13 @@ def test_what_a_claimed_prerequisite_needs_is_still_walked():
     assert next_step([1, 9, 2, 3], cards, set(), {2: _claim(2)}).card.number == 3
 
 
-def test_a_claimed_step_takes_no_turn_so_what_it_needs_is_not_pulled():
-    """The spec's order is of unclaimed steps: the branch holding it asks for its own."""
+def test_a_claimed_step_keeps_its_turn_so_what_it_needs_is_handed_out():
+    """Ruling plan#1831: "a step's unfinished prerequisites go just ahead of it", whoever holds
+    it, so C's need goes at C's place, and C itself is never handed out; a claimed step that
+    needs nothing passes its turn.  As the live plan#1183 (claimed, #162) needs plan#2718."""
     cards = _cards(_card(1, blocked_by=(3,)), _card(2), _card(3))
-    assert next_step([1, 2, 3], cards, set(), {1: _claim(1)}).card.number == 2
+    assert next_step([1, 2, 3], cards, set(), {1: _claim(1)}).card.number == 3
+    assert next_step([1, 2, 3], cards, {3}, {1: _claim(1)}).card.number == 2
 
 
 def test_a_needed_split_step_hands_out_its_leaves_best_turn_first():
@@ -313,11 +316,13 @@ def test_a_pause_on_a_finished_card_holds_nothing():
     assert answer.card.number == 1 and not answer.waiting
 
 
-def test_a_claimed_or_shipped_step_needing_a_pause_is_no_waiter():
-    """It takes no turn, so nothing passes over it."""
+def test_a_claimed_step_needing_a_pause_is_named_and_a_shipped_one_is_not():
+    """Spec: "a step that needs one is reported": the session holding it is stuck too.  A step
+    that shipped needs nothing."""
     cards = _cards(_card(1, blocked_by=(3,)), _card(2, blocked_by=(3,)),
                    _card(3, priority="On hold"))
-    assert not next_step([1, 2, 3], cards, {1}, {2: _claim(2)}).waiting
+    answer = next_step([1, 2, 3], cards, {1}, {2: _claim(2)})
+    assert [wait.step.number for wait in answer.waiting] == [2]
 
 
 def test_the_mark_lifted_the_step_is_handed_out_at_the_waiter_s_turn():

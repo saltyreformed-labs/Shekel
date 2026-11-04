@@ -4,6 +4,7 @@ or loans.
 """
 
 from decimal import Decimal
+from functools import partial
 
 import pytest
 
@@ -38,7 +39,9 @@ def _captured_read(seed_user):
     """
     owner_id, scenario_id = seed_user["user"].id, seed_user["scenario"].id
     return capture_sql_statements(
-        lambda: worked_out_lines(owner_id, scenario_id),
+        lambda: worked_out_lines(
+            owner_id, scenario_id, partial(calendar_for, owner_id),
+        ),
     )
 
 
@@ -126,7 +129,9 @@ class TestTheReadWritesNothing:
             assert pending in _db.session.new
 
             lines, statements = capture_sql_statements(
-                lambda: worked_out_lines(owner_id, scenario_id),
+                lambda: worked_out_lines(
+                    owner_id, scenario_id, partial(calendar_for, owner_id),
+                ),
             )
 
             (write,) = _writes_in(statements)
@@ -161,7 +166,9 @@ class TestWhoseRecordsItReads:
             with pytest.raises(PayCalendarError):
                 calendar_for(owner_id)
 
-            assert worked_out_lines(owner_id, scenario.id) == []
+            assert worked_out_lines(
+                owner_id, scenario.id, partial(calendar_for, owner_id),
+            ) == []
 
     def test_an_owner_whose_one_account_is_a_loan_reads_its_loan_lines(
         self, app, db, bare_user, bare_periods,
@@ -183,9 +190,38 @@ class TestWhoseRecordsItReads:
             loan = _trued_up_loan(bare_user, "Only Loan")
             calendar = calendar_for(owner_id)
 
-            lines = worked_out_lines(owner_id, scenario.id)
+            lines = worked_out_lines(owner_id, scenario.id, lambda: calendar)
 
             assert lines == _loan_anchor_lines(loan, calendar)
+
+    def test_another_owners_calendar_is_refused(
+        self, app, db, seed_user, seed_periods, seed_second_user,
+        seed_second_periods,
+    ):
+        """A correction to file and the second owner's calendar: refused.
+
+        The seed owner's Checking opening is a correction, filed in a
+        paycheck of the calendar the read is handed (plan task plan#2771):
+        handed the second owner's, it would file the first owner's opening
+        in the second owner's paycheck.  The read refuses, naming both
+        owners.  The CONTROL: handed the owner's own calendar, the same read
+        answers lines, so the refusal is the pairing's.
+        """
+        with app.app_context():
+            owner_id = seed_user["user"].id
+            other_id = seed_second_user["user"].id
+            scenario_id = seed_user["scenario"].id
+
+            assert worked_out_lines(
+                owner_id, scenario_id, partial(calendar_for, owner_id),
+            )
+            with pytest.raises(
+                ValueError,
+                match=f"user {owner_id}'s ledger was handed user {other_id}'s",
+            ):
+                worked_out_lines(
+                    owner_id, scenario_id, partial(calendar_for, other_id),
+                )
 
     def test_another_owners_movements_are_never_read(
         self, app, seed_user, seed_periods, seed_second_user,
@@ -230,14 +266,18 @@ class TestWhoseRecordsItReads:
 
             # The bill's -77.77 / +77.77; each transfer side's -250.00 and
             # +250.00 against the owner's Transfers in transit.
-            assert _moved(worked_out_lines(other_id, other_scenario_id)) == [
+            assert _moved(worked_out_lines(
+                other_id, other_scenario_id, partial(calendar_for, other_id),
+            )) == [
                 Decimal("-250.00"), Decimal("-250.00"), Decimal("-77.77"),
                 Decimal("77.77"), Decimal("250.00"), Decimal("250.00"),
             ]
             assert _moved(_read(seed_user)) == [
                 Decimal("-11.11"), Decimal("11.11"),
             ]
-            assert _moved(worked_out_lines(owner_id, other_scenario_id)) == []
+            assert _moved(worked_out_lines(
+                owner_id, other_scenario_id, partial(calendar_for, owner_id),
+            )) == []
 
 
 class TestItsStatementsDoNotGrowWithItsSources:
@@ -333,10 +373,10 @@ class TestItsStatementsDoNotGrowWithItsSources:
 
         Each loan holds its terms, a true-up, an escrow line and a settled
         payment from Checking, so every loan the second read walks has
-        records of each kind its walk folds.  The loans' terms ride the
-        account load (``Account.loan_params``), and their statements, rate
-        history, escrow lines and payments are each loaded once whatever the
-        number of loans (``loan_ledger.walk_loan_ledgers``), so a per-loan
+        records of each kind its walk folds.  The loans' terms, statements,
+        rate history, escrow lines and payments are each loaded once whatever
+        the number of loans (``loan_ledger.walk_loan_ledgers``, the terms by
+        the loans' ids since finding plan#2691), so a per-loan
         load -- a walk that loads its own loan's records -- makes the second
         read issue more statements per added loan and fails this.  Each read
         starts from an expired session, and the second reads more lines than

@@ -28,7 +28,8 @@ app logged while it ran).  Keep ``--out`` in the handoff folder: production figu
 the repository (ruling R-BAL132), and a commit or pull request cites the path.
 
 Exit status: the harness's (0, 1 or 2, as its docstring says); 2 also when the bench could not
-be made or its teardown left something, or the deploy step refused the copy.
+be made or its teardown left something, the deploy step refused the copy, or this run or the
+harness crashed or was killed (``exit_status``).
 """
 
 import argparse
@@ -43,12 +44,38 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
 # above; there is no import order that resolves ``tools`` before it runs.
 # pylint: disable=wrong-import-position
+from tests.manual import exit_status
+
+exit_status.arm(__name__)
+
 from tools.rehearsal import bench, rows
 
 #: The harness, as a path inside the measured worktree.
 _HARNESS = pathlib.Path("tests") / "manual" / "verify_worked_out_ledger.py"
 #: The one state the bench makes: the commit measured.
 _STATE = "measured"
+
+
+def _measure(state, environment, moment, out):
+    """Run the harness from *state*'s worktree on its copy; what its exit status says.
+
+    Args:
+        state: The side measured, whose worktree holds the harness.
+        environment: The harness's environment.
+        moment: The instant its clock is pinned at.
+        out: The directory its report and log are written to.
+
+    Returns:
+        The harness's verdict, or 2 for any other status (``exit_status``).
+    """
+    with (out / "harness_log.txt").open("w", encoding="utf-8") as log:
+        measured = bench.run(
+            [sys.executable, str(state.worktree / _HARNESS),
+             "--report", str(out / "report.txt"), "--at", moment.isoformat()],
+            environment, stdout=log, cwd=state.worktree,
+        )
+        log.write(measured.stderr)
+    return exit_status.measurement_status(measured.returncode)
 
 
 def run(dump, out, revision):
@@ -84,14 +111,7 @@ def run(dump, out, revision):
             "PATH": os.pathsep.join((str(pathlib.Path(sys.executable).parent),
                                      "/usr/bin", "/bin")),
         }
-        with (out / "harness_log.txt").open("w", encoding="utf-8") as log:
-            measured = bench.run(
-                [sys.executable, str(state.worktree / _HARNESS),
-                 "--report", str(out / "report.txt"), "--at", moment.isoformat()],
-                environment, stdout=log, cwd=state.worktree,
-            )
-            log.write(measured.stderr)
-        return measured.returncode
+        return _measure(state, environment, moment, out)
 
 
 def main(argv=None):

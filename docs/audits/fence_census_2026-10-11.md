@@ -181,7 +181,7 @@ list above with that ruling as its reason. The posted-ledger family is ruled by 
 | A-19 | `scripts/init_database.py:378` (`backfill_loan_payment_postings_after_migration`) | re-reconciles every loan's corrections at each deploy | the posted-ledger family | `balance:X-ek` |
 | A-22 | `app/services/loan_posting_service/_sync.py:300` (`_assert_checked_projection`) | the posted loan ledger equals the loan's fold, date by date | the posted-ledger family | `balance:X-ek` |
 | A-23 | `scripts/_integrity_consistency.py:232` (DC-10) | an undated movement holding a live journal leg | the posted-ledger family | `balance:X-ek` |
-| A-25 | `app/services/pay_period_gates.py:424` (`reject_moved_ledger`) | removing earlier paychecks when a booked total would move | `pay_calendar:R-PC53`, `R-PC114` | `pay_calendar:C25` |
+| A-25 | `app/services/pay_period_gates.py:424` (`reject_moved_ledger`) | removing earlier paychecks when a booked total would move | `pay_calendar:R-PC53`, `R-PC114` | `pay_calendar:C25`; answered yes by plan#2517, deleted by plan#2775 |
 | A-38 | `app/exceptions.py:129` (`ForeignAccountError`) | a balance read handed another owner's account | `R-GV` | `balance:X-el` |
 | A-41 | `app/services/loan_recurrence_sync.py:580` (`sync_loan_payment_start`) | a loan rule's start date re-copied from the loan | `recurrence:R-R29` | `recurrence:R31` |
 

@@ -434,8 +434,8 @@ class TestTheRefusalNamesWhatEachPaycheckHolds:
 
             assert str(refusal) == (
                 f"{_kroger_refusal(periods[_FUTURE])} Operation refused: 1 pay "
-                "period(s) are locked (past, settled, or holding posted ledger "
-                "entries) and cannot be deleted or rebuilt."
+                "period(s) are locked (past or settled) and cannot be deleted "
+                "or rebuilt."
             )
 
     def test_a_settled_row_in_the_same_paycheck_outranks_the_purchase(
@@ -466,9 +466,8 @@ class TestTheRefusalNamesWhatEachPaycheckHolds:
                 periods[_FUTURE].id: PeriodLockReason.SETTLED_TXN,
             }
             assert str(refusal) == (
-                "Operation refused: 1 pay period(s) are locked (past, settled, "
-                "or holding posted ledger entries) and cannot be deleted or "
-                "rebuilt."
+                "Operation refused: 1 pay period(s) are locked (past or "
+                "settled) and cannot be deleted or rebuilt."
             )
 
 

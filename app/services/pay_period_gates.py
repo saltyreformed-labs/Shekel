@@ -46,7 +46,6 @@ that called a door would be the cycle the C3-a split exists to prevent.
 
 import logging
 from datetime import date
-from decimal import Decimal
 
 from sqlalchemy.orm import selectinload
 
@@ -78,9 +77,6 @@ from app.utils.balance_predicates import is_projected
 from app.utils.log_events import ACCESS, EVT_RESOURCE_NOT_FOUND, log_event
 
 logger = logging.getLogger(__name__)
-
-#: A ledger total a key does not reach: no posting, no money.
-_NO_MONEY = Decimal("0")
 
 
 def log_unresolved_period(user_id: int, period_id: int) -> None:
@@ -229,25 +225,19 @@ def gate_deletable_tail(
         if locks[period.period_id] is not None
     }
     if blocking:
-        # Posting-ledger protection, two layers: a period holding settled
-        # (posted) transactions classifies SETTLED_TXN, and a period whose
-        # journal entries do not net to zero per ledger account (a loan
-        # opening / true-up correction, or attribution drift) classifies
-        # LEDGER_POSTINGS -- so truncate refuses both.
-        # journal_entries.pay_period_id is ON DELETE CASCADE, so deleting a
-        # posted period disposes its ledger entries + legs at the DB tier
-        # (outside the ORM, where the balanced-journal trigger never fires on
-        # DELETE); that is safe only for a period whose postings net to zero
-        # per account (a self-cancelling original + reversal pair).  Whoever
-        # relaxes these locks MUST first reverse the postings
-        # (movement_removal.remove_movements, the one act that reverses and
-        # deletes a movement / the loan sync).
-        # A third layer since plan step credit_card:CC-5-4a-4: a period
-        # holding a row or transfer that holds a payment or purchase
-        # classifies HOLDS_MOVEMENT, whatever ``_regenerable`` says, and
-        # BEFORE the discard count below -- so no confirmation reaches it.
-        # Its refusal names every payment and purchase, its amount and its
-        # row (plan step pay_calendar:C22, ruling R-PC116).
+        # A period holding settled transactions classifies SETTLED_TXN, and
+        # since plan step credit_card:CC-5-4a-4 a period holding a row or
+        # transfer that holds a payment or purchase classifies HOLDS_MOVEMENT,
+        # whatever ``_regenerable`` says, and BEFORE the discard count below
+        # -- so no confirmation reaches it.  Its refusal names every payment
+        # and purchase, its amount and its row (plan step pay_calendar:C22,
+        # ruling R-PC116).  Whoever relaxes these locks MUST first reverse the
+        # postings (movement_removal.remove_movements, the one act that
+        # reverses and deletes a movement / the loan sync).
+        # A correction, an opening or a true-up, locks nothing (ruling
+        # plan#2782): worked out from the records it files by its day on
+        # whichever paycheck stands, and the journal_entries.pay_period_id
+        # cascade takes only the stored copy, which the next re-sync rebuilds.
         raise PayPeriodLocked(
             blocking, pay_period_locks.locked_refusal(to_delete, blocking),
         )
@@ -328,9 +318,11 @@ def gate_removable_head(
     so after "Add earlier paychecks" a loan's opening dated years back sits
     in an added paycheck, and refusing on it made the
     undo die at the first loan payment (review 1 of C21, measured on the
-    developer's data).  The door re-files those entries through Reset's two
-    re-syncs instead and asks :func:`reject_moved_ledger` of the result: the
-    ledger may lose nothing.  A row the head holds that still holds a payment
+    developer's data).  Nothing is asked of the totals after the delete
+    either (ruling **plan#2517**): worked out from the records, a total moves
+    only if a record holding money goes, the delete reaches only rows,
+    transfers and journal entries, and (1) refuses a row or a transfer
+    holding money.  A row the head holds that still holds a payment
     or purchase is refused by (1) whatever its entries net to: a
     paid-then-unpaid pair nets to zero, but its row keeps the payment
     (**R-PC115**).
@@ -420,52 +412,6 @@ def _reject_held_rows(head: "list[DerivedPeriod]") -> None:
         "Delete or move it first." if one else "Delete or move them first.",
     )
     raise PayPeriodRemovalRefused(" ".join(sentences))
-
-
-def reject_moved_ledger(
-    before: "dict[tuple[int, int], Decimal]",
-    after: "dict[tuple[int, int], Decimal]",
-) -> None:
-    """Refuse a removal that changed any posted total (ruling **R-PC114**).
-
-    "Remove earlier paychecks"' ledger half, asked AFTER its write:
-    ``pay_period_admin.remove_earlier_pay_periods`` reads
-    :func:`~app.services.pay_period_locks.posted_totals` as they stand,
-    retires the head (whose journal entries the ``CASCADE`` takes), re-syncs so
-    every entry rebuilt from a surviving record is re-filed onto the kept
-    paychecks, and reads the totals again -- the ruling's words, "refused
-    iff a posted total would change", with no re-synced counterfactual in
-    front (review 2 of C21 measured that one refusing falsely).  Equal totals mean the removal
-    lost nothing booked: whatever the head held was rebuilt onto the kept
-    paychecks (an opening, a true-up correction) or netted to zero with it
-    (the pair of a row paid, set back and then deleted; a row still holding
-    its payment never reaches here, ruling **R-PC115**); a total that moved
-    is an entry no re-sync
-    rebuilds, and the door refuses.  It is asked after the write because only the
-    re-syncs can say what they rebuild -- a list of rebuildable entry kinds
-    here would be a second statement of the posting modules' own rules --
-    and the refusal leaves nothing behind because the door rolls back the
-    savepoint it made the write in.
-
-    Args:
-        before: The totals before the removal, as they stood.
-        after: The totals after the removal and its re-sync.
-
-    Raises:
-        PayPeriodRemovalRefused: A total differs; the message is the ruled
-            one, naming the account(s) whose booked balance moved.
-    """
-    moved = {
-        key[1] for key in set(before) | set(after)
-        if before.get(key, _NO_MONEY) != after.get(key, _NO_MONEY)
-    }
-    if not moved:
-        return
-    raise PayPeriodRemovalRefused(
-        f"Removing these paychecks would change the balance the app has "
-        f"booked for {', '.join(pay_period_locks.ledger_account_names(moved))}, "
-        f"so nothing was removed. Start from an earlier paycheck."
-    )
 
 
 def _reject_stubs(user_id: int, head: "list[DerivedPeriod]") -> None:
@@ -782,8 +728,8 @@ def regenerate_keep_through_period(
             candidate satisfies ``start_date > as_of``, a derived period always
             has ``end_date >= start_date``, so no candidate can satisfy
             ``end_date < as_of``.  What can keep a not-yet-started period out of
-            the rebuildable tail is settled money or posted ledger entries,
-            never HISTORICAL.
+            the rebuildable tail is settled money or a payment or purchase it
+            holds, never HISTORICAL.
         as_of: The owner's civil day, resolved once by the caller.
 
     Returns:

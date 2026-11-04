@@ -42,6 +42,7 @@ Underscore-prefixed module name keeps pytest from collecting it.
 
 from collections import defaultdict, namedtuple
 from decimal import Decimal
+from functools import partial
 
 from sqlalchemy import func, or_
 
@@ -49,6 +50,7 @@ from app.models.journal_entry import JournalEntry, Posting
 from app.models.ledger_account import LedgerAccount
 from app.models.scenario import Scenario
 from app.services.ledger_lines import worked_out_lines
+from app.services.pay_calendar import calendar_for
 from tests._test_helpers import stored_chart_key
 
 _ZERO = Decimal("0.00")
@@ -63,6 +65,46 @@ LedgerParityDifference = namedtuple(
     "LedgerParityDifference",
     "key stored_row_ids pay_period_id entry_date stored worked_out",
 )
+
+
+def owner_worked_out_lines(db_session, owner_id):
+    """Return every worked-out line of *owner_id*'s, in every scenario.
+
+    Args:
+        db_session: The test ``db.session``.
+        owner_id: The owner.
+
+    Returns:
+        ``[(scenario_id, LedgerLine), ...]``.
+    """
+    return [
+        (scenario_id, line)
+        for (scenario_id,) in db_session.query(Scenario.id).filter_by(user_id=owner_id)
+        for line in worked_out_lines(
+            owner_id, scenario_id, partial(calendar_for, owner_id),
+        )
+    ]
+
+
+def worked_out_totals(db_session, owner_id):
+    """Return *owner_id*'s worked-out total per ``(scenario_id, chart key)``.
+
+    What a schedule change must leave as it was (rulings plan#2517, plan#2782),
+    whatever paycheck each line files in.  A key whose lines net to ``$0.00``
+    is left out, as a key with no line: both hold no money.
+
+    Args:
+        db_session: The test ``db.session``.
+        owner_id: The owner.
+
+    Returns:
+        ``{(scenario_id, ChartKey): total}``, each total non-zero.
+    """
+    totals = {}
+    for scenario_id, line in owner_worked_out_lines(db_session, owner_id):
+        key = (scenario_id, line.key)
+        totals[key] = totals.get(key, _ZERO) + line.amount
+    return {key: total for key, total in totals.items() if total != 0}
 
 
 def ledger_parity_differences(db_session, scenario_id):
@@ -243,7 +285,9 @@ def _worked_out_nets(owner_id, scenario_id, chart):
         ``{(ChartKey, stored row ids, pay_period_id, entry_date): net}``.
     """
     nets = {}
-    for line in worked_out_lines(owner_id, scenario_id):
+    for line in worked_out_lines(
+        owner_id, scenario_id, partial(calendar_for, owner_id),
+    ):
         cell = (
             *chart.worked_account(line.key), line.pay_period_id,
             line.entry_date,

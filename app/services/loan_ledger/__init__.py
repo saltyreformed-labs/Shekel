@@ -20,7 +20,7 @@ kind = CHARGE      standing += (interest, escrow)    (one per accrual period)
                                                       then the plan's projections)
 
 walk_loan_ledger(loan, scenario) = replay(facts, seeded at 0.00)
-walk_loan_ledgers(loans, scenario) = the same, every loan's facts loaded once
+walk_loan_ledgers(loan ids, scenario) = the same, every loan's facts loaded once
 replay_loan_stream(facts + projections) = the same replay, the whole timeline
 ```
 

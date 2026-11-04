@@ -66,13 +66,10 @@ EXPECTED_KINDS = (
 # id.  ``key`` and ``rows`` are its chart account
 # (``tests._ledger_parity.ParityChart``): the stored row it sits on, or the
 # owner's stored row for a worked-out line's key, ``()`` for none.
-# ``attributed_on`` is the day a calendar window or a balance sheet
-# places it on (the store's reader: a movement's bank day, a correction's own
-# day; ``None`` for residue, which it drops); ``entry_id`` is the stored
-# journal entry, ``None`` for a worked-out line.
+# ``entry_id`` is the stored journal entry, ``None`` for a worked-out line.
 Contribution = namedtuple(
     "Contribution",
-    "source key rows pay_period_id entry_date amount attributed_on entry_id",
+    "source key rows pay_period_id entry_date amount entry_id",
 )
 
 
@@ -113,8 +110,9 @@ def _movement_on_account(contribution):
     """Return a contribution's ``(source, key, stored rows)``: a source on one account.
 
     A source cell's first three parts, every paycheck and day together: the
-    grain the store's report nets a movement at
-    (``ledger_report_service._attribution._purchase_dated_nets``).
+    grain the store's report netted a movement at (its
+    ``_purchase_dated_nets``, until plan task plan#2771 moved the report onto
+    the worked-out ledger).
     """
     return source_cell_of(contribution)[:3]
 
@@ -146,8 +144,9 @@ def paired(stored, worked):
 def correction_kind_ids():
     """Return the source kinds a correction is booked under.
 
-    The five the store's statement reader keeps as sourceless corrections
-    (``ledger_report_service._attribution._correction_dated_nets``).
+    The five the store's statement reader kept as sourceless corrections
+    (its ``_correction_dated_nets``, until plan task plan#2771 moved the report
+    onto the worked-out ledger).
     """
     return {
         ref_cache.posting_source_id(member)

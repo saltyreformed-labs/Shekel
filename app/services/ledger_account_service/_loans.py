@@ -16,6 +16,7 @@ the transaction boundary.
 
 from app import ref_cache
 from app.enums import LedgerAccountKindEnum
+from app.extensions import db
 from app.models.account import Account
 from app.models.ledger_account import LedgerAccount
 from app.services.account_projection import (
@@ -147,3 +148,22 @@ def get_or_create_loan_ledger_account(
             key, _load_amortizing_loan_account(user_id, loan_account_id),
         ),
     )
+
+
+def dispose_loan_chart_rows(loan_account_id: int) -> None:
+    """Delete a loan's per-loan chart rows, ahead of the loan's own delete.
+
+    ``fk_ledger_accounts_loan_account_id`` is RESTRICT, so a permanent delete
+    of a loan has to clear these first (ruling plan#2784); an account's linked
+    and counter rows go by their CASCADE instead.  Each row's legs go by
+    ``fk_account_postings_ledger_account_id``'s CASCADE, which PostgreSQL runs
+    as the table owner: the running app holds no DELETE on the journal
+    (:func:`app.posting_infrastructure.apply_ledger_append_only_privileges`),
+    so this deletes the chart rows and never an entry.  Does not commit.
+
+    Args:
+        loan_account_id: The loan about to be deleted.
+    """
+    db.session.query(LedgerAccount).filter_by(
+        loan_account_id=loan_account_id,
+    ).delete(synchronize_session="fetch")

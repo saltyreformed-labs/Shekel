@@ -168,55 +168,38 @@ own snapshot.  **The COALESCE rule is the LINKED-row rule only**: an
 per-account COUNTER row also carries ``account_id`` (so the COALESCE would
 wrongly resolve to the bare account name), so readers rendering chart
 entries branch on ``kind_id`` and use the ``name`` snapshot for those rows
--- the sole writer always stamps one.  Readers do that with a DEFAULT arm
-rather than an enumeration, which is why R-FO's two new kinds needed no
-edit in ``ledger_report_service._attribution.ledger_account_label``.  The
-``ck_ledger_accounts_name_present`` CHECK guarantees at least one of the
+-- the sole writer always stamps one.  No reader renders these rows since
+plan task plan#2771: the statements label each line from the worked-out
+chart, by its live record (``ledger_lines.chart_label``, ruling plan#2518).
+The ``ck_ledger_accounts_name_present`` CHECK guarantees at least one of the
 two is present so the display rule can never resolve to NULL -- and because
 a non-account-linked row has ``account_id`` NULL, that CHECK forces it to
 carry a ``name``.
 
-**Write-once, not append-only.**  Rows are created by the sync hook /
-backfill and never edited afterwards: ``class_id``, ``kind_id``,
-``account_id``, and ``loan_account_id`` are intrinsic, and a linked row's
-``name`` stays NULL (the display name lives on ``account.name``).  The table
+**Not append-only.**  Rows are created by the sync hook / backfill and
+``kind_id``, ``account_id`` and ``loan_account_id`` are intrinsic, a linked
+row's ``name`` stays NULL (the display name lives on ``account.name``), and its
+``class_id`` follows the account's type when a re-type crosses the
+Asset/Liability boundary (ruling plan#2785).  The table
 therefore uses :class:`CreatedAtMixin` (no ``updated_at``).  Unlike the
 append-only ledger tables (``journal_entries`` / ``account_postings``) it
 carries no ORM immutability guards: a ledger account is a directory entry
 that is disposed of -- never corrected -- when its real account is deleted.
 
-**FK-action rationale (the cascade-imbalance impossibility argument).**
-``account_id`` is ``ON DELETE CASCADE`` so a freshly-created *empty*
-account deletes cleanly, taking its (postings-free) ledger account -- and,
-since Step 5, its (equally postings-free) per-account counter rows -- with
-it.
-An account whose ledger rows *have* postings is instead kept off the
-hard-delete path by route **Guard 5** (``archive_helpers.account_has_ledger_postings``
-in ``routes/accounts/crud.py``), which joins by ``account_id`` across ALL
-kinds -- so it covers the linked row and the anchor-equity twin alike --
-and archives (``is_active=False``) any such account rather than deleting
-it.  (**A counter row CAN be the lone posting-bearing row, and the parenthetical
-here said it could not**: it read "the twin's legs only ever land pairwise
-with correction legs on the linked row", which ruling R-FO falsified -- a
-correction re-pointed from one counter row to another emits a delta entry
-whose linked leg is zero and dropped, so its two legs are both counter legs
-and no linked leg exists.  The conclusion survives untouched because Guard 5
-was never resting on that premise: it joins by ``account_id`` across ALL
-kinds, so it sees a counter row's postings whether or not the linked row has
-any.  The premise is corrected rather than deleted because it is what
-authorises a DESTRUCTIVE FK action.)  That guard -- not the shadow-transaction
-RESTRICT FKs -- is what makes the impossibility hold, because a settled
-transfer's postings OUTLIVE the transfer: a transfer delete removes its
-movements, SET-NULLing their entries' ``journal_entries.transaction_entry_id``,
-but keeps the immutable legs, so once the
-shadows are gone the RESTRICT FKs on ``transactions.account_id`` /
-``transfers.from|to_account_id`` (``transaction.py`` / ``transfer.py``) no
-longer cover the case on their own.  With Guard 5 in front, only a
-posting-free account ever reaches the CASCADE, so CASCADE can never orphan a
-posting leg; those RESTRICT FKs on any still-live shadows, plus the
-``loan_account_id`` RESTRICT below (a loan-correction row survives even with no
-settled transaction at all), are the DB-tier second layer.  (Accounts with
-history are *archived*, never deleted.)  The relationship to
+**FK-action rationale.**  ``account_id`` is ``ON DELETE CASCADE`` so a
+permanent account delete takes its linked row and its per-account counter rows
+with it, and each row's legs go by ``account_postings.ledger_account_id``'s
+CASCADE (ruling plan#2784, which deleted the route guard that kept an account
+holding postings off that path).  **That can leave a single leg in the store,
+and this is why it is allowed.**  A correction books both legs on the account's
+own rows, so its entry loses both.  A movement's entry has its other leg on a
+category or on the owner's Transfers in transit, and it outlives the movement
+with ``journal_entries.transaction_entry_id`` SET NULL, so that leg stays,
+single, beside its reversal's.  The balanced trigger has no DELETE
+arm and the running app holds no DELETE on the journal, so nothing refuses it
+and nothing could remove the entry; no reader or deploy hook reads a leg no
+movement links, and X-ew's third leaf (plan#2516) deletes the store.  The
+relationship to
 :class:`~app.models.account.Account` is
 deliberately one-directional (no backref): ``Account`` has no awareness
 of its ledger account, so deleting an account never triggers an ORM
@@ -233,17 +216,12 @@ and a kind delete would strand every ledger account of that kind.
 ``loan_account_id`` is ``ON DELETE RESTRICT``.  It links a per-loan
 interest / escrow / refund / opening row to the loan ``budget.accounts`` row
 it books against, and is NULL on every other kind.  RESTRICT
-(not SET NULL or CASCADE) because such a row accumulates immutable postings:
-SET NULL would strand the row's kind (a ``loan_interest`` row with no loan),
-and CASCADE would delete a posting-bearing chart entry and orphan its legs
-(breaking the per-entry SUM = 0 invariant).  A loan account that has per-loan
-ledger rows therefore cannot be deleted -- consistent with "accounts with
-history are archived, never deleted," the same disposal contract the linked
-``account_id`` CASCADE relies on (that CASCADE is only ever reachable for an
-empty, postings-free account; see the impossibility argument above).  Like
-``account`` and ``category``, the relationship is one-directional (no backref
-on ``Account``), so an account delete never triggers an ORM action on the
-ledger row.
+(not SET NULL) because SET NULL would strand the row's kind (a ``loan_interest``
+row with no loan).  A permanent delete of a loan therefore clears these rows
+first (``ledger_account_service.dispose_loan_chart_rows``, ruling plan#2784), and
+the key is the backstop against a delete that does not.  Like ``account`` and
+``category``, the relationship is one-directional (no backref on ``Account``), so
+an account delete never triggers an ORM action on the ledger row.
 
 ``category_id`` is ``ON DELETE SET NULL`` (the same action
 ``budget.transactions.category_id`` uses).  A category ledger account
@@ -279,10 +257,9 @@ class LedgerAccount(UserScopedMixin, CreatedAtMixin, db.Model):
     orphan / per-loan rows; a linked row derives its label from
     ``account.name``).  See the module docstring for the twelve-kind taxonomy,
     why the loan shape CHECK does not pin ``kind_id``, why ``is_owner_bucket``
-    exists, the display rule, and the FK-action rationale (the CASCADE
-    impossibility argument for ``account_id``, the RESTRICT for ``class_id`` /
-    ``kind_id`` / ``loan_account_id``, and the SET NULL disposal for
-    ``category_id``).
+    exists, the display rule, and the FK-action rationale (the CASCADE for
+    ``account_id``, the RESTRICT for ``class_id`` / ``kind_id`` /
+    ``loan_account_id``, and the SET NULL disposal for ``category_id``).
     """
 
     __tablename__ = "ledger_accounts"
@@ -468,9 +445,8 @@ class LedgerAccount(UserScopedMixin, CreatedAtMixin, db.Model):
     # ``unrealized_change``; all four kinds share this column, and
     # ``uq_ledger_accounts_account_kind`` permits one row of each).
     # NULL on the category / fallback / orphan / per-loan
-    # kinds.  CASCADE: see the module docstring's impossibility argument --
-    # a CASCADE here can only ever fire for an empty (postings-free)
-    # account, removing the linked row and the twin together.  Explicit
+    # kinds.  CASCADE: see the module docstring's FK-action rationale, which
+    # says what a permanent account delete leaves.  Explicit
     # convention name for the same reason as ``class_id``.
     account_id = db.Column(
         db.Integer,
@@ -503,11 +479,10 @@ class LedgerAccount(UserScopedMixin, CreatedAtMixin, db.Model):
     )
     # The loan ``budget.accounts`` row a per-loan interest / escrow / refund /
     # opening row books against; NULL on every other kind.  RESTRICT (NOT SET
-    # NULL or CASCADE): a per-loan row accumulates immutable postings, so the
-    # loan account cannot be deleted while it has these rows -- SET NULL would
-    # strand the kind, CASCADE would orphan posting legs (see the module
-    # docstring's FK-action rationale).  Explicit convention FK name for the
-    # same reason as ``class_id`` / ``kind_id``.
+    # NULL): the loan account cannot be deleted while it has these rows, so its
+    # permanent delete clears them first (see the module docstring's FK-action
+    # rationale).  Explicit convention FK name for the same reason as
+    # ``class_id`` / ``kind_id``.
     loan_account_id = db.Column(
         db.Integer,
         db.ForeignKey(

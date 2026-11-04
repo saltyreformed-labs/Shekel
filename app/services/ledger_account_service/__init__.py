@@ -14,8 +14,8 @@ surface.
   width, the natural-key race handler (:func:`._common.add_or_reuse`), and the
   tenancy-filtered account load the two account-linked resolvers guard with.
 * :mod:`._linked` -- the ``linked`` Asset/Liability row, one per real
-  ``budget.accounts`` row (Build-Order Step 2), and the re-class an unposted
-  type change needs.
+  ``budget.accounts`` row (Build-Order Step 2), and the re-class a type change
+  needs.
 * :mod:`._categories` -- the per-category Income/Expense rows an ordinary
   settled transaction's counter-leg books into (Step 3), and the door that
   answers the per-(owner, class) ``Uncategorized`` fallback for a transaction
@@ -26,7 +26,7 @@ surface.
   ``(user, class, kind)``.
 * :mod:`._loans` -- the four per-loan rows: ``loan_interest``, ``loan_escrow``,
   ``loan_refund`` (Step 4's payment split) and ``equity_opening`` (the loan
-  read switch's origination entry).
+  read switch's origination entry), and their disposal with the loan.
 * :mod:`._counters` -- the per-account rows that hold a non-loan account's
   anchor-correction COUNTER leg (``anchor_equity`` from Step 5,
   ``interest_income`` and ``unrealized_change`` from ruling **R-FO**), and the
@@ -94,10 +94,11 @@ from ._linked import (
     find_linked_ledger_account,
     sync_linked_ledger_class,
 )
-from ._loans import get_or_create_loan_ledger_account
+from ._loans import dispose_loan_chart_rows, get_or_create_loan_ledger_account
 
 __all__ = [
     "create_ledger_account_for_account",
+    "dispose_loan_chart_rows",
     "find_linked_ledger_account",
     "get_or_create_account_counter_account",
     "get_or_create_category_ledger_account",

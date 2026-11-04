@@ -1,6 +1,7 @@
-"""WHAT A PAYCHECK MAY HOLD (R-PC109's filed half), one case per kind, and the LEDGER RE-FILED
+"""WHAT A PAYCHECK MAY HOLD (R-PC109's filed half), one case per kind, the STORE RE-FILED
 (R-PC114): an account's and a loan's opening filed in an added paycheck go back, a
-self-cancelling pair goes, and an entry no re-sync rebuilds refuses in the ruled words.
+self-cancelling pair goes, and an entry no re-sync rebuilds goes too, unrefused (plan#2517), and
+that NO WORKED-OUT TOTAL MOVES (plan#2517), which is why nothing is left to refuse.
 """
 
 from __future__ import annotations
@@ -23,12 +24,18 @@ from app.services import (
     anchor_service,
     loan_posting_service,
     pay_period_admin,
-    pay_period_locks,
     posting_service,
     status_seam,
     transfer_service,
 )
+from app.services.ledger_lines import linked_key
 from app.models.amount_ownership import AmountOwnership
+from tests._ledger_parity import (
+    assert_ledger_parity,
+    ledger_parity_differences,
+    owner_worked_out_lines,
+    worked_out_totals,
+)
 from tests._test_helpers import (
     add_entry,
     add_txn,
@@ -51,6 +58,7 @@ from ._helpers import (
     _monthly_transfer_from,
     _entries_in,
     _held,
+    _stored_totals,
 )
 
 
@@ -399,14 +407,15 @@ class TestWhatAPaycheckMayHold:
             ).count() == 0
 
 
-class TestTheLedgerIsReFiledAndLosesNothing:
-    """R-PC114 (amending R-PC109): booked entries are re-filed, and no total may move.
+class TestTheStoreIsReFiled:
+    """R-PC114 (amending R-PC109): booked entries are re-filed, the store's upkeep.
 
     The ledger files an entry dated before the first paycheck in the
     EARLIEST one (R-PC53), and every re-sync re-files there -- so once a
     paycheck is added below the record, the books' or a loan's opening sits
-    in it.  The removal re-files through Reset's two re-syncs, and is
-    refused only if a posted total still moves.
+    in it.  The removal re-files through Reset's two re-syncs.  An entry no
+    re-sync rebuilds, which no door books, no longer refuses it (ruling
+    plan#2517): it goes with its paycheck, and it was never a worked-out line.
     """
 
     def test_an_account_opening_filed_in_an_added_paycheck_goes_back(
@@ -425,7 +434,7 @@ class TestTheLedgerIsReFiledAndLosesNothing:
             )
             added_first = head[0].id
             assert set(nets) == {added_first}, "the opening's money sits in the head"
-            totals = pay_period_locks.posted_totals(user_id)
+            totals = _stored_totals(user_id)
 
             assert pay_period_admin.remove_earlier_pay_periods(
                 user_id, seed_periods[0].id,
@@ -437,7 +446,7 @@ class TestTheLedgerIsReFiledAndLosesNothing:
             assert _source_nets_by_period(
                 seed_user["account"], PostingSourceEnum.ACCOUNT_OPENING,
             ) == {seed_periods[0].id: nets[added_first]}
-            assert pay_period_locks.posted_totals(user_id) == totals
+            assert _stored_totals(user_id) == totals
 
     def test_a_loans_opening_filed_in_an_added_paycheck_goes_back(
         self, app, db, seed_user, seed_periods,
@@ -459,7 +468,7 @@ class TestTheLedgerIsReFiledAndLosesNothing:
             nets = _source_nets_by_period(loan, PostingSourceEnum.LOAN_OPENING)
             added_first = head[0].id
             assert set(nets) == {added_first}, "the loan opening's money sits in the head"
-            totals = pay_period_locks.posted_totals(user_id)
+            totals = _stored_totals(user_id)
 
             assert pay_period_admin.remove_earlier_pay_periods(
                 user_id, seed_periods[0].id,
@@ -469,7 +478,7 @@ class TestTheLedgerIsReFiledAndLosesNothing:
             assert _source_nets_by_period(loan, PostingSourceEnum.LOAN_OPENING) == {
                 seed_periods[0].id: nets[added_first],
             }
-            assert pay_period_locks.posted_totals(user_id) == totals
+            assert _stored_totals(user_id) == totals
 
     def test_a_self_cancelling_pair_goes_with_its_paycheck(
         self, app, db, seed_user, seed_periods,
@@ -487,23 +496,24 @@ class TestTheLedgerIsReFiledAndLosesNothing:
                 db.session, seed_user, from_ledger_id=other,
                 to_ledger_id=checking, period_id=head[1].id,
             )
-            totals = pay_period_locks.posted_totals(user_id)
+            totals = _stored_totals(user_id)
 
             assert pay_period_admin.remove_earlier_pay_periods(
                 user_id, seed_periods[0].id,
             ) == 2
             db.session.commit()
 
-            assert pay_period_locks.posted_totals(user_id) == totals
+            assert _stored_totals(user_id) == totals
 
-    def test_an_entry_no_re_sync_rebuilds_is_refused_in_the_ruled_words(
+    def test_an_entry_no_re_sync_rebuilds_goes_with_its_paycheck(
         self, app, db, seed_user, seed_periods,
     ):
-        """One entry in an added paycheck that no record rebuilds: refused, rolled back.
+        """One entry in an added paycheck that no record rebuilds: no longer refused.
 
         Built by hand, because no door books money into a paycheck with
-        nothing in it: this is the guard's own firing case, and its message
-        is the ruled one.
+        nothing in it: the deleted refusal's own firing case (ruling
+        plan#2517).  The store loses the entry's $100.00, and the worked-out
+        ledger, which reads the records, never held it.
         """
         with app.app_context():
             user_id = seed_user["user"].id
@@ -513,39 +523,41 @@ class TestTheLedgerIsReFiledAndLosesNothing:
                 db.session, seed_user, from_ledger_id=checking,
                 to_ledger_id=other, period_id=head[1].id,
             )
-            paydays, eras = _paydays(user_id), _stored_eras(user_id)
-            totals = pay_period_locks.posted_totals(user_id)
+            scenario = seed_user["scenario"].id
+            stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
 
-            # No rollback here: the door rolls back its own savepoint, and
-            # ``_unchanged`` COMMITS what is left, so a staged delete would
-            # show.
-            message = _held(user_id, seed_periods[0])
+            assert pay_period_admin.remove_earlier_pay_periods(
+                user_id, seed_periods[0].id,
+            ) == 2
+            db.session.commit()
 
-            assert message == (
-                f"Removing these paychecks would change the balance the app has "
-                f"booked for {seed_user['account'].name}, so nothing was "
-                f"removed. Start from an earlier paycheck."
+            # The entry booked -$100.00 on Checking and +$100.00 on the other
+            # row, so losing it moves each back by that.
+            after = _stored_totals(user_id)
+            assert after[(scenario, checking)] == (
+                stored[(scenario, checking)] + Decimal("100.00")
             )
-            _unchanged(user_id, paydays, eras)
-            assert pay_period_locks.posted_totals(user_id) == totals
+            assert after[(scenario, other)] == (
+                stored[(scenario, other)] - Decimal("100.00")
+            )
+            assert worked_out_totals(_db.session, user_id) == worked_out
 
-
-    def test_a_legacy_entry_between_two_accounts_is_refused_naming_both(
+    def test_a_legacy_entry_between_two_accounts_leaves_the_store_equal_to_the_records(
         self, app, db, seed_user, seed_periods,
     ):
-        """Review 2's firing case: a sourceless Checking to Savings entry, both trued up later.
+        """A sourceless Checking to Savings entry, both trued up later: no longer refused.
 
-        Each later true-up is worked from the RECORDS (ruling plan#2572),
-        which hold no row the entry came from, so the entry rides on top of
-        each account's asserted balance and removing it moves each account's
-        own row: both accounts' booked balances would change, and both are
-        named.  *Until plan task plan#2525 each true-up's correction absorbed
-        the entry, its walk summing the stored postings, so the own rows
-        booked exactly the asserted balances and what moved on removal was
-        the corrections' counter legs.*
+        Review 2's firing case for the deleted refusal.  Each later true-up
+        is worked from the RECORDS (ruling plan#2572), which hold no row the
+        entry came from, so the entry rides on top of each account's asserted
+        balance in the store: $900.00 - $100.00 = $800.00 on Checking and
+        $600.00 + $100.00 = $700.00 on Savings.  The worked-out ledger holds
+        the asserted balances, before the removal and after, and the removal
+        takes the entry with its paycheck, so the store comes to equal it.
         """
         with app.app_context():
             user_id = seed_user["user"].id
+            checking = seed_user["account"]
             savings = create_savings_account(
                 seed_user, db.session, "Savings", Decimal("500.00"),
             )
@@ -553,30 +565,104 @@ class TestTheLedgerIsReFiledAndLosesNothing:
             head = _added_head(user_id, 2)
             make_balanced_entry(
                 db.session, seed_user,
-                from_ledger_id=_ledger_ids_of(seed_user["account"])[0],
+                from_ledger_id=_ledger_ids_of(checking)[0],
                 to_ledger_id=_ledger_ids_of(savings)[0],
                 period_id=head[1].id,
             )
             anchor_service.apply_anchor_true_up(
-                account=seed_user["account"], new_balance=Decimal("900.00"),
+                account=checking, new_balance=Decimal("900.00"),
             )
             anchor_service.apply_anchor_true_up(
                 account=savings, new_balance=Decimal("600.00"),
             )
-            paydays, eras = _paydays(user_id), _stored_eras(user_id)
-            totals = pay_period_locks.posted_totals(user_id)
+            db.session.commit()
             scenario = seed_user["scenario"].id
-            # The true-ups did not absorb the entry (ruling plan#2572): each
-            # own row books its asserted balance with the $100.00 entry on
-            # top, $900.00 - $100.00 on Checking and $600.00 + $100.00 on
-            # Savings, so what moves on removal is the own rows.
-            assert totals[(scenario, _ledger_ids_of(seed_user["account"])[0])] == Decimal("800.00")
-            assert totals[(scenario, _ledger_ids_of(savings)[0])] == Decimal("700.00")
-
-            assert _held(user_id, seed_periods[0]) == (
-                f"Removing these paychecks would change the balance the app has "
-                f"booked for {seed_user['account'].name}, Savings, so nothing "
-                f"was removed. Start from an earlier paycheck."
+            stored = _stored_totals(user_id)
+            assert stored[(scenario, _ledger_ids_of(checking)[0])] == Decimal("800.00")
+            assert stored[(scenario, _ledger_ids_of(savings)[0])] == Decimal("700.00")
+            assert ledger_parity_differences(db.session, scenario), (
+                "the entry must part the store from the records"
             )
-            _unchanged(user_id, paydays, eras)
-            assert pay_period_locks.posted_totals(user_id) == totals
+            worked_out = worked_out_totals(_db.session, user_id)
+            assert worked_out[(scenario, linked_key(checking))] == Decimal("900.00")
+            assert worked_out[(scenario, linked_key(savings))] == Decimal("600.00")
+
+            assert pay_period_admin.remove_earlier_pay_periods(
+                user_id, seed_periods[0].id,
+            ) == 2
+            db.session.commit()
+
+            after = _stored_totals(user_id)
+            assert after[(scenario, _ledger_ids_of(checking)[0])] == Decimal("900.00")
+            assert after[(scenario, _ledger_ids_of(savings)[0])] == Decimal("600.00")
+            assert worked_out_totals(_db.session, user_id) == worked_out
+            assert_ledger_parity(db.session, scenario)
+
+
+class TestNoWorkedOutTotalMoves:
+    """Ruling plan#2517: nothing is left for the deleted booked-total check to catch.
+
+    A worked-out total moves only if a record holding money goes, and the
+    gate refuses every row or transfer holding money the delete could take.
+    What the head does hold is an opening filed in it, which names no
+    paycheck, and the plan's rows, which the ledger's walk does not read.
+    """
+
+    def test_a_loans_and_an_accounts_openings_in_the_head_move_no_total(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """Openings and a loan's planned payments in the added paychecks; every total equal.
+
+        A loan from 2020 and a monthly transfer into it from 2025-11-24, whose
+        11-24 and 12-24 occurrences fall in the 11-21 and 12-19 paychecks the
+        add records: a planned payment the delete takes, which must not move
+        the loan's corrections.  Each opening files in the earliest paycheck,
+        so in the head before the removal and in the first kept one after.
+        """
+        with app.app_context():
+            user_id = seed_user["user"].id
+            checking = seed_user["account"]
+            loan = create_loan_account(
+                seed_user, db.session, name="Car Loan",
+                principal=Decimal("20000.00"), rate=Decimal("0.05"),
+                origination_date=date(2020, 1, 1),
+            )
+            _monthly_transfer_from(seed_user, loan, date(2025, 11, 24))
+            db.session.commit()
+            head = _added_head(user_id, 3)
+            held = {period.id for period in head}
+            loan_posting_service.resync_user_loan_postings(user_id)
+            account_posting_service.resync_user_account_anchor_postings(user_id)
+            db.session.commit()
+            assert _db.session.query(Transfer).filter(
+                Transfer.pay_period_id.in_(held),
+            ).count() == 2, "the head must hold the loan's planned payments"
+            openings = {
+                ref_cache.posting_source_id(PostingSourceEnum.ACCOUNT_OPENING),
+                ref_cache.posting_source_id(PostingSourceEnum.LOAN_OPENING),
+            }
+
+            def _filed_openings():
+                """Return the kinds of opening the worked-out ledger files, per paycheck."""
+                filed = {}
+                for _scenario_id, line in owner_worked_out_lines(_db.session, user_id):
+                    if line.source_kind_id in openings:
+                        filed.setdefault(line.pay_period_id, set()).add(line.source_kind_id)
+                return filed
+
+            assert _filed_openings() == {head[0].id: openings}
+            scenario = seed_user["scenario"].id
+            before = worked_out_totals(_db.session, user_id)
+            # What each opening books, debit-positive: Checking's stated
+            # $1,000.00, and the loan's principal owed, a liability's credit.
+            assert before[(scenario, linked_key(checking))] == Decimal("1000.00")
+            assert before[(scenario, linked_key(loan))] == Decimal("-20000.00")
+
+            assert pay_period_admin.remove_earlier_pay_periods(
+                user_id, seed_periods[0].id,
+            ) == 3
+            db.session.commit()
+
+            assert worked_out_totals(_db.session, user_id) == before
+            assert _filed_openings() == {seed_periods[0].id: openings}
+            assert_ledger_parity(db.session, scenario)

@@ -357,8 +357,8 @@ class PayPeriodLocked(ShekelError):
 
     Raised by truncate / regenerate when the window they would delete or
     rebuild contains a period that may never be removed -- it is
-    historical, holds a settled, non-deleted row or transfer, holds a row or
-    transfer holding a payment or purchase, or holds posted ledger entries
+    historical, holds a settled, non-deleted row or transfer, or holds a row
+    or transfer holding a payment or purchase
     (:class:`~app.services.pay_period_locks.PeriodLockReason`).  A hard lock
     is NOT overridable (unlike the discard gate); the operation deletes
     nothing.
@@ -464,12 +464,10 @@ class PayPeriodRemovalRefused(ValidationError):
 
     Plan step ``pay_calendar:C21``.  Raised by the door's gate
     (``pay_period_gates.gate_removable_head``: a row the owner made, a pay
-    stub, money dated inside the removed paychecks -- ruling **R-PC109**),
-    by the era rule (``pay_era_write.era_to_move``, **R-PC110**) and by the
-    ledger post-condition (``pay_period_gates.reject_moved_ledger``,
-    **R-PC114**).  The operation leaves nothing behind: the gate's refusals
-    come before the door writes anything, and R-PC110's and R-PC114's
-    inside a savepoint the door rolls back before it re-raises.
+    stub, money dated inside the removed paychecks -- ruling **R-PC109**)
+    and by the era rule (``pay_era_write.era_to_move``, **R-PC110**).  The
+    operation leaves nothing behind: each comes before the door writes
+    anything.
 
     **Its own class, for the reason** :class:`PayPeriodUnresolved` **gives**:
     the route must catch the door's refusals and nothing else.  The door

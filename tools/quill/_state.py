@@ -404,11 +404,10 @@ def never_offered(card: Card, cards: Mapping[int, Card], shipped: Iterable[int])
     return None
 
 
-def workable(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
+def has_turn(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
              claims: Mapping[int, Claim]) -> bool:
-    """Whether a card is a step someone could start now: open unshipped unclaimed work that
-    nothing holds back (:func:`never_offered`), and every blocker of it and of each step
-    above it resolved (R-BAL182)."""
+    """Whether a card is a step someone could start once what it needs is done: open unshipped
+    unclaimed work that nothing holds back (:func:`never_offered`)."""
     shipped = set(shipped)
     return (
         card.is_open
@@ -417,9 +416,21 @@ def workable(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
         and never_offered(card, cards, shipped) is None
         and card.number not in shipped
         and card.number not in claims
-        and all(resolved(blocker, cards, shipped)
-                for step in (card, *above(card, cards)) for blocker in step.blocked_by)
     )
+
+
+def blockers(card: BareCard, cards: Mapping[int, BareCard]) -> set[int]:
+    """Every blocker of ``card`` and of each step above it, which a leaf inherits (R-BAL182)."""
+    return {blocker for step in (card, *above(card, cards)) for blocker in step.blocked_by}
+
+
+def workable(card: Card, cards: Mapping[int, Card], shipped: Iterable[int],
+             claims: Mapping[int, Claim]) -> bool:
+    """Whether a card is a step someone could start now: it :func:`has_turn`, and each of its
+    :func:`blockers` is resolved."""
+    shipped = set(shipped)
+    return has_turn(card, cards, shipped, claims) and all(
+        resolved(blocker, cards, shipped) for blocker in blockers(card, cards))
 
 
 def outside_reports(cards: Mapping[int, Card]) -> list[str]:

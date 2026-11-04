@@ -253,6 +253,9 @@ class TestTheOwningArcRefusesWhatItIsFor:
         return RecurrenceRule(
             interval_n=1,
             unit_id=ref_cache.recurrence_unit_id(RecurrenceUnitEnum.MONTH),
+            unit_has_day_of_month=ref_cache.recurrence_unit_has_day_of_month(
+                RecurrenceUnitEnum.MONTH,
+            ),
             placement_id=ref_cache.period_placement_id(
                 PeriodPlacementEnum.CONTAINING_DATE,
             ),

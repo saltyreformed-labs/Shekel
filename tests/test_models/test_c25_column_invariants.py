@@ -284,12 +284,16 @@ def test_server_default_fills_omitted_recurrence_integers(db, seed_user):
     owner_id = bare_expense_template(db.session, seed_user).id
     db.session.execute(db.text(
         "INSERT INTO budget.recurrence_rules "
-        "(transaction_template_id, unit_id, placement_id, shift_id, starts_on) "
-        "VALUES (:owner_id, :unit_id, :placement_id, :shift_id, "
-        "DATE '2026-01-02')"
+        "(transaction_template_id, unit_id, unit_has_day_of_month, "
+        "placement_id, shift_id, starts_on) "
+        "VALUES (:owner_id, :unit_id, :unit_has_day_of_month, :placement_id, "
+        ":shift_id, DATE '2026-01-02')"
     ), {
         "owner_id": owner_id,
         "unit_id": ref_cache.recurrence_unit_id(RecurrenceUnitEnum.PERIOD),
+        "unit_has_day_of_month": ref_cache.recurrence_unit_has_day_of_month(
+            RecurrenceUnitEnum.PERIOD,
+        ),
         "placement_id": ref_cache.period_placement_id(
             PeriodPlacementEnum.CONTAINING_DATE,
         ),

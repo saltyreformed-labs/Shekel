@@ -147,6 +147,9 @@ def _require_month_ceiling_pair(
     this package removes: a column holding a fact no reader can act on, which
     is how a value comes to be maintained by nobody and believed by someone.
 
+    The actionable check in front of ``ck_recurrence_rules_max_per_month_unit``
+    (plan step plan#2302), which holds a writer that never reaches this one.
+
     Membership is :func:`~app.services.recurrence.can_repeat_within_month`,
     and not a second list of units: that predicate is what the picker offers
     the control on and what the shared schema refuses against, so the three

@@ -191,6 +191,8 @@ def _require_nominal_day_pair(
     in-memory half here, so both values that carry the pair
     (:class:`RecurrenceSpec` and :class:`ResolvedRecurrence`) refuse it before
     they exist.  There is no state left for a generation-time fence to catch.
+    The unit half of the rule reached the table at plan step plan#2302
+    (``ck_recurrence_rules_nominal_day_unit``); this answers in front of it.
 
     **Membership in :func:`offerable_nominal_days`, and not a second list of
     conditions.**  That function IS the rule -- the cadence must fire on a day

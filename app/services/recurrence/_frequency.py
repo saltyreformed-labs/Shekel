@@ -486,7 +486,11 @@ def can_repeat_within_month(unit: RecurrenceUnitEnum) -> bool:
     control the engine would ignore being a control the form does not show --
     and the read door that takes a STATED cadence
     (``_reading.recurrence_spec_with_cadence``) DROPS a stored ceiling where
-    the stated unit cannot hold it, which is the arm a restored row meets.
+    the stated unit cannot hold it, which is the arm the edit form's repair
+    path meets, stating a calendar-month cadence over a stored paycheck one.
+    A stored row cannot meet it on its own unit:
+    ``ck_recurrence_rules_max_per_month_unit`` refuses that pair (plan step
+    plan#2302).
 
     Derived from :func:`has_day_of_month_coordinate` rather than from a second
     list of units, which an adversarial review of plan step R7b-1 required of

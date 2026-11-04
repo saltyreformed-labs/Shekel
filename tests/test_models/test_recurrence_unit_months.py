@@ -36,6 +36,7 @@ from app.models.ref import RecurrenceUnit
 from app.ref_seeds import _REF_TABLE_SEEDS
 from app.services.recurrence import _months, has_day_of_month_coordinate
 from tests._test_helpers import load_migration_module
+from tests.test_models._rule_unit_flag import rewind_rule_unit_flag
 
 _MIGRATION = load_migration_module(
     "c4e8a1f7d2b6_a_units_months_live_on_its_reference_row.py",
@@ -150,6 +151,7 @@ class TestTheMigration:
         seed file is graded against above.
         """
         with app.app_context():
+            rewind_rule_unit_flag(db.session)
             _run(db, _MIGRATION.downgrade)
             assert not {"months_per_unit", "has_day_of_month"} & _columns(db)
 
@@ -172,6 +174,7 @@ class TestTheMigration:
         RENAMED rather than deleted: rules on the clone may reference it.
         """
         with app.app_context():
+            rewind_rule_unit_flag(db.session)
             _run(db, _MIGRATION.downgrade)
             db.session.execute(sqlalchemy.text(
                 "UPDATE ref.recurrence_units SET name = 'annual' "

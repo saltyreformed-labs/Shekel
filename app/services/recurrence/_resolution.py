@@ -50,7 +50,9 @@ honest cadence existed for it, and it resolved to the same inert value as
 Plan step R2e-3 deleted it: "does not recur" is NO RULE naming the definition,
 on either template kind, which never reaches this module at all.
 
-Pure: no Flask, no ORM, no clock, no database.  Its two inputs are the
+No Flask, no ORM, no clock, and no database read: what a unit's reference row
+states comes from the reference cache, loaded once per process (ruling
+plan#2748).  Its two inputs are the
 authored spec and the owner's
 :class:`~app.services.pay_calendar.PayCalendar`, so every derivation below can
 be exercised at exact dates.
@@ -146,6 +148,9 @@ def _require_month_ceiling_pair(
     never changes an answer with.  Storing it would be the closed-set shape
     this package removes: a column holding a fact no reader can act on, which
     is how a value comes to be maintained by nobody and believed by someone.
+
+    The actionable check in front of ``ck_recurrence_rules_max_per_month_unit``
+    (plan step plan#2302), which holds a writer that never reaches this one.
 
     Membership is :func:`~app.services.recurrence.can_repeat_within_month`,
     and not a second list of units: that predicate is what the picker offers

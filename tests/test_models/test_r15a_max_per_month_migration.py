@@ -24,6 +24,7 @@ from tests._test_helpers import (
     load_migration_module,
     run_migration_callable as _run,
 )
+from tests.test_models._rule_unit_flag import rewind_rule_unit_flag
 
 #: This revision, loaded so its own callables are what this file drives.
 _M_R15A = load_migration_module(
@@ -92,8 +93,13 @@ class TestTheRoundTrip:
     def test_down_then_up_removes_and_restores_exactly_the_two_objects(
         self, app, db,
     ):
-        """With no ceilinged row the downgrade drops both, and the upgrade puts both back."""
+        """With no ceilinged row the downgrade drops both, and the upgrade puts both back.
+
+        plan#2302's unit CHECK names the column, and PostgreSQL drops a CHECK with
+        a column it names, so that newer object is rewound before this one is graded.
+        """
         with app.app_context():
+            rewind_rule_unit_flag(db.session)
             before_columns = _columns(db.session)
             before_constraints = _constraints(db.session)
 

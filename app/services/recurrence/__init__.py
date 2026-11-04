@@ -53,7 +53,7 @@ What this package offers
 ------------------------
 
 * :func:`resolve` -- ``(spec, calendar) -> ResolvedRecurrence``, the two-axis
-  meaning.  Pure: no Flask, no ORM, no clock, no database.
+  meaning.  No Flask, no ORM, no clock, no database read.
   Its ``starts_on`` is the rule's FIRST OCCURRENCE, with ONE meaning for every
   unit (ruling **R-R16**, plan ledger row **D28**), and it is what
   ``budget.recurrence_rules.starts_on`` holds.  ``anchor_date`` and the

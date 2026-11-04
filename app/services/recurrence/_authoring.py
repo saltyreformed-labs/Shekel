@@ -23,9 +23,9 @@ The shape that leaves nothing for a writer to get half-right:
 **Since plan step R7c-c there is ONE representation and this function writes
 it.**  The rule states its recurrence in ``interval_n`` / ``unit_id`` /
 ``placement_id`` / ``shift_id`` / ``starts_on`` / ``nominal_day``, and that is
-the whole table apart from the closing bound's exclusive arc
-(``due_day_of_month`` was the other exception until plan step
-recurrence:R5-a dropped it, ruling **R-R96**).  The closed set's storage
+the whole table apart from the closing bound's exclusive arc and the unit's
+carried day-of-month flag (``due_day_of_month`` was the other exception until
+plan step recurrence:R5-a dropped it, ruling **R-R96**).  The closed set's storage
 encoding -- ``pattern_id``,
 ``day_of_month``, ``month_of_year``, ``start_date``, ``start_period_id``,
 ``offset_periods``, and ``interval_n``'s encoded value -- was derived here and
@@ -68,7 +68,10 @@ from app.models.recurrence_rule import RecurrenceRule
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
 from app.services.pay_calendar import PayCalendar
-from app.services.recurrence._frequency import RecurrenceResolutionError
+from app.services.recurrence._frequency import (
+    RecurrenceResolutionError,
+    has_day_of_month_coordinate,
+)
 from app.services.recurrence._resolution import RecurrenceSpec, resolve
 
 class EmptyAuthoredWindowError(RecurrenceResolutionError):
@@ -139,7 +142,9 @@ def _author(
     ``pattern_id`` / ``interval_n`` / ``day_of_month`` derived from them.  All
     three of the second set are dropped, and what remains is a straight write of
     what the caller stated -- which is what makes "a stored authored value is a
-    fact" true of every column on the row rather than of five of eight.
+    fact" true of every column on the row rather than of five of eight.  The
+    one column nobody states is the unit's carried flag (plan step plan#2302),
+    and its key holds it to the unit rather than this function's word.
 
     **The two-axis columns are AUTHORED from plan step R7c-b**, which is what
     retires the "a stored derivation is a cache" objection ruling R2d raised
@@ -232,7 +237,8 @@ def _author(
     #
     # **The WHOLE table since plan step R7c-c**: six columns, every one of them
     # a value a caller states, and no encoding beside them -- seven since plan
-    # step salary:R15-a added the per-month ceiling.  They are written
+    # step salary:R15-a added the per-month ceiling, with the carried unit flag
+    # below the one column no caller states since plan#2302.  They are written
     # from the ONE ``resolve`` call above, whose cadence has already been
     # through
     # :func:`~app.services.recurrence._frequency.canonical_cadence` -- so
@@ -247,6 +253,10 @@ def _author(
     # (ruling **R-R16**).  For every other unit the two are the same value.
     rule.interval_n = resolved.interval_n
     rule.unit_id = ref_cache.recurrence_unit_id(resolved.unit)
+    # The unit's flag, carried so the row's CHECKs can read it (plan step
+    # plan#2302, ruling plan#2748): off the same resolved unit, because
+    # ``fk_recurrence_rules_unit_day_of_month`` refuses a pair that disagrees.
+    rule.unit_has_day_of_month = has_day_of_month_coordinate(resolved.unit)
     rule.placement_id = ref_cache.period_placement_id(resolved.placement)
     rule.shift_id = ref_cache.business_day_shift_id(resolved.shift)
     rule.starts_on = resolved.starts_on

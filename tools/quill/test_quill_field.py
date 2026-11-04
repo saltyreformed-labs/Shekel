@@ -185,7 +185,8 @@ def test_the_command_line_takes_one_of_the_field_s_options_or_a_clear(code, caps
 
 
 @pytest.mark.parametrize(("command", "options"), [
-    ("priority", ("Urgent", "High", "Medium", "Low")), ("effort", ("1", "2", "3", "4", "5+"))])
+    ("priority", ("Urgent", "High", "Medium", "Low", "On hold")),
+    ("effort", ("1", "2", "3", "4", "5+"))])
 def test_every_declared_option_is_taken(code, command, options):
     """Each option the field declares is a value the command writes."""
     tracker = FakeTracker()

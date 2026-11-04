@@ -162,6 +162,7 @@ from tools.quill._exits import Refused, exit_status
 from tools.quill._export import cmd_export
 from tools.quill._filing import cmd_file
 from tools.quill._github import CredentialsError, GitHubError
+from tools.quill._next import next_step
 from tools.quill._show import cmd_show
 from tools.quill._state import (
     STALE_CLAIM,
@@ -178,7 +179,6 @@ from tools.quill._state import (
     left_bare,
     never_offered,
     never_split,
-    next_step,
     outside_reports,
     release_hint,
     resolved,

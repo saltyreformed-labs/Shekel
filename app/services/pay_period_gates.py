@@ -225,25 +225,19 @@ def gate_deletable_tail(
         if locks[period.period_id] is not None
     }
     if blocking:
-        # Posting-ledger protection, two layers: a period holding settled
-        # (posted) transactions classifies SETTLED_TXN, and a period whose
-        # journal entries do not net to zero per ledger account (a loan
-        # opening / true-up correction, or attribution drift) classifies
-        # LEDGER_POSTINGS -- so truncate refuses both.
-        # journal_entries.pay_period_id is ON DELETE CASCADE, so deleting a
-        # posted period disposes its ledger entries + legs at the DB tier
-        # (outside the ORM, where the balanced-journal trigger never fires on
-        # DELETE); that is safe only for a period whose postings net to zero
-        # per account (a self-cancelling original + reversal pair).  Whoever
-        # relaxes these locks MUST first reverse the postings
-        # (movement_removal.remove_movements, the one act that reverses and
-        # deletes a movement / the loan sync).
-        # A third layer since plan step credit_card:CC-5-4a-4: a period
-        # holding a row or transfer that holds a payment or purchase
-        # classifies HOLDS_MOVEMENT, whatever ``_regenerable`` says, and
-        # BEFORE the discard count below -- so no confirmation reaches it.
-        # Its refusal names every payment and purchase, its amount and its
-        # row (plan step pay_calendar:C22, ruling R-PC116).
+        # A period holding settled transactions classifies SETTLED_TXN, and
+        # since plan step credit_card:CC-5-4a-4 a period holding a row or
+        # transfer that holds a payment or purchase classifies HOLDS_MOVEMENT,
+        # whatever ``_regenerable`` says, and BEFORE the discard count below
+        # -- so no confirmation reaches it.  Its refusal names every payment
+        # and purchase, its amount and its row (plan step pay_calendar:C22,
+        # ruling R-PC116).  Whoever relaxes these locks MUST first reverse the
+        # postings (movement_removal.remove_movements, the one act that
+        # reverses and deletes a movement / the loan sync).
+        # A correction, an opening or a true-up, locks nothing (ruling
+        # plan#2782): worked out from the records it files by its day on
+        # whichever paycheck stands, and the journal_entries.pay_period_id
+        # cascade takes only the stored copy, which the next re-sync rebuilds.
         raise PayPeriodLocked(
             blocking, pay_period_locks.locked_refusal(to_delete, blocking),
         )
@@ -734,8 +728,8 @@ def regenerate_keep_through_period(
             candidate satisfies ``start_date > as_of``, a derived period always
             has ``end_date >= start_date``, so no candidate can satisfy
             ``end_date < as_of``.  What can keep a not-yet-started period out of
-            the rebuildable tail is settled money or posted ledger entries,
-            never HISTORICAL.
+            the rebuildable tail is settled money or a payment or purchase it
+            holds, never HISTORICAL.
         as_of: The owner's civil day, resolved once by the caller.
 
     Returns:

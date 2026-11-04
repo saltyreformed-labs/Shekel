@@ -79,7 +79,6 @@ from sqlalchemy.orm import Query
 from sqlalchemy.sql.expression import ColumnElement
 
 from app.extensions import db
-from app.models.journal_entry import JournalEntry, Posting
 from app.models.transaction import Transaction
 from app.models.transaction_entry import TransactionEntry
 from app.models.transfer import Transfer
@@ -95,7 +94,7 @@ class PeriodLockReason(enum.Enum):
     """Why a pay period may not be deleted or rebuilt.
 
     A non-``None`` reason is a HARD lock: the period either is historical
-    or holds irreplaceable state (settled money, posted ledger entries), and
+    or holds irreplaceable state (settled money, a payment or purchase), and
     no operation may delete or rebuild it --
     not even with ``confirm_discard``.  **An account's balance ASSERTION is no
     longer among them, and it did not become deletable**: ruling R-EO moved the
@@ -116,9 +115,7 @@ class PeriodLockReason(enum.Enum):
     A movement is money that moved, so an item holding one is history, and
     deleting the period deleted it through the ``pay_period_id`` cascades;
     the movement's key refuses that now, and this makes the refusal a
-    designed one.  It outranks ``LEDGER_POSTINGS`` because it is
-    the truer sentence where both hold: a dated purchase's own legs are
-    what make a period's ledger non-zero.
+    designed one.
 
     **A TRANSFER answers ``SETTLED_TXN`` and ``HOLDS_MOVEMENT`` for itself
     since plan step ``balance:X-bi-6-4a-3``** (rulings **R-BAL125**,
@@ -130,14 +127,12 @@ class PeriodLockReason(enum.Enum):
     HISTORICAL = "historical"
     SETTLED_TXN = "settled"
     HOLDS_MOVEMENT = "holds_movement"
-    LEDGER_POSTINGS = "ledger_postings"
 
 
 def _resolve_lock(
     *, is_historical: bool, has_settled: bool, holds_movement: bool,
-    has_unbalanced_ledger: bool,
 ) -> PeriodLockReason | None:
-    """Apply the lock-reason precedence to four already-computed booleans.
+    """Apply the lock-reason precedence to three already-computed booleans.
 
     The single source of truth for the ordering; :func:`classify_schedule_locks`
     is its only caller (the module docstring says why the single-period
@@ -147,12 +142,7 @@ def _resolve_lock(
     and it left by becoming unreachable rather than by being relaxed.  It
     refused a period an account's ``current_anchor_period_id`` pointed at; that
     column is deleted, and a balance ASSERTION no longer references a pay
-    period either, so no period delete can take one.  What is still worth
-    protecting is the period's POSTED state, and ``LEDGER_POSTINGS`` -- which
-    outranked ``ACCOUNT_ANCHOR`` anyway -- covers it: measured on the
-    developer's production data, all 10 periods holding an assertion carry an
-    unbalanced ledger account, so the deleted reason was refusing nothing that
-    survives without it.
+    period either, so no period delete can take one.
 
     **``RECURRENCE_ANCHOR`` left the same way at plan step R7b-4.**  It
     refused a period some recurrence rule's ``start_period_id`` pointed at,
@@ -163,6 +153,17 @@ def _resolve_lock(
     the deletion of any period.  The lock was protecting a bound that can no
     longer be lost, which makes it unreachable rather than relaxed.
 
+    **``LEDGER_POSTINGS``, the settings page's "Posted", left at plan task
+    plan#2777** (ruling **plan#2782**).  It refused a period whose stored
+    journal entries did not net to zero per ledger account, because the
+    ``pay_period_id`` cascade takes them.  Worked out from the records a
+    correction holds no paycheck of its own: it files by its day
+    (:meth:`~app.services.pay_calendar.PayCalendar.filing_period`) on whichever
+    paycheck stands, so the lock guarded only the stored copy, which the next
+    re-sync rebuilds.  Measured by the ruling on the 2026-11-03 production
+    dump: 16 of 67 paychecks held a correction, each locked first by Past or
+    Settled, so it decided none.
+
     Args:
         is_historical: The period has already ended (``end_date`` is
             before the reference date).
@@ -170,10 +171,6 @@ def _resolve_lock(
             (see :func:`settled_items`).
         holds_movement: A row or a transfer in the period holds a payment or
             a purchase (see :func:`items_holding_a_movement`).
-        has_unbalanced_ledger: The period's journal entries do NOT net to
-            zero per ledger account -- posted financial state a CASCADE
-            delete would mis-state (see
-            :func:`_period_ids_with_unbalanced_ledger`).
 
     Returns:
         The first applicable :class:`PeriodLockReason`, or ``None`` when
@@ -185,8 +182,6 @@ def _resolve_lock(
         return PeriodLockReason.SETTLED_TXN
     if holds_movement:
         return PeriodLockReason.HOLDS_MOVEMENT
-    if has_unbalanced_ledger:
-        return PeriodLockReason.LEDGER_POSTINGS
     return None
 
 
@@ -195,7 +190,7 @@ def classify_schedule_locks(
 ) -> "dict[int, PeriodLockReason | None]":
     """Return ``{period_id: reason | None}`` for every SAVED period of *calendar*.
 
-    Three set queries plus an in-memory date check -- the no-N+1 path the truncate
+    Two set queries plus an in-memory date check -- the no-N+1 path the truncate
     and regenerate doors run before they delete anything, and the settings page
     renders as a per-period badge.
 
@@ -249,14 +244,12 @@ def classify_schedule_locks(
 
     settled = _period_ids_of(settled_items(period_ids))
     holding = _period_ids_of(items_holding_a_movement(period_ids))
-    unbalanced = _period_ids_with_unbalanced_ledger(period_ids)
 
     return {
         period.period_id: _resolve_lock(
             is_historical=period.end_date < as_of,
             has_settled=period.period_id in settled,
             holds_movement=period.period_id in holding,
-            has_unbalanced_ledger=period.period_id in unbalanced,
         )
         for period in saved
     }
@@ -502,9 +495,8 @@ def locked_refusal(
     others = len(blocking) - len(held)
     if others:
         sentences.append(
-            f"Operation refused: {others} pay period(s) are locked (past, "
-            f"settled, or holding posted ledger entries) and cannot be "
-            f"deleted or rebuilt."
+            f"Operation refused: {others} pay period(s) are locked (past or "
+            f"settled) and cannot be deleted or rebuilt."
         )
     return " ".join(sentences)
 
@@ -670,39 +662,3 @@ def _period_ids_of(items: "tuple[Query, Query]") -> set[int]:
     """Return the periods holding any of *items* (a pair from :func:`_items`)."""
     rows, transfers = items
     return {period_id for (period_id,) in rows.union(transfers)}
-
-
-def _period_ids_with_unbalanced_ledger(period_ids: list[int]) -> set[int]:
-    """Return the ``period_ids`` whose entries do NOT net to zero per ledger.
-
-    The double-entry gate of the lock classifier (the 2026-07-02 adversarial
-    review's R2 defense-in-depth): ``journal_entries.pay_period_id`` is
-    ``ON DELETE CASCADE``, so deleting a period disposes its entries and legs
-    at the DB tier -- outside the ORM, where the balanced-journal trigger
-    never fires on DELETE.  That disposal is safe ONLY when the period's
-    postings net to zero per ledger account (e.g. an original + its reversal,
-    which the R2 attribution rule keeps in one period): the cascade then
-    removes a self-cancelling pair and no account's sum moves.  A period
-    whose postings carry a NON-zero per-account net -- a loan opening /
-    true-up correction, or any attribution drift -- holds posted financial
-    state a cascade would silently mis-state, so it hard-locks.
-
-    A period holding a settled transaction is already locked upstream
-    (``SETTLED_TXN`` precedence); this catches the posted state settled-row
-    counting cannot see.
-
-    Args:
-        period_ids: The pay-period ids being classified.
-
-    Returns:
-        The subset whose postings have a non-zero net on any ledger account.
-    """
-    rows = (
-        db.session.query(JournalEntry.pay_period_id)
-        .join(Posting, Posting.journal_entry_id == JournalEntry.id)
-        .filter(JournalEntry.pay_period_id.in_(period_ids))
-        .group_by(JournalEntry.pay_period_id, Posting.ledger_account_id)
-        .having(db.func.sum(Posting.amount) != 0)
-        .all()
-    )
-    return {row[0] for row in rows}

@@ -71,7 +71,7 @@ production compose, pins nothing, and neither does CI, a script or a bare
 ``flask run``.  Where they differ the owner's day is the EARLIER one, so exactly
 two decisions flip and both admit MORE: a paycheck ending yesterday-in-UTC is
 still current, and a paycheck opening tomorrow-in-UTC is still unstarted.
-Settled money and posted ledger entries lock either way.
+Settled money and a held payment or purchase lock either way.
 
 **A no-op truncate costs four queries more than it did, and that is stated
 rather than absorbed** (adversarial review, 2026-08-19).  The lock map is an
@@ -362,8 +362,7 @@ def truncate_pay_periods(
          since plan step ``credit_card:CC-5-4a-4``; where that is the
          period's first lock reason the refusal names each one, its amount
          and its row, plan step ``pay_calendar:C22``, ruling **R-PC116**),
-         or carries an unbalanced ledger account, raise
-         :class:`PayPeriodLocked` and delete nothing.
+         raise :class:`PayPeriodLocked` and delete nothing.
       2. **Discard gate (overridable).** If any to-delete period holds a
          row regeneration cannot reproduce -- hand-entered, override, or
          Credit/Cancelled -- and ``confirm_discard`` is False, raise
@@ -464,7 +463,7 @@ def regenerate_pay_periods(
     ``new_start_date`` at ``cadence_days``.  The new periods come back EMPTY
     and the caller repopulates them (ruling **R-R38**; see the module
     docstring).  Periods that have already started, are historical, or
-    hold settled money, a payment or purchase, or posted ledger entries are
+    hold settled money or a payment or purchase are
     KEPT; if any such locked period sits inside the rebuildable tail the
     truncate step refuses (history cannot be rewritten under a settled
     paycheck), naming each payment and purchase a paycheck locked for

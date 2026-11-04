@@ -357,8 +357,8 @@ class PayPeriodLocked(ShekelError):
 
     Raised by truncate / regenerate when the window they would delete or
     rebuild contains a period that may never be removed -- it is
-    historical, holds a settled, non-deleted row or transfer, holds a row or
-    transfer holding a payment or purchase, or holds posted ledger entries
+    historical, holds a settled, non-deleted row or transfer, or holds a row
+    or transfer holding a payment or purchase
     (:class:`~app.services.pay_period_locks.PeriodLockReason`).  A hard lock
     is NOT overridable (unlike the discard gate); the operation deletes
     nothing.

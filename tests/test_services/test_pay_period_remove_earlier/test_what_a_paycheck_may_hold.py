@@ -30,7 +30,12 @@ from app.services import (
 )
 from app.services.ledger_lines import linked_key
 from app.models.amount_ownership import AmountOwnership
-from tests._ledger_parity import assert_ledger_parity, ledger_parity_differences
+from tests._ledger_parity import (
+    assert_ledger_parity,
+    ledger_parity_differences,
+    owner_worked_out_lines,
+    worked_out_totals,
+)
 from tests._test_helpers import (
     add_entry,
     add_txn,
@@ -54,8 +59,6 @@ from ._helpers import (
     _entries_in,
     _held,
     _stored_totals,
-    _worked_out_lines_of,
-    _worked_out_totals,
 )
 
 
@@ -521,7 +524,7 @@ class TestTheStoreIsReFiled:
                 to_ledger_id=other, period_id=head[1].id,
             )
             scenario = seed_user["scenario"].id
-            stored, worked_out = _stored_totals(user_id), _worked_out_totals(user_id)
+            stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
 
             assert pay_period_admin.remove_earlier_pay_periods(
                 user_id, seed_periods[0].id,
@@ -537,7 +540,7 @@ class TestTheStoreIsReFiled:
             assert after[(scenario, other)] == (
                 stored[(scenario, other)] - Decimal("100.00")
             )
-            assert _worked_out_totals(user_id) == worked_out
+            assert worked_out_totals(_db.session, user_id) == worked_out
 
     def test_a_legacy_entry_between_two_accounts_leaves_the_store_equal_to_the_records(
         self, app, db, seed_user, seed_periods,
@@ -580,7 +583,7 @@ class TestTheStoreIsReFiled:
             assert ledger_parity_differences(db.session, scenario), (
                 "the entry must part the store from the records"
             )
-            worked_out = _worked_out_totals(user_id)
+            worked_out = worked_out_totals(_db.session, user_id)
             assert worked_out[(scenario, linked_key(checking))] == Decimal("900.00")
             assert worked_out[(scenario, linked_key(savings))] == Decimal("600.00")
 
@@ -592,7 +595,7 @@ class TestTheStoreIsReFiled:
             after = _stored_totals(user_id)
             assert after[(scenario, _ledger_ids_of(checking)[0])] == Decimal("900.00")
             assert after[(scenario, _ledger_ids_of(savings)[0])] == Decimal("600.00")
-            assert _worked_out_totals(user_id) == worked_out
+            assert worked_out_totals(_db.session, user_id) == worked_out
             assert_ledger_parity(db.session, scenario)
 
 
@@ -642,14 +645,14 @@ class TestNoWorkedOutTotalMoves:
             def _filed_openings():
                 """Return the kinds of opening the worked-out ledger files, per paycheck."""
                 filed = {}
-                for _scenario_id, line in _worked_out_lines_of(user_id):
+                for _scenario_id, line in owner_worked_out_lines(_db.session, user_id):
                     if line.source_kind_id in openings:
                         filed.setdefault(line.pay_period_id, set()).add(line.source_kind_id)
                 return filed
 
             assert _filed_openings() == {head[0].id: openings}
             scenario = seed_user["scenario"].id
-            before = _worked_out_totals(user_id)
+            before = worked_out_totals(_db.session, user_id)
             # What each opening books, debit-positive: Checking's stated
             # $1,000.00, and the loan's principal owed, a liability's credit.
             assert before[(scenario, linked_key(checking))] == Decimal("1000.00")
@@ -660,6 +663,6 @@ class TestNoWorkedOutTotalMoves:
             ) == 3
             db.session.commit()
 
-            assert _worked_out_totals(user_id) == before
+            assert worked_out_totals(_db.session, user_id) == before
             assert _filed_openings() == {seed_periods[0].id: openings}
             assert_ledger_parity(db.session, scenario)

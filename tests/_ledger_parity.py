@@ -67,6 +67,46 @@ LedgerParityDifference = namedtuple(
 )
 
 
+def owner_worked_out_lines(db_session, owner_id):
+    """Return every worked-out line of *owner_id*'s, in every scenario.
+
+    Args:
+        db_session: The test ``db.session``.
+        owner_id: The owner.
+
+    Returns:
+        ``[(scenario_id, LedgerLine), ...]``.
+    """
+    return [
+        (scenario_id, line)
+        for (scenario_id,) in db_session.query(Scenario.id).filter_by(user_id=owner_id)
+        for line in worked_out_lines(
+            owner_id, scenario_id, partial(calendar_for, owner_id),
+        )
+    ]
+
+
+def worked_out_totals(db_session, owner_id):
+    """Return *owner_id*'s worked-out total per ``(scenario_id, chart key)``.
+
+    What a schedule change must leave as it was (rulings plan#2517, plan#2782),
+    whatever paycheck each line files in.  A key whose lines net to ``$0.00``
+    is left out, as a key with no line: both hold no money.
+
+    Args:
+        db_session: The test ``db.session``.
+        owner_id: The owner.
+
+    Returns:
+        ``{(scenario_id, ChartKey): total}``, each total non-zero.
+    """
+    totals = {}
+    for scenario_id, line in owner_worked_out_lines(db_session, owner_id):
+        key = (scenario_id, line.key)
+        totals[key] = totals.get(key, _ZERO) + line.amount
+    return {key: total for key, total in totals.items() if total != 0}
+
+
 def ledger_parity_differences(db_session, scenario_id):
     """Return every cell where the worked-out ledger parts from the stored one.
 

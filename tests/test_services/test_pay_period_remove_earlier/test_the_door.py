@@ -24,6 +24,7 @@ from app.services import (
     pay_schedule_service,
 )
 from app.services.pay_rhythm import Monthly, Rhythm
+from tests._ledger_parity import worked_out_totals
 from tests._test_helpers import (
     all_periods,
     assert_pay_period_invariants,
@@ -44,7 +45,6 @@ from ._helpers import (
     _monthly_transfer_from,
     _entries_in,
     _stored_totals,
-    _worked_out_totals,
 )
 
 
@@ -276,7 +276,7 @@ class TestTheEarliestRhythmKeepsAPaycheck:
             _record(user_id, last + timedelta(days=21), 3, rhythm_of(7))
             paydays, eras = _paydays(user_id), _stored_eras(user_id)
             rows, entries = _rows_by_period(user_id), set(_entries_in(head))
-            stored, worked_out = _stored_totals(user_id), _worked_out_totals(user_id)
+            stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
             assert entries, "the re-sync must file the opening in the head"
             assert _db.session.query(Transaction).filter(
                 Transaction.pay_period_id.in_(head),
@@ -295,7 +295,7 @@ class TestTheEarliestRhythmKeepsAPaycheck:
             assert _rows_by_period(user_id) == rows
             assert set(_entries_in(head)) == entries
             assert _stored_totals(user_id) == stored
-            assert _worked_out_totals(user_id) == worked_out
+            assert worked_out_totals(_db.session, user_id) == worked_out
 
 
 class TestTheDoorRefusesAnIdItCannotResolve:
@@ -430,7 +430,7 @@ class TestAnAddUndoneLeavesNothingBehind:
             db.session.commit()
             paydays, eras = _paydays(user_id), _stored_eras(user_id)
             rows = _rows_by_period(user_id)
-            stored, worked_out = _stored_totals(user_id), _worked_out_totals(user_id)
+            stored, worked_out = _stored_totals(user_id), worked_out_totals(_db.session, user_id)
 
             head = _added_head(user_id, 3)
             added = {period.id for period in head}
@@ -455,5 +455,5 @@ class TestAnAddUndoneLeavesNothingBehind:
             assert _stored_eras(user_id) == eras
             assert _rows_by_period(user_id) == rows
             assert _stored_totals(user_id) == stored
-            assert _worked_out_totals(user_id) == worked_out
+            assert worked_out_totals(_db.session, user_id) == worked_out
             assert_pay_period_invariants(db.session, user_id)

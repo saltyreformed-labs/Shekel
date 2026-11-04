@@ -73,8 +73,7 @@ _LEDGER_MODEL_NAMES = frozenset({"Posting", "JournalEntry", "LedgerAccount"})
 # (``posting_reads``, the
 # loan / account posting packages), the
 # chart-of-accounts resolver
-# (``ledger_account_service``), the pay-period LOCK CLASSIFIER whose
-# ``LEDGER_POSTINGS`` gate sums a period's postings, and the archive
+# (``ledger_account_service``), and the archive
 # guard that counts a linked account's postings. Fully-qualified names, matched
 # exactly or as a package prefix (the packages) via the fail-closed
 # :func:`_module_in_allowlist` -- the same match/prefix/fail-closed contract the
@@ -97,11 +96,9 @@ _LEDGER_MODEL_ALLOWLIST = frozenset({
     # task plan#2771) moved the statements onto the worked-out ledger
     # (``app.services.ledger_lines``), which reads no ledger model.
     # ``app.services.pay_period_admin`` until plan step C3-a MOVED the lock
-    # classifier out of it: the only ledger-model use in that module was
-    # ``_period_ids_with_unbalanced_ledger``, so the entry moved with the
-    # function rather than being duplicated, and the writers now hold no
-    # ledger import at all.  The fence got tighter, not wider.
-    "app.services.pay_period_locks",
+    # classifier out of it, and ``app.services.pay_period_locks`` until X-ew's
+    # second leaf (plan task plan#2777, ruling plan#2782) deleted the
+    # ``LEDGER_POSTINGS`` lock, the classifier's only ledger-model use.
     "app.utils.archive_helpers",
 })
 

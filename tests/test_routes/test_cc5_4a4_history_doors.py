@@ -61,6 +61,7 @@ from app.services.pay_period_locks import (
 from app.services.statement_match import accept_match, matched_subjects
 from app.utils.archive_helpers import HeldMovements
 from tests._test_helpers import (
+    create_loan_account,
     add_entry,
     create_account_of_type,
     create_settled_transfer,
@@ -479,6 +480,35 @@ class TestThePayPeriodDoors:
             response = auth_client.get("/settings?section=pay-periods")
 
             assert b"Holds a recorded payment or purchase" in response.data
+
+    def test_a_paycheck_holding_only_a_correction_reads_editable(
+        self, app, db, auth_client, seed_user, seed_periods_today,
+    ):
+        """No "Posted" chip (ruling plan#2782): a loan's opening locks nothing.
+
+        The ruling's own example: a loan starting in a future paycheck files
+        its opening there, and that paycheck reads Editable.  Pairs with the
+        locked paycheck above, whose chip this page still renders.
+        """
+        with app.app_context():
+            future = seed_periods_today[7]
+            create_loan_account(
+                seed_user, db.session, name="Car Loan",
+                principal=Decimal("20000.00"), rate=Decimal("0.05"),
+                origination_date=future.start_date,
+            )
+            db.session.commit()
+            label = calendar_for(seed_user["user"].id).period_by_id(future.id).label
+
+            response = auth_client.get("/settings?section=pay-periods")
+
+            assert response.status_code == 200
+            row = re.search(
+                rf"{re.escape(label)}.*?</tr>".encode(), response.data, re.DOTALL,
+            )
+            assert row is not None, "the page must list the paycheck"
+            assert b"Editable" in row.group(0)
+            assert b"Posted" not in response.data
 
     def test_reset_refuses_while_a_row_holds_one(
         self, app, db, seed_user, seed_periods_today,

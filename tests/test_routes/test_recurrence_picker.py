@@ -490,7 +490,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
     })
 
     @staticmethod
-    def _script_property_reads():
+    def _script_property_reads(app):
         """Return every option property ``recurrence_form.js`` dereferences.
 
         Read FROM the script rather than restated beside it, which an
@@ -500,6 +500,9 @@ class TestTheScriptCanReadWhatTheServerSerialized:
         property JavaScript cannot find is ``undefined``, not an error, and
         ``undefined`` is falsy.
 
+        Args:
+            app: The application, whose static folder holds the script.
+
         Returns:
             set[str]: The property names, scoped to the identifiers the file
             binds to an option (``o`` inside its filter callbacks, ``chosen``
@@ -507,8 +510,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
             absent -- that one is an ``<option>`` element, not an offer).
         """
         source = (
-            Path(__file__).resolve().parents[2]
-            / "app" / "static" / "js" / "recurrence_form.js"
+            Path(app.static_folder) / "js" / "recurrence_form.js"
         ).read_text(encoding="utf-8")
         return set(re.findall(r"\b(?:o|chosen)\.([a-z_]+)\b", source))
 
@@ -520,7 +522,7 @@ class TestTheScriptCanReadWhatTheServerSerialized:
         equally silently.  Reading one side from the JS source and the other
         from the serialized payload is what makes either direction fail here.
         """
-        reads = self._script_property_reads()
+        reads = self._script_property_reads(app)
 
         assert reads == self._READ_BY_THE_SCRIPT, (
             f"recurrence_form.js now dereferences {sorted(reads)}; update "

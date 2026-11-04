@@ -938,3 +938,22 @@ def card_payment_mode_id(member):
     """
     require_init()
     return cache().enum_ids[CardPaymentModeEnum][member]
+
+
+def card_payment_mode_member(mode_id):
+    """Return the CardPaymentModeEnum member for a stored id, or None.
+
+    :func:`card_payment_mode_id`'s inverse, for the reason
+    :func:`statement_balance_evidence_member` gives: the rule that works out a
+    card's payment holds ``budget.card_payment_settings.mode_id`` and dispatches
+    on the member, and the only other way to get one is constructing logic out
+    of a column whose strings are for display.
+
+    Args:
+        mode_id: A ``ref.card_payment_modes`` primary key.
+
+    Returns:
+        The member, or ``None`` when no row carries that id.
+    """
+    require_init()
+    return cache().enum_members[CardPaymentModeEnum].get(mode_id)

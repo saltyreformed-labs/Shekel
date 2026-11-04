@@ -33,12 +33,12 @@ the app must be told (ruling **R-FL**) rather than one it can compute.
 **The two AMOUNT rows are two questions, not one split in half** (plan
 step X-au-b, ruling **R-FI**).  :mod:`._amount_source` answers *where does this
 row's amount come from* -- the figure the amount COLUMN holds or would hold,
-by a total dispatch over the five sources a row's amount can have.
+by a total dispatch over the six sources a row's amount can have.
 :mod:`._amounts` answers *what is this row worth to checking*, which composes
 that amount with an entered actual, an excluded status and an envelope's
 purchases.  The arrow runs one way: the second consumes the first.  The loan
 side has no analog for :mod:`._amount_source` because a loan payment's amount
-has exactly one source; a cash row's has five, and four of them are derived.
+has exactly one source; a cash row's has six, and five of them are derived.
 
 **The DEFINITION row answers for a row that does not exist yet** (plan step
 R16-b-2, ruling **R-R67**).  Rules 3 and 4 are functions of four columns a
@@ -222,6 +222,7 @@ from ._amount_basis import (
 from ._amount_rule import (
     AmountRule,
     amount_rule,
+    is_card_payment_definition,
     is_loan_payment_definition,
     transfer_amount_rule,
 )
@@ -320,6 +321,7 @@ __all__ = [
     "books_hold",
     "amount_rule",
     "definition_cash",
+    "is_card_payment_definition",
     "is_loan_payment_definition",
     "transfer_amount_rule",
     "amounts_by_key",

@@ -173,6 +173,7 @@ def _fake_template(
     return SimpleNamespace(
         id=_STAND_IN_TEMPLATE,
         settings=None,
+        card_payment_settings=None,
         amount_versions=[
             SimpleNamespace(
                 id=_STAND_IN_TEMPLATE, effective_date=_SCHEDULE_START,

@@ -37,6 +37,7 @@ from app.routes._commit_helpers import (
 from app.routes._redirect_target import RedirectTarget
 from app.services import template_amount_service
 from app.services.balance_at import BalanceContext
+from app.services.cash_ledger import is_card_payment_definition
 from app.services.obligations_aggregator import todays_price
 
 
@@ -137,10 +138,22 @@ class _WorkedOutWords:
     refusal: str
 
 
+#: The words for a card's worked-out payment, the one transfer template that
+#: does not own its amount and does not follow a loan.
+_CARD_WORKS_IT_OUT = _WorkedOutWords(
+    source="Your card works out this payment from what it owes.",
+    refusal=(
+        "Your card works out this payment from what it owes, so its amount "
+        "cannot be typed here. To pay a different amount once, type over that "
+        "payment on the grid."
+    ),
+)
+
 #: The words for each kind of worked-out definition, keyed by its model.  A
 #: transaction template that does not own its amount is a salary profile's; a
-#: transfer template that does not is a loan payment in derive mode
-#: (``template_amount_service.owns_its_amount``).
+#: transfer template that does not is a loan payment in derive mode, or a
+#: card's payment (:func:`_worked_out_words`;
+#: ``template_amount_service.owns_its_amount``).
 _WORKED_OUT_WORDS: dict[type, _WorkedOutWords] = {
     TransactionTemplate: _WorkedOutWords(
         source="Your salary profile works out this amount.",
@@ -157,6 +170,20 @@ _WORKED_OUT_WORDS: dict[type, _WorkedOutWords] = {
         ),
     ),
 }
+
+
+def _worked_out_words(template) -> _WorkedOutWords:
+    """Return what the app says about *template*'s worked-out amount.
+
+    Args:
+        template: A definition that does not own its amount.
+
+    Returns:
+        Its :class:`_WorkedOutWords`.
+    """
+    if is_card_payment_definition(template):
+        return _CARD_WORKS_IT_OUT
+    return _WORKED_OUT_WORDS[type(template)]
 
 
 @dataclass(frozen=True)
@@ -233,7 +260,7 @@ def edit_form_amount(
         )
     return EditFormAmount(
         today=todays_price(template, ctx).amount,
-        worked_out_by=_WORKED_OUT_WORDS[type(template)].source,
+        worked_out_by=_worked_out_words(template).source,
     )
 
 
@@ -262,7 +289,7 @@ def refuse_a_typed_worked_out_amount(
     """
     if "amount" not in data or template_amount_service.owns_its_amount(template):
         return None
-    flash(_WORKED_OUT_WORDS[type(template)].refusal, "danger")
+    flash(_worked_out_words(template).refusal, "danger")
     return back.to_response()
 
 

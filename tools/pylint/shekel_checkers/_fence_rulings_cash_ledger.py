@@ -154,6 +154,10 @@ CASH_LEDGER_NON_PRODUCERS = frozenset({
     # reads one relationship and answers a bool.
     "definition_cash",
     "is_loan_payment_definition",
+    # Its twin for the card's rule (plan step credit_card:CC-6): whether a
+    # settings row hangs off one definition.  A predicate over a row's link,
+    # holding no figure at all.
+    "is_card_payment_definition",
     # Rule 3's series arm, public for a reader pricing a DEFINITION on a day
     # rather than a row (plan step X-bp, ruling plan#2693: the Recurring and
     # savings pages price a definition as of the read pass's day).  One

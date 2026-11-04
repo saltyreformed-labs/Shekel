@@ -3,7 +3,7 @@ Shekel Budget App -- Cash ledger: WHERE one row's amount comes from.
 
 The TOTAL dispatch behind ruling **R-FI** (plan step **X-au-b**): a row's amount
 is either its OWN -- a human authored the figure, or the money already moved --
-or it is DERIVED, and a derived amount is not stored at all.  Four rules, one
+or it is DERIVED, and a derived amount is not stored at all.  Five rules, one
 per source, each delegating to the producer that already answers it.  Given a
 row, :func:`resolve_transaction_amount` answers what its amount column holds or
 would hold, and REFUSES rather than falling back for a row it cannot place.
@@ -29,9 +29,9 @@ because the W9909 completeness fence is keyed on the package and prefix-matched,
 so a sibling module is scoped the day it is written -- where a new top-level
 module would escape it, which is finding N-28's shape.
 
-**The four rules, and the DECLARATION that picks between them.**  They are NOT a
+**The five rules, and the DECLARATION that picks between them.**  They are NOT a
 partition over a row's links -- ruling R-FI refuted that discriminator by
-tracing -- because two of them are SUBSETS of two others:
+tracing -- because three of them are SUBSETS of another:
 
   1. **OWN** -- the row states its own figure, and SAYS SO by carrying
      ``amount_source_id IS NULL``.  An ad-hoc row, a CC payback, and a row a
@@ -51,8 +51,14 @@ tracing -- because two of them are SUBSETS of two others:
      transfer template.  **It was a rule about the SHADOW until plan step
      X-au-f-2** (ruling **R-BAL10**), where it moved onto the transfer and
      took the standing ``extra_principal`` with it.
+  5. **CARD_PAYMENT** -- a card's worked-out payment, priced inside the card's
+     own balance (plan step ``credit_card:CC-6``; rulings **R-CC22**,
+     plan#2666): what the card owes on the rule's day, less the credits not yet
+     inside that figure, floor zero.  A SUBSET of rule 3: its definition is a
+     transfer template.  The answer is a fold's, so the read pass injects it
+     (:attr:`AmountBasis.card_payments`).
 
-A fifth rule, **TRANSFER**, priced a transfer's two shadow rows by their
+An earlier rule, **TRANSFER**, priced a transfer's two shadow rows by their
 parent (a row declaring ``parent_transfer``).  Plan step
 ``balance:X-bi-6-4d-2`` deleted the shadows (ruling **R-BAL166**), and plan
 step ``balance:X-bi-6-5`` deleted the rule, its refusal of a row with no
@@ -64,9 +70,9 @@ step X-au-f-2 when this module passed ``max-module-lines``).  That leaf holds
 the :class:`AmountRule` enum, both classifiers and their refinement tables; this
 one holds what each rule ANSWERS.  The seam is *ownership is DECLARED and the
 refinement is READ* -- plan step X-au-c2's design, finding **N-262** -- and the
-argument for it is written once, there.  **FOUR RULES, TWO ROW TABLES, and
-neither table takes all four**: a TRANSACTION takes rules 1, 2 and 3
-(:func:`resolve_transaction_amount`), a TRANSFER takes rules 1, 3 and 4
+argument for it is written once, there.  **FIVE RULES, TWO ROW TABLES, and
+neither table takes all five**: a TRANSACTION takes rules 1, 2 and 3
+(:func:`resolve_transaction_amount`), a TRANSFER takes rules 1, 3, 4 and 5
 (:func:`resolve_transfer_amount`).  Each has its own total dispatch below, and
 the suite grades their UNION against the enum.
 
@@ -444,14 +450,17 @@ def resolve_transfer_amount(xfer, basis: AmountBasis) -> Decimal:
     owner-scoped nor scenario-scoped -- ``LoanPricing`` lost its scenario
     argument at plan step X-au-g-2c-2 precisely because the parameter only ever
     expressed a mistake.  A pin check here could not change an answer, and a
-    guard that cannot fire is a fence rather than a control.  The day a
-    scenario-scoped producer prices a transfer, the check arrives with it.
+    guard that cannot fire is a fence rather than a control.  **The card's rule
+    is the scenario-scoped producer that sentence waited for**, so the check
+    arrived with it, on that one arm (:func:`_card_payment_answer`): a card's
+    balance is folded over one scenario's rows.
 
     Args:
         xfer: The :class:`~app.models.transfer.Transfer` to price.
         basis: The read pass's :class:`AmountBasis` (:func:`amount_basis`).
-            Only rule 4's DERIVE arm reads it, so a transfer that owns its
-            figure or reads a series is answered off the row already loaded.
+            Only rule 4's DERIVE arm and the card's rule read it, so a transfer
+            that owns its figure or reads a series is answered off the row
+            already loaded.
 
     Returns:
         The transfer's amount as a ``Decimal``.
@@ -459,8 +468,10 @@ def resolve_transfer_amount(xfer, basis: AmountBasis) -> Decimal:
     Raises:
         AmountUnresolvable: When the transfer declares a relation that cannot
             price a transfer, when it is priced by its definition and that
-            definition states no price for its due date, or when it is a
-            derive-mode loan payment whose loan will not resolve.
+            definition states no price for its due date, when it is a
+            derive-mode loan payment whose loan will not resolve, or when it is
+            a card's worked-out payment and *basis* holds no read pass or
+            prices another scenario.
     """
     return _TRANSFER_RULE_ANSWERS[transfer_amount_rule(xfer)](xfer, basis)
 
@@ -797,6 +808,52 @@ def _loan_payment_cash(xfer, basis: AmountBasis) -> Decimal:
     )
 
 
+def _card_payment_answer(xfer, basis: AmountBasis) -> Decimal:
+    """Rule 5: a card's worked-out payment is worth what the card works out.
+
+    **The answer is the read pass's, and this arm holds no rule of its own**
+    (plan step ``credit_card:CC-6``): the price is a balance's, so it is worked
+    out where balances are (``balance_at._card_payment``) and reaches every
+    reader here, so checking's leg, the card's leg, the grid cell and the
+    popover read one figure.  **The owner's typed figure never reaches this
+    arm**: a typed-over row declares no relation, so rule 1 answers it.
+
+    **Two refusals, neither a fallback.**  A basis from another scenario would
+    answer from another scenario's rows with nothing to say so, which is the
+    check :func:`resolve_transaction_amount` makes for the same reason.  And a
+    basis no read pass built has nothing to ask: there is no figure to
+    substitute, because this definition stores none (ruling plan#2667).
+
+    Args:
+        xfer: The worked-out payment's transfer.
+        basis: The read pass's basis, whose ``card_payments`` answers.
+
+    Returns:
+        The payment's price.
+
+    Raises:
+        AmountUnresolvable: When *basis* prices another scenario, or holds no
+            read pass.
+    """
+    if xfer.scenario_id != basis.scenario_id:
+        raise AmountUnresolvable(
+            f"Transfer {xfer.id} is in scenario {xfer.scenario_id} and this "
+            f"AmountBasis prices scenario {basis.scenario_id}. A card works out "
+            "its payment from one scenario's rows, so resolving it here would "
+            "price it from another's. Build the basis for the scenario you "
+            "are pricing."
+        )
+    if basis.card_payments is None:
+        raise AmountUnresolvable(
+            f"Transfer {xfer.id} is a card's worked-out payment and this "
+            "AmountBasis holds no read pass, so nothing can work it out: the "
+            "price is read off the card's balance. Price it through "
+            "BalanceContext.amounts(). The definition stores no figure to "
+            "fall back to."
+        )
+    return basis.card_payments(xfer)
+
+
 # The TOTAL dispatch: one answer per rule, keyed by the rule itself.  A mapping
 # rather than a chain of ``if``s so that adding a member to :class:`AmountRule`
 # without an answer for it raises at the lookup instead of falling through to
@@ -810,10 +867,10 @@ _RULE_ANSWERS = {
     AmountRule.TEMPLATE: _template_answer,
 }
 
-# The same table for the OTHER row table, and the two are what make the four
-# rules total across both.  A transfer takes rule 1, rule 3 or rule 4; a
-# transaction takes any but rule 4, which stopped being a shadow rule at plan
-# step X-au-f-2 (ruling **R-BAL10**).  ``tests/test_services/test_amount_source.py``
+# The same table for the OTHER row table, and the two are what make the five
+# rules total across both.  A transfer takes rule 1, 3, 4 or the card's; a
+# transaction takes rule 1, 2 or 3, rule 4 having stopped being a shadow rule at
+# plan step X-au-f-2 (ruling **R-BAL10**).  ``tests/test_services/test_amount_source.py``
 # grades the UNION of the two against the enum -- so a rule with an answer in
 # neither table is caught -- and each table's own key set besides, so a member
 # added to :class:`AmountRule` has to arrive with a decision about BOTH rather
@@ -822,4 +879,5 @@ _TRANSFER_RULE_ANSWERS = {
     AmountRule.OWN: _transfer_own_answer,
     AmountRule.TEMPLATE: _transfer_template_answer,
     AmountRule.LOAN_PAYMENT: _loan_payment_cash,
+    AmountRule.CARD_PAYMENT: _card_payment_answer,
 }

@@ -519,6 +519,7 @@ class TestTheDispatchIsTotal:
             AmountRule.OWN,
             AmountRule.TEMPLATE,
             AmountRule.LOAN_PAYMENT,
+            AmountRule.CARD_PAYMENT,
         }
 
     def test_every_declarable_relation_has_a_rule(self):

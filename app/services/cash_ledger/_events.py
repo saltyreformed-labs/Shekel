@@ -258,7 +258,7 @@ class CashAnchorFact:
 class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     """One dated movement's signed effect on the account, when, and whose column.
 
-    Pylint: ``too-many-instance-attributes`` (8/7) -- one movement, its two
+    Pylint: ``too-many-instance-attributes`` (9/7) -- one movement, its two
     parent links (a plan row's, a transfer's) and what the fold reads of it.
     A leg's fact carries both until ``X-bi-6-4d`` (its shadow's id and its
     transfer's); from then the table takes an exactly-one-parent shape
@@ -370,6 +370,11 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
             ``0.00`` for a card purchase (which leaves through its CC Payback
             sibling) or a movement under a non-contributing parent -- the two
             the producer is total over, stated there.
+        parent_due_date: The PARENT's ``due_date``, ``None`` for a parent with
+            none: the day it was planned for, beside :attr:`settled_on`, the
+            day it moved.  Its one reader is the card rule, where a payment
+            made late still counts from the day it was due
+            (``balance_at._card_payment``, plan step ``credit_card:CC-6``).
 
     **There is no instant on this record, and its absence is the ruling** (R-DH).
     It carried ``occurred_at`` -- ``paid_at`` normalized to UTC -- until
@@ -391,6 +396,7 @@ class CashSourceFact:  # pylint: disable=too-many-instance-attributes
     settled_on: date
     reconciled_by_id: "int | None"
     delta: Decimal
+    parent_due_date: "date | None"
 
 
 def cash_anchor_facts(account_id: int) -> list[CashAnchorFact]:
@@ -685,6 +691,7 @@ def _source_fact(entry, parent, *, transfer_id: "int | None") -> CashSourceFact:
         settled_on=entry.settled_on,
         reconciled_by_id=entry.reconciled_by_id,
         delta=movement_cash_leg(parent, entry),
+        parent_due_date=parent.due_date,
     )
 
 

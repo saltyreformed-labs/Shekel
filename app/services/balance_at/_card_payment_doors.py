@@ -1,0 +1,70 @@
+"""Balance-at-T seam -- the doors to a card's worked-out payment price.
+
+Plan step ``credit_card:CC-6``.  :mod:`._card_payment` holds the rule, which
+:mod:`._cash_fold` imports to assemble a card's fold; these read the answer off
+the pass's fold, so they import that module and it imports nothing of them.
+Their own module for that one arrow.
+
+Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes.
+"""
+
+from decimal import Decimal
+from typing import TYPE_CHECKING
+
+from app.models.transfer import Transfer
+from app.models.transfer_template import TransferTemplate
+
+from ._cash_fold import assembled_fold
+
+if TYPE_CHECKING:
+    from ._context import BalanceContext
+
+
+def card_payment_price(xfer: Transfer, ctx: "BalanceContext") -> Decimal:
+    """Return what the card works out for one of its payment rows.
+
+    What :meth:`~._context.BalanceContext.amounts` hands the amount model, and
+    the one answer every reader of the row reads.
+
+    Args:
+        xfer: The row: a transfer into the card, on any status.
+        ctx: The read pass whose fold of the card answers.
+
+    Returns:
+        The row's price.
+
+    Raises:
+        ForeignAccountError: The card belongs to another owner.
+        AmountUnresolvable: See
+            :meth:`~._card_payment.CardPayments.price_of`.
+    """
+    return assembled_fold(xfer.to_account, ctx).card_payments.price_of(xfer)
+
+
+def next_card_payment_price(
+    template: TransferTemplate, ctx: "BalanceContext",
+) -> Decimal:
+    """Return what a card's worked-out payment will next ask of checking.
+
+    The figure the Recurring and savings pages show for the definition.  **Its
+    next row, never a row imagined on the pass's day**: such a row reads
+    ``0.00`` in statement mode from each due date until the next close, which
+    says nothing about what the payment costs.
+
+    Args:
+        template: The definition, carrying card-payment settings.
+        ctx: The read pass.
+
+    Returns:
+        The price of its earliest row still in the plan, ``0.00`` with none.
+
+    Raises:
+        ForeignAccountError: The card belongs to another owner.
+        BaselineMissingError: This pass has no baseline scenario: a card's
+            balance is folded over one scenario's rows.
+        AmountUnresolvable: See
+            :meth:`~._card_payment.CardPayments.price_of`.
+    """
+    return assembled_fold(
+        template.to_account, ctx,
+    ).card_payments.next_price(template.id)

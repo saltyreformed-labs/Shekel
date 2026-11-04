@@ -9,7 +9,7 @@ question for one loan payment (principal / interest / escrow).
 
 **The VALUATION is here and the AMOUNT is next door.**  :mod:`._amount_source`
 answers *what is this row's amount* -- the quantity the amount column holds or
-would hold, by ruling R-FI's four rules.  This module answers *what is it
+would hold, by ruling R-FI's rules.  This module answers *what is it
 worth*, which composes that amount with an entered actual, an excluded status, a
 soft delete and an envelope's purchases.  :func:`contributed_amount` is that
 composition in one function and it took over from
@@ -106,7 +106,7 @@ neither of the above:
     question, stated there), read by neither the walk nor the writer.
 
 **Why they are one module (plan step D1c).**  They were split across two: the
-override map's producer sat in the cash event sources while the four rules that
+override map's producer sat in the cash event sources while the rules that
 read its output sat inside ``balance_calculator``, a PRODUCER module, where
 the fence had ruled all four explicit non-producers.  (The override map itself
 is gone as of plan step X-au-d, above; the reason the valuations live together

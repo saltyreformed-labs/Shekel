@@ -24,10 +24,12 @@ from decimal import Decimal
 from app.models.account import Account
 from app.models.transaction import Transaction
 from app.services.cash_ledger import (
+    AmountRule,
     InFlightMovement,
     AmountBasis,
     planned_cash_rows,
     sum_projected,
+    transfer_amount_rule,
 )
 from app.services.pay_calendar import FiledRow, PayCalendar
 from app.services.transfer_legs import TransferLeg, parent_of
@@ -39,6 +41,23 @@ _PlanItem = Transaction | TransferLeg | InFlightMovement  # one plan item
 # ``_plan._ONE_DAY``, because it is the same rule -- ruling D1 for loans, R-G for
 # cash -- and the two are meant to read as one.
 _ONE_DAY = timedelta(days=1)
+
+
+@dataclass(frozen=True)
+class _WorkedOutRow:
+    """A card's worked-out payment still in the plan, and its two days.
+
+    Attributes:
+        leg: The to-side :class:`~app.services.transfer_legs.TransferLeg`, on
+            the card.
+        dated_on: The day the payment is dated (:func:`_planned_day`).
+        lands_on: The day its money joins the card's running total: *dated_on*
+            clamped up to the reader's tomorrow (ruling R-G).
+    """
+
+    leg: TransferLeg
+    dated_on: date
+    lands_on: date
 
 
 @dataclass(frozen=True)
@@ -63,7 +82,14 @@ class _CashPlan:
             purchase on the account (ruling **R-BAL77**).
         by_day: The same items keyed by the day each LANDS on (ruling R-G's
             clamp; a movement in flight's floor is the day it happened) --
-            the cash clock.  Empty when the account has no plan.
+            the cash clock.  Empty when the account has no plan.  **A card's
+            worked-out payments are NOT here** (plan step ``credit_card:CC-6``):
+            their price is worked out off this very running total, so valuing
+            them with the rest would have the assembly ask itself.
+        worked_out: Those payments, on the card that holds them, each with its
+            two days (:mod:`._card_payment` prices them).  They stay in
+            :attr:`rows`, because the period view reads rows after the fold
+            is assembled, when asking for a price is safe.
         basis: The READ PASS's
             :class:`~app.services.cash_ledger.AmountBasis` -- what every row is
             priced through -- carried here and threaded into every reduction so
@@ -84,6 +110,7 @@ class _CashPlan:
     rows: "list[_PlanItem]"
     by_day: "dict[date, list[_PlanItem]]"
     basis: AmountBasis
+    worked_out: "list[_WorkedOutRow]"
 
 
 def _cash_plan(
@@ -185,20 +212,66 @@ def _cash_plan(
     """
     rows = planned_cash_rows(account.id, basis.scenario_id)
     if not rows:
-        return _CashPlan(rows=[], by_day={}, basis=basis)
+        return _CashPlan(rows=[], by_day={}, basis=basis, worked_out=[])
 
     not_before = as_of + _ONE_DAY
     by_day: "dict[date, list[_PlanItem]]" = defaultdict(list)
+    worked_out: "list[_WorkedOutRow]" = []
     for item in rows:
-        if isinstance(item, InFlightMovement):
-            # No due date and no attribution clamp: money already spent lands
-            # no earlier than the day it happened (ruling **R-BAL77**).
-            by_day[max(item.purchased_on, not_before)].append(item)
-            continue
-        period = calendar.require_period(FiledRow.for_row(parent_of(item)))
-        nominal = period.attribution_day(item.due_date)
-        by_day[max(nominal, not_before)].append(item)
-    return _CashPlan(rows=rows, by_day=dict(by_day), basis=basis)
+        dated_on = _planned_day(item, calendar)
+        lands_on = max(dated_on, not_before)
+        if _is_worked_out(item):
+            worked_out.append(_WorkedOutRow(item, dated_on, lands_on))
+        else:
+            by_day[lands_on].append(item)
+    return _CashPlan(
+        rows=rows, by_day=dict(by_day), basis=basis, worked_out=worked_out,
+    )
+
+
+def _planned_day(item: _PlanItem, calendar: PayCalendar) -> date:
+    """Return the day *item* is dated, before ruling R-G's clamp.
+
+    The attribution day of the period its parent is filed in; a movement in
+    flight has no due date and no attribution clamp, so it is dated the day it
+    happened (ruling **R-BAL77**).  **One statement**, for the clamp above and
+    for the card's rule, which needs a credit's date as well as its landing
+    day (:mod:`._card_payment`).
+
+    Args:
+        item: A plan item.
+        calendar: The owner's pay calendar.
+
+    Returns:
+        The day it is dated.
+
+    Raises:
+        RuntimeError: Its parent names a pay period *calendar* does not hold.
+    """
+    if isinstance(item, InFlightMovement):
+        return item.purchased_on
+    period = calendar.require_period(FiledRow.for_row(parent_of(item)))
+    return period.attribution_day(item.due_date)
+
+
+def _is_worked_out(item: _PlanItem) -> bool:
+    """Return whether *item* is the card's side of its worked-out payment.
+
+    Only the to-side: checking's leg is an ordinary plan item that asks the
+    amount model, which asks the card's fold, so the one answer is the card's
+    and the assembly of the card never asks itself.
+
+    Args:
+        item: A plan item.
+
+    Returns:
+        ``True`` for the to-side leg of a transfer the card rule prices.
+    """
+    return (
+        isinstance(item, TransferLeg)
+        and item.is_income
+        and transfer_amount_rule(item.transfer) is AmountRule.CARD_PAYMENT
+    )
 
 
 def _planned_day_nets(plan: _CashPlan) -> "dict[date, Decimal]":
@@ -235,9 +308,10 @@ def _planned_day_nets(plan: _CashPlan) -> "dict[date, Decimal]":
             row lands on (ruling R-G's clamp, applied at load).
 
     Returns:
-        ``{day: net}`` -- one entry per day carrying at least one planned row,
-        valued as signed income-minus-expense.  ``{}`` for an account with no
-        plan.
+        ``{day: net}`` -- one entry per day carrying at least one planned row
+        in :attr:`_CashPlan.by_day`, valued as signed income-minus-expense.
+        ``{}`` for an account with no plan.  A card's worked-out payments join
+        these nets afterwards (:func:`~._cash_fold._assemble`).
     """
     nets: "dict[date, Decimal]" = {}
     for day, txns in plan.by_day.items():

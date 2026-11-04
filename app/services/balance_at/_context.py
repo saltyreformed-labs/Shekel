@@ -56,6 +56,7 @@ Boundary discipline (``CLAUDE.md``): no Flask symbol, no writes.
 
 from dataclasses import dataclass, field
 from datetime import date
+from functools import partial
 from typing import TYPE_CHECKING
 
 from app.exceptions import ForeignAccountError
@@ -78,17 +79,21 @@ from app.services.recurrence import (
 )
 from app.services.scenario_resolver import get_baseline_scenario
 
+from ._card_payment_doors import card_payment_price
+from ._cash_fold import AssembledCashFold
 from ._definition_books import DefinitionBooks
 from ._memoize import _memoize_once, require_scenario
 from ._recurrence_memos import RecurrenceMemosMixin
 
 if TYPE_CHECKING:
-    # Type-only: all three RECORD types below are defined by seam SIBLINGS that
+    # Type-only: both RECORD types below are defined by seam SIBLINGS that
     # import THIS module at runtime.  They type the caches the seam FILLS (this
-    # module never builds a plan, never resolves a loan and never assembles a
-    # cash fold), so they carry NO runtime edge back -- the sibling cycle a
-    # runtime import would close (finding N-25) stays open.
-    from ._cash_fold import AssembledCashFold
+    # module never builds a plan and never resolves a loan), so they carry NO
+    # runtime edge back -- the sibling cycle a runtime import would close
+    # (finding N-25) stays open.  The cash fold was a third until plan step
+    # credit_card:CC-6: it names this class in annotations alone now, so the
+    # arrow runs from here down to it and the pass can hand the amount model
+    # the card rule's answer.  This module still never assembles a cash fold.
     from ._plan import LoanForwardPlan
     from ._resolution import ResolvedLoan
 
@@ -722,6 +727,13 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
         a leaf BELOW the seam (it imports no ``balance_at`` module at all --
         its own docstring states the arrow), so filling it here opens no cycle.
 
+        **It hands the basis the card rule's answer** (plan step
+        ``credit_card:CC-6``): a card's worked-out payment is priced off the
+        card's running total, which that leaf cannot reach, so the pass
+        injects a function reading its own memoized fold.  Asking costs
+        nothing until a row asks, and a card's assembly leaves those rows out
+        of what it values, so it never asks itself.
+
         Returns:
             The pass's :class:`~app.services.cash_ledger.AmountBasis`.
 
@@ -738,6 +750,7 @@ class BalanceContext(RecurrenceMemosMixin):  # pylint: disable=too-many-instance
             # under this pass reads, rather than deriving a second set.
             self._amount_bases[scenario_id] = amount_basis(
                 self.paychecks(), scenario_id, self._loan_calendars,
+                card_payments=partial(card_payment_price, ctx=self),
             )
         return self._amount_bases[scenario_id]
 

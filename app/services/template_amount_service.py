@@ -13,11 +13,11 @@ docstring holds the supersession argument and this one holds the rules.
 **Four rules, and each answers a question the scalar could not.**
 
 1. **Which definitions have a series** (:func:`owns_its_amount`).  A version
-   records an amount somebody STATED.  A salary-linked transaction template and
-   a derive-mode loan-payment transfer template both have an amount something
-   else COMPUTES -- the paycheck calculator in one case, P&I plus escrow in the
-   other -- so a series over either would manufacture a price history nobody
-   ever set.  Neither gets one.
+   records an amount somebody STATED.  A salary-linked transaction template, a
+   derive-mode loan-payment transfer template and a card's worked-out payment
+   all have an amount something else COMPUTES -- the paycheck calculator, P&I
+   plus escrow, the card's own balance -- so a series over any of them would
+   manufacture a price history nobody ever set.  None gets one.
 
 2. **What a definition is worth on a date** (:func:`amount_as_of`).  The version
    with the greatest ``effective_date`` at or before the date; before the
@@ -134,7 +134,12 @@ def owns_its_amount(template) -> bool:
       calculator prices per period (:func:`is_salary_linked_template`);
     * a **derive-mode loan-payment** transfer template, whose projected cash
       amount rule 4 computes live from the loan
-      (``cash_ledger._loan_pricing``).
+      (``cash_ledger._loan_pricing``);
+    * a **card's worked-out payment**, a transfer template carrying card-payment
+      settings, whose amount the card rule works out inside the card's balance
+      on every read (``balance_at._card_payment``; rulings plan#2666 and
+      plan#2667: such a definition stores no figure, and a fixed payment is a
+      plain transfer that carries no settings).
 
     A MANUAL loan payment is NOT refused: there the operator owns the base cash
     (amount rule 4's MANUAL arm, which resolves the parent transfer's own
@@ -153,6 +158,8 @@ def owns_its_amount(template) -> bool:
     """
     if isinstance(template, TransactionTemplate):
         return not is_salary_linked_template(template)
+    if template.card_payment_settings is not None:
+        return False
     settings = template.settings
     return settings is None or not settings.derive_from_loan
 

@@ -187,3 +187,47 @@ class TestTheTransferEditDoor:
             assert CARD_PAYMENT_CANNOT_CHANGE_DESTINATION.format(
                 payment=template.name,
             ) not in _flashes(auth_client)
+
+
+class TestTheWorkedOutAmountIsNotTyped:
+    """The edit form shows the card's words, and its door refuses a figure."""
+
+    def test_the_form_names_the_card_and_shows_no_amount_box(
+        self, app, auth_client, seed_user,
+    ):
+        """No box to type in, and the words say where the amount comes from."""
+        with app.app_context():
+            template = make_transfer_template(
+                db.session, seed_user, _card(seed_user),
+            )
+            _work_it_out(template)
+
+            response = auth_client.get(f"/transfers/{template.id}/edit")
+
+            assert response.status_code == 200
+            page = response.get_data(as_text=True)
+            assert "Your card works out this payment" in page
+            assert 'name="amount"' not in page
+
+    def test_the_door_refuses_a_typed_figure(self, app, auth_client, seed_user):
+        """A stale form's figure is refused, in the card's words, and states nothing."""
+        with app.app_context():
+            template = make_transfer_template(
+                db.session, seed_user, _card(seed_user),
+            )
+            _work_it_out(template)
+            versions_before = len(template.amount_versions)
+
+            response = auth_client.post(
+                f"/transfers/{template.id}",
+                data={"amount": "75.00"},
+            )
+
+            assert response.status_code == 302
+            assert _flashes(auth_client) == [
+                "Your card works out this payment from what it owes, so its "
+                "amount cannot be typed here. To pay a different amount once, "
+                "type over that payment on the grid."
+            ]
+            db.session.expire_all()
+            assert len(template.amount_versions) == versions_before

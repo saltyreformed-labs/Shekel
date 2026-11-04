@@ -35,7 +35,7 @@ model asks the model for its own load and only the tiers beneath it name this
 module directly.
 """
 
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.models.transaction import Transaction
 from app.models.transaction_template import TransactionTemplate
@@ -128,6 +128,16 @@ def transfer_template_pricing_load_options() -> tuple:
     * ``settings`` -- whether a loan payment's settings row hangs off it:
       rule 4's refinement (``cash_ledger.is_loan_payment_definition``), and
       ``owns_its_amount`` for a payment that follows its loan;
+    * ``card_payment_settings`` -- whether a card's worked-out payment's settings
+      row hangs off it: the card rule's refinement
+      (``cash_ledger.is_card_payment_definition``), and ``owns_its_amount`` for
+      that payment (plan step credit_card:CC-6, plan#2677).  **Joined rather
+      than selected in, and measured**: the relationship is keyed on the
+      definition's ``(id, to_account_id)`` superkey, not its primary key, so a
+      ``selectinload`` cannot skip the parent and issues a second statement
+      against ``budget.transfer_templates``
+      (``test_the_priced_feed_reads_every_pricing_table``).  It is one-to-one,
+      so the join adds no row and no statement;
     * ``amount_versions`` -- rule 3, and rule 4's MANUAL arm.
 
     :func:`transfer_pricing_load_options` composes this under
@@ -140,6 +150,7 @@ def transfer_template_pricing_load_options() -> tuple:
     """
     return (
         selectinload(TransferTemplate.settings),
+        joinedload(TransferTemplate.card_payment_settings),
         selectinload(TransferTemplate.amount_versions),
     )
 
@@ -278,6 +289,8 @@ def transfer_pricing_load_options() -> tuple:
 
     * ``Transfer.template`` -> ``settings`` -- rule 4's refinement asks whether
       a loan payment's settings row hangs off the definition;
+    * ``Transfer.template`` -> ``card_payment_settings`` -- the card rule's
+      refinement asks whether a card payment's settings row does;
     * ``Transfer.template`` -> ``amount_versions`` -- rule 3 and rule 4's
       MANUAL arm price the definition's series as of the transfer's due date;
     * ``Transfer.pay_period`` -- rule 4's DERIVE arm dates the installment from
@@ -286,10 +299,11 @@ def transfer_pricing_load_options() -> tuple:
       only on its no-``due_date`` fallback), and the loan partition sorts on
       it.
 
-    The first two are one entry composing
-    :func:`transfer_template_pricing_load_options` since plan#2733; the set
-    named the same four paths before and after (``Transfer.template``, its
-    two relationships and the period; walked, 2026-11-02).
+    The first three are one entry composing
+    :func:`transfer_template_pricing_load_options` since plan#2733, whose set
+    named four paths before and after that move (``Transfer.template``, its
+    two relationships and the period; walked, 2026-11-02) and five since
+    plan#2677 added the card's settings.
 
     ONE spelling of a transfer's pricing graph, and since plan step
     ``balance:X-bi-6-4d-2`` the one path to it.  :func:`pricing_load_options`

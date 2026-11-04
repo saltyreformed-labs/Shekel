@@ -31,7 +31,9 @@ defer and the import is stated at the top like any other.*
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.services.loan_ledger import LoanCalendars
@@ -113,16 +115,30 @@ class AmountBasis:
             read-time repair that needed the question asked scenario-wide; the
             amount model reads the refinement off the parent transfer it was
             handed, per row.
+        card_payments: What a card's worked-out payment is priced at, given its
+            transfer, or ``None`` for a basis held by no read pass.  **Injected
+            because the answer is a balance's** (plan step
+            ``credit_card:CC-6``): the card rule prices a row off the card's
+            running total, a fold this package never imports
+            (``balance_at._card_payment``), so the pass hands the amount model a
+            function and the arrow stays one way.  ``None`` REFUSES such a row
+            rather than guessing (:func:`._amount_source._card_payment_answer`).
     """
 
     user_id: int
     scenario_id: int
     salary: "SalaryPricing" = field(compare=False, repr=False)
     loans: LoanPricing = field(compare=False, repr=False)
+    card_payments: Callable[[object], Decimal] | None = field(
+        default=None, compare=False, repr=False,
+    )
 
 
 def amount_basis(
-    paychecks: "PaycheckPricing", scenario_id, loan_calendars: LoanCalendars,
+    paychecks: "PaycheckPricing",
+    scenario_id,
+    loan_calendars: LoanCalendars,
+    card_payments: Callable[[object], Decimal] | None = None,
 ) -> AmountBasis:
     """Return the read pass's :class:`AmountBasis` over its pricer and scenario.
 
@@ -197,6 +213,9 @@ def amount_basis(
         loan_calendars: The read pass's
             :class:`~app.services.loan_ledger.LoanCalendars` -- the memo its
             loan walk reads too, or a fresh one for a caller holding no pass.
+        card_payments: The read pass's price of a card's worked-out payment
+            (:attr:`AmountBasis.card_payments`), or ``None`` for a caller
+            holding no pass.
 
     Returns:
         The unresolved :class:`AmountBasis` for that owner and scenario.
@@ -214,6 +233,7 @@ def amount_basis(
         scenario_id=scenario_id,
         salary=income_service.salary_pricing(scenario_id, paychecks),
         loans=loan_pricing(loan_calendars),
+        card_payments=card_payments,
     )
 
 

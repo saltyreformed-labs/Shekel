@@ -108,7 +108,8 @@ def _stated_amount(template, on_date: date, subject: str) -> Decimal:
 
     * **the definition does not own its amount**
       (``template_amount_service.owns_its_amount`` is False -- a salary-linked
-      template, a derive-mode loan payment).  Its price is COMPUTED by something
+      template, a derive-mode loan payment, a card's worked-out payment).  Its
+      price is COMPUTED by something
       else, so any versions it holds are dormant rather than authoritative.
       **The test for this is not "is the series empty", and a control found the
       difference**: a template switched from manual to derive-mode KEEPS the
@@ -175,7 +176,8 @@ def _stated_amount(template, on_date: date, subject: str) -> Decimal:
         raise AmountUnresolvable(
             f"{subject} is priced by template "
             f"{template.id}, whose own amount is DERIVED rather than stated -- "
-            "a salary-linked template, or a loan payment in derive mode. Its "
+            "a salary-linked template, a loan payment in derive mode, or a "
+            "card's worked-out payment. Its "
             "price series is dormant and may still hold versions stated while "
             "it owned its amount, so reading it here would answer a price "
             "nobody is stating any more. The rule that prices this row is the "

@@ -304,6 +304,7 @@ from ._kind_correct import (
     build_maps,
     investment_growth_since_anchor,
 )
+from ._card_payment_doors import next_card_payment_price
 from ._liability import liability_owed_at_dates
 from ._resolution import is_standing_loan_payment
 from ._loan_figures import (
@@ -426,6 +427,7 @@ __all__ = [
     "loan_what_if_owed_at_dates",
     "loan_principal_paid_in_year",
     "money_account_columns",
+    "next_card_payment_price",
     "positions",
     "records_balance_at",
     "resolved_with_books",

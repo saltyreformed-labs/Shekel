@@ -8,7 +8,7 @@ that module past ``max-module-lines``.  The cut is by tier and it is the seam
 the sibling's docstring already draws: *ownership is DECLARED and the
 refinement is READ, and the split between the two is the design*.  Nothing here
 resolves a figure, reads a price series or touches a live producer; it answers
-which of the four rules owns a row's amount and nothing else.
+which of the five rules owns a row's amount and nothing else.
 
 **The alternative was shaving prose, and this project has already ruled against
 it**: *"three lines of headroom is not a design, and the structural answer is a
@@ -16,16 +16,18 @@ package with one private leaf per verb"* (``transaction_service`` package
 docstring), restated by :mod:`._amount_basis` when the same ceiling forced the
 same choice at plan step X-au-j.
 
-**TWO ROW TABLES, two classifiers, and neither takes all four rules.**
+**TWO ROW TABLES, two classifiers, and neither takes all five rules.**
 :func:`amount_rule` classifies a ``budget.transactions`` row and can answer
 rules 1, 2 and 3; :func:`transfer_amount_rule` classifies a
-``budget.transfers`` row and can answer rules 1, 3 and 4.  Rule 2 needs a
-salary profile, which names a TRANSACTION template, and rule 4 belongs to the
-TRANSFER classifier since ruling **R-BAL10** (it was a shadow rule until plan
-step X-au-f-2).  A fifth rule, *= my parent*, priced a transfer's two shadow
-rows from their transfer; plan step ``balance:X-bi-6-4d-2`` deleted the
-shadows (ruling **R-BAL166**), and plan step ``balance:X-bi-6-5`` deleted the
-rule with the ``parent_transfer`` relation that declared it.
+``budget.transfers`` row and can answer rules 1, 3, 4 and the card's.  Rule 2
+needs a salary profile, which names a TRANSACTION template, and rule 4 belongs
+to the TRANSFER classifier since ruling **R-BAL10** (it was a shadow rule until
+plan step X-au-f-2), as the card's rule has since it arrived (plan step
+``credit_card:CC-6``).  An earlier fifth rule, *= my parent*, priced a
+transfer's two shadow rows from their transfer; plan step
+``balance:X-bi-6-4d-2`` deleted the shadows (ruling **R-BAL166**), and plan
+step ``balance:X-bi-6-5`` deleted the rule with the ``parent_transfer``
+relation that declared it.
 
 Nothing here imports from :mod:`._amount_source`, so the split introduces no
 cycle: this module is strictly below it.  Boundary discipline (``CLAUDE.md``
@@ -41,13 +43,13 @@ from app.services import template_amount_service
 
 
 class AmountRule(Enum):
-    """Which of ruling R-FI's four sources a row's amount comes from.
+    """Which of ruling R-FI's sources a row's amount comes from.
 
     The dispatch key.  An explicit enum rather than a pair of link tests, because
     the rules are not a partition over the links -- see :mod:`._amount_source`'s
-    docstring for the two subset relations (rules 2 and 4 are each a subset of
-    rule 3) that make the refinement order load-bearing; they stayed there when
-    this module was split from it.
+    docstring for the subset relations (rules 2 and 4 and the card's are each a
+    subset of rule 3) that make the refinement order load-bearing; they stayed
+    there when this module was split from it.
 
     **It is NOT what the ``amount_source_id`` column stores, and a first draft of
     this docstring said it was.**  That column names the RELATION that prices a
@@ -75,11 +77,11 @@ class AmountRule(Enum):
     SALARY = "salary"
     TEMPLATE = "template"
     LOAN_PAYMENT = "loan_payment"
-
+    CARD_PAYMENT = "card_payment"
 
 
 def amount_rule(txn) -> AmountRule:
-    """Return which of R-FI's four rules owns *txn*'s amount.
+    """Return which of R-FI's rules owns *txn*'s amount.
 
     **One question to the COLUMN, then one to the DEFINITION.**  A row that
     carries no ``amount_source_id`` owns its figure and is priced by rule 1; a
@@ -200,7 +202,7 @@ def _rule_within_definition(txn) -> AmountRule:
 
 
 def _rule_within_transfer_definition(xfer) -> AmountRule:
-    """Refine a TRANSFER's TEMPLATE relation into rule 4 or rule 3.
+    """Refine a TRANSFER's TEMPLATE relation into the card's rule, rule 4 or rule 3.
 
     The transfer twin of :func:`_rule_within_definition`, and the same shape:
     a definition prices its rows either through a live producer that answers
@@ -220,13 +222,24 @@ def _rule_within_transfer_definition(xfer) -> AmountRule:
     the rule -- which is why the test is :func:`_is_loan_payment` (a settings
     row exists) rather than ``derive_from_loan``.
 
+    **The card's rule is reached the same way** (plan step ``credit_card:CC-6``):
+    a definition carrying card-payment settings has its rows worked out inside
+    the card's balance (:func:`is_card_payment_definition`), and a typed-over row
+    never arrives here, because it declares no relation at all.  The two
+    settings rows cannot meet on one definition: a loan payment's destination is
+    a loan, a card payment's a credit card, and
+    ``ck_account_types_revolving_is_plain`` keeps those two kinds apart.
+
     Args:
         xfer: A :class:`~app.models.transfer.Transfer` declaring
             :attr:`~app.enums.AmountSourceEnum.TEMPLATE`.
 
     Returns:
-        :attr:`AmountRule.LOAN_PAYMENT` or :attr:`AmountRule.TEMPLATE`.
+        :attr:`AmountRule.CARD_PAYMENT`, :attr:`AmountRule.LOAN_PAYMENT` or
+        :attr:`AmountRule.TEMPLATE`.
     """
+    if is_card_payment_definition(xfer.template):
+        return AmountRule.CARD_PAYMENT
     return (
         AmountRule.LOAN_PAYMENT if _is_loan_payment(xfer)
         else AmountRule.TEMPLATE
@@ -234,7 +247,7 @@ def _rule_within_transfer_definition(xfer) -> AmountRule:
 
 
 def transfer_amount_rule(xfer) -> AmountRule:
-    """Return which of R-FI's four rules owns *xfer*'s amount.
+    """Return which of R-FI's rules owns *xfer*'s amount.
 
     The TRANSFER twin of :func:`amount_rule`, and it asks the two questions in
     the same order for the same reasons: the ``amount_source_id`` COLUMN says
@@ -242,12 +255,13 @@ def transfer_amount_rule(xfer) -> AmountRule:
     the refinement WITHIN a declared relation is read live off the definition
     (:func:`_rule_within_transfer_definition`).
 
-    **Three of the four rules can apply here and one cannot.**  A transfer
-    takes rule 1 (its own figure), rule 3 (its definition's dated series) or
+    **Four of the five rules can apply here and one cannot.**  A transfer
+    takes rule 1 (its own figure), rule 3 (its definition's dated series),
     rule 4 (a loan payment's cash, since plan step X-au-f-2 -- ruling
-    **R-BAL10**).  It cannot take rule 2, which prices a paycheck and needs a
-    salary profile naming a TRANSACTION template.  The other table's
-    classifier is the mirror image: everything but rule 4.
+    **R-BAL10**) or the card's (a card's worked-out payment, since plan step
+    ``credit_card:CC-6``).  It cannot take rule 2, which prices a paycheck and
+    needs a salary profile naming a TRANSACTION template.  The other table's
+    classifier takes neither rule 4 nor the card's.
 
     Args:
         xfer: The :class:`~app.models.transfer.Transfer` to classify.  Its
@@ -327,6 +341,31 @@ def is_loan_payment_definition(template) -> bool:
     if template is None:
         return False
     return getattr(template, "settings", None) is not None
+
+
+def is_card_payment_definition(template) -> bool:
+    """Return whether *template* is a card's worked-out payment.
+
+    The ONE reading of the settings-row test for the card's rule (plan step
+    ``credit_card:CC-6``), :func:`is_loan_payment_definition`'s twin and for its
+    reason: a row's classifier and a reader pricing the definition itself
+    (``obligations_aggregator``) decide the same way by construction.  A
+    transfer into a card with no settings row is an ordinary transfer, a fixed
+    payment or an extra one (ruling plan#2666), which rule 3 prices.
+
+    ``getattr`` for the reason its twin gives: a kind-agnostic reader may hold a
+    transaction template, which carries no such row.
+
+    Args:
+        template: A transfer template, a transaction template, or ``None``
+            for a transfer with none.
+
+    Returns:
+        ``True`` when the card works out the definition's rows.
+    """
+    if template is None:
+        return False
+    return getattr(template, "card_payment_settings", None) is not None
 
 
 # WHICH RULE a declared relation refines into, keyed by the relation itself.  The

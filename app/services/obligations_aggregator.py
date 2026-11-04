@@ -117,10 +117,11 @@ from typing import TYPE_CHECKING, Iterable, Union
 
 from app.models.transaction_template import TransactionTemplate
 from app.models.transfer_template import TransferTemplate
-from app.services.balance_at import BalanceContext
+from app.services.balance_at import BalanceContext, next_card_payment_price
 from app.services.cash_ledger import (
     DefinitionRow,
     definition_cash,
+    is_card_payment_definition,
     is_loan_payment_definition,
     stated_price,
 )
@@ -236,6 +237,10 @@ def todays_price(
       :func:`~app.services.cash_ledger.definition_cash` -- the contract for a
       payment that tracks its loan, the stated series otherwise, and the
       standing extra in both, because that is what leaves checking;
+    * a card's worked-out payment: what its next row asks of checking
+      (:func:`~app.services.balance_at.next_card_payment_price`), because the
+      rule prices a row off the card's balance and a row imagined on the day
+      would read ``$0.00`` from each due date until the next close;
     * any other definition: rule 3, its price series as of the day.
 
     **Not the newest stated price**, which is what the stored
@@ -272,8 +277,9 @@ def todays_price(
             refused.  There is no stored copy to fall back to, and no reader
             ever should have.
         BaselineMissingError: A loan payment priced for an owner with no
-            baseline scenario (ruling **R-R30**); every other definition is
-            priced without one.
+            baseline scenario (ruling **R-R30**), or a card's worked-out payment,
+            which needs one for the reason a loan payment does; every other
+            definition is priced without one.
         UnsupportedStateError: A salary profile in a state the tax law does
             not list, from the pricer (plan step salary:X-at-3).
     """
@@ -291,7 +297,7 @@ def todays_price(
 def _definition_price(
     template: RecurringTemplate, ctx: BalanceContext,
 ) -> Decimal:
-    """Rule 4 or rule 3 on the pass's day, for a definition no paycheck prices.
+    """The card's rule, rule 4 or rule 3, for a definition no paycheck prices.
 
     The two arms :func:`~app.services.cash_ledger.definition_cash` decides
     between for a row, decided by the same predicate
@@ -314,6 +320,8 @@ def _definition_price(
         AmountUnresolvable: See :func:`todays_price`.
         BaselineMissingError: See :func:`todays_price`.
     """
+    if is_card_payment_definition(template):
+        return next_card_payment_price(template, ctx)
     subject = (
         f"{type(template).__name__} {template.id}'s price on "
         f"{ctx.as_of.isoformat()}"

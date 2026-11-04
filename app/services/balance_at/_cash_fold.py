@@ -110,6 +110,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from app.models.account import Account
 from app.services.cash_ledger import (
@@ -121,10 +122,16 @@ from app.services.cash_ledger import (
 from app.services.pay_calendar import PayCalendar, PeriodWindow
 
 from ._assertions import CashAnchorCorrection, assertion_corrections
+from ._card_payment import CardPayments
 from ._cash_plan import _CashPlan, _cash_plan, _planned_day_nets
-from ._context import BalanceContext
 from ._memoize import _memoize_once
 from ._fold import sample_cumulative
+
+if TYPE_CHECKING:
+    # Type-only since plan step credit_card:CC-6: the pass hands the amount
+    # model the card rule's answer, which is read off this module's fold, so
+    # the runtime arrow runs from the context down to here.
+    from ._context import BalanceContext
 
 _ZERO_MONEY = Decimal("0.00")
 
@@ -133,13 +140,14 @@ _ZERO_MONEY = Decimal("0.00")
 class AssembledCashFold:  # pylint: disable=too-many-instance-attributes
     """One account's whole running total, plus the facts it was built from.
 
-    Pylint: ``too-many-instance-attributes`` (9/7) -- suppressed because the
-    count is the POINT rather than an accident.  Three of the nine are the
+    Pylint: ``too-many-instance-attributes`` (10/7) -- suppressed because the
+    count is the POINT rather than an accident.  Three of the ten are the
     inputs this record was built FROM (:attr:`account_id`, :attr:`scenario_id`,
     :attr:`calendar`), carried so a reader holding both this and one of them
-    cannot pair them wrongly; the other six (:attr:`seed`, :attr:`steps`,
-    :attr:`walk`, :attr:`corrections`, :attr:`plan`, :attr:`day_nets`) are one
-    derivation and its groupings.  Collapsing the three into a nested value
+    cannot pair them wrongly; the other seven (:attr:`seed`, :attr:`steps`,
+    :attr:`walk`, :attr:`corrections`, :attr:`plan`, :attr:`day_nets`,
+    :attr:`card_payments`) are one derivation and its groupings.  Collapsing the
+    three into a nested value
     would hide exactly
     what each is here to make visible, and dropping one is what findings
     **N-354** and this step's own review re-opened.  Same disposition as
@@ -226,6 +234,10 @@ class AssembledCashFold:  # pylint: disable=too-many-instance-attributes
             than taking one beside it: :func:`~._asset_fold.resolve` DROPPED
             its own ``calendar`` parameter here, which removes the mis-pairing
             rather than adding a check that catches it.
+        card_payments: What this account's worked-out card payments are priced
+            at (:class:`~._card_payment.CardPayments`; plan step
+            ``credit_card:CC-6``).  Empty on every account but a card with such
+            a payment, and costing nothing there until asked.
     """
 
     account_id: int
@@ -237,6 +249,7 @@ class AssembledCashFold:  # pylint: disable=too-many-instance-attributes
     plan: _CashPlan
     day_nets: "dict[date, Decimal]"
     calendar: PayCalendar
+    card_payments: CardPayments
 
     def require_account(self, account: Account) -> None:
         """Refuse an *account* these steps were not assembled for.
@@ -265,7 +278,7 @@ class AssembledCashFold:  # pylint: disable=too-many-instance-attributes
 
 
 def assembled_fold(
-    account: Account, ctx: BalanceContext,
+    account: Account, ctx: "BalanceContext",
 ) -> AssembledCashFold:
     """Return *account*'s assembled cash fold for this pass, assembling it once.
 
@@ -426,11 +439,19 @@ def _assemble(
     plan = _cash_plan(account, basis, as_of, calendar)
     day_nets = _planned_day_nets(plan)
     seed, steps = _running_steps(walk, corrections, day_nets)
+    # A card's worked-out payments are priced off the running total WITHOUT
+    # them, then join it (plan step credit_card:CC-6): each is a later step on
+    # the same total, never a second producer's series.
+    card_payments = CardPayments(account.id, seed, steps, walk, plan, calendar)
+    if plan.worked_out:
+        day_nets = card_payments.with_prices(day_nets)
+        seed, steps = _running_steps(walk, corrections, day_nets)
     return AssembledCashFold(
         account_id=account.id,
         scenario_id=basis.scenario_id,
         seed=seed, steps=steps, walk=walk, corrections=corrections,
         plan=plan, day_nets=day_nets, calendar=calendar,
+        card_payments=card_payments,
     )
 
 

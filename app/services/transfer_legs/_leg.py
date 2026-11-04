@@ -445,7 +445,7 @@ def parent_of(item: PlanItem) -> PlanParent:
     item is FILED as**: a leg's period is its transfer's, and the calendar
     places a mapped row (``pay_calendar.FiledRow.for_row``), so the cash
     fold's plan files each item under this answer
-    (``balance_at._cash_fold._cash_plan``).
+    (``balance_at._cash_plan._cash_plan``).
 
     Args:
         item: A row or a leg.

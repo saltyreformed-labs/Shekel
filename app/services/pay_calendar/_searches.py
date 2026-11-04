@@ -258,7 +258,7 @@ def period_by_id(
     lookup started resolving an id back to a derived period; plan step C2-f3c
     deleted that caller, since the generation seam carries the derived period on
     the placement; and **plan step C4-a-1 put a per-row caller back** --
-    ``balance_at._cash_fold._cash_plan``, through
+    ``balance_at._cash_plan._cash_plan``, through
     :meth:`~._calendar.PayCalendar.require_period`, resolves every
     still-projected row's span here.
 
@@ -342,7 +342,7 @@ class FiledRow:
     **What a crossed pair COSTS, measured rather than assumed, because the
     first draft of this paragraph overstated it** (adversarial design review,
     2026-08-31).  That draft said a wrong period here "moves money to another
-    day", citing ``balance_at._cash_fold._cash_plan`` feeding the answer into
+    day", citing ``balance_at._cash_plan._cash_plan`` feeding the answer into
     :meth:`~._derive.DerivedPeriod.attribution_day` -- which dates a projected
     row on the daily balance line.  **Those are two different call sites.**
     ``_cash_plan`` reads ``txn.pay_period_id`` and ``txn.id`` off one object on

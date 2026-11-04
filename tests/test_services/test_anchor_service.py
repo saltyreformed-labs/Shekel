@@ -907,7 +907,7 @@ class TestBackDatedCashTrueUp:
         first version asserted only the three asserted balances back out of an
         account with NO transactions, so every expected value was an anchor
         echoed verbatim -- and a fold that dropped dated deltas entirely still
-        passed it (proved by mutating ``_cash_fold._planned_day_nets`` to return
+        passed it (proved by mutating ``_cash_plan._planned_day_nets`` to return
         nothing: all five cases stayed green).  The real hazard of back-dating is
         what happens to the flows on either side of the new assertion, so those
         are what this now grades.

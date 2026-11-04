@@ -19,7 +19,7 @@ seam's thirteen per-period entries stopped TAKING a period list and now read
 ``_cash_periods._PeriodSpans`` -- a fourth index over the STORED spans.
 **TWO readers of the stored columns survived INSIDE that seam and an earlier
 draft of this paragraph claimed none did** (adversarial review, 2026-08-13):
-``balance_at/_cash_fold._cash_plan`` clamps a projected row against
+``balance_at/_cash_plan._cash_plan`` clamps a projected row against
 ``txn.pay_period``'s span -- it still does, and it is named in the pay-calendar
 plan's section 3 as ``C4``'s -- and ``balance_at/_asset_contributions`` walked
 ``pay_period_service.get_all_periods``, whose ORDER is the stored ordinal and

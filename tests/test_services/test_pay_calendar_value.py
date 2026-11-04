@@ -2465,7 +2465,7 @@ class TestTheFiledRowCannotBeMispaired:
     Pay-calendar plan step **C4-a-5**.  The signature was
     ``require_period(period_id, transaction_id)`` -- two ``int``s in a fixed
     order, held to one row by nothing.  A crossed pair does not raise: it finds
-    a DIFFERENT period, and ``balance_at._cash_fold._cash_plan`` dates the
+    a DIFFERENT period, and ``balance_at._cash_plan._cash_plan`` dates the
     daily balance line with the answer.  These grade the two properties that
     replace the old signature's inspection: it cannot be built positionally,
     and the constructor every entity-holding caller uses reads both ids off ONE

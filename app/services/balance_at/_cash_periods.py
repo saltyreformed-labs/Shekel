@@ -45,11 +45,8 @@ from app.services.pay_calendar import PeriodWindow
 from app.utils.money import round_money
 
 from ._assertions import CashAnchorCorrection
-from ._cash_fold import (
-    AssembledCashFold,
-    _CashPlan,
-    period_balances,
-)
+from ._cash_fold import AssembledCashFold, period_balances
+from ._cash_plan import _CashPlan
 
 _ZERO_MONEY = Decimal("0.00")
 
@@ -396,7 +393,7 @@ def _budget_legs(
     still-projected rows -- the account's own, and one derived leg per
     still-projected transfer it is on (plan step **X-bi-6a**) -- at the shared
     ``sum_projected`` reduction -- the same
-    engine :func:`~._cash_fold._planned_day_nets` reduces the same items through
+    engine :func:`~._cash_plan._planned_day_nets` reduces the same items through
     on the other clock, through the same
     :class:`~app.services.cash_ledger.AmountBasis`, which is why the two
     groupings reconcile to the cent.
@@ -438,7 +435,7 @@ def _budget_legs(
 
     Args:
         walk: The account's walk -- its settled facts carry both clocks.
-        plan: The account's :class:`~._cash_fold._CashPlan`.
+        plan: The account's :class:`~._cash_plan._CashPlan`.
         window: The reported periods.
         far: The far legs to leave out, by their transfers.
 
@@ -508,7 +505,7 @@ def _cash_sums(
     Args:
         walk: The account's walk.
         day_nets: The plan's per-day nets
-            (:func:`~._cash_fold._planned_day_nets`).
+            (:func:`~._cash_plan._planned_day_nets`).
         window: The reported periods.
 
     Returns:

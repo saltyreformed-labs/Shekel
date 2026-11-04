@@ -291,7 +291,7 @@ class TestTheReductionIsAdditiveOverRows:
 
     The property the fold depends on structurally: ``sum_projected`` is
     additive over disjoint groups, so a period's days sum to the period's net
-    exactly -- which is why ``_cash_fold._planned_day_nets`` may reduce per DAY
+    exactly -- which is why ``_cash_plan._planned_day_nets`` may reduce per DAY
     and ``_budget_legs`` may reduce the SAME rows per pay period and get
     answers that reconcile to the cent.
 

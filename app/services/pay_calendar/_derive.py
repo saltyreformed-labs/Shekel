@@ -236,7 +236,7 @@ class DerivedPeriod:
 
         The single BUDGET-attribution rule, shared by the calendar's day-cell
         grouping (``calendar_service._get_display_day``), the balance-at seam's
-        PLANNED tier (``balance_at._cash_fold._cash_plan``) and the reconcile
+        PLANNED tier (``balance_at._cash_plan._cash_plan``) and the reconcile
         panel's offer bound (``reconcile_service._rows.attributed_on``), so no
         two of them can come to disagree about which day an item is BUDGETED
         to.  An item lands on *preferred* -- its ``due_date`` -- falling back

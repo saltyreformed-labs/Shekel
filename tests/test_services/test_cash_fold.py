@@ -1752,7 +1752,7 @@ class TestTheDriftOracleWalksFiftyTwoPeriods:
 # leaving a gap.**  Three cases planted a ``budget.pay_periods.end_date``
 # that disagreed with the owner's paydays -- with a direct UPDATE, under
 # the writer, because no door could produce one -- and asserted that
-# ``_cash_fold._cash_plan`` clamped a projected row against the DERIVED
+# ``_cash_plan._cash_plan`` clamped a projected row against the DERIVED
 # span rather than that column.  Both branches of the derivation were
 # driven: a middle period's ``lead(start) - 1`` and the last one's
 # ``start + cadence_days - 1`` projection.  That was plan step C4-a-1's

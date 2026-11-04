@@ -529,7 +529,7 @@ def _unwindowed_contributing_rows(
 
     **``joinedload(pay_period)`` was a THIRD option here and pay-calendar plan
     step C4-a-1 deleted it, which is worth a paragraph because of what kept it
-    alive.**  It was the fold's -- ``_cash_fold._cash_plan`` read
+    alive.**  It was the fold's -- ``_cash_plan._cash_plan`` read
     ``txn.pay_period`` for its attribution clamp until that step moved the clamp
     onto the owner's derived calendar.  Once that reader left, the load had no
     consumer of its own at all: what it still did was warm SQLAlchemy's identity

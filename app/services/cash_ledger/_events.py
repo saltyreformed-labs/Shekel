@@ -714,7 +714,7 @@ class InFlightMovement:
         is_income: The parent's type, so a budget-clock reduction files it on
             the parent's leg.
         purchased_on: The day it happened, the floor the plan's landing day is
-            clamped up from (``balance_at._cash_fold._cash_plan``).
+            clamped up from (``balance_at._cash_plan._cash_plan``).
         delta: :func:`~._cash_leg.movement_cash_leg` -- its whole figure in
             the parent's direction, signed as the settled stream would sign it
             the day it is dated.

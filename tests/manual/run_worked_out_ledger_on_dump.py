@@ -8,7 +8,7 @@ release rehearsal kit's bench (``tools/rehearsal``) rather than beside it:
    measure, and that commit's production pins in a venv of their own;
 2. the commit's deploy step (``scripts/init_database.py``) runs on the clone as production's
    entrypoint runs it, under those pins, in production's environment, with the clock pinned at
-   noon of the dump's civil day (``rows.deploy``): the step that brings the store to target;
+   noon of the dump's civil day (``sides.deploy``): the step that brings the store to target;
 3. the harness runs from that worktree on the clone, pinned at the same instant, under THIS
    interpreter, since it needs the suite's helpers and a side's production pins do not hold
    ``pytest``.
@@ -21,6 +21,9 @@ creates the app)::
     LC_ALL=C.UTF-8 .venv/bin/python tests/manual/run_worked_out_ledger_on_dump.py \\
         --dump <pg_dump -Fc file> --out <a directory that does not exist yet> \\
         [--revision <commit, default HEAD>]
+
+A commit with no ``uv.lock`` is refused, exit 2: the bench builds a side's venv from its lock
+(ruling plan#2404).
 
 It writes three files into ``--out``: ``deploy.txt`` (the commit, the pinned instant and the
 deploy step's verdict), ``report.txt`` (the harness's report) and ``harness_log.txt`` (what the
@@ -43,7 +46,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 # Pylint: ``wrong-import-position`` -- these must follow the path bootstrap
 # above; there is no import order that resolves ``tools`` before it runs.
 # pylint: disable=wrong-import-position
-from tools.rehearsal import bench, rows
+from tools.rehearsal import bench
+from tools.rehearsal.sides import deploy, image_environment, side_environment
 
 #: The harness, as a path inside the measured worktree.
 _HARNESS = pathlib.Path("tests") / "manual" / "verify_worked_out_ledger.py"
@@ -68,9 +72,9 @@ def run(dump, out, revision):
     """
     with bench.Bench(dump, {_STATE: revision}) as made:
         state = made.made[_STATE]
-        moment = made.listing.noon(rows.image_environment(state.worktree)["TZ"])
+        moment = made.listing.noon(image_environment(state.worktree)["TZ"])
         secret = secrets.token_hex(32)
-        refused = rows.deploy(state, state.url, secret, moment)
+        refused = deploy(state, state.url, secret, moment)
         (out / "deploy.txt").write_text(
             f"commit {state.commit}, deployed under the clock pinned at "
             f"{moment.isoformat()}: "
@@ -80,7 +84,7 @@ def run(dump, out, revision):
         if refused is not None:
             return 2
         environment = {
-            **rows.side_environment(state, state.url, secret),
+            **side_environment(state, state.url, secret),
             "PATH": os.pathsep.join((str(pathlib.Path(sys.executable).parent),
                                      "/usr/bin", "/bin")),
         }

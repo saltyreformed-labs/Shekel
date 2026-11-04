@@ -220,7 +220,7 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
     """The step :func:`_next.next_step` hands out, Urgent, then High, then the board's order, each
     step's unfinished prerequisites just ahead of it, and never one On hold; then how far ``sync``
     is behind, what it cannot offer that a person must act on, each step waiting on one On hold,
-    by name (ruling plan#1832), and last,
+    by name (ruling plan#1830, plan#1820's spec), and last,
     after every line no further read can cost, each claimed card, and each task under one,
     holding a comment of the developer's that no answer of quill's has followed (plan#1822,
     ruling plan#1924, :func:`_comments.unanswered_lines`).
@@ -252,8 +252,8 @@ def cmd_next(args, tracker: Tracker, root: Path) -> int:
                  f"place it with `quill move plan#{card.number} --after plan#M` (or the board "
                  "lags a fresh write)"))
     for wait in answer.waiting:
-        print(f"WAITING: {_label(wait.step)} needs {' and '.join(map(_label, wait.on))}, "
-              f"which is {ON_HOLD}")
+        print(f"WAITING: {_label(wait.step)} needs what is {ON_HOLD}: "
+              f"{' and '.join(map(_label, wait.on))}")
     for claim in stale_claims(reads.claims, datetime.now(UTC)):
         print(f"STALE CLAIM: plan#{claim.card} on {holder(claim)}: no commit for more than "
               f"{STALE_CLAIM.days} days -- {release_hint(claim)} keeps its work and frees it")

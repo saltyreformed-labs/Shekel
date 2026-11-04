@@ -18,9 +18,10 @@ claims, whose own needs are still walked, or an open question, which only the de
 closes.  With nothing to hand out for it, the next step takes its turn.
 
 **A pause is never pulled through.**  A step On hold has no turn and is never handed out, and a
-leaf inherits a pause from a step above it (:func:`_state.held_at`).  A step that needs one waits:
-it is named, with what it waits on (:class:`Waiting`), and nothing else it needs is pulled ahead,
-since doing so brings it no nearer; each of those takes its own turn.
+leaf inherits a pause from a step above it (:func:`_state.held_at`).  A step that needs one waits
+(ruling plan#1830: "waits, and the tool says so"): it is named, with what it waits on
+(:class:`Waiting`).  Nothing else it needs is pulled ahead, each of those keeping its own turn: the
+developer has chosen that the step not go on yet, so what it needs gains no urgency from it.
 
 ``--arc`` hands out the first step of that arc in the same walk, so it never hands out another
 arc's step, and a step needing one simply passes.  Split out of :mod:`_state`, which On hold would
@@ -54,9 +55,9 @@ _AHEAD = (URGENT, HIGH)
 
 @dataclass(frozen=True)
 class Waiting:
-    """A step whose turn passes because it needs a card On hold (ruling plan#1832): ``step``, and
-    ``on``, each card On hold it waits on (:func:`_state.held_at`: a step above the card it
-    needs, when the pause is set there)."""
+    """A step whose turn passes because it needs a card On hold (rulings plan#1830, plan#1832):
+    ``step``, and ``on``, each card On hold its walk reaches (:func:`_state.held_at`: a step above
+    the card it needs, when the pause is set there)."""
 
     step: Card
     on: tuple[BareCard, ...]
@@ -93,9 +94,10 @@ def _needed(start: Card, cards: Mapping[int, Card], shipped: set[int],
     it (so two cards blocking each other end the walk), the needs of each in ``turn``'s order.
 
     The walk stops at a card no work can start on (:func:`_state.never_offered`, On hold among
-    them), and at any card that is not work.  A finding is walked: the one card it is blocked by
-    is the step that ships it (R-BAL395).  A question is not: what it is blocked by is the step
-    it was asked for, which it does not wait on."""
+    them), and at any card that is neither a step nor a finding.  A finding is walked: the one
+    card it is blocked by is its owner, whose pull request owes it (R-BAL395, plan#1777).  A
+    question is not: what it is blocked by is the step it was asked for, which it does not wait
+    on."""
     seen, wanted = set(), [start]
     while wanted:
         card = wanted.pop()

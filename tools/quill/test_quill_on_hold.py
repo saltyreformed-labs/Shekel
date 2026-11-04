@@ -42,6 +42,23 @@ def test_the_mark_cleared_the_claim_is_taken(code):
     assert 1 in _git.read(code).claims
 
 
+def test_a_claim_marked_on_hold_since_is_refused_for_the_pause_and_finishes_once_it_is_lifted(
+        code, capsys):
+    """never_offered is read before a claim is finished (``quill._claimed_again``), as its older
+    reasons are: the claim stands, and the same command finishes it when the mark is cleared."""
+    tracker = FakeTracker()
+    tracker.add(1)
+    assert run(tracker, code, "claim", "plan#1") == 0
+    assert run(tracker, code, "priority", "plan#1", "--to", "On hold") == 0
+    capsys.readouterr()
+    assert run(tracker, code, "claim", "plan#1") == 1
+    assert "never offered as work: it is On hold" in capsys.readouterr().err
+    assert 1 in _git.read(code).claims
+    assert run(tracker, code, "priority", "plan#1", "--clear") == 0
+    assert run(tracker, code, "claim", "plan#1") == 1
+    assert "plan#1 is already claimed" in capsys.readouterr().err
+
+
 def _next(tracker, code, capsys, *argv) -> list[str]:
     """What ``quill next`` prints, a line each; it exits 0."""
     capsys.readouterr()
@@ -49,7 +66,7 @@ def _next(tracker, code, capsys, *argv) -> list[str]:
     return capsys.readouterr().out.splitlines()
 
 
-def test_next_hands_out_the_step_a_marked_step_needs_read_from_the_real_board(code, capsys):
+def test_next_hands_out_the_step_a_marked_step_needs(code, capsys):
     """The ruling's example with C marked High, through the command: D, then C once D ships."""
     tracker = FakeTracker()
     tracker.add(1)
@@ -71,9 +88,20 @@ def test_next_names_a_step_waiting_on_one_on_hold_and_hands_out_the_next(code, c
     tracker.add(3, priority="On hold")
     assert _next(tracker, code, capsys) == [
         "next: plan#2 [step, balance] card 2",
-        "WAITING: plan#1 [step, balance] card 1 needs plan#3 [step, balance] card 3, which is "
-        "On hold",
+        "WAITING: plan#1 [step, balance] card 1 needs what is On hold: "
+        "plan#3 [step, balance] card 3",
     ]
+
+
+def test_next_names_each_of_two_pauses_a_step_needs(code, capsys):
+    """One line for the step, reading the same for one pause or two."""
+    tracker = FakeTracker()
+    tracker.add(1, blocked_by=(2, 3))
+    tracker.add(2, priority="On hold")
+    tracker.add(3, priority="On hold")
+    assert _next(tracker, code, capsys)[1] == (
+        "WAITING: plan#1 [step, balance] card 1 needs what is On hold: "
+        "plan#2 [step, balance] card 2 and plan#3 [step, balance] card 3")
 
 
 def test_next_with_nothing_to_hand_out_still_says_what_waits(code, capsys):
@@ -83,6 +111,6 @@ def test_next_with_nothing_to_hand_out_still_says_what_waits(code, capsys):
     tracker.add(2, priority="On hold")
     assert _next(tracker, code, capsys, "--arc", "balance") == [
         "next in balance: nothing",
-        "WAITING: plan#1 [step, balance] card 1 needs plan#2 [step, balance] card 2, which is "
-        "On hold",
+        "WAITING: plan#1 [step, balance] card 1 needs what is On hold: "
+        "plan#2 [step, balance] card 2",
     ]

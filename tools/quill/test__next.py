@@ -5,6 +5,10 @@ needs; a step needing one On hold waits, by name.  ``cmd_next``'s lines are
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
+
 from tools.quill._git import Claim
 from tools.quill._next import next_step
 from tools.quill._tracker import Card, Child
@@ -96,10 +100,12 @@ def test_a_prerequisite_goes_first_whatever_its_own_mark():
 
 def test_a_split_steps_mark_reaches_its_leaves_and_the_highest_holds():
     """A step marked and then split (plan#2023 holds High so, 2026-11-04) leaves the board; its
-    mark still orders its leaves, read and never copied."""
-    cards = _cards(_split(1, 3, 4, priority="High"), _split(2, 5, priority="Urgent"), _card(6),
-                   _card(3, parent=1), _card(4, parent=1, priority="Urgent"), _card(5, parent=2))
-    assert _handed_out([6, 3, 4, 5], cards) == [4, 5, 3, 6]
+    mark still orders its leaves, read and never copied, and the higher of a leaf's own and its
+    step's holds, whichever of them is the higher: plan#4 and plan#7 by the board, Urgent both."""
+    cards = _cards(_split(1, 3, 4, priority="High"), _split(2, 5, 7, priority="Urgent"), _card(6),
+                   _card(3, parent=1), _card(4, parent=1, priority="Urgent"), _card(5, parent=2),
+                   _card(7, parent=2, priority="High"))
+    assert _handed_out([6, 3, 7, 4, 5], cards) == [7, 4, 5, 3, 6]
 
 
 # -- what a blocked step needs -------------------------------------------------------------
@@ -168,17 +174,24 @@ def test_two_cards_blocking_each_other_end_the_walk():
     assert next_step([1, 2, 9], cards, set(), {}).card.number == 9
 
 
-def test_a_shared_need_is_walked_once():
-    """Two ways down to one card hand it out, and name it once."""
+def test_a_pause_reached_two_ways_is_named_once():
+    """C needs D and E, and each of them needs H."""
     cards = _cards(_card(1, blocked_by=(2, 3)), _card(2, blocked_by=(4,)),
                    _card(3, blocked_by=(4,)), _card(4, priority="On hold"))
     answer = next_step([1, 2, 3, 4], cards, set(), {})
     assert [card.number for card in answer.waiting[0].on] == [4]
 
 
+def test_a_shared_need_is_handed_out_by_the_two_ways_down_to_it():
+    """C needs D and E, and each of them needs F, which goes first."""
+    cards = _cards(_card(1, blocked_by=(2, 3)), _card(2, blocked_by=(4,)),
+                   _card(3, blocked_by=(4,)), _card(4))
+    assert _handed_out([1, 2, 3, 4], cards) == [4, 2, 3, 1]
+
+
 def test_a_finding_needed_hands_out_the_step_that_ships_it():
-    """A finding is never handed out, but the one step it is blocked by ships it (R-BAL395), so
-    that step is what the step needing it waits for."""
+    """A finding is never handed out, but the one step it is blocked by is its owner, whose pull
+    request owes it (R-BAL395, plan#1777), so that step is what the step needing it waits for."""
     cards = _cards(_card(1, blocked_by=(2,)), _card(9), _card(2, "finding", blocked_by=(3,)),
                    _card(3))
     assert next_step([1, 9, 3], cards, set(), {}).card.number == 3
@@ -189,6 +202,14 @@ def test_a_question_is_answered_not_built_and_its_owner_is_not_what_is_needed():
     question needs: only the developer's answer closes it, so C passes its turn."""
     cards = _cards(_card(1, blocked_by=(2,)), _card(9), _card(2, "question", blocked_by=(3,)),
                    _card(3))
+    assert next_step([1, 9, 3], cards, set(), {}).card.number == 9
+
+
+@pytest.mark.parametrize("kind", ["ruling", "task"])
+def test_the_walk_stops_at_a_card_that_is_neither_a_step_nor_a_finding(kind):
+    """Nothing a ruling or a task is blocked by is what a step needing it needs, and neither is
+    built by a step's own turn: the next step takes its turn."""
+    cards = _cards(_card(1, blocked_by=(2,)), _card(9), _card(2, kind, blocked_by=(3,)), _card(3))
     assert next_step([1, 9, 3], cards, set(), {}).card.number == 9
 
 
@@ -216,6 +237,13 @@ def test_a_prerequisite_off_the_board_is_handed_out_and_still_named():
     assert [card.number for card in answer.unplaced] == [2]
 
 
+def test_needs_off_the_board_go_in_number_order():
+    """No place on the board tells them apart, so their numbers do."""
+    cards = _cards(_card(1, blocked_by=(2, 3)), _card(2, board_item=None),
+                   _card(3, board_item=None))
+    assert next_step([1], cards, set(), {}).card.number == 2
+
+
 def test_a_marked_step_off_the_board_takes_no_turn():
     """A mark does not give a step a place in the order: it is named instead."""
     cards = _cards(_card(9), _card(2, board_item=None, priority="Urgent"))
@@ -227,7 +255,7 @@ def test_a_marked_step_off_the_board_takes_no_turn():
 # -- On hold -------------------------------------------------------------------------------
 
 def test_a_step_on_hold_is_never_handed_out_and_nothing_waits_for_it_unasked():
-    """Ruling plan#1832: never handed out, whatever its place; and with nothing needing it, it
+    """Ruling plan#1831: never handed out, whatever its place; and with nothing needing it, it
     is the developer's mark alone, with no line."""
     cards = _cards(_card(1, priority="On hold"), _card(2))
     answer = next_step([1, 2], cards, set(), {})
@@ -263,7 +291,8 @@ def test_a_step_waiting_on_a_pause_pulls_nothing_else_it_needs():
 
 
 def test_a_step_needing_two_pauses_names_both():
-    """Each is a mark the developer would have to lift."""
+    """Each pause its walk reaches is named.  A pause behind a pause is not reached: the walk
+    stops at the first, and the step needing it is named in its own turn."""
     cards = _cards(_card(1, blocked_by=(2, 3)), _card(2, priority="On hold"),
                    _card(3, priority="On hold"))
     answer = next_step([1, 2, 3], cards, set(), {})
@@ -326,9 +355,13 @@ def test_a_claimed_step_needing_a_pause_is_named_and_a_shipped_one_is_not():
 
 
 def test_the_mark_lifted_the_step_is_handed_out_at_the_waiter_s_turn():
-    """The waiter's turn comes back at once: the pull of the ruling's example."""
-    cards = _cards(_card(1, blocked_by=(3,)), _card(2), _card(3))
-    assert next_step([1, 2, 3], cards, set(), {}).card.number == 3
+    """Held, C waits and B goes; with the mark cleared, C's turn pulls its need at once, as the
+    ruling's example pulls D, and nothing waits."""
+    held = _cards(_card(1, blocked_by=(3,)), _card(2), _card(3, priority="On hold"))
+    assert next_step([1, 2, 3], held, set(), {}).card.number == 2
+    lifted = {**held, 3: replace(held[3], priority=None)}
+    answer = next_step([1, 2, 3], lifted, set(), {})
+    assert answer.card.number == 3 and not answer.waiting
 
 
 # -- --arc ---------------------------------------------------------------------------------

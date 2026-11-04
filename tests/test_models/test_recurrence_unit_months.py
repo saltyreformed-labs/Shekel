@@ -22,6 +22,7 @@ each unit's span and flag off the row, and the occurrence stride follows a
 span changed in the database, which is the ruling's whole claim -- the code
 holds no second copy to answer from.
 """
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
@@ -34,7 +35,13 @@ from app import ref_cache
 from app.enums import RecurrenceUnitEnum
 from app.models.ref import RecurrenceUnit
 from app.ref_seeds import _REF_TABLE_SEEDS
-from app.services.recurrence import _months, has_day_of_month_coordinate
+from app.services.pay_calendar import PayCadence
+from app.services.pay_rhythm import FixedDays
+from app.services.recurrence import (
+    Cadence,
+    _months,
+    has_day_of_month_coordinate,
+)
 from tests._test_helpers import load_migration_module
 from tests.test_models._rule_unit_flag import rewind_rule_unit_flag
 
@@ -229,3 +236,29 @@ class TestTheEngineReadsTheRow:
                 db.session.rollback()
                 ref_cache.init(db.session)
             assert _months.months_per_step(RecurrenceUnitEnum.YEAR, 1) == 12
+
+    def test_the_yearly_count_follows_a_span_changed_on_the_row(self, app, db):
+        """A yearly span of 24 is half a unit a year (finding plan#2801).
+
+        The count the monthly equivalent reads and the stride above read one
+        span.  With the code table this replaced, the count would still read 1
+        beside a 24-month stride.
+        """
+        biweekly = PayCadence(FixedDays(14))
+        yearly = Cadence(interval_n=1, unit=RecurrenceUnitEnum.YEAR)
+        monthly = Cadence(interval_n=1, unit=RecurrenceUnitEnum.MONTH)
+        with app.app_context():
+            assert monthly.units_per_year(biweekly) == Decimal("12")
+            assert yearly.units_per_year(biweekly) == Decimal("1")
+            db.session.execute(sqlalchemy.text(
+                "UPDATE ref.recurrence_units SET months_per_unit = 24 "
+                "WHERE name = 'year'"
+            ))
+            ref_cache.init(db.session)
+            try:
+                # 12 months a year over 24 months a unit.
+                assert yearly.units_per_year(biweekly) == Decimal("0.5")
+            finally:
+                db.session.rollback()
+                ref_cache.init(db.session)
+            assert yearly.units_per_year(biweekly) == Decimal("1")

@@ -85,8 +85,9 @@ first three-payday month.  Like the interval it is not part of an OFFER: every
 positive ceiling is authorable wherever a unit can put two occurrences in a
 month (:func:`can_repeat_within_month`), and refused where it cannot.
 
-No Flask, no ORM, no clock, and no database read: a unit's day-of-month flag
-comes from the reference cache, loaded once per process (ruling plan#2748).
+No Flask, no ORM, no clock, and no database read: a unit's month span and
+day-of-month flag come from the reference cache, loaded once per process (ruling
+plan#2748).
 """
 from dataclasses import dataclass
 from decimal import Decimal
@@ -116,26 +117,6 @@ from app.services.recurrence._vocabulary import (
 #: inherits that rule without a second one being invented for it.
 _WEEKLY = PayCadence(FixedDays(7))
 
-#: How many times a year each CALENDAR unit fires, before its interval divides
-#: the count.
-#:
-#: The twelve comes from :data:`app.utils.money.MONTHS_PER_YEAR`, the MONEY
-#: constant, and not from ``recurrence._months``' integer twelve: this count is
-#: a factor in a monthly equivalent, and an adversarial review of plan step
-#: R7a-2b noted that one expression was reading its twelve from two modules.
-#: ``_months``' is for month-ORDINAL arithmetic and stays where it is.
-#:
-#: ``PERIOD`` is absent DELIBERATELY, and the absence is not a lookup miss:
-#: it is the one unit whose count is a property of the OWNER rather than of the
-#: calendar, so :meth:`Cadence.occurrences_per_year` answers it from the pay
-#: cadence BEFORE consulting this table.  An entry for it would have to be a
-#: placeholder, which is how a per-owner fact becomes a constant again -- the
-#: defect plan step R7a-2a removed.
-_CALENDAR_UNITS_PER_YEAR: dict[RecurrenceUnitEnum, Decimal] = {
-    RecurrenceUnitEnum.WEEK: _WEEKLY.periods_per_year,
-    RecurrenceUnitEnum.MONTH: MONTHS_PER_YEAR,
-    RecurrenceUnitEnum.YEAR: Decimal(1),
-}
 
 class RecurrenceFrequencyError(ShekelError):
     """A cadence names a unit with no yearly count.
@@ -202,7 +183,8 @@ class Cadence:
         """Return how many of this cadence's UNIT fit in a year, EXACTLY.
 
         The count before :attr:`interval_n` divides it -- 26 paychecks, 52
-        weeks, 12 months, 1 year -- and always a whole number, which is what
+        weeks, 12 months, 1 year -- and a whole number on every span
+        ``app.ref_seeds`` states (1 and 12 both divide twelve), which is what
         makes it the right thing to hand a money conversion.
 
         **The interval is deliberately NOT applied here, and that is an
@@ -243,16 +225,27 @@ class Cadence:
                 about a monthly bill.
 
         Returns:
-            The whole number of units in a year, as a ``Decimal``.
+            The number of units in a year, as a ``Decimal``.
 
         Raises:
             RecurrenceFrequencyError: *unit* has no yearly count -- a member
                 added to :class:`~app.enums.RecurrenceUnitEnum` without one.
         """
+        # The one unit whose count is a property of the OWNER rather than of
+        # the calendar: a constant here is how a per-owner fact becomes wrong,
+        # the defect plan step R7a-2a removed.
         if self.unit is RecurrenceUnitEnum.PERIOD:
             return pay_cadence.periods_per_year
-        per_year = _CALENDAR_UNITS_PER_YEAR.get(self.unit)
-        if per_year is None:
+        if self.unit is RecurrenceUnitEnum.WEEK:
+            return _WEEKLY.periods_per_year
+        # Twelve over the span on the unit's reference row, the span the month
+        # stride walks (finding plan#2801), so the two cannot disagree.  The
+        # twelve is :data:`app.utils.money.MONTHS_PER_YEAR`, the MONEY constant,
+        # and not ``recurrence._months``' integer: this count is a factor in a
+        # monthly equivalent, and an adversarial review of plan step R7a-2b
+        # noted one expression reading its twelve from two modules.
+        months = ref_cache.recurrence_unit_months(self.unit)
+        if months is None:
             raise RecurrenceFrequencyError(
                 f"recurrence unit {self.unit!r} has no yearly count.  Every "
                 f"member of RecurrenceUnitEnum must have one: a monthly "
@@ -261,7 +254,7 @@ class Cadence:
                 f"emergency-fund baseline and to every per-goal contribution "
                 f"floor."
             )
-        return per_year
+        return MONTHS_PER_YEAR / months
 
     def occurrences_per_year(self, pay_cadence: PayCadence) -> Decimal:
         """Return how many times a year this cadence actually fires.

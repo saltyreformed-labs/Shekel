@@ -1,9 +1,13 @@
 """A measurement on a production copy that measured nothing exits 2, never Python's own 1.
 
-Every production-dump measurement here reads one exit status: 0 clean, 1 figures part (a
-difference it measured, a question for the developer), 2 nothing measured.  Python ends any
-uncaught exception with status 1, so however carefully each chose its own statuses, each read
-every crash as figures that moved: on a dump older than head's migrations
+Five production-dump measurements read one exit status, each arming this module: the three
+runners ``run_*_on_dump.py``, and ``verify_worked_out_ledger.py`` and
+``measure_worked_out_read.py``, which they run.  It is 0 clean, 1 figures part (a difference it
+measured, a question for the developer), 2 nothing measured.  The figure baselines and the render
+probe a runner also runs do not read it: any non-zero of theirs is nothing measured to the runner
+(``_dump_runs.run_pinned_on``).  Python ends any uncaught exception with status 1, so however
+carefully each of the five chose its own statuses, each read every crash as figures that moved: on
+a dump older than head's migrations
 ``measure_worked_out_read.py`` raised in ``ref_cache.init`` before it read a row, and exited as
 if a count had moved (measured 2026-11-04, ``PRE_FICA_DEDUCTION``, finding plan#2826).
 

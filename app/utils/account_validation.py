@@ -204,7 +204,7 @@ def _visible_account_type(type_id, user_id):
     return None
 
 
-def _crosses_amortizing_boundary(old_type, new_amortization):
+def _crosses_amortizing_boundary(old_type: AccountType, new_amortization: bool) -> bool:
     """Return True iff a type change moves an account between loan and non-loan.
 
     The kind decides which records an account's history is worked out from: a
@@ -223,7 +223,9 @@ def _crosses_amortizing_boundary(old_type, new_amortization):
     return bool(old_type.has_amortization) != bool(new_amortization)
 
 
-def _crosses_posting_boundary(old_type, new_amortization, new_category_id):
+def _crosses_posting_boundary(
+    old_type: AccountType, new_amortization: bool, new_category_id: int,
+) -> bool:
     """Return True iff a type edit leaves the stored chart to bring back in step.
 
     The upkeep of the stored ledger, which X-ew's third leaf (plan#2516)

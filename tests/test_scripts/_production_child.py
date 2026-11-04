@@ -6,7 +6,7 @@ import secrets
 
 
 def production_env(database_url: str) -> dict:
-    """Build the child\x27s environment: the production config, on *database_url*.
+    """Build the child's environment: the production config, on *database_url*.
 
     Only what Python needs to run is inherited.  ``ProdConfig`` refuses to
     start without a SECRET_KEY of real length and a non-memory rate-limit
@@ -15,7 +15,7 @@ def production_env(database_url: str) -> dict:
     reads it as unset) leaves no other database to reach.
 
     Args:
-        database_url: The URL of this test\x27s database, password included.
+        database_url: The URL of this test's database, password included.
 
     Returns:
         The environment mapping for :func:`subprocess.run`.

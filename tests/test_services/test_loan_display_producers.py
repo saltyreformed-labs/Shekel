@@ -349,8 +349,10 @@ class TestConfirmedLoanPaymentHistory:
 
         Plan task plan#2779: whether the table shows is the walk's answer.  The
         statements are captured too, so a read of a stored table that happened
-        to agree could not pass; the capture holding the terms' table is what
-        says it measured the read.
+        to agree could not pass.  A load FROM the terms' table is what says the
+        capture measured the walk, which reads the terms by the loan's id: merely
+        naming that table says nothing, since ``Account.loan_params`` joins it
+        into any load of the account.
         """
         with app.app_context():
             scenario_id = seed_user["scenario"].id
@@ -377,7 +379,9 @@ class TestConfirmedLoanPaymentHistory:
                 Decimal("250000.00"), Decimal("100000.00"),
             ]
             for reads in (table_reads, scorecard_reads):
-                assert any("loan_params" in text for text, _params in reads)
+                assert any(
+                    "FROM budget.loan_params" in text for text, _params in reads
+                )
                 assert not [
                     text for text, _params in reads
                     if any(table in text for table in _STORED_LEDGER_TABLES)

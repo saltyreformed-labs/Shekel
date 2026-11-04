@@ -195,7 +195,13 @@ class TestTheFlagIsHeldToTheUnit:
                 seed_user, db, RecurrenceUnitEnum.MONTH,
                 unit_has_day_of_month=None,
             )
-            _assert_refused_by(db, "unit_has_day_of_month", "null flag")
+            with pytest.raises(IntegrityError) as exc_info:
+                db.session.flush()
+            # The database's own word: the statement's text names the column too.
+            assert (
+                exc_info.value.orig.diag.column_name == "unit_has_day_of_month"
+            )
+            db.session.rollback()
 
     def test_moving_the_unit_alone_is_refused(self, app, db, seed_user):
         """A stored rule re-pointed by hand cannot leave its flag behind."""

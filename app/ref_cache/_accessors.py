@@ -209,7 +209,7 @@ def recurrence_unit_id(member):
     return cache().enum_ids[RecurrenceUnitEnum][member]
 
 
-def recurrence_unit_months(member):
+def recurrence_unit_months(member: RecurrenceUnitEnum) -> int | None:
     """Return how many months one *member* unit spans, or ``None``.
 
     The ONE statement of which recurrence units are measured in months, and
@@ -237,7 +237,7 @@ def recurrence_unit_months(member):
     return cache().recurrence_unit_months.get(member)
 
 
-def recurrence_unit_has_day_of_month(member):
+def recurrence_unit_has_day_of_month(member: RecurrenceUnitEnum) -> bool:
     """Return whether a cadence measured in *member* fires on a day of the month.
 
     The unit's ``ref.recurrence_units.has_day_of_month``, which the DATABASE

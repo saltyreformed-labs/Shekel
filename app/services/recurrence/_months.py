@@ -60,7 +60,6 @@ from app.enums import RecurrenceUnitEnum
 from app.exceptions import ShekelError
 from app.utils.dates import (
     CALENDAR_DATE_MAX,
-    MONTHS_PER_YEAR,
     clamped_day,
     grid_month_on_or_before,
     month_ordinal,
@@ -185,7 +184,6 @@ def walk_months(
 
 
 __all__ = [
-    "MONTHS_PER_YEAR",
     "MonthStepError",
     "clamped_day",
     "month_ordinal",

@@ -18,20 +18,17 @@ this test's own clone: the downgrade takes all three objects away, the
 upgrade puts back exactly the spans the seed states, and its refusal over a
 database missing a calendar row is FIRED rather than left as the one path a
 green suite never runs.  And what the ENGINE reads: ``ref_cache`` answers
-each unit's span and flag off the row, and the stride, the yearly count and
-the day-of-month predicate each follow a span changed in the database, which
-is the ruling's claim: the code holds no second copy of them.  The describer's
+each unit's span and flag off the row, and the stride, the yearly count, the
+months-to-years rewrite and the day-of-month predicate each follow a span
+changed in the database, which is the ruling's claim: the code holds no second
+copy of them.  The describer's
 words are outside it: it names ``(MONTH, 3)`` "Quarterly" for what a month
 means, and a span edit is no supported act (``RecurrenceUnit``'s docstring).
 """
 from decimal import Decimal
-from unittest.mock import patch
 
 import pytest
 import sqlalchemy
-from alembic import op
-from alembic.operations import Operations
-from alembic.runtime.migration import MigrationContext
 
 from app import ref_cache
 from app.enums import RecurrenceUnitEnum
@@ -42,9 +39,10 @@ from app.services.pay_rhythm import FixedDays
 from app.services.recurrence import (
     Cadence,
     _months,
+    canonical_cadence,
     has_day_of_month_coordinate,
 )
-from tests._test_helpers import load_migration_module
+from tests._test_helpers import load_migration_module, run_migration_callable
 from tests.test_models._rule_unit_flag import rewind_rule_unit_flag
 
 _MIGRATION = load_migration_module(
@@ -81,20 +79,6 @@ def _columns(db):
         "SELECT column_name FROM information_schema.columns "
         "WHERE table_schema = 'ref' AND table_name = 'recurrence_units'"
     )).scalars())
-
-
-def _run(db, step):
-    """Drive one of the migration's steps over this test's own connection.
-
-    The idiom ``test_recurrence_window_check`` uses: Alembic's ``op`` proxy
-    needs an operations context, and ``op.get_bind`` is patched so the step
-    gets the session's connection rather than a second one.
-    """
-    connection = db.session.connection()
-    ctx = MigrationContext.configure(connection=connection)
-    with Operations.context(ctx):
-        with patch.object(op, "get_bind", return_value=connection):
-            step()
 
 
 class TestWhatTheRowsSay:
@@ -161,10 +145,10 @@ class TestTheMigration:
         """
         with app.app_context():
             rewind_rule_unit_flag(db.session)
-            _run(db, _MIGRATION.downgrade)
+            run_migration_callable(_MIGRATION.downgrade, db.session)
             assert not {"months_per_unit", "has_day_of_month"} & _columns(db)
 
-            _run(db, _MIGRATION.upgrade)
+            run_migration_callable(_MIGRATION.upgrade, db.session)
             assert _stored(db) == _EXPECTED
             superkeys = db.session.execute(sqlalchemy.text(
                 "SELECT count(*) FROM pg_constraint "
@@ -184,14 +168,14 @@ class TestTheMigration:
         """
         with app.app_context():
             rewind_rule_unit_flag(db.session)
-            _run(db, _MIGRATION.downgrade)
+            run_migration_callable(_MIGRATION.downgrade, db.session)
             db.session.execute(sqlalchemy.text(
                 "UPDATE ref.recurrence_units SET name = 'annual' "
                 "WHERE name = 'year'"
             ))
 
             with pytest.raises(RuntimeError) as exc:
-                _run(db, _MIGRATION.upgrade)
+                run_migration_callable(_MIGRATION.upgrade, db.session)
 
             assert "wrote a month span on 1 row(s), expected 2" in str(
                 exc.value
@@ -259,6 +243,30 @@ class TestTheEngineReadsTheRow:
                 db.session.rollback()
                 ref_cache.init(db.session)
             assert not has_day_of_month_coordinate(RecurrenceUnitEnum.WEEK)
+
+    def test_the_rewrite_to_years_follows_a_span_changed_on_the_row(self, app, db):
+        """A month of two makes six of them one year: the rewrite reads the stride.
+
+        It divided the authored interval by twelve, which assumes a month spans
+        one: ``(6, MONTH)`` passed its remainder test and became an interval of
+        0, which no rule can hold.
+        """
+        with app.app_context():
+            db.session.execute(sqlalchemy.text(
+                "UPDATE ref.recurrence_units SET months_per_unit = 2 "
+                "WHERE name = 'month'"
+            ))
+            ref_cache.init(db.session)
+            try:
+                assert canonical_cadence(6, RecurrenceUnitEnum.MONTH) == Cadence(
+                    interval_n=1, unit=RecurrenceUnitEnum.YEAR,
+                )
+            finally:
+                db.session.rollback()
+                ref_cache.init(db.session)
+            assert canonical_cadence(6, RecurrenceUnitEnum.MONTH) == Cadence(
+                interval_n=6, unit=RecurrenceUnitEnum.MONTH,
+            )
 
     def test_the_yearly_count_follows_a_span_changed_on_the_row(self, app, db):
         """A yearly span of 24 is half a unit a year (finding plan#2801).

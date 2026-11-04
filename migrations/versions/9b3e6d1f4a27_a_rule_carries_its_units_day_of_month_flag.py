@@ -79,7 +79,7 @@ _UNFILLED = sa.text(
 )
 
 
-def _clear_what_the_unit_cannot_hold(bind) -> None:
+def _clear_what_the_unit_cannot_hold(bind: sa.engine.Connection) -> None:
     """Set each value its rule's unit cannot hold to NULL, printing each one.
 
     Args:

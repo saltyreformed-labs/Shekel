@@ -241,7 +241,7 @@ class Cadence:
         # Twelve over the span on the unit's reference row, the span the month
         # stride walks (finding plan#2801), so the two cannot disagree.  The
         # twelve is :data:`app.utils.money.MONTHS_PER_YEAR`, the MONEY constant,
-        # and not ``recurrence._months``' integer: this count is a factor in a
+        # and not ``app.utils.dates``' integer: this count is a factor in a
         # monthly equivalent, and an adversarial review of plan step R7a-2b
         # noted one expression reading its twelve from two modules.
         months = ref_cache.recurrence_unit_months(self.unit)
@@ -666,10 +666,11 @@ def canonical_cadence(
     if unit is not RecurrenceUnitEnum.MONTH:
         return stated
     months_per_year = months_per_step(RecurrenceUnitEnum.YEAR, 1)
-    if months_per_step(unit, interval_n) % months_per_year != 0:
+    stride = months_per_step(unit, interval_n)
+    if stride % months_per_year != 0:
         return stated
     return Cadence(
-        interval_n=interval_n // months_per_year,
+        interval_n=stride // months_per_year,
         unit=RecurrenceUnitEnum.YEAR,
         max_per_month=max_per_month,
     )

@@ -776,6 +776,16 @@ def hard_delete_account(account_id):
         return _archive_instead_of_delete(account, account_id, history_refusal)
 
     # All guards passed -- permanently delete.
+    # A loan's terms go first, before step 1.  Step 1's delete of a hidden
+    # payment re-syncs the loan it left, and a loan the store is short of
+    # would have the sync post on the very chart rows step 3 disposes of:
+    # those legs go by the cascade, their entries stay empty, and the balanced
+    # trigger their inserts queued refuses at COMMIT.  A loan with no terms
+    # walks to nothing and the sync writes nothing
+    # (``LoanLedgerWalk.is_empty``, the N1 guard), so this door never writes
+    # on rows it deletes.
+    db.session.query(LoanParams).filter_by(account_id=account_id).delete()
+
     # Step 1: delete remaining Transfer rows (soft-deleted or ghost
     # ad-hoc) through the transfer service, which every write of a transfer
     # goes through (CLAUDE.md, Architecture).
@@ -818,7 +828,6 @@ def hard_delete_account(account_id):
     # relationships on Account.  Without explicit relationships,
     # SQLAlchemy's unit of work tries to SET NULL on their account_id
     # column before the DB-level CASCADE fires, violating NOT NULL.
-    db.session.query(LoanParams).filter_by(account_id=account_id).delete()
     db.session.query(InterestParams).filter_by(account_id=account_id).delete()
     db.session.query(InvestmentParams).filter_by(account_id=account_id).delete()
     db.session.query(AssetAppreciationParams).filter_by(

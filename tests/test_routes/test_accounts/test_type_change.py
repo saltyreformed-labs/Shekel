@@ -535,6 +535,48 @@ class TestTypeChangeBoundaryGuard:
             db.session.refresh(custom_type)
             assert custom_type.has_amortization is False
 
+    @pytest.mark.parametrize(
+        "openings", (("0.00", "-250.00"), ("-250.00", "0.00")),
+        ids=("the-second-holds-it", "the-first-holds-it"),
+    )
+    def test_type_edit_amortization_flip_refused_when_any_account_holds_a_line(
+        self, app, auth_client, seed_user, openings,
+    ):
+        """Either of a type's two accounts holding the line refuses the flip.
+
+        One holds a $0.00 opening, which books nothing, and the other $250.00 owed.
+        The type is one row, so it cannot cross for the one and not the other.
+        """
+        with app.app_context():
+            custom_type = AccountType(
+                name="store_card",
+                category_id=ref_cache.acct_category_id(AcctCategoryEnum.LIABILITY),
+                user_id=seed_user["user"].id,
+            )
+            db.session.add(custom_type)
+            db.session.commit()
+            for number, opening in enumerate(openings):
+                account_service.create_account(
+                    account_service.AccountSpec(
+                        user_id=seed_user["user"].id,
+                        account_type_id=custom_type.id,
+                        name=f"Store Card {number}",
+                        anchor_balance=Decimal(opening),
+                    ),
+                )
+            db.session.commit()
+
+            response = auth_client.post(
+                f"/accounts/types/{custom_type.id}",
+                data=_type_edit_form(custom_type, has_amortization="true"),
+                follow_redirects=True,
+            )
+
+            assert response.status_code == 200
+            assert b"between a loan type and a non-loan type" in response.data
+            db.session.refresh(custom_type)
+            assert custom_type.has_amortization is False
+
     def test_type_edit_amortization_flip_allowed_holding_no_line(
         self, app, auth_client, seed_user,
     ):

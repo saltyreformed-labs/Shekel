@@ -11,6 +11,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.extensions import db as _db
+from app.models.category import Category
 from app.models.journal_entry import Posting
 from app.models.ledger_account import LedgerAccount
 from app.models.scenario import Scenario
@@ -98,6 +99,29 @@ class TestALineMustBeTheAccountsOwn:
             theirs = seed_second_user["account"]
             assert accounts_hold_lines([account]) is False
             assert accounts_hold_lines([account, theirs]) is True
+
+    def test_a_category_line_sharing_the_accounts_id_is_not_its_line(
+        self, app, db, seed_user,
+    ):
+        """A key's record id means an account only on a key that names an account.
+
+        The test database's id offsets keep accounts' and categories' ids apart, so
+        the category is inserted with the empty account's id: the line beside it,
+        on the seeded Checking under that category, carries the same number.
+        """
+        with app.app_context():
+            account = _empty_account(seed_user)
+            category = Category(
+                id=account.id, user_id=seed_user["user"].id,
+                group_name="Shared", item_name="Number",
+            )
+            _db.session.add(category)
+            _db.session.flush()
+            create_settled_cash_transaction(
+                seed_user, _db.session, seed_user["bootstrap_period"],
+                Decimal("70.00"), category=category,
+            )
+            assert accounts_hold_lines([account]) is False
 
 
 class TestEveryScenarioIsAsked:

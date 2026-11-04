@@ -17,7 +17,9 @@ import io
 import pathlib
 import subprocess
 import sys
+from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -25,6 +27,8 @@ from sqlalchemy import text
 
 from tests._test_helpers import create_settled_cash_transaction
 from tests.manual import exit_status
+from tests.manual import run_deploy_rewrites_on_dump as deploy_rewrites
+from tests.manual import run_worked_out_ledger_on_dump as worked_out_ledger
 from tests.manual import verify_worked_out_ledger as harness
 from tests.test_scripts._production_child import production_env
 
@@ -286,7 +290,10 @@ class TestTheHook:
 
 
 class TestWhatARunnerTakesFromAMeasurement:
-    """A runner folds its measurements by the highest status, so each must be 0, 1 or 2."""
+    """A runner folds its measurements by the highest status, so each must be 0, 1 or 2.
+
+    Each runner's fold runs in this process, its measurements stubbed: none makes a bench.
+    """
 
     @pytest.mark.parametrize("returncode, status", (
         (0, 0),     # clean
@@ -299,3 +306,30 @@ class TestWhatARunnerTakesFromAMeasurement:
     def test_only_a_verdict_passes(self, returncode, status):
         """0 and 1 are a measurement's own; everything else measured nothing."""
         assert exit_status.measurement_status(returncode) == status
+
+    @pytest.mark.parametrize("measured, status", (
+        ((0, 0, 0, 0, 0), 0),
+        ((0, 1, 0, 0, 0), 1),
+        ((0, 0, 1, 0, 0), 1),
+        ((-9, 0, 0, 0, 0), 2),      # a harness killed: the highest raw status reads 0
+        ((0, 0, 0, 0, -9), 2),      # a probe killed
+    ))
+    def test_the_deploy_rewrites_run_folds_its_five(self, measured, status):
+        """Head's harness on two copies, then its probe on three: one status."""
+        with mock.patch.object(deploy_rewrites, "_measured", side_effect=measured):
+            folded = deploy_rewrites._measure_copies(
+                {"base": "b", "head": "h", "undeployed": "u"}, None, lambda *_: None,
+            )
+
+        assert folded == status
+
+    @pytest.mark.parametrize("returncode, status", ((0, 0), (1, 1), (2, 2), (-9, 2)))
+    def test_the_worked_out_ledger_run_takes_its_harness(self, returncode, status, tmp_path):
+        """A verdict passes as it is, and a harness killed is nothing measured."""
+        finished = subprocess.CompletedProcess([], returncode, stderr="")
+        with mock.patch.object(worked_out_ledger.bench, "run", return_value=finished):
+            taken = worked_out_ledger._measure(
+                SimpleNamespace(worktree=tmp_path), {}, datetime(2026, 11, 4, 12), tmp_path,
+            )
+
+        assert taken == status

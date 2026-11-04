@@ -56,6 +56,28 @@ _HARNESS = pathlib.Path("tests") / "manual" / "verify_worked_out_ledger.py"
 _STATE = "measured"
 
 
+def _measure(state, environment, moment, out):
+    """Run the harness from *state*'s worktree on its copy; what its exit status says.
+
+    Args:
+        state: The side measured, whose worktree holds the harness.
+        environment: The harness's environment.
+        moment: The instant its clock is pinned at.
+        out: The directory its report and log are written to.
+
+    Returns:
+        The harness's verdict, or 2 for any other status (``exit_status``).
+    """
+    with (out / "harness_log.txt").open("w", encoding="utf-8") as log:
+        measured = bench.run(
+            [sys.executable, str(state.worktree / _HARNESS),
+             "--report", str(out / "report.txt"), "--at", moment.isoformat()],
+            environment, stdout=log, cwd=state.worktree,
+        )
+        log.write(measured.stderr)
+    return exit_status.measurement_status(measured.returncode)
+
+
 def run(dump, out, revision):
     """Bring the bench up on *dump*, deploy, measure into *out*; the exit status.
 
@@ -89,14 +111,7 @@ def run(dump, out, revision):
             "PATH": os.pathsep.join((str(pathlib.Path(sys.executable).parent),
                                      "/usr/bin", "/bin")),
         }
-        with (out / "harness_log.txt").open("w", encoding="utf-8") as log:
-            measured = bench.run(
-                [sys.executable, str(state.worktree / _HARNESS),
-                 "--report", str(out / "report.txt"), "--at", moment.isoformat()],
-                environment, stdout=log, cwd=state.worktree,
-            )
-            log.write(measured.stderr)
-        return exit_status.measurement_status(measured.returncode)
+        return _measure(state, environment, moment, out)
 
 
 def main(argv=None):

@@ -6,6 +6,8 @@ from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from app import ref_cache
 from app.enums import PostingKindEnum, PostingSourceEnum
 from app.extensions import db as _db
@@ -19,7 +21,12 @@ from app.services.ledger_report_service import StatementWindow
 from app.services.pay_calendar import calendar_for
 import sqlalchemy as sa
 
-from tests._test_helpers import create_settled_cash_transaction, linked_ledger_account
+from tests._test_helpers import (
+    capture_sql_statements,
+    create_account_of_type,
+    create_settled_cash_transaction,
+    linked_ledger_account,
+)
 
 from ._helpers import (
     _checking_at_its_opening,
@@ -194,6 +201,84 @@ class TestScenarioAndOwnerIsolation:
                 user2, seed_second_user["scenario"].id, sheet2,
             )
             _assert_ledger_self_consistent()
+
+    def test_a_line_under_another_owners_category_is_refused(
+        self, app, db, seed_user, seed_second_user,
+    ):
+        """A purchase moved under the other owner's category refuses, unlabelled.
+
+        No key ties a transaction's category to its owner, so the row can exist, though
+        the stored ledger's writer refuses to book one: it is moved there after its
+        settle.  The labels are loaded under this owner alone, so the read finds no
+        record for the line, where a load by id would label it with the other's name.
+        """
+        with app.app_context():
+            theirs_id = seed_second_user["categories"]["Rent"].id
+            purchase = create_settled_cash_transaction(
+                seed_user, db.session, seed_user["bootstrap_period"],
+                Decimal("60.00"), account=seed_user["account"],
+                category=seed_user["categories"]["Groceries"],
+                settled_on=date(_Y, 10, 1),
+            )
+            db.session.execute(
+                sa.text(
+                    "UPDATE budget.transactions SET category_id = :theirs WHERE id = :id"
+                ),
+                {"theirs": theirs_id, "id": purchase.id},
+            )
+            db.session.commit()
+            db.session.expire_all()
+
+            with pytest.raises(ValueError, match=f"the Category id={theirs_id}"):
+                _reader_bs(seed_user["user"].id)
+
+
+class TestTheLabelsReadOneStatementPerTable:
+    """The count does not grow with the accounts and categories the lines name."""
+
+    def test_more_accounts_and_categories_read_in_the_same_statements(
+        self, app, db, seed_user,
+    ):
+        """One account and category, then three of each more: one count, one load.
+
+        Each read starts from an expired session, so it loads what it labels itself.
+        The second sheet carries six more lines than the first, so both measured a
+        label load that grew, and each loads the categories in one statement.
+        """
+        owner_id = seed_user["user"].id
+
+        def _read():
+            """Return an expired session's sheet, and its statements on the categories."""
+            db.session.commit()
+            db.session.expire_all()
+            sheet, statements = capture_sql_statements(lambda: _reader_bs(owner_id))
+            return sheet, statements, [
+                text for text, _params in statements if "FROM budget.categories" in text
+            ]
+
+        def _settle(item):
+            """Settle a purchase on the seeded Checking under the category *item*."""
+            create_settled_cash_transaction(
+                seed_user, db.session, seed_user["bootstrap_period"],
+                Decimal("10.00"), account=seed_user["account"],
+                category=seed_user["categories"][item], settled_on=date(_Y, 10, 1),
+            )
+
+        with app.app_context():
+            _settle("Groceries")
+            few, few_statements, few_categories = _read()
+            for number, item in enumerate(("Rent", "Car Payment", "Payback")):
+                _settle(item)
+                create_account_of_type(
+                    seed_user, db.session, "Savings", f"Counted {number}",
+                    anchor_balance=Decimal("100.00"), observed_on=date(_Y, 1, 1),
+                )
+            many, many_statements, many_categories = _read()
+
+            assert len(many.assets.lines) == len(few.assets.lines) + 3
+            assert len(many.equity.lines) == len(few.equity.lines) + 3
+            assert len(few_categories) == len(many_categories) == 1
+            assert len(many_statements) == len(few_statements)
 
 
 # ---------------------------------------------------------------------------

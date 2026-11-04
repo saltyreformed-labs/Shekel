@@ -392,6 +392,12 @@ def anchor_correction_counter_kind(
     for an ``INTEREST`` account, an unrealized change in value for an ``INVESTMENT`` or
     ``APPRECIATING`` one, the equity opening for a ``PLAIN`` one.
 
+    **A re-type re-reads every past true-up** (ruling plan#2880): the kind is the
+    one the account has when the ledger is read, so a HYSA re-typed to Credit Card
+    moves its true-ups from interest income to its opening on every past
+    statement.  A re-type means "it was always this type"; a real change of type
+    is a new account, and the archived old one keeps its own.
+
     **An OPENING books to equity whatever the account is**, and that is not a
     carve-out in the dispatch -- it is a different question.  An opening is the
     balance brought ONTO the books, capital rather than something earned:

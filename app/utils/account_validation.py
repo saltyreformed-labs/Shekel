@@ -29,7 +29,8 @@ The helpers fall into two groups:
   affected account(s) hold a line of the worked-out ledger -- see
   ``_crosses_amortizing_boundary`` for why.  Crossing between an asset and a
   liability is not refused: a line is classed by its account's current type,
-  as it is labeled by its current name.  Both
+  as it is labeled by its current name, and an account's past true-ups are
+  re-read under that type too, past income included (ruling plan#2880).  Both
   also refuse moving an account between savings and debt while an active
   savings goal is on it, or between a loan type and a card-style debt (plan
   step credit_card:CC-5-5d, rulings R-CC87 and R-CC91):
@@ -229,7 +230,10 @@ def _crosses_posting_boundary(old_type, new_amortization, new_category_id):
     deletes, and refuses nothing: an amortizing crossing swaps which family of
     corrections the account books, and an Asset/Liability crossing flips the
     class its stored linked row was stamped with (per
-    :func:`app.services.ledger_lines.linked_ledger_class`).
+    :func:`app.services.ledger_lines.linked_ledger_class`).  A flag that changes
+    the account's kind alone, such as ``has_interest``, is neither: the worked-out
+    ledger re-reads it at once (ruling plan#2880), and the stored one holds the old
+    reading until the account's next balance (finding plan#2883).
 
     Args:
         old_type: The account's current :class:`~app.models.ref.AccountType`.

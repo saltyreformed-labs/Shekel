@@ -5,11 +5,18 @@ an allowed one re-reads.
 from datetime import timedelta
 from decimal import Decimal
 
+import pytest
+
 from app import ref_cache
 from app.enums import AcctCategoryEnum
 from app.extensions import db
 from app.models.account import Account, AccountAnchorHistory
-from app.services.ledger_report_service import compute_balance_sheet
+from app.services.ledger_report_service import (
+    StatementWindow,
+    compute_balance_sheet,
+    compute_income_statement,
+)
+from app.services.pay_calendar import calendar_for
 from app.utils.dates import display_today
 from tests._ledger_parity import assert_ledger_parity
 from tests._test_helpers import (
@@ -18,7 +25,7 @@ from tests._test_helpers import (
     create_settled_cash_transaction,
 )
 from app.models.ref import AccountType
-from app.services import account_service
+from app.services import account_service, anchor_service
 
 
 def _sheet_line(section, label):
@@ -28,16 +35,40 @@ def _sheet_line(section, label):
     return amounts[0]
 
 
-def _mistaken_card(seed_user):
-    """Return a card set up as a Savings account: -$500.00 recorded, $70.00 spent.
+def _income_lines(seed_user):
+    """Return the income statement's lines as ``{label: amount}``, for the true-up's year."""
+    owner_id = seed_user["user"].id
+    report = compute_income_statement(
+        owner_id, calendar_for(owner_id),
+        StatementWindow("year", year=(display_today() - timedelta(days=1)).year),
+    )
+    return {line.label: line.amount for line in report.income.lines}
 
-    Ruling plan#2785's example, with a settled purchase on it so its history is
-    both a correction and a movement: it reads ``-500.00 - 70.00 = -570.00``.
-    """
+
+def _trued_up_account(seed_user, type_name, name, amounts):
+    """Return an account opened at ``amounts[0]`` two days ago, at ``amounts[1]`` yesterday."""
+    opening, trued_to = amounts
     account = create_account_of_type(
-        seed_user, db.session, "Savings", "Mistaken Card",
-        anchor_balance=Decimal("-500.00"),
+        seed_user, db.session, type_name, name,
+        anchor_balance=Decimal(opening),
+        observed_on=display_today() - timedelta(days=2),
+    )
+    anchor_service.apply_anchor_true_up(
+        account=account, new_balance=Decimal(trued_to),
         observed_on=display_today() - timedelta(days=1),
+    )
+    return account
+
+
+def _mistaken_card(seed_user):
+    """Return a card set up as a HYSA: -$500.00 recorded, then -$530.00, $70.00 spent.
+
+    Ruling plan#2785's example on a type that earns interest (ruling plan#2880), so
+    its history is an opening, a true-up and a settled purchase: it reads
+    ``-530.00 - 70.00 = -600.00``.
+    """
+    account = _trued_up_account(
+        seed_user, "HYSA", "Mistaken Card", ("-500.00", "-530.00"),
     )
     create_settled_cash_transaction(
         seed_user, db.session, seed_user["bootstrap_period"], Decimal("70.00"),
@@ -48,20 +79,72 @@ def _mistaken_card(seed_user):
     return account
 
 
-def _assert_it_moved_to_liabilities(seed_user, equity_before):
-    """Assert the mistaken card reads $570.00 owed, equity and the tie-out unchanged.
+def _assert_it_reads_as_interest_bearing(seed_user):
+    """Assert the mistaken card reads -$600.00 in Assets, its true-up as interest; return equity.
 
-    Assets fall from ``1,000.00 - 570.00 = 430.00`` to the seeded Checking's
-    ``1,000.00``, and Liabilities rise from nothing to ``570.00``, so
-    ``1,000.00 = 570.00 + 430.00`` still holds with the same equity.
+    Assets are ``1,000.00 - 600.00 = 400.00``, Retained Earnings the true-up and the
+    purchase, ``-30.00 - 70.00 = -100.00``, and equity
+    ``1,000.00 - 500.00 - 100.00 = 400.00``.
+    """
+    before = compute_balance_sheet(seed_user["user"].id, display_today())
+    assert _sheet_line(before.assets, "Mistaken Card") == Decimal("-600.00")
+    assert before.assets.total == Decimal("400.00")
+    assert _income_lines(seed_user) == {
+        "Mistaken Card -- Interest Income": Decimal("-30.00"),
+    }
+    assert _sheet_line(before.equity, "Mistaken Card -- Opening") == Decimal("-500.00")
+    assert _sheet_line(before.equity, "Retained Earnings") == Decimal("-100.00")
+    return before.equity.total
+
+
+def _assert_it_moved_to_liabilities(seed_user, equity_before):
+    """Assert the mistaken card reads $600.00 owed, equity and the tie-out unchanged.
+
+    Assets rise from ``400.00`` to the seeded Checking's ``1,000.00``, and Liabilities
+    from nothing to ``600.00``, so ``1,000.00 = 600.00 + 400.00`` still holds with the
+    same equity.  Re-read under a type that earns no interest (ruling plan#2880), the
+    true-up leaves the income statement for the opening,
+    ``-500.00 - 30.00 = -530.00``, and Retained Earnings holds the purchase alone.
     """
     after = compute_balance_sheet(seed_user["user"].id, display_today())
     assert [line.label for line in after.assets.lines] == ["Checking"]
     assert after.assets.total == Decimal("1000.00")
-    assert _sheet_line(after.liabilities, "Mistaken Card") == Decimal("570.00")
+    assert _sheet_line(after.liabilities, "Mistaken Card") == Decimal("600.00")
+    assert not _income_lines(seed_user)
+    assert _sheet_line(after.equity, "Mistaken Card -- Opening") == Decimal("-530.00")
+    assert _sheet_line(after.equity, "Retained Earnings") == Decimal("-70.00")
     assert after.equity.total == equity_before
     assert after.tie_out.in_balance is True
     assert_ledger_parity(db.session, seed_user["scenario"].id)
+
+
+def _assert_the_true_up_reads(seed_user, opening, interest):
+    """Assert Rainy's opening, and its true-up as interest or, with ``None``, not.
+
+    The seeded Checking earns nothing, so Retained Earnings is that interest alone.
+    """
+    sheet = compute_balance_sheet(seed_user["user"].id, display_today())
+    assert _sheet_line(sheet.equity, "Rainy -- Opening") == Decimal(opening)
+    assert _income_lines(seed_user) == (
+        {} if interest is None
+        else {"Rainy -- Interest Income": Decimal(interest)}
+    )
+    assert _sheet_line(sheet.equity, "Retained Earnings") == Decimal(interest or "0.00")
+    assert sheet.tie_out.in_balance is True
+    return sheet.equity.total
+
+
+def _type_edit_form(account_type, **changed):
+    """Return what an account type's edit form submits, an unticked flag as ``false``."""
+    flags = ("has_parameters", "has_amortization", "has_interest", "is_pretax", "is_liquid")
+    return {
+        "name": account_type.name,
+        "category_id": str(account_type.category_id),
+        "icon_class": account_type.icon_class or "",
+        "max_term_months": "",
+        **{flag: str(getattr(account_type, flag)).lower() for flag in flags},
+        **changed,
+    }
 
 
 class TestTypeChangeBoundaryGuard:
@@ -75,16 +158,21 @@ class TestTypeChangeBoundaryGuard:
     account's current type, as it is labeled by its current name.  Either crossing
     on an account holding no line passes.  An allowed crossing re-classes the
     stored linked row and re-syncs the corrections.
+
+    Any allowed change of an account's kind re-reads its past true-ups under the
+    new type, past income included (ruling plan#2880): a re-type means "it was
+    always this type".
     """
 
     def test_retype_with_history_across_class_boundary_is_allowed(
         self, app, auth_client, seed_user,
     ):
-        """Re-typing the mistaken Savings to Credit Card moves it, equity unchanged.
+        """Re-typing the mistaken HYSA to Credit Card moves it, equity unchanged.
 
-        It read ``-570.00`` under Assets and reads ``570.00`` owed under
-        Liabilities on every past balance sheet (ruling plan#2785's worked example),
-        and the stored linked row follows its class.
+        It read ``-600.00`` under Assets and reads ``600.00`` owed under Liabilities
+        on every past balance sheet (ruling plan#2785), its true-up moves from
+        interest to its opening on every past statement (ruling plan#2880), and the
+        stored linked row follows its class.
         """
         # Pylint: ``import-outside-toplevel`` -- localized to the one test
         # that needs these helpers, matching the file's convention.
@@ -100,9 +188,7 @@ class TestTypeChangeBoundaryGuard:
                 .filter_by(name="Credit Card", user_id=None)
                 .one()
             )
-            before = compute_balance_sheet(seed_user["user"].id, display_today())
-            assert _sheet_line(before.assets, "Mistaken Card") == Decimal("-570.00")
-            assert before.assets.total == Decimal("430.00")
+            equity_before = _assert_it_reads_as_interest_bearing(seed_user)
 
             response = auth_client.post(
                 f"/accounts/{account_id}",
@@ -119,7 +205,7 @@ class TestTypeChangeBoundaryGuard:
             ).class_id == ref_cache.ledger_account_class_id(
                 LedgerAccountClassEnum.LIABILITY,
             )
-            _assert_it_moved_to_liabilities(seed_user, before.equity.total)
+            _assert_it_moved_to_liabilities(seed_user, equity_before)
 
     def test_type_edit_with_history_across_class_boundary_is_allowed(
         self, app, auth_client, seed_user,
@@ -127,7 +213,8 @@ class TestTypeChangeBoundaryGuard:
         """Editing the mistaken account's custom type to a Liability moves it too.
 
         The other door to the same crossing, with the same figures: no
-        ``account_type_id`` changes, only the category of the type it is on.
+        ``account_type_id`` changes, only the type it is on, whose "Interest" tick
+        goes with the Asset category that allows it.
         """
         # Pylint: ``import-outside-toplevel`` -- localized to the one test
         # that needs these helpers, matching the file's convention.
@@ -140,6 +227,7 @@ class TestTypeChangeBoundaryGuard:
                 name="side_pocket",
                 category_id=ref_cache.acct_category_id(AcctCategoryEnum.ASSET),
                 user_id=seed_user["user"].id,
+                has_interest=True,
             )
             db.session.add(custom_type)
             db.session.commit()
@@ -147,16 +235,17 @@ class TestTypeChangeBoundaryGuard:
             account_id = account.id
             account.account_type_id = custom_type.id
             db.session.commit()
-            before = compute_balance_sheet(seed_user["user"].id, display_today())
-            assert _sheet_line(before.assets, "Mistaken Card") == Decimal("-570.00")
+            equity_before = _assert_it_reads_as_interest_bearing(seed_user)
 
             response = auth_client.post(
                 f"/accounts/types/{custom_type.id}",
-                data={
-                    "category_id": str(ref_cache.acct_category_id(
+                data=_type_edit_form(
+                    custom_type,
+                    category_id=str(ref_cache.acct_category_id(
                         AcctCategoryEnum.LIABILITY,
                     )),
-                },
+                    has_interest="false",
+                ),
                 follow_redirects=True,
             )
 
@@ -168,7 +257,93 @@ class TestTypeChangeBoundaryGuard:
             ).class_id == ref_cache.ledger_account_class_id(
                 LedgerAccountClassEnum.LIABILITY,
             )
-            _assert_it_moved_to_liabilities(seed_user, before.equity.total)
+            _assert_it_moved_to_liabilities(seed_user, equity_before)
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            # Ruling plan#2880's example: ``1,040.00 - 1,000.00 = 40.00`` of interest
+            # becomes opening, ``1,000.00 + 40.00 = 1,040.00``.
+            pytest.param(
+                ("HYSA", ("1000.00", "1040.00"), "Credit Card",
+                 ("1000.00", "40.00"), ("1040.00", None)),
+                id="asset-to-liability",
+            ),
+            # The same $40.00 with no crossing, which no refusal ever guarded.
+            pytest.param(
+                ("HYSA", ("1000.00", "1040.00"), "Savings",
+                 ("1000.00", "40.00"), ("1040.00", None)),
+                id="asset-to-asset",
+            ),
+            # The reverse: ``-530.00 - (-500.00) = -30.00`` was opening, and is
+            # interest once the type earns it.
+            pytest.param(
+                ("Credit Card", ("-500.00", "-530.00"), "HYSA",
+                 ("-530.00", None), ("-500.00", "-30.00")),
+                id="liability-to-asset",
+            ),
+        ],
+    )
+    def test_retype_re_reads_past_true_ups(self, app, auth_client, seed_user, case):
+        """A re-type moves a true-up between interest and opening, equity unchanged."""
+        from_type, amounts, to_type, reads_before, reads_after = case
+        with app.app_context():
+            account = _trued_up_account(seed_user, from_type, "Rainy", amounts)
+            account_id = account.id
+            to_type_id = (
+                db.session.query(AccountType)
+                .filter_by(name=to_type, user_id=None)
+                .one()
+            ).id
+            equity_before = _assert_the_true_up_reads(seed_user, *reads_before)
+
+            response = auth_client.post(
+                f"/accounts/{account_id}",
+                data={"account_type_id": str(to_type_id)},
+                follow_redirects=True,
+            )
+
+            assert response.status_code == 200
+            assert b"updated" in response.data
+            db.session.expire_all()
+            assert _assert_the_true_up_reads(seed_user, *reads_after) == equity_before
+            assert_ledger_parity(db.session, seed_user["scenario"].id)
+
+    def test_type_edit_unticking_interest_re_reads_past_true_ups(
+        self, app, auth_client, seed_user,
+    ):
+        """Unticking "Interest" on a custom type moves a past true-up at once.
+
+        No crossing, so nothing re-syncs the stored ledger: it holds the old reading
+        until the account's next balance (finding plan#2883), and parity is
+        deliberately not asserted here.  Nothing reads the store.
+        """
+        with app.app_context():
+            custom_type = AccountType(
+                name="side_pocket",
+                category_id=ref_cache.acct_category_id(AcctCategoryEnum.ASSET),
+                user_id=seed_user["user"].id,
+                has_interest=True,
+            )
+            db.session.add(custom_type)
+            db.session.commit()
+            account = _trued_up_account(
+                seed_user, "HYSA", "Rainy", ("1000.00", "1040.00"),
+            )
+            account.account_type_id = custom_type.id
+            db.session.commit()
+            equity_before = _assert_the_true_up_reads(seed_user, "1000.00", "40.00")
+
+            response = auth_client.post(
+                f"/accounts/types/{custom_type.id}",
+                data=_type_edit_form(custom_type, has_interest="false"),
+                follow_redirects=True,
+            )
+
+            assert response.status_code == 200
+            assert b"updated" in response.data
+            db.session.expire_all()
+            assert _assert_the_true_up_reads(seed_user, "1040.00", None) == equity_before
 
     def test_retype_holding_a_line_to_a_loan_type_refused(
         self, app, auth_client, seed_user,

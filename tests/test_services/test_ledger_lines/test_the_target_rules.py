@@ -41,21 +41,25 @@ from app.enums import (
     PostingSourceEnum,
 )
 from app.extensions import db as _db
-from app.models.account import AccountAnchorHistory
+from app.models.account import Account, AccountAnchorHistory
 from app.models.journal_entry import JournalEntry
 from app.services import account_posting_service, ledger_account_service
 from app.services.ledger_lines import (
     ChartKey,
+    account_correction_targets,
     account_counter_key,
     anchor_correction_targets,
     category_key,
+    chart_record_type,
     linked_key,
+    loan_correction_targets,
     loan_key,
     owner_bucket_key,
     payment_split_targets,
     purchase_target,
     transit_key,
     walk_account_ledger,
+    worked_out_lines,
 )
 from app.services.loan_ledger import walk_loan_ledger
 from app.services.pay_calendar import calendar_for
@@ -332,6 +336,145 @@ class TestTheLoanRulesNameKeys:
                 },
             ]
             _assert_the_chart_is_untouched(statements)
+
+
+# Every source kind that is a correction rather than a movement.  Listed by hand
+# rather than by subtraction, so a new kind fails the census below until its rule
+# is shown here, rather than joining the set unmeasured.
+_CORRECTION_SOURCES = {
+    PostingSourceEnum.ACCOUNT_OPENING,
+    PostingSourceEnum.ACCOUNT_TRUEUP,
+    PostingSourceEnum.LOAN_OPENING,
+    PostingSourceEnum.LOAN_TRUEUP,
+    PostingSourceEnum.LOAN_PAYMENT,
+}
+
+
+def _assert_books_only_its_own_lines(account, targets):
+    """Assert every leg of *account*'s corrections is on one of its own lines.
+
+    Args:
+        account: The account the corrections are of.
+        targets: Its correction targets, ``{correction key: {chart key: leg}}``.
+    """
+    foreign = [
+        key for legs in targets.values() for key in legs
+        if chart_record_type(key) is not Account or key.record_id != account.id
+    ]
+    assert not foreign, (
+        f"a correction of account {account.id} books on another's line: {foreign}"
+    )
+
+
+def _sorted_lines(lines):
+    """Return ``(key, amount)`` pairs in one comparable order, without a $0.00 one."""
+    return sorted(
+        ((repr(key), amount) for key, amount in lines if amount != 0),
+    )
+
+
+class TestACorrectionBooksOnlyItsOwnAccountsLines:
+    """Ruling plan#2784: what lets a permanent delete take an account's balance records.
+
+    The account hard delete deleted its ledger-history guard on this property: a
+    delete takes an account's lines, and every correction it books has both halves
+    among them, so what is left still balances.  A rule booking across accounts
+    fails here rather than needing a guard.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _freeze_today(self, monkeypatch):
+        """Freeze today after every payment period the case settles in."""
+        freeze_today(monkeypatch, date(2026, 5, 15))
+
+    def test_every_correction_of_every_kind_of_account(
+        self, app, db, seed_user, seed_periods,
+    ):
+        """A true-up of each projection kind, and a loan's opening, true-up and split.
+
+        The census says every correction source was booked, so no rule's
+        absence reads as a pass; and the targets are all the read's corrections
+        (it books none of its own), so a family the read adds cannot sit outside
+        this.
+        """
+        with app.app_context():
+            owner_id = seed_user["user"].id
+            scenario_id = seed_user["scenario"].id
+            accounts = [
+                create_account_of_type(
+                    seed_user, _db.session, type_name, type_name,
+                    anchor_balance=Decimal("1000.00"),
+                    observed_on=display_today() - timedelta(days=3),
+                )
+                for type_name in ("Savings", "Money Market", "Roth IRA", "Property")
+            ]
+            for account in accounts:
+                _assert_on(account, "1150.00", days_after_opening=1, seconds=1)
+            loan = create_loan_with_trueup(
+                seed_user, _db.session,
+                origination_principal=Decimal("250000.00"),
+                anchor_balance=Decimal("100000.00"),
+                anchor_date=date(2026, 1, 10), rate=Decimal("0.06000"),
+                origination_date=date(2025, 1, 1), name="Own Lines Loan",
+                escrow_annual=Decimal("1200.00"),
+            )
+            create_settled_transfer(
+                seed_user, _db.session, seed_user["account"], loan,
+                seed_periods[1], amount=Decimal("1000.00"),
+            )
+            calendar = calendar_for(owner_id)
+
+            checking = seed_user["account"]
+            targets_by_account = [
+                (account, account_correction_targets(
+                    account, walk_account_ledger(account.id, scenario_id), calendar,
+                ))
+                for account in (checking, *accounts)
+            ]
+            targets_by_account.append((loan, loan_correction_targets(
+                walk_loan_ledger(loan.id, scenario_id), loan, calendar,
+            )))
+
+            for account, targets in targets_by_account:
+                _assert_books_only_its_own_lines(account, targets)
+
+            assert {
+                source_kind_id
+                for _, targets in targets_by_account
+                for (source_kind_id, _period, _day), legs in targets.items()
+                if legs
+            } == {
+                ref_cache.posting_source_id(source) for source in _CORRECTION_SOURCES
+            }
+            assert _sorted_lines(
+                (key, amount)
+                for _, targets in targets_by_account
+                for legs in targets.values()
+                for key, (amount, _kind) in legs.items()
+            ) == _sorted_lines(
+                (line.key, line.amount)
+                for line in worked_out_lines(owner_id, scenario_id, lambda: calendar)
+                if line.movement_id is None
+            )
+
+    def test_the_assertion_fires_on_a_leg_on_another_accounts_line(
+        self, app, db, seed_user,
+    ):
+        """The pin's negative control: a counter leg on another account's line."""
+        with app.app_context():
+            account = seed_user["account"]
+            other = account_counter_key(
+                LedgerAccountKindEnum.ANCHOR_EQUITY, account.id + 1,
+            )
+            own = linked_key(account)
+            with pytest.raises(AssertionError, match="another's line"):
+                _assert_books_only_its_own_lines(
+                    account, {("key",): {own: (Decimal("1"), 0), other: (Decimal("-1"), 0)}},
+                )
+            with pytest.raises(AssertionError, match="another's line"):
+                _assert_books_only_its_own_lines(
+                    account, {("key",): {transit_key(): (Decimal("1"), 0)}},
+                )
 
 
 class TestTheWriterResolvesEveryKind:

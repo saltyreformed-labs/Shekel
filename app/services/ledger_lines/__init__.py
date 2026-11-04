@@ -28,7 +28,8 @@ moves every reader onto it, and its third deletes the store.
   (:func:`loan_correction_targets`).
 * :mod:`._worked_out` -- the READ: every :class:`LedgerLine` of one owner's
   ledger in one scenario, worked out by the rules above
-  (:func:`worked_out_lines`), issuing no write of its own.
+  (:func:`worked_out_lines`), issuing no write of its own, and whether an
+  account holds one (:func:`accounts_hold_lines`).
 
 **The rules are the worked-out ledger's, and the writer imports them back**
 (plan task plan#2526): every target rule the stored ledger's writers posted
@@ -71,7 +72,7 @@ from ._movements import (
     purchase_target,
 )
 from ._targets import ChartLegMap, CorrectionKey, merge_target_legs
-from ._worked_out import LedgerLine, worked_out_lines
+from ._worked_out import LedgerLine, accounts_hold_lines, worked_out_lines
 
 __all__ = [
     "ACCOUNT_COUNTER_KINDS",
@@ -83,6 +84,7 @@ __all__ = [
     "LedgerLine",
     "account_correction_targets",
     "account_counter_key",
+    "accounts_hold_lines",
     "anchor_correction_counter_kind",
     "anchor_correction_targets",
     "category_key",

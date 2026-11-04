@@ -390,6 +390,9 @@ _FENCED_MODULE_RULINGS = {
         # ``balance_at`` (X-ew's second leaf, plan#2515, moves the statements
         # onto these lines).
         "worked_out_lines",
+        # Whether an account holds one of those lines, the re-type refusal's
+        # question (ruling plan#2785): a yes or no, never money.
+        "accounts_hold_lines",
     })),
     # The account-KIND classifier -- why it is scoped is recorded once, at
     # :data:`_KIND_CLASSIFIER_MODULES`.  Its ``find_period_containing_date``

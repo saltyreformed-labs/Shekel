@@ -59,14 +59,16 @@ twin), while this read answers whichever scenario it is asked for.  Today
 every owner holds only a baseline.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from functools import cache, partial
 
 from app import ref_cache
 from app.extensions import db
 from app.models.account import Account
+from app.models.scenario import Scenario
 from app.models.transaction_entry import TransactionEntry
 from app.services.account_projection import (
     AccountProjectionKind,
@@ -74,12 +76,12 @@ from app.services.account_projection import (
 )
 from app.services.cash_ledger import owner_cash_records
 from app.services.loan_ledger import LoanLedgerWalk, walk_loan_ledgers
-from app.services.pay_calendar import PayCalendar
+from app.services.pay_calendar import PayCalendar, calendar_for
 from app.services.transfer_legs import PlanItem
 
 from ._account_anchors import account_correction_targets
 from ._account_walk import AccountAnchorCorrection, account_corrections
-from ._chart import ChartKey
+from ._chart import ChartKey, chart_record_type
 from ._loan_corrections import loan_correction_targets
 from ._movements import (
     posting_kind_of,
@@ -228,6 +230,61 @@ def worked_out_lines(
                 _correction_targets(account, calendar, corrections, loan_walks),
             ))
     return [line for line in lines if line.amount != 0]
+
+
+def accounts_hold_lines(accounts: Iterable[Account]) -> bool:
+    """Return whether any of *accounts* holds a line, in any scenario of its owner.
+
+    The one question the re-type refusal asks (ruling plan#2785, task plan#2778),
+    at both of its doors: a line is an account's when its key names the account
+    as its record (:func:`._chart.chart_record_type`), which is the account's own
+    line, its correction counters and a loan's components, and never a category
+    or an owner bucket.  What the store holds with no record behind it is no
+    line, so a settle and its revert leave an account holding none.
+
+    Each owner's ledger is read once per scenario, by the one read the statements
+    fold (:func:`worked_out_lines`), and its calendar loaded at most once.
+
+    Args:
+        accounts: The accounts to ask about, with ``account_type`` loaded.
+
+    Returns:
+        ``True`` when one of them holds a line in any scenario of its owner;
+        ``False`` for an empty *accounts*.
+
+    Raises:
+        PayCalendarError: From :func:`worked_out_lines`, when a correction has
+            no paycheck to file in.  No door leaves an owner there: an account
+            is refused until its owner has paychecks, and no schedule change
+            leaves none.
+    """
+    account_ids_by_owner: dict[int, set[int]] = {}
+    for account in accounts:
+        account_ids_by_owner.setdefault(account.user_id, set()).add(account.id)
+    return any(
+        _holds_a_line_on(owner_id, account_ids)
+        for owner_id, account_ids in account_ids_by_owner.items()
+    )
+
+
+def _holds_a_line_on(owner_id: int, account_ids: set[int]) -> bool:
+    """Return whether *owner_id*'s ledger holds a line on one of *account_ids*.
+
+    Args:
+        owner_id: The owner, whose every scenario is read.
+        account_ids: The owner's accounts to ask about.
+
+    Returns:
+        ``True`` at the first line found on one of them.
+    """
+    calendar_source = cache(partial(calendar_for, owner_id))
+    scenario_ids = db.session.query(Scenario.id).filter_by(user_id=owner_id).all()
+    return any(
+        chart_record_type(line.key) is Account
+        and line.key.record_id in account_ids
+        for (scenario_id,) in scenario_ids
+        for line in worked_out_lines(owner_id, scenario_id, calendar_source)
+    )
 
 
 def _is_loan(account: Account) -> bool:

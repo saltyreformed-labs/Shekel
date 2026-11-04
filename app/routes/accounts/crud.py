@@ -409,12 +409,14 @@ def update_account(account_id):
     def _reconcile_type_effects():
         """Reconcile the type-change side effects (in-transaction step).
 
-        Re-class the (empty) linked ledger row when the Asset/Liability
-        boundary was crossed -- ``_validate_update_account`` already refused a
-        crossing on a posted account -- and re-sync the account's Step-5 anchor
-        corrections so an amortizing-boundary crossing swaps correction
-        families instead of stranding one (the sync structurally no-ops for the
-        loan side).
+        Re-class the stored linked ledger row when the Asset/Liability
+        boundary was crossed, history or not (ruling plan#2785) -- the
+        worked-out ledger classes each line by the account's current type when
+        it reads it -- and re-sync the account's Step-5 anchor corrections so
+        an amortizing-boundary crossing, which ``_validate_update_account``
+        allows only on an account holding no line, swaps correction families
+        instead of stranding one (the sync structurally no-ops for the loan
+        side).
 
         **It reconciles nothing for an ANCHOR any more, because this route no
         longer asserts one** (plan step X-f1e, finding N-195).  It ran the same
@@ -568,8 +570,8 @@ def unarchive_account(account_id):
 def _archive_instead_of_delete(account, account_id, reason):
     """Archive an account with history worth preserving, instead of deleting.
 
-    The shared outcome of the hard-delete history guards (transaction history
-    and posting-ledger history): flash *reason*, flip ``is_active`` to False
+    The shared outcome of the hard-delete history guard's two arms
+    (:func:`_history_refusal`): flash *reason*, flip ``is_active`` to False
     idempotently, and commit under the optimistic lock.  Returns the Flask
     response the caller returns directly.
 
@@ -690,11 +692,13 @@ def hard_delete_account(account_id):
          payment or purchase: a live one is history above, and the
          database refuses a hidden one holding one (rulings **R-CC89**,
          **R-CC92**).
-      5. Posting-ledger check -- any posting on ANY of this account's
-         ledger accounts (a settled transfer's immutable entries, which
-         survive a transfer delete, and its anchor corrections' counter
-         legs) triggers archive-instead-of-delete, even when no transaction
-         history remains.
+
+    **Balance records alone do not archive** (ruling plan#2784).  An account's
+    openings and true-ups, and a loan's terms and statements, are its alone:
+    every correction books both halves on the account's own lines (pinned by
+    ``tests/test_services/test_ledger_lines/test_the_target_rules.py``), so they
+    go with it, and past statements lose those lines and stay in balance.
+    Archive is what keeps an account's past.
 
     Permanent delete cleanup:
       After all guards pass, remaining RESTRICT-FK rows must be
@@ -715,10 +719,15 @@ def hard_delete_account(account_id):
           the database refuses of a hidden row.  Their series rows cascade
           with them; the merchant rules that could name one cascade with the
           ACCOUNT already (``fk_merchant_rules_owner``).
+        - A loan's per-loan chart rows, whose RESTRICT key would refuse the
+          account otherwise.
       CASCADE-FK dependents (LoanParams, InterestParams,
       InvestmentParams, AccountAnchorHistory, AnchorRelease, SavingsGoal,
-      LoanFeatures) are auto-deleted by PostgreSQL when the account row is
-      removed.
+      LoanFeatures, and the account's own chart rows and every stored leg on
+      them) are auto-deleted by PostgreSQL when the account row is removed.
+      A stored entry with a leg elsewhere keeps that leg: the running app
+      holds no DELETE on the journal, nothing reads a leg its movement has
+      left, and X-ew's third leaf (plan#2516) deletes the store.
     """
     account = get_or_404(Account, account_id)
     if account is None:
@@ -765,27 +774,6 @@ def hard_delete_account(account_id):
     history_refusal = _history_refusal(account, definitions)
     if history_refusal is not None:
         return _archive_instead_of_delete(account, account_id, history_refusal)
-
-    # Guard 5: posting-ledger history (Build-Order Step 2).  A settled
-    # transfer wrote balanced journal entries onto this account's linked
-    # ledger account; they are immutable history that survives a transfer
-    # delete (it removes the transfer's movements, which SET-NULLs their
-    # entries' ``journal_entries.transaction_entry_id``), so the account can
-    # still hold posting legs after its transactions are gone (e.g. its ad-hoc
-    # transfer was hard-deleted).  The check spans every KIND the account
-    # carries, which is what covers an anchor correction re-pointed between
-    # two counter rows (ruling R-FO): it has no linked leg at all.
-    # Hard-deleting it would CASCADE-delete only
-    # its own legs and strand the paired legs as unbalanced single-leg entries
-    # (the balanced trigger does not fire on DELETE), so archive instead --
-    # restoring the LedgerAccount cascade-imbalance impossibility premise
-    # (``app/models/ledger_account.py``).
-    if archive_helpers.account_has_ledger_postings(account.id):
-        return _archive_instead_of_delete(
-            account, account_id,
-            f"'{account.name}' has posting-ledger history and cannot be "
-            "permanently deleted. It has been archived instead.",
-        )
 
     # All guards passed -- permanently delete.
     # Step 1: delete remaining Transfer rows (soft-deleted or ghost
@@ -843,6 +831,7 @@ def hard_delete_account(account_id):
     db.session.query(EscrowLine).filter_by(account_id=account_id).delete()
     db.session.query(RateHistory).filter_by(account_id=account_id).delete()
     db.session.query(SavingsGoal).filter_by(account_id=account_id).delete()
+    ledger_account_service.dispose_loan_chart_rows(account_id)
 
     # Step 4: delete the account.  AccountAnchorHistory, AccountOpening and
     # LoanAnchorEvent are append-only (plan step X-f3c-2c), so the ORM must

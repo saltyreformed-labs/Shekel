@@ -99,7 +99,9 @@ _LEDGER_MODEL_ALLOWLIST = frozenset({
     # classifier out of it, and ``app.services.pay_period_locks`` until X-ew's
     # second leaf (plan task plan#2777, ruling plan#2782) deleted the
     # ``LEDGER_POSTINGS`` lock, the classifier's only ledger-model use.
-    "app.utils.archive_helpers",
+    # ``app.utils.archive_helpers`` until X-ew's second leaf (plan task
+    # plan#2778, rulings plan#2784, plan#2785) deleted
+    # ``account_has_ledger_postings``, its only ledger-model use.
 })
 
 
@@ -140,8 +142,8 @@ class ShekelLedgerModelFenceChecker(BaseChecker):
             "model -- or its defining module -- can query or construct/mutate a "
             "row outside those seams, the bypass class Build-Order Steps 2-5 "
             "built the seams to prevent (docs/audits/balance_architecture/). "
-            "Only the posting-ledger write core, its readers, "
-            "ledger_account_service, pay_period_admin, and archive_helpers may "
+            "Only the posting-ledger write core, its readers, and "
+            "ledger_account_service may "
             "import a ledger model. The fence binds by NAME (importing Posting / "
             "JournalEntry / LedgerAccount is flagged wherever it comes from -- "
             "the app.models re-export F-1 shape, the defining submodule, a "

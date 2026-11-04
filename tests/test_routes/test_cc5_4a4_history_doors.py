@@ -261,13 +261,13 @@ def _settle_and_revert(seed_user, txn):
 
 
 class TestTheAccountDoor:
-    """An account a hidden transfer named archives on its posting-ledger history.
+    """An account a hidden transfer named goes with that transfer (ruling plan#2784).
 
     The transfer's soft delete took both sides' payments off, so the hidden
-    transfer holds none; the settle's journal entries stay.
+    transfer holds none, and nothing is left to archive on.
     """
 
-    def test_a_hidden_transfer_whose_payments_went_archives_the_account_on_its_ledger(
+    def test_a_hidden_transfer_whose_payments_went_goes_with_the_account(
         self, app, db, auth_client, seed_user,
     ):
         """Ruling R-CC65: the cleanup deleted the hidden row AND its money.
@@ -282,10 +282,11 @@ class TestTheAccountDoor:
         a transfer's soft delete takes both sides' payments off the books
         too (ruling **credit_card:R-CC75**, "Same as a one-off"; finding
         **balance:BAL-532** closed), so the hidden transfer holds 0 payments
-        where it held 2, and Savings still archives rather than deletes --
-        now on the history its ledger keeps, not on a hidden payment.  An
-        ad-hoc transfer, because a recurring transfer's definition refuses
-        the account first (guard 2).
+        where it held 2.  **Re-expressed a third time under rule 5, ruling
+        plan#2784**: Savings archived on the settle's stored entries until that
+        ruling deleted the guard, since the worked-out ledger holds no line for
+        a payment that left the books.  An ad-hoc transfer, because a recurring
+        transfer's definition refuses the account first (guard 2).
         """
         with app.app_context():
             savings = create_account_of_type(
@@ -306,16 +307,16 @@ class TestTheAccountDoor:
 
             auth_client.post(f"/accounts/{savings.id}/hard-delete")
 
+            savings_id, xfer_id = savings.id, xfer.id
             assert _flashes(auth_client) == [
-                "'Savings' has posting-ledger history and cannot be "
-                "permanently deleted. It has been archived instead."
+                "Account 'Savings' permanently deleted."
             ]
             db.session.expire_all()
-            assert db.session.get(Account, savings.id) is not None
-            assert db.session.get(Transfer, xfer.id).is_deleted is True
+            assert db.session.get(Account, savings_id) is None
+            assert db.session.get(Transfer, xfer_id) is None
             assert db.session.query(TransactionEntry).filter(
-                (TransactionEntry.expense_transfer_id == xfer.id)
-                | (TransactionEntry.income_transfer_id == xfer.id),
+                (TransactionEntry.expense_transfer_id == xfer_id)
+                | (TransactionEntry.income_transfer_id == xfer_id),
             ).count() == 0
 
 
